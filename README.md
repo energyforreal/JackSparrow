@@ -4,6 +4,8 @@
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
+> For the pirates who love treasure hunting, except for the fact that there is no water here. The treasure is sought out of thin air.
+
 ## Overview
 
 JackSparrow is a functional AI-powered trading agent (not just a bot) that:
@@ -137,4 +139,3 @@ See [LICENSE](LICENSE) file for details.
 
 - **Documentation**: See [DOCUMENTATION.md](DOCUMENTATION.md)
 - **Issues**: [GitHub Issues](https://github.com/energyforreal/JackSparrow/issues)
-
