@@ -1,0 +1,4 @@
+timeframe,train_accuracy,val_accuracy,test_accuracy,training_time,num_features,train_samples,model_file
+15m,1.0,0.9806678383128296,0.9525483304042179,1.3220336437225342,49,2654,models/xgboost_BTCUSD_15m.pkl
+1h,1.0,0.9315789473684211,0.8526315789473684,5.280389785766602,49,2658,models/xgboost_BTCUSD_1h.pkl
+4h,1.0,0.33557046979865773,0.3053691275167785,6.419313669204712,49,1390,models/xgboost_BTCUSD_4h.pkl

@@ -1,0 +1,81 @@
+"""
+Request logging middleware.
+
+Provides structured logging for all API requests.
+"""
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Callable
+import time
+import structlog
+import json
+
+logger = structlog.get_logger()
+
+
+class LoggingMiddleware(BaseHTTPMiddleware):
+    """Request logging middleware."""
+    
+    async def dispatch(self, request: Request, call_next: Callable):
+        """Log request and response."""
+        
+        # Get request details
+        request_id = getattr(request.state, "request_id", "unknown")
+        client_ip = request.client.host if request.client else "unknown"
+        method = request.method
+        path = request.url.path
+        query_params = dict(request.query_params)
+        
+        # Start timer
+        start_time = time.time()
+        
+        # Log request
+        logger.info(
+            "request_started",
+            request_id=request_id,
+            method=method,
+            path=path,
+            query_params=query_params,
+            client_ip=client_ip
+        )
+        
+        try:
+            # Process request
+            response = await call_next(request)
+            
+            # Calculate process time
+            process_time = time.time() - start_time
+            
+            # Log response
+            logger.info(
+                "request_completed",
+                request_id=request_id,
+                method=method,
+                path=path,
+                status_code=response.status_code,
+                process_time_ms=round(process_time * 1000, 2),
+                client_ip=client_ip
+            )
+            
+            return response
+            
+        except Exception as e:
+            # Calculate process time
+            process_time = time.time() - start_time
+            
+            # Log error
+            logger.error(
+                "request_failed",
+                request_id=request_id,
+                method=method,
+                path=path,
+                error=str(e),
+                process_time_ms=round(process_time * 1000, 2),
+                client_ip=client_ip,
+                exc_info=True
+            )
+            
+            # Re-raise exception
+            raise
+

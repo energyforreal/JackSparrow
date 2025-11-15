@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""
+Database setup script for JackSparrow Trading Agent.
+
+This script initializes the PostgreSQL database with TimescaleDB extension
+and creates all necessary tables for the trading agent system.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv(dotenv_path=project_root / "backend" / ".env")
+
+
+def setup_database():
+    """Initialize database with TimescaleDB and create tables."""
+    
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        print("ERROR: DATABASE_URL not found in environment variables")
+        print("Please set DATABASE_URL in backend/.env file")
+        sys.exit(1)
+    
+    print(f"Connecting to database...")
+    
+    try:
+        # Create engine
+        engine = create_engine(database_url, echo=False)
+        
+        with engine.connect() as conn:
+            # Enable TimescaleDB extension
+            print("Enabling TimescaleDB extension...")
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
+            conn.commit()
+            print("✓ TimescaleDB extension enabled")
+            
+            # Create trades table (hypertable)
+            print("Creating trades table...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    id SERIAL PRIMARY KEY,
+                    trade_id VARCHAR(255) UNIQUE NOT NULL,
+                    symbol VARCHAR(50) NOT NULL,
+                    side VARCHAR(10) NOT NULL,
+                    quantity DECIMAL(18, 8) NOT NULL,
+                    price DECIMAL(18, 8) NOT NULL,
+                    order_type VARCHAR(20) NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    executed_at TIMESTAMPTZ NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    reasoning_chain_id VARCHAR(255),
+                    model_predictions JSONB,
+                    metadata JSONB
+                );
+            """))
+            conn.commit()
+            
+            # Convert trades to hypertable
+            conn.execute(text("""
+                SELECT create_hypertable('trades', 'executed_at', 
+                    if_not_exists => TRUE);
+            """))
+            conn.commit()
+            print("✓ Trades table created as hypertable")
+            
+            # Create positions table
+            print("Creating positions table...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS positions (
+                    id SERIAL PRIMARY KEY,
+                    position_id VARCHAR(255) UNIQUE NOT NULL,
+                    symbol VARCHAR(50) NOT NULL,
+                    side VARCHAR(10) NOT NULL,
+                    quantity DECIMAL(18, 8) NOT NULL,
+                    entry_price DECIMAL(18, 8) NOT NULL,
+                    current_price DECIMAL(18, 8),
+                    unrealized_pnl DECIMAL(18, 8),
+                    opened_at TIMESTAMPTZ NOT NULL,
+                    closed_at TIMESTAMPTZ,
+                    status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+                    stop_loss DECIMAL(18, 8),
+                    take_profit DECIMAL(18, 8),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """))
+            conn.commit()
+            print("✓ Positions table created")
+            
+            # Create decisions table
+            print("Creating decisions table...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS decisions (
+                    id SERIAL PRIMARY KEY,
+                    decision_id VARCHAR(255) UNIQUE NOT NULL,
+                    timestamp TIMESTAMPTZ NOT NULL,
+                    symbol VARCHAR(50) NOT NULL,
+                    signal VARCHAR(20) NOT NULL,
+                    confidence DECIMAL(5, 4) NOT NULL,
+                    position_size DECIMAL(5, 4),
+                    reasoning_chain JSONB NOT NULL,
+                    model_predictions JSONB,
+                    market_context JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """))
+            conn.commit()
+            
+            # Convert decisions to hypertable
+            conn.execute(text("""
+                SELECT create_hypertable('decisions', 'timestamp', 
+                    if_not_exists => TRUE);
+            """))
+            conn.commit()
+            print("✓ Decisions table created as hypertable")
+            
+            # Create performance_metrics table
+            print("Creating performance_metrics table...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS performance_metrics (
+                    id SERIAL PRIMARY KEY,
+                    metric_id VARCHAR(255) UNIQUE NOT NULL,
+                    timestamp TIMESTAMPTZ NOT NULL,
+                    metric_type VARCHAR(50) NOT NULL,
+                    metric_name VARCHAR(100) NOT NULL,
+                    value DECIMAL(18, 8) NOT NULL,
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """))
+            conn.commit()
+            
+            # Convert performance_metrics to hypertable
+            conn.execute(text("""
+                SELECT create_hypertable('performance_metrics', 'timestamp', 
+                    if_not_exists => TRUE);
+            """))
+            conn.commit()
+            print("✓ Performance metrics table created as hypertable")
+            
+            # Create model_performance table
+            print("Creating model_performance table...")
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS model_performance (
+                    id SERIAL PRIMARY KEY,
+                    model_name VARCHAR(100) NOT NULL,
+                    timestamp TIMESTAMPTZ NOT NULL,
+                    prediction_accuracy DECIMAL(5, 4),
+                    profit_contribution DECIMAL(18, 8),
+                    weight DECIMAL(5, 4),
+                    total_predictions INTEGER DEFAULT 0,
+                    correct_predictions INTEGER DEFAULT 0,
+                    metadata JSONB,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE(model_name, timestamp)
+                );
+            """))
+            conn.commit()
+            
+            # Convert model_performance to hypertable
+            conn.execute(text("""
+                SELECT create_hypertable('model_performance', 'timestamp', 
+                    if_not_exists => TRUE);
+            """))
+            conn.commit()
+            print("✓ Model performance table created as hypertable")
+            
+            # Create indexes
+            print("Creating indexes...")
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_trades_symbol_executed_at 
+                    ON trades(symbol, executed_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_positions_symbol_status 
+                    ON positions(symbol, status);
+                CREATE INDEX IF NOT EXISTS idx_decisions_symbol_timestamp 
+                    ON decisions(symbol, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_performance_metrics_type_timestamp 
+                    ON performance_metrics(metric_type, timestamp DESC);
+            """))
+            conn.commit()
+            print("✓ Indexes created")
+            
+        print("\n✓ Database setup completed successfully!")
+        
+    except OperationalError as e:
+        print(f"\nERROR: Database connection failed: {e}")
+        print("\nPlease ensure:")
+        print("1. PostgreSQL is running")
+        print("2. TimescaleDB extension is installed")
+        print("3. DATABASE_URL is correct in backend/.env")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\nERROR: Database setup failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    setup_database()
+
