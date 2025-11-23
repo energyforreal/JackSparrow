@@ -17,37 +17,107 @@ class FeatureEngineering:
         pass
     
     async def compute_feature(self, feature_name: str, candles: List[Dict[str, Any]]) -> float:
-        """Compute feature value from candles."""
+        """Compute feature value from candles.
+        
+        Args:
+            feature_name: Name of the feature to compute
+            candles: List of candle dictionaries with market data
+            
+        Returns:
+            Computed feature value as float
+            
+        Raises:
+            ValueError: If input validation fails or feature cannot be computed
+        """
+        
+        # Validate input parameters
+        if not feature_name or not isinstance(feature_name, str):
+            raise ValueError("Feature name must be a non-empty string")
+        
+        if candles is None:
+            raise ValueError("Candles cannot be None")
         
         if not candles:
-            raise ValueError("No candles provided")
+            raise ValueError("No candles provided - at least one candle is required")
+        
+        # Validate each candle is a dictionary
+        if not all(isinstance(candle, dict) for candle in candles):
+            raise ValueError("All candles must be dictionaries")
         
         # Convert to DataFrame
-        df = pd.DataFrame(candles)
+        try:
+            df = pd.DataFrame(candles)
+        except Exception as e:
+            raise ValueError(f"Failed to convert candles to DataFrame: {str(e)}")
         
         # Ensure required columns exist
         required_cols = ["close", "high", "low", "open", "volume"]
-        for col in required_cols:
-            if col not in df.columns:
-                raise ValueError(f"Missing required column: {col}")
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {', '.join(missing_cols)}")
+        
+        # Validate and clean numeric columns
+        numeric_cols = ["close", "high", "low", "open", "volume"]
+        for col in numeric_cols:
+            if col in df.columns:
+                # Convert to numeric, coercing errors to NaN
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Check for null values
+                null_count = df[col].isnull().sum()
+                if null_count > 0:
+                    # Fill null values with forward fill, then backward fill, then 0
+                    df[col] = df[col].fillna(method='ffill').fillna(method='bfill').fillna(0)
+                    if null_count == len(df):
+                        raise ValueError(f"Column '{col}' contains only null/invalid values")
+        
+        # Validate numeric values are reasonable (not NaN, Inf, or negative for price/volume)
+        for col in ["close", "high", "low", "open"]:
+            if col in df.columns:
+                if (df[col] <= 0).any():
+                    raise ValueError(f"Column '{col}' contains non-positive values")
+                if not np.isfinite(df[col]).all():
+                    raise ValueError(f"Column '{col}' contains non-finite values (NaN or Inf)")
+        
+        # Volume can be zero but not negative
+        if "volume" in df.columns:
+            if (df["volume"] < 0).any():
+                raise ValueError("Column 'volume' contains negative values")
+            if not np.isfinite(df["volume"]).all():
+                raise ValueError("Column 'volume' contains non-finite values (NaN or Inf)")
+        
+        # Validate high >= low and high >= close >= low
+        if "high" in df.columns and "low" in df.columns:
+            invalid_high_low = (df["high"] < df["low"]).any()
+            if invalid_high_low:
+                raise ValueError("Invalid data: high < low in some candles")
+        
+        if all(col in df.columns for col in ["high", "low", "close"]):
+            invalid_close = ((df["close"] > df["high"]) | (df["close"] < df["low"])).any()
+            if invalid_close:
+                raise ValueError("Invalid data: close price outside high/low range in some candles")
         
         # Compute feature based on name
-        if feature_name == "rsi_14":
-            return self._compute_rsi(df, period=14)
-        elif feature_name == "macd_signal":
-            return self._compute_macd_signal(df)
-        elif feature_name == "bb_upper":
-            return self._compute_bollinger_upper(df, period=20)
-        elif feature_name == "bb_lower":
-            return self._compute_bollinger_lower(df, period=20)
-        elif feature_name == "volume_sma":
-            return self._compute_volume_sma(df, period=20)
-        elif feature_name == "price_sma":
-            return self._compute_price_sma(df, period=20)
-        elif feature_name == "volatility":
-            return self._compute_volatility(df, period=20)
-        else:
-            raise ValueError(f"Unknown feature: {feature_name}")
+        try:
+            if feature_name == "rsi_14":
+                return self._compute_rsi(df, period=14)
+            elif feature_name == "macd_signal":
+                return self._compute_macd_signal(df)
+            elif feature_name == "bb_upper":
+                return self._compute_bollinger_upper(df, period=20)
+            elif feature_name == "bb_lower":
+                return self._compute_bollinger_lower(df, period=20)
+            elif feature_name == "volume_sma":
+                return self._compute_volume_sma(df, period=20)
+            elif feature_name == "price_sma":
+                return self._compute_price_sma(df, period=20)
+            elif feature_name == "volatility":
+                return self._compute_volatility(df, period=20)
+            else:
+                raise ValueError(f"Unknown feature: {feature_name}. Supported features: rsi_14, macd_signal, bb_upper, bb_lower, volume_sma, price_sma, volatility")
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError(f"Error computing feature '{feature_name}': {str(e)}")
     
     def _compute_rsi(self, df: pd.DataFrame, period: int = 14) -> float:
         """Compute RSI indicator."""

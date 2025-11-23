@@ -7,9 +7,12 @@ Provides client for MCP Feature Server.
 from typing import Optional, Dict, Any, List
 import httpx
 import asyncio
+import structlog
 
 from backend.core.config import settings
 from backend.core.redis import get_cache, set_cache
+
+logger = structlog.get_logger()
 
 
 class FeatureService:
@@ -51,14 +54,31 @@ class FeatureService:
                     await set_cache(cache_key, data, ttl=30)
                     return data
                 else:
-                    print(f"Feature server error: {response.status_code} - {response.text}")
+                    logger.error(
+                        "feature_service_error",
+                        status_code=response.status_code,
+                        response_text=response.text[:200],  # Limit log size
+                        symbol=symbol,
+                        feature_names=feature_names
+                    )
                     return None
                     
         except httpx.TimeoutException:
-            print("Feature server timeout")
+            logger.warning(
+                "feature_service_timeout",
+                symbol=symbol,
+                feature_names=feature_names,
+                timeout=self.timeout
+            )
             return None
         except Exception as e:
-            print(f"Error getting features: {e}")
+            logger.error(
+                "feature_service_get_features_failed",
+                symbol=symbol,
+                feature_names=feature_names,
+                error=str(e),
+                exc_info=True
+            )
             return None
 
 

@@ -2,11 +2,27 @@
 Agent state machine.
 
 Manages agent state transitions and state-specific behavior.
+Event-driven state transitions.
 """
 
 from enum import Enum
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, List
 from datetime import datetime
+import structlog
+
+from agent.events.event_bus import event_bus
+from agent.events.schemas import (
+    CandleClosedEvent,
+    ReasoningCompleteEvent,
+    RiskApprovedEvent,
+    OrderFillEvent,
+    RiskAlertEvent,
+    EmergencyStopEvent,
+    StateTransitionEvent,
+    EventType,
+)
+
+logger = structlog.get_logger()
 
 
 class AgentState(Enum):
@@ -19,7 +35,6 @@ class AgentState(Enum):
     ANALYZING = "ANALYZING"
     EXECUTING = "EXECUTING"
     MONITORING_POSITION = "MONITORING_POSITION"
-    LEARNING = "LEARNING"
     DEGRADED = "DEGRADED"
     EMERGENCY_STOP = "EMERGENCY_STOP"
 
@@ -43,16 +58,95 @@ class StateTransition:
 class AgentStateMachine:
     """Agent state machine manager."""
     
-    def __init__(self):
+    def __init__(self, context_manager):
         """Initialize state machine."""
         self.current_state = AgentState.INITIALIZING
         self.previous_state: Optional[AgentState] = None
         self.state_entry_time = datetime.utcnow()
         self.transitions: Dict[AgentState, List[StateTransition]] = {}
         self.state_handlers: Dict[AgentState, Callable] = {}
+        self.context_manager = context_manager
         
         # Initialize transitions
         self._initialize_transitions()
+    
+    async def initialize(self):
+        """Initialize state machine and register event handlers."""
+        event_bus.subscribe(EventType.CANDLE_CLOSED, self._handle_candle_closed)
+        event_bus.subscribe(EventType.REASONING_COMPLETE, self._handle_reasoning_complete)
+        event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
+        event_bus.subscribe(EventType.ORDER_FILL, self._handle_order_fill)
+        event_bus.subscribe(EventType.RISK_ALERT, self._handle_risk_alert)
+        event_bus.subscribe(EventType.EMERGENCY_STOP, self._handle_emergency_stop)
+    
+    async def _handle_candle_closed(self, event: CandleClosedEvent):
+        """Handle candle closed event - transition OBSERVING -> THINKING."""
+        if self.current_state == AgentState.OBSERVING:
+            await self._transition_to(AgentState.THINKING, "Candle closed - analyzing market")
+    
+    async def _handle_reasoning_complete(self, event: ReasoningCompleteEvent):
+        """Handle reasoning complete event - transition THINKING -> DELIBERATING."""
+        if self.current_state == AgentState.THINKING:
+            await self._transition_to(AgentState.DELIBERATING, "Reasoning chain complete")
+    
+    async def _handle_risk_approved(self, event: RiskApprovedEvent):
+        """Handle risk approved event - transition DELIBERATING/ANALYZING -> EXECUTING."""
+        if self.current_state in [AgentState.DELIBERATING, AgentState.ANALYZING]:
+            await self._transition_to(AgentState.EXECUTING, "Risk approved - executing trade")
+    
+    async def _handle_order_fill(self, event: OrderFillEvent):
+        """Handle order fill event - transition EXECUTING -> MONITORING_POSITION."""
+        if self.current_state == AgentState.EXECUTING:
+            await self._transition_to(AgentState.MONITORING_POSITION, "Order filled - monitoring position")
+    
+    async def _handle_risk_alert(self, event: RiskAlertEvent):
+        """Handle risk alert event - transition to DEGRADED."""
+        if event.payload.get("severity") == "CRITICAL":
+            await self._transition_to(AgentState.DEGRADED, f"Risk alert: {event.payload.get('message')}")
+    
+    async def _handle_emergency_stop(self, event: EmergencyStopEvent):
+        """Handle emergency stop event - transition to EMERGENCY_STOP."""
+        await self._transition_to(AgentState.EMERGENCY_STOP, f"Emergency stop: {event.payload.get('reason')}")
+    
+    async def _transition_to(self, new_state: AgentState, reason: str):
+        """Transition to new state and emit event.
+        
+        Args:
+            new_state: New state to transition to
+            reason: Reason for transition
+        """
+        if self.current_state == new_state:
+            return
+        
+        from_state = self.current_state
+        self.previous_state = self.current_state
+        self.current_state = new_state
+        self.state_entry_time = datetime.utcnow()
+        
+        # Update context
+        self.context_manager.update_context({"state": new_state})
+        self.context_manager.add_state_transition(from_state, new_state, reason)
+        
+        # Emit state transition event
+        transition_event = StateTransitionEvent(
+            source="state_machine",
+            payload={
+                "from_state": from_state.value,
+                "to_state": new_state.value,
+                "reason": reason,
+                "timestamp": datetime.utcnow()
+            }
+        )
+        
+        await event_bus.publish(transition_event)
+        
+        logger.info(
+            "state_transition",
+            from_state=from_state.value,
+            to_state=new_state.value,
+            reason=reason,
+            event_id=transition_event.event_id
+        )
     
     def _initialize_transitions(self):
         """Initialize state transitions."""
@@ -127,22 +221,6 @@ class AgentStateMachine:
             AgentState.OBSERVING,
             lambda ctx: ctx.get("execution_failed", False),
             "Execution failed"
-        )
-        
-        # MONITORING_POSITION -> LEARNING
-        self.add_transition(
-            AgentState.MONITORING_POSITION,
-            AgentState.LEARNING,
-            lambda ctx: ctx.get("position_closed", False),
-            "Position closed"
-        )
-        
-        # LEARNING -> OBSERVING
-        self.add_transition(
-            AgentState.LEARNING,
-            AgentState.OBSERVING,
-            lambda ctx: ctx.get("learning_complete", False),
-            "Learning complete"
         )
         
         # DEGRADED -> OBSERVING
@@ -241,8 +319,7 @@ class AgentStateMachine:
             AgentState.DELIBERATING,
             AgentState.ANALYZING,
             AgentState.EXECUTING,
-            AgentState.MONITORING_POSITION,
-            AgentState.LEARNING
+            AgentState.MONITORING_POSITION
         ]
         return self.current_state in operational_states
     
@@ -253,8 +330,3 @@ class AgentStateMachine:
             AgentState.EXECUTING
         ]
         return self.current_state in tradeable_states and not self.current_state == AgentState.EMERGENCY_STOP
-
-
-# Global state machine instance
-state_machine = AgentStateMachine()
-

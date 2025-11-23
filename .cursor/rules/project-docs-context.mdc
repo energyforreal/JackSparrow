@@ -1,0 +1,35 @@
+---
+description: Always include the JackSparrow docs context bundle.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+# JackSparrow Project Documentation Context
+
+The `.cursor/context/docs` directory mirrors the entire `docs/` tree so these files can be pulled into any conversation without manual attachment. Use `@Folders .cursor/context/docs` (with Full Folder Content enabled) or reference individual files directly to load detailed guidance:
+
+- `.cursor/context/docs/01-architecture.md`
+- `.cursor/context/docs/02-mcp-layer.md`
+- `.cursor/context/docs/03-ml-models.md`
+- `.cursor/context/docs/04-features.md`
+- `.cursor/context/docs/05-logic-reasoning.md`
+- `.cursor/context/docs/06-backend.md`
+- `.cursor/context/docs/07-frontend.md`
+- `.cursor/context/docs/08-file-structure.md`
+- `.cursor/context/docs/09-ui-ux.md`
+- `.cursor/context/docs/10-deployment.md`
+- `.cursor/context/docs/11-build-guide.md`
+- `.cursor/context/docs/12-logging.md`
+- `.cursor/context/docs/13-debugging.md`
+- `.cursor/context/docs/14-project-rules.md`
+- `.cursor/context/docs/15-audit-report.md`
+- `.cursor/context/docs/AUDIT_REPORT.md`
+- `.cursor/context/docs/audit-findings.md`
+- `.cursor/context/docs/comprehensive-audit-report.md`
+- `.cursor/context/docs/docker-logs-analysis-report.md`
+- `.cursor/context/docs/docker-logs-followup-report.md`
+- `.cursor/context/docs/docker-logs-analysis-report-20251123.md`
+- `.cursor/context/docs/docker-hot-reload.md`
+- `.cursor/context/docs/remediation-plan.md`
+
+Keep this bundle updated whenever new documentation is added so the assistant always has the latest project knowledge.

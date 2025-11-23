@@ -9,9 +9,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable
 import time
 import json
+import structlog
 
 from backend.core.redis import get_redis
 from backend.core.config import settings
+
+logger = structlog.get_logger()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -82,7 +85,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             
         except Exception as e:
             # If Redis fails, allow request (fail open)
-            print(f"Rate limit check failed: {e}")
+            logger.warning(
+                "rate_limit_check_failed",
+                client_id=client_id,
+                endpoint=endpoint,
+                error=str(e),
+                exc_info=True
+            )
             return True
     
     async def _get_remaining_requests(self, client_id: str, endpoint: str) -> int:

@@ -128,7 +128,7 @@ export function Dashboard() {
 ```typescript
 interface AgentStatusProps {
   state: 'INITIALIZING' | 'OBSERVING' | 'THINKING' | 'DELIBERATING' | 
-         'ANALYZING' | 'EXECUTING' | 'MONITORING_POSITION' | 'LEARNING' | 
+         'ANALYZING' | 'EXECUTING' | 'MONITORING_POSITION' |
          'DEGRADED' | 'EMERGENCY_STOP';
   lastUpdate: Date;
   message?: string;
@@ -150,7 +150,7 @@ interface AgentStatusProps {
 - `ANALYZING`: Blue - 📊 Analyzing Signals
 - `EXECUTING`: Orange - ⚡ Executing Trade
 - `MONITORING_POSITION`: Amber - 📈 Monitoring Position
-- `LEARNING`: Teal - 📚 Learning from Outcome
+- *(Learning state removed while adaptive features are paused)*
 - `DEGRADED`: Yellow - ⚠️ Degraded Performance
 - `EMERGENCY_STOP`: Red - 🚨 Emergency Stop
 

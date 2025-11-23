@@ -4,14 +4,42 @@ XGBoost model node implementation.
 Implements MCP Model Node interface for XGBoost models.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 from pathlib import Path
 import pickle
+import sys
+import types
 import time
 import numpy as np
+import structlog
+from xgboost import XGBClassifier
 
 from agent.models.mcp_model_node import MCPModelNode, MCPModelRequest, MCPModelPrediction
 from agent.core.config import settings
+
+logger = structlog.get_logger()
+
+
+def _ensure_pickle_compatibility() -> None:
+    """Register compatibility shims for legacy-pickled XGBoost models."""
+    module_name = "XGBClassifier"
+    if module_name in sys.modules:
+        return
+
+    shim = types.ModuleType(module_name)
+
+    def _module_getattr(name: str):
+        if name == "XGBClassifier":
+            return XGBClassifier
+        if hasattr(np, name):
+            return getattr(np, name)
+        raise AttributeError(f"module '{module_name}' has no attribute '{name}'")
+
+    shim.__getattr__ = _module_getattr  # type: ignore[attr-defined]
+    shim.XGBClassifier = XGBClassifier
+    shim.dtype = np.dtype
+    shim.ndarray = np.ndarray
+    sys.modules[module_name] = shim
 
 
 class XGBoostNode(MCPModelNode):
@@ -21,9 +49,9 @@ class XGBoostNode(MCPModelNode):
         """Initialize XGBoost node."""
         self.model_path = model_path
         self.model = None
-        self.model_name = model_path.stem
-        self.model_version = "1.0.0"
-        self.model_type = "xgboost"
+        self._model_name = model_path.stem
+        self._model_version = "1.0.0"
+        self._model_type = "xgboost"
         self.health_status = "unknown"
     
     @classmethod
@@ -36,11 +64,17 @@ class XGBoostNode(MCPModelNode):
     async def initialize(self):
         """Initialize model."""
         try:
+            _ensure_pickle_compatibility()
             with open(self.model_path, "rb") as f:
                 self.model = pickle.load(f)
             self.health_status = "healthy"
         except Exception as e:
-            print(f"Error loading XGBoost model: {e}")
+            logger.error(
+                "xgboost_model_load_failed",
+                model_path=str(self.model_path),
+                error=str(e),
+                exc_info=True
+            )
             self.health_status = "unhealthy"
     
     async def predict(self, request: MCPModelRequest) -> MCPModelPrediction:
@@ -54,24 +88,83 @@ class XGBoostNode(MCPModelNode):
             # Convert features to numpy array
             features_array = np.array([request.features]).reshape(1, -1)
             
-            # Get prediction
-            prediction_raw = self.model.predict(features_array)[0]
+            # Detect model output type and get prediction
+            # Try to use predict_proba() first (for probability outputs)
+            prediction_raw = None
+            is_probability = False
+            
+            if hasattr(self.model, 'predict_proba'):
+                try:
+                    proba = self.model.predict_proba(features_array)[0]
+                    # For binary classification, use probability of positive class
+                    if len(proba) == 2:
+                        prediction_raw = proba[1]  # Probability of class 1
+                        is_probability = True
+                    else:
+                        # Multi-class: use max probability
+                        prediction_raw = np.max(proba)
+                        is_probability = True
+                except Exception:
+                    # Fallback to predict() if predict_proba fails
+                    prediction_raw = self.model.predict(features_array)[0]
+            else:
+                # No predict_proba, use predict()
+                prediction_raw = self.model.predict(features_array)[0]
             
             # Normalize to -1.0 to +1.0 range
-            # Assuming model outputs probability or class prediction
-            # This is a simplification - actual normalization depends on model output
-            if prediction_raw > 0.5:
-                prediction_normalized = (prediction_raw - 0.5) * 2.0  # Scale to [0, 1] then [0, 2] then shift
+            if is_probability:
+                # Probability output [0, 1] -> [-1, 1]
+                # Map: 0.0 -> -1.0, 0.5 -> 0.0, 1.0 -> +1.0
+                prediction_normalized = (prediction_raw - 0.5) * 2.0
             else:
-                prediction_normalized = (prediction_raw - 0.5) * 2.0  # Scale to [-1, 0]
+                # Class label output (0 or 1) or other numeric output
+                # If it's a binary class (0 or 1), map: 0 -> -1, 1 -> +1
+                if prediction_raw in [0, 1] or (isinstance(prediction_raw, (int, np.integer)) and prediction_raw in [0, 1]):
+                    prediction_normalized = (prediction_raw * 2.0) - 1.0  # 0 -> -1, 1 -> +1
+                else:
+                    # Assume it's already in a reasonable range, normalize to [-1, 1]
+                    # This handles regression outputs or other numeric outputs
+                    if prediction_raw > 1.0 or prediction_raw < 0.0:
+                        # If outside [0, 1], assume it needs normalization
+                        # Use sigmoid-like normalization: map to [-1, 1]
+                        prediction_normalized = np.tanh(prediction_raw)
+                    else:
+                        # Already in [0, 1], normalize to [-1, 1]
+                        prediction_normalized = (prediction_raw - 0.5) * 2.0
             
-            # Clamp to [-1, 1]
-            prediction_normalized = max(-1.0, min(1.0, prediction_normalized))
+            # Clamp to [-1, 1] to ensure valid range
+            prediction_normalized = max(-1.0, min(1.0, float(prediction_normalized)))
             
-            # Calculate confidence (simplified)
-            confidence = abs(prediction_normalized)
+            # Calculate confidence based on distance from neutral (0.0)
+            # For probabilities: confidence is how far from 0.5
+            # For normalized: confidence is absolute value
+            if is_probability:
+                # Confidence is how certain the model is (distance from 0.5)
+                confidence = abs(prediction_raw - 0.5) * 2.0  # [0, 1] range
+            else:
+                # Confidence is absolute value of normalized prediction
+                confidence = abs(prediction_normalized)
             
             computation_time_ms = (time.time() - start_time) * 1000
+            
+            # Calculate feature importance using model.feature_importances_
+            feature_importance = {}
+            if hasattr(self.model, 'feature_importances_'):
+                importances = self.model.feature_importances_
+                # Get feature names from context if available, otherwise use indices
+                feature_names = request.context.get('feature_names', None)
+                if feature_names and len(feature_names) == len(importances):
+                    # Use provided feature names
+                    feature_importance = {
+                        name: float(importance)
+                        for name, importance in zip(feature_names, importances)
+                    }
+                else:
+                    # Use feature indices
+                    feature_importance = {
+                        f"feature_{i}": float(importance)
+                        for i, importance in enumerate(importances)
+                    }
             
             return MCPModelPrediction(
                 model_name=self.model_name,
@@ -80,7 +173,7 @@ class XGBoostNode(MCPModelNode):
                 confidence=float(confidence),
                 reasoning=f"XGBoost model prediction: {prediction_raw:.4f}",
                 features_used=[f"feature_{i}" for i in range(len(request.features))],
-                feature_importance={},  # Would need SHAP or feature_importances_
+                feature_importance=feature_importance,
                 computation_time_ms=computation_time_ms,
                 health_status=self.health_status
             )
@@ -92,7 +185,7 @@ class XGBoostNode(MCPModelNode):
                 confidence=0.0,
                 reasoning=f"Prediction failed: {str(e)}",
                 features_used=[],
-                feature_importance={},
+                feature_importance={},  # Empty on error
                 computation_time_ms=(time.time() - start_time) * 1000,
                 health_status="degraded"
             )
@@ -113,4 +206,16 @@ class XGBoostNode(MCPModelNode):
             "status": self.health_status,
             "model_loaded": self.model is not None
         }
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    @property
+    def model_version(self) -> str:
+        return self._model_version
+
+    @property
+    def model_type(self) -> str:
+        return self._model_type
 

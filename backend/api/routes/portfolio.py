@@ -4,28 +4,109 @@ Portfolio management endpoints.
 Provides portfolio status, positions, and performance metrics.
 """
 
+import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import desc, select
 from typing import Optional, List
 
-from backend.core.database import get_db, Position, Trade
+from backend.core.database import get_db, Position, Trade, PositionStatus, TradeStatus
 from backend.api.models.requests import PortfolioRequest
 from backend.api.models.responses import PortfolioSummaryResponse, PositionResponse, TradeResponse, ErrorResponse
 from backend.services.portfolio_service import portfolio_service
+from backend.api.middleware.auth import require_auth
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
+
+
+def validate_symbol(symbol: Optional[str]) -> Optional[str]:
+    """Validate and sanitize symbol parameter.
+    
+    Args:
+        symbol: Symbol string to validate
+        
+    Returns:
+        Validated symbol or None
+        
+    Raises:
+        HTTPException: If symbol is invalid
+    """
+    if symbol is None:
+        return None
+    
+    # Remove whitespace
+    symbol = symbol.strip()
+    
+    # Validate length (max 50 chars per database schema)
+    if len(symbol) > 50:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Symbol must be 50 characters or less"
+        )
+    
+    # Validate format: alphanumeric and common trading symbols (BTCUSD, ETH-USD, etc.)
+    if not re.match(r'^[A-Z0-9\-_]+$', symbol.upper()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Symbol contains invalid characters. Use uppercase letters, numbers, hyphens, or underscores"
+        )
+    
+    return symbol.upper()
+
+
+def validate_status(status: Optional[str], valid_statuses: List[str]) -> Optional[str]:
+    """Validate and sanitize status parameter.
+    
+    Args:
+        status: Status string to validate
+        valid_statuses: List of valid status values
+        
+    Returns:
+        Validated status or None
+        
+    Raises:
+        HTTPException: If status is invalid
+    """
+    if status is None:
+        return None
+    
+    # Remove whitespace and convert to uppercase
+    status = status.strip().upper()
+    
+    # Validate against allowed values
+    if status not in valid_statuses:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Status must be one of: {', '.join(valid_statuses)}"
+        )
+    
+    return status
 
 
 @router.get("/portfolio/summary", response_model=PortfolioSummaryResponse)
 async def get_portfolio_summary(
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get portfolio summary.
     
-    Returns total value, balance, positions, and PnL.
+    Returns comprehensive portfolio information including:
+    - Total portfolio value
+    - Available balance
+    - Total unrealized and realized PnL
+    - Position count and details
+    
+    **Example Response:**
+    ```json
+    {
+      "total_value": 10000.50,
+      "available_balance": 5000.00,
+      "total_unrealized_pnl": 150.25,
+      "total_realized_pnl": 200.00,
+      "position_count": 2
+    }
+    ```
     """
     
     try:
@@ -54,10 +135,10 @@ async def get_portfolio_summary(
 @router.get("/portfolio/positions", response_model=List[PositionResponse])
 async def get_positions(
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
-    status: Optional[str] = Query(None, description="Filter by status (OPEN/CLOSED)"),
+    status: Optional[str] = Query(None, description="Filter by status (OPEN/CLOSED/LIQUIDATED)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get positions list.
@@ -66,20 +147,28 @@ async def get_positions(
     """
     
     try:
+        # Validate and sanitize input parameters
+        validated_symbol = validate_symbol(symbol)
+        validated_status = validate_status(
+            status,
+            [s.value for s in PositionStatus]
+        )
+        
         # Build query
-        query = db.query(Position)
+        query = select(Position)
         
-        if symbol:
-            query = query.filter(Position.symbol == symbol)
+        if validated_symbol:
+            query = query.where(Position.symbol == validated_symbol)
         
-        if status:
-            query = query.filter(Position.status == status)
+        if validated_status:
+            query = query.where(Position.status == validated_status)
         
-        # Get total count
-        total = query.count()
+        # Apply ordering and pagination
+        query = query.order_by(desc(Position.opened_at)).offset(offset).limit(limit)
         
-        # Apply pagination
-        positions = query.order_by(desc(Position.opened_at)).offset(offset).limit(limit).all()
+        # Execute query
+        result = await db.execute(query)
+        positions = result.scalars().all()
         
         # Convert to response models
         position_responses = [
@@ -111,10 +200,10 @@ async def get_positions(
 @router.get("/portfolio/trades", response_model=List[TradeResponse])
 async def get_trades(
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status: Optional[str] = Query(None, description="Filter by status (PENDING/EXECUTED/FAILED/CANCELLED)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get trade history.
@@ -123,20 +212,28 @@ async def get_trades(
     """
     
     try:
+        # Validate and sanitize input parameters
+        validated_symbol = validate_symbol(symbol)
+        validated_status = validate_status(
+            status,
+            [s.value for s in TradeStatus]
+        )
+        
         # Build query
-        query = db.query(Trade)
+        query = select(Trade)
         
-        if symbol:
-            query = query.filter(Trade.symbol == symbol)
+        if validated_symbol:
+            query = query.where(Trade.symbol == validated_symbol)
         
-        if status:
-            query = query.filter(Trade.status == status)
+        if validated_status:
+            query = query.where(Trade.status == validated_status)
         
-        # Get total count
-        total = query.count()
+        # Apply ordering and pagination
+        query = query.order_by(desc(Trade.executed_at)).offset(offset).limit(limit)
         
-        # Apply pagination
-        trades = query.order_by(desc(Trade.executed_at)).offset(offset).limit(limit).all()
+        # Execute query
+        result = await db.execute(query)
+        trades = result.scalars().all()
         
         # Convert to response models
         trade_responses = [
@@ -165,7 +262,7 @@ async def get_trades(
 @router.get("/portfolio/performance")
 async def get_performance(
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Get portfolio performance metrics.

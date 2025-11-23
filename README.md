@@ -47,8 +47,10 @@ See [Build Guide](docs/11-build-guide.md) for complete step-by-step instructions
 **Quick Start Commands:**
 
 ```bash
-# Start all services
+# Start all services (parallel startup - faster!)
 make start
+# or directly:
+python tools/commands/start_parallel.py
 
 # Restart services
 make restart
@@ -60,11 +62,47 @@ make audit
 make error
 ```
 
+**Note**: The startup system uses a Python-based parallel process manager that starts all services (backend, agent, frontend) simultaneously, providing faster initialization and real-time log streaming. See [Deployment Documentation](docs/10-deployment.md) for details.
+
+## Containerized Deployment
+
+All 24/7 services now run via Docker images orchestrated with Compose.
+
+1. Copy/create the `.env` files described below and set secrets consumed during build/test/deploy (minimum: `DELTA_EXCHANGE_API_KEY`, `DELTA_EXCHANGE_API_SECRET`, `JWT_SECRET_KEY`, `API_KEY`, `POSTGRES_PASSWORD`).
+2. Prepare persistent host paths before the first deployment:
+   ```bash
+   mkdir -p logs/backend logs/agent logs/frontend models
+   touch kubera_pokisham.db
+   ```
+3. Build and start the stack:
+   ```bash
+   docker compose up --build -d
+   ```
+4. Inspect status & logs:
+   ```bash
+   docker compose ps
+   docker compose logs -f backend
+   ```
+
+The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on `8001`), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./models`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
+
+## CI/CD Pipeline
+
+GitHub Actions workflow [`cicd.yml`](.github/workflows/cicd.yml) runs backend/agent pytest suites, executes `npm test -- --ci` for the frontend, builds Docker images for each service, pushes them to GHCR on `main`, and redeploys the Compose stack via SSH. Required repository secrets: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, and `DEPLOY_PATH`. See [Deployment Documentation](docs/10-deployment.md#cicd-automation) for setup details.
+
 ### Environment Setup
 
-1. Copy `.env.example` files to `.env` in `backend/` and `agent/` directories
-2. Configure database, Redis, and Delta Exchange API credentials
-3. See [Deployment Documentation](docs/10-deployment.md) for details
+1. **Create `.env` files**:
+   - Copy `backend/.env.example` to `backend/.env` (or create from template in `backend/core/config.py`)
+   - Copy `agent/.env.example` to `agent/.env` (or create from template in `agent/core/config.py`)
+   - Copy `frontend/.env.example` to `frontend/.env.local` (optional, defaults provided)
+2. **Configure required variables**:
+   - `DATABASE_URL` - PostgreSQL connection string
+   - `DELTA_EXCHANGE_API_KEY` and `DELTA_EXCHANGE_API_SECRET` - Delta Exchange credentials
+   - `JWT_SECRET_KEY` and `API_KEY` - Security keys (backend only)
+   - *(Optional)* `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` - Enable Telegram trade alerts
+3. **Initialize database**: Run `python scripts/setup_db.py` before starting services
+4. See [Deployment Documentation](docs/10-deployment.md) for complete details
 
 ## Documentation
 

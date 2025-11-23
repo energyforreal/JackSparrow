@@ -6,12 +6,14 @@ Base interface for all ML model nodes implementing MCP Model Protocol.
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
 from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
 
 
 class MCPModelRequest(BaseModel):
     """MCP Model Protocol request."""
+    model_config = ConfigDict(protected_namespaces=())
     request_id: str
     features: List[float]
     context: Dict[str, Any]
@@ -20,6 +22,7 @@ class MCPModelRequest(BaseModel):
 
 class MCPModelPrediction(BaseModel):
     """MCP Model Protocol prediction structure."""
+    model_config = ConfigDict(protected_namespaces=())
     model_name: str
     model_version: str
     prediction: float  # -1.0 (strong sell) to +1.0 (strong buy)

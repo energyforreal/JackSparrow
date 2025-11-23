@@ -4,18 +4,20 @@ Trading operation endpoints.
 Handles prediction requests and trade execution.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from datetime import datetime
-from sqlalchemy.orm import Session
-import uuid
+import asyncio
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.api.models.requests import ExecuteTradeRequest, PredictRequest
+from backend.api.models.responses import ErrorResponse, PredictResponse, TradeResponse
 from backend.core.database import get_db
-from backend.api.models.requests import PredictRequest, ExecuteTradeRequest
-from backend.api.models.responses import PredictResponse, TradeResponse, ErrorResponse
+from backend.notifications import telegram_notifier
 from backend.services.agent_service import agent_service
 from backend.services.market_service import market_service
+from backend.api.middleware.auth import require_auth
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @router.post("/predict", response_model=PredictResponse)
@@ -24,6 +26,34 @@ async def predict(request: PredictRequest):
     Request AI prediction for current market conditions.
     
     Returns trading signal with reasoning chain and model predictions.
+    
+    **Request Body:**
+    ```json
+    {
+      "symbol": "BTCUSD",
+      "context": {
+        "interval": "15m",
+        "features": {}
+      }
+    }
+    ```
+    
+    **Example Response:**
+    ```json
+    {
+      "signal": 0.75,
+      "confidence": 0.85,
+      "timestamp": "2025-01-27T12:00:00Z",
+      "reasoning_chain": [
+        {
+          "step": 1,
+          "reasoning": "Market analysis shows bullish trend",
+          "confidence": 0.8
+        }
+      ],
+      "model_predictions": []
+    }
+    ```
     """
     
     try:
@@ -53,12 +83,38 @@ async def predict(request: PredictRequest):
 @router.post("/trade/execute", response_model=TradeResponse)
 async def execute_trade(
     request: ExecuteTradeRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Execute a trade order.
     
     Places order via Delta Exchange API through the agent service.
+    
+    **Request Body:**
+    ```json
+    {
+      "symbol": "BTCUSD",
+      "side": "buy",
+      "quantity": 0.1,
+      "order_type": "MARKET",
+      "price": null
+    }
+    ```
+    
+    **Example Response:**
+    ```json
+    {
+      "trade_id": "trade_123",
+      "symbol": "BTCUSD",
+      "side": "buy",
+      "quantity": 0.1,
+      "price": 50000.00,
+      "status": "filled",
+      "executed_at": "2025-01-27T12:00:00Z"
+    }
+    ```
+    
+    **Note:** In paper trading mode, orders are simulated and not executed on the exchange.
     """
     
     try:
@@ -93,7 +149,21 @@ async def execute_trade(
                 detail=f"Trade execution failed: {trade_result.get('error', 'Unknown error')}"
             )
         
-        return TradeResponse(**trade_result)
+        response_payload = TradeResponse(**trade_result)
+        
+        if telegram_notifier.enabled:
+            asyncio.create_task(
+                telegram_notifier.notify_trade_execution(
+                    symbol=request.symbol,
+                    side=request.side,
+                    quantity=float(request.quantity),
+                    price=float(request.price) if request.price else None,
+                    order_type=request.order_type,
+                    result=trade_result,
+                )
+            )
+        
+        return response_payload
         
     except HTTPException:
         raise

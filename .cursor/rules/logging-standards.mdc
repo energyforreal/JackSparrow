@@ -1,0 +1,51 @@
+---
+description: Structured logging standards using structlog
+globs:
+  - "**/*.py"
+alwaysApply: true
+---
+
+# Logging Standards
+
+## Structured Logging
+
+Use `structlog` for Python structured logging:
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+
+logger.info(
+    "trade_executed",
+    trade_id="trade_123",
+    symbol="BTCUSD",
+    side="buy",
+    quantity=0.1,
+    price=50000.0
+)
+```
+
+## Required Context Fields
+
+Always include:
+- `service` - Service name
+- `component` - Component name
+- `session_id` - Session identifier
+- `environment` - Environment (dev, staging, prod)
+- Correlation IDs, User IDs, Request IDs when applicable
+- Timestamps and relevant data
+
+## Log Levels
+
+- **DEBUG**: Detailed information for debugging
+- **INFO**: General informational messages
+- **WARNING**: Warning messages for potential issues
+- **ERROR**: Error messages for failures
+- **CRITICAL**: Critical errors requiring immediate attention
+
+## Startup Logging
+
+- Invoke `LogBootstrapper.clear_previous_logs()` before every start
+- Emit `system.startup` event with `session_id`, commit SHA, and environment
+- Ensure automation runs bootstrap scripts prior to launching services

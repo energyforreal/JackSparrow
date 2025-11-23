@@ -18,8 +18,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv(dotenv_path=project_root / "backend" / ".env")
+# Load environment variables from project root
+load_dotenv(dotenv_path=project_root / ".env")
 
 
 def setup_database():
@@ -28,7 +28,7 @@ def setup_database():
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         print("ERROR: DATABASE_URL not found in environment variables")
-        print("Please set DATABASE_URL in backend/.env file")
+        print("Please set DATABASE_URL in the project root .env file")
         sys.exit(1)
     
     print(f"Connecting to database...")
@@ -197,7 +197,7 @@ def setup_database():
         print("\nPlease ensure:")
         print("1. PostgreSQL is running")
         print("2. TimescaleDB extension is installed")
-        print("3. DATABASE_URL is correct in backend/.env")
+        print("3. DATABASE_URL is correct in the root .env file")
         sys.exit(1)
     except Exception as e:
         print(f"\nERROR: Database setup failed: {e}")

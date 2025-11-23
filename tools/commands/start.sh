@@ -1,61 +1,33 @@
 #!/bin/bash
 # Start all JackSparrow services
+# Uses Python-based parallel process manager for simultaneous startup
 
 set -e
 
-echo "Starting JackSparrow Trading Agent..."
-echo ""
+# Get script directory for proper path resolution
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Create logs directory
-mkdir -p logs
+# Path to Python parallel startup script
+PYTHON_SCRIPT="$SCRIPT_DIR/start_parallel.py"
 
-# Start Backend
-echo "Starting Backend (FastAPI)..."
-cd backend
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
+# Check if Python is available
+if ! command -v python3 &> /dev/null && ! command -v python &> /dev/null; then
+    echo "Error: Python is required but not found in PATH" >&2
+    echo "Please install Python 3.11+ and ensure it's in your PATH" >&2
+    exit 1
 fi
-source venv/bin/activate
-pip install -q -r requirements.txt
-uvicorn api.main:app --host 0.0.0.0 --port 8000 > ../logs/backend.log 2>&1 &
-BACKEND_PID=$!
-cd ..
-echo "Backend started (PID: $BACKEND_PID)"
 
-# Start Agent
-echo "Starting Agent..."
-cd agent
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
+# Use python3 if available, otherwise python
+PYTHON_CMD="python3"
+if ! command -v python3 &> /dev/null; then
+    PYTHON_CMD="python"
 fi
-source venv/bin/activate
-pip install -q -r requirements.txt
-python -m agent.core.intelligent_agent > ../logs/agent.log 2>&1 &
-AGENT_PID=$!
-cd ..
-echo "Agent started (PID: $AGENT_PID)"
 
-# Start Frontend
-echo "Starting Frontend (Next.js)..."
-cd frontend
-if [ ! -d "node_modules" ]; then
-    npm install
-fi
-npm run dev > ../logs/frontend.log 2>&1 &
-FRONTEND_PID=$!
-cd ..
-echo "Frontend started (PID: $FRONTEND_PID)"
+# Make Python script executable
+chmod +x "$PYTHON_SCRIPT" 2>/dev/null || true
 
-# Save PIDs
-echo "$BACKEND_PID" > logs/backend.pid
-echo "$AGENT_PID" > logs/agent.pid
-echo "$FRONTEND_PID" > logs/frontend.pid
-
-echo ""
-echo "All services started successfully!"
-echo "Backend: http://localhost:8000"
-echo "Frontend: http://localhost:3000"
-echo ""
-echo "Logs are in the logs/ directory"
-echo "Use 'make stop' to stop all services"
+# Execute Python script for parallel startup
+echo "Launching parallel process manager..."
+exec "$PYTHON_CMD" "$PYTHON_SCRIPT"
 

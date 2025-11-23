@@ -1,0 +1,116 @@
+---
+description: Documentation organization rules for markdown files
+globs:
+  - "**/*.md"
+alwaysApply: true
+---
+# Documentation Organization Rules
+
+## File Location Standards
+
+All project documentation markdown files (`.md`) must be organized according to the following structure:
+
+### Required Locations
+
+1. **Project Documentation** → `docs/` directory
+   - All project documentation, guides, and reports should be placed in `docs/`
+   - Use descriptive kebab-case naming (e.g., `audit-findings.md`, `docker-logs-analysis-report.md`)
+   - Examples:
+     - Audit reports: `docs/audit-findings.md`, `docs/comprehensive-audit-report.md`
+     - Docker logs: `docs/docker-logs-analysis-report.md`, `docs/docker-logs-followup-report.md`
+     - Remediation plans: `docs/remediation-plan.md`
+
+2. **Cursor Rules** → `.cursor/rules/` directory
+   - Cursor-specific configuration and rules should be in `.cursor/rules/`
+   - Use `.mdc` extension for cursor rules (e.g., `claude.mdc`, `documentation-organization.mdc`)
+
+3. **Reference Specifications** → `reference/` directory
+   - Reference specifications and design documents
+   - Examples: `reference/tradingagent_rebuild_spec.md`, `reference/agent_reasoning_spec.md`
+
+### Exceptions (Root-Level Files)
+
+The following files are allowed in the project root:
+- `DOCUMENTATION.md` - Main documentation index (must stay in root)
+- `README.md` - Project readme (must stay in root)
+- `.env.example` - Environment variable templates (if needed)
+
+### Naming Conventions
+
+1. **Use kebab-case** for all documentation files
+   - ✅ Good: `audit-findings.md`, `docker-logs-analysis-report.md`
+   - ❌ Bad: `AUDIT_FINDINGS.md`, `DockerLogsAnalysisReport.md`
+
+2. **Use descriptive names** that clearly indicate content
+   - Include date stamps for time-sensitive reports: `docker-logs-analysis-report-20251123.md`
+   - Use consistent prefixes for related documents: `docker-logs-*`, `audit-*`
+
+3. **Avoid abbreviations** unless they are widely understood
+   - ✅ Good: `comprehensive-audit-report.md`
+   - ❌ Bad: `comp-audit-rpt.md`
+
+## When Creating New Markdown Files
+
+### Automatic Placement Rules
+
+When creating new markdown files, automatically:
+
+1. **Check file purpose:**
+   - Project documentation → `docs/`
+   - Cursor rules → `.cursor/rules/` (with `.mdc` extension)
+   - Reference specs → `reference/`
+   - Index/readme → Root (only if it's the main index)
+
+2. **Suggest correct location** if file is created in wrong place:
+   - If `.md` file created in root (except `DOCUMENTATION.md`, `README.md`) → Suggest moving to `docs/`
+   - If cursor rule created as `.md` → Suggest converting to `.mdc` and moving to `.cursor/rules/`
+
+3. **Update documentation index:**
+   - When adding new documentation to `docs/`, remind to update `DOCUMENTATION.md`
+   - When adding new cursor rules, remind to update relevant rule files
+
+## File Organization Checklist
+
+Before committing new markdown files, verify:
+
+- [ ] File is in the correct directory (`docs/`, `.cursor/rules/`, or `reference/`)
+- [ ] File uses kebab-case naming
+- [ ] File name is descriptive and clear
+- [ ] If it's documentation, it's referenced in `DOCUMENTATION.md`
+- [ ] If it's a cursor rule, it has `.mdc` extension
+- [ ] No duplicate files with different naming conventions
+
+## Examples
+
+### Correct Organization
+
+```
+docs/
+  ├── audit-findings.md
+  ├── comprehensive-audit-report.md
+  ├── docker-logs-analysis-report.md
+  └── remediation-plan.md
+
+.cursor/rules/
+  ├── claude.mdc
+  └── documentation-organization.mdc
+
+reference/
+  └── tradingagent_rebuild_spec.md
+
+DOCUMENTATION.md  (root - main index)
+README.md  (root - project readme)
+```
+
+### Incorrect Organization
+
+```
+❌ AUDIT_FINDINGS.md  (root - should be in docs/)
+❌ DockerLogsReport.md  (root - should be in docs/ with kebab-case)
+❌ .cursor/rules/claude.md  (should be .mdc extension)
+❌ docs/AUDIT_FINDINGS.md  (should use kebab-case)
+```
+
+## Enforcement
+
+This rule is always applied (`alwaysApply: true`) to ensure consistent documentation organization across the project. When creating or moving markdown files, always follow these guidelines.

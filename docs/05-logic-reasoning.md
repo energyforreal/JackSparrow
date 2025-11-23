@@ -97,14 +97,9 @@ The agent uses an enhanced state machine that reflects its thinking process:
    - Active position management
    - Monitoring exit conditions (stop-loss, take-profit)
    - Tracking position performance
-   - **Transition to**: LEARNING when position closed
+   - **Transition to**: OBSERVING when position closed
 
-8. **LEARNING**
-   - Post-trade analysis
-   - Updating model weights
-   - Calibrating confidence
-   - Storing decision in vector memory
-   - **Transition to**: OBSERVING after learning complete
+> **Note**: The historical `LEARNING` state is intentionally disabled in this build to avoid heavy post-trade computation. Outcome analysis can be re-enabled in future releases without impacting the current lightweight runtime.
 
 9. **DEGRADED**
    - Partial functionality due to service issues
@@ -621,6 +616,8 @@ This table provides a quick health check when auditing individual decisions—if
 ---
 
 ## Learning Algorithms
+
+> **Status**: The learning pipeline is currently disabled in production builds to keep the agent lightweight. This section remains for future reference when adaptive behavior is re-enabled.
 
 ### Model Weight Adjustment
 

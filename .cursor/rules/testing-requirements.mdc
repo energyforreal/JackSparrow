@@ -1,0 +1,55 @@
+---
+description: Testing requirements and standards
+globs:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: true
+---
+
+# Testing Requirements
+
+## Test Coverage
+
+- **Minimum Coverage**: 80% code coverage
+- **Critical Paths**: 100% coverage required for:
+  - Risk management logic
+  - Position sizing calculations
+  - Trade execution
+  - Error handling
+
+## Test Organization
+
+- **Unit Tests**: One test file per source file (`test_*.py` or `*.test.tsx`)
+- Mirror source directory structure in test directories
+- **Integration Tests**: Test module interactions, API endpoints, database operations
+- **E2E Tests**: Test complete user flows and critical paths
+
+## Test Writing
+
+**Python (pytest)**:
+```python
+import pytest
+from agent.risk import RiskManager
+
+class TestRiskManager:
+    def test_calculate_position_size_normal(self):
+        """Test normal position size calculation."""
+        manager = RiskManager()
+        size = manager.calculate_position_size(signal_strength=0.8, risk_level=0.3)
+        assert 0.0 <= size <= 0.1
+        assert size == pytest.approx(0.064, rel=0.01)
+```
+
+**TypeScript (Jest/React Testing Library)**:
+```typescript
+import { render, screen } from '@testing-library/react';
+import { AgentStatus } from './AgentStatus';
+
+describe('AgentStatus', () => {
+  it('displays monitoring state correctly', () => {
+    render(<AgentStatus state="MONITORING" lastUpdate={new Date()} />);
+    expect(screen.getByText('Monitoring Markets')).toBeInTheDocument();
+  });
+});
+```

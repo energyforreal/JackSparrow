@@ -1,46 +1,119 @@
 'use client'
 
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Eye, Brain, Zap, AlertTriangle, AlertCircle } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { formatTime } from '@/utils/formatters'
+
 interface AgentStatusProps {
   state: string
   lastUpdate: Date
+  message?: string
   isConnected?: boolean
 }
 
-export function AgentStatus({ state, lastUpdate, isConnected = false }: AgentStatusProps) {
-  const getStatusColor = () => {
-    switch (state) {
-      case 'MONITORING':
-      case 'OBSERVING':
-        return 'bg-green-100 text-green-800'
-      case 'THINKING':
-      case 'DELIBERATING':
-      case 'ANALYZING':
-        return 'bg-blue-100 text-blue-800'
-      case 'EXECUTING':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'DEGRADED':
-        return 'bg-orange-100 text-orange-800'
-      case 'EMERGENCY_STOP':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
+const getStateConfig = (state: string) => {
+  switch (state) {
+    case 'MONITORING':
+    case 'OBSERVING':
+      return {
+        color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+        icon: Eye,
+        label: 'Monitoring Markets',
+        bgColor: 'bg-emerald-500',
+      }
+    case 'THINKING':
+    case 'DELIBERATING':
+    case 'ANALYZING':
+      return {
+        color: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+        icon: Brain,
+        label: 'Analyzing Signals',
+        bgColor: 'bg-blue-500',
+      }
+    case 'EXECUTING':
+    case 'TRADING':
+      return {
+        color: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+        icon: Zap,
+        label: 'Active Trade',
+        bgColor: 'bg-amber-500',
+      }
+    case 'DEGRADED':
+      return {
+        color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+        icon: AlertTriangle,
+        label: 'Degraded Performance',
+        bgColor: 'bg-yellow-500',
+      }
+    case 'EMERGENCY_STOP':
+      return {
+        color: 'bg-red-500/10 text-red-400 border-red-500/20',
+        icon: AlertCircle,
+        label: 'Emergency Stop',
+        bgColor: 'bg-red-500',
+      }
+    default:
+      return {
+        color: 'bg-muted text-muted-foreground border-border',
+        icon: AlertCircle,
+        label: 'Unknown',
+        bgColor: 'bg-gray-500',
+      }
   }
+}
+
+export function AgentStatus({
+  state,
+  lastUpdate,
+  message,
+  isConnected = false,
+}: AgentStatusProps) {
+  const config = getStateConfig(state)
+  const Icon = config.icon
 
   return (
-    <div className="bg-white rounded-lg shadow p-4">
-      <h2 className="text-xl font-semibold mb-2">Agent Status</h2>
-      <div className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getStatusColor()}`}>
-        {state || 'UNKNOWN'}
-      </div>
-      <div className="mt-2 text-sm text-gray-600">
-        Last Update: {lastUpdate.toLocaleTimeString()}
-      </div>
-      <div className="mt-2">
-        <span className={`inline-block w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-        {isConnected ? 'Connected' : 'Disconnected'}
-      </div>
-    </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Agent Status</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Badge
+          variant="outline"
+          className={cn(
+            'flex items-center gap-2 px-3 py-2 text-sm font-medium w-fit',
+            config.color
+          )}
+          role="status"
+          aria-live="polite"
+        >
+          <span className={cn('h-2 w-2 rounded-full', config.bgColor)} aria-hidden="true" />
+          <Icon className="h-4 w-4" />
+          <span>{state || 'UNKNOWN'}</span>
+        </Badge>
+
+        <div className="space-y-1">
+          <p className="text-sm font-medium">{config.label}</p>
+          {message && (
+            <p className="text-sm text-muted-foreground">{message}</p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
+          <span>Last update: {formatTime(lastUpdate)}</span>
+          <div className="flex items-center gap-1">
+            <span
+              className={cn(
+                'h-2 w-2 rounded-full',
+                isConnected ? 'bg-success' : 'bg-error'
+              )}
+            />
+            <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

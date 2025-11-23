@@ -143,7 +143,9 @@ The example illustrates how raw market context, historical success rate, and mod
 
 ### 4. Learning and Adaptation System
 
-**Description**: The agent learns from every trade outcome and continuously improves.
+> **Status**: Disabled for the current lightweight build. The architecture remains documented for future use, but the runtime intentionally skips all adaptive learning steps to keep compute requirements minimal.
+
+**Description**: (Paused) The agent previously learned from every trade outcome and continuously improved.
 
 **Learning Components**:
 
@@ -246,7 +248,6 @@ The example illustrates how raw market context, historical success rate, and mod
 - `ANALYZING` - Processing signals and evaluating entry conditions
 - `EXECUTING` - Placing or managing trade orders
 - `MONITORING_POSITION` - Active position management (monitoring exit conditions)
-- `LEARNING` - Post-trade analysis and model updates
 - `DEGRADED` - Partial functionality due to service issues
 - `EMERGENCY_STOP` - Critical failure, no trading allowed
 
@@ -483,10 +484,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Conclusion display
 
 **Learning Reports**:
-- Recent learning updates
-- Model weight changes
-- Strategy adaptations
-- Key lessons learned
+- (Paused) No new reports are generated while the learning loop is disabled.
 
 ---
 
@@ -496,7 +494,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - ✅ Autonomous market analysis
 - ✅ Structured reasoning chains
 - ✅ Multi-model ensemble
-- ✅ Learning and adaptation
+- ⚠️ Learning and adaptation (documented architecture, currently disabled)
 - ✅ Confidence calibration
 - ✅ Decision explanation
 
@@ -556,8 +554,8 @@ The example illustrates how raw market context, historical success rate, and mod
 ### Optional Features
 
 **Telegram Interface** (Optional):
-- Mobile notifications for trades and alerts
-- Command interface for manual controls
+- Mobile notifications for trades and alerts *(backend support available; supply `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to enable outbound messages).*
+- Command interface for manual controls *(future enhancement)*
 - Status updates and monitoring
 - Not required for core functionality
 - Can be added as separate service if needed

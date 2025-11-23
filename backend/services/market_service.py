@@ -7,10 +7,13 @@ Fetches market data from Delta Exchange API or agent service.
 from typing import Optional, Dict, Any, List
 import httpx
 import asyncio
+import structlog
 
 from backend.core.config import settings
 from backend.core.redis import get_cache, set_cache
 from backend.services.agent_service import agent_service
+
+logger = structlog.get_logger()
 
 
 class MarketService:
@@ -54,7 +57,14 @@ class MarketService:
                     await set_cache(cache_key, market_data, ttl=self.cache_ttl)
                     return market_data
         except Exception as e:
-            print(f"Error getting market data from agent: {e}")
+            logger.error(
+                "market_service_get_market_data_failed",
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                error=str(e),
+                exc_info=True
+            )
         
         # Fallback: return None (will be handled by route)
         return None
@@ -83,7 +93,12 @@ class MarketService:
                     await set_cache(cache_key, ticker, ttl=10)  # Shorter cache for ticker
                     return ticker
         except Exception as e:
-            print(f"Error getting ticker from agent: {e}")
+            logger.error(
+                "market_service_get_ticker_failed",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True
+            )
         
         return None
     
@@ -118,7 +133,13 @@ class MarketService:
                     await set_cache(cache_key, orderbook, ttl=5)  # Short cache for orderbook
                     return orderbook
         except Exception as e:
-            print(f"Error getting orderbook from agent: {e}")
+            logger.error(
+                "market_service_get_orderbook_failed",
+                symbol=symbol,
+                depth=depth,
+                error=str(e),
+                exc_info=True
+            )
         
         return None
 

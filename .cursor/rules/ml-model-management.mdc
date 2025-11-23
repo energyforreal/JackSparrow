@@ -1,0 +1,45 @@
+---
+description: ML model management and MCP protocol standards
+globs:
+  - "agent/models/**/*.py"
+  - "agent/model_storage/**/*"
+alwaysApply: true
+---
+
+# ML Model Management Standards
+
+## Model File Organization
+
+- **Production models**: Root `models/` directory (versioned, source-controlled)
+- **Uploaded models**: `agent/model_storage/` directory (discovered automatically)
+- User-uploaded models: `agent/model_storage/custom/`
+- Model-specific directories: `agent/model_storage/xgboost/`, `agent/model_storage/lstm/`, etc.
+
+## Environment Variables
+
+- `MODEL_PATH`: Points to specific production model file (e.g., `models/xgboost_BTCUSD_15m.pkl`)
+- `MODEL_DIR`: Points to directory for model discovery (e.g., `./agent/model_storage`)
+
+## Model Implementation
+
+All models must implement `MCPModelNode` interface:
+- Predictions normalized to -1.0 to +1.0 range
+- Human-readable reasoning/explanations
+- Confidence scores
+- Feature importance tracking
+
+## Model Metadata
+
+**Required Fields**:
+- `model_name`: Unique identifier
+- `model_type`: Model type (xgboost, lstm, transformer, etc.)
+- `version`: Semantic version (MAJOR.MINOR.PATCH)
+- `features_required`: List of required feature names
+- `description`: Model description
+
+## Model Versioning
+
+- Use semantic versioning (MAJOR.MINOR.PATCH)
+- Keep old versions for rollback capability
+- Document version changes in metadata
+- Test new versions before activation

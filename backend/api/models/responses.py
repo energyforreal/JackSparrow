@@ -5,7 +5,7 @@ Pydantic response models for API endpoints.
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class HealthServiceStatus(BaseModel):
@@ -68,6 +68,8 @@ class HealthResponse(BaseModel):
 
 class ModelPrediction(BaseModel):
     """Model prediction details."""
+    
+    model_config = ConfigDict(protected_namespaces=())
     
     model_name: str = Field(
         ...,
@@ -158,6 +160,8 @@ class ReasoningChain(BaseModel):
 
 class PredictResponse(BaseModel):
     """Prediction response."""
+    
+    model_config = ConfigDict(protected_namespaces=())
     
     signal: str = Field(
         ...,
@@ -361,6 +365,8 @@ class MarketDataResponse(BaseModel):
 
 class AgentStatusResponse(BaseModel):
     """Agent status response."""
+    
+    model_config = ConfigDict(protected_namespaces=())
     
     state: str = Field(
         ...,

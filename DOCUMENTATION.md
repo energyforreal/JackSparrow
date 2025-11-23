@@ -144,6 +144,30 @@ This document serves as the central index for all project documentation. Navigat
    - Missing features identification
    - Update recommendations
 
+16. **[Audit Findings](docs/audit-findings.md)**
+   - Initial project audit findings
+   - Critical issues identified
+   - Medium priority issues
+   - Recommendations and next steps
+
+17. **[Comprehensive Audit Report](docs/comprehensive-audit-report.md)**
+   - Complete full-stack audit report
+   - All critical, high, medium, and low priority issues
+   - Resolution status tracking
+   - Testing recommendations
+
+18. **[Docker Logs Analysis Reports](docs/docker-logs-analysis-report.md)**
+   - Container health analysis
+   - Service-specific issue identification
+   - Docker deployment troubleshooting
+   - Related: [Docker Logs Follow-up Report](docs/docker-logs-followup-report.md), [Docker Logs Analysis Report - 2025-11-23](docs/docker-logs-analysis-report-20251123.md)
+
+19. **[Remediation Plan](docs/remediation-plan.md)**
+   - Step-by-step remediation for identified issues
+   - Implementation priorities
+   - Testing checklists
+   - Rollback procedures
+
 ---
 
 ## 🎯 Project Overview
@@ -225,7 +249,13 @@ Trading Agent Documentation
 │   ├── build-guide.md           # Complete build instructions
 │   ├── logging.md               # Centralized logging plan
 │   ├── project-rules.md         # Development standards
-│   └── audit-report.md          # Documentation audit report
+│   ├── audit-report.md          # Documentation audit report
+│   ├── audit-findings.md        # Initial audit findings
+│   ├── comprehensive-audit-report.md  # Complete audit report
+│   ├── docker-logs-analysis-report.md # Docker logs analysis
+│   ├── docker-logs-followup-report.md  # Docker logs follow-up
+│   ├── docker-logs-analysis-report-20251123.md  # Timestamped analysis
+│   └── remediation-plan.md      # Issue remediation plan
 │
 ├── models/                      # Managed production artefacts (see docs/03-ml-models.md)
 │   ├── *.pkl                    # Trained model binaries

@@ -185,8 +185,9 @@ JackSparrow/
 │
 ├── tools/                             # Command toolkit
 │   ├── commands/
-│   │   ├── start.sh                   # Start stack (macOS/Linux)
-│   │   ├── start.ps1                  # Start stack (Windows)
+│   │   ├── start_parallel.py          # Parallel process manager (Python, cross-platform)
+│   │   ├── start.sh                   # Start stack wrapper (macOS/Linux)
+│   │   ├── start.ps1                  # Start stack wrapper (Windows)
 │   │   ├── restart.sh                 # Clean restart script
 │   │   ├── restart.ps1                # Clean restart script (Windows)
 │   │   ├── audit.sh                   # Audit automation
@@ -575,7 +576,7 @@ tests/unit/backend/test_agent_service.py
 ### Command Automation
 
 **Makefile (root)**:
-- `make start`: Launches backend, agent, and frontend services; writes combined output to `logs/start.log`.
+- `make start`: Launches backend, agent, and frontend services simultaneously using parallel process manager; streams real-time logs to console and writes to `logs/{service}.log`.
 - `make restart`: Stops running services, clears temporary artefacts, re-executes `make start`, and archives previous logs under `logs/restart/`.
 - `make audit`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
 - `make error`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
@@ -591,21 +592,26 @@ Supporting helper scripts live under `scripts/commands/` (when present) and are 
 - Companion docs: `tools/README.md`
 
 ### Available Commands
-- `start.sh` / `start.ps1`: Launch backend, agent, frontend, and stream logs
+- `start_parallel.py`: Python-based parallel process manager (cross-platform) - starts all services simultaneously
+- `start.sh` / `start.ps1`: Wrapper scripts that invoke `start_parallel.py` for convenience
 - `restart.sh` / `restart.ps1`: Perform a clean shutdown and restart
 - `audit.sh` / `audit.ps1`: Run formatting, tests, health checks, and log review
 - `error.sh` / `error.ps1`: Gather live diagnostics and recent log summaries
 
 ### Invocation Options
-- Direct script execution (`./tools/commands/start.sh`)
+- Direct Python execution (`python tools/commands/start_parallel.py`) - recommended for fastest startup
+- Direct script execution (`./tools/commands/start.sh` or `start.ps1`)
 - Makefile wrappers (`make start`, `make audit`, etc.)
 - PowerShell scripts for Windows environments
 
 ### Log Outputs
 - All commands write to the `logs/` tree:
-  - `logs/start.log`
-  - `logs/restart.log`
-  - `logs/audit/`
+  - `logs/backend.log` - Backend service logs
+  - `logs/agent.log` - Agent service logs
+  - `logs/frontend.log` - Frontend service logs
+  - `logs/backend.pid`, `logs/agent.pid`, `logs/frontend.pid` - Process ID files
+  - `logs/restart.log` - Restart operation logs
+  - `logs/audit/` - Audit reports
   - `logs/error/`
 
 ---

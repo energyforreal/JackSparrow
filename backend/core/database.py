@@ -6,32 +6,70 @@ Provides database session management and ORM models.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, Dict, Any
-from sqlalchemy import create_engine, Column, Integer, String, DECIMAL, DateTime, JSON, Enum as SQLEnum, text
+from typing import Optional, Dict, Any, AsyncGenerator
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DECIMAL,
+    DateTime,
+    JSON,
+    Enum as SQLEnum,
+    text,
+    TIMESTAMP,
+    Index,
+)
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMPTZ
-from sqlalchemy.engine import Engine
+from sqlalchemy.dialects.postgresql import JSONB
 import enum
-from typing import Generator
 
 from backend.core.config import settings
 
 # Create base class for models
 Base = declarative_base()
 
-# Create engine (async-compatible)
-engine = create_engine(
-    settings.database_url,
+# PostgreSQL-compatible timestamp with timezone
+TIMESTAMPTZ = TIMESTAMP(timezone=True)
+
+# Convert database URL to async format if needed
+def get_async_database_url(database_url: str) -> str:
+    """Convert database URL to async format.
+    
+    Args:
+        database_url: Original database URL
+        
+    Returns:
+        Async-compatible database URL
+    """
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql+psycopg2://"):
+        return database_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql+asyncpg://"):
+        return database_url
+    else:
+        # Assume it's postgresql:// and convert
+        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+# Create async engine
+async_database_url = get_async_database_url(settings.database_url)
+engine = create_async_engine(
+    async_database_url,
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
     echo=False,
-    future=True
 )
 
-# Create session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Create async session factory
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
 
 
 # Enums
@@ -90,7 +128,12 @@ class Trade(Base):
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
     reasoning_chain_id = Column(String(255), nullable=True)
     model_predictions = Column(JSONB, nullable=True)
-    metadata = Column(JSONB, nullable=True)
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    
+    # Composite index for common query pattern: symbol + executed_at
+    __table_args__ = (
+        Index('idx_trade_symbol_executed_at', 'symbol', 'executed_at'),
+    )
 
 
 class Position(Base):
@@ -112,6 +155,11 @@ class Position(Base):
     take_profit = Column(DECIMAL(18, 8), nullable=True)
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
     updated_at = Column(TIMESTAMPTZ, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Composite index for common query pattern: symbol + status
+    __table_args__ = (
+        Index('idx_position_symbol_status', 'symbol', 'status'),
+    )
 
 
 class Decision(Base):
@@ -129,6 +177,11 @@ class Decision(Base):
     model_predictions = Column(JSONB, nullable=True)
     market_context = Column(JSONB, nullable=True)
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    
+    # Composite index for common query pattern: symbol + timestamp
+    __table_args__ = (
+        Index('idx_decision_symbol_timestamp', 'symbol', 'timestamp'),
+    )
 
 
 class PerformanceMetric(Base):
@@ -141,7 +194,7 @@ class PerformanceMetric(Base):
     metric_type = Column(String(50), nullable=False, index=True)
     metric_name = Column(String(100), nullable=False)
     value = Column(DECIMAL(18, 8), nullable=False)
-    metadata = Column(JSONB, nullable=True)
+    metadata_json = Column("metadata", JSONB, nullable=True)
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
 
 
@@ -157,16 +210,24 @@ class ModelPerformance(Base):
     weight = Column(DECIMAL(5, 4), nullable=True)
     total_predictions = Column(Integer, default=0)
     correct_predictions = Column(Integer, default=0)
-    metadata = Column(JSONB, nullable=True)
+    metadata_json = Column("metadata", JSONB, nullable=True)
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
 
 
 # Database dependency for FastAPI
-def get_db() -> Generator[Session, None, None]:
-    """Get database session."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Get async database session.
+    
+    Yields:
+        AsyncSession: Database session
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 

@@ -10,9 +10,14 @@ from enum import Enum
 from pydantic import BaseModel
 import uuid
 import time
+import structlog
 
 from agent.data.feature_engineering import FeatureEngineering
 from agent.data.market_data_service import MarketDataService
+from agent.events.event_bus import event_bus
+from agent.events.schemas import FeatureRequestEvent, FeatureComputedEvent, EventType
+
+logger = structlog.get_logger()
 
 
 class FeatureQuality(str, Enum):
@@ -68,14 +73,109 @@ class MCPFeatureServer:
             "price_sma": "1.0.0",
             "volatility": "1.0.0"
         }
+        self._computing: Dict[str, bool] = {}  # Track ongoing computations
     
     async def initialize(self):
         """Initialize feature server."""
         await self.market_data_service.initialize()
+        # Register event handler
+        event_bus.subscribe(EventType.FEATURE_REQUEST, self._handle_feature_request_event)
     
     async def shutdown(self):
         """Shutdown feature server."""
         await self.market_data_service.shutdown()
+    
+    async def _handle_feature_request_event(self, event: FeatureRequestEvent):
+        """Handle feature request event.
+        
+        Args:
+            event: Feature request event
+        """
+        try:
+            payload = event.payload
+            symbol = payload.get("symbol")
+            feature_names = payload.get("feature_names", [])
+            
+            # Check if already computing for this symbol
+            computation_key = f"{symbol}:{','.join(sorted(feature_names))}"
+            if self._computing.get(computation_key, False):
+                logger.debug(
+                    "feature_computation_already_in_progress",
+                    symbol=symbol,
+                    computation_key=computation_key
+                )
+                return
+            
+            self._computing[computation_key] = True
+            
+            try:
+                # Create MCP request
+                request = MCPFeatureRequest(
+                    feature_names=feature_names,
+                    symbol=symbol,
+                    timestamp=payload.get("timestamp"),
+                    version=payload.get("version", "latest")
+                )
+                
+                # Get features
+                response = await self.get_features(request)
+                
+                # Emit feature computed event
+                await self._emit_feature_computed_event(event, response)
+                
+            finally:
+                self._computing[computation_key] = False
+                
+        except Exception as e:
+            logger.error(
+                "feature_request_event_handler_error",
+                event_id=event.event_id,
+                error=str(e),
+                exc_info=True
+            )
+            self._computing[computation_key] = False
+    
+    async def _emit_feature_computed_event(self, request_event: FeatureRequestEvent, response: MCPFeatureResponse):
+        """Emit feature computed event.
+        
+        Args:
+            request_event: Original feature request event
+            response: Feature response
+        """
+        try:
+            # Convert features to dict
+            features_dict = {
+                feat.name: feat.value
+                for feat in response.features
+            }
+            
+            event = FeatureComputedEvent(
+                source="feature_server",
+                correlation_id=request_event.event_id,
+                payload={
+                    "symbol": request_event.payload.get("symbol"),
+                    "features": features_dict,
+                    "quality_score": response.quality_score,
+                    "timestamp": response.timestamp
+                }
+            )
+            
+            await event_bus.publish(event)
+            
+            logger.info(
+                "feature_computed_event_emitted",
+                symbol=request_event.payload.get("symbol"),
+                feature_count=len(features_dict),
+                quality_score=response.quality_score,
+                event_id=event.event_id
+            )
+            
+        except Exception as e:
+            logger.error(
+                "feature_computed_event_emit_failed",
+                error=str(e),
+                exc_info=True
+            )
     
     async def get_features(self, request: MCPFeatureRequest) -> MCPFeatureResponse:
         """Get features according to MCP Feature Protocol."""
@@ -139,7 +239,13 @@ class MCPFeatureServer:
                 
             except Exception as e:
                 # Feature computation failed
-                print(f"Error computing feature {feature_name}: {e}")
+                logger.error(
+                    "feature_server_compute_failed",
+                    feature_name=feature_name,
+                    symbol=symbol,
+                    error=str(e),
+                    exc_info=True
+                )
                 features.append(MCPFeature(
                     name=feature_name,
                     version=self.feature_registry.get(feature_name, "1.0.0"),

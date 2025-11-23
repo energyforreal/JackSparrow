@@ -10,8 +10,9 @@ from datetime import datetime
 from backend.api.models.requests import AgentControlRequest
 from backend.api.models.responses import AgentStatusResponse
 from backend.services.agent_service import agent_service
+from backend.api.middleware.auth import require_auth
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @router.get("/agent/status", response_model=AgentStatusResponse)

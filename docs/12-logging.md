@@ -115,10 +115,11 @@ Service Emitters → Local Rotating Files → (optional) Forwarder → Central C
 
 ### 4. Clearing Strategy
 
-- On service startup, run `LogBootstrapper`:
-  - Archive or delete previous log files.
+- On service startup, clear or archive previous log files:
+  - Archive or delete previous log files (can be done via startup scripts or manually).
   - Register session metadata (`session_id`, `start_time`, `commit_sha`).
   - Emit a `system.startup` log event with summary of previous session (if archived).
+  - Note: Log clearing functionality should be implemented in startup scripts or service initialization code.
 
 ---
 
@@ -211,7 +212,7 @@ Use the info and error samples when constructing log ingestion tests or validati
    Override FastAPI exception handlers to log `ERROR` level entries with stack traces.
 
 5. **Startup Clearing**  
-   In `backend/api/main.py`, call `LogBootstrapper.clear_previous_logs()` before app start.
+   Clear or archive previous log files before app start. This can be implemented in the startup scripts (`tools/commands/start.sh` or `start.ps1`) or in the application's lifespan startup handler. Ensure a new `session_id` is generated for each service run.
 
 6. **Graceful Shutdown**  
    Emit `system.shutdown` log with request statistics and error counts.

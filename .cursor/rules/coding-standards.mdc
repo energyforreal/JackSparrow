@@ -1,0 +1,86 @@
+---
+description: Coding standards for Python and TypeScript/React
+globs:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: true
+---
+
+# Coding Standards
+
+## Python Code Style
+
+- Follow PEP 8 with modifications
+- Maximum line length: 100 characters (soft limit at 88)
+- Always use type hints for function parameters and return types
+- Use Google-style docstrings for all public functions, classes, and modules
+
+### Import Organization
+```python
+# Standard library imports
+import os
+from datetime import datetime
+
+# Third-party imports
+import numpy as np
+import fastapi
+
+# Local imports
+from .core import Agent
+from .utils import format_price
+```
+
+### Docstring Format
+```python
+def calculate_position_size(signal_strength: float, risk_level: float) -> float:
+    """Calculate position size based on signal strength and risk level.
+    
+    Args:
+        signal_strength: Signal strength from 0.0 to 1.0
+        risk_level: Risk level from 0.0 to 1.0
+        
+    Returns:
+        Position size as percentage of portfolio (0.0 to 0.1)
+        
+    Raises:
+        ValueError: If signal_strength or risk_level out of range
+    """
+```
+
+## TypeScript/React Code Style
+
+- Follow Airbnb JavaScript/TypeScript Style Guide
+- Always define types/interfaces for component props and function parameters
+- Use JSDoc for public functions
+
+### Component Structure
+```typescript
+import React from 'react';
+import { ComponentProps } from './types';
+
+/**
+ * Component description
+ */
+export function ComponentName({ prop1, prop2 }: ComponentProps) {
+  // Hooks first
+  const [state, setState] = React.useState('');
+  
+  // Effects
+  React.useEffect(() => {
+    // Effect logic
+  }, []);
+  
+  // Handlers
+  const handleClick = () => {
+    // Handler logic
+  };
+  
+  // Render
+  return (
+    <div>
+      {/* Component JSX */}
+    </div>
+  );
+}
+```

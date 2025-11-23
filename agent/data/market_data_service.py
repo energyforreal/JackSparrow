@@ -2,14 +2,20 @@
 Market data service.
 
 Fetches and caches market data from Delta Exchange.
+Supports event-driven streaming via event bus.
 """
 
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timedelta, timezone
 import asyncio
+import structlog
 
-from agent.data.delta_client import DeltaExchangeClient
+from agent.data.delta_client import DeltaExchangeClient, CircuitBreakerOpenError, DeltaExchangeError
 from agent.core.redis import get_cache, set_cache
+from agent.events.event_bus import event_bus
+from agent.events.schemas import MarketTickEvent, CandleClosedEvent, EventType
+
+logger = structlog.get_logger()
 
 
 class MarketDataService:
@@ -20,6 +26,13 @@ class MarketDataService:
         self.delta_client = DeltaExchangeClient()
         self.cache_ttl = 60  # Cache for 60 seconds
         self.ticker_cache_ttl = 10  # Shorter cache for ticker
+        self.streaming_symbols: List[str] = []
+        self.streaming_running = False
+        self._streaming_task: Optional[asyncio.Task] = None
+        self._last_ticker_cache: Dict[str, Dict[str, Any]] = {}
+        self._last_candle_cache: Dict[str, Dict[str, Any]] = {}
+        self._tick_throttle_ms = 100  # Throttle ticks to max 10 per second per symbol
+        self._last_tick_time: Dict[str, datetime] = {}
     
     async def initialize(self):
         """Initialize market data service."""
@@ -27,7 +40,282 @@ class MarketDataService:
     
     async def shutdown(self):
         """Shutdown market data service."""
-        pass
+        await self.stop_market_data_stream()
+    
+    async def start_market_data_stream(self, symbols: List[str], interval: str = "15m"):
+        """Start streaming market data for symbols.
+        
+        Args:
+            symbols: List of symbols to stream
+            interval: Candle interval to monitor
+        """
+        if self.streaming_running:
+            logger.warning("market_data_stream_already_running")
+            return
+        
+        self.streaming_symbols = symbols
+        self.streaming_running = True
+        self._streaming_task = asyncio.create_task(self._stream_loop(interval))
+        
+        logger.info(
+            "market_data_stream_started",
+            symbols=symbols,
+            interval=interval
+        )
+    
+    async def stop_market_data_stream(self):
+        """Stop streaming market data."""
+        self.streaming_running = False
+        
+        if self._streaming_task:
+            self._streaming_task.cancel()
+            try:
+                await self._streaming_task
+            except asyncio.CancelledError:
+                pass
+        
+        logger.info("market_data_stream_stopped")
+    
+    async def _stream_loop(self, interval: str):
+        """Main streaming loop."""
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+        
+        while self.streaming_running:
+            try:
+                for symbol in self.streaming_symbols:
+                    await self._check_and_emit_ticker(symbol)
+                    await self._check_and_emit_candle(symbol, interval)
+                
+                # Reset error count on successful iteration
+                consecutive_errors = 0
+                
+                # Sleep based on interval
+                sleep_seconds = self._get_interval_seconds(interval)
+                await asyncio.sleep(min(sleep_seconds, 10))  # Max 10 second polling
+                
+            except asyncio.CancelledError:
+                break
+            except CircuitBreakerOpenError as e:
+                # Circuit breaker is OPEN - service unavailable
+                consecutive_errors += 1
+                if consecutive_errors <= 3:  # Log first few times
+                    logger.warning(
+                        "market_data_stream_circuit_breaker_open",
+                        error=str(e),
+                        consecutive_errors=consecutive_errors,
+                        message="Delta Exchange circuit breaker is OPEN - pausing stream"
+                    )
+                # Sleep longer when circuit breaker is open
+                await asyncio.sleep(30)  # Wait 30 seconds before retry
+            except DeltaExchangeError as e:
+                # Delta Exchange API error
+                consecutive_errors += 1
+                logger.error(
+                    "market_data_stream_delta_exchange_error",
+                    error=str(e),
+                    consecutive_errors=consecutive_errors,
+                    exc_info=True
+                )
+                # Exponential backoff for API errors
+                sleep_time = min(5 * (2 ** min(consecutive_errors, 4)), 60)
+                await asyncio.sleep(sleep_time)
+            except Exception as e:
+                # Other unexpected errors
+                consecutive_errors += 1
+                logger.error(
+                    "market_data_stream_loop_error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    consecutive_errors=consecutive_errors,
+                    exc_info=True
+                )
+                # Stop streaming if too many consecutive errors
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error(
+                        "market_data_stream_stopped_too_many_errors",
+                        consecutive_errors=consecutive_errors,
+                        message="Stopping market data stream due to too many consecutive errors"
+                    )
+                    self.streaming_running = False
+                    break
+                await asyncio.sleep(5)
+    
+    def _get_interval_seconds(self, interval: str) -> int:
+        """Get sleep seconds for interval."""
+        interval_map = {
+            "15m": 15,
+            "1h": 60,
+            "4h": 240,
+            "1d": 86400
+        }
+        return interval_map.get(interval, 60)
+    
+    async def _check_and_emit_ticker(self, symbol: str):
+        """Check ticker and emit tick event if changed."""
+        try:
+            ticker = await self.get_ticker(symbol)
+            if not ticker:
+                return
+            
+            # Throttle ticks
+            now = datetime.now(timezone.utc)
+            last_tick_time = self._last_tick_time.get(symbol)
+            if last_tick_time:
+                elapsed_ms = (now - last_tick_time).total_seconds() * 1000
+                if elapsed_ms < self._tick_throttle_ms:
+                    return
+            
+            # Check if price changed significantly (>0.1%)
+            last_ticker = self._last_ticker_cache.get(symbol)
+            if last_ticker:
+                price_change_pct = abs((ticker["price"] - last_ticker["price"]) / last_ticker["price"])
+                if price_change_pct < 0.001:  # Less than 0.1% change
+                    return
+            
+            # Emit tick event
+            await self._on_tick(symbol, ticker)
+            
+            self._last_ticker_cache[symbol] = ticker
+            self._last_tick_time[symbol] = now
+            
+        except Exception as e:
+            logger.error(
+                "market_data_ticker_check_error",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True
+            )
+    
+    async def _check_and_emit_candle(self, symbol: str, interval: str):
+        """Check for new candle and emit candle closed event."""
+        try:
+            market_data = await self.get_market_data(symbol, interval, limit=2)
+            if not market_data or not market_data.get("candles"):
+                return
+            
+            candles = market_data["candles"]
+            if len(candles) < 2:
+                return
+            
+            latest_candle = candles[-1]
+            last_candle_key = f"{symbol}:{interval}"
+            last_candle = self._last_candle_cache.get(last_candle_key)
+            
+            # Check if this is a new candle
+            if last_candle:
+                if latest_candle.get("timestamp") == last_candle.get("timestamp"):
+                    return  # Same candle, not closed yet
+            
+            # Emit candle closed event
+            await self._on_candle_close(symbol, interval, latest_candle)
+            
+            self._last_candle_cache[last_candle_key] = latest_candle
+            
+        except Exception as e:
+            logger.error(
+                "market_data_candle_check_error",
+                symbol=symbol,
+                interval=interval,
+                error=str(e),
+                exc_info=True
+            )
+    
+    async def _on_tick(self, symbol: str, ticker_data: Dict[str, Any]):
+        """Handle tick event and emit to event bus.
+        
+        Args:
+            symbol: Trading symbol
+            ticker_data: Ticker data dictionary
+        """
+        try:
+            event = MarketTickEvent(
+                source="market_data_service",
+                payload={
+                    "symbol": symbol,
+                    "price": ticker_data.get("price", 0.0),
+                    "volume": ticker_data.get("volume", 0.0),
+                    "timestamp": datetime.fromisoformat(ticker_data.get("timestamp", datetime.now(timezone.utc).isoformat()))
+                    if isinstance(ticker_data.get("timestamp"), str)
+                    else ticker_data.get("timestamp", datetime.now(timezone.utc))
+                }
+            )
+            
+            await event_bus.publish(event)
+            
+            logger.debug(
+                "market_tick_event_emitted",
+                symbol=symbol,
+                price=ticker_data.get("price"),
+                event_id=event.event_id
+            )
+            
+        except Exception as e:
+            logger.error(
+                "market_tick_event_emit_failed",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True
+            )
+    
+    async def _on_candle_close(self, symbol: str, interval: str, candle_data: Dict[str, Any]):
+        """Handle candle close event and emit to event bus.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Candle interval
+            candle_data: Candle data dictionary
+        """
+        try:
+            # Parse timestamp - ensure UTC timezone
+            timestamp = candle_data.get("timestamp")
+            if isinstance(timestamp, str):
+                # Parse ISO format string
+                timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                # Ensure UTC timezone
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                else:
+                    timestamp = timestamp.astimezone(timezone.utc)
+            elif isinstance(timestamp, (int, float)):
+                # Parse Unix timestamp - fromtimestamp uses local timezone, so convert to UTC
+                timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            else:
+                # Use current UTC time
+                timestamp = datetime.now(timezone.utc)
+            
+            event = CandleClosedEvent(
+                source="market_data_service",
+                payload={
+                    "symbol": symbol,
+                    "interval": interval,
+                    "open": float(candle_data.get("open", 0)),
+                    "high": float(candle_data.get("high", 0)),
+                    "low": float(candle_data.get("low", 0)),
+                    "close": float(candle_data.get("close", 0)),
+                    "volume": float(candle_data.get("volume", 0)),
+                    "timestamp": timestamp
+                }
+            )
+            
+            await event_bus.publish(event)
+            
+            logger.info(
+                "candle_closed_event_emitted",
+                symbol=symbol,
+                interval=interval,
+                close=candle_data.get("close"),
+                event_id=event.event_id
+            )
+            
+        except Exception as e:
+            logger.error(
+                "candle_closed_event_emit_failed",
+                symbol=symbol,
+                interval=interval,
+                error=str(e),
+                exc_info=True
+            )
     
     async def get_market_data(
         self,
@@ -85,7 +373,7 @@ class MarketDataService:
                 "candles": formatted_candles,
                 "current_price": current_price,
                 "data_age_seconds": 0,  # Fresh data
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
             # Cache result
@@ -93,8 +381,38 @@ class MarketDataService:
             
             return market_data
             
+        except CircuitBreakerOpenError as e:
+            # Circuit breaker is OPEN - service unavailable, return None gracefully
+            logger.warning(
+                "market_data_service_circuit_breaker_open",
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                message="Delta Exchange circuit breaker is OPEN - service unavailable"
+            )
+            return None
+        except DeltaExchangeError as e:
+            # Delta Exchange API error - log and return None
+            logger.error(
+                "market_data_service_delta_exchange_error",
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                error=str(e),
+                exc_info=True
+            )
+            return None
         except Exception as e:
-            print(f"Error fetching market data: {e}")
+            # Other unexpected errors
+            logger.error(
+                "market_data_service_fetch_failed",
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True
+            )
             return None
     
     async def get_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -121,7 +439,7 @@ class MarketDataService:
                 "low": float(ticker_data.get("low", 0)),
                 "volume": float(ticker_data.get("volume", 0)),
                 "change_24h": float(ticker_data.get("change_24h", 0)),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
             # Cache result
@@ -129,8 +447,32 @@ class MarketDataService:
             
             return ticker
             
+        except CircuitBreakerOpenError as e:
+            # Circuit breaker is OPEN - service unavailable, return None gracefully
+            logger.warning(
+                "market_data_service_ticker_circuit_breaker_open",
+                symbol=symbol,
+                message="Delta Exchange circuit breaker is OPEN - service unavailable"
+            )
+            return None
+        except DeltaExchangeError as e:
+            # Delta Exchange API error - log and return None
+            logger.error(
+                "market_data_service_ticker_delta_exchange_error",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True
+            )
+            return None
         except Exception as e:
-            print(f"Error fetching ticker: {e}")
+            # Other unexpected errors
+            logger.error(
+                "market_data_service_ticker_failed",
+                symbol=symbol,
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True
+            )
             return None
     
     async def get_orderbook(self, symbol: str, depth: int = 20) -> Optional[Dict[str, Any]]:
@@ -147,11 +489,17 @@ class MarketDataService:
                 "symbol": symbol,
                 "bids": orderbook_data.get("buy", []),
                 "asks": orderbook_data.get("sell", []),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
-            print(f"Error fetching orderbook: {e}")
+            logger.error(
+                "market_data_service_orderbook_failed",
+                symbol=symbol,
+                depth=depth,
+                error=str(e),
+                exc_info=True
+            )
             return None
     
     async def get_health_status(self) -> Dict[str, Any]:

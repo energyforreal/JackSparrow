@@ -5,12 +5,12 @@ Provides methods for interacting with the agent service via Redis queues.
 """
 
 from typing import Optional, Dict, Any, List
-import json
 import uuid
 import asyncio
 import time
+from datetime import datetime
 
-from backend.core.redis import enqueue_command, get_response, cache_response
+from backend.core.redis import enqueue_command, get_response
 from backend.core.config import settings
 
 
@@ -20,7 +20,8 @@ class AgentService:
     def __init__(self):
         """Initialize agent service."""
         self.command_queue = settings.agent_command_queue
-        self.response_queue = settings.agent_response_queue
+        # Response mechanism uses Redis key-value store (response:{request_id})
+        # Backend polls using get_response() which reads from key-value, not list queue
     
     async def _send_command(
         self,
@@ -45,16 +46,7 @@ class AgentService:
         if not success:
             return None
         
-        # Wait for response (check cache first)
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            response = await get_response(request_id, timeout=1)
-            if response:
-                return response
-            
-            await asyncio.sleep(0.5)
-        
-        return None
+        return await self._wait_for_response(request_id, timeout)
     
     async def get_prediction(
         self,
@@ -73,6 +65,17 @@ class AgentService:
         )
         
         return response
+
+    async def _wait_for_response(self, request_id: str, timeout: int) -> Optional[Dict[str, Any]]:
+        """Poll Redis for the agent response until timeout."""
+        deadline = time.time() + timeout
+        poll_interval = 0.2
+        while time.time() < deadline:
+            response = await get_response(request_id)
+            if response:
+                return response
+            await asyncio.sleep(poll_interval)
+        return None
     
     async def execute_trade(
         self,
@@ -111,15 +114,30 @@ class AgentService:
             timeout=5
         )
         
-        # Return default status if agent is not responding
+        now = datetime.utcnow()
+        
         if not response:
             return {
-                "available": False,
                 "state": "UNKNOWN",
+                "last_update": now,
+                "active_symbols": [],
+                "model_count": 0,
+                "health_status": "unavailable",
                 "message": "Agent service unavailable"
             }
         
-        return response
+        data = response.get("data", {})
+        health = data.get("health", {})
+        model_registry = health.get("model_registry", {})
+        
+        return {
+            "state": data.get("state", "UNKNOWN"),
+            "last_update": now,
+            "active_symbols": data.get("active_symbols", []),
+            "model_count": model_registry.get("total_models", 0),
+            "health_status": health.get("overall_status", "unknown"),
+            "message": data.get("message")
+        }
     
     async def control_agent(
         self,

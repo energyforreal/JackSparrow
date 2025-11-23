@@ -651,7 +651,7 @@ logger.info(
 
 ### Startup Clearing
 
-- Invoke the service-specific bootstrapper to archive/delete previous logs before every start (`LogBootstrapper.clear_previous_logs()`).
+- Archive or delete previous logs before every start (implemented in startup scripts or service initialization code).
 - Emit a `system.startup` event containing the new `session_id`, commit SHA, and environment.
 - Verify automation (e.g., `make start`, deployment pipelines) runs bootstrap scripts prior to launching services.
 
@@ -736,10 +736,12 @@ The snippet demonstrates secret-free configuration, dependency-injected authenti
 
 The JackSparrow command toolkit lives under `tools/commands/` with Makefile aliases for macOS/Linux. Use the following guidance when operating the project locally or in shared environments:
 
-- **`start`** (`./tools/commands/start.sh`, `start.ps1`, or `make start`)
+- **`start`** (`./tools/commands/start.sh`, `start.ps1`, `make start`, or `python tools/commands/start_parallel.py`)
   - Launch before every development session
+  - Uses parallel process manager to start all services simultaneously
   - Confirms backend, agent, and frontend are reachable on `localhost`
-  - Ensure `logs/start.log` is generated without errors
+  - Streams real-time color-coded logs to console and writes to `logs/{service}.log`
+  - Automatically sets up virtual environments and installs dependencies if needed
 - **`restart`** (`./tools/commands/restart.sh`, `restart.ps1`, or `make restart`)
   - Trigger after changing environment variables, dependencies, or configuration files
   - Performs a clean shutdown and relaunch; review `logs/restart.log` afterwards

@@ -12,5 +12,5 @@ class RandomForestNode(XGBoostNode):
     def __init__(self, model_path: Path):
         """Initialize Random Forest node."""
         super().__init__(model_path)
-        self.model_type = "random_forest"
+        self._model_type = "random_forest"
 

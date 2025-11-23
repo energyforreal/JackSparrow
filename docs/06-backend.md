@@ -755,7 +755,7 @@ Emit entries in this format so observability tooling can pivot by `correlation_i
 - Structured logging using structlog
 - Error tracking with correlation IDs
 - Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL
-- Startup log clearing via `LogBootstrapper` (see [Logging Documentation](12-logging.md))
+- Startup log clearing (implemented in startup scripts or service initialization) (see [Logging Documentation](12-logging.md))
 - Consistent log schema fields (`service`, `component`, `session_id`, `correlation_id`)
 
 **Structured Logging Example**:
@@ -796,7 +796,7 @@ logger.info(
 
 The backend adheres to the centralized logging blueprint described in [Logging Documentation](12-logging.md):
 
-- **Startup clearing**: Invoke `LogBootstrapper.clear_previous_logs()` during application startup to archive or delete stale logs and generate a new `session_id`.
+- **Startup clearing**: Clear or archive previous logs during application startup (implemented in startup scripts or lifespan handler) to archive or delete stale logs and generate a new `session_id`.
 - **Structured JSON schema**: Emit logs with `service="backend"`, `component`, `environment`, `session_id`, and `correlation_id` fields to maintain cross-service parity.
 - **Exception capture**: Register FastAPI exception handlers that record `ERROR` entries (with stack traces redacted in production when `LOG_INCLUDE_STACKTRACE=false`).
 - **Forwarding support**: When `LOG_FORWARDING_ENABLED=true`, stream logs to the configured collector while retaining STDOUT/file writes.
@@ -836,6 +836,10 @@ QDRANT_URL=http://localhost:6333
 JWT_SECRET_KEY=your_secret_key
 API_KEY=your_api_key
 
+# Telegram Alerts (optional)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+
 # Logging
 LOG_LEVEL=INFO
 LOG_DIR=./logs/backend
@@ -846,6 +850,23 @@ LOG_FORWARDING_ENABLED=false
 LOG_FORWARDING_ENDPOINT=
 LOG_INCLUDE_STACKTRACE=false
 ```
+
+When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are populated, the backend automatically publishes trade notifications to the configured chat. Leaving either value blank disables the integration without requiring code changes.
+
+### Telegram Notifications (Optional)
+
+- Implemented via `backend.notifications.telegram.TelegramNotifier`.
+- Enabled only when both credentials are present; otherwise the notifier short-circuits with an informational log entry.
+- Trade executions (`POST /api/v1/trade/execute`) schedule non-blocking notifications so API latency is unaffected.
+- Messages include symbol, side, size, order type, execution ID (when available), and realized PnL when supplied by the agent.
+- Additional event types (risk alerts, health changes) can reuse the same notifier by injecting it into the relevant service.
+
+Deployment checklist for Telegram alerts:
+
+1. Create a bot with [@BotFather](https://core.telegram.org/bots#botfather) and record the token.
+2. Obtain the chat ID (e.g., via @userinfobot or a simple script using `getUpdates`).
+3. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the root or backend `.env`.
+4. Restart the backend so the new configuration is applied.
 
 ---
 

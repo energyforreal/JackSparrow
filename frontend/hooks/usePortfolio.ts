@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { apiClient } from '@/services/api'
+import { Portfolio } from '@/types'
 
 export function usePortfolio() {
-  const [portfolio, setPortfolio] = useState<any>(null)
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 

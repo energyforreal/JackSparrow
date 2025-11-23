@@ -1,0 +1,27 @@
+---
+description: Naming conventions for Python and TypeScript/React
+globs:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: true
+---
+
+# Naming Conventions
+
+## Python Naming
+
+- **Files**: `snake_case.py` (e.g., `agent_service.py`, `risk_manager.py`)
+- **Classes**: `PascalCase` (e.g., `AgentService`, `RiskManager`)
+- **Functions**: `snake_case()` (e.g., `calculate_position_size()`, `get_portfolio_status()`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_POSITION_SIZE`, `DEFAULT_RISK_LEVEL`)
+- **Private**: Prefix with underscore (e.g., `_internal_method()`, `_private_variable`)
+
+## TypeScript/React Naming
+
+- **Files**: `PascalCase.tsx` for components, `camelCase.ts` for utilities
+- **Components**: `PascalCase` (e.g., `AgentStatus`, `PortfolioSummary`)
+- **Hooks**: `useCamelCase` (e.g., `useWebSocket`, `useAgent`)
+- **Functions**: `camelCase` (e.g., `handleClick`, `formatPrice`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `API_BASE_URL`, `MAX_RETRIES`)
+- **Types/Interfaces**: `PascalCase` (e.g., `UserData`, `ComponentProps`)

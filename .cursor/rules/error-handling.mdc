@@ -1,0 +1,42 @@
+---
+description: Error handling patterns and standards
+globs:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: true
+---
+
+# Error Handling
+
+## Python Error Handling
+
+```python
+try:
+    result = risky_operation()
+except SpecificError as e:
+    logger.error(f"Operation failed: {e}", exc_info=True)
+    raise CustomError("User-friendly message") from e
+except Exception as e:
+    logger.error(f"Unexpected error: {e}", exc_info=True)
+    raise
+```
+
+## TypeScript Error Handling
+
+```typescript
+try {
+  const result = await riskyOperation();
+  return result;
+} catch (error) {
+  console.error('Operation failed:', error);
+  throw new CustomError('User-friendly message', { cause: error });
+}
+```
+
+## Guidelines
+
+- Use specific error types
+- Provide helpful error messages
+- Log errors with context
+- Don't expose internal details

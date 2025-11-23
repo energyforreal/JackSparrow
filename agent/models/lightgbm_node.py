@@ -13,5 +13,5 @@ class LightGBMNode(XGBoostNode):
     def __init__(self, model_path: Path):
         """Initialize LightGBM node."""
         super().__init__(model_path)
-        self.model_type = "lightgbm"
+        self._model_type = "lightgbm"
 

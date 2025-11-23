@@ -1,9 +1,14 @@
+export interface WebSocketMessage {
+  type: string
+  data: unknown
+}
+
 export class WebSocketClient {
   private ws: WebSocket | null = null
   private url: string
   private reconnectDelay: number = 1000
   private reconnectTimeout: NodeJS.Timeout | null = null
-  private listeners: Map<string, Set<(data: any) => void>> = new Map()
+  private listeners: Map<string, Set<(data: unknown) => void>> = new Map()
 
   constructor(url: string) {
     this.url = url
@@ -58,21 +63,21 @@ export class WebSocketClient {
     }
   }
 
-  on(event: string, callback: (data: any) => void) {
+  on(event: string, callback: (data: unknown) => void) {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set())
     }
     this.listeners.get(event)!.add(callback)
   }
 
-  off(event: string, callback: (data: any) => void) {
+  off(event: string, callback: (data: unknown) => void) {
     const listeners = this.listeners.get(event)
     if (listeners) {
       listeners.delete(callback)
     }
   }
 
-  send(message: any) {
+  send(message: WebSocketMessage | Record<string, unknown>) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message))
     }

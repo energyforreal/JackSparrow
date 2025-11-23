@@ -4,19 +4,29 @@ Configuration management for agent service.
 Handles environment variable loading, validation, and default values.
 """
 
-import os
+from pathlib import Path
 from typing import List, Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+
+ROOT_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
     """Agent settings loaded from environment variables."""
     
+    model_config = SettingsConfigDict(
+        env_file=str(ROOT_ENV_PATH),
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="allow",
+        protected_namespaces=("settings_",),
+    )
+    
     # Database
     database_url: str = Field(
         ...,
-        env="DATABASE_URL",
+        env=("DATABASE_URL", "database_url"),
         description="PostgreSQL database connection URL"
     )
     
@@ -30,17 +40,17 @@ class Settings(BaseSettings):
     # Delta Exchange API
     delta_exchange_api_key: str = Field(
         ...,
-        env="DELTA_EXCHANGE_API_KEY",
+        env=("DELTA_EXCHANGE_API_KEY", "DELTA_API_KEY", "delta_api_key"),
         description="Delta Exchange API key"
     )
     delta_exchange_api_secret: str = Field(
         ...,
-        env="DELTA_EXCHANGE_API_SECRET",
+        env=("DELTA_EXCHANGE_API_SECRET", "DELTA_API_SECRET", "delta_api_secret"),
         description="Delta Exchange API secret"
     )
     delta_exchange_base_url: str = Field(
         default="https://api.delta.exchange",
-        env="DELTA_EXCHANGE_BASE_URL",
+        env=("DELTA_EXCHANGE_BASE_URL", "DELTA_API_URL", "delta_api_url"),
         description="Delta Exchange API base URL"
     )
     
@@ -93,6 +103,13 @@ class Settings(BaseSettings):
         default="15m",
         env="AGENT_INTERVAL",
         description="Default analysis interval"
+    )
+    
+    # Trading Mode
+    paper_trading_mode: bool = Field(
+        default=True,
+        env="PAPER_TRADING_MODE",
+        description="Enable paper trading mode (default: True). Set to False for live trading."
     )
     
     # Risk Management
@@ -153,12 +170,36 @@ class Settings(BaseSettings):
         description="Redis queue for agent responses"
     )
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+try:
+    settings = Settings()
+except Exception as e:
+    # Configuration errors must be printed to stderr since logger may not be initialized
+    # This is acceptable for startup errors that prevent the application from starting
+    import sys
+    error_msg = f"""
+{'='*70}
+ERROR: Failed to load agent configuration
+{'='*70}
 
+Error: {str(e)}
 
-# Global settings instance
-settings = Settings()
+Required environment variables:
+  - DATABASE_URL (PostgreSQL connection URL)
+  - DELTA_EXCHANGE_API_KEY (Delta Exchange API key)
+  - DELTA_EXCHANGE_API_SECRET (Delta Exchange API secret)
 
+Optional environment variables:
+  - MODEL_PATH (Path to specific model file)
+  - MODEL_DIR (Directory for model discovery, default: ./agent/model_storage)
+  - AGENT_SYMBOL (Trading symbol, default: BTCUSD)
+  - AGENT_INTERVAL (Analysis interval, default: 15m)
+
+Please:
+  1. Copy .env.example to .env in the project root
+  2. Fill in all required values in the root .env file
+  3. Ensure PostgreSQL and Redis are running
+  4. Run 'python scripts/setup_db.py' to initialize database
+{'='*70}
+"""
+    print(error_msg, file=sys.stderr)
+    sys.exit(1)

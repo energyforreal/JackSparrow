@@ -218,45 +218,75 @@ pip install -r requirements.txt
 
 ### 5.3 Configure Environment Variables
 
-Create `backend/.env`:
+**Option 1: Use .env.example template (recommended)**
+```bash
+# Copy the example file
+cp backend/.env.example backend/.env
+
+# Edit backend/.env with your actual values
+# Required variables:
+#   - DATABASE_URL
+#   - DELTA_EXCHANGE_API_KEY
+#   - DELTA_EXCHANGE_API_SECRET
+#   - JWT_SECRET_KEY
+#   - API_KEY
+```
+
+**Option 2: Create manually**
+Create `backend/.env` with the following required variables:
 
 ```bash
-# Database
+# Database (REQUIRED)
 DATABASE_URL=postgresql://trading_agent_user:your_password@localhost:5432/trading_agent
 
-# Redis
+# Redis (default: redis://localhost:6379)
 REDIS_URL=redis://localhost:6379
 
-# Delta Exchange (Paper Trading)
+# Delta Exchange (REQUIRED - Paper Trading)
 DELTA_EXCHANGE_API_KEY=your_api_key
 DELTA_EXCHANGE_API_SECRET=your_api_secret
 DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
 
-# Agent Communication
+# Security (REQUIRED)
+JWT_SECRET_KEY=your_secret_key_here_minimum_32_characters
+API_KEY=your_api_key_here_minimum_32_characters
+
+# Agent Communication (defaults provided)
 AGENT_COMMAND_QUEUE=agent_commands
 AGENT_RESPONSE_QUEUE=agent_responses
 
-# Feature Server
+# Feature Server (default: http://localhost:8001)
 FEATURE_SERVER_URL=http://localhost:8001
 
-# Vector Database
-QDRANT_URL=http://localhost:6333
+# Vector Database (Optional)
+QDRANT_URL=
 QDRANT_API_KEY=
 
-# Security
-JWT_SECRET_KEY=your_secret_key_here_change_in_production
-API_KEY=your_api_key_here_change_in_production
-
-# Logging
+# Logging (default: INFO)
 LOG_LEVEL=INFO
 ```
 
+**Note**: If `.env.example` files don't exist, refer to `backend/core/config.py` and `agent/core/config.py` for all available configuration options and their descriptions.
+
 ### 5.4 Initialize Database
 
+**Important**: Database initialization must be completed before starting services.
+
 ```bash
-cd ../scripts
-python setup_db.py
+# From project root directory
+python scripts/setup_db.py
 ```
+
+This script will:
+- Enable TimescaleDB extension
+- Create all required tables (trades, positions, decisions, performance_metrics, model_performance)
+- Convert time-series tables to hypertables for optimal performance
+- Create necessary indexes
+
+**Troubleshooting**:
+- Ensure PostgreSQL is running: `pg_isready` or `psql -U postgres -c "SELECT 1"`
+- Verify TimescaleDB is installed: `psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"`
+- Check DATABASE_URL in `backend/.env` is correct
 
 ### 5.5 Verify Backend Setup
 
@@ -306,22 +336,35 @@ mkdir -p agent/model_storage/transformer
 
 ### 6.4 Configure Environment Variables
 
-Create `agent/.env`:
+**Option 1: Use .env.example template (recommended)**
+```bash
+# Copy the example file
+cp agent/.env.example agent/.env
+
+# Edit agent/.env with your actual values
+# Required variables:
+#   - DATABASE_URL
+#   - DELTA_EXCHANGE_API_KEY
+#   - DELTA_EXCHANGE_API_SECRET
+```
+
+**Option 2: Create manually**
+Create `agent/.env` with the following required variables:
 
 ```bash
-# Database
+# Database (REQUIRED)
 DATABASE_URL=postgresql://trading_agent_user:your_password@localhost:5432/trading_agent
 
-# Redis
+# Redis (default: redis://localhost:6379)
 REDIS_URL=redis://localhost:6379
 
-# Delta Exchange (Paper Trading)
+# Delta Exchange (REQUIRED - Paper Trading)
 DELTA_EXCHANGE_API_KEY=your_api_key
 DELTA_EXCHANGE_API_SECRET=your_api_secret
 DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
 
-# Vector Database
-QDRANT_URL=http://localhost:6333
+# Vector Database (Optional)
+QDRANT_URL=
 QDRANT_API_KEY=
 
 # Model Configuration
@@ -333,9 +376,22 @@ MODEL_DIR=./agent/model_storage
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 
-# Logging
+# Agent Configuration (defaults provided)
+AGENT_START_MODE=MONITORING
+AGENT_SYMBOL=BTCUSD
+AGENT_INTERVAL=15m
+
+# Risk Management (defaults provided)
+MAX_POSITION_SIZE=0.1
+MAX_PORTFOLIO_HEAT=0.3
+STOP_LOSS_PERCENTAGE=0.02
+TAKE_PROFIT_PERCENTAGE=0.05
+
+# Logging (default: INFO)
 LOG_LEVEL=INFO
 ```
+
+**Note**: If `.env.example` files don't exist, refer to `agent/core/config.py` for all available configuration options and their descriptions.
 
 ### 6.5 Verify Agent Setup
 
@@ -437,13 +493,26 @@ After all three terminals report successful startup:
 The project root contains a `Makefile` with convenience commands that orchestrate the full JackSparrow stack. Run these commands from the repository root (`JackSparrow/`).
 
 ### `make start`
-- Launches backend (`uvicorn`), agent (`python -m agent.core.intelligent_agent`), and frontend (`npm run dev`)
-- Verifies required services (PostgreSQL, Redis, optional Qdrant) before starting
-- Streams combined logs to `logs/start.log`
+- Launches backend (`uvicorn`), agent (`python -m agent.core.intelligent_agent`), and frontend (`npm run dev`) **simultaneously** using parallel process manager
+- Automatically sets up virtual environments and installs dependencies if needed
+- Streams real-time color-coded logs to console with service prefixes
+- Writes individual service logs to `logs/{service}.log`
+- Creates PID files for process management
 
 ```bash
 make start
+# or directly:
+python tools/commands/start_parallel.py
 ```
+
+**Parallel Startup Benefits:**
+- Faster initialization (all services start at once)
+- Real-time log aggregation with service identification
+- Cross-platform compatibility (Windows, macOS, Linux)
+- Automatic dependency management
+- Graceful shutdown handling (Ctrl+C stops all services)
+
+**Note**: Services handle their own dependency checks (e.g., backend waits for Redis/PostgreSQL). The parallel startup ensures faster initialization while maintaining service reliability.
 
 ### `make restart`
 - Gracefully stops any running services (`make stop`)

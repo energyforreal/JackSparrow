@@ -1,0 +1,64 @@
+# syntax=docker/dockerfile:1.7
+# Development Dockerfile for Backend
+# Source code is mounted as volume, only dependencies are installed
+
+# Stage 1: Dependencies builder
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python dependencies
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --user --no-warn-script-location -r /tmp/requirements.txt
+
+# Stage 2: Runtime (Development)
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/home/backend/.local/bin:${PATH}" \
+    BACKEND_PORT=8000
+
+WORKDIR /app
+
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r backend && useradd -r -g backend backend && \
+    mkdir -p /app /logs && \
+    chown -R backend:backend /app /logs
+
+# Copy Python dependencies from builder
+COPY --from=builder --chown=backend:backend /root/.local /home/backend/.local
+
+# Note: Source code will be mounted as volume in docker-compose.dev.yml
+# No COPY of source code here - this enables hot-reload
+
+# Switch to non-root user
+USER backend
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:${BACKEND_PORT}/api/v1/health || exit 1
+
+# Development command with --reload flag (overridden in docker-compose.dev.yml)
+CMD ["sh", "-c", "uvicorn backend.api.main:app --host 0.0.0.0 --port ${BACKEND_PORT} --reload"]
+

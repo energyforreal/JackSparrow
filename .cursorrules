@@ -1,0 +1,492 @@
+# JackSparrow Trading Agent - Cursor AI Project Rules
+
+This file defines the coding standards, conventions, and best practices for the JackSparrow project. 
+For complete documentation, see `docs/14-project-rules.md`.
+
+## Project Overview
+
+**Repository**: https://github.com/energyforreal/JackSparrow
+**Project Name**: JackSparrow Trading Agent
+
+## Coding Standards
+
+### Python Code Style
+
+- **Style Guide**: Follow PEP 8 with modifications
+- **Line Length**: Maximum 100 characters (soft limit at 88)
+- **Type Hints**: Always use type hints for function parameters and return types
+- **Docstrings**: Use Google-style docstrings for all public functions, classes, and modules
+
+**Import Organization**:
+```python
+# Standard library imports
+import os
+import sys
+from datetime import datetime
+
+# Third-party imports
+import fastapi
+import numpy as np
+
+# Local imports
+from .core import Agent
+from .utils import format_price
+```
+
+**Docstring Format**:
+```python
+def calculate_position_size(signal_strength: float, risk_level: float) -> float:
+    """Calculate position size based on signal strength and risk level.
+    
+    Args:
+        signal_strength: Signal strength from 0.0 to 1.0
+        risk_level: Risk level from 0.0 to 1.0
+        
+    Returns:
+        Position size as percentage of portfolio (0.0 to 0.1)
+        
+    Raises:
+        ValueError: If signal_strength or risk_level out of range
+    """
+```
+
+### TypeScript/React Code Style
+
+- **Style Guide**: Follow Airbnb JavaScript/TypeScript Style Guide
+- **Type Definitions**: Always define types/interfaces for component props and function parameters
+- **Comments**: Use JSDoc for public functions
+
+**Component Structure**:
+```typescript
+import React from 'react';
+import { ComponentProps } from './types';
+
+/**
+ * Component description
+ */
+export function ComponentName({ prop1, prop2 }: ComponentProps) {
+  // Hooks first
+  const [state, setState] = React.useState('');
+  
+  // Effects
+  React.useEffect(() => {
+    // Effect logic
+  }, []);
+  
+  // Handlers
+  const handleClick = () => {
+    // Handler logic
+  };
+  
+  // Render
+  return (
+    <div>
+      {/* Component JSX */}
+    </div>
+  );
+}
+```
+
+## Naming Conventions
+
+### Python Naming
+
+- **Files**: `snake_case.py` (e.g., `agent_service.py`, `risk_manager.py`)
+- **Classes**: `PascalCase` (e.g., `AgentService`, `RiskManager`)
+- **Functions**: `snake_case()` (e.g., `calculate_position_size()`, `get_portfolio_status()`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_POSITION_SIZE`, `DEFAULT_RISK_LEVEL`)
+- **Private**: Prefix with underscore (e.g., `_internal_method()`, `_private_variable`)
+
+### TypeScript/React Naming
+
+- **Files**: `PascalCase.tsx` for components, `camelCase.ts` for utilities
+- **Components**: `PascalCase` (e.g., `AgentStatus`, `PortfolioSummary`)
+- **Hooks**: `useCamelCase` (e.g., `useWebSocket`, `useAgent`)
+- **Functions**: `camelCase` (e.g., `handleClick`, `formatPrice`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `API_BASE_URL`, `MAX_RETRIES`)
+- **Types/Interfaces**: `PascalCase` (e.g., `UserData`, `ComponentProps`)
+
+## Git Workflow
+
+### Branch Strategy
+
+- **Main Branches**: `main` (production), `develop` (integration)
+- **Supporting Branches**: 
+  - `feature/*` - New features
+  - `bugfix/*` - Bug fixes
+  - `hotfix/*` - Critical production fixes
+  - `release/*` - Release preparation
+
+### Commit Messages
+
+Follow Conventional Commits specification:
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+
+**Examples**:
+- `feat(agent): add 6-step reasoning chain`
+- `fix(backend): resolve WebSocket reconnection issue`
+
+### Pull Request Process
+
+1. Create feature branch from `develop`
+2. Make changes with tests and documentation
+3. Commit using conventional commit format
+4. Push branch and create PR targeting `develop`
+5. Address review comments
+6. Squash and merge after approval
+
+## Documentation Standards
+
+### Python Documentation
+
+- All public functions, classes, and modules require Google-style docstrings
+- Include Args, Returns, and Raises sections where applicable
+- Reference related documentation when needed
+
+### TypeScript Documentation
+
+- Use JSDoc comments for public functions
+- Document component props with TypeScript interfaces
+- Include usage examples for complex components
+
+## Testing Requirements
+
+### Test Coverage
+
+- **Minimum Coverage**: 80% code coverage
+- **Critical Paths**: 100% coverage required for:
+  - Risk management logic
+  - Position sizing calculations
+  - Trade execution
+  - Error handling
+
+### Test Organization
+
+- **Unit Tests**: One test file per source file (`test_*.py` or `*.test.tsx`)
+- Mirror source directory structure in test directories
+- **Integration Tests**: Test module interactions, API endpoints, database operations
+- **E2E Tests**: Test complete user flows and critical paths
+
+### Test Writing
+
+**Python (pytest)**:
+```python
+import pytest
+from agent.risk import RiskManager
+
+class TestRiskManager:
+    def test_calculate_position_size_normal(self):
+        """Test normal position size calculation."""
+        manager = RiskManager()
+        size = manager.calculate_position_size(signal_strength=0.8, risk_level=0.3)
+        assert 0.0 <= size <= 0.1
+        assert size == pytest.approx(0.064, rel=0.01)
+```
+
+**TypeScript (Jest/React Testing Library)**:
+```typescript
+import { render, screen } from '@testing-library/react';
+import { AgentStatus } from './AgentStatus';
+
+describe('AgentStatus', () => {
+  it('displays monitoring state correctly', () => {
+    render(<AgentStatus state="MONITORING" lastUpdate={new Date()} />);
+    expect(screen.getByText('Monitoring Markets')).toBeInTheDocument();
+  });
+});
+```
+
+## Error Handling
+
+### Python Error Handling
+
+```python
+try:
+    result = risky_operation()
+except SpecificError as e:
+    logger.error(f"Operation failed: {e}", exc_info=True)
+    raise CustomError("User-friendly message") from e
+except Exception as e:
+    logger.error(f"Unexpected error: {e}", exc_info=True)
+    raise
+```
+
+### TypeScript Error Handling
+
+```typescript
+try {
+  const result = await riskyOperation();
+  return result;
+} catch (error) {
+  console.error('Operation failed:', error);
+  throw new CustomError('User-friendly message', { cause: error });
+}
+```
+
+**Guidelines**:
+- Use specific error types
+- Provide helpful error messages
+- Log errors with context
+- Don't expose internal details
+
+## Logging Standards
+
+### Structured Logging
+
+Use `structlog` for Python structured logging:
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+
+logger.info(
+    "trade_executed",
+    trade_id="trade_123",
+    symbol="BTCUSD",
+    side="buy",
+    quantity=0.1,
+    price=50000.0
+)
+```
+
+### Required Context Fields
+
+Always include:
+- `service` - Service name
+- `component` - Component name
+- `session_id` - Session identifier
+- `environment` - Environment (dev, staging, prod)
+- Correlation IDs, User IDs, Request IDs when applicable
+- Timestamps and relevant data
+
+### Log Levels
+
+- **DEBUG**: Detailed information for debugging
+- **INFO**: General informational messages
+- **WARNING**: Warning messages for potential issues
+- **ERROR**: Error messages for failures
+- **CRITICAL**: Critical errors requiring immediate attention
+
+### Startup Logging
+
+- Clear or archive previous log files before every start (implemented in startup scripts or service initialization)
+- Emit `system.startup` event with `session_id`, commit SHA, and environment
+- Ensure automation runs bootstrap scripts prior to launching services
+
+## Security Standards
+
+### Security Checklist
+
+- [ ] No hardcoded secrets
+- [ ] Environment variables for configuration
+- [ ] Input validation on all endpoints
+- [ ] SQL injection prevention
+- [ ] XSS prevention
+- [ ] CSRF protection
+- [ ] Authentication required for protected endpoints
+- [ ] Rate limiting implemented
+- [ ] Error messages don't expose internals
+
+### Secure API Handler Pattern
+
+```python
+@router.post("/trade/execute", response_model=TradeResponse)
+async def execute_trade(request: TradeRequest, user: User = Depends(get_current_user)):
+    validate_trade_request(request)
+    await rate_limiter.throttle(user.id)
+
+    try:
+        result = await agent_service.execute_trade(request, user.id)
+    except RiskViolation as exc:
+        logger.warning(
+            "trade_rejected",
+            user_id=user.id,
+            symbol=request.symbol,
+            reason=str(exc),
+            correlation_id=request.correlation_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Trade rejected by risk manager.",
+        ) from exc
+    return result
+```
+
+## Performance Standards
+
+### Performance Targets
+
+- **API Response Time**: p95 < 200ms
+- **WebSocket Latency**: < 50ms
+- **Database Queries**: < 100ms
+- **Feature Computation**: < 500ms
+- **Model Inference**: < 1000ms
+
+### Optimization Guidelines
+
+- Use caching appropriately
+- Optimize database queries
+- Minimize network calls
+- Use async/await for I/O operations
+- Profile before optimizing
+
+## File Organization
+
+### Directory Structure
+
+Follow the structure defined in `docs/08-file-structure.md`
+
+**Key Principles**:
+- One module per directory
+- Clear separation of concerns
+- Consistent naming
+- Logical grouping
+
+### Import Organization
+
+**Python**:
+```python
+# Standard library
+import os
+from datetime import datetime
+
+# Third-party
+import numpy as np
+import fastapi
+
+# Local
+from .core import Agent
+from .utils import format_price
+```
+
+**TypeScript**:
+```typescript
+// React
+import React, { useState, useEffect } from 'react';
+
+// Third-party
+import { format } from 'date-fns';
+
+// Local
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { apiClient } from '@/services/api';
+```
+
+## ML Model Management Standards
+
+### Model File Organization
+
+- **Production models**: Root `models/` directory (versioned, source-controlled)
+- **Uploaded models**: `agent/model_storage/` directory (discovered automatically)
+- User-uploaded models: `agent/model_storage/custom/`
+- Model-specific directories: `agent/model_storage/xgboost/`, `agent/model_storage/lstm/`, etc.
+
+### Environment Variables
+
+- `MODEL_PATH`: Points to specific production model file (e.g., `models/xgboost_BTCUSD_15m.pkl`)
+- `MODEL_DIR`: Points to directory for model discovery (e.g., `./agent/model_storage`)
+
+### Model Implementation
+
+All models must implement `MCPModelNode` interface:
+- Predictions normalized to -1.0 to +1.0 range
+- Human-readable reasoning/explanations
+- Confidence scores
+- Feature importance tracking
+
+### Model Metadata
+
+**Required Fields**:
+- `model_name`: Unique identifier
+- `model_type`: Model type (xgboost, lstm, transformer, etc.)
+- `version`: Semantic version (MAJOR.MINOR.PATCH)
+- `features_required`: List of required feature names
+- `description`: Model description
+
+### Model Versioning
+
+- Use semantic versioning (MAJOR.MINOR.PATCH)
+- Keep old versions for rollback capability
+- Document version changes in metadata
+- Test new versions before activation
+
+## Operational Commands
+
+The project provides command scripts in `tools/commands/` with Makefile aliases:
+
+- **`start`**: Launch all services (backend, agent, frontend)
+  - Scripts: `tools/commands/start.sh`, `tools/commands/start.ps1`
+  - Makefile: `make start`
+  - Use before every development session
+
+- **`restart`**: Clean restart of all services
+  - Scripts: `tools/commands/restart.sh`, `tools/commands/restart.ps1`
+  - Makefile: `make restart`
+  - Use after changing environment variables or configuration
+
+- **`audit`**: Run system audit (linting, tests, health checks)
+  - Scripts: `tools/commands/audit.sh`, `tools/commands/audit.ps1`
+  - Makefile: `make audit`
+  - Run before PRs, releases, or after major refactors
+
+- **`error`**: Quick error diagnostics
+  - Scripts: `tools/commands/error.sh`, `tools/commands/error.ps1`
+  - Makefile: `make error`
+  - Use when diagnosing runtime issues
+
+Always bootstrap logging before running commands (see `docs/12-logging.md`).
+
+## Code Review Checklist
+
+### Functionality
+- [ ] Code works as intended
+- [ ] Edge cases handled
+- [ ] Error handling implemented
+- [ ] No breaking changes (or documented)
+
+### Code Quality
+- [ ] Follows coding standards
+- [ ] Proper naming conventions
+- [ ] Adequate comments/documentation
+- [ ] No code duplication
+- [ ] Proper abstraction
+
+### Testing
+- [ ] Tests written and passing
+- [ ] Adequate test coverage (80% minimum)
+- [ ] Edge cases tested
+- [ ] Integration tests updated
+
+### Performance
+- [ ] No obvious performance issues
+- [ ] Database queries optimized
+- [ ] Caching used appropriately
+- [ ] No memory leaks
+
+### Security
+- [ ] No security vulnerabilities
+- [ ] Input validation
+- [ ] Authentication/authorization
+- [ ] Secrets not exposed
+
+## Related Documentation
+
+- `docs/01-architecture.md` - System architecture
+- `docs/02-mcp-layer.md` - MCP architecture and protocols
+- `docs/03-ml-models.md` - Model management and intelligence
+- `docs/05-logic-reasoning.md` - Logic and reasoning engine
+- `docs/06-backend.md` - Backend API implementation
+- `docs/07-frontend.md` - Frontend implementation
+- `docs/08-file-structure.md` - Project organization
+- `docs/12-logging.md` - Centralized logging standards
+- `docs/14-project-rules.md` - Complete project rules documentation
+

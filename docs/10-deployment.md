@@ -230,9 +230,15 @@ DELTA_API_KEY=<delta_api_key>
 DELTA_API_SECRET=<delta_api_secret>
 DELTA_API_URL=https://api.india.delta.exchange
 
-# Telegram Bot
+# Telegram Bot (optional)
 TELEGRAM_BOT_TOKEN=<telegram_bot_token>
 TELEGRAM_CHAT_ID=<telegram_chat_id>
+
+# Telegram alerts are optional. Leave the values blank to disable notifications.
+# To enable:
+# 1. Talk to @BotFather on Telegram and create a bot token.
+# 2. Send a message to your bot and use @userinfobot or a simple script to obtain the chat ID.
+# 3. Set both variables and restart the backend to begin receiving trade alerts.
 
 # Trading
 INITIAL_BALANCE=10000.0
@@ -351,17 +357,25 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 
 ### Step 9: Start Services
 
-**Recommended (Makefile command)**:
+**Recommended (Parallel Startup)**:
 ```bash
 make start
+# or directly:
+python tools/commands/start_parallel.py
 ```
 
-The `make start` target launches:
-- Backend (`uvicorn api.main:app --port 8000`)
+The startup system uses a Python-based parallel process manager that launches all services simultaneously:
+- Backend (`uvicorn backend.api.main:app --port 8000`)
 - Agent (`python -m agent.core.intelligent_agent`)
 - Frontend (`npm run dev`)
 
-Combined logs are streamed to `logs/start.log`. The command verifies that PostgreSQL, Redis, and (optionally) Qdrant are running before starting application services.
+**Key Benefits of Parallel Startup:**
+- **Faster initialization**: All services start simultaneously instead of sequentially
+- **Real-time log streaming**: Color-coded logs from all services in a single console
+- **Cross-platform**: Single Python script works on Windows, macOS, and Linux
+- **Better monitoring**: Service health checks and automatic dependency setup
+
+Each service logs to `logs/{service}.log` while also streaming to the console with service name prefixes. The command automatically sets up virtual environments and installs dependencies if needed.
 
 **Manual alternative** (if you prefer separate terminals):
 
@@ -391,6 +405,201 @@ Combined logs are streamed to `logs/start.log`. The command verifies that Postgr
 - API Docs: http://localhost:8000/docs
 
 **Note**: The frontend is a Next.js webapp that runs in development mode. For production builds, see the [Build Guide](11-build-guide.md) and refer to the `make start` + `npm run build` combination described there.
+
+---
+
+## Docker Compose Deployment
+
+Use Docker when you need repeatable 24/7 runtimes or remote deployments. The Docker deployment includes production-ready configurations, optimized multi-stage builds, non-root users, resource limits, and health checks.
+
+For comprehensive Docker deployment documentation, see [Docker Deployment Guide](DOCKER_DEPLOYMENT.md).
+
+### Prerequisites
+
+- **Docker Engine 24+** ([Install Docker](https://docs.docker.com/get-docker/))
+- **Docker Compose V2** (`docker compose` CLI)
+- **Environment Configuration**: Create `.env` file from `.env.example` with:
+  - `DELTA_EXCHANGE_API_KEY`, `DELTA_EXCHANGE_API_SECRET`
+  - `JWT_SECRET_KEY`, `API_KEY`
+  - `POSTGRES_PASSWORD` (and optionally `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PORT`)
+
+### Quick Start
+
+**1. Prepare persistent assets:**
+```bash
+mkdir -p logs/backend logs/agent logs/frontend models
+touch kubera_pokisham.db
+```
+
+**2. Create environment file:**
+```bash
+# Copy the example template
+cp .env.example .env
+
+# Edit .env with your configuration
+# Required: DELTA_EXCHANGE_API_KEY, DELTA_EXCHANGE_API_SECRET, JWT_SECRET_KEY, API_KEY, POSTGRES_PASSWORD
+```
+
+**3. Build and start services:**
+```bash
+# Using deployment scripts (recommended)
+./scripts/docker/build.sh
+./scripts/docker/deploy.sh up
+
+# Or using docker-compose directly
+docker compose up --build -d
+```
+
+**4. Verify deployment:**
+```bash
+# Check service health
+./scripts/docker/healthcheck.sh
+
+# Or manually
+docker compose ps
+docker compose logs -f
+```
+
+### Service Architecture
+
+| Service   | Image/Build                     | Port | Resource Limits | Notes |
+|-----------|---------------------------------|------|-----------------|-------|
+| postgres  | `timescale/timescaledb:2.13.1-pg15` | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
+| redis     | `redis:7.2-alpine`              | 6379 | 1 CPU, 512MB RAM | Append-only mode, persistent volume |
+| agent     | `agent/Dockerfile`              | 8001 | 4 CPU, 4GB RAM | Multi-stage build, ML-optimized |
+| backend   | `backend/Dockerfile`            | 8000 | 2 CPU, 2GB RAM | Multi-stage build, non-root user |
+| frontend  | `frontend/Dockerfile`           | 3000 | 1 CPU, 1GB RAM | Multi-stage build, production-ready |
+
+### Key Features
+
+**Production-Ready Configuration:**
+- Multi-stage Dockerfile builds for smaller images
+- Non-root users for enhanced security
+- Resource limits to prevent resource exhaustion
+- Health checks for automatic container management
+- Restart policies (`unless-stopped`) for automatic recovery
+- Log rotation (10MB max size, 3 files retention)
+
+**Volume Management:**
+- `./models` → `/app/models` (bind-mounted for agent model access)
+- `./logs/<service>` → `/logs` (structured logs from each container)
+- `./kubera_pokisham.db` → `/data/kubera_pokisham.db` (legacy SQLite support)
+- `postgres-data` volume (TimescaleDB persistent storage)
+- `redis-data` volume (Redis persistent storage)
+
+**Network Isolation:**
+- All services communicate on isolated Docker network (`jacksparrow-network`)
+- Internal DNS resolution using service names (e.g., `postgres`, `redis`, `agent`)
+
+### Deployment Scripts
+
+The project includes deployment scripts in `scripts/docker/`:
+
+**Build Scripts:**
+```bash
+# Unix/Linux/macOS
+./scripts/docker/build.sh [VERSION] [COMMIT_SHA]
+
+# Windows PowerShell
+.\scripts\docker\build.ps1 -Version "1.0.0" -CommitSha "abc123"
+```
+
+**Deploy Scripts:**
+```bash
+# Start services
+./scripts/docker/deploy.sh up
+
+# Stop services
+./scripts/docker/deploy.sh down
+
+# Restart services
+./scripts/docker/deploy.sh restart
+
+# Rolling update
+./scripts/docker/deploy.sh update
+
+# View logs
+./scripts/docker/deploy.sh logs
+```
+
+**Health Check Script:**
+```bash
+# Check all services
+./scripts/docker/healthcheck.sh
+```
+
+### Common Operations
+
+**View logs:**
+```bash
+docker compose logs -f [service]  # Follow logs for specific service
+docker compose logs --tail=100    # Last 100 lines from all services
+```
+
+**Execute commands in containers:**
+```bash
+# Run database migrations
+docker compose exec backend python scripts/setup_db.py
+
+# Access PostgreSQL
+docker compose exec postgres psql -U jacksparrow -d trading_agent
+
+# Access Redis CLI
+docker compose exec redis redis-cli
+```
+
+**Shutdown & teardown:**
+```bash
+# Stop containers (keep volumes)
+docker compose down
+
+# Stop and remove volumes (WARNING: deletes data)
+docker compose down -v
+
+# Stop specific service
+docker compose stop backend
+```
+
+### Troubleshooting
+
+See [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#troubleshooting) for comprehensive troubleshooting steps.
+
+**Common Issues:**
+- **Port conflicts**: Update port in `.env` file (e.g., `BACKEND_PORT=8001`)
+- **Volume permissions**: Fix with `sudo chown -R $USER:$USER logs/ models/`
+- **Database connection**: Verify `DATABASE_URL` uses service name `postgres`, not `localhost`
+- **Health checks failing**: Check logs with `docker compose logs [service]`
+
+### Production Deployment
+
+For production deployments, see [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#production-deployment) for:
+- Security hardening checklist
+- Secrets management
+- HTTPS/TLS configuration
+- Backup strategies
+- Monitoring and alerting
+- Scaling considerations
+
+---
+
+## CI/CD Automation
+
+The workflow defined in `.github/workflows/cicd.yml` enforces quality gates and automates deployments:
+
+1. **Tests** – Backend and agent pytest suites run in parallel via a matrix; the frontend executes `npm test -- --ci`.
+2. **Images** – After tests pass, Docker images for `backend`, `agent`, and `frontend` are built with Buildx. Images are tagged with the commit SHA and `latest` and pushed to GitHub Container Registry (GHCR) on the `main` branch.
+3. **Deploy** – On `main`, the workflow connects to the deployment host via SSH, pulls the latest repository state, fetches new images, and runs `docker compose up -d --pull always --build` to restart services with zero manual steps.
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `DEPLOY_HOST` | Public hostname or IP of the target server |
+| `DEPLOY_USER` | SSH user with rights to pull the repo and run Docker |
+| `DEPLOY_KEY`  | Private key (PEM) for the deploy user |
+| `DEPLOY_PATH` | Absolute path on the server that contains the repository |
+
+The workflow already uses the built-in `GITHUB_TOKEN` for GHCR authentication; no additional registry secret is needed. Ensure the remote server has Docker/Compose installed and that the repository at `DEPLOY_PATH` contains the latest `docker-compose.yml`.
 
 ---
 
@@ -554,8 +763,18 @@ After you create the environment files above, you can start every service with a
 
 - **macOS/Linux**: `./tools/commands/start.sh` (or `make start`)
 - **Windows PowerShell**: `powershell -ExecutionPolicy Bypass -File .\tools\commands\start.ps1`
+- **Direct Python**: `python tools/commands/start_parallel.py`
 
-The command spins up the backend, agent, and frontend, then streams aggregated logs to `logs/start.log`. For manual start instructions, see the [Build Guide](11-build-guide.md#project-commands).
+The startup system uses a Python-based parallel process manager that starts all services (backend, agent, frontend) simultaneously. Real-time logs are streamed to the console with color-coded service prefixes, and each service also writes to `logs/{service}.log`. The system automatically handles virtual environment setup and dependency installation.
+
+**Parallel Startup Features:**
+- All services start at the same time (faster than sequential startup)
+- Real-time aggregated log streaming with service identification
+- Automatic dependency checking and installation
+- Graceful shutdown handling (Ctrl+C stops all services)
+- Cross-platform compatibility (Windows, macOS, Linux)
+
+For manual start instructions, see the [Build Guide](11-build-guide.md#project-commands).
 
 ---
 
@@ -568,8 +787,8 @@ Implement the centralized logging strategy described in [Logging Documentation](
    - Grant write permissions to the processes that run each service.
 
 2. **Startup Clearing**
-   - Each service calls `LogBootstrapper.clear_previous_logs()` (or equivalent) during startup to archive/delete old logs and emit a `system.startup` entry with a new `session_id`.
-   - The `start` command (`./tools/commands/start.sh` / `start.ps1` or `make start`) performs this automatically; manual starts should run `python scripts/logging/bootstrap.py` (backend/agent) or `npm run log:bootstrap` (frontend) before launching services.
+   - Each service should clear or archive previous logs during startup and emit a `system.startup` entry with a new `session_id`.
+   - The `start` command (`./tools/commands/start.sh` / `start.ps1`, `make start`, or `python tools/commands/start_parallel.py`) launches services in parallel and manages log files automatically; manual starts should clear logs before launching services.
 
 3. **Structured Logging**
    - Ensure log output is JSON-formatted with `service`, `component`, `session_id`, `correlation_id`, and `environment` fields.
@@ -664,24 +883,36 @@ brew services start grafana
 Run these commands from the project root (`JackSparrow/`). Each command is available as both a shell script under `tools/commands/` and a Makefile target for macOS/Linux. PowerShell equivalents (`*.ps1`) are provided for Windows.
 
 ### `start`
-Launch all JackSparrow services after the environment is configured.
+Launch all JackSparrow services after the environment is configured using parallel process startup.
 
 - macOS/Linux
   ```bash
   ./tools/commands/start.sh
   # or
   make start
+  # or directly:
+  python tools/commands/start_parallel.py
   ```
 - Windows PowerShell
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\tools\commands\start.ps1
+  # or directly:
+  python tools\commands\start_parallel.py
   ```
 
-Actions performed:
-1. Validates PostgreSQL, Redis (and optional Qdrant) availability
-2. Loads environment variables from component `.env` files
-3. Starts the FastAPI backend (`http://localhost:8000`), JackSparrow agent, and Next.js frontend (`http://localhost:3000`)
-4. Streams aggregated logs to `logs/start.log`
+**Actions performed:**
+1. Checks and creates virtual environments if needed (backend, agent)
+2. Installs Python dependencies if required
+3. Installs frontend dependencies if `node_modules` is missing
+4. Starts all three services **simultaneously**:
+   - FastAPI backend (`http://localhost:8000`)
+   - JackSparrow agent
+   - Next.js frontend (`http://localhost:3000`)
+5. Streams real-time color-coded logs to console with service prefixes
+6. Writes individual service logs to `logs/{service}.log`
+7. Creates PID files in `logs/` for process management
+
+**Note**: Services handle their own dependency checks (e.g., backend waits for Redis/PostgreSQL). The parallel startup ensures faster initialization while maintaining service reliability.
 
 ### `restart`
 Perform a clean restart when configuration or dependencies change.
@@ -1369,40 +1600,110 @@ docker-compose exec agent pytest
 
 ---
 
-### Development vs Production
+### Development Workflow with Hot-Reload
 
-#### Development Configuration
+The project includes a development Docker setup that enables hot-reload, allowing code changes to be reflected immediately without rebuilding Docker images.
 
-For development with hot-reload, use `docker-compose.dev.yml`:
+#### Quick Start
 
-```yaml
-version: '3.8'
-
-services:
-  backend:
-    volumes:
-      - ./backend:/app
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-
-  agent:
-    volumes:
-      - ./agent:/app
-      - ./models:/app/models
-
-  frontend:
-    build:
-      target: builder
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
-    command: npm run dev
+**Start development environment:**
+```bash
+make docker-dev
+# or
+scripts/docker/dev-start.ps1 --Build
+scripts/docker/dev-start.sh --build
 ```
 
-Run development stack:
+**Start with specific service:**
 ```bash
+scripts/docker/dev-start.ps1 backend
+scripts/docker/dev-start.sh backend
+```
+
+#### How It Works
+
+The development setup uses `docker-compose.dev.yml` which:
+
+1. **Mounts source code as volumes**: Code changes are immediately visible inside containers
+   - `./backend:/app/backend` - Backend source code
+   - `./agent:/app/agent` - Agent source code
+   - `./frontend:/app` - Frontend source code (excluding `node_modules` and `.next`)
+
+2. **Uses development Dockerfiles**: `Dockerfile.dev` files install dependencies only (no source code COPY)
+
+3. **Enables hot-reload**:
+   - **Backend**: `uvicorn --reload` automatically restarts on Python file changes
+   - **Frontend**: Next.js dev server (`npm run dev`) provides hot module replacement
+   - **Agent**: Python module reloads on `.py` file changes
+
+#### Development vs Production
+
+**Development Mode** (`docker-compose.dev.yml`):
+- ✅ Hot-reload enabled
+- ✅ Source code mounted as volumes
+- ✅ Faster iteration (no rebuild needed)
+- ✅ Development dependencies included
+- ⚠️ Not optimized for production performance
+
+**Production Mode** (`docker-compose.yml`):
+- ✅ Optimized builds
+- ✅ Source code baked into images
+- ✅ Production dependencies only
+- ✅ Better security and performance
+- ⚠️ Requires rebuild for code changes
+
+#### Development Commands
+
+**Start development environment:**
+```bash
+# First time (builds images)
+make docker-dev
+# or
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Subsequent starts (uses cached images)
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
+
+**View logs:**
+```bash
+make docker-logs SERVICE=backend
+make docker-logs SERVICE=agent LEVEL=ERROR
+```
+
+**Start specific container:**
+```bash
+make docker-start CONTAINER=backend
+```
+
+**Audit errors:**
+```bash
+make docker-audit
+```
+
+#### Troubleshooting
+
+**Code changes not reflecting:**
+- Ensure you're using `docker-compose.dev.yml` override
+- Check volume mounts: `docker-compose config`
+- Verify file permissions on mounted volumes
+
+**Performance issues:**
+- Development mode is slower than production
+- Use production mode for performance testing
+- Consider excluding large directories from volumes
+
+**Port conflicts:**
+- Check if ports are already in use: `netstat -an | grep 8000`
+- Modify ports in `.env` file if needed
+
+#### Best Practices
+
+1. **Use development mode** for active coding and debugging
+2. **Use production mode** for final testing and deployment
+3. **Rebuild images** when dependencies change (`--Build` flag)
+4. **Monitor logs** regularly for errors (`make docker-logs`)
+5. **Run audits** before committing (`make docker-audit`)
 
 #### Production Configuration
 

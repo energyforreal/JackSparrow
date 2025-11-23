@@ -1,0 +1,56 @@
+version: "3.9"
+
+# Development override for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+# This enables hot-reload by mounting source code as volumes
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    # Override command to use reload flag
+    command: ["sh", "-c", "uvicorn backend.api.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000} --reload"]
+    # Mount source code for hot-reload
+    volumes:
+      - ./backend:/app/backend:rw
+      - ./logs/backend:/logs:rw
+    # Development environment
+    environment:
+      - LOG_LEVEL=${BACKEND_LOG_LEVEL:-DEBUG}
+    # Keep other settings from base docker-compose.yml
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile.dev
+    # Mount source code for hot-reload
+    volumes:
+      - ./agent:/app/agent:rw
+      - ./models:/app/models:ro
+      - ./logs/agent:/logs:rw
+    # Development environment
+    environment:
+      - LOG_LEVEL=${AGENT_LOG_LEVEL:-DEBUG}
+    # Keep other settings from base docker-compose.yml
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile.dev
+    # Override environment for development
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
+      - NEXT_PUBLIC_BACKEND_API_KEY=${API_KEY:-dev-api-key}
+      - PORT=${FRONTEND_PORT:-3000}
+    # Mount source code for hot-reload
+    # Exclude node_modules and .next to avoid conflicts
+    volumes:
+      - ./frontend:/app:rw
+      - /app/node_modules
+      - /app/.next
+      - ./logs/frontend:/logs:rw
+    # Keep other settings from base docker-compose.yml
+

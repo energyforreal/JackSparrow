@@ -1,0 +1,47 @@
+---
+description: Security standards and best practices
+globs:
+  - "**/*.py"
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: true
+---
+
+# Security Standards
+
+## Security Checklist
+
+- [ ] No hardcoded secrets
+- [ ] Environment variables for configuration
+- [ ] Input validation on all endpoints
+- [ ] SQL injection prevention
+- [ ] XSS prevention
+- [ ] CSRF protection
+- [ ] Authentication required for protected endpoints
+- [ ] Rate limiting implemented
+- [ ] Error messages don't expose internals
+
+## Secure API Handler Pattern
+
+```python
+@router.post("/trade/execute", response_model=TradeResponse)
+async def execute_trade(request: TradeRequest, user: User = Depends(get_current_user)):
+    validate_trade_request(request)
+    await rate_limiter.throttle(user.id)
+
+    try:
+        result = await agent_service.execute_trade(request, user.id)
+    except RiskViolation as exc:
+        logger.warning(
+            "trade_rejected",
+            user_id=user.id,
+            symbol=request.symbol,
+            reason=str(exc),
+            correlation_id=request.correlation_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Trade rejected by risk manager.",
+        ) from exc
+    return result
+```

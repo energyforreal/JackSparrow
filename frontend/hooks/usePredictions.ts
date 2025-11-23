@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { apiClient } from '@/services/api'
+import { Prediction } from '@/types'
 
 export function usePredictions(symbol: string = 'BTCUSD') {
-  const [prediction, setPrediction] = useState<any>(null)
+  const [prediction, setPrediction] = useState<Prediction | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 

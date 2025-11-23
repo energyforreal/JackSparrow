@@ -2,6 +2,14 @@
 Market data endpoints.
 
 Provides market data from Delta Exchange.
+
+**Authentication**: These endpoints are intentionally public (no authentication required).
+Market data endpoints provide read-only access to public market information and are
+typically accessed by frontend applications without authentication. This follows common
+practices for public market data APIs.
+
+If authentication is required in the future, add `dependencies=[Depends(require_auth)]`
+to the router initialization below.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -11,6 +19,7 @@ from backend.api.models.requests import MarketDataRequest
 from backend.api.models.responses import MarketDataResponse
 from backend.services.market_service import market_service
 
+# Intentionally public - no authentication required for market data
 router = APIRouter()
 
 

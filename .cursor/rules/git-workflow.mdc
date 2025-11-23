@@ -1,0 +1,43 @@
+---
+description: Git workflow and commit message standards
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Git Workflow
+
+## Branch Strategy
+
+- **Main Branches**: `main` (production), `develop` (integration)
+- **Supporting Branches**: 
+  - `feature/*` - New features
+  - `bugfix/*` - Bug fixes
+  - `hotfix/*` - Critical production fixes
+  - `release/*` - Release preparation
+
+## Commit Messages
+
+Follow Conventional Commits specification:
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+
+**Examples**:
+- `feat(agent): add 6-step reasoning chain`
+- `fix(backend): resolve WebSocket reconnection issue`
+
+## Pull Request Process
+
+1. Create feature branch from `develop`
+2. Make changes with tests and documentation
+3. Commit using conventional commit format
+4. Push branch and create PR targeting `develop`
+5. Address review comments
+6. Squash and merge after approval

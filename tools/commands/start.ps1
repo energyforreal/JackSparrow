@@ -1,27 +1,31 @@
 # Start all JackSparrow services (PowerShell)
+# Uses Python-based parallel process manager for simultaneous startup
 
-Write-Host "Starting JackSparrow Trading Agent..." -ForegroundColor Green
-Write-Host ""
+$ErrorActionPreference = "Stop"
 
-# Create logs directory
-New-Item -ItemType Directory -Force -Path logs | Out-Null
+# Get script directory for proper path resolution
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = Split-Path -Parent $ScriptDir
 
-# Start Backend
-Write-Host "Starting Backend (FastAPI)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd backend; if (-not (Test-Path venv)) { python -m venv venv }; .\venv\Scripts\Activate.ps1; pip install -q -r requirements.txt; uvicorn api.main:app --host 0.0.0.0 --port 8000" -WindowStyle Normal
+# Path to Python parallel startup script
+$PythonScript = Join-Path $ScriptDir "start_parallel.py"
 
-# Start Agent
-Write-Host "Starting Agent..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd agent; if (-not (Test-Path venv)) { python -m venv venv }; .\venv\Scripts\Activate.ps1; pip install -q -r requirements.txt; python -m agent.core.intelligent_agent" -WindowStyle Normal
+# Check if Python is available
+try {
+    $pythonVersion = python --version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Python not found"
+    }
+} catch {
+    Write-Host "Error: Python is required but not found in PATH" -ForegroundColor Red
+    Write-Host "Please install Python 3.11+ and ensure it's in your PATH" -ForegroundColor Yellow
+    exit 1
+}
 
-# Start Frontend
-Write-Host "Starting Frontend (Next.js)..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd frontend; if (-not (Test-Path node_modules)) { npm install }; npm run dev" -WindowStyle Normal
+# Execute Python script for parallel startup
+Write-Host "Launching parallel process manager..." -ForegroundColor Green
+python $PythonScript
 
-Write-Host ""
-Write-Host "All services started successfully!" -ForegroundColor Green
-Write-Host "Backend: http://localhost:8000" -ForegroundColor Cyan
-Write-Host "Frontend: http://localhost:3000" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Logs are in the logs/ directory" -ForegroundColor Gray
+# Exit with the same code as Python script
+exit $LASTEXITCODE
 
