@@ -108,36 +108,67 @@ class AgentService:
     async def get_agent_status(self) -> Optional[Dict[str, Any]]:
         """Get agent status."""
         
+        start_time = time.time()
         response = await self._send_command(
             "get_status",
             parameters={},
             timeout=5
         )
+        latency_ms = (time.time() - start_time) * 1000
         
         now = datetime.utcnow()
         
         if not response:
             return {
+                "available": False,
                 "state": "UNKNOWN",
                 "last_update": now,
                 "active_symbols": [],
                 "model_count": 0,
                 "health_status": "unavailable",
-                "message": "Agent service unavailable"
+                "message": "Agent service unavailable",
+                "latency_ms": round(latency_ms, 2)
             }
         
         data = response.get("data", {})
         health = data.get("health", {})
-        model_registry = health.get("model_registry", {})
+        detailed_health = data.get("detailed_health", {})
         
-        return {
+        # Extract model registry info from health or detailed_health
+        model_registry = health.get("model_registry", {})
+        if not model_registry and detailed_health:
+            model_nodes = detailed_health.get("model_nodes", {})
+            model_registry = {
+                "total_models": model_nodes.get("total_models", 0),
+                "healthy_models": model_nodes.get("healthy_models", 0)
+            }
+        
+        # Extract available flag from agent response (agent includes it in data)
+        # If not present, assume True since we got a successful response
+        available = data.get("available", True)
+        
+        # Build response with detailed health information
+        status_response = {
+            "available": available,  # Use agent's reported availability
             "state": data.get("state", "UNKNOWN"),
             "last_update": now,
             "active_symbols": data.get("active_symbols", []),
             "model_count": model_registry.get("total_models", 0),
             "health_status": health.get("overall_status", "unknown"),
-            "message": data.get("message")
+            "message": data.get("message"),
+            "latency_ms": round(latency_ms, 2)
         }
+        
+        # Add detailed health information if available
+        if detailed_health:
+            status_response.update({
+                "feature_server": detailed_health.get("feature_server", {}),
+                "model_nodes": detailed_health.get("model_nodes", {}),
+                "delta_exchange": detailed_health.get("delta_exchange", {}),
+                "reasoning_engine": detailed_health.get("reasoning_engine", {})
+            })
+        
+        return status_response
     
     async def control_agent(
         self,

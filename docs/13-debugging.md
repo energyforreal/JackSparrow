@@ -88,7 +88,7 @@ python -m agent.core.intelligent_agent --debug
 pnpm dev
 ```
 
-- Activate server-side logging by setting `LOG_LEVEL=debug` in `.env.local` or `.env` and confirm the `pino`/`winston` transport writes into `logs/frontend/`.
+- Activate server-side logging by setting `LOG_LEVEL=debug` in the root `.env` file and confirm the `pino`/`winston` transport writes into `logs/frontend/`.
 - Client-side errors are mirrored to `/api/log`; inspect both browser console and server logs (with correlation IDs) for full context.
 - Use the Next.js debug overlay to inspect component stack traces; replicate render errors with React Developer Tools.
 

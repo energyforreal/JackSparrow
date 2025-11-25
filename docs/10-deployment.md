@@ -218,140 +218,62 @@ curl http://localhost:6333/health
 
 ### Step 8: Environment Variables
 
-**Create `.env` files**:
+**Single Root `.env` File**: All services (backend, agent, frontend) read from a **single root `.env` file** in the project root directory. This is the only environment file you need to configure.
 
-> **New:** The repository now includes a root-level `.env` file that is ignored by Cursor (`.cursorignore`) and Git. Use it as the canonical reference for environment keys, but **replace all sensitive values with your own** before running any services. The shipped file is intended for local paper-trading on Delta Exchange India and contains placeholder credentials that must be regenerated.
+**Setup Instructions:**
 
-#### Root `.env`
+1. Copy the example template: `cp .env.example .env`
+2. Edit `.env` with your actual values
+3. Fill in all **REQUIRED** variables (marked in `.env.example`)
+4. Optionally configure **OPTIONAL** variables as needed
 
-```
-# Delta Exchange
-DELTA_API_KEY=<delta_api_key>
-DELTA_API_SECRET=<delta_api_secret>
-DELTA_API_URL=https://api.india.delta.exchange
+**How Components Read the Root `.env` File:**
 
-# Telegram Bot (optional)
-TELEGRAM_BOT_TOKEN=<telegram_bot_token>
-TELEGRAM_CHAT_ID=<telegram_chat_id>
+- **Backend**: Reads via `ROOT_ENV_PATH` in `backend/core/config.py` (points to root `.env`)
+- **Agent**: Reads via `ROOT_ENV_PATH` in `agent/core/config.py` (points to root `.env`)
+- **Frontend**: Reads via `loadRootEnv()` function in `frontend/next.config.js` (reads `../.env`)
+- **Docker**: Docker Compose automatically loads root `.env` via `env_file: - .env` directive
 
-# Telegram alerts are optional. Leave the values blank to disable notifications.
-# To enable:
-# 1. Talk to @BotFather on Telegram and create a bot token.
-# 2. Send a message to your bot and use @userinfobot or a simple script to obtain the chat ID.
-# 3. Set both variables and restart the backend to begin receiving trade alerts.
+**Important Notes:**
 
-# Trading
-INITIAL_BALANCE=10000.0
-TRADING_MODE=paper
-TRADING_SYMBOL=BTCUSD
+- **No service-specific `.env` files needed**: All services share the same root `.env` file
+- **For local development**: Database URLs should use `localhost` (e.g., `postgresql://user:pass@localhost:5432/db`)
+- **For Docker deployments**: Database URLs should use service names (e.g., `postgresql://user:pass@postgres:5432/db`)
+- See `.env.example` in the project root for a complete template with all available variables
 
-# Database
-DATABASE_URL=sqlite:///./kubera_pokisham.db
+**Required Variables (Minimum Setup):**
 
-# Logging
-LOG_LEVEL=INFO
-LOG_FILE=logs/kubera_pokisham.log
-
-# Risk Management
-MAX_POSITION_SIZE=0.25
-RISK_PER_TRADE=0.02
-MAX_DAILY_LOSS=0.05
-MAX_DRAWDOWN=0.15
-MAX_CONSECUTIVE_LOSSES=5
-MIN_TIME_BETWEEN_TRADES=300
-
-# Model Configuration
-# MODEL_PATH: Points to a specific production model file in root models/ directory
-MODEL_PATH=models/xgboost_BTCUSD_15m.pkl
-MIN_CONFIDENCE_THRESHOLD=0.65
-# MODEL_DIR: Points to directory for model discovery (used by agent for uploaded models)
-# MODEL_DIR=./agent/model_storage  # Uncomment if using model discovery
-
-# Market Data
-UPDATE_INTERVAL=900
-TIMEFRAMES=15m,1h,4h
-```
-
-Copy the file to `.env.local` or service-specific environments if you need different values per component. The variables continue to work with the backend/agent-specific `.env` files described below.
-
-**Backend `.env`**:
 ```bash
-# Database
+# Database (REQUIRED)
 DATABASE_URL=postgresql://user:password@localhost:5432/trading_agent
 
-# Redis
-REDIS_URL=redis://localhost:6379
-
-# Delta Exchange
+# Delta Exchange API (REQUIRED)
 DELTA_EXCHANGE_API_KEY=your_api_key
 DELTA_EXCHANGE_API_SECRET=your_api_secret
-DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
 
-# Agent Communication
-AGENT_COMMAND_QUEUE=agent_commands
-AGENT_RESPONSE_QUEUE=agent_responses
+# Security (REQUIRED)
+JWT_SECRET_KEY=your_jwt_secret_key
+API_KEY=your_api_key
 
-# Feature Server
-FEATURE_SERVER_URL=http://localhost:8001
-
-# Vector Database
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=  # Optional for local
-
-# Security
-JWT_SECRET_KEY=your_secret_key_here
-API_KEY=your_api_key_here
-
-# Logging
-LOG_LEVEL=INFO
-LOG_DIR=./logs/backend
-LOG_RETENTION_DAYS=7
-LOG_ARCHIVE_MODE=archive  # or delete
-LOG_SESSION_ID=  # optional override
-LOG_FORWARDING_ENABLED=false
-LOG_FORWARDING_ENDPOINT=
-LOG_INCLUDE_STACKTRACE=false
-```
-
-**Agent `.env`**:
-```bash
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/trading_agent
-
-# Redis
-REDIS_URL=redis://localhost:6379
-
-# Delta Exchange
-DELTA_EXCHANGE_API_KEY=your_api_key
-DELTA_EXCHANGE_API_SECRET=your_api_secret
-DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
-
-# Vector Database
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=  # Optional for local
-
-# Model Configuration
-# MODEL_PATH: Specific production model file (from root models/ directory)
-# MODEL_PATH=models/xgboost_BTCUSD_15m.pkl  # Uncomment if using production model
-# MODEL_DIR: Directory for model discovery (for uploaded models in agent/model_storage/)
-MODEL_DIR=./agent/model_storage
-
-# Logging
-LOG_LEVEL=INFO
-LOG_DIR=./logs/agent
-LOG_RETENTION_DAYS=7
-LOG_ARCHIVE_MODE=archive  # or delete
-LOG_SESSION_ID=
-LOG_FORWARDING_ENABLED=false
-LOG_FORWARDING_ENDPOINT=
-LOG_INCLUDE_STACKTRACE=false
-```
-
-**Frontend `.env.local`**:
-```bash
+# Frontend (REQUIRED)
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 ```
+
+**See `.env.example` for the complete list of all available environment variables**, including:
+- Database and Redis configuration
+- Backend settings (ports, CORS, logging, rate limiting)
+- Agent configuration (model paths, trading settings, risk management)
+- Frontend Next.js public variables
+- Telegram notifications (optional)
+- Vector database (Qdrant, optional)
+- Docker service ports
+
+> **Template Format Reminder**  
+> The root `.env.example` is already organized into sections (Infrastructure & Shared Services, Delta Exchange Credentials, Backend Security & API, Agent Configuration with Risk Management/Trading Session defaults, Frontend, and Optional Services). Copy it verbatim to `.env` and only change the values so every service reads the same structured configuration.
+
+> **Agent Risk Controls**  
+> Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Tune these in `.env` to match your testing needs.
 
 ---
 
@@ -359,9 +281,10 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 
 **Recommended (Parallel Startup)**:
 ```bash
-make start
-# or directly:
 python tools/commands/start_parallel.py
+# or use shell scripts:
+# Linux/macOS: ./tools/commands/start.sh
+# Windows: .\tools\commands\start.ps1
 ```
 
 The startup system uses a Python-based parallel process manager that launches all services simultaneously:
@@ -404,7 +327,7 @@ Each service logs to `logs/{service}.log` while also streaming to the console wi
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs
 
-**Note**: The frontend is a Next.js webapp that runs in development mode. For production builds, see the [Build Guide](11-build-guide.md) and refer to the `make start` + `npm run build` combination described there.
+**Note**: The frontend is a Next.js webapp that runs in development mode. For production builds, see the [Build Guide](11-build-guide.md) and refer to the startup scripts + `npm run build` combination described there.
 
 ---
 
@@ -586,6 +509,25 @@ For production deployments, see [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#p
 
 The workflow defined in `.github/workflows/cicd.yml` enforces quality gates and automates deployments:
 
+### Validation in CI/CD
+
+The CI/CD pipeline includes a validation job that runs before tests:
+
+**Validation Job**:
+- Validates environment variable structure (checks .env format, not actual values)
+- Validates Python and Node.js versions
+- Checks code structure and imports
+- Runs before Python and Frontend test jobs
+
+**Validation Steps**:
+1. Environment variable validation (structure check)
+2. Prerequisites validation (version checks only, services not available in CI)
+3. Code quality checks (linting, formatting)
+
+**Note**: Full validation (including service connectivity) requires a local environment with running services. CI validation focuses on code structure and configuration format validation.
+
+### CI/CD Pipeline Steps
+
 1. **Tests** – Backend and agent pytest suites run in parallel via a matrix; the frontend executes `npm test -- --ci`.
 2. **Images** – After tests pass, Docker images for `backend`, `agent`, and `frontend` are built with Buildx. Images are tagged with the commit SHA and `latest` and pushed to GitHub Container Registry (GHCR) on the `main` branch.
 3. **Deploy** – On `main`, the workflow connects to the deployment host via SSH, pulls the latest repository state, fetches new images, and runs `docker compose up -d --pull always --build` to restart services with zero manual steps.
@@ -676,15 +618,15 @@ This creates an optimized production build and starts the production server.
 
 ### Environment Configuration
 
-The frontend uses environment variables prefixed with `NEXT_PUBLIC_` to expose configuration to the browser:
+The frontend uses environment variables prefixed with `NEXT_PUBLIC_` to expose configuration to the browser. These are configured in the **root `.env` file**:
 
-**`.env.local`** (development):
+**Root `.env`** (all environments):
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 ```
 
-**`.env.production`** (production):
+**For production**:
 ```bash
 NEXT_PUBLIC_API_URL=https://api.yourdomain.com
 NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
@@ -711,7 +653,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `REDIS_URL` | Redis connection string | Yes | - |
 | `DELTA_EXCHANGE_API_KEY` | Delta Exchange API key | Yes | - |
 | `DELTA_EXCHANGE_API_SECRET` | Delta Exchange API secret | Yes | - |
-| `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | - |
+| `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | https://api.india.delta.exchange |
 | `QDRANT_URL` | Qdrant vector database URL | No | http://localhost:6333 |
 | `QDRANT_API_KEY` | Qdrant API key | No | - |
 | `JWT_SECRET_KEY` | JWT secret for authentication | Yes | - |
@@ -734,7 +676,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `REDIS_URL` | Redis connection string | Yes | - |
 | `DELTA_EXCHANGE_API_KEY` | Delta Exchange API key | Yes | - |
 | `DELTA_EXCHANGE_API_SECRET` | Delta Exchange API secret | Yes | - |
-| `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | - |
+| `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | https://api.india.delta.exchange |
 | `QDRANT_URL` | Qdrant vector database URL | No | http://localhost:6333 |
 | `QDRANT_API_KEY` | Qdrant API key | No | - |
 | `MODEL_DIR` | Directory for model discovery (uploaded models) | No | ./agent/model_storage |
@@ -761,7 +703,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 
 After you create the environment files above, you can start every service with a single command instead of launching each component manually:
 
-- **macOS/Linux**: `./tools/commands/start.sh` (or `make start`)
+- **macOS/Linux**: `./tools/commands/start.sh`
 - **Windows PowerShell**: `powershell -ExecutionPolicy Bypass -File .\tools\commands\start.ps1`
 - **Direct Python**: `python tools/commands/start_parallel.py`
 
@@ -788,7 +730,7 @@ Implement the centralized logging strategy described in [Logging Documentation](
 
 2. **Startup Clearing**
    - Each service should clear or archive previous logs during startup and emit a `system.startup` entry with a new `session_id`.
-   - The `start` command (`./tools/commands/start.sh` / `start.ps1`, `make start`, or `python tools/commands/start_parallel.py`) launches services in parallel and manages log files automatically; manual starts should clear logs before launching services.
+   - The `start` command (`./tools/commands/start.sh` / `start.ps1`, or `python tools/commands/start_parallel.py`) launches services in parallel and manages log files automatically; manual starts should clear logs before launching services.
 
 3. **Structured Logging**
    - Ensure log output is JSON-formatted with `service`, `component`, `session_id`, `correlation_id`, and `environment` fields.
@@ -799,7 +741,7 @@ Implement the centralized logging strategy described in [Logging Documentation](
 
 5. **Verification Checklist**
    - After startup, confirm that `logs/*/current.log` was regenerated and `system.startup` entries appear in each log file.
-   - Run `make logging:health` (or equivalent script) to validate writable directories, retention settings, and forwarding status.
+   - Validate logging setup by checking that log directories are writable and logs are being generated correctly.
 
 For detailed retention policies, schema definitions, and troubleshooting tips see [Logging Documentation](12-logging.md).
 
@@ -880,16 +822,14 @@ brew services start grafana
 ---
 
 ## Operations & Maintenance Commands
-Run these commands from the project root (`JackSparrow/`). Each command is available as both a shell script under `tools/commands/` and a Makefile target for macOS/Linux. PowerShell equivalents (`*.ps1`) are provided for Windows.
+Run these commands from the project root (`JackSparrow/`). Each command is available as a shell script under `tools/commands/` (`.sh` for macOS/Linux, `.ps1` for Windows PowerShell) or can be run directly as Python scripts.
 
 ### `start`
-Launch all JackSparrow services after the environment is configured using parallel process startup.
+Launch all JackSparrow services after the environment is configured using parallel process startup. The startup script automatically validates configuration and prerequisites before starting services.
 
 - macOS/Linux
   ```bash
   ./tools/commands/start.sh
-  # or
-  make start
   # or directly:
   python tools/commands/start_parallel.py
   ```
@@ -920,8 +860,6 @@ Perform a clean restart when configuration or dependencies change.
 - macOS/Linux
   ```bash
   ./tools/commands/restart.sh
-  # or
-  make restart
   ```
 - Windows PowerShell
   ```powershell
@@ -940,8 +878,6 @@ Run the full project audit pipeline before releases or after major refactors.
 - macOS/Linux
   ```bash
   ./tools/commands/audit.sh
-  # or
-  make audit
   ```
 - Windows PowerShell
   ```powershell
@@ -963,8 +899,6 @@ Capture live diagnostics whenever issues are suspected.
 - macOS/Linux
   ```bash
   ./tools/commands/error.sh
-  # or
-  make error
   ```
 - Windows PowerShell
   ```powershell
@@ -1038,7 +972,7 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 **Problem**: Agent not responding to backend requests
 
 **Solutions**:
-1. Check agent logs for errors (`logs/agent/current.log` or `make logs agent`)
+1. Check agent logs for errors (`logs/agent/current.log` or `logs/agent.log`)
 2. Verify message queue is working
 3. Check agent state machine status (see [Logic & Reasoning Documentation](05-logic-reasoning.md#enhanced-agent-state-machine))
 4. Verify agent has database access
@@ -1064,7 +998,7 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 **Problem**: `npm run dev` exits immediately with missing environment variables.
 
 **Solutions**:
-1. Confirm `.env.local` (or `.env`) contains `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`. Copy from `.env.example` if necessary.
+1. Confirm the root `.env` file contains `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL`. Copy from `.env.example` if necessary.
 2. Ensure Node.js 18+ is installed: `node --version` should report `v18.x` or newer. Upgrade via `nvm`, `fnm`, or the installer if required.
 3. Remove `.next/` and reinstall dependencies to clear stale build artefacts: `rm -rf .next node_modules && npm install`.
 4. Check for port conflicts on `3000` using `npx kill-port 3000` (macOS/Linux) or `Get-NetTCPConnection -LocalPort 3000` (Windows) and stop the offending process.
@@ -1105,9 +1039,14 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 export LOG_LEVEL=DEBUG
 ```
 
-**Run Logging Health Check**:
+**Verify Logging Setup**:
 ```bash
-make logging:health  # verifies directories, session ID, forwarding
+# Check that log directories exist and are writable
+ls -la logs/backend logs/agent logs/frontend
+
+# Verify logs are being generated
+tail -f logs/backend/current.log
+tail -f logs/agent/current.log
 ```
 
 **Manually Clear Logs Before Restart**:
@@ -1405,7 +1344,7 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - DELTA_EXCHANGE_API_KEY=${DELTA_EXCHANGE_API_KEY}
       - DELTA_EXCHANGE_API_SECRET=${DELTA_EXCHANGE_API_SECRET}
-      - DELTA_EXCHANGE_BASE_URL=${DELTA_EXCHANGE_BASE_URL:-https://api.delta.exchange}
+      - DELTA_EXCHANGE_BASE_URL=${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - API_KEY=${API_KEY}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -1438,7 +1377,7 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - DELTA_EXCHANGE_API_KEY=${DELTA_EXCHANGE_API_KEY}
       - DELTA_EXCHANGE_API_SECRET=${DELTA_EXCHANGE_API_SECRET}
-      - DELTA_EXCHANGE_BASE_URL=${DELTA_EXCHANGE_BASE_URL:-https://api.delta.exchange}
+      - DELTA_EXCHANGE_BASE_URL=${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
       - MODEL_PATH=/app/models/xgboost_BTCUSD_15m.pkl
       - MODEL_DIR=/app/agent/model_storage
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
@@ -1512,7 +1451,7 @@ FRONTEND_PORT=3000
 # Delta Exchange API
 DELTA_EXCHANGE_API_KEY=your_api_key
 DELTA_EXCHANGE_API_SECRET=your_api_secret
-DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
+DELTA_EXCHANGE_BASE_URL=https://api.india.delta.exchange
 
 # Security
 JWT_SECRET_KEY=your_jwt_secret_key_here
@@ -1604,14 +1543,19 @@ docker-compose exec agent pytest
 
 The project includes a development Docker setup that enables hot-reload, allowing code changes to be reflected immediately without rebuilding Docker images.
 
+> **📖 For comprehensive hot reload documentation**, see [Docker Hot Reload Guide](docker-hot-reload.md)
+
 #### Quick Start
 
 **Start development environment:**
 ```bash
-make docker-dev
-# or
-scripts/docker/dev-start.ps1 --Build
-scripts/docker/dev-start.sh --build
+# Using helper scripts (recommended)
+./scripts/docker/dev-start.sh --build
+# or on Windows
+.\scripts\docker\dev-start.ps1 -Build
+
+# Or manually
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 **Start with specific service:**
@@ -1625,16 +1569,16 @@ scripts/docker/dev-start.sh backend
 The development setup uses `docker-compose.dev.yml` which:
 
 1. **Mounts source code as volumes**: Code changes are immediately visible inside containers
-   - `./backend:/app/backend` - Backend source code
-   - `./agent:/app/agent` - Agent source code
-   - `./frontend:/app` - Frontend source code (excluding `node_modules` and `.next`)
+   - `./backend:/app/backend:rw` - Backend source code
+   - `./agent:/app/agent:rw` - Agent source code
+   - `./frontend:/app:rw` - Frontend source code (excluding `node_modules` and `.next`)
 
 2. **Uses development Dockerfiles**: `Dockerfile.dev` files install dependencies only (no source code COPY)
 
 3. **Enables hot-reload**:
    - **Backend**: `uvicorn --reload` automatically restarts on Python file changes
-   - **Frontend**: Next.js dev server (`npm run dev`) provides hot module replacement
-   - **Agent**: Python module reloads on `.py` file changes
+   - **Frontend**: Next.js dev server (`npm run dev`) provides hot module replacement (HMR)
+   - **Agent**: Custom file watcher (`watchdog`) monitors Python files and restarts the agent process on changes
 
 #### Development vs Production
 
@@ -1657,8 +1601,6 @@ The development setup uses `docker-compose.dev.yml` which:
 **Start development environment:**
 ```bash
 # First time (builds images)
-make docker-dev
-# or
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 # Subsequent starts (uses cached images)
@@ -1667,43 +1609,67 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 
 **View logs:**
 ```bash
-make docker-logs SERVICE=backend
-make docker-logs SERVICE=agent LEVEL=ERROR
+# View all logs
+docker-compose logs -f
+
+# View specific service logs
+docker-compose logs -f backend
+docker-compose logs -f agent
+
+# Filter logs by level (example: ERROR)
+docker-compose logs backend | grep ERROR
 ```
 
 **Start specific container:**
 ```bash
-make docker-start CONTAINER=backend
+docker-compose up -d backend
 ```
 
 **Audit errors:**
 ```bash
-make docker-audit
+# Check for errors in logs
+docker-compose logs | grep -i error
+
+# Check service status
+docker-compose ps
 ```
 
 #### Troubleshooting
 
 **Code changes not reflecting:**
-- Ensure you're using `docker-compose.dev.yml` override
-- Check volume mounts: `docker-compose config`
+- Ensure you're using `docker-compose.dev.yml` override: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml ps`
+- Check volume mounts: `docker-compose -f docker-compose.yml -f docker-compose.dev.yml config | grep volumes`
 - Verify file permissions on mounted volumes
+- Check logs for reload/restart messages: `docker-compose logs -f backend | grep -i reload`
+
+**Agent not restarting:**
+- Verify watchdog is installed: `docker-compose exec agent pip list | grep watchdog`
+- Check agent watcher logs: `docker-compose logs -f agent | grep -i watcher`
+- Manually restart: `docker-compose restart agent`
+
+**Frontend not updating:**
+- Check Next.js dev server is running: `docker-compose logs frontend | grep -i ready`
+- Hard refresh browser: `Ctrl+Shift+R` (Windows/Linux) or `Cmd+Shift+R` (macOS)
+- Check for compilation errors: `docker-compose logs -f frontend`
 
 **Performance issues:**
-- Development mode is slower than production
+- Development mode is slower than production (by design)
 - Use production mode for performance testing
 - Consider excluding large directories from volumes
 
 **Port conflicts:**
-- Check if ports are already in use: `netstat -an | grep 8000`
+- Check if ports are already in use: `netstat -an | grep 8000` (Unix) or `netstat -ano | findstr :8000` (Windows)
 - Modify ports in `.env` file if needed
+
+> **💡 For detailed troubleshooting**, see [Docker Hot Reload Guide - Troubleshooting](docker-hot-reload.md#troubleshooting)
 
 #### Best Practices
 
 1. **Use development mode** for active coding and debugging
 2. **Use production mode** for final testing and deployment
 3. **Rebuild images** when dependencies change (`--Build` flag)
-4. **Monitor logs** regularly for errors (`make docker-logs`)
-5. **Run audits** before committing (`make docker-audit`)
+4. **Monitor logs** regularly for errors (`docker-compose logs -f`)
+5. **Run audits** before committing (check logs with `docker-compose logs | grep -i error`)
 
 #### Production Configuration
 
@@ -1919,6 +1885,7 @@ When deploying to production with Docker:
 - [Backend Documentation](06-backend.md) - API implementation
 - [Logging Documentation](12-logging.md) - Centralized logging plan and procedures
 - [Frontend Documentation](07-frontend.md) - Frontend implementation
+- [Docker Hot Reload Guide](docker-hot-reload.md) - Hot reload setup and usage
 - [Project Rules](14-project-rules.md) - Development standards
 
 ---

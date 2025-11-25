@@ -39,7 +39,7 @@ export function SystemClock({ className }: SystemClockProps) {
         )}
         aria-hidden="true"
       />
-      <span className="text-foreground">
+      <span className="text-foreground" suppressHydrationWarning>
         {formatDateTime(currentTime)}
       </span>
       {!isSynced && !syncError && (

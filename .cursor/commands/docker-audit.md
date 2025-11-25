@@ -4,6 +4,8 @@ Scan all Docker container logs for errors and generate comprehensive audit repor
 
 ## Usage
 
+**Related Commands**: See [audit.md](audit.md) for system-wide audit, [docker-logs.md](docker-logs.md) for log viewing.
+
 ```bash
 make docker-audit
 # or

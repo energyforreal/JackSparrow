@@ -10,6 +10,7 @@ import pickle
 import sys
 import types
 import time
+import warnings
 import numpy as np
 import structlog
 from xgboost import XGBClassifier
@@ -64,15 +65,127 @@ class XGBoostNode(MCPModelNode):
     async def initialize(self):
         """Initialize model."""
         try:
+            # Validate file exists and is readable
+            if not self.model_path.exists():
+                raise FileNotFoundError(f"Model file not found: {self.model_path}")
+            
+            if not self.model_path.is_file():
+                raise ValueError(f"Model path is not a file: {self.model_path}")
+            
+            # Check file size (corrupted files are often very small or empty)
+            file_size = self.model_path.stat().st_size
+            if file_size == 0:
+                raise ValueError(f"Model file is empty: {self.model_path}")
+            if file_size < 100:  # XGBoost models are typically at least a few KB
+                logger.warning(
+                    "xgboost_model_suspicious_size",
+                    model_path=str(self.model_path),
+                    file_size=file_size,
+                    message="Model file is unusually small - may be corrupted"
+                )
+            
+            # Try to validate pickle file format before loading
+            try:
+                with open(self.model_path, "rb") as f:
+                    # Read first few bytes to check pickle magic bytes
+                    magic_bytes = f.read(4)
+                    # Pickle files typically start with specific byte sequences
+                    # Python 3 pickle: b'\x80\x03' or b'\x80\x04' or b'\x80\x05'
+                    if not magic_bytes.startswith(b'\x80'):
+                        logger.warning(
+                            "xgboost_model_invalid_format",
+                            model_path=str(self.model_path),
+                            magic_bytes=magic_bytes.hex(),
+                            message="File does not appear to be a valid pickle file"
+                        )
+            except Exception as e:
+                logger.warning(
+                    "xgboost_model_format_check_failed",
+                    model_path=str(self.model_path),
+                    error=str(e),
+                    message="Could not validate file format before loading"
+                )
+            
             _ensure_pickle_compatibility()
-            with open(self.model_path, "rb") as f:
-                self.model = pickle.load(f)
+            
+            # Catch XGBoost compatibility warnings and log them informatively
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                
+                try:
+                    with open(self.model_path, "rb") as f:
+                        self.model = pickle.load(f)
+                except (pickle.UnpicklingError, EOFError, ValueError) as e:
+                    # These errors typically indicate corrupted pickle files
+                    error_msg = str(e)
+                    if "invalid load key" in error_msg.lower() or "unpickling" in error_msg.lower():
+                        raise ValueError(
+                            f"Model file appears to be corrupted or in an incompatible format: {error_msg}. "
+                            f"Please regenerate the model file or remove it from the model storage directory."
+                        ) from e
+                    raise
+                
+                # Check for XGBoost compatibility warnings
+                xgboost_warnings = [
+                    warning for warning in w 
+                    if "xgboost" in str(warning.message).lower() or 
+                       "serialized model" in str(warning.message).lower() or
+                       "older version" in str(warning.message).lower()
+                ]
+                
+                if xgboost_warnings:
+                    logger.info(
+                        "xgboost_model_compatibility_warning",
+                        model_path=str(self.model_path),
+                        model_name=self._model_name,
+                        warning_message=str(xgboost_warnings[0].message),
+                        message="Model loaded successfully but was serialized with an older XGBoost version. "
+                               "For best compatibility, re-export the model using Booster.save_model() from the original version, "
+                               "then load it in the current version. See: https://xgboost.readthedocs.io/en/stable/tutorials/saving_model.html"
+                    )
+            
+            # Validate loaded model
+            if self.model is None:
+                raise ValueError("Model loaded but is None")
+            
             self.health_status = "healthy"
-        except Exception as e:
+            logger.info(
+                "xgboost_model_loaded",
+                model_path=str(self.model_path),
+                model_name=self._model_name,
+                health_status=self.health_status,
+                file_size_bytes=file_size
+            )
+        except (pickle.UnpicklingError, EOFError, ValueError) as e:
+            # Corrupted file errors
+            error_msg = str(e)
+            is_corrupted = (
+                "invalid load key" in error_msg.lower() or
+                "unpickling" in error_msg.lower() or
+                "corrupted" in error_msg.lower() or
+                "eof" in error_msg.lower()
+            )
+            
             logger.error(
                 "xgboost_model_load_failed",
                 model_path=str(self.model_path),
+                model_name=self._model_name,
+                error=error_msg,
+                error_type=type(e).__name__,
+                is_corrupted=is_corrupted,
+                message="Model file failed to load. If the file is corrupted, remove it from the model storage directory "
+                       "or regenerate it. The agent will continue without this model." if is_corrupted else None,
+                exc_info=True
+            )
+            self.health_status = "unhealthy"
+        except Exception as e:
+            # Other errors
+            logger.error(
+                "xgboost_model_load_failed",
+                model_path=str(self.model_path),
+                model_name=self._model_name,
                 error=str(e),
+                error_type=type(e).__name__,
                 exc_info=True
             )
             self.health_status = "unhealthy"

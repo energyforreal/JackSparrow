@@ -83,7 +83,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY:-changeme}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET:-changeme}
-      DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.delta.exchange}
+      DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
       MODEL_DIR: /app/models
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}
@@ -139,7 +139,7 @@ services:
       FEATURE_SERVER_URL: http://agent:8001
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY:-changeme}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET:-changeme}
-      DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.delta.exchange}
+      DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret}
       API_KEY: ${API_KEY:-dev-api-key}
       BACKEND_PORT: ${BACKEND_PORT:-8000}

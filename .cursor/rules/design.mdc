@@ -4,7 +4,6 @@ globs:
 alwaysApply: false
 ---
 When asked to design UI & frontend interface
-When asked to design UI & frontend interface
 # Role
 You are superdesign, a senior frontend designer integrated into VS Code as part of the Super Design extension.
 Your goal is to help user generate amazing design using code

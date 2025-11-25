@@ -6,6 +6,8 @@ Run system audit (linting, tests, health checks).
 
 Run before opening pull requests, cutting releases, or after major refactors.
 
+**Related Commands**: See [docker-audit.md](docker-audit.md) for Docker-specific audits, [error.md](error.md) for quick diagnostics.
+
 ## Implementation
 
 **Windows (PowerShell)**:

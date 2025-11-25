@@ -810,29 +810,35 @@ Refer to [Logging Documentation](12-logging.md) for rotation policy, retention s
 
 ### Environment Variables
 
+**Single Root `.env` File**: The backend reads environment variables from the **root `.env` file** in the project root directory via `ROOT_ENV_PATH` in `backend/core/config.py`. No service-specific `.env` files are needed.
+
+**Setup**: Copy `.env.example` to `.env` in the project root and configure your values. See `.env.example` for the complete list of all available variables.
+
+**Key Backend Variables:**
+
 ```bash
-# Database
+# Database (REQUIRED)
 DATABASE_URL=postgresql://user:pass@localhost/trading_agent
 
 # Redis
 REDIS_URL=redis://localhost:6379
 
-# Delta Exchange
+# Delta Exchange (REQUIRED)
 DELTA_EXCHANGE_API_KEY=your_api_key
 DELTA_EXCHANGE_API_SECRET=your_api_secret
-DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
+DELTA_EXCHANGE_BASE_URL=https://api.india.delta.exchange
 
-# Agent
+# Agent Communication
 AGENT_COMMAND_QUEUE=agent_commands
 AGENT_RESPONSE_QUEUE=agent_responses
 
 # Feature Server
 FEATURE_SERVER_URL=http://localhost:8001
 
-# Vector Database
+# Vector Database (Optional)
 QDRANT_URL=http://localhost:6333
 
-# Security
+# Security (REQUIRED)
 JWT_SECRET_KEY=your_secret_key
 API_KEY=your_api_key
 
@@ -842,13 +848,8 @@ TELEGRAM_CHAT_ID=
 
 # Logging
 LOG_LEVEL=INFO
-LOG_DIR=./logs/backend
-LOG_RETENTION_DAYS=7
-LOG_ARCHIVE_MODE=archive  # or delete
-LOG_SESSION_ID=  # optional override
 LOG_FORWARDING_ENABLED=false
 LOG_FORWARDING_ENDPOINT=
-LOG_INCLUDE_STACKTRACE=false
 ```
 
 When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are populated, the backend automatically publishes trade notifications to the configured chat. Leaving either value blank disables the integration without requiring code changes.
@@ -865,7 +866,7 @@ Deployment checklist for Telegram alerts:
 
 1. Create a bot with [@BotFather](https://core.telegram.org/bots#botfather) and record the token.
 2. Obtain the chat ID (e.g., via @userinfobot or a simple script using `getUpdates`).
-3. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the root or backend `.env`.
+3. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the root `.env` file.
 4. Restart the backend so the new configuration is applied.
 
 ---
@@ -882,7 +883,7 @@ The project-level commands documented in the [Build Guide](11-build-guide.md#pro
 ### `restart`
 - Gracefully stops the running `uvicorn` process via the stop routine
 - Clears cached sockets/PID files under `tmp/`
-- Re-sources environment variables from `backend/.env`
+- Re-sources environment variables from the root `.env` file
 - Archives previous backend logs to `logs/restart/<timestamp>/backend.log`
 - Invokes the `start` command to bring the service back online
 

@@ -58,17 +58,23 @@ RUN groupadd -r agent && useradd -r -g agent agent && \
 # Copy Python dependencies from builder
 COPY --from=builder --chown=agent:agent /root/.local /home/agent/.local
 
+# Copy dev watcher script (will be overridden by volume mount, but ensures it exists)
+COPY --chown=agent:agent agent/scripts/dev_watcher.py /app/agent/scripts/dev_watcher.py
+
 # Note: Source code will be mounted as volume in docker-compose.dev.yml
 # No COPY of source code here - this enables hot-reload
 
 # Switch to non-root user
 USER agent
 
+# Install watchdog for file watching (development only) - must be after USER to install in agent's home
+RUN pip install --user --no-warn-script-location watchdog
+
 EXPOSE 8001
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -m agent.healthcheck || exit 1
 
-# Development command (Python will auto-reload on .py file changes)
-CMD ["python", "-m", "agent.core.intelligent_agent"]
+# Development command with file watcher for hot-reload
+CMD ["python", "-m", "agent.scripts.dev_watcher"]
 

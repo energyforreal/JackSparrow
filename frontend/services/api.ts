@@ -11,6 +11,20 @@ if (!API_URL && process.env.NODE_ENV === 'production') {
 
 const API_KEY = process.env.NEXT_PUBLIC_BACKEND_API_KEY
 
+// Log API key status in development
+if (process.env.NODE_ENV === 'development') {
+  if (!API_KEY) {
+    console.warn(
+      '⚠️  NEXT_PUBLIC_BACKEND_API_KEY is not set. API requests may fail with 401 Unauthorized.\n' +
+      '   Set NEXT_PUBLIC_BACKEND_API_KEY in your .env file or ensure API_KEY is set in root .env file.'
+    )
+  } else {
+    console.log(
+      `✓ API Key loaded: ${API_KEY.substring(0, 8)}... (length: ${API_KEY.length})`
+    )
+  }
+}
+
 interface ApiError {
   error?: {
     code?: string

@@ -18,7 +18,7 @@ This report documents the audit of all documentation files against reference spe
 
 The audit workflow is encapsulated in the `audit` command. Execute it from the project root using one of the following entry points:
 
-- macOS/Linux: `./tools/commands/audit.sh` (or `make audit`)
+- macOS/Linux: `./tools/commands/audit.sh`
 - Windows PowerShell: `powershell -ExecutionPolicy Bypass -File .\tools\commands\audit.ps1`
 
 The command performs the following checks:

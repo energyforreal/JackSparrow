@@ -410,56 +410,175 @@ Each service logs to `logs/{service}.log` while also streaming to the console wi
 
 ## Docker Compose Deployment
 
-Use Docker when you need repeatable 24/7 runtimes or remote deployments.
+Use Docker when you need repeatable 24/7 runtimes or remote deployments. The Docker deployment includes production-ready configurations, optimized multi-stage builds, non-root users, resource limits, and health checks.
+
+For comprehensive Docker deployment documentation, see [Docker Deployment Guide](DOCKER_DEPLOYMENT.md).
 
 ### Prerequisites
 
-- Docker Engine 24+
-- Docker Compose V2 (`docker compose` CLI)
-- Updated `.env` / service env files containing:
+- **Docker Engine 24+** ([Install Docker](https://docs.docker.com/get-docker/))
+- **Docker Compose V2** (`docker compose` CLI)
+- **Environment Configuration**: Create `.env` file from `.env.example` with:
   - `DELTA_EXCHANGE_API_KEY`, `DELTA_EXCHANGE_API_SECRET`
   - `JWT_SECRET_KEY`, `API_KEY`
-  - `POSTGRES_PASSWORD` (optional `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PORT`)
+  - `POSTGRES_PASSWORD` (and optionally `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PORT`)
 
-### Prepare persistent assets
+### Quick Start
 
+**1. Prepare persistent assets:**
 ```bash
 mkdir -p logs/backend logs/agent logs/frontend models
 touch kubera_pokisham.db
 ```
 
-### Bring the stack online
-
+**2. Create environment file:**
 ```bash
+# Copy the example template
+cp .env.example .env
+
+# Edit .env with your configuration
+# Required: DELTA_EXCHANGE_API_KEY, DELTA_EXCHANGE_API_SECRET, JWT_SECRET_KEY, API_KEY, POSTGRES_PASSWORD
+```
+
+**3. Build and start services:**
+```bash
+# Using deployment scripts (recommended)
+./scripts/docker/build.sh
+./scripts/docker/deploy.sh up
+
+# Or using docker-compose directly
 docker compose up --build -d
-docker compose ps
-docker compose logs -f backend   # or agent/frontend/postgres
 ```
 
-### What the stack includes
-
-| Service   | Image/Build                     | Port | Notes |
-|-----------|---------------------------------|------|-------|
-| postgres  | `timescale/timescaledb:pg15`    | 5432 | Health-checked, data stored in `postgres-data` volume |
-| redis     | `redis:7.2-alpine`              | 6379 | Append-only mode, data stored in `redis-data` volume |
-| agent     | `agent/Dockerfile`              | 8001 | Mounts `./models`, `./logs/agent`, `./kubera_pokisham.db` |
-| backend   | `backend/Dockerfile`            | 8000 | Mounts `./logs/backend`, reuses same DB + Redis |
-| frontend  | `frontend/Dockerfile`           | 3000 | Connects to backend/WS URLs provided via env |
-
-Additional notes:
-
-- `./models` is bind-mounted to `/app/models` so the agent can access production model files without copying them into the image.
-- `./logs/<service>` directories collect structured logs emitted from each container.
-- `./kubera_pokisham.db` is mounted into `/data/kubera_pokisham.db` so legacy SQLite workflows and analytics scripts continue to function.
-- Named volumes `postgres-data` and `redis-data` retain TimescaleDB/Redis state across restarts.
-- Customize any exposed port by defining `BACKEND_PORT`, `FRONTEND_PORT`, `FEATURE_SERVER_PORT`, `POSTGRES_PORT`, or `REDIS_PORT` in your `.env`.
-
-### Shutdown & teardown
-
+**4. Verify deployment:**
 ```bash
-docker compose down          # stop containers, keep volumes
-docker compose down -v       # stop containers and remove postgres/redis volumes
+# Check service health
+./scripts/docker/healthcheck.sh
+
+# Or manually
+docker compose ps
+docker compose logs -f
 ```
+
+### Service Architecture
+
+| Service   | Image/Build                     | Port | Resource Limits | Notes |
+|-----------|---------------------------------|------|-----------------|-------|
+| postgres  | `timescale/timescaledb:2.13.1-pg15` | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
+| redis     | `redis:7.2-alpine`              | 6379 | 1 CPU, 512MB RAM | Append-only mode, persistent volume |
+| agent     | `agent/Dockerfile`              | 8001 | 4 CPU, 4GB RAM | Multi-stage build, ML-optimized |
+| backend   | `backend/Dockerfile`            | 8000 | 2 CPU, 2GB RAM | Multi-stage build, non-root user |
+| frontend  | `frontend/Dockerfile`           | 3000 | 1 CPU, 1GB RAM | Multi-stage build, production-ready |
+
+### Key Features
+
+**Production-Ready Configuration:**
+- Multi-stage Dockerfile builds for smaller images
+- Non-root users for enhanced security
+- Resource limits to prevent resource exhaustion
+- Health checks for automatic container management
+- Restart policies (`unless-stopped`) for automatic recovery
+- Log rotation (10MB max size, 3 files retention)
+
+**Volume Management:**
+- `./models` → `/app/models` (bind-mounted for agent model access)
+- `./logs/<service>` → `/logs` (structured logs from each container)
+- `./kubera_pokisham.db` → `/data/kubera_pokisham.db` (legacy SQLite support)
+- `postgres-data` volume (TimescaleDB persistent storage)
+- `redis-data` volume (Redis persistent storage)
+
+**Network Isolation:**
+- All services communicate on isolated Docker network (`jacksparrow-network`)
+- Internal DNS resolution using service names (e.g., `postgres`, `redis`, `agent`)
+
+### Deployment Scripts
+
+The project includes deployment scripts in `scripts/docker/`:
+
+**Build Scripts:**
+```bash
+# Unix/Linux/macOS
+./scripts/docker/build.sh [VERSION] [COMMIT_SHA]
+
+# Windows PowerShell
+.\scripts\docker\build.ps1 -Version "1.0.0" -CommitSha "abc123"
+```
+
+**Deploy Scripts:**
+```bash
+# Start services
+./scripts/docker/deploy.sh up
+
+# Stop services
+./scripts/docker/deploy.sh down
+
+# Restart services
+./scripts/docker/deploy.sh restart
+
+# Rolling update
+./scripts/docker/deploy.sh update
+
+# View logs
+./scripts/docker/deploy.sh logs
+```
+
+**Health Check Script:**
+```bash
+# Check all services
+./scripts/docker/healthcheck.sh
+```
+
+### Common Operations
+
+**View logs:**
+```bash
+docker compose logs -f [service]  # Follow logs for specific service
+docker compose logs --tail=100    # Last 100 lines from all services
+```
+
+**Execute commands in containers:**
+```bash
+# Run database migrations
+docker compose exec backend python scripts/setup_db.py
+
+# Access PostgreSQL
+docker compose exec postgres psql -U jacksparrow -d trading_agent
+
+# Access Redis CLI
+docker compose exec redis redis-cli
+```
+
+**Shutdown & teardown:**
+```bash
+# Stop containers (keep volumes)
+docker compose down
+
+# Stop and remove volumes (WARNING: deletes data)
+docker compose down -v
+
+# Stop specific service
+docker compose stop backend
+```
+
+### Troubleshooting
+
+See [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#troubleshooting) for comprehensive troubleshooting steps.
+
+**Common Issues:**
+- **Port conflicts**: Update port in `.env` file (e.g., `BACKEND_PORT=8001`)
+- **Volume permissions**: Fix with `sudo chown -R $USER:$USER logs/ models/`
+- **Database connection**: Verify `DATABASE_URL` uses service name `postgres`, not `localhost`
+- **Health checks failing**: Check logs with `docker compose logs [service]`
+
+### Production Deployment
+
+For production deployments, see [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#production-deployment) for:
+- Security hardening checklist
+- Secrets management
+- HTTPS/TLS configuration
+- Backup strategies
+- Monitoring and alerting
+- Scaling considerations
 
 ---
 
@@ -1481,40 +1600,110 @@ docker-compose exec agent pytest
 
 ---
 
-### Development vs Production
+### Development Workflow with Hot-Reload
 
-#### Development Configuration
+The project includes a development Docker setup that enables hot-reload, allowing code changes to be reflected immediately without rebuilding Docker images.
 
-For development with hot-reload, use `docker-compose.dev.yml`:
+#### Quick Start
 
-```yaml
-version: '3.8'
-
-services:
-  backend:
-    volumes:
-      - ./backend:/app
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-
-  agent:
-    volumes:
-      - ./agent:/app
-      - ./models:/app/models
-
-  frontend:
-    build:
-      target: builder
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
-    command: npm run dev
+**Start development environment:**
+```bash
+make docker-dev
+# or
+scripts/docker/dev-start.ps1 --Build
+scripts/docker/dev-start.sh --build
 ```
 
-Run development stack:
+**Start with specific service:**
 ```bash
+scripts/docker/dev-start.ps1 backend
+scripts/docker/dev-start.sh backend
+```
+
+#### How It Works
+
+The development setup uses `docker-compose.dev.yml` which:
+
+1. **Mounts source code as volumes**: Code changes are immediately visible inside containers
+   - `./backend:/app/backend` - Backend source code
+   - `./agent:/app/agent` - Agent source code
+   - `./frontend:/app` - Frontend source code (excluding `node_modules` and `.next`)
+
+2. **Uses development Dockerfiles**: `Dockerfile.dev` files install dependencies only (no source code COPY)
+
+3. **Enables hot-reload**:
+   - **Backend**: `uvicorn --reload` automatically restarts on Python file changes
+   - **Frontend**: Next.js dev server (`npm run dev`) provides hot module replacement
+   - **Agent**: Python module reloads on `.py` file changes
+
+#### Development vs Production
+
+**Development Mode** (`docker-compose.dev.yml`):
+- ✅ Hot-reload enabled
+- ✅ Source code mounted as volumes
+- ✅ Faster iteration (no rebuild needed)
+- ✅ Development dependencies included
+- ⚠️ Not optimized for production performance
+
+**Production Mode** (`docker-compose.yml`):
+- ✅ Optimized builds
+- ✅ Source code baked into images
+- ✅ Production dependencies only
+- ✅ Better security and performance
+- ⚠️ Requires rebuild for code changes
+
+#### Development Commands
+
+**Start development environment:**
+```bash
+# First time (builds images)
+make docker-dev
+# or
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Subsequent starts (uses cached images)
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
+
+**View logs:**
+```bash
+make docker-logs SERVICE=backend
+make docker-logs SERVICE=agent LEVEL=ERROR
+```
+
+**Start specific container:**
+```bash
+make docker-start CONTAINER=backend
+```
+
+**Audit errors:**
+```bash
+make docker-audit
+```
+
+#### Troubleshooting
+
+**Code changes not reflecting:**
+- Ensure you're using `docker-compose.dev.yml` override
+- Check volume mounts: `docker-compose config`
+- Verify file permissions on mounted volumes
+
+**Performance issues:**
+- Development mode is slower than production
+- Use production mode for performance testing
+- Consider excluding large directories from volumes
+
+**Port conflicts:**
+- Check if ports are already in use: `netstat -an | grep 8000`
+- Modify ports in `.env` file if needed
+
+#### Best Practices
+
+1. **Use development mode** for active coding and debugging
+2. **Use production mode** for final testing and deployment
+3. **Rebuild images** when dependencies change (`--Build` flag)
+4. **Monitor logs** regularly for errors (`make docker-logs`)
+5. **Run audits** before committing (`make docker-audit`)
 
 #### Production Configuration
 

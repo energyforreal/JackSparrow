@@ -38,11 +38,25 @@ def setup_database():
         engine = create_engine(database_url, echo=False)
         
         with engine.connect() as conn:
-            # Enable TimescaleDB extension
+            # Enable TimescaleDB extension (optional)
             print("Enabling TimescaleDB extension...")
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
-            conn.commit()
-            print("✓ TimescaleDB extension enabled")
+            timescaledb_available = False
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
+                conn.commit()
+                print("✓ TimescaleDB extension enabled")
+                timescaledb_available = True
+            except Exception as e:
+                if "timescaledb" in str(e).lower() and "not available" in str(e).lower():
+                    # Rollback the failed transaction
+                    conn.rollback()
+                    print("⚠ TimescaleDB extension is not installed")
+                    print("  Tables will be created as regular PostgreSQL tables (not hypertables)")
+                    print("  To install TimescaleDB, see: https://docs.timescale.com/install/latest/self-hosted/")
+                    timescaledb_available = False
+                else:
+                    conn.rollback()
+                    raise
             
             # Create trades table (hypertable)
             print("Creating trades table...")
@@ -65,13 +79,16 @@ def setup_database():
             """))
             conn.commit()
             
-            # Convert trades to hypertable
-            conn.execute(text("""
-                SELECT create_hypertable('trades', 'executed_at', 
-                    if_not_exists => TRUE);
-            """))
-            conn.commit()
-            print("✓ Trades table created as hypertable")
+            # Convert trades to hypertable (if TimescaleDB available)
+            if timescaledb_available:
+                conn.execute(text("""
+                    SELECT create_hypertable('trades', 'executed_at', 
+                        if_not_exists => TRUE);
+                """))
+                conn.commit()
+                print("✓ Trades table created as hypertable")
+            else:
+                print("✓ Trades table created (regular table)")
             
             # Create positions table
             print("Creating positions table...")
@@ -116,13 +133,16 @@ def setup_database():
             """))
             conn.commit()
             
-            # Convert decisions to hypertable
-            conn.execute(text("""
-                SELECT create_hypertable('decisions', 'timestamp', 
-                    if_not_exists => TRUE);
-            """))
-            conn.commit()
-            print("✓ Decisions table created as hypertable")
+            # Convert decisions to hypertable (if TimescaleDB available)
+            if timescaledb_available:
+                conn.execute(text("""
+                    SELECT create_hypertable('decisions', 'timestamp', 
+                        if_not_exists => TRUE);
+                """))
+                conn.commit()
+                print("✓ Decisions table created as hypertable")
+            else:
+                print("✓ Decisions table created (regular table)")
             
             # Create performance_metrics table
             print("Creating performance_metrics table...")
@@ -140,13 +160,16 @@ def setup_database():
             """))
             conn.commit()
             
-            # Convert performance_metrics to hypertable
-            conn.execute(text("""
-                SELECT create_hypertable('performance_metrics', 'timestamp', 
-                    if_not_exists => TRUE);
-            """))
-            conn.commit()
-            print("✓ Performance metrics table created as hypertable")
+            # Convert performance_metrics to hypertable (if TimescaleDB available)
+            if timescaledb_available:
+                conn.execute(text("""
+                    SELECT create_hypertable('performance_metrics', 'timestamp', 
+                        if_not_exists => TRUE);
+                """))
+                conn.commit()
+                print("✓ Performance metrics table created as hypertable")
+            else:
+                print("✓ Performance metrics table created (regular table)")
             
             # Create model_performance table
             print("Creating model_performance table...")
@@ -167,13 +190,16 @@ def setup_database():
             """))
             conn.commit()
             
-            # Convert model_performance to hypertable
-            conn.execute(text("""
-                SELECT create_hypertable('model_performance', 'timestamp', 
-                    if_not_exists => TRUE);
-            """))
-            conn.commit()
-            print("✓ Model performance table created as hypertable")
+            # Convert model_performance to hypertable (if TimescaleDB available)
+            if timescaledb_available:
+                conn.execute(text("""
+                    SELECT create_hypertable('model_performance', 'timestamp', 
+                        if_not_exists => TRUE);
+                """))
+                conn.commit()
+                print("✓ Model performance table created as hypertable")
+            else:
+                print("✓ Model performance table created (regular table)")
             
             # Create indexes
             print("Creating indexes...")

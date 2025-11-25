@@ -225,7 +225,7 @@ JackSparrow/
 │   ├── implementation_guide.md
 │   └── improvements_summary.md
 │
-├── Makefile                             # Project command targets (start/restart/audit/error)
+├── tools/commands/                      # Command scripts (start, restart, audit, error)
 ├── logs/                                # Aggregated outputs from start/restart/audit/error
 ├── .env                                 # Runtime configuration (ignored from version control)
 ├── .env.example                       # Environment variables template
@@ -575,13 +575,16 @@ tests/unit/backend/test_agent_service.py
 
 ### Command Automation
 
-**Makefile (root)**:
-- `make start`: Launches backend, agent, and frontend services simultaneously using parallel process manager; streams real-time logs to console and writes to `logs/{service}.log`.
-- `make restart`: Stops running services, clears temporary artefacts, re-executes `make start`, and archives previous logs under `logs/restart/`.
-- `make audit`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
-- `make error`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
+**Command Scripts (tools/commands/)**:
+- `start_parallel.py`: Launches backend, agent, and frontend services simultaneously using parallel process manager; streams real-time logs to console and writes to `logs/{service}.log`. Automatically validates configuration and prerequisites before starting.
+- `start.sh` / `start.ps1`: Shell script wrappers for `start_parallel.py` (Linux/macOS and Windows respectively).
+- `restart.sh` / `restart.ps1`: Stops running services, clears temporary artefacts, re-executes start command, and archives previous logs under `logs/restart/`.
+- `audit.sh` / `audit.ps1`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
+- `error.sh` / `error.ps1`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
+- `validate-prerequisites.py`: Validates system prerequisites (Python, Node.js, PostgreSQL, Redis).
+- `health-check.py`: Checks health of running services.
 
-Supporting helper scripts live under `scripts/commands/` (when present) and are invoked automatically by the Makefile targets.
+Supporting helper scripts live under `scripts/` and are invoked automatically by the command scripts.
 
 ---
 
@@ -601,7 +604,7 @@ Supporting helper scripts live under `scripts/commands/` (when present) and are 
 ### Invocation Options
 - Direct Python execution (`python tools/commands/start_parallel.py`) - recommended for fastest startup
 - Direct script execution (`./tools/commands/start.sh` or `start.ps1`)
-- Makefile wrappers (`make start`, `make audit`, etc.)
+- Command scripts (`tools/commands/start_parallel.py`, `tools/commands/audit.sh`, etc.)
 - PowerShell scripts for Windows environments
 
 ### Log Outputs

@@ -151,6 +151,34 @@ class MarketDataService:
         }
         return interval_map.get(interval, 60)
     
+    @staticmethod
+    def _calculate_candle_time_range(resolution: str, candle_count: int) -> tuple[int, int]:
+        """Calculate start and end timestamps for candle request.
+        
+        Args:
+            resolution: Candle resolution (e.g., "15m", "1h", "4h", "1d")
+            candle_count: Number of candles to retrieve
+            
+        Returns:
+            Tuple of (start_timestamp, end_timestamp) in Unix seconds
+        """
+        import time
+        
+        # Map resolution to seconds per candle
+        resolution_seconds = {
+            "1m": 60, "3m": 180, "5m": 300, "15m": 900,
+            "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400,
+            "6h": 21600, "1d": 86400, "1w": 604800
+        }
+        
+        seconds_per_candle = resolution_seconds.get(resolution.lower(), 3600)
+        total_seconds = candle_count * seconds_per_candle
+        
+        end_time = int(time.time())
+        start_time = end_time - total_seconds
+        
+        return start_time, end_time
+    
     async def _check_and_emit_ticker(self, symbol: str):
         """Check ticker and emit tick event if changed."""
         try:
@@ -332,24 +360,37 @@ class MarketDataService:
             return cached
         
         try:
-            # Map interval to Delta Exchange resolution
+            # Map interval to Delta Exchange resolution (must be lowercase)
             resolution_map = {
-                "15m": "15M",
-                "1h": "1H",
-                "4h": "4H",
-                "1d": "1D"
+                "15m": "15m",
+                "1h": "1h",
+                "4h": "4h",
+                "1d": "1d"
             }
-            resolution = resolution_map.get(interval, "1H")
+            resolution = resolution_map.get(interval, "1h")
+            
+            # Calculate start and end timestamps from limit and interval
+            start_time, end_time = self._calculate_candle_time_range(resolution, limit)
             
             # Fetch from Delta Exchange
             response = await self.delta_client.get_candles(
                 symbol=symbol,
                 resolution=resolution,
-                limit=limit
+                start=start_time,
+                end=end_time
             )
             
-            # Parse response
-            candles = response.get("result", {}).get("candles", [])
+            # Parse response - handle different response structures
+            # API might return {"result": {"candles": [...]}} or {"result": [...]} or just [...]
+            candles = []
+            if isinstance(response, dict):
+                result = response.get("result")
+                if isinstance(result, dict):
+                    candles = result.get("candles", [])
+                elif isinstance(result, list):
+                    candles = result
+            elif isinstance(response, list):
+                candles = response
             
             # Convert to standard format
             formatted_candles = []

@@ -23,7 +23,9 @@ interface UseSystemClockReturn {
  * - WebSocket time sync support
  */
 export function useSystemClock(): UseSystemClockReturn {
-  const [currentTime, setCurrentTime] = useState<Date>(() => new Date())
+  // Initialize with epoch to prevent hydration mismatch (server/client time difference)
+  // Will be updated immediately after mount on client-side only
+  const [currentTime, setCurrentTime] = useState<Date>(() => new Date(0))
   const [isSynced, setIsSynced] = useState(false)
   const [syncError, setSyncError] = useState<Error | null>(null)
   
@@ -86,8 +88,12 @@ export function useSystemClock(): UseSystemClockReturn {
     }
   }
 
-  // Initial sync on mount
+  // Initial sync on mount (client-side only)
   useEffect(() => {
+    // Set initial time immediately on client mount to prevent hydration mismatch
+    setCurrentTime(new Date())
+    
+    // Then sync with server
     syncWithServer()
     
     // Periodic sync every 5 minutes

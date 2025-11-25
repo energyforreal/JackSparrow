@@ -4,6 +4,8 @@ Analyze Docker container logs with filtering and export capabilities.
 
 ## Usage
 
+**Related Commands**: See [docker-audit.md](docker-audit.md) for error auditing, [error.md](error.md) for quick diagnostics.
+
 ```bash
 make docker-logs [SERVICE=backend] [LEVEL=ERROR] [TAIL=100]
 # or

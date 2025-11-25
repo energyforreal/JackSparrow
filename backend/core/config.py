@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         description="Delta Exchange API secret"
     )
     delta_exchange_base_url: str = Field(
-        default="https://api.delta.exchange",
+        default="https://api.india.delta.exchange",
         env=("DELTA_EXCHANGE_BASE_URL", "DELTA_API_URL", "delta_api_url"),
         description="Delta Exchange API base URL"
     )
@@ -107,6 +107,11 @@ class Settings(BaseSettings):
         env="LOG_LEVEL",
         description="Logging level"
     )
+    backend_log_level: Optional[str] = Field(
+        default=None,
+        env="BACKEND_LOG_LEVEL",
+        description="Backend-specific logging level (overrides LOG_LEVEL)"
+    )
     log_forwarding_enabled: bool = Field(
         default=False,
         env="LOG_FORWARDING_ENABLED",
@@ -116,6 +121,11 @@ class Settings(BaseSettings):
         default=None,
         env="LOG_FORWARDING_ENDPOINT",
         description="Log forwarding endpoint URL"
+    )
+    log_include_stacktrace: bool = Field(
+        default=False,
+        env="LOG_INCLUDE_STACKTRACE",
+        description="Include stack traces in logs"
     )
     
     # Backend Configuration
@@ -226,12 +236,57 @@ except Exception as e:
     # Configuration errors must be printed to stderr since logger may not be initialized
     # This is acceptable for startup errors that prevent the application from starting
     import sys
+    
+    # Check if .env file exists to provide more specific guidance
+    env_exists = ROOT_ENV_PATH.exists()
+    
+    # Try to extract which field failed from Pydantic error
+    error_str = str(e)
+    missing_field = None
+    if "field required" in error_str.lower():
+        # Try to extract field name from error message
+        import re
+        match = re.search(r"['\"]([^'\"]+)['\"]", error_str)
+        if match:
+            missing_field = match.group(1)
+    
     error_msg = f"""
 {'='*70}
 ERROR: Failed to load backend configuration
 {'='*70}
 
-Error: {str(e)}
+Error: {error_str}
+"""
+    
+    if env_exists:
+        error_msg += f"""
+The .env file exists at: {ROOT_ENV_PATH}
+
+However, there are issues with the configuration:
+"""
+        if missing_field:
+            error_msg += f"  - Missing or invalid: {missing_field}\n"
+        else:
+            error_msg += "  - One or more required variables are missing or invalid\n"
+        
+        error_msg += f"""
+Required environment variables (check your .env file):
+  - DATABASE_URL (PostgreSQL connection URL, e.g., postgresql://user:pass@localhost:5432/dbname)
+  - DELTA_EXCHANGE_API_KEY (Delta Exchange API key from your account)
+  - DELTA_EXCHANGE_API_SECRET (Delta Exchange API secret from your account)
+  - JWT_SECRET_KEY (JWT secret key, minimum 32 characters recommended)
+  - API_KEY (API key for authentication, minimum 32 characters recommended)
+
+To fix:
+  1. Open the .env file: {ROOT_ENV_PATH}
+  2. Ensure all required variables are set (no empty values)
+  3. Verify variable formats are correct
+  4. Run validation: python scripts/validate-env.py
+  5. See docs/troubleshooting-local-startup.md for detailed help
+"""
+    else:
+        error_msg += f"""
+The .env file was not found at: {ROOT_ENV_PATH}
 
 Required environment variables:
   - DATABASE_URL (PostgreSQL connection URL)
@@ -240,10 +295,19 @@ Required environment variables:
   - JWT_SECRET_KEY (JWT secret key for authentication)
   - API_KEY (API key for authentication)
 
-Please:
-  1. Copy .env.example to .env in the project root
-  2. Fill in all required values in the root .env file
-  3. Ensure PostgreSQL and Redis are running
+To fix:
+  1. Copy .env.example to .env in the project root (if .env.example exists)
+  2. Or create .env file manually with all required variables
+  3. Fill in all required values
+  4. Run validation: python scripts/validate-env.py
+  5. See docs/11-build-guide.md for setup instructions
+"""
+    
+    error_msg += f"""
+Additional checks:
+  - Ensure PostgreSQL is running and accessible
+  - Ensure Redis is running (if required)
+  - Verify DATABASE_URL connection string format is correct
 {'='*70}
 """
     print(error_msg, file=sys.stderr)

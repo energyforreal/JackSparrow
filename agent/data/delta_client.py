@@ -23,7 +23,7 @@ try:
 except ImportError:
     # Fallback if config not available
     class Settings:
-        delta_exchange_base_url = os.getenv("DELTA_EXCHANGE_BASE_URL", "https://api.delta.exchange")
+        delta_exchange_base_url = os.getenv("DELTA_EXCHANGE_BASE_URL", "https://api.india.delta.exchange")
         delta_exchange_api_key = os.getenv("DELTA_EXCHANGE_API_KEY", "")
         delta_exchange_api_secret = os.getenv("DELTA_EXCHANGE_API_SECRET", "")
     settings = Settings()
@@ -243,15 +243,70 @@ class DeltaExchangeClient:
         self,
         symbol: str,
         resolution: str = "1h",
-        limit: int = 100
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        limit: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Get OHLCV candles."""
+        """Get OHLCV candles.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSD")
+            resolution: Candle resolution - must be lowercase (e.g., "15m", "1h", "4h", "1d")
+            start: Start timestamp in Unix seconds (required)
+            end: End timestamp in Unix seconds (required)
+            limit: Deprecated - use start/end instead. If provided, will calculate start/end automatically.
+            
+        Returns:
+            API response with candles data
+            
+        Raises:
+            ValueError: If start/end are not provided and limit is not provided
+            DeltaExchangeError: For API errors
+        """
+        # Handle backward compatibility: if limit is provided but start/end are not, calculate them
+        if limit is not None and (start is None or end is None):
+            start, end = self._calculate_candle_time_range(resolution, limit)
+        
+        # Validate required parameters
+        if start is None or end is None:
+            raise ValueError("start and end timestamps are required (or provide limit for backward compatibility)")
+        
+        # Ensure resolution is lowercase (API requirement)
+        resolution = resolution.lower()
+        
         params = {
             "symbol": symbol,
             "resolution": resolution,
-            "limit": limit
+            "start": start,
+            "end": end
         }
         return await self._make_request("GET", "/v2/history/candles", params=params)
+    
+    @staticmethod
+    def _calculate_candle_time_range(resolution: str, candle_count: int) -> tuple[int, int]:
+        """Calculate start and end timestamps for candle request.
+        
+        Args:
+            resolution: Candle resolution (e.g., "15m", "1h", "4h", "1d")
+            candle_count: Number of candles to retrieve
+            
+        Returns:
+            Tuple of (start_timestamp, end_timestamp) in Unix seconds
+        """
+        # Map resolution to seconds per candle
+        resolution_seconds = {
+            "1m": 60, "3m": 180, "5m": 300, "15m": 900,
+            "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400,
+            "6h": 21600, "1d": 86400, "1w": 604800
+        }
+        
+        seconds_per_candle = resolution_seconds.get(resolution.lower(), 3600)
+        total_seconds = candle_count * seconds_per_candle
+        
+        end_time = int(time.time())
+        start_time = end_time - total_seconds
+        
+        return start_time, end_time
     
     async def get_orderbook(self, symbol: str, depth: int = 20) -> Dict[str, Any]:
         """Get order book."""
@@ -298,16 +353,16 @@ class DeltaExchangeClient:
         """
         try:
             current_time = time.time()
-            timestamp_ms = int(current_time * 1000)
+            timestamp = int(current_time)
             
             # Check for obvious clock issues (more than 1 minute drift)
             # This is a basic sanity check - actual validation happens per-request
-            max_init_drift_ms = 60000  # 1 minute
+            max_init_drift_seconds = 60  # 1 minute
             
             # Log current timestamp for debugging
             logger.info(
                 "delta_exchange_time_validation",
-                current_timestamp_ms=timestamp_ms,
+                current_timestamp=timestamp,
                 current_time_iso=datetime.now(timezone.utc).isoformat(),
                 message="Delta Exchange client initialized with system time"
             )
@@ -333,15 +388,20 @@ class DeltaExchangeClient:
     ) -> Dict[str, str]:
         """Create authenticated headers required by Delta Exchange.
         
-        Delta Exchange API signature format:
-        message = timestamp + method + endpoint + payload
-        signature = HMAC-SHA256(api_secret, message)
+        Delta Exchange API signature format (India platform):
+        signature_data = METHOD + TIMESTAMP + PATH + QUERY_STRING + PAYLOAD
+        signature = HMAC-SHA256(api_secret, signature_data)
         
         Where:
-        - timestamp: Unix timestamp in milliseconds (string)
-        - method: HTTP method in uppercase (GET, POST, etc.)
-        - endpoint: API endpoint path without query parameters
-        - payload: JSON-serialized params (for GET) or data (for POST), sorted keys
+        - METHOD: HTTP method in uppercase (GET, POST, etc.)
+        - TIMESTAMP: Unix timestamp in seconds (string)
+        - PATH: API endpoint path without query parameters (e.g., /v2/history/candles)
+        - QUERY_STRING: URL-encoded query parameters with ? prefix (e.g., ?symbol=BTCUSD&resolution=15m&start=1732454400&end=1732456200)
+          - Empty string if no query parameters
+        - PAYLOAD: JSON-serialized request body for POST requests, empty string for GET requests
+        
+        Example for GET /v2/history/candles?symbol=BTCUSD&resolution=15m&start=1732454400&end=1732456200:
+        signature_data = GET + 1763978527 + /v2/history/candles + ?symbol=BTCUSD&resolution=15m&start=1732454400&end=1732456200 + 
         
         Args:
             method: HTTP method
@@ -360,37 +420,45 @@ class DeltaExchangeClient:
         if not endpoint.startswith('/'):
             raise ValueError(f"Endpoint must start with '/': {endpoint}")
         
-        # Generate timestamp in milliseconds
+        # Generate timestamp in seconds
         # Use current time to ensure freshness
         current_time = time.time()
-        timestamp_ms = int(current_time * 1000)
+        timestamp = int(current_time)
         
         # Validate timestamp is reasonable (not more than 5 seconds in the future or past)
         # This helps catch clock synchronization issues
-        max_drift_ms = 5000  # 5 seconds in milliseconds
-        current_ms = int(current_time * 1000)
-        drift_ms = abs(timestamp_ms - current_ms)
+        max_drift_seconds = 5  # 5 seconds
+        current_timestamp = int(current_time)
+        drift_seconds = abs(timestamp - current_timestamp)
         
-        if drift_ms > max_drift_ms:
+        if drift_seconds > max_drift_seconds:
             logger.warning(
                 "delta_exchange_timestamp_drift",
-                timestamp=timestamp_ms,
-                current_time=current_ms,
-                drift_ms=drift_ms,
-                max_drift_ms=max_drift_ms,
+                timestamp=timestamp,
+                current_time=current_timestamp,
+                drift_seconds=drift_seconds,
+                max_drift_seconds=max_drift_seconds,
                 message="System clock drift detected - may cause authentication failures"
             )
             # Use current time instead to ensure accuracy
-            timestamp_ms = current_ms
+            timestamp = current_timestamp
         
-        timestamp = str(timestamp_ms)
+        timestamp_str = str(timestamp)
         method_upper = method.upper()
         
-        # Serialize payload: GET uses params, POST uses data
-        payload = self._serialize_payload(params if method_upper == "GET" else data)
+        # Build query string for GET requests (with ? prefix)
+        # For POST requests, query_string is empty
+        query_string = ""
+        if method_upper == "GET" and params:
+            query_string = self._build_query_string(params)
         
-        # Build message for signature: timestamp + method + endpoint + payload
-        message = f"{timestamp}{method_upper}{endpoint}{payload}"
+        # Build payload: empty for GET requests, JSON for POST requests
+        payload = ""
+        if method_upper == "POST" and data:
+            payload = self._serialize_payload(data, method=method_upper)
+        
+        # Build signature data: METHOD + TIMESTAMP + PATH + QUERY_STRING + PAYLOAD
+        message = f"{method_upper}{timestamp_str}{endpoint}{query_string}{payload}"
         
         # Generate HMAC-SHA256 signature
         try:
@@ -412,37 +480,75 @@ class DeltaExchangeClient:
             "delta_exchange_signature_generated",
             method=method_upper,
             endpoint=endpoint,
-            timestamp=timestamp,
+            timestamp=timestamp_str,
+            query_string=query_string[:50] + "..." if len(query_string) > 50 else query_string,
             payload_length=len(payload),
             signature_prefix=signature[:8] + "..."
         )
 
         headers = {
             "api-key": self.api_key,
-            "timestamp": timestamp,
+            "timestamp": timestamp_str,
             "signature": signature,
             "Content-Type": "application/json",
+            "User-Agent": "JackSparrow-TradingAgent/1.0",
         }
         headers["recv-window"] = str(self.recv_window)
         return headers
 
     @staticmethod
-    def _serialize_payload(payload: Optional[Dict[str, Any]]) -> str:
-        """Serialize payload deterministically for signing.
+    def _build_query_string(params: Dict[str, Any]) -> str:
+        """Build query string for GET requests with ? prefix.
         
-        Uses JSON serialization with sorted keys to ensure consistent
-        signature generation regardless of dict insertion order.
+        Query string format: ?key=value&key2=value2
+        Parameters maintain their insertion order (not sorted).
+        Order matters for Delta Exchange signature validation.
+        
+        Args:
+            params: Query parameters dictionary (order preserved from insertion order)
+            
+        Returns:
+            Query string with ? prefix, or empty string if params is empty
+        """
+        if not params:
+            return ""
+        
+        try:
+            from urllib.parse import urlencode
+            # Preserve insertion order - do NOT sort (Delta Exchange requires exact order match)
+            # Python 3.7+ dictionaries maintain insertion order
+            # Pass params dict directly - urlencode() accepts dicts and preserves order
+            encoded = urlencode(params)
+            # Add ? prefix as required by Delta Exchange signature format
+            return f"?{encoded}"
+        except (TypeError, ValueError) as e:
+            logger.error(
+                "delta_exchange_query_string_build_failed",
+                error=str(e),
+                params_type=type(params).__name__,
+                exc_info=True
+            )
+            raise DeltaExchangeError(f"Failed to build query string: {e}") from e
+    
+    @staticmethod
+    def _serialize_payload(payload: Optional[Dict[str, Any]], method: str = "POST") -> str:
+        """Serialize payload deterministically for signing (POST requests only).
+        
+        For POST requests: Uses JSON serialization with sorted keys
+        For GET requests: Returns empty string (GET requests use query string, not payload)
         
         Args:
             payload: Dictionary to serialize (None or empty dict returns empty string)
+            method: HTTP method (should be POST for payload serialization)
             
         Returns:
-            JSON string with sorted keys, or empty string if payload is None/empty
+            JSON-serialized string for signature, or empty string if payload is None/empty
         """
         if not payload:
             return ""
         
         try:
+            # For POST requests, use JSON serialization
             # Use separators to ensure no extra whitespace
             # sort_keys=True ensures consistent ordering
             return json.dumps(payload, separators=(",", ":"), sort_keys=True)
@@ -451,6 +557,7 @@ class DeltaExchangeClient:
                 "delta_exchange_payload_serialization_failed",
                 error=str(e),
                 payload_type=type(payload).__name__,
+                method=method,
                 exc_info=True
             )
             raise DeltaExchangeError(f"Failed to serialize payload: {e}") from e

@@ -56,7 +56,7 @@ Write-Host ""
 Write-Host "Services will auto-reload on code changes:" -ForegroundColor Cyan
 Write-Host "  - Backend: uvicorn --reload" -ForegroundColor White
 Write-Host "  - Frontend: npm run dev (Next.js hot-reload)" -ForegroundColor White
-Write-Host "  - Agent: Python module reload" -ForegroundColor White
+Write-Host "  - Agent: watchdog file watcher" -ForegroundColor White
 Write-Host ""
 
 docker-compose $composeArgs

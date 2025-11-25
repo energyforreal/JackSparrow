@@ -102,10 +102,30 @@ async def check_model_nodes_health() -> HealthServiceStatus:
         
         if model_nodes_status:
             healthy_count = model_nodes_status.get("healthy_models", 0)
-            return HealthServiceStatus(
-                status="up" if healthy_count > 0 else "down",
-                details=model_nodes_status
-            )
+            total_count = model_nodes_status.get("total_models", 0)
+            status_from_agent = model_nodes_status.get("status", "unknown")
+            
+            # If no models are loaded, return "unknown" (not "down") since this is acceptable in paper trading mode
+            if total_count == 0:
+                return HealthServiceStatus(
+                    status="unknown",
+                    details={
+                        **model_nodes_status,
+                        "note": "No models loaded - agent can function in paper trading mode without ML models"
+                    }
+                )
+            
+            # Use status from agent if available, otherwise determine from healthy count
+            if status_from_agent != "unknown":
+                return HealthServiceStatus(
+                    status=status_from_agent,
+                    details=model_nodes_status
+                )
+            else:
+                return HealthServiceStatus(
+                    status="up" if healthy_count > 0 else "down",
+                    details=model_nodes_status
+                )
         else:
             return HealthServiceStatus(
                 status="unknown",

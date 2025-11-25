@@ -560,7 +560,7 @@ class CustomModelNode(MCPModelNode):
         # Generate SHAP explanation
         shap_values = self._calculate_shap_values(features)
         reasoning = self._generate_shap_reasoning(shap_values, features)
-        feature_importance = self._extract_feature_importance(shap_values)
+        feature_importance = self._extract_feature_importance(shap_values, features)
         
         return MCPModelPrediction(
             model_name=self.model_name,
@@ -596,7 +596,7 @@ class CustomModelNode(MCPModelNode):
         
         return f"Model prediction based on: {', '.join(reasoning_parts)}"
     
-    def _extract_feature_importance(self, shap_values):
+    def _extract_feature_importance(self, shap_values, features):
         """Extract feature importance from SHAP values."""
         feature_names = [f.name for f in features]
         return dict(zip(feature_names, shap_values))

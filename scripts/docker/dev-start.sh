@@ -82,7 +82,7 @@ echo ""
 echo -e "${CYAN}Services will auto-reload on code changes:${NC}"
 echo -e "${WHITE}  - Backend: uvicorn --reload${NC}"
 echo -e "${WHITE}  - Frontend: npm run dev (Next.js hot-reload)${NC}"
-echo -e "${WHITE}  - Agent: Python module reload${NC}"
+echo -e "${WHITE}  - Agent: watchdog file watcher${NC}"
 echo ""
 
 docker-compose "${COMPOSE_ARGS[@]}"

@@ -49,7 +49,7 @@ class Settings(BaseSettings):
         description="Delta Exchange API secret"
     )
     delta_exchange_base_url: str = Field(
-        default="https://api.delta.exchange",
+        default="https://api.india.delta.exchange",
         env=("DELTA_EXCHANGE_BASE_URL", "DELTA_API_URL", "delta_api_url"),
         description="Delta Exchange API base URL"
     )
@@ -133,12 +133,37 @@ class Settings(BaseSettings):
         env="TAKE_PROFIT_PERCENTAGE",
         description="Take profit percentage"
     )
+    max_daily_loss: float = Field(
+        default=0.05,
+        env="MAX_DAILY_LOSS",
+        description="Maximum daily loss as fraction of portfolio"
+    )
+    max_drawdown: float = Field(
+        default=0.15,
+        env="MAX_DRAWDOWN",
+        description="Maximum drawdown as fraction of portfolio"
+    )
+    max_consecutive_losses: int = Field(
+        default=5,
+        env="MAX_CONSECUTIVE_LOSSES",
+        description="Maximum consecutive losses before stopping"
+    )
+    min_time_between_trades: int = Field(
+        default=300,
+        env="MIN_TIME_BETWEEN_TRADES",
+        description="Minimum time between trades in seconds"
+    )
     
     # Logging
     log_level: str = Field(
         default="INFO",
         env="LOG_LEVEL",
         description="Logging level"
+    )
+    agent_log_level: Optional[str] = Field(
+        default=None,
+        env="AGENT_LOG_LEVEL",
+        description="Agent-specific logging level (overrides LOG_LEVEL)"
     )
     log_forwarding_enabled: bool = Field(
         default=False,
@@ -150,12 +175,22 @@ class Settings(BaseSettings):
         env="LOG_FORWARDING_ENDPOINT",
         description="Log forwarding endpoint URL"
     )
+    log_include_stacktrace: bool = Field(
+        default=False,
+        env="LOG_INCLUDE_STACKTRACE",
+        description="Include stack traces in logs"
+    )
     
     # Feature Server
     feature_server_port: int = Field(
         default=8001,
         env="FEATURE_SERVER_PORT",
         description="Feature server port"
+    )
+    feature_server_host: str = Field(
+        default="0.0.0.0",
+        env="FEATURE_SERVER_HOST",
+        description="Feature server host address"
     )
     
     # Agent Communication
@@ -170,18 +205,100 @@ class Settings(BaseSettings):
         description="Redis queue for agent responses"
     )
     
+    # Trading Session Defaults
+    initial_balance: float = Field(
+        default=10000.0,
+        env="INITIAL_BALANCE",
+        description="Initial trading balance"
+    )
+    trading_mode: str = Field(
+        default="paper",
+        env="TRADING_MODE",
+        description="Trading mode (paper/live)"
+    )
+    trading_symbol: str = Field(
+        default="BTCUSD",
+        env="TRADING_SYMBOL",
+        description="Trading symbol"
+    )
+    min_confidence_threshold: float = Field(
+        default=0.65,
+        env="MIN_CONFIDENCE_THRESHOLD",
+        description="Minimum confidence threshold for trades"
+    )
+    update_interval: int = Field(
+        default=900,
+        env="UPDATE_INTERVAL",
+        description="Update interval in seconds"
+    )
+    timeframes: str = Field(
+        default="15m,1h,4h",
+        env="TIMEFRAMES",
+        description="Comma-separated list of timeframes"
+    )
+    
 try:
     settings = Settings()
 except Exception as e:
     # Configuration errors must be printed to stderr since logger may not be initialized
     # This is acceptable for startup errors that prevent the application from starting
     import sys
+    
+    # Check if .env file exists to provide more specific guidance
+    env_exists = ROOT_ENV_PATH.exists()
+    
+    # Try to extract which field failed from Pydantic error
+    error_str = str(e)
+    missing_field = None
+    if "field required" in error_str.lower():
+        # Try to extract field name from error message
+        import re
+        match = re.search(r"['\"]([^'\"]+)['\"]", error_str)
+        if match:
+            missing_field = match.group(1)
+    
     error_msg = f"""
 {'='*70}
 ERROR: Failed to load agent configuration
 {'='*70}
 
-Error: {str(e)}
+Error: {error_str}
+"""
+    
+    if env_exists:
+        error_msg += f"""
+The .env file exists at: {ROOT_ENV_PATH}
+
+However, there are issues with the configuration:
+"""
+        if missing_field:
+            error_msg += f"  - Missing or invalid: {missing_field}\n"
+        else:
+            error_msg += "  - One or more required variables are missing or invalid\n"
+        
+        error_msg += f"""
+Required environment variables (check your .env file):
+  - DATABASE_URL (PostgreSQL connection URL, e.g., postgresql://user:pass@localhost:5432/dbname)
+  - DELTA_EXCHANGE_API_KEY (Delta Exchange API key from your account)
+  - DELTA_EXCHANGE_API_SECRET (Delta Exchange API secret from your account)
+
+Optional environment variables:
+  - MODEL_PATH (Path to specific model file, e.g., models/xgboost_BTCUSD_15m.pkl)
+  - MODEL_DIR (Directory for model discovery, default: ./agent/model_storage)
+  - AGENT_SYMBOL (Trading symbol, default: BTCUSD)
+  - AGENT_INTERVAL (Analysis interval, default: 15m)
+
+To fix:
+  1. Open the .env file: {ROOT_ENV_PATH}
+  2. Ensure all required variables are set (no empty values)
+  3. Verify variable formats are correct
+  4. Run validation: python scripts/validate-env.py
+  5. Ensure database is initialized: python scripts/setup_db.py
+  6. See docs/troubleshooting-local-startup.md for detailed help
+"""
+    else:
+        error_msg += f"""
+The .env file was not found at: {ROOT_ENV_PATH}
 
 Required environment variables:
   - DATABASE_URL (PostgreSQL connection URL)
@@ -194,11 +311,21 @@ Optional environment variables:
   - AGENT_SYMBOL (Trading symbol, default: BTCUSD)
   - AGENT_INTERVAL (Analysis interval, default: 15m)
 
-Please:
-  1. Copy .env.example to .env in the project root
-  2. Fill in all required values in the root .env file
-  3. Ensure PostgreSQL and Redis are running
-  4. Run 'python scripts/setup_db.py' to initialize database
+To fix:
+  1. Copy .env.example to .env in the project root (if .env.example exists)
+  2. Or create .env file manually with all required variables
+  3. Fill in all required values
+  4. Run validation: python scripts/validate-env.py
+  5. Initialize database: python scripts/setup_db.py
+  6. See docs/11-build-guide.md for setup instructions
+"""
+    
+    error_msg += f"""
+Additional checks:
+  - Ensure PostgreSQL is running and accessible
+  - Ensure Redis is running (if required)
+  - Verify DATABASE_URL connection string format is correct
+  - Run database setup: python scripts/setup_db.py
 {'='*70}
 """
     print(error_msg, file=sys.stderr)

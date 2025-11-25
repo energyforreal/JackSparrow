@@ -169,7 +169,19 @@ touch kubera_pokisham.db
 
 ### Environment Variables
 
-The `.env` file contains all configuration for Docker deployment. See `.env.example` for a complete template.
+**Single Root `.env` File**: The `.env` file in the project root is the **single source of truth** for all environment variables. All services (backend, agent, frontend) read from this one file.
+
+**How Docker Compose Loads Environment Variables:**
+- **Backend and Agent**: Docker Compose automatically loads the root `.env` file via the `env_file: - .env` directive
+- **Frontend**: Receives variables through the `environment:` section in `docker-compose.yml`, which reads from root `.env`
+- **Database Services**: Use variables directly from root `.env` via `${VARIABLE_NAME}` syntax
+
+**Setup Instructions:**
+
+1. Copy the example template: `cp .env.example .env`
+2. Edit `.env` with your actual values (see `.env.example` for complete template)
+3. Required variables: `DELTA_EXCHANGE_API_KEY`, `DELTA_EXCHANGE_API_SECRET`, `JWT_SECRET_KEY`, `API_KEY`, `POSTGRES_PASSWORD`
+4. Docker Compose will automatically load this file when you run `docker compose up`
 
 **Required Variables:**
 
@@ -178,6 +190,7 @@ The `.env` file contains all configuration for Docker deployment. See `.env.exam
 POSTGRES_USER=jacksparrow
 POSTGRES_PASSWORD=your_secure_password_here
 POSTGRES_DB=trading_agent
+DATABASE_URL=postgresql://jacksparrow:password@postgres:5432/trading_agent
 
 # Delta Exchange API
 DELTA_EXCHANGE_API_KEY=your_api_key
@@ -203,17 +216,24 @@ REDIS_PORT=6379
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+NEXT_PUBLIC_BACKEND_API_KEY=your_api_key
 ```
+
+**Important Notes:**
+- **No service-specific `.env` files needed**: All services share the same root `.env` file
+- **Database URLs in Docker**: Use service names (e.g., `postgres`, `redis`, `agent`) instead of `localhost`
+- **For local development**: Database URLs should use `localhost` instead of service names
 
 ### Production Environment
 
-For production, use `.env.production.example` as a template. Key differences:
+For production deployments:
 
-- Use strong, randomly generated secrets
-- Update frontend URLs to production domain
+- Use strong, randomly generated secrets (32+ characters, mixed case, numbers, symbols)
+- Update frontend URLs to production domain (use `https://` and `wss://`)
 - Configure HTTPS endpoints
-- Enable log forwarding
+- Enable log forwarding if needed
 - Set appropriate log levels (INFO or WARNING, not DEBUG)
+- Ensure `CORS_ORIGINS` only includes production domains
 
 ---
 

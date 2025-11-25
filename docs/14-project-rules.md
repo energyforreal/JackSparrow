@@ -653,7 +653,7 @@ logger.info(
 
 - Archive or delete previous logs before every start (implemented in startup scripts or service initialization code).
 - Emit a `system.startup` event containing the new `session_id`, commit SHA, and environment.
-- Verify automation (e.g., `make start`, deployment pipelines) runs bootstrap scripts prior to launching services.
+- Verify automation (e.g., startup scripts, deployment pipelines) runs bootstrap scripts prior to launching services.
 
 ### Forwarding & Retention
 
@@ -664,7 +664,7 @@ logger.info(
 ### Validation
 
 - Add unit/integration tests that assert logging output shape for critical flows.
-- Run `make logging:health` (or equivalent) before merges that affect logging infrastructure.
+- Verify logging setup before merges that affect logging infrastructure (check log directories are writable and logs are being generated).
 - Ensure CI verifies that JSON log schema includes required fields and that startup events were emitted.
 
 ---
@@ -734,21 +734,21 @@ The snippet demonstrates secret-free configuration, dependency-injected authenti
 
 ## Operational Command Guidelines
 
-The JackSparrow command toolkit lives under `tools/commands/` with Makefile aliases for macOS/Linux. Use the following guidance when operating the project locally or in shared environments:
+The JackSparrow command toolkit lives under `tools/commands/`. Use the following guidance when operating the project locally or in shared environments:
 
-- **`start`** (`./tools/commands/start.sh`, `start.ps1`, `make start`, or `python tools/commands/start_parallel.py`)
+- **`start`** (`./tools/commands/start.sh`, `start.ps1`, or `python tools/commands/start_parallel.py`)
   - Launch before every development session
   - Uses parallel process manager to start all services simultaneously
   - Confirms backend, agent, and frontend are reachable on `localhost`
   - Streams real-time color-coded logs to console and writes to `logs/{service}.log`
   - Automatically sets up virtual environments and installs dependencies if needed
-- **`restart`** (`./tools/commands/restart.sh`, `restart.ps1`, or `make restart`)
+- **`restart`** (`./tools/commands/restart.sh` or `restart.ps1`)
   - Trigger after changing environment variables, dependencies, or configuration files
   - Performs a clean shutdown and relaunch; review `logs/restart.log` afterwards
-- **`audit`** (`./tools/commands/audit.sh`, `audit.ps1`, or `make audit`)
+- **`audit`** (`./tools/commands/audit.sh` or `audit.ps1`)
   - Run before opening pull requests, cutting releases, or after major refactors
   - Attach `logs/audit/report.md` to the PR/issue when findings require discussion
-- **`error`** (`./tools/commands/error.sh`, `error.ps1`, or `make error`)
+- **`error`** (`./tools/commands/error.sh` or `error.ps1`)
   - Execute when diagnosing runtime issues; share `logs/error/error-dump-<timestamp>.md` with the team if escalation is needed
 
 Always bootstrap logging before running the commands (see [Logging Documentation](12-logging.md)) and clean up artefacts according to the retention policy.

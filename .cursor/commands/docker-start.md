@@ -4,6 +4,8 @@ Start individual Docker containers with automatic dependency handling.
 
 ## Usage
 
+**Related Commands**: See [docker-deploy.md](docker-deploy.md) for full deployment, [docker-logs.md](docker-logs.md) for log viewing.
+
 ```bash
 make docker-start CONTAINER=backend
 # or

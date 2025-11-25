@@ -796,6 +796,35 @@ class ErrorBoundary extends React.Component {
 
 ---
 
+## Environment Configuration
+
+### Environment Variables
+
+The frontend reads environment variables from the **root `.env` file** in the project root directory. The `frontend/next.config.js` file includes a `loadRootEnv()` function that automatically reads from `../.env` (project root).
+
+**Required Frontend Variables:**
+
+```bash
+# Backend API URL
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# WebSocket URL
+NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+
+# Backend API key (inherited from API_KEY)
+NEXT_PUBLIC_BACKEND_API_KEY=your_api_key
+```
+
+**How It Works:**
+
+- **Local Development**: The `loadRootEnv()` function in `next.config.js` reads variables from the root `.env` file at build time and runtime
+- **Docker Deployment**: Variables are passed through the `environment:` section in `docker-compose.yml`, which reads from root `.env`
+- **No `frontend/.env.local` needed**: All frontend environment variables are configured in the root `.env` file
+
+**Note**: See `.env.example` in the project root for the complete list of all available environment variables. All services (backend, agent, frontend) share the same root `.env` file.
+
+---
+
 ## Related Documentation
 
 - [Backend Documentation](06-backend.md) - API specifications

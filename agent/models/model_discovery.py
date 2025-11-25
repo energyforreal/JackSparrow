@@ -35,51 +35,103 @@ class ModelDiscovery:
         Note:
             This method will continue discovery even if individual models fail.
             Errors are logged but do not crash the agent.
+            Duplicate models (same name) are skipped - MODEL_PATH takes precedence over MODEL_DIR.
         """
         
         discovered_models = []
         failed_models = []
+        loaded_model_names = set()  # Track loaded model names to prevent duplicates
+        
+        logger.info(
+            "model_discovery_starting",
+            model_path=self.model_path,
+            model_dir=str(self.model_dir),
+            discovery_enabled=settings.model_discovery_enabled
+        )
         
         try:
             # Option 1: Load production model from MODEL_PATH
             if self.model_path:
                 model_file = Path(self.model_path)
+                logger.debug(
+                    "model_discovery_checking_path",
+                    model_path=str(model_file),
+                    exists=model_file.exists(),
+                    absolute_path=str(model_file.resolve()) if model_file.exists() else None
+                )
                 if model_file.exists():
                     try:
+                        logger.info(
+                            "model_discovery_loading",
+                            model_path=str(model_file)
+                        )
                         model_node = await self._load_model_from_path(model_file)
                         if model_node:
-                            self.registry.register_model(model_node)
-                            discovered_models.append(model_node.model_name)
-                            logger.info(
-                                "model_discovered",
-                                model_name=model_node.model_name,
-                                model_path=str(model_file)
-                            )
+                            # Check for duplicate model name
+                            if model_node.model_name in loaded_model_names:
+                                logger.warning(
+                                    "model_discovery_duplicate_skipped",
+                                    model_name=model_node.model_name,
+                                    model_path=str(model_file),
+                                    reason="Model with same name already loaded from MODEL_PATH (preferring MODEL_PATH over MODEL_DIR)"
+                                )
+                            else:
+                                self.registry.register_model(model_node)
+                                discovered_models.append(model_node.model_name)
+                                loaded_model_names.add(model_node.model_name)
+                                logger.info(
+                                    "model_discovered",
+                                    model_name=model_node.model_name,
+                                    model_path=str(model_file),
+                                    model_type=model_node.model_type
+                                )
                         else:
                             failed_models.append(str(model_file))
+                            logger.warning(
+                                "model_discovery_load_returned_none",
+                                model_file=str(model_file),
+                                message="Model loader returned None - model type may not be supported"
+                            )
                     except Exception as e:
                         failed_models.append(str(model_file))
-                        logger.error(
-                            "model_discovery_load_failed",
-                            model_file=str(model_file),
-                            error=str(e),
-                            exc_info=True,
-                            message="Model discovery will continue with other models"
-                        )
+                        error_type = type(e).__name__
+                        
+                        # Special handling for corrupted/unpickling errors
+                        if error_type == "UnpicklingError" or "pickle" in str(e).lower() or "unpickling" in str(e).lower():
+                            logger.error(
+                                "model_discovery_corrupted_file",
+                                model_file=str(model_file),
+                                error=str(e),
+                                error_type=error_type,
+                                exc_info=True,
+                                message="Model file appears to be corrupted or incompatible. Skipping this model and continuing discovery."
+                            )
+                        else:
+                            logger.error(
+                                "model_discovery_load_failed",
+                                model_file=str(model_file),
+                                error=str(e),
+                                error_type=error_type,
+                                exc_info=True,
+                                message="Model discovery will continue with other models"
+                            )
                 else:
                     logger.warning(
                         "model_path_not_found",
                         model_path=str(model_file),
+                        absolute_path=str(model_file.resolve()),
                         message="MODEL_PATH specified but file does not exist"
                     )
             
             # Option 2: Discover models from MODEL_DIR
             if settings.model_discovery_enabled:
                 try:
+                    model_dir_abs = self.model_dir.resolve()
                     if not self.model_dir.exists():
                         logger.warning(
                             "model_dir_not_found",
                             model_dir=str(self.model_dir),
+                            absolute_path=str(model_dir_abs),
                             message="MODEL_DIR does not exist, skipping discovery"
                         )
                     else:
@@ -87,31 +139,75 @@ class ModelDiscovery:
                         logger.info(
                             "model_discovery_scanning",
                             model_dir=str(self.model_dir),
-                            files_found=len(model_files)
+                            absolute_path=str(model_dir_abs),
+                            files_found=len(model_files),
+                            file_list=[str(f) for f in model_files[:10]]  # Log first 10 files
                         )
+                        
+                        if not model_files:
+                            logger.info(
+                                "model_discovery_no_files",
+                                model_dir=str(self.model_dir),
+                                message="No model files found in MODEL_DIR"
+                            )
                         
                         for model_file in model_files:
                             try:
+                                logger.debug(
+                                    "model_discovery_loading_file",
+                                    model_file=str(model_file),
+                                    absolute_path=str(model_file.resolve())
+                                )
                                 model_node = await self._load_model_from_path(model_file)
                                 if model_node:
-                                    self.registry.register_model(model_node)
-                                    discovered_models.append(model_node.model_name)
-                                    logger.info(
-                                        "model_discovered",
-                                        model_name=model_node.model_name,
-                                        model_path=str(model_file)
-                                    )
+                                    # Check for duplicate model name
+                                    if model_node.model_name in loaded_model_names:
+                                        logger.warning(
+                                            "model_discovery_duplicate_skipped",
+                                            model_name=model_node.model_name,
+                                            model_path=str(model_file),
+                                            reason="Model with same name already loaded (duplicate detected)"
+                                        )
+                                    else:
+                                        self.registry.register_model(model_node)
+                                        discovered_models.append(model_node.model_name)
+                                        loaded_model_names.add(model_node.model_name)
+                                        logger.info(
+                                            "model_discovered",
+                                            model_name=model_node.model_name,
+                                            model_path=str(model_file),
+                                            model_type=model_node.model_type
+                                        )
                                 else:
                                     failed_models.append(str(model_file))
+                                    logger.warning(
+                                        "model_discovery_load_returned_none",
+                                        model_file=str(model_file),
+                                        message="Model loader returned None - model type may not be supported"
+                                    )
                             except Exception as e:
                                 failed_models.append(str(model_file))
-                                logger.error(
-                                    "model_discovery_load_failed",
-                                    model_file=str(model_file),
-                                    error=str(e),
-                                    exc_info=True,
-                                    message="Continuing with other models"
-                                )
+                                error_type = type(e).__name__
+                                
+                                # Special handling for corrupted/unpickling errors
+                                if error_type == "UnpicklingError" or "pickle" in str(e).lower() or "unpickling" in str(e).lower():
+                                    logger.error(
+                                        "model_discovery_corrupted_file",
+                                        model_file=str(model_file),
+                                        error=str(e),
+                                        error_type=error_type,
+                                        exc_info=True,
+                                        message="Model file appears to be corrupted or incompatible. Skipping this model and continuing discovery."
+                                    )
+                                else:
+                                    logger.error(
+                                        "model_discovery_load_failed",
+                                        model_file=str(model_file),
+                                        error=str(e),
+                                        error_type=error_type,
+                                        exc_info=True,
+                                        message="Continuing with other models"
+                                    )
                 except Exception as e:
                     logger.error(
                         "model_discovery_scan_failed",
@@ -134,13 +230,17 @@ class ModelDiscovery:
                 "model_discovery_complete",
                 discovered_count=len(discovered_models),
                 failed_count=len(failed_models),
-                models=discovered_models
+                models=discovered_models,
+                message=f"Successfully discovered {len(discovered_models)} model(s)"
             )
         else:
             logger.warning(
                 "model_discovery_no_models",
                 failed_count=len(failed_models),
-                message="No models were successfully discovered"
+                failed_files=failed_models[:5] if failed_models else [],  # Log first 5 failed files
+                model_path=self.model_path,
+                model_dir=str(self.model_dir),
+                message="No models were successfully discovered. Agent will continue in paper trading mode without ML predictions."
             )
         
         return discovered_models

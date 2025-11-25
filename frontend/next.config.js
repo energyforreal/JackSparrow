@@ -28,6 +28,13 @@ function loadRootEnv() {
       process.env.DELTA_EXCHANGE_API_SECRET ||= value
     } else if (key === 'DELTA_API_URL') {
       process.env.DELTA_EXCHANGE_BASE_URL ||= value
+    } else if (key === 'API_KEY' || key === 'BACKEND_API_KEY') {
+      // Map backend API_KEY to frontend NEXT_PUBLIC_BACKEND_API_KEY
+      // Only set if not already set (to allow explicit override)
+      if (!process.env.NEXT_PUBLIC_BACKEND_API_KEY) {
+        process.env.NEXT_PUBLIC_BACKEND_API_KEY = value
+        console.log(`[next.config.js] Mapped ${key} to NEXT_PUBLIC_BACKEND_API_KEY (prefix: ${value.substring(0, 8)}...)`)
+      }
     }
   })
 }
@@ -51,6 +58,8 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
     NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws',
+    // Expose API key from root .env (API_KEY or BACKEND_API_KEY) as NEXT_PUBLIC_BACKEND_API_KEY
+    NEXT_PUBLIC_BACKEND_API_KEY: process.env.NEXT_PUBLIC_BACKEND_API_KEY || process.env.API_KEY || process.env.BACKEND_API_KEY || 'dev-api-key',
   },
   webpack: (config, { isServer }) => {
     // Fix for paths with special characters on Windows

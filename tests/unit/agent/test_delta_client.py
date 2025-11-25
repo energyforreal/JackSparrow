@@ -27,7 +27,7 @@ DeltaExchangeError = delta_module.DeltaExchangeError
 def delta_settings(monkeypatch):
     """Provide stub configuration for DeltaExchangeClient."""
     settings_stub = SimpleNamespace(
-        delta_exchange_base_url="https://api.delta.exchange",
+        delta_exchange_base_url="https://api.india.delta.exchange",
         delta_exchange_api_key="test-key",
         delta_exchange_api_secret="test-secret",
     )

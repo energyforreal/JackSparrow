@@ -87,32 +87,64 @@ class ExecutionModule:
                     symbol=symbol,
                     side=side,
                     quantity=quantity,
-                    message="Executing trade in paper trading mode"
+                    message="Executing trade in paper trading mode - no real exchange API calls will be made"
                 )
             
             try:
-                # Place order via Delta Exchange
-                # In paper trading mode, use testnet/sandbox API if available
-                # For now, the delta_client should handle this based on base_url
+                # In paper trading mode, simulate trade execution without calling exchange API
                 if settings.paper_trading_mode:
                     logger.debug(
                         "executing_paper_trade",
                         symbol=symbol,
                         side=side,
-                        quantity=quantity
+                        quantity=quantity,
+                        message="Simulating trade execution (paper trading mode)"
+                    )
+                    
+                    # Simulate order placement - get current market price for realistic simulation
+                    try:
+                        ticker = await self.delta_client.get_ticker(symbol)
+                        simulated_price = ticker.get("close") if ticker else price
+                    except Exception:
+                        # If ticker fetch fails, use provided price or a default
+                        simulated_price = price if price else 50000.0  # Fallback price
+                        logger.warning(
+                            "paper_trade_ticker_fetch_failed",
+                            symbol=symbol,
+                            message="Using fallback price for paper trade simulation"
+                        )
+                    
+                    # Simulate order result
+                    result = {
+                        "id": str(uuid.uuid4()),
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": quantity,
+                        "price": simulated_price,
+                        "status": "filled",
+                        "paper_trading": True
+                    }
+                else:
+                    # Real trading mode - place actual order via Delta Exchange
+                    logger.info(
+                        "executing_real_trade",
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        message="Placing real order on exchange (PAPER_TRADING_MODE=False)"
+                    )
+                    
+                    result = await self.delta_client.place_order(
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        order_type="MARKET",
+                        price=None
                     )
                 
-                result = await self.delta_client.place_order(
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    order_type="MARKET",
-                    price=None
-                )
-                
-                # Simulate order fill (in real implementation, wait for exchange confirmation)
+                # Extract trade details from result
                 trade_id = result.get("id", str(uuid.uuid4()))
-                fill_price = price  # Use requested price or market price
+                fill_price = result.get("price", price)  # Use price from result or requested price
                 
                 # Emit order fill event
                 fill_event = OrderFillEvent(

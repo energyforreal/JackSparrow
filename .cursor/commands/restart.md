@@ -6,6 +6,8 @@ Clean restart of all JackSparrow services.
 
 Trigger after changing environment variables, dependencies, or configuration files.
 
+**Related Commands**: See [start.md](start.md) for initial startup, [error.md](error.md) for diagnostics.
+
 ## Implementation
 
 **Windows (PowerShell)**:

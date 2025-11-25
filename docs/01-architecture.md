@@ -516,6 +516,7 @@ The system implements graceful degradation at multiple levels:
 class CircuitBreaker:
     def __init__(self, failure_threshold=5, timeout=60):
         self.failure_count = 0
+        self.success_count = 0  # Initialize success_count for HALF_OPEN state tracking
         self.state = "CLOSED"
         self.last_failure_time = None
         self.failure_threshold = failure_threshold
@@ -525,6 +526,7 @@ class CircuitBreaker:
         if self.state == "OPEN":
             if time.time() - self.last_failure_time > self.timeout:
                 self.state = "HALF_OPEN"
+                self.success_count = 0  # Reset success count when entering HALF_OPEN
             else:
                 raise CircuitBreakerOpenError("Circuit breaker is OPEN")
         
@@ -535,6 +537,7 @@ class CircuitBreaker:
                 if self.success_count >= 2:
                     self.state = "CLOSED"
                     self.failure_count = 0
+                    self.success_count = 0  # Reset success count when closing circuit
             return result
         except Exception as e:
             self.failure_count += 1

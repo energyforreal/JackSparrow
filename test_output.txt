@@ -1,0 +1,84 @@
+﻿
+[1m============================================================[0m
+[1mDelta Exchange Connection Test Suite[0m
+[1m============================================================[0m
+
+Symbol: BTCUSD
+Timestamp: 2025-11-23T14:06:58.651810+00:00
+
+[92m[19:36:58] API Key: SittsaP5...[0m
+[92m[19:36:58] Base URL: https://api.india.delta.exchange[0m
+python : Traceback (most recent 
+call last):
+At line:1 char:1
++ python 
+tools/test_delta_connection.py 
+--symbol BTCUSD 2>&1 | Out-File ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSp 
+   ecified: (Traceback (most recen  
+  t call last)::String) [], Remot   
+ eException
+    + FullyQualifiedErrorId : Nativ 
+   eCommandError
+ 
+  File "C:\Users\lohit\OneDrive\Docu
+ments\ATTRAL\Projects\Trading Agent 
+2\tools\test_delta_connection.py", 
+line 417, in <module>
+    asyncio.run(main())
+  File "C:\Program Files\WindowsApps
+\PythonSoftwareFoundation.Python.3.1
+2_3.12.2800.0_x64__qbz5n2kfra8p0\Lib
+\asyncio\runners.py", line 195, in 
+run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps
+\PythonSoftwareFoundation.Python.3.1
+2_3.12.2800.0_x64__qbz5n2kfra8p0\Lib
+\asyncio\runners.py", line 118, in 
+run
+    return 
+self._loop.run_until_complete(task)
+           
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps
+\PythonSoftwareFoundation.Python.3.1
+2_3.12.2800.0_x64__qbz5n2kfra8p0\Lib
+\asyncio\base_events.py", line 691, 
+in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\lohit\OneDrive\Docu
+ments\ATTRAL\Projects\Trading Agent 
+2\tools\test_delta_connection.py", 
+line 411, in main
+    success = await 
+tester.run_all_tests()
+              
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\lohit\OneDrive\Docu
+ments\ATTRAL\Projects\Trading Agent 
+2\tools\test_delta_connection.py", 
+line 357, in run_all_tests
+    await self.test_env_config()
+  File "C:\Users\lohit\OneDrive\Docu
+ments\ATTRAL\Projects\Trading Agent 
+2\tools\test_delta_connection.py", 
+line 120, in wrapper
+    print(result)
+  File "C:\Program Files\WindowsApps
+\PythonSoftwareFoundation.Python.3.1
+2_3.12.2800.0_x64__qbz5n2kfra8p0\Lib
+\encodings\cp1252.py", line 19, in 
+encode
+    return codecs.charmap_encode(inp
+ut,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec 
+can't encode character '\u2713' in 
+position 5: character maps to 
+<undefined>

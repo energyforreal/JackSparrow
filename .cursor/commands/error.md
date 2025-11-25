@@ -6,6 +6,8 @@ Quick diagnostic for runtime issues.
 
 Execute when diagnosing runtime issues.
 
+**Related Commands**: See [audit.md](audit.md) for comprehensive system audit, [docker-logs.md](docker-logs.md) for Docker container logs.
+
 ## Implementation
 
 **Windows (PowerShell)**:

@@ -4,6 +4,8 @@ Deploy JackSparrow Trading Agent using Docker Compose.
 
 ## Usage
 
+**Related Commands**: See [docker-start.md](docker-start.md) for individual container management, [docker-logs.md](docker-logs.md) for log viewing.
+
 **Production deployment:**
 ```bash
 make docker-deploy

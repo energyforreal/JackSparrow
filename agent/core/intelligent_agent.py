@@ -7,6 +7,7 @@ Orchestrates all agent components and provides main agent loop.
 import asyncio
 import os
 import sys
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -315,16 +316,39 @@ class IntelligentAgent:
         params = command.get("parameters", {})
         
         try:
+            # Validate command before processing
+            if not cmd:
+                logger.warning(
+                    "agent_command_invalid",
+                    request_id=request_id,
+                    reason="Missing command field"
+                )
+                await self._send_response(request_id, {
+                    "success": False,
+                    "error": "Missing command field"
+                })
+                return
+            
             # Emit command as event for event-driven processing
-            command_event = AgentCommandEvent(
-                source="intelligent_agent",
-                payload={
-                    "command": cmd,
-                    "parameters": params,
-                    "request_id": request_id
-                }
-            )
-            await event_bus.publish(command_event)
+            try:
+                command_event = AgentCommandEvent(
+                    source="intelligent_agent",
+                    payload={
+                        "command": cmd,
+                        "parameters": params or {},
+                        "request_id": request_id or str(uuid.uuid4())
+                    }
+                )
+                await event_bus.publish(command_event)
+            except Exception as e:
+                logger.warning(
+                    "agent_command_event_publish_failed",
+                    request_id=request_id,
+                    command=cmd,
+                    error=str(e),
+                    exc_info=True,
+                    message="Continuing with command handling despite event publish failure"
+                )
             
             # Handle command (backward compatibility)
             if cmd == "predict":
@@ -378,12 +402,87 @@ class IntelligentAgent:
         """Handle status request."""
         health = await self.mcp_orchestrator.get_health_status()
         
+        # Extract detailed health information
+        feature_server_health = health.get("feature_server", {})
+        model_registry_health = health.get("model_registry", {})
+        reasoning_engine_health = health.get("reasoning_engine", {})
+        
+        # Extract delta_exchange status from feature_server (which includes market_data_service)
+        delta_exchange_status = {}
+        if feature_server_health:
+            market_data_service = feature_server_health.get("market_data_service", {})
+            if market_data_service:
+                delta_status = market_data_service.get("status", "unknown")
+                circuit_breaker = market_data_service.get("circuit_breaker", {})
+                delta_exchange_status = {
+                    "status": delta_status,
+                    "latency_ms": None,  # Market data service doesn't track latency separately
+                    "circuit_breaker": circuit_breaker
+                }
+            else:
+                delta_exchange_status = {
+                    "status": "unknown",
+                    "latency_ms": None
+                }
+        else:
+            delta_exchange_status = {
+                "status": "unknown",
+                "latency_ms": None
+            }
+        
+        # Extract model_nodes status from model_registry
+        model_nodes_status = {}
+        if model_registry_health:
+            total_models = model_registry_health.get("total_models", 0)
+            healthy_models = model_registry_health.get("healthy_models", 0)
+            registry_health = model_registry_health.get("registry_health", "unknown")
+            
+            # Determine status based on model registry health
+            if total_models == 0:
+                model_status = "unknown"  # No models loaded, but not an error
+            elif healthy_models == 0:
+                model_status = "down"
+            elif healthy_models < total_models:
+                model_status = "degraded"
+            else:
+                model_status = "up"
+            
+            model_nodes_status = {
+                "status": model_status,
+                "healthy_models": healthy_models,
+                "total_models": total_models,
+                "registry_health": registry_health
+            }
+        else:
+            model_nodes_status = {
+                "status": "unknown",
+                "healthy_models": 0,
+                "total_models": 0
+            }
+        
+        # Build comprehensive health response
+        detailed_health = {
+            "feature_server": {
+                "status": feature_server_health.get("status", "unknown"),
+                "latency_ms": None,  # Feature server doesn't track latency
+                "feature_registry_count": feature_server_health.get("feature_registry_count", 0)
+            },
+            "model_nodes": model_nodes_status,
+            "delta_exchange": delta_exchange_status,
+            "reasoning_engine": {
+                "status": reasoning_engine_health.get("status", "unknown"),
+                "latency_ms": None  # Reasoning engine doesn't track latency
+            },
+            "overall_status": health.get("overall_status", "unknown")
+        }
+        
         return {
             "success": True,
             "data": {
                 "available": True,
                 "state": self.state_machine.current_state.value,
-                "health": health,
+                "health": health,  # Keep original health structure for backward compatibility
+                "detailed_health": detailed_health,  # New detailed structure
                 "latency_ms": 5.0
             }
         }

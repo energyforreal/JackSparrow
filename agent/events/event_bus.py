@@ -154,15 +154,78 @@ class EventBus:
                 )
                 return False
             
+            # Validate event before publishing
+            if not event.event_type:
+                logger.error(
+                    "event_publish_validation_failed",
+                    event_id=event.event_id,
+                    reason="Missing event_type"
+                )
+                return False
+            
+            if not event.source:
+                logger.error(
+                    "event_publish_validation_failed",
+                    event_id=event.event_id,
+                    event_type=event.event_type,
+                    reason="Missing source"
+                )
+                return False
+            
             # Serialize event
-            event_data = event.dict()
-            event_data["_event_class"] = event.__class__.__name__
+            try:
+                # Use model_dump() for Pydantic v2, fallback to dict() for v1
+                if hasattr(event, 'model_dump'):
+                    event_data = event.model_dump()
+                else:
+                    event_data = event.dict()
+                event_data["_event_class"] = event.__class__.__name__
+                
+                # Validate serialized data
+                if not event_data or not isinstance(event_data, dict):
+                    logger.error(
+                        "event_publish_validation_failed",
+                        event_id=event.event_id,
+                        event_type=event.event_type,
+                        reason="Event serialization produced invalid data"
+                    )
+                    return False
+                
+                # Ensure required fields are present
+                if "event_type" not in event_data or "source" not in event_data:
+                    logger.error(
+                        "event_publish_validation_failed",
+                        event_id=event.event_id,
+                        event_type=event.event_type,
+                        reason="Missing required fields after serialization"
+                    )
+                    return False
+                
+            except Exception as e:
+                logger.error(
+                    "event_publish_serialization_failed",
+                    event_id=event.event_id,
+                    event_type=event.event_type,
+                    error=str(e),
+                    exc_info=True
+                )
+                return False
             
             # Publish to Redis Stream
+            event_json_str = json.dumps(event_data, default=str)
+            logger.debug(
+                "event_publishing",
+                event_id=event.event_id,
+                event_type=event.event_type,
+                event_data_keys=list(event_data.keys()),
+                event_json_length=len(event_json_str),
+                event_json_preview=event_json_str[:200]
+            )
+            
             message_id = await redis.xadd(
                 self.stream_name,
                 {
-                    "event": json.dumps(event_data, default=str)
+                    "event": event_json_str
                 }
             )
             
@@ -181,7 +244,7 @@ class EventBus:
             logger.error(
                 "event_publish_failed",
                 event_id=event.event_id,
-                event_type=event.event_type,
+                event_type=event.event_type if hasattr(event, 'event_type') else 'unknown',
                 error=str(e),
                 exc_info=True
             )
@@ -274,9 +337,85 @@ class EventBus:
                 except (ValueError, AttributeError):
                     retry_count = 0
             
-            # Deserialize event
-            event_json = message_data.get(b"event", b"{}")
-            event_dict = json.loads(event_json.decode("utf-8"))
+            # Deserialize event - Redis Streams returns data as bytes
+            # Check all possible key formats (some Redis clients use different encodings)
+            event_json_bytes = None
+            for key_variant in [b"event", "event".encode("utf-8"), b"event".decode("utf-8")]:
+                if isinstance(key_variant, bytes):
+                    event_json_bytes = message_data.get(key_variant)
+                elif isinstance(key_variant, str):
+                    # Try both string and bytes versions
+                    event_json_bytes = message_data.get(key_variant.encode("utf-8")) or message_data.get(key_variant)
+                
+                if event_json_bytes:
+                    break
+            
+            # If still not found, check if message_data itself contains the event
+            if not event_json_bytes:
+                # Sometimes Redis returns the data directly in message_data
+                # Check if there's a single key-value pair that might be the event
+                if len(message_data) == 1:
+                    event_json_bytes = list(message_data.values())[0]
+                elif len(message_data) == 0:
+                    logger.warning(
+                        "event_validation_skipped",
+                        message_id=message_id,
+                        reason="Empty message data",
+                        message_keys=list(message_data.keys()) if isinstance(message_data, dict) else "not_dict"
+                    )
+                    await redis.xack(self.stream_name, self.consumer_group, message_id)
+                    return
+            
+            # Debug: Log raw message data to understand format
+            if event_json_bytes:
+                try:
+                    preview = event_json_bytes[:200].decode("utf-8", errors="replace") if isinstance(event_json_bytes, bytes) else str(event_json_bytes)[:200]
+                except Exception:
+                    preview = f"<bytes length={len(event_json_bytes) if isinstance(event_json_bytes, bytes) else 'unknown'}>"
+            else:
+                preview = None
+                
+            logger.debug(
+                "event_message_received",
+                message_id=message_id,
+                message_keys=[k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k) for k in (list(message_data.keys()) if isinstance(message_data, dict) else [])],
+                event_json_length=len(event_json_bytes) if event_json_bytes else 0,
+                event_json_preview=preview,
+                event_json_type=type(event_json_bytes).__name__ if event_json_bytes else None
+            )
+            
+            if not event_json_bytes or (isinstance(event_json_bytes, bytes) and len(event_json_bytes) == 0):
+                logger.warning(
+                    "event_validation_skipped",
+                    message_id=message_id,
+                    reason="No event data in message",
+                    message_keys=[k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k) for k in (list(message_data.keys()) if isinstance(message_data, dict) else [])],
+                    message_data_type=type(message_data).__name__
+                )
+                await redis.xack(self.stream_name, self.consumer_group, message_id)
+                return
+            
+            # Decode bytes to string if needed
+            try:
+                if isinstance(event_json_bytes, bytes):
+                    event_json_str = event_json_bytes.decode("utf-8")
+                else:
+                    event_json_str = str(event_json_bytes)
+                
+                # Parse JSON
+                event_dict = json.loads(event_json_str)
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as e:
+                logger.error(
+                    "event_deserialization_failed",
+                    message_id=message_id,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    event_json_preview=preview,
+                    event_json_type=type(event_json_bytes).__name__,
+                    exc_info=True
+                )
+                await redis.xack(self.stream_name, self.consumer_group, message_id)
+                return
             
             # Validate event dictionary - check if it's empty or missing required fields
             if not event_dict or not isinstance(event_dict, dict):
@@ -284,7 +423,8 @@ class EventBus:
                     "event_validation_skipped",
                     message_id=message_id,
                     reason="Empty or invalid event dictionary",
-                    event_data=str(event_dict)[:200] if event_dict else "empty"
+                    event_data=str(event_dict)[:200] if event_dict else "empty",
+                    event_dict_type=type(event_dict).__name__
                 )
                 # Acknowledge corrupted message to prevent retry loops
                 await redis.xack(self.stream_name, self.consumer_group, message_id)
@@ -351,7 +491,21 @@ class EventBus:
             if "timestamp" in event_dict and isinstance(event_dict["timestamp"], str):
                 event_dict["timestamp"] = datetime.fromisoformat(event_dict["timestamp"])
             
-            event = event_class(**event_dict)
+            # Create event instance with error handling
+            try:
+                event = event_class(**event_dict)
+            except Exception as e:
+                logger.error(
+                    "event_instantiation_failed",
+                    message_id=message_id,
+                    event_class_name=event_class_name,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    event_dict_keys=list(event_dict.keys()) if isinstance(event_dict, dict) else None,
+                    exc_info=True
+                )
+                await redis.xack(self.stream_name, self.consumer_group, message_id)
+                return
             
             # Get handlers for this event type
             handlers = self.handlers.get(event.event_type, [])

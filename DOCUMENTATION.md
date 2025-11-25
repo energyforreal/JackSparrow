@@ -100,7 +100,14 @@ This document serves as the central index for all project documentation. Navigat
     - Monitoring and observability setup
     - Troubleshooting guide
 
-11. **[Build Guide](docs/11-build-guide.md)**
+11. **[Docker Hot Reload Guide](docs/docker-hot-reload.md)**
+    - Hot reload setup and configuration
+    - How hot reload works for each service
+    - Usage examples and best practices
+    - Troubleshooting hot reload issues
+    - Related: [Quick Reference](docs/docker-hot-reload-quick-reference.md), [Implementation Summary](docs/docker-hot-reload-implementation-summary.md), [Testing Guide](docs/docker-hot-reload-testing-guide.md)
+
+12. **[Build Guide](docs/11-build-guide.md)**
     - Complete step-by-step build instructions
     - Project setup from scratch
     - Prerequisites and dependencies
@@ -144,11 +151,12 @@ This document serves as the central index for all project documentation. Navigat
    - Missing features identification
    - Update recommendations
 
-16. **[Audit Findings](docs/audit-findings.md)**
+16. **[Audit Findings](docs/archive/audit-findings-2025-11-18.md)** (Archived)
    - Initial project audit findings
    - Critical issues identified
    - Medium priority issues
    - Recommendations and next steps
+   - Note: See [Comprehensive Audit Report](docs/comprehensive-audit-report.md) for current status
 
 17. **[Comprehensive Audit Report](docs/comprehensive-audit-report.md)**
    - Complete full-stack audit report
@@ -156,11 +164,11 @@ This document serves as the central index for all project documentation. Navigat
    - Resolution status tracking
    - Testing recommendations
 
-18. **[Docker Logs Analysis Reports](docs/docker-logs-analysis-report.md)**
+18. **[Docker Logs Analysis Reports](docs/docker-logs-analysis-report-current.md)**
    - Container health analysis
    - Service-specific issue identification
    - Docker deployment troubleshooting
-   - Related: [Docker Logs Follow-up Report](docs/docker-logs-followup-report.md), [Docker Logs Analysis Report - 2025-11-23](docs/docker-logs-analysis-report-20251123.md)
+   - Related: [Docker Logs Follow-up Report](docs/archive/docker-logs-followup-report-2025-11-20.md), [Docker Logs Analysis Report - 2025-11-23](docs/archive/docker-logs-analysis-report-2025-11-23.md)
 
 19. **[Remediation Plan](docs/remediation-plan.md)**
    - Step-by-step remediation for identified issues
@@ -246,22 +254,31 @@ Trading Agent Documentation
 │   ├── file-structure.md        # Project organization
 │   ├── ui-ux.md                 # User interface design
 │   ├── deployment.md            # Setup and deployment
+│   ├── docker-hot-reload.md     # Docker hot reload guide
+│   ├── docker-hot-reload-quick-reference.md  # Quick command reference
+│   ├── docker-hot-reload-implementation-summary.md  # Implementation details
+│   ├── docker-hot-reload-testing-guide.md   # Testing procedures
 │   ├── build-guide.md           # Complete build instructions
 │   ├── logging.md               # Centralized logging plan
 │   ├── project-rules.md         # Development standards
-│   ├── audit-report.md          # Documentation audit report
-│   ├── audit-findings.md        # Initial audit findings
+│   ├── 15-audit-report.md       # Documentation audit report
+│   ├── audit-report-consolidated.md  # Consolidated audit report
+│   ├── audit-summary-2025-01-27.md  # Audit summary
 │   ├── comprehensive-audit-report.md  # Complete audit report
-│   ├── docker-logs-analysis-report.md # Docker logs analysis
-│   ├── docker-logs-followup-report.md  # Docker logs follow-up
-│   ├── docker-logs-analysis-report-20251123.md  # Timestamped analysis
-│   └── remediation-plan.md      # Issue remediation plan
+│   ├── docker-logs-analysis-report-current.md # Current Docker logs analysis
+│   ├── docker-logs-agent-communication-analysis.md # Agent communication analysis
+│   ├── remediation-plan.md      # Issue remediation plan
+│   └── archive/
+│       ├── docker-logs-followup-report-2025-11-20.md  # Docker logs follow-up (archived)
+│       ├── docker-logs-analysis-report-2025-11-20.md  # Timestamped analysis (archived)
+│       └── docker-logs-analysis-report-2025-11-23.md  # Timestamped analysis (archived)
 │
 ├── models/                      # Managed production artefacts (see docs/03-ml-models.md)
 │   ├── *.pkl                    # Trained model binaries
 │   └── training_summary.csv     # Latest training metrics
 │
-├── .env                          # Runtime configuration (ignored by VCS, documented in docs/10-deployment.md)
+├── .env.example                 # Environment variables template (see docs/10-deployment.md)
+├── .env                         # Runtime configuration (ignored by VCS, copy from .env.example)
 │
 └── reference/                   # Reference specifications
     ├── tradingagent_rebuild_spec.md
@@ -295,6 +312,7 @@ Trading Agent Documentation
 **Operations**
 - [Build Guide](docs/11-build-guide.md) - Complete build instructions
 - [Deployment Documentation](docs/10-deployment.md) - Setup and deployment
+- [Docker Hot Reload Guide](docs/docker-hot-reload.md) - Hot reload setup and usage
 - [Logging Documentation](docs/12-logging.md) - Centralized logging strategy
 - [Project Rules Documentation](docs/14-project-rules.md) - Development standards
 
@@ -324,7 +342,7 @@ When adding or updating documentation:
 
 ## 📅 Last Updated
 
-Documentation last updated: 2025-11-12
+Documentation last updated: 2025-01-27
 
 For the latest specifications and implementation details, refer to the files in the `reference/` directory.
 
@@ -340,5 +358,6 @@ For the latest specifications and implementation details, refer to the files in 
 - **Logging and observability**: See [Logging Documentation](docs/12-logging.md)
 - **Implementation questions**: See [Backend](docs/06-backend.md) or [Frontend](docs/07-frontend.md) documentation
 - **Setup issues**: See [Deployment Documentation](docs/10-deployment.md)
+- **Docker hot reload**: See [Docker Hot Reload Guide](docs/docker-hot-reload.md)
 - **Code standards**: See [Project Rules](docs/14-project-rules.md)
 
