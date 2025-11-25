@@ -63,7 +63,7 @@ class MCPOrchestrator:
     
     async def get_predictions(
         self,
-        features: List[Dict[str, Any]],
+        features: List[float],
         context: Dict[str, Any],
         require_explanation: bool = True
     ) -> MCPModelResponse:
@@ -125,6 +125,7 @@ class MCPOrchestrator:
         context = market_context or {}
         context["features"] = features_dict
         context["symbol"] = symbol
+        context["feature_names"] = list(features_dict.keys())
         
         model_response = await self.get_predictions(
             features=list(features_dict.values()),

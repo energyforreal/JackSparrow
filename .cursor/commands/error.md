@@ -20,11 +20,6 @@ Execute when diagnosing runtime issues.
 ./tools/commands/error.sh
 ```
 
-**Makefile (Cross-platform)**:
-```bash
-make error
-```
-
 ## What It Does
 
 1. Checks service status (backend, agent)

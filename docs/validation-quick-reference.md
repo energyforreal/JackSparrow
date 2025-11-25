@@ -15,7 +15,7 @@ python scripts/validate-env.py
 python tools/commands/validate-prerequisites.py
 
 # Check health of running services
-python tools/commands/health-check.py
+python tools/commands/health_check.py
 ```
 
 ## What Gets Validated
@@ -148,7 +148,7 @@ python tools/commands/start_parallel.py
 # 1. python scripts/validate-env.py
 # 2. python tools/commands/validate-prerequisites.py
 # 3. Starts services only if validation passes
-# 4. python tools/commands/health-check.py (after services start)
+# 4. python tools/commands/health_check.py (after services start)
 ```
 
 If validation fails during startup, services will not start and you'll see clear error messages.
@@ -163,7 +163,7 @@ After services start, health checks verify:
 
 Run health checks independently:
 ```bash
-python tools/commands/health-check.py
+python tools/commands/health_check.py
 ```
 
 ## Exit Codes

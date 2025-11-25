@@ -51,7 +51,7 @@ _symbols = Symbols()
 # Try to import HealthChecker, but don't fail if it's not available
 try:
     import importlib.util
-    health_check_path = project_root / "tools" / "commands" / "health-check.py"
+    health_check_path = project_root / "tools" / "commands" / "health_check.py"
     if health_check_path.exists():
         spec = importlib.util.spec_from_file_location("health_check", health_check_path)
         health_check_module = importlib.util.module_from_spec(spec)
@@ -79,17 +79,6 @@ class StartupSequenceTester:
             ("tools.commands.health_check", "Health Check Script"),
             ("tools.commands.start_parallel", "Start Parallel Script"),
         ]
-        
-        for script_name, display_name in scripts:
-            try:
-                __import__(script_name)
-                print(f"{Colors.GREEN}{_symbols.CHECK}{Colors.RESET} {display_name}")
-                self.tests_passed += 1
-            except ImportError:
-                print(f"{Colors.YELLOW}{_symbols.WARNING}{Colors.RESET} {display_name} (not available)")
-            except Exception as e:
-                print(f"{Colors.RED}{_symbols.CROSS}{Colors.RESET} {display_name}: {e}")
-                self.tests_failed += 1
         
         for script_name, display_name in scripts:
             try:

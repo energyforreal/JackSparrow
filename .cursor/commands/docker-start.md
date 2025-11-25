@@ -6,11 +6,12 @@ Start individual Docker containers with automatic dependency handling.
 
 **Related Commands**: See [docker-deploy.md](docker-deploy.md) for full deployment, [docker-logs.md](docker-logs.md) for log viewing.
 
+```powershell
+.\scripts\docker\start-container.ps1 backend
+```
+
 ```bash
-make docker-start CONTAINER=backend
-# or
-scripts/docker/start-container.ps1 backend
-scripts/docker/start-container.sh backend
+./scripts/docker/start-container.sh backend
 ```
 
 ## Implementation
@@ -42,9 +43,12 @@ The script automatically starts dependencies:
 ## Examples
 
 **Start backend (with dependencies):**
+```powershell
+.\scripts\docker\start-container.ps1 backend
+```
+
 ```bash
-make docker-start CONTAINER=backend
-scripts/docker/start-container.ps1 backend
+./scripts/docker/start-container.sh backend
 ```
 
 **Start multiple containers:**
@@ -78,5 +82,5 @@ After starting each container, the script:
 - Dependencies are started automatically
 - Health checks ensure services are ready before proceeding
 - Use this for targeted container management during development
-- For full stack startup, use `make docker-dev` or `scripts/docker/dev-start.ps1`
+- For full stack startup, use `scripts/docker/dev-start.ps1` or `scripts/docker/dev-start.sh`
 

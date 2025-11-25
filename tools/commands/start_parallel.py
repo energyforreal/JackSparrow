@@ -28,9 +28,22 @@ class Colors:
     AGENT = "\033[92m"    # Green
     FRONTEND = "\033[93m" # Yellow
     YELLOW = "\033[93m"   # Yellow (alias)
+    GREEN = "\033[92m"    # Green (alias)
     ERROR = "\033[91m"    # Red
     RESET = "\033[0m"     # Reset
     BOLD = "\033[1m"
+
+
+def get_safe_symbol(symbol: str, fallback: str) -> str:
+    """Return symbol if platform supports Unicode, otherwise fallback."""
+    if platform.system() == "Windows":
+        try:
+            # Try to encode the symbol to check if it's supported
+            symbol.encode(sys.stdout.encoding or "utf-8")
+            return symbol
+        except (UnicodeEncodeError, AttributeError):
+            return fallback
+    return symbol
 
 
 @dataclass
@@ -254,31 +267,6 @@ class ParallelProcessManager:
         if platform.system() != "Windows":
             signal.signal(signal.SIGHUP, self._signal_handler)
     
-    def _run_health_checks(self):
-        """Run health checks after services start."""
-        health_check_script = self.project_root / "tools" / "commands" / "health-check.py"
-        
-        if not health_check_script.exists():
-            # Health check script not available, skip
-            return
-        
-        print(f"\n{Colors.BOLD}Running health checks...{Colors.RESET}")
-        try:
-            result = subprocess.run(
-                [sys.executable, str(health_check_script), "--no-wait", "--max-wait", "15"],
-                cwd=str(self.project_root),
-                timeout=20,
-                capture_output=False
-            )
-            # Don't fail startup if health check fails, just report
-            if result.returncode != 0:
-                print(f"{Colors.YELLOW}[WARN] Health checks reported issues. Check logs above.{Colors.RESET}")
-        except subprocess.TimeoutExpired:
-            print(f"{Colors.YELLOW}[WARN] Health check timed out. Services may still be initializing.{Colors.RESET}")
-        except Exception as e:
-            # Don't fail startup if health check fails
-            print(f"{Colors.YELLOW}[WARN] Could not run health checks: {e}{Colors.RESET}")
-    
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
         print(f"\n{Colors.BOLD}Shutting down services...{Colors.RESET}")
@@ -372,7 +360,7 @@ class ParallelProcessManager:
     
     def _run_health_checks(self):
         """Run health checks after services start."""
-        health_check_script = self.project_root / "tools" / "commands" / "health-check.py"
+        health_check_script = self.project_root / "tools" / "commands" / "health_check.py"
         
         if not health_check_script.exists():
             # Health check script not available, skip
@@ -445,6 +433,64 @@ def get_npm_executable() -> str:
             "npm executable not found. Install Node.js 18+ and ensure npm is on PATH."
         )
     return path
+
+
+def _is_signature_stale(stamp_path: Path, signature: str) -> bool:
+    """Check whether dependency signature differs from recorded stamp."""
+    if not signature:
+        return False
+    if not stamp_path.exists():
+        return True
+    try:
+        return stamp_path.read_text(encoding="utf-8").strip() != signature
+    except OSError:
+        return True
+
+
+def _install_python_dependencies(
+    component_name: str, python_exec: str, requirements_path: Path
+) -> None:
+    """Install Python requirements when the requirements file changes."""
+    if not requirements_path.exists():
+        return
+    
+    signature = str(requirements_path.stat().st_mtime_ns)
+    stamp_path = requirements_path.parent / ".deps_stamp"
+    
+    if not _is_signature_stale(stamp_path, signature):
+        print(f"  {component_name.capitalize()} dependencies up to date")
+        return
+    
+    print(f"  Installing {component_name} dependencies...")
+    subprocess.run(
+        [python_exec, "-m", "pip", "install", "-r", str(requirements_path)],
+        cwd=str(requirements_path.parent),
+        check=True,
+    )
+    stamp_path.write_text(signature, encoding="utf-8")
+
+
+def _install_frontend_dependencies(frontend_dir: Path, npm_cmd: str) -> None:
+    """Install frontend dependencies when package metadata changes."""
+    lock_file = frontend_dir / "package-lock.json"
+    source = lock_file if lock_file.exists() else frontend_dir / "package.json"
+    if not source.exists():
+        return
+    
+    signature = str(source.stat().st_mtime_ns)
+    stamp_path = frontend_dir / ".deps_stamp"
+    
+    if not _is_signature_stale(stamp_path, signature):
+        print("  Frontend dependencies up to date")
+        return
+    
+    print("  Installing frontend dependencies...")
+    subprocess.run(
+        [npm_cmd, "install"],
+        cwd=str(frontend_dir),
+        check=True,
+    )
+    stamp_path.write_text(signature, encoding="utf-8")
 
 
 def setup_services(project_root: Path, npm_cmd: str) -> ParallelProcessManager:
@@ -530,38 +576,19 @@ def ensure_dependencies(project_root: Path, npm_cmd: str):
             check=True
         )
     
-    # Install backend dependencies (quiet mode)
+    # Install backend dependencies (only when requirements change)
     backend_python = get_python_executable(backend_venv)
     backend_reqs = project_root / "backend" / "requirements.txt"
-    if backend_reqs.exists():
-        print(f"  Installing backend dependencies...")
-        subprocess.run(
-            [backend_python, "-m", "pip", "install", "-q", "-r", str(backend_reqs)],
-            cwd=str(project_root / "backend"),
-            check=False  # Don't fail if some packages fail
-        )
+    _install_python_dependencies("backend", backend_python, backend_reqs)
     
     # Install agent dependencies (quiet mode)
     agent_python = get_python_executable(agent_venv)
     agent_reqs = project_root / "agent" / "requirements.txt"
-    if agent_reqs.exists():
-        print(f"  Installing agent dependencies...")
-        subprocess.run(
-            [agent_python, "-m", "pip", "install", "-q", "-r", str(agent_reqs)],
-            cwd=str(project_root / "agent"),
-            check=False  # Don't fail if some packages fail
-        )
+    _install_python_dependencies("agent", agent_python, agent_reqs)
     
     # Check frontend node_modules
     frontend_dir = project_root / "frontend"
-    node_modules = frontend_dir / "node_modules"
-    if not node_modules.exists():
-        print(f"  Installing frontend dependencies...")
-        subprocess.run(
-            [npm_cmd, "install"],
-            cwd=str(frontend_dir),
-            check=False  # Don't fail if npm install has warnings
-        )
+    _install_frontend_dependencies(frontend_dir, npm_cmd)
     
     print()  # Empty line after dependency check
 
@@ -754,6 +781,95 @@ def print_prerequisite_error(issues: List[str]):
     print(f"\n{Colors.BOLD}For detailed setup instructions, see docs/10-deployment.md{Colors.RESET}\n")
 
 
+def attempt_start_redis(project_root: Path) -> bool:
+    """Attempt to start Redis if it's not already running.
+    
+    Args:
+        project_root: Project root directory
+        
+    Returns:
+        True if Redis is now accessible, False otherwise
+    """
+    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+    host, port = parse_redis_url(redis_url)
+    
+    # Check if Redis is already accessible
+    if check_redis_running(redis_url):
+        return True
+    
+    print(f"{Colors.BOLD}Redis not accessible at {host}:{port}. Attempting to start...{Colors.RESET}")
+    
+    if platform.system() == "Windows":
+        # Try bundled Redis server
+        redis_exe = project_root / "redis-tmp" / "redis-server.exe"
+        redis_config = project_root / "redis-tmp" / "redis.windows.conf"
+        
+        if redis_exe.exists():
+            try:
+                # Start Redis in background
+                subprocess.Popen(
+                    [str(redis_exe), str(redis_config)],
+                    cwd=str(redis_exe.parent),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                # Wait a moment for Redis to start
+                time.sleep(2)
+                if check_redis_running(redis_url):
+                    check_mark = get_safe_symbol("✓", "+")
+                    print(f"{Colors.GREEN}{check_mark} Redis started successfully{Colors.RESET}")
+                    return True
+            except Exception as e:
+                warning = get_safe_symbol("⚠", "!")
+                print(f"{Colors.YELLOW}{warning} Failed to start bundled Redis: {e}{Colors.RESET}")
+        
+        # Try Windows service
+        try:
+            redis_services = subprocess.run(
+                ["powershell", "-Command", "Get-Service -Name 'redis*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Name"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if redis_services.returncode == 0 and redis_services.stdout.strip():
+                service_name = redis_services.stdout.strip()
+                subprocess.run(
+                    ["powershell", "-Command", f"Start-Service -Name '{service_name}'"],
+                    capture_output=True,
+                    timeout=10
+                )
+                time.sleep(2)
+                if check_redis_running(redis_url):
+                    check_mark = get_safe_symbol("✓", "+")
+                    print(f"{Colors.GREEN}{check_mark} Redis service started: {service_name}{Colors.RESET}")
+                    return True
+        except Exception:
+            pass
+    else:
+        # Unix/Linux/macOS: Try redis-server command
+        try:
+            redis_cmd = shutil.which("redis-server")
+            if redis_cmd:
+                # Start Redis in daemon mode
+                subprocess.Popen(
+                    [redis_cmd, "--daemonize", "yes"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                time.sleep(2)
+                if check_redis_running(redis_url):
+                    check_mark = get_safe_symbol("✓", "+")
+                    print(f"{Colors.GREEN}{check_mark} Redis started successfully{Colors.RESET}")
+                    return True
+        except Exception as e:
+            warning = get_safe_symbol("⚠", "!")
+            print(f"{Colors.YELLOW}{warning} Failed to start Redis: {e}{Colors.RESET}")
+    
+    # Redis still not accessible after attempts
+    return False
+
+
 def check_prerequisites() -> bool:
     """Check if required services (PostgreSQL, Redis) are running.
     
@@ -844,6 +960,10 @@ def main():
 
     # Load root .env so child processes inherit environment variables
     load_root_env(project_root)
+
+    # Attempt to start Redis if not already running
+    attempt_start_redis(project_root)
+    print()  # Empty line after Redis attempt
 
     # Validate .env file contents before proceeding
     env_validator_path = project_root / "scripts" / "validate-env.py"

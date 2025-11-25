@@ -56,16 +56,23 @@ class EnhancedHealthValidator:
         )
         
         # Store detailed results
+        backend_health = self.health_checker.get_backend_health_details() or {}
+        backend_port = self.health_checker.backend_port_status()
+        frontend_port = self.health_checker.frontend_port_status()
+        agent_status = self.health_checker.check_agent_status()
+        frontend_http = self.health_checker.check_frontend_accessible()
+        
         self.detailed_results = {
             "backend": {
-                "accessible": self.health_checker.check_backend_accessible(),
-                "health": self.health_checker.check_backend_health(),
+                "port": backend_port,
+                "health": backend_health,
             },
             "frontend": {
-                "accessible": self.health_checker.check_frontend_accessible(),
+                "port": frontend_port,
+                "http_accessible": frontend_http,
             },
             "agent": {
-                "status": self.health_checker.check_agent_status(),
+                "status": agent_status,
             },
         }
         
@@ -77,28 +84,44 @@ class EnhancedHealthValidator:
         
         # Backend details
         backend = self.detailed_results.get("backend", {})
-        backend_accessible = backend.get("accessible", False)
+        backend_port = backend.get("port", {})
         backend_health = backend.get("health", {})
+        backend_reachable = backend_port.get("reachable", False)
         
-        backend_symbol = _symbols.CHECK if backend_accessible else _symbols.CROSS
-        backend_color = Colors.GREEN if backend_accessible else Colors.RED
+        backend_symbol = _symbols.CHECK if backend_reachable else _symbols.CROSS
+        backend_color = Colors.GREEN if backend_reachable else Colors.RED
         
         print(f"{backend_color}{backend_symbol}{Colors.RESET} Backend:")
-        print(f"  Accessible: {backend_accessible}")
+        if backend_port:
+            print(f"  Host: {backend_port.get('host')}")
+            print(f"  Port: {backend_port.get('port')}")
+            print(f"  Reachable: {backend_reachable}")
         if backend_health:
             print(f"  Health Status: {backend_health.get('status', 'unknown')}")
-            if 'score' in backend_health:
-                print(f"  Health Score: {backend_health['score']:.2f}")
+            score = backend_health.get("health_score")
+            if score is not None:
+                print(f"  Health Score: {score:.2f}")
+            degradation = backend_health.get("degradation_reasons") or []
+            if degradation:
+                print("  Degradation Reasons:")
+                for reason in degradation:
+                    print(f"    - {reason}")
         
         # Frontend details
         frontend = self.detailed_results.get("frontend", {})
-        frontend_accessible = frontend.get("accessible", False)
+        frontend_port = frontend.get("port", {})
+        frontend_reachable = frontend_port.get("reachable", False)
+        frontend_http = frontend.get("http_accessible", False)
         
-        frontend_symbol = _symbols.CHECK if frontend_accessible else _symbols.CROSS
-        frontend_color = Colors.GREEN if frontend_accessible else Colors.RED
+        frontend_symbol = _symbols.CHECK if frontend_reachable else _symbols.CROSS
+        frontend_color = Colors.GREEN if frontend_reachable else Colors.RED
         
         print(f"\n{frontend_color}{frontend_symbol}{Colors.RESET} Frontend:")
-        print(f"  Accessible: {frontend_accessible}")
+        if frontend_port:
+            print(f"  Host: {frontend_port.get('host')}")
+            print(f"  Port: {frontend_port.get('port')}")
+            print(f"  Port Reachable: {frontend_reachable}")
+        print(f"  HTTP Accessible: {frontend_http}")
         
         # Agent details
         agent = self.detailed_results.get("agent", {})

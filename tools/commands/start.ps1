@@ -24,6 +24,18 @@ try {
 
 # Execute Python script for parallel startup
 Write-Host "Launching parallel process manager..." -ForegroundColor Green
+# Ensure local services are up (Redis/PostgreSQL helper)
+$serviceScript = Join-Path $ProjectRoot "tools\start-services.ps1"
+if (Test-Path $serviceScript) {
+    Write-Host "Ensuring Redis/PostgreSQL services are running..." -ForegroundColor Yellow
+    try {
+        & $serviceScript
+    } catch {
+        Write-Host "Warning: Unable to run start-services.ps1 automatically. $_" -ForegroundColor Yellow
+    }
+    Write-Host ""
+}
+
 python $PythonScript
 
 # Exit with the same code as Python script

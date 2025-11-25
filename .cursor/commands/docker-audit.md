@@ -6,11 +6,12 @@ Scan all Docker container logs for errors and generate comprehensive audit repor
 
 **Related Commands**: See [audit.md](audit.md) for system-wide audit, [docker-logs.md](docker-logs.md) for log viewing.
 
+```powershell
+.\scripts\docker\audit-errors.ps1
+```
+
 ```bash
-make docker-audit
-# or
-scripts/docker/audit-errors.ps1
-scripts/docker/audit-errors.sh
+./scripts/docker/audit-errors.sh
 ```
 
 ## Implementation
@@ -62,9 +63,12 @@ Report includes:
 ## Examples
 
 **Audit last 24 hours (default):**
+```powershell
+.\scripts\docker\audit-errors.ps1
+```
+
 ```bash
-make docker-audit
-scripts/docker/audit-errors.ps1
+./scripts/docker/audit-errors.sh
 ```
 
 **Audit last 48 hours:**

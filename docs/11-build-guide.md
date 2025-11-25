@@ -600,7 +600,7 @@ This will:
 
 **Check health of running services:**
 ```bash
-python tools/commands/health-check.py
+python tools/commands/health_check.py
 ```
 
 This verifies:

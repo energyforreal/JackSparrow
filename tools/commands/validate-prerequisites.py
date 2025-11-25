@@ -375,7 +375,8 @@ class PrerequisiteValidator:
         print()
         
         if self.errors:
-            print(f"{Colors.RED}{Colors.BOLD}❌ PREREQUISITE CHECK FAILED{Colors.RESET}\n")
+            failure_symbol = "X" if self.is_windows else "❌"
+            print(f"{Colors.RED}{Colors.BOLD}{failure_symbol} PREREQUISITE CHECK FAILED{Colors.RESET}\n")
             error_symbol = "X" if self.is_windows else "✗"
             print("The following issues were found:")
             for error in self.errors:

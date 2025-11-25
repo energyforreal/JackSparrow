@@ -9,20 +9,26 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Check if we're in the symlink path
+$projectRoot = Split-Path -Parent $PSScriptRoot
 $currentPath = Get-Location
-$expectedSymlinkPath = "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2"
+$hasLegacyPath = $projectRoot -match "#"
+$expectedSymlinkPath = if ($hasLegacyPath) { $projectRoot -replace "#", "-" } else { $projectRoot }
 
-if ($currentPath.Path -notlike "*Trading-Agent-2*" -and $currentPath.Path -like "*Trading Agent#2*") {
-    Write-Host "WARNING: You're still in the old path with # character!" -ForegroundColor Yellow
-    Write-Host "Current path: $($currentPath.Path)" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "Please switch to the symlink path:" -ForegroundColor Yellow
-    Write-Host "  cd `"$expectedSymlinkPath`"" -ForegroundColor Cyan
-    Write-Host ""
-    $response = Read-Host "Continue anyway? (y/n)"
-    if ($response -ne "y" -and $response -ne "Y") {
-        exit 1
+if ($hasLegacyPath) {
+    if ($currentPath.Path -notlike "*$($expectedSymlinkPath.Split('\')[-1])*") {
+        Write-Host "WARNING: You're still in the old path with # character!" -ForegroundColor Yellow
+        Write-Host "Current path: $($currentPath.Path)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "Please switch to the symlink path:" -ForegroundColor Yellow
+        Write-Host "  cd `"$expectedSymlinkPath`"" -ForegroundColor Cyan
+        Write-Host ""
+        $response = Read-Host "Continue anyway? (y/n)"
+        if ($response -ne "y" -and $response -ne "Y") {
+            exit 1
+        }
     }
+} else {
+    Write-Host "Project path is already symlink-safe: $projectRoot" -ForegroundColor Green
 }
 
 # Check if frontend directory exists
@@ -36,8 +42,8 @@ if (-not (Test-Path $frontendPath)) {
 Write-Host "Step 1: Checking current path..." -ForegroundColor Yellow
 Write-Host "Current path: $($currentPath.Path)" -ForegroundColor Gray
 
-# Check if symlink exists
-$symlinkPath = "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2"
+# Check if symlink exists (or confirm clean path)
+$symlinkPath = $expectedSymlinkPath
 if (Test-Path $symlinkPath) {
     $linkInfo = Get-Item $symlinkPath
     if ($linkInfo.LinkType -eq "SymbolicLink") {

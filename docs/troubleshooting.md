@@ -260,7 +260,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 ### Check System Status
 ```bash
-python tools/commands/health-check.py
+python tools/commands/health_check.py
 ```
 
 ### Validate Fixes

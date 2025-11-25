@@ -582,7 +582,7 @@ tests/unit/backend/test_agent_service.py
 - `audit.sh` / `audit.ps1`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
 - `error.sh` / `error.ps1`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
 - `validate-prerequisites.py`: Validates system prerequisites (Python, Node.js, PostgreSQL, Redis).
-- `health-check.py`: Checks health of running services.
+- `health_check.py`: Checks health of running services.
 
 Supporting helper scripts live under `scripts/` and are invoked automatically by the command scripts.
 

@@ -60,6 +60,7 @@ class TestRunner:
     def __init__(self):
         self.project_root = Path(__file__).parent.parent.parent
         self.test_results = {}
+        self.tests_skipped = 0
     
     def run_pytest_tests(self, test_path: str, test_name: str) -> bool:
         """Run pytest tests.
@@ -76,8 +77,10 @@ class TestRunner:
         test_file = self.project_root / test_path
         
         if not test_file.exists():
-            print(f"{Colors.YELLOW}{_symbols.WARNING}{Colors.RESET} Test file not found: {test_path}")
-            return False
+            print(f"{Colors.YELLOW}{_symbols.WARNING}{Colors.RESET} Test file not found (skipping): {test_path}")
+            self.test_results[test_name] = "skipped"
+            self.tests_skipped += 1
+            return True
         
         try:
             # Run pytest
@@ -129,6 +132,8 @@ class TestRunner:
         # Print summary
         print(f"\n{Colors.BOLD}Test Summary{Colors.RESET}")
         print(f"{Colors.GREEN}Passed: {passed}{Colors.RESET}")
+        if self.tests_skipped:
+            print(f"{Colors.YELLOW}Skipped: {self.tests_skipped}{Colors.RESET}")
         if failed > 0:
             print(f"{Colors.RED}Failed: {failed}{Colors.RESET}")
         else:

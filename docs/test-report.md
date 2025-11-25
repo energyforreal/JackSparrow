@@ -16,7 +16,7 @@ This report summarizes the validation and testing of all recent fixes implemente
 
 All fixes were validated using `validate-fixes.py`:
 
-1. ✅ **Unicode Encoding**: Fixes found in health-check.py
+1. ✅ **Unicode Encoding**: Fixes found in health_check.py
 2. ✅ **Event Deserialization**: Improvements found (4 checks)
 3. ✅ **XGBoost Compatibility**: Handling found (3 checks)
 4. ✅ **Corrupted Model Handling**: Handling found (xgboost: 3, discovery: 2)

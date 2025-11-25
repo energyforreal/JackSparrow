@@ -92,6 +92,14 @@ class MCPModelRegistry:
         
         # Normalize weights
         self._normalize_weights()
+
+    def get_model(self, model_name: str) -> Optional[MCPModelNode]:
+        """Retrieve a registered model by name."""
+        return self.models.get(model_name)
+
+    def list_models(self) -> List[str]:
+        """List names of all registered models."""
+        return list(self.models.keys())
     
     def unregister_model(self, model_name: str):
         """Unregister model node."""

@@ -36,11 +36,6 @@ Run this command to start all services before every development session.
 ./tools/commands/start.sh
 ```
 
-**Makefile (Cross-platform)**:
-```bash
-make start
-```
-
 ## What It Does
 
 1. Creates logs directory
@@ -159,6 +154,7 @@ If the frontend appears to start but is not accessible:
 ## Notes
 
 - The start script checks prerequisites automatically before starting services
+- On both Windows and macOS/Linux, the command attempts to start a local Redis instance automatically if port 6379 is unavailable
 - Ensure `logs/` directory exists (created automatically)
 - Confirms backend, agent, and frontend are reachable on `localhost` after successful start
 - Always bootstrap logging before running commands (see `docs/12-logging.md`)

@@ -63,7 +63,7 @@ python tools/commands/start_parallel.py
 .\tools\commands\start.ps1
 
 # Check health of running services
-python tools/commands/health-check.py
+  python tools/commands/health_check.py
 
 # Restart services: Stop services (Ctrl+C) then run start command again
 ```
@@ -120,7 +120,7 @@ python tools/commands/test-encoding.py
 python tools/commands/test-startup-sequence.py
 
 # Run health checks
-python tools/commands/health-check.py
+  python tools/commands/health_check.py
 
 # Enhanced health validation
 python tools/commands/validate-health.py

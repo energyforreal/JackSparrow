@@ -4,8 +4,17 @@
 
 $ErrorActionPreference = "Stop"
 
-$sourcePath = "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading Agent#2"
-$linkPath = "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2"
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$sourcePath = $projectRoot
+$linkPath = $sourcePath
+
+if ($sourcePath -match "#") {
+    $linkPath = $sourcePath -replace "#", "-"
+} else {
+    Write-Host "Current project path does not contain a # character." -ForegroundColor Green
+    Write-Host "Symlink workaround is not required. You're good to go!" -ForegroundColor Green
+    exit 0
+}
 
 Write-Host "Creating symlink to work around # character issue..." -ForegroundColor Yellow
 Write-Host ""

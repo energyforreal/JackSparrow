@@ -312,6 +312,10 @@ class IntelligentAgent:
     async def _process_command(self, command: Dict[str, Any]):
         """Process command from backend."""
         request_id = command.get("request_id")
+        # Ensure request_id is always a valid UUID string (generate if missing/None)
+        # This matches the pattern used in event creation and ensures responses
+        # can be retrieved by the backend using the request_id key
+        request_id = request_id or str(uuid.uuid4())
         cmd = command.get("command")
         params = command.get("parameters", {})
         
@@ -336,7 +340,7 @@ class IntelligentAgent:
                     payload={
                         "command": cmd,
                         "parameters": params or {},
-                        "request_id": request_id or str(uuid.uuid4())
+                        "request_id": request_id
                     }
                 )
                 await event_bus.publish(command_event)

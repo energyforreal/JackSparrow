@@ -3,8 +3,16 @@
 
 $ErrorActionPreference = "Stop"
 
-$sourcePath = "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading Agent#2"
-$targetPath = "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2"
+$sourcePath = Split-Path -Parent $PSScriptRoot
+$targetPath = $sourcePath
+
+if ($sourcePath -match "#") {
+    $targetPath = $sourcePath -replace "#", "-"
+} else {
+    Write-Host "Current project folder does not include a # character." -ForegroundColor Green
+    Write-Host "No rename required. You are already using: $sourcePath" -ForegroundColor Cyan
+    exit 0
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Rename Folder Script" -ForegroundColor Yellow

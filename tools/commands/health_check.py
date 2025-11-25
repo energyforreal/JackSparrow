@@ -12,7 +12,7 @@ import time
 import socket
 import platform
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 # Set UTF-8 encoding for stdout/stderr on Windows to prevent encoding errors
@@ -82,6 +82,7 @@ class HealthChecker:
         self.warnings: List[str] = []
         self.checks_passed = 0
         self.checks_failed = 0
+        self.last_backend_health: Optional[Dict[str, Any]] = None
         
         if not HTTPX_AVAILABLE and not REQUESTS_AVAILABLE:
             self.errors.append(
@@ -118,6 +119,7 @@ class HealthChecker:
             True if backend is healthy, False otherwise
         """
         health_url = f"{self.backend_url}/api/v1/health"
+        self.last_backend_health = None
         
         try:
             if HTTPX_AVAILABLE:
@@ -134,6 +136,14 @@ class HealthChecker:
                     data = response.json()
                     status = data.get("status", "unknown")
                     health_score = data.get("health_score", 0.0)
+                    
+                    health_details = {
+                        "status": status,
+                        "health_score": health_score,
+                        "services": services,
+                        "degradation_reasons": data.get("degradation_reasons", []),
+                    }
+                    self.last_backend_health = health_details
                     
                     if status == "healthy":
                         print(f"{Colors.GREEN}{_symbols.CHECK}{Colors.RESET} Backend health: {status} (score: {health_score:.2f})")
@@ -277,6 +287,58 @@ class HealthChecker:
                 self.errors.append(f"Frontend is not accessible: {e}")
                 self.checks_failed += 1
                 return False
+    
+    def backend_port_status(self) -> Dict[str, Any]:
+        """Return backend port reachability details."""
+        parsed = urlparse(self.backend_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 8000
+        reachable = self.check_port_accessible(host, port, timeout=3.0)
+        return {"host": host, "port": port, "reachable": reachable}
+    
+    def frontend_port_status(self) -> Dict[str, Any]:
+        """Return frontend port reachability details."""
+        parsed = urlparse(self.frontend_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 3000
+        reachable = self.check_port_accessible(host, port, timeout=3.0)
+        return {"host": host, "port": port, "reachable": reachable}
+    
+    def get_backend_health_details(self) -> Optional[Dict[str, Any]]:
+        """Return last cached backend health payload."""
+        return self.last_backend_health
+    
+    def check_agent_status(self) -> Dict[str, Any]:
+        """Query agent status endpoint for detailed info."""
+        status: Dict[str, Any] = {"available": False}
+        agent_url = f"{self.backend_url}/api/v1/agent/status"
+        
+        if not (HTTPX_AVAILABLE or REQUESTS_AVAILABLE):
+            self.warnings.append(
+                "Cannot check agent status: install httpx or requests (pip install httpx)"
+            )
+            status["error"] = "No HTTP client available"
+            return status
+        
+        try:
+            if HTTPX_AVAILABLE:
+                with httpx.Client(timeout=self.timeout) as client:  # type: ignore[name-defined]
+                    response = client.get(agent_url)
+            else:
+                response = requests.get(agent_url, timeout=self.timeout)  # type: ignore[name-defined]
+            
+            status["status_code"] = response.status_code
+            if response.status_code == 200:
+                data = response.json()
+                status.update(data)
+                status["available"] = True
+            else:
+                status["error"] = f"HTTP {response.status_code}"
+        except Exception as exc:
+            status["error"] = str(exc)
+            self.warnings.append(f"Agent status check failed: {exc}")
+        
+        return status
     
     def check_all(self, wait_for_services: bool = True, max_wait: int = 30) -> bool:
         """Run all health checks.

@@ -72,15 +72,29 @@ class TestResult:
         return result
 
 
+def _is_production_url(url: Optional[str]) -> bool:
+    """Rudimentary check to see if we're targeting live Delta endpoints."""
+    if not url:
+        return False
+    lowered = url.lower()
+    return "delta.exchange" in lowered and "testnet" not in lowered
+
+
 class DeltaExchangeTester:
     """Delta Exchange connection tester."""
     
-    def __init__(self, verbose: bool = False, symbol: str = "BTCUSD"):
+    def __init__(self, verbose: bool = False, symbol: str = "BTCUSD", rate_limit: float = 0.5):
         self.verbose = verbose
         self.symbol = symbol
         self.results: list[TestResult] = []
         self.client: Optional[DeltaExchangeClient] = None
         self.market_service: Optional[MarketDataService] = None
+        self.rate_limit = max(0.0, rate_limit)
+    async def _throttle(self):
+        """Add a short delay between live API calls to avoid overwhelming the service."""
+        if self.rate_limit > 0:
+            await asyncio.sleep(self.rate_limit)
+    
     
     def log(self, message: str, level: str = "INFO"):
         """Log message with color coding."""
@@ -185,6 +199,7 @@ class DeltaExchangeTester:
         if not self.client:
             raise ValueError("Client not initialized")
         
+        await self._throttle()
         async with httpx.AsyncClient(timeout=10.0) as http_client:
             try:
                 response = await http_client.get(self.client.base_url, follow_redirects=True)
@@ -229,6 +244,7 @@ class DeltaExchangeTester:
         if not self.client:
             raise ValueError("Client not initialized")
         
+        await self._throttle()
         response = await self.client.get_ticker(self.symbol)
         
         if not response:
@@ -254,6 +270,7 @@ class DeltaExchangeTester:
         if not self.client:
             raise ValueError("Client not initialized")
         
+        await self._throttle()
         # Calculate start and end timestamps for 10 candles of 1h resolution
         resolution = "1h"
         candle_count = 10
@@ -305,6 +322,7 @@ class DeltaExchangeTester:
         if not self.client:
             raise ValueError("Client not initialized")
         
+        await self._throttle()
         response = await self.client.get_orderbook(
             symbol=self.symbol,
             depth=10
@@ -328,6 +346,7 @@ class DeltaExchangeTester:
     @test("MarketDataService Integration")
     async def test_market_service(self, result: TestResult):
         """Test 9: Test MarketDataService integration."""
+        await self._throttle()
         try:
             self.market_service = MarketDataService()
             await self.market_service.initialize()
@@ -429,10 +448,48 @@ async def main():
         action="store_true",
         help="Enable verbose output"
     )
+    parser.add_argument(
+        "--allow-live",
+        action="store_true",
+        help="Acknowledge that this script will hit live Delta Exchange endpoints"
+    )
+    parser.add_argument(
+        "--base-url",
+        help="Override the Delta Exchange base URL (defaults to env/https://api.india.delta.exchange)"
+    )
+    parser.add_argument(
+        "--rate-limit",
+        type=float,
+        default=0.5,
+        help="Seconds to wait between live API requests (default: 0.5)"
+    )
     
     args = parser.parse_args()
     
-    tester = DeltaExchangeTester(verbose=args.verbose, symbol=args.symbol)
+    env_default_url = (
+        args.base_url
+        or os.getenv("DELTA_EXCHANGE_BASE_URL")
+        or os.getenv("DELTA_API_URL")
+        or "https://api.india.delta.exchange"
+    )
+    
+    if args.base_url:
+        os.environ["DELTA_EXCHANGE_BASE_URL"] = args.base_url
+    else:
+        os.environ.setdefault("DELTA_EXCHANGE_BASE_URL", env_default_url)
+    
+    if _is_production_url(env_default_url) and not args.allow_live:
+        print(
+            "Refusing to hit production Delta Exchange endpoints without --allow-live.\n"
+            "Pass --base-url https://api-testnet.delta.exchange (or another sandbox) to run safely."
+        )
+        sys.exit(2)
+    
+    tester = DeltaExchangeTester(
+        verbose=args.verbose,
+        symbol=args.symbol,
+        rate_limit=args.rate_limit,
+    )
     success = await tester.run_all_tests()
     
     sys.exit(0 if success else 1)

@@ -4,6 +4,8 @@
 
 This directory contains scripts and documentation to fix the Next.js module resolution error caused by the `#` character in the folder name "Trading Agent#2".
 
+> **Heads-up:** The current repository already uses `Trading Agent 2` (no `#`). If that's your path, you don't need any action—the scripts will exit early and let you know.
+
 ## Problem
 
 Next.js incorrectly parses file paths when the folder name contains a `#` character, causing it to look for `app-router.js#` instead of `app-router.js`. This happens in Next.js's internal file tracing system before webpack processes anything, so configuration changes don't fix it.

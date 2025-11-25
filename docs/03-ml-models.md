@@ -674,6 +674,41 @@ class ModelPerformanceTracker:
 
 ---
 
+## Model Inference Testing
+
+### Automated Smoke Test
+
+Use `scripts/test_model_inference.py` to validate that every model stored under `agent/model_storage/` can be discovered, loaded, and queried end-to-end without starting the full agent:
+
+```bash
+python scripts/test_model_inference.py \
+  --model-dir agent/model_storage \
+  [--model-path models/xgboost_BTCUSD_15m.pkl]
+```
+
+The script runs the standard discovery pipeline, issues a lightweight prediction request to each registered node, and prints a confidence summary so regressions are obvious in CI logs. It also reports which artefacts failed to deserialize so you can remove or regenerate them before production deployments.
+
+### Latest Validation Snapshot (2025-11-25)
+
+Running the script against the committed artefacts produced these findings:
+
+- `xgboost_BTCUSD_15m.pkl`, `xgboost_BTCUSD_1h.pkl`, and `xgboost_BTCUSD_4h.pkl` load successfully but currently emit neutral predictions because the sample feature vector lacks their full 49-feature schema. Supply the complete feature list via metadata when updating these models.
+- `xgboost_BTCUSD_4h_production_20251014_114541.pkl`, `lightgbm_BTCUSD_4h_production_20251014_115655.pkl`, and `randomforest_BTCUSD_4h_production_20251014_125258.pkl` fail with `ValueError: invalid load key` during pickle deserialization. Regenerate them by exporting with `Booster.save_model()` (or the equivalent framework-specific method) in the original training environment, then upload the newly serialized files.
+
+Keep this section updated whenever the script uncovers model-health changes so other contributors know which artefacts require attention.
+
+### Feature Vector Expectations
+
+The MCP orchestrator now forwards both the ordered feature values and the associated `feature_names` inside the model request context. Models must continue to:
+
+1. Accept a `List[float]` feature vector shaped exactly like their training data.
+2. Read `request.context["feature_names"]` when feature importance needs human-readable labels.
+3. Validate the feature count and raise a descriptive error if the input is malformed.
+
+Document the expected feature order inside each model’s metadata so downstream scripts (including the inference smoke test) can source realistic inputs.
+
+---
+
 ## Best Practices
 
 ### Model Upload
@@ -723,8 +758,9 @@ class ModelPerformanceTracker:
 1. Verify model file format is supported
 2. Check model dependencies are installed
 3. Verify model file is not corrupted
-4. Check model compatibility with Python version
+4. Check model compatibility with Python version (re-export pickled models using `Booster.save_model()` or the framework-native exporter before upgrading XGBoost/LightGBM versions)
 5. Review error logs for specific issues
+6. If you observe `invalid load key` errors, delete the affected file from `agent/model_storage/` and replace it with a freshly serialized artefact from the training environment.
 
 ### Model Prediction Errors
 
@@ -732,7 +768,7 @@ class ModelPerformanceTracker:
 
 **Solutions**:
 1. Verify required features are available
-2. Check feature format matches model expectations
+2. Check feature format matches model expectations (the context now carries both `features` and `feature_names`; custom nodes should rely on those keys instead of positional assumptions)
 3. Verify model is properly loaded
 4. Check model health status
 5. Review prediction logs for errors

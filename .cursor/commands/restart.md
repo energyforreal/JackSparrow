@@ -20,11 +20,6 @@ Trigger after changing environment variables, dependencies, or configuration fil
 ./tools/commands/restart.sh
 ```
 
-**Makefile (Cross-platform)**:
-```bash
-make restart
-```
-
 ## What It Does
 
 1. Stops all running services (backend, agent, frontend)

@@ -7,19 +7,21 @@ Deploy JackSparrow Trading Agent using Docker Compose.
 **Related Commands**: See [docker-start.md](docker-start.md) for individual container management, [docker-logs.md](docker-logs.md) for log viewing.
 
 **Production deployment:**
+```powershell
+.\scripts\docker\deploy.ps1 up
+```
+
 ```bash
-make docker-deploy
-# or
-scripts/docker/deploy.ps1 up
-scripts/docker/deploy.sh up
+./scripts/docker/deploy.sh up
 ```
 
 **Development deployment (with hot-reload):**
+```powershell
+.\scripts\docker\dev-start.ps1
+```
+
 ```bash
-make docker-dev
-# or
-scripts/docker/dev-start.ps1
-scripts/docker/dev-start.sh
+./scripts/docker/dev-start.sh
 ```
 
 ## Implementation
@@ -69,23 +71,39 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ## Examples
 
 **Start production environment:**
+```powershell
+.\scripts\docker\deploy.ps1 up
+```
+
 ```bash
-scripts/docker/deploy.ps1 up
+./scripts/docker/deploy.sh up
 ```
 
 **Start development environment:**
+```powershell
+.\scripts\docker\dev-start.ps1 --Build
+```
+
 ```bash
-scripts/docker/dev-start.ps1 --Build
+./scripts/docker/dev-start.sh --build
 ```
 
 **Update services:**
+```powershell
+.\scripts\docker\deploy.ps1 update -PullImages
+```
+
 ```bash
-scripts/docker/deploy.ps1 update -PullImages
+PULL_IMAGES=true ./scripts/docker/deploy.sh update
 ```
 
 **View logs:**
+```powershell
+.\scripts\docker\deploy.ps1 logs
+```
+
 ```bash
-scripts/docker/deploy.ps1 logs
+./scripts/docker/deploy.sh logs
 ```
 
 ## Health Checks

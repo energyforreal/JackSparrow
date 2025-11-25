@@ -33,7 +33,7 @@ python tools/commands/monitor-system.py --interval 60
 
 One-time health check:
 ```bash
-python tools/commands/health-check.py
+python tools/commands/health_check.py
 ```
 
 Options:
@@ -116,11 +116,11 @@ Use cron (Linux/Mac) or Task Scheduler (Windows) to run periodic health checks:
 Linux/Mac (crontab):
 ```bash
 # Run health check every 5 minutes
-*/5 * * * * cd /path/to/project && python tools/commands/health-check.py
+*/5 * * * * cd /path/to/project && python tools/commands/health_check.py
 ```
 
 Windows (Task Scheduler):
-- Create task to run `python tools/commands/health-check.py` on schedule
+- Create task to run `python tools/commands/health_check.py` on schedule
 
 ## Monitoring Best Practices
 
@@ -192,7 +192,7 @@ Integrate with:
 
 ## Additional Resources
 
-- [Health Check Script](../tools/commands/health-check.py)
+- [Health Check Script](../tools/commands/health_check.py)
 - [System Monitor Script](../tools/commands/monitor-system.py)
 - [Project Documentation](README.md)
 

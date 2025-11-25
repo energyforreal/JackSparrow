@@ -1,7 +1,10 @@
 # Quick Fix for Next.js Path Error with # Character
 
 ## Problem
-The `#` character in your folder name "Trading Agent#2" causes Next.js to incorrectly parse paths, looking for `app-router.js#` instead of `app-router.js`. This happens in Next.js's internal file tracing system before webpack processes anything.
+The `#` character in your folder name (e.g., `Trading Agent#2`) causes Next.js to incorrectly parse paths, looking for `app-router.js#` instead of `app-router.js`. This happens in Next.js's internal file tracing system before webpack processes anything.
+
+> **Already on `Trading Agent 2`?**  
+> If your project directory no longer contains `#` (the repo now ships as `Trading Agent 2`), you can skip this entire workaround—the issue is already resolved. The scripts below will detect this and exit gracefully.
 
 ## Solution: Create Symlink (Recommended - No Data Movement)
 
@@ -10,14 +13,14 @@ The `#` character in your folder name "Trading Agent#2" causes Next.js to incorr
 1. **Open PowerShell as Administrator**
    - Right-click PowerShell → "Run as Administrator"
 
-2. **Navigate to your Projects folder**
+2. **Navigate to your project folder**
    ```powershell
-   cd "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects"
+   cd "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading Agent 2"
    ```
 
-3. **Create the symlink**
+3. **Create the symlink (only needed if the folder still includes `#`)**
    ```powershell
-   New-Item -ItemType SymbolicLink -Path "Trading-Agent-2" -Target "Trading Agent#2"
+   .\tools\create-symlink.ps1
    ```
 
 4. **Reopen Cursor/VS Code** and open the project from:

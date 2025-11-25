@@ -20,11 +20,6 @@ Run before opening pull requests, cutting releases, or after major refactors.
 ./tools/commands/audit.sh
 ```
 
-**Makefile (Cross-platform)**:
-```bash
-make audit
-```
-
 ## What It Does
 
 1. Checks Python code formatting (black)

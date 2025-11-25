@@ -61,17 +61,17 @@ class FixValidator:
     def validate_unicode_encoding(self) -> Tuple[bool, str]:
         """Validate Unicode encoding fixes."""
         try:
-            # Test that health-check.py uses ASCII-safe symbols on Windows
-            health_check_path = self.project_root / "tools" / "commands" / "health-check.py"
+            # Test that health_check.py uses ASCII-safe symbols on Windows
+            health_check_path = self.project_root / "tools" / "commands" / "health_check.py"
             if not health_check_path.exists():
-                return False, "health-check.py not found"
+                return False, "health_check.py not found"
             
             content = health_check_path.read_text(encoding='utf-8')
             
             # Check for platform-specific symbol handling
             if 'platform.system() == "Windows"' in content:
                 if '[OK]' in content or '[WARN]' in content:
-                    return True, "Unicode encoding fixes found in health-check.py"
+                    return True, "Unicode encoding fixes found in health_check.py"
             
             # Test start_parallel.py
             start_parallel_path = self.project_root / "tools" / "commands" / "start_parallel.py"

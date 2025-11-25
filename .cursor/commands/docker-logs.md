@@ -6,11 +6,12 @@ Analyze Docker container logs with filtering and export capabilities.
 
 **Related Commands**: See [docker-audit.md](docker-audit.md) for error auditing, [error.md](error.md) for quick diagnostics.
 
+```powershell
+.\scripts\docker\logs.ps1 [service] [-Level ERROR] [-Tail 100] [-Follow] [-Export]
+```
+
 ```bash
-make docker-logs [SERVICE=backend] [LEVEL=ERROR] [TAIL=100]
-# or
-scripts/docker/logs.ps1 [service] [--Level ERROR] [--Tail 100] [--Follow] [--Export]
-scripts/docker/logs.sh [service] [--level=ERROR] [--tail=100] [-f] [--export]
+./scripts/docker/logs.sh [service] [--level=ERROR] [--tail=100] [-f] [--export]
 ```
 
 ## Implementation
@@ -36,15 +37,21 @@ scripts/docker/logs.sh [service] [--level=ERROR] [--tail=100] [-f] [--export]
 ## Examples
 
 **View all backend logs:**
+```powershell
+.\scripts\docker\logs.ps1 backend
+```
+
 ```bash
-make docker-logs SERVICE=backend
-scripts/docker/logs.ps1 backend
+./scripts/docker/logs.sh backend
 ```
 
 **View only errors from agent:**
+```powershell
+.\scripts\docker\logs.ps1 agent -Level ERROR
+```
+
 ```bash
-make docker-logs SERVICE=agent LEVEL=ERROR
-scripts/docker/logs.ps1 agent -Level ERROR
+./scripts/docker/logs.sh agent --level=ERROR
 ```
 
 **Follow logs in real-time:**

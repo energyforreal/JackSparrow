@@ -7,7 +7,9 @@ Runs after code changes to verify API integration is correct.
 Exits with code 0 on success, non-zero on failure.
 """
 
+import argparse
 import asyncio
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -24,6 +26,14 @@ except ImportError:
     pass
 
 from agent.data.delta_client import DeltaExchangeClient, DeltaExchangeError
+
+
+def _is_production_url(url: str | None) -> bool:
+    """Heuristic to detect live Delta endpoints."""
+    if not url:
+        return False
+    lowered = url.lower()
+    return "delta.exchange" in lowered and "testnet" not in lowered
 
 
 def calculate_time_range(resolution: str, candle_count: int) -> tuple[int, int]:
@@ -51,15 +61,13 @@ def calculate_time_range(resolution: str, candle_count: int) -> tuple[int, int]:
     return start_time, end_time
 
 
-async def test_candles_api():
+async def test_candles_api(symbol: str, rate_limit: float):
     """Test candles API with various resolutions and counts."""
     try:
         client = DeltaExchangeClient()
     except Exception as e:
         print(f"FAIL: Failed to initialize client: {e}")
         return False
-    
-    symbol = "BTCUSD"
     
     test_cases = [
         {"resolution": "15m", "candle_count": 2},
@@ -77,6 +85,8 @@ async def test_candles_api():
         candle_count = test_case["candle_count"]
         
         try:
+            if rate_limit > 0:
+                await asyncio.sleep(rate_limit)
             # Calculate time range
             start_time, end_time = calculate_time_range(resolution, candle_count)
             
@@ -171,12 +181,46 @@ async def test_candles_api():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Validate Delta Exchange candles API")
+    parser.add_argument("--symbol", default="BTCUSD", help="Trading symbol to test")
+    parser.add_argument(
+        "--allow-live",
+        action="store_true",
+        help="Acknowledge that this script will hit live Delta Exchange endpoints",
+    )
+    parser.add_argument(
+        "--base-url",
+        help="Override Delta Exchange base URL (defaults to env or https://api.india.delta.exchange)",
+    )
+    parser.add_argument(
+        "--rate-limit",
+        type=float,
+        default=0.5,
+        help="Seconds to wait between API requests (default: 0.5)",
+    )
+    args = parser.parse_args()
+    
+    target_url = (
+        args.base_url
+        or os.getenv("DELTA_EXCHANGE_BASE_URL")
+        or os.getenv("DELTA_API_URL")
+        or "https://api.india.delta.exchange"
+    )
+    os.environ["DELTA_EXCHANGE_BASE_URL"] = target_url
+    
+    if _is_production_url(target_url) and not args.allow_live:
+        print(
+            "Refusing to run against production Delta Exchange endpoints without --allow-live.\n"
+            "Use --base-url https://api-testnet.delta.exchange (or another sandbox) to run safely."
+        )
+        sys.exit(2)
+    
     print("=" * 60)
     print("Delta Exchange Candles API Validation Test")
     print("=" * 60)
     print(f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n")
     
-    success = asyncio.run(test_candles_api())
+    success = asyncio.run(test_candles_api(symbol=args.symbol, rate_limit=max(0.0, args.rate_limit)))
     
     print("\n" + "=" * 60)
     if success:

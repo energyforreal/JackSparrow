@@ -2,7 +2,7 @@
 
 ## Problem Overview
 
-The `#` character in your folder name "Trading Agent#2" causes Next.js to incorrectly parse module paths. When Next.js tries to resolve `app-router.js`, it looks for `app-router.js#` instead, causing build failures.
+The `#` character in folder names such as "Trading Agent#2" causes Next.js to incorrectly parse module paths. When Next.js tries to resolve `app-router.js`, it looks for `app-router.js#` instead, causing build failures. Newer checkouts already use `Trading Agent 2` (no `#`), so you may not need this guide—the scripts will detect that and exit cleanly.
 
 ## Solution
 
@@ -28,15 +28,15 @@ Before creating the symlink, close all applications using the project:
 
 ### Step 3: Navigate to Project Root
 
-In the Administrator PowerShell window, navigate to your project:
+In the Administrator PowerShell window, navigate to your project (adjust the path if yours is different):
 
 ```powershell
-cd "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading Agent#2"
+cd "C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading Agent 2"
 ```
 
 ### Step 4: Run the Symlink Creation Script
 
-Execute the script:
+Execute the script (it auto-detects whether the `#` workaround is required):
 
 ```powershell
 .\tools\create-symlink.ps1
@@ -106,7 +106,7 @@ Link:   C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2
 
 ## What Changed?
 
-- **Original folder**: `Trading Agent#2` - stays exactly as it is
+- **Original folder**: `Trading Agent#2` - stays exactly as it is (only applicable to legacy setups)
 - **Symlink created**: `Trading-Agent-2` - points to the original folder
 - **Next.js now uses**: The symlink path (without `#`), resolving the path issue
 
@@ -120,7 +120,7 @@ Link:   C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2
 
 ## Quick Reference
 
-**Symlink Path**: `C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2`
+**Symlink Path**: `C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading-Agent-2` (only needed when the original folder contains `#`)
 
 **Original Path**: `C:\Users\lohit\OneDrive\Documents\ATTRAL\Projects\Trading Agent#2`
 
