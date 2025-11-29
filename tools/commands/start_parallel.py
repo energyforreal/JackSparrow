@@ -15,10 +15,31 @@ import time
 import platform
 import shutil
 import socket
+import builtins
 from urllib.parse import urlparse
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+
+# Try to import database libraries for schema verification
+try:
+    from sqlalchemy import create_engine, inspect, text
+    SQLALCHEMY_AVAILABLE = True
+except ImportError:
+    SQLALCHEMY_AVAILABLE = False
+
+
+def _flushed_print(*args, **kwargs):
+    """Proxy print that always flushes stdout (and stderr when used)."""
+    kwargs.setdefault("flush", True)
+    builtins.print(*args, **kwargs)
+
+
+# Ensure every existing print() call in this module flushes immediately.
+print = _flushed_print  # type: ignore
+
+# Guarantee unbuffered output for this process and its children.
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
 
 
 # ANSI color codes for terminal output
@@ -126,10 +147,11 @@ class ServiceManager:
                 with open(self.config.pid_file, 'w') as f:
                     f.write(str(self.process.pid))
             return True
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             error_symbol = "X" if platform.system() == "Windows" else "✗"
-            print(f"{Colors.ERROR}{error_symbol} Failed to start {self.config.name}: Command not found ({cmd[0]}){Colors.RESET}")
-            print(f"   Make sure {cmd[0]} is installed and in PATH")
+            missing_cmd = self.config.command[0]
+            print(f"{Colors.ERROR}{error_symbol} Failed to start {self.config.name}: Command not found ({missing_cmd}){Colors.RESET}")
+            print(f"   Make sure {missing_cmd} is installed and in PATH")
             return False
         except Exception as e:
             error_symbol = "X" if platform.system() == "Windows" else "✗"
@@ -346,42 +368,128 @@ class ParallelProcessManager:
         
         # All services started successfully
         success_symbol = "OK" if platform.system() == "Windows" else "✓"
-        print(f"\n{Colors.BOLD}{success_symbol} All services started successfully!{Colors.RESET}")
-        print(f"{Colors.BACKEND}Backend: http://localhost:8000{Colors.RESET}")
-        print(f"{Colors.FRONTEND}Frontend: http://localhost:3000{Colors.RESET}")
+        print(f"\n{Colors.BOLD}{success_symbol} All services started successfully!{Colors.RESET}\n")
+        
+        # Display comprehensive startup summary
+        print(f"{Colors.BOLD}Full Stack Components:{Colors.RESET}")
+        print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.BACKEND}Backend API{Colors.RESET}: http://localhost:8000")
+        print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.AGENT}Agent Service{Colors.RESET}: Running (includes Feature Server on port 8001)")
+        print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.AGENT}Feature Server API{Colors.RESET}: http://localhost:8001")
+        print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.FRONTEND}Frontend{Colors.RESET}: http://localhost:3000")
+        
+        # Check database and Redis status
+        database_url = os.environ.get("DATABASE_URL", "")
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        
+        if database_url and check_postgres_running(database_url):
+            host, port, database = parse_database_url(database_url)
+            print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} Database: Connected at {host}:{port}")
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.RESET} Database: Status unknown")
+        
+        if check_redis_running(redis_url):
+            host, port = parse_redis_url(redis_url)
+            print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} Redis: Connected at {host}:{port}")
+        else:
+            print(f"  {Colors.YELLOW}⚠{Colors.RESET} Redis: Status unknown")
+        
         print(f"\nLogs are in the logs/ directory")
+        print(f"API Documentation: http://localhost:8000/docs\n")
         
         # Run health checks after services start
         self._run_health_checks()
         
-        print(f"Press Ctrl+C to stop all services\n")
+        print(f"\nPress Ctrl+C to stop all services\n")
         
         return True
     
     def _run_health_checks(self):
-        """Run health checks after services start."""
-        health_check_script = self.project_root / "tools" / "commands" / "health_check.py"
-        
-        if not health_check_script.exists():
-            # Health check script not available, skip
-            return
-        
+        """Run comprehensive health checks for all services after startup."""
         print(f"\n{Colors.BOLD}Running health checks...{Colors.RESET}")
+        
+        # Wait a bit more for services to fully initialize
+        time.sleep(2)
+        
+        services_status = {
+            "Backend": {"url": "http://localhost:8000/api/v1/health", "status": "unknown"},
+            "Feature Server": {"url": "http://localhost:8001/health", "status": "unknown"},
+            "Frontend": {"url": "http://localhost:3000", "status": "unknown"},
+        }
+        
+        # Check Backend
+        if self._check_http_endpoint(services_status["Backend"]["url"], expected_status=200):
+            services_status["Backend"]["status"] = "healthy"
+        else:
+            services_status["Backend"]["status"] = "unhealthy"
+        
+        # Check Feature Server (runs inside Agent)
+        if self._check_http_endpoint(services_status["Feature Server"]["url"], expected_status=200, timeout=5):
+            services_status["Feature Server"]["status"] = "healthy"
+        else:
+            services_status["Feature Server"]["status"] = "unhealthy"
+        
+        # Check Frontend
+        if self._check_http_endpoint(services_status["Frontend"]["url"], expected_status=200, timeout=5):
+            services_status["Frontend"]["status"] = "healthy"
+        else:
+            services_status["Frontend"]["status"] = "unhealthy"
+        
+        # Display results
+        print()
+        success_symbol = "OK" if platform.system() == "Windows" else "✓"
+        error_symbol = "X" if platform.system() == "Windows" else "✗"
+        
+        for service_name, info in services_status.items():
+            if info["status"] == "healthy":
+                print(f"{Colors.GREEN}{success_symbol}{Colors.RESET} {service_name}: {info['status'].upper()}")
+            else:
+                print(f"{Colors.ERROR}{error_symbol}{Colors.RESET} {service_name}: {info['status'].upper()} - {info['url']}")
+        
+        # Also try external health check script if available
+        health_check_script = self.project_root / "tools" / "commands" / "health_check.py"
+        if health_check_script.exists():
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(health_check_script), "--no-wait", "--max-wait", "15"],
+                    cwd=str(self.project_root),
+                    timeout=20,
+                    capture_output=False,
+                )
+                # Don't fail startup if health check fails, just report
+                if result.returncode != 0:
+                    print(
+                        f"{Colors.YELLOW}[WARN] Additional health checks reported issues. "
+                        f"Check logs above.{Colors.RESET}"
+                    )
+            except (subprocess.TimeoutExpired, Exception):
+                # Already have inline checks above; ignore secondary health script failures
+                pass
+    
+    def _check_http_endpoint(self, url: str, expected_status: int = 200, timeout: float = 3.0) -> bool:
+        """Check if an HTTP endpoint is responding.
+        
+        Args:
+            url: URL to check
+            expected_status: Expected HTTP status code
+            timeout: Request timeout in seconds
+            
+        Returns:
+            True if endpoint responds with expected status, False otherwise
+        """
         try:
-            result = subprocess.run(
-                [sys.executable, str(health_check_script), "--no-wait", "--max-wait", "15"],
-                cwd=str(self.project_root),
-                timeout=20,
-                capture_output=False
-            )
-            # Don't fail startup if health check fails, just report
-            if result.returncode != 0:
-                print(f"{Colors.YELLOW}[WARN] Health checks reported issues. Check logs above.{Colors.RESET}")
-        except subprocess.TimeoutExpired:
-            print(f"{Colors.YELLOW}[WARN] Health check timed out. Services may still be initializing.{Colors.RESET}")
-        except Exception as e:
-            # Don't fail startup if health check fails
-            print(f"{Colors.YELLOW}[WARN] Could not run health checks: {e}{Colors.RESET}")
+            import urllib.request
+            import urllib.error
+            
+            req = urllib.request.Request(url)
+            req.add_header("User-Agent", "JackSparrow-Startup-HealthCheck/1.0")
+            
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return response.status == expected_status
+        except urllib.error.HTTPError as e:
+            # HTTP error but service is responding
+            return e.code == expected_status
+        except (urllib.error.URLError, socket.timeout, Exception):
+            return False
     
     def wait_for_shutdown(self):
         """Wait for shutdown signal."""
@@ -531,7 +639,8 @@ def setup_services(project_root: Path, npm_cmd: str) -> ParallelProcessManager:
             "-m", "agent.core.intelligent_agent"
         ],
         cwd=project_root,
-        log_file=logs_dir / "agent.log",
+        # Agent manages its own structured log file; avoid duplicating stream capture here.
+        log_file=None,
         pid_file=logs_dir / "agent.pid",
         check_delay=2.0
     )
@@ -870,8 +979,98 @@ def attempt_start_redis(project_root: Path) -> bool:
     return False
 
 
+def verify_database_schema(database_url: str) -> Tuple[bool, bool]:
+    """Verify database schema exists and optionally initialize if missing.
+    
+    Args:
+        database_url: PostgreSQL connection URL
+        
+    Returns:
+        Tuple of (schema_exists: bool, auto_initialized: bool)
+    """
+    if not SQLALCHEMY_AVAILABLE:
+        # Skip schema check if SQLAlchemy not available
+        return True, False
+    
+    required_tables = [
+        "trades",
+        "positions",
+        "decisions",
+        "performance_metrics",
+        "model_performance",
+    ]
+    
+    try:
+        # Normalize database URL for SQLAlchemy
+        normalized_url = database_url
+        if "+" in database_url and "://" in database_url:
+            scheme_part, rest = database_url.split("://", 1)
+            normalized_url = f"postgresql://{rest}"
+        elif not database_url.startswith(("postgresql://", "postgres://")):
+            # Skip if URL format is invalid
+            return True, False
+        
+        engine = create_engine(normalized_url, connect_args={"connect_timeout": 5})
+        inspector = inspect(engine)
+        
+        existing_tables = inspector.get_table_names()
+        missing_tables = [table for table in required_tables if table not in existing_tables]
+        
+        if missing_tables:
+            # Schema is missing - check if auto-initialization is enabled
+            auto_init = os.environ.get("AUTO_INIT_DB", "").lower() in ("1", "true", "yes")
+            
+            if auto_init:
+                # Attempt to auto-initialize database
+                setup_script = Path(__file__).parent.parent.parent / "scripts" / "setup_db.py"
+                if setup_script.exists():
+                    print(f"{Colors.YELLOW}Database schema missing. Auto-initializing...{Colors.RESET}")
+                    try:
+                        result = subprocess.run(
+                            [sys.executable, str(setup_script)],
+                            cwd=str(setup_script.parent.parent),
+                            capture_output=True,
+                            text=True,
+                            timeout=60
+                        )
+                        if result.returncode == 0:
+                            success_symbol = "OK" if platform.system() == "Windows" else "✓"
+                            print(f"{Colors.GREEN}{success_symbol} Database schema initialized successfully{Colors.RESET}")
+                            return True, True
+                        else:
+                            error_msg = result.stderr or result.stdout
+                            print(f"{Colors.ERROR}Failed to auto-initialize database: {error_msg[:200]}{Colors.RESET}")
+                            return False, False
+                    except Exception as e:
+                        print(f"{Colors.ERROR}Error during auto-initialization: {e}{Colors.RESET}")
+                        return False, False
+                else:
+                    print(f"{Colors.ERROR}Database setup script not found: {setup_script}{Colors.RESET}")
+                    return False, False
+            else:
+                # Schema missing but auto-init not enabled
+                warning_symbol = "!" if platform.system() == "Windows" else "⚠"
+                print(f"{Colors.YELLOW}{warning_symbol} Database schema missing: {', '.join(missing_tables)}{Colors.RESET}")
+                print(f"  Run 'python scripts/setup_db.py' to initialize schema")
+                print(f"  Or set AUTO_INIT_DB=1 to auto-initialize on startup")
+                return False, False
+        else:
+            # Schema exists
+            success_symbol = "OK" if platform.system() == "Windows" else "✓"
+            print(f"{Colors.GREEN}{success_symbol} Database schema verified (all tables exist){Colors.RESET}")
+            return True, False
+            
+    except Exception as e:
+        # Don't fail startup if schema check fails, just warn
+        warning_symbol = "!" if platform.system() == "Windows" else "⚠"
+        print(f"{Colors.YELLOW}{warning_symbol} Could not verify database schema: {str(e)[:100]}{Colors.RESET}")
+        print(f"  Ensure database is initialized with 'python scripts/setup_db.py'")
+        # Return True to allow startup to continue
+        return True, False
+
+
 def check_prerequisites() -> bool:
-    """Check if required services (PostgreSQL, Redis) are running.
+    """Check if required services (PostgreSQL, Redis) are running and schema exists.
     
     Reads DATABASE_URL and REDIS_URL from environment variables
     (loaded by load_root_env) and verifies services are accessible.
@@ -893,6 +1092,13 @@ def check_prerequisites() -> bool:
             issues.append(f"PostgreSQL is not accessible at {host}:{port} (database: {database})")
         else:
             issues.append(f"PostgreSQL is not accessible at {host}:{port}")
+    else:
+        # Database is accessible, verify schema
+        schema_exists, auto_init = verify_database_schema(database_url)
+        if not schema_exists:
+            # Schema check failed - this is a warning, not a fatal error
+            # But we'll allow startup to continue
+            pass
     
     if not check_redis_running(redis_url):
         host, port = parse_redis_url(redis_url)
@@ -907,7 +1113,7 @@ def check_prerequisites() -> bool:
     return True
 
 
-def run_validation_script(script_path: Path, script_name: str) -> bool:
+def run_validation_script(script_path: Path, script_name: str, project_root: Path) -> bool:
     """Run a validation script and return success status.
     
     Args:
@@ -920,10 +1126,10 @@ def run_validation_script(script_path: Path, script_name: str) -> bool:
     try:
         result = subprocess.run(
             [sys.executable, str(script_path)],
-            cwd=str(script_path.parent.parent.parent),
+            cwd=str(project_root),
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
         
         # Print output
@@ -949,6 +1155,10 @@ def main():
     
     # Change to project root
     os.chdir(str(project_root))
+
+    print(f"{Colors.BOLD}JackSparrow startup sequence initiated (PID {os.getpid()}){Colors.RESET}")
+    print(f"Project root: {project_root}")
+    print()
     
     # Resolve npm command early (raises if missing)
     try:
@@ -958,19 +1168,25 @@ def main():
         print(f"\n{Colors.BOLD}Please install Node.js 18+ and ensure npm is in your PATH{Colors.RESET}")
         sys.exit(1)
 
+    print(f"{Colors.BOLD}Step 1/4: Loading environment configuration...{Colors.RESET}")
     # Load root .env so child processes inherit environment variables
     load_root_env(project_root)
+    print()
 
+    print(f"{Colors.BOLD}Step 2/4: Checking Redis availability...{Colors.RESET}")
     # Attempt to start Redis if not already running
     attempt_start_redis(project_root)
     print()  # Empty line after Redis attempt
 
+    print(f"{Colors.BOLD}Step 3/4: Running configuration validators...{Colors.RESET}")
     # Validate .env file contents before proceeding
     env_validator_path = project_root / "scripts" / "validate-env.py"
     if env_validator_path.exists():
         print(f"{Colors.BOLD}Validating environment variables...{Colors.RESET}")
-        if not run_validation_script(env_validator_path, "validate-env.py"):
-            print(f"\n{Colors.ERROR}Environment validation failed. Please fix .env file issues above.{Colors.RESET}")
+        if not run_validation_script(env_validator_path, "validate-env.py", project_root):
+            print(
+                f"\n{Colors.ERROR}Environment validation failed. Please fix .env file issues above.{Colors.RESET}"
+            )
             print(f"Run manually: python {env_validator_path}")
             sys.exit(1)
         print()  # Empty line after validation
@@ -978,7 +1194,7 @@ def main():
     # Validate prerequisites (Python, Node.js, PostgreSQL, Redis)
     prereq_validator_path = project_root / "tools" / "commands" / "validate-prerequisites.py"
     if prereq_validator_path.exists():
-        if not run_validation_script(prereq_validator_path, "validate-prerequisites.py"):
+        if not run_validation_script(prereq_validator_path, "validate-prerequisites.py", project_root):
             print(f"\n{Colors.ERROR}Prerequisite validation failed. Please fix issues above.{Colors.RESET}")
             print(f"Run manually: python {prereq_validator_path}")
             sys.exit(1)
@@ -987,7 +1203,25 @@ def main():
         print(f"{Colors.BOLD}Checking prerequisites...{Colors.RESET}")
         if not check_prerequisites():
             sys.exit(1)
+    
+    # Optional model validation (if enabled)
+    validate_models_on_startup = os.environ.get("VALIDATE_MODELS_ON_STARTUP", "").lower() in ("1", "true", "yes")
+    if validate_models_on_startup:
+        print(f"{Colors.BOLD}Validating model files...{Colors.RESET}")
+        model_validator_path = project_root / "scripts" / "validate_model_files.py"
+        if model_validator_path.exists():
+            if not run_validation_script(model_validator_path, "validate_model_files.py", project_root):
+                print(f"\n{Colors.ERROR}Model validation failed. Models may be corrupted.{Colors.RESET}")
+                print(
+                    f"{Colors.YELLOW}Warning: Continuing startup despite model validation failure.{Colors.RESET}"
+                )
+                print("   To fix models, run: python scripts/train_models.py")
+                print(
+                    "   To disable this check, unset VALIDATE_MODELS_ON_STARTUP environment variable"
+                )
+            print()  # Empty line after validation
 
+    print(f"{Colors.BOLD}Step 4/4: Ensuring service dependencies...{Colors.RESET}")
     # Ensure dependencies are set up
     try:
         ensure_dependencies(project_root, npm_cmd)
@@ -1000,6 +1234,7 @@ def main():
         print(f"  4. See docs/troubleshooting-local-startup.md for more help")
         sys.exit(1)
     
+    print(f"{Colors.BOLD}Preparing service manager...{Colors.RESET}")
     # Setup and start services
     try:
         manager = setup_services(project_root, npm_cmd)
@@ -1009,7 +1244,7 @@ def main():
             print(f"\n{Colors.BOLD}Troubleshooting:{Colors.RESET}")
             print(f"  1. Check service logs in logs/ directory")
             print(f"  2. Verify all prerequisites are running (PostgreSQL, Redis)")
-            print(f"  3. Ensure ports 8000, 3000, 8001 are available")
+            print(f"  3. Ensure ports 8000 and 3000 are available (port 8001 is only needed if you run the optional feature server separately)")
             print(f"  4. Run validation scripts manually:")
             print(f"     - python scripts/validate-env.py")
             print(f"     - python tools/commands/validate-prerequisites.py")

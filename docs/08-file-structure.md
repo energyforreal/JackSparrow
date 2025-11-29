@@ -556,10 +556,11 @@ tests/unit/backend/test_agent_service.py
 - Historical data import
 - Mock data creation
 
-**`scripts/migrate_db.py`**:
-- Database migrations
-- Schema updates
-- Data migrations
+**`scripts/migrate_enums.py`**:
+- Database schema migration for ENUM types
+- Converts VARCHAR enum columns to PostgreSQL ENUM types
+- Required for existing databases created before ENUM support
+- Includes transaction safety and rollback capability
 
 ---
 
@@ -668,7 +669,7 @@ sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
 
 # ML/AI
-xgboost==2.0.0
+xgboost==2.0.2
 tensorflow==2.14.0
 
 # Utilities

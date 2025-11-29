@@ -86,11 +86,18 @@ export interface HealthStatus {
   timestamp?: string | Date
 }
 
+export interface ServiceDetails {
+  note?: string
+  healthy_models?: number
+  total_models?: number
+  [key: string]: unknown
+}
+
 export interface ServiceStatus {
   status: 'up' | 'degraded' | 'down' | 'unknown'
   latency_ms?: number
   error?: string
-  details?: Record<string, unknown>
+  details?: ServiceDetails
 }
 
 export interface LearningUpdate {

@@ -2,7 +2,7 @@
 description: Documentation organization rules for markdown files
 globs:
   - "**/*.md"
-alwaysApply: true
+alwaysApply: false
 ---
 # Documentation Organization Rules
 
@@ -92,7 +92,7 @@ docs/
   └── remediation-plan.md
 
 .cursor/rules/
-  ├── claude.mdc
+  ├── design.mdc
   └── documentation-organization.mdc
 
 reference/
@@ -113,4 +113,4 @@ README.md  (root - project readme)
 
 ## Enforcement
 
-This rule is always applied (`alwaysApply: true`) to ensure consistent documentation organization across the project. When creating or moving markdown files, always follow these guidelines.
+This rule is applied when working with markdown files (`alwaysApply: false`, loaded via glob pattern `**/*.md`) to ensure consistent documentation organization across the project. When creating or moving markdown files, always follow these guidelines.

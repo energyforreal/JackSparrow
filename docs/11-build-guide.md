@@ -726,6 +726,29 @@ python -m agent.core.intelligent_agent
 
 Check logs for model discovery messages.
 
+### 10.3 Train Models (Alternative to Upload)
+
+If you need to train new models or regenerate corrupted models, use the training script:
+
+**Prerequisites**: Ensure Delta Exchange API credentials are configured in `.env`
+
+**Run Training**:
+```bash
+# From project root
+python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
+```
+
+**Validate Models**:
+```bash
+# Validate all models
+python scripts/validate_model_files.py
+
+# Or run pre-deployment validation
+python scripts/validate_models_before_deployment.py
+```
+
+See [ML Models Documentation](03-ml-models.md#model-training) for detailed training guide.
+
 ---
 
 ## Step 11: Run Tests (Optional)

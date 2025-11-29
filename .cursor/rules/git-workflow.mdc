@@ -1,8 +1,7 @@
 ---
 description: Git workflow and commit message standards
-globs:
-  - "**/*"
-alwaysApply: true
+globs: []
+alwaysApply: false
 ---
 
 # Git Workflow

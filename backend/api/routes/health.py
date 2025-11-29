@@ -134,10 +134,22 @@ async def check_model_nodes_health() -> HealthServiceStatus:
             )
     except Exception as e:
         # Agent service unavailable - report model nodes as unknown, not down
+        error_msg = str(e)
+        details_note = "Agent service unavailable, cannot verify model nodes"
+        
+        # Provide more specific error messages
+        if "redis" in error_msg.lower() or "connection" in error_msg.lower():
+            details_note = "Agent service unavailable - check Redis connection and ensure agent is running"
+        elif "timeout" in error_msg.lower():
+            details_note = "Agent service timeout - agent may be overloaded or not responding"
+        
         return HealthServiceStatus(
             status="unknown",
-            error=f"Cannot check model nodes: {str(e)}",
-            details={"note": "Agent service unavailable, cannot verify model nodes"}
+            error=f"Cannot check model nodes: {error_msg}",
+            details={
+                "note": details_note,
+                "troubleshooting": "Ensure agent service is running and Redis is accessible. Check agent logs for model discovery errors."
+            }
         )
 
 

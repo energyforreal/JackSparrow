@@ -48,7 +48,16 @@ class MCPModelRegistry:
         self._prediction_latencies: Dict[str, List[float]] = {}  # Track prediction latencies per model
         self._prediction_errors: Dict[str, int] = {}  # Track error counts per model
         self._prediction_successes: Dict[str, int] = {}  # Track success counts per model
+        self._pending_models: Dict[str, MCPModelNode] = {}
         self._max_latency_history: int = 100  # Keep last 100 latencies per model
+        self._discovery_summary: Dict[str, Any] = {
+            "discovery_attempted": False,
+            "discovered_models": 0,
+            "failed_models": 0,
+            "failed_files": [],
+            "last_error_messages": [],
+            "last_attempt_at": None,
+        }
     
     async def initialize(self):
         """Initialize model registry."""
@@ -78,6 +87,8 @@ class MCPModelRegistry:
             weight: Optional initial weight. If None, will use equal weight or 
                    performance-based weight if available.
         """
+        if model.model_name in self._pending_models:
+            del self._pending_models[model.model_name]
         self.models[model.model_name] = model
         
         if weight is not None:
@@ -108,6 +119,25 @@ class MCPModelRegistry:
         if model_name in self.model_weights:
             del self.model_weights[model_name]
         self._normalize_weights()
+    
+    def record_discovery_summary(
+        self,
+        discovered_models: List[str],
+        failed_files: List[str],
+        error_messages: List[str],
+        discovery_attempted: bool = True,
+    ) -> None:
+        """Persist latest discovery attempt summary."""
+        self._discovery_summary = {
+            "discovery_attempted": discovery_attempted,
+            "discovered_models": len(discovered_models),
+            "failed_models": len(failed_files),
+            "failed_files": failed_files[:5],
+            "last_error_messages": error_messages[-5:],  # keep recent
+            "last_attempt_at": datetime.utcnow().isoformat() if discovery_attempted else None,
+            "pending_models": len(self._pending_models),
+            "pending_model_names": list(self._pending_models.keys())[:10],
+        }
     
     def _normalize_weights(self):
         """Normalize model weights to sum to 1.0."""
@@ -154,19 +184,139 @@ class MCPModelRegistry:
                     exc_info=True
                 )
         
-        # Filter healthy models
+        # Health validation: If a model successfully made a prediction, it should be considered healthy
+        # Update health_status for successful predictions
+        for pred in predictions:
+            # If prediction was successful (has non-zero confidence or valid prediction value)
+            # and health_status is not "healthy", update it
+            if pred.health_status != "healthy":
+                # Check if prediction appears successful
+                is_successful = (
+                    pred.confidence > 0.0 or 
+                    abs(pred.prediction) > 0.0 or
+                    pred.computation_time_ms < 10000  # Reasonable computation time
+                )
+                
+                if is_successful and pred.health_status in ["unknown", "degraded"]:
+                    # Update the model's health status if we have access to it
+                    model = self.models.get(pred.model_name)
+                    if model and hasattr(model, 'health_status'):
+                        old_status = model.health_status
+                        model.health_status = "healthy"
+                        pred.health_status = "healthy"
+                        logger.info(
+                            "model_health_status_validated",
+                            model_name=pred.model_name,
+                            old_status=old_status,
+                            new_status="healthy",
+                            reason="Successful prediction indicates healthy model",
+                            message="Updated model health_status based on successful prediction"
+                        )
+        
+        # Diagnostic logging: Log health status for all predictions before filtering
+        if predictions:
+            prediction_health_statuses = [
+                {
+                    "model_name": pred.model_name,
+                    "health_status": pred.health_status,
+                    "prediction": pred.prediction,
+                    "confidence": pred.confidence
+                }
+                for pred in predictions
+            ]
+            logger.info(
+                "model_predictions_health_status",
+                request_id=request.request_id,
+                total_predictions=len(predictions),
+                prediction_health_statuses=prediction_health_statuses,
+                message="Health status of all predictions before filtering"
+            )
+        
+        # Log model health status before prediction attempts
+        model_health_before = {}
+        for model_name, model in self.models.items():
+            try:
+                health_info = await model.get_health_status()
+                model_health_before[model_name] = health_info.get("status", "unknown")
+            except Exception as e:
+                model_health_before[model_name] = f"error: {str(e)}"
+        
+        if model_health_before:
+            logger.debug(
+                "model_health_status_before_predictions",
+                request_id=request.request_id,
+                model_health_statuses=model_health_before,
+                message="Model health status before prediction attempts"
+            )
+        
+        # Filter predictions by health status with fallback logic
+        # Priority: healthy > unknown (if model loaded) > degraded (with reduced weight)
         healthy_predictions = [
             pred for pred in predictions
             if pred.health_status == "healthy"
         ]
         
+        # Fallback: If no healthy predictions, check for "unknown" status
+        # (models that loaded but haven't been marked healthy yet)
+        if not healthy_predictions:
+            unknown_predictions = [
+                pred for pred in predictions
+                if pred.health_status == "unknown"
+            ]
+            if unknown_predictions:
+                logger.info(
+                    "model_predictions_using_unknown_status",
+                    request_id=request.request_id,
+                    unknown_count=len(unknown_predictions),
+                    message="No healthy predictions, using 'unknown' status predictions as fallback"
+                )
+                healthy_predictions = unknown_predictions
+        
+        # Last resort fallback: Use degraded predictions with reduced weight
+        if not healthy_predictions:
+            degraded_predictions = [
+                pred for pred in predictions
+                if pred.health_status == "degraded"
+            ]
+            if degraded_predictions:
+                logger.warning(
+                    "model_predictions_using_degraded_status",
+                    request_id=request.request_id,
+                    degraded_count=len(degraded_predictions),
+                    message="No healthy/unknown predictions, using 'degraded' status predictions with reduced weight"
+                )
+                healthy_predictions = degraded_predictions
+        
+        # Log filtering results
+        if predictions and not healthy_predictions:
+            filtered_out = [
+                {
+                    "model_name": pred.model_name,
+                    "health_status": pred.health_status,
+                    "reason": f"health_status='{pred.health_status}' not acceptable"
+                }
+                for pred in predictions
+            ]
+            logger.error(
+                "model_predictions_all_filtered_out",
+                request_id=request.request_id,
+                total_predictions=len(predictions),
+                healthy_predictions=len(healthy_predictions),
+                filtered_predictions=filtered_out,
+                message="All predictions filtered out - no acceptable predictions available"
+            )
+        
         # Calculate consensus using weighted average by both model performance and confidence
+        # Apply weight reduction for non-healthy predictions
         if healthy_predictions:
             # Weighted average: combines model performance weight (from historical accuracy/profit)
             # with prediction confidence to get final weight for each prediction
             total_weight = 0.0
             weighted_sum = 0.0
             confidence_sum = 0.0
+            
+            # Log individual predictions for debugging
+            prediction_details = []
             
             for pred in healthy_predictions:
                 # Get model weight (based on historical performance metrics)
@@ -176,25 +326,77 @@ class MCPModelRegistry:
                     1.0 / len(healthy_predictions)
                 )
                 
-                # Combined weight = performance_weight * prediction_confidence
+                # Apply health status weight multiplier
+                # Healthy predictions get full weight, unknown get 0.8x, degraded get 0.5x
+                health_weight_multiplier = {
+                    "healthy": 1.0,
+                    "unknown": 0.8,
+                    "degraded": 0.5
+                }.get(pred.health_status, 0.5)
+                
+                # Combined weight = performance_weight * prediction_confidence * health_weight
                 # This ensures models with better historical performance AND higher
-                # confidence in current prediction get more weight
-                combined_weight = model_weight * pred.confidence
+                # confidence in current prediction AND healthy status get more weight
+                combined_weight = model_weight * pred.confidence * health_weight_multiplier
                 
                 weighted_sum += pred.prediction * combined_weight
                 total_weight += combined_weight
                 confidence_sum += pred.confidence
+                
+                # Track for logging
+                prediction_details.append({
+                    "model": pred.model_name,
+                    "prediction": pred.prediction,
+                    "confidence": pred.confidence,
+                    "model_weight": model_weight,
+                    "combined_weight": combined_weight
+                })
             
             if total_weight > 0:
                 consensus_prediction = weighted_sum / total_weight
                 # Average confidence across all predictions
                 consensus_confidence = confidence_sum / len(healthy_predictions)
             else:
-                consensus_prediction = 0.0
-                consensus_confidence = 0.0
+                # If total_weight is 0, it means all predictions have 0 confidence
+                # Fall back to simple average of predictions
+                if len(healthy_predictions) > 0:
+                    consensus_prediction = sum(pred.prediction for pred in healthy_predictions) / len(healthy_predictions)
+                    consensus_confidence = confidence_sum / len(healthy_predictions) if confidence_sum > 0 else 0.0
+                else:
+                    consensus_prediction = 0.0
+                    consensus_confidence = 0.0
+            
+            # Log consensus calculation details for debugging
+            logger.debug(
+                "consensus_calculation",
+                healthy_predictions_count=len(healthy_predictions),
+                total_models=len(self.models),
+                prediction_details=prediction_details,
+                total_weight=total_weight,
+                weighted_sum=weighted_sum,
+                consensus_prediction=consensus_prediction,
+                consensus_confidence=consensus_confidence
+            )
         else:
             consensus_prediction = 0.0
             consensus_confidence = 0.0
+            
+            # Log detailed information about why consensus failed
+            prediction_statuses = {}
+            for pred in predictions:
+                status = pred.health_status
+                if status not in prediction_statuses:
+                    prediction_statuses[status] = []
+                prediction_statuses[status].append(pred.model_name)
+            
+            logger.warning(
+                "consensus_calculation_no_acceptable_predictions",
+                total_predictions=len(predictions),
+                total_models=len(self.models),
+                prediction_statuses=prediction_statuses,
+                message="No acceptable predictions available for consensus calculation. "
+                       "All predictions were filtered out or failed."
+            )
         
         return MCPModelResponse(
             request_id=request.request_id,
@@ -409,6 +611,39 @@ class MCPModelRegistry:
                 error=str(e),
                 exc_info=True
             )
+
+    def add_pending_model(self, model: MCPModelNode):
+        """Store model node in pending cache for manual activation."""
+        self._pending_models[model.model_name] = model
+        logger.info(
+            "model_pending_registration",
+            model_name=model.model_name,
+            model_type=model.model_type
+        )
+
+    def list_pending_models(self) -> List[str]:
+        """Return names of pending models awaiting registration."""
+        return list(self._pending_models.keys())
+
+    def register_pending_models(self, model_names: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Register pending models by name (or all pending if none specified)."""
+        targets = model_names or list(self._pending_models.keys())
+        results = {
+            "registered": [],
+            "not_found": []
+        }
+        for name in targets:
+            model = self._pending_models.pop(name, None)
+            if not model:
+                results["not_found"].append(name)
+                continue
+            self.register_model(model)
+            results["registered"].append(name)
+            logger.info(
+                "pending_model_registered",
+                model_name=name
+            )
+        return results
     
     async def get_health_status(self) -> Dict[str, Any]:
         """Get comprehensive health status of all models."""
@@ -478,12 +713,33 @@ class MCPModelRegistry:
                     }
                 }
         
+        # Determine overall status
+        # If no models are loaded, return "unknown" (acceptable in paper trading mode)
+        # If all models are healthy, return "healthy"
+        # If some models are unhealthy, return "degraded"
+        # If all models are unhealthy (but models exist), return "unhealthy"
+        if len(self.models) == 0:
+            registry_health = "unknown"
+            status = "unknown"
+        elif healthy_count == len(self.models):
+            registry_health = "healthy"
+            status = "up"
+        elif healthy_count > 0:
+            registry_health = "degraded"
+            status = "degraded"
+        else:
+            # All models exist but none are healthy
+            registry_health = "unhealthy"
+            status = "down"
+        
         return {
+            "status": status,  # Standard status field for health checks ("up", "degraded", "down", "unknown")
             "total_models": len(self.models),
             "healthy_models": healthy_count,
             "unhealthy_models": len(self.models) - healthy_count,
             "model_statuses": health_statuses,
-            "registry_health": "healthy" if healthy_count == len(self.models) else "degraded" if healthy_count > 0 else "unhealthy"
+            "registry_health": registry_health,  # Keep for backward compatibility
+            "discovery": self._discovery_summary,
         }
     
     def _record_prediction_result(self, model_name: str, latency_ms: float, success: bool):

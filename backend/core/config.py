@@ -144,6 +144,18 @@ class Settings(BaseSettings):
         env="BACKEND_RELOAD",
         description="Enable auto-reload in development"
     )
+    auto_create_db_schema: bool = Field(
+        default=True,
+        env="AUTO_CREATE_DB_SCHEMA",
+        description="Automatically create database tables/enums on startup if missing"
+    )
+    
+    # Trading Configuration
+    initial_balance: float = Field(
+        default=10000.0,
+        env="INITIAL_BALANCE",
+        description="Initial balance for paper trading (in USD)"
+    )
     
     # CORS
     cors_origins: Union[str, List[str]] = Field(

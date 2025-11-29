@@ -1,43 +1,44 @@
-# Start all JackSparrow services (PowerShell)
-# Uses Python-based parallel process manager for simultaneous startup
+<#
+Start all JackSparrow services (PowerShell wrapper).
+Delegates to the Python-based parallel startup manager.
+#>
 
 $ErrorActionPreference = "Stop"
 
-# Get script directory for proper path resolution
+# Resolve key paths
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-
-# Path to Python parallel startup script
 $PythonScript = Join-Path $ScriptDir "start_parallel.py"
+$ServiceScript = Join-Path $ProjectRoot "tools\start-services.ps1"
 
-# Check if Python is available
+# Ensure Python is available
 try {
     $pythonVersion = python --version 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Python not found"
     }
 } catch {
-    Write-Host "Error: Python is required but not found in PATH" -ForegroundColor Red
-    Write-Host "Please install Python 3.11+ and ensure it's in your PATH" -ForegroundColor Yellow
+    Write-Host "Error: Python is required but not found in PATH." -ForegroundColor Red
+    Write-Host "Please install Python 3.11+ and ensure it's available in PATH." -ForegroundColor Yellow
     exit 1
 }
 
-# Execute Python script for parallel startup
-Write-Host "Launching parallel process manager..." -ForegroundColor Green
-# Ensure local services are up (Redis/PostgreSQL helper)
-$serviceScript = Join-Path $ProjectRoot "tools\start-services.ps1"
-if (Test-Path $serviceScript) {
-    Write-Host "Ensuring Redis/PostgreSQL services are running..." -ForegroundColor Yellow
+# Try to ensure Redis/PostgreSQL via helper if available
+if (Test-Path $ServiceScript) {
+    Write-Host "Ensuring prerequisite services (PostgreSQL/Redis) are running..." -ForegroundColor Yellow
     try {
-        & $serviceScript
+        & $ServiceScript
     } catch {
         Write-Host "Warning: Unable to run start-services.ps1 automatically. $_" -ForegroundColor Yellow
     }
     Write-Host ""
 }
 
+# Ensure Python and child processes flush immediately
+$env:PYTHONUNBUFFERED = "1"
+
+# Launch Python parallel manager
+Write-Host "Launching parallel process manager..." -ForegroundColor Green
 python $PythonScript
 
-# Exit with the same code as Python script
 exit $LASTEXITCODE
-

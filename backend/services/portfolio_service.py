@@ -12,6 +12,7 @@ from sqlalchemy import func, desc, select
 import structlog
 
 from backend.core.database import Position, Trade, TradeStatus, PositionStatus
+from backend.core.config import settings
 
 logger = structlog.get_logger()
 
@@ -26,15 +27,17 @@ class PortfolioService:
         """
         
         # Use transaction to ensure consistent snapshot of data
-        async with db.begin():
-            try:
+        try:
+            async with db.begin():
                 # Get all open positions
                 query = select(Position).where(Position.status == PositionStatus.OPEN)
                 result = await db.execute(query)
                 open_positions = result.scalars().all()
                 
-                # Calculate totals
-                total_value = Decimal("10000.0")  # Starting balance (configurable)
+                # Get initial balance from config (defaults to 10000.0)
+                initial_balance = Decimal(str(getattr(settings, 'initial_balance', 10000.0)))
+                
+                # Calculate totals - start with initial balance
                 total_unrealized_pnl = Decimal("0.0")
                 positions_value = Decimal("0.0")
                 
@@ -69,8 +72,19 @@ class PortfolioService:
                         "take_profit": pos.take_profit
                     })
                 
-                # Calculate available balance
-                available_balance = total_value - positions_value
+                # Calculate available balance (initial balance minus positions value)
+                available_balance = initial_balance - positions_value
+                
+                # Ensure available balance doesn't go negative (shouldn't happen, but safety check)
+                if available_balance < 0:
+                    logger.warning(
+                        "portfolio_available_balance_negative",
+                        available_balance=float(available_balance),
+                        positions_value=float(positions_value),
+                        initial_balance=float(initial_balance),
+                        message="Available balance is negative, setting to 0"
+                    )
+                    available_balance = Decimal("0.0")
                 
                 # Get realized PnL from closed positions
                 query = select(Position).where(Position.status == PositionStatus.CLOSED)
@@ -82,8 +96,11 @@ class PortfolioService:
                     if pos.unrealized_pnl:  # This would be realized PnL when closed
                         total_realized_pnl += Decimal(str(pos.unrealized_pnl))
                 
+                # Calculate total portfolio value: initial balance + unrealized PnL + realized PnL
+                total_value = initial_balance + total_unrealized_pnl + total_realized_pnl
+                
                 return {
-                    "total_value": total_value + total_unrealized_pnl,
+                    "total_value": total_value,
                     "available_balance": available_balance,
                     "open_positions": len(open_positions),
                     "total_unrealized_pnl": total_unrealized_pnl,
@@ -91,14 +108,28 @@ class PortfolioService:
                     "positions": positions_list
                 }
                 
-            except Exception as e:
+        except Exception as e:
+            error_msg = str(e)
+            error_type = type(e).__name__
+            
+            # Check if it's a table doesn't exist error
+            if "does not exist" in error_msg.lower() or "relation" in error_msg.lower():
                 logger.error(
-                    "portfolio_service_get_summary_failed",
-                    error=str(e),
+                    "portfolio_service_get_summary_failed_table_missing",
+                    error=error_msg,
+                    error_type=error_type,
+                    message="Database tables may not be initialized. Run database setup script.",
                     exc_info=True
                 )
-                # Transaction will be rolled back automatically on exception
-                return None
+            else:
+                logger.error(
+                    "portfolio_service_get_summary_failed",
+                    error=error_msg,
+                    error_type=error_type,
+                    exc_info=True
+                )
+            # Transaction will be rolled back automatically on exception
+            return None
     
     async def get_performance_metrics(
         self,

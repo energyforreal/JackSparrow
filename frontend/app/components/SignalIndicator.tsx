@@ -42,6 +42,9 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">No signal available</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Ensure models are loaded and agent service is running. Check System Health for model_nodes status.
+          </p>
         </CardContent>
       </Card>
     )

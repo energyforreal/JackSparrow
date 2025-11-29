@@ -1,12 +1,18 @@
 ---
-description: Always include the JackSparrow docs context bundle.
-globs:
-  - "**/*"
-alwaysApply: true
+description: Reference guide for JackSparrow documentation files - load on-demand when documentation context is needed
+globs: []
+alwaysApply: false
 ---
 # JackSparrow Project Documentation Context
 
-The `.cursor/context/docs` directory mirrors the entire `docs/` tree so these files can be pulled into any conversation without manual attachment. Use `@Folders .cursor/context/docs` (with Full Folder Content enabled) or reference individual files directly to load detailed guidance:
+The `.cursor/context/docs` directory mirrors the entire `docs/` tree. Reference this file when you need to know which documentation files are available. Load specific documentation files on-demand using `@` mentions or explicit file references:
+
+**To load documentation context:**
+- Use `@.cursor/context/docs/<filename>` to reference specific docs
+- Use `@Folders .cursor/context/docs` to load all docs (use sparingly)
+- Reference individual files directly when needed
+
+**Available documentation files:**
 
 - `.cursor/context/docs/01-architecture.md`
 - `.cursor/context/docs/02-mcp-layer.md`
@@ -32,4 +38,4 @@ The `.cursor/context/docs` directory mirrors the entire `docs/` tree so these fi
 - `.cursor/context/docs/docker-hot-reload.md`
 - `.cursor/context/docs/remediation-plan.md`
 
-Keep this bundle updated whenever new documentation is added so the assistant always has the latest project knowledge.
+**Note:** This rule does not auto-load documentation. Documentation files should be loaded explicitly when needed to reduce context token usage and improve performance.

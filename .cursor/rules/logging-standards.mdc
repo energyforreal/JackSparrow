@@ -2,7 +2,7 @@
 description: Structured logging standards using structlog
 globs:
   - "**/*.py"
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Logging Standards

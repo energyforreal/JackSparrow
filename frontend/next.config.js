@@ -2,6 +2,8 @@
 const fs = require('fs')
 const path = require('path')
 
+const LOGO_FILENAME = 'logo.png'
+
 function loadRootEnv() {
   const rootEnvPath = path.resolve(__dirname, '..', '.env')
   if (!fs.existsSync(rootEnvPath)) {
@@ -39,7 +41,39 @@ function loadRootEnv() {
   })
 }
 
+function ensurePublicLogoAsset() {
+  const sourcePath = path.resolve(__dirname, '..', LOGO_FILENAME)
+  const destinationPath = path.resolve(__dirname, 'public', LOGO_FILENAME)
+
+  try {
+    if (!fs.existsSync(sourcePath)) {
+      console.warn(`[next.config.js] Logo asset not found at ${sourcePath}`)
+      return
+    }
+
+    const destinationDir = path.dirname(destinationPath)
+    if (!fs.existsSync(destinationDir)) {
+      fs.mkdirSync(destinationDir, { recursive: true })
+    }
+
+    const shouldCopy =
+      !fs.existsSync(destinationPath) ||
+      fs.statSync(destinationPath).mtimeMs < fs.statSync(sourcePath).mtimeMs
+
+    if (!shouldCopy) {
+      return
+    }
+
+    fs.copyFileSync(sourcePath, destinationPath)
+    console.log('[next.config.js] Copied logo asset into frontend/public')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[next.config.js] Failed to sync logo asset: ${message}`)
+  }
+}
+
 loadRootEnv()
+ensurePublicLogoAsset()
 
 const nextConfig = {
   reactStrictMode: true,

@@ -8,14 +8,18 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from typing import Optional, List
+import structlog
 
 from backend.core.database import get_db, Position, Trade, PositionStatus, TradeStatus
+from backend.core.config import settings
 from backend.api.models.requests import PortfolioRequest
 from backend.api.models.responses import PortfolioSummaryResponse, PositionResponse, TradeResponse, ErrorResponse
 from backend.services.portfolio_service import portfolio_service
 from backend.api.middleware.auth import require_auth
+
+logger = structlog.get_logger()
 
 router = APIRouter(dependencies=[Depends(require_auth)])
 
@@ -113,19 +117,63 @@ async def get_portfolio_summary(
         summary = await portfolio_service.get_portfolio_summary(db)
         
         if not summary:
-            # Return empty portfolio if no data
-            return PortfolioSummaryResponse(
-                total_value=0,
-                available_balance=0,
-                open_positions=0,
-                total_unrealized_pnl=0,
-                total_realized_pnl=0,
-                positions=[]
-            )
+            # Get initial balance from config for fallback
+            initial_balance = float(getattr(settings, 'initial_balance', 10000.0))
+            
+            # Check if this is a database initialization issue
+            # Try a simple query to see if tables exist
+            try:
+                await db.execute(text("SELECT 1 FROM positions LIMIT 1"))
+                # Table exists, just no data - return portfolio with initial balance
+                logger.info(
+                    "portfolio_summary_no_data",
+                    message="No positions found, returning portfolio with initial balance",
+                    initial_balance=initial_balance
+                )
+                return PortfolioSummaryResponse(
+                    total_value=initial_balance,
+                    available_balance=initial_balance,
+                    open_positions=0,
+                    total_unrealized_pnl=0,
+                    total_realized_pnl=0,
+                    positions=[]
+                )
+            except Exception as table_error:
+                # Table doesn't exist - this is a configuration issue
+                error_msg = str(table_error)
+                if "does not exist" in error_msg.lower() or "relation" in error_msg.lower():
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Database tables not initialized. Please run the database setup script (scripts/setup_db.py) to create required tables."
+                    )
+                # Other database error - return portfolio with initial balance but log it
+                logger.warning(
+                    "portfolio_summary_table_check_failed",
+                    error=error_msg,
+                    initial_balance=initial_balance,
+                    message="Returning portfolio with initial balance due to database error"
+                )
+                return PortfolioSummaryResponse(
+                    total_value=initial_balance,
+                    available_balance=initial_balance,
+                    open_positions=0,
+                    total_unrealized_pnl=0,
+                    total_realized_pnl=0,
+                    positions=[]
+                )
         
         return PortfolioSummaryResponse(**summary)
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (like the 503 above)
+        raise
     except Exception as e:
+        logger.error(
+            "portfolio_summary_endpoint_error",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get portfolio summary: {str(e)}"

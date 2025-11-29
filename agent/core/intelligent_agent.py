@@ -36,8 +36,23 @@ def _configure_utf8_stdio() -> None:
 
 _configure_utf8_stdio()
 
-from agent.core.config import settings
 
+def _json_serializer(obj: Any) -> Any:
+    """Serialize non-JSON-native objects for Redis responses."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    if hasattr(obj, "__dict__"):
+        return obj.__dict__
+    return str(obj)
+
+from agent.core.config import settings
+from agent.core.logging_utils import configure_logging
+
+SESSION_ID = configure_logging()
 logger = structlog.get_logger()
 from agent.core.state_machine import AgentState, AgentStateMachine
 from agent.core.context_manager import ContextManager, context_manager
@@ -50,6 +65,7 @@ from agent.models.mcp_model_registry import MCPModelRegistry
 from agent.risk.risk_manager import RiskManager
 from agent.data.delta_client import DeltaExchangeClient
 from agent.data.market_data_service import MarketDataService
+from agent.data.feature_server_api import FeatureServerAPI
 from agent.events.event_bus import event_bus
 from agent.events.schemas import AgentCommandEvent, EventType
 from agent.events.handlers import (
@@ -65,6 +81,7 @@ class IntelligentAgent:
     
     def __init__(self):
         """Initialize intelligent agent."""
+        self.session_id = SESSION_ID
         self.state_machine = AgentStateMachine(context_manager=context_manager)
         self.context_manager = context_manager
         self.mcp_orchestrator = mcp_orchestrator
@@ -74,20 +91,90 @@ class IntelligentAgent:
         self.delta_client = DeltaExchangeClient()
         self.model_discovery = ModelDiscovery(self.model_registry)
         self.market_data_service = MarketDataService()
+        self.feature_server_api = FeatureServerAPI(
+            feature_server=self.mcp_orchestrator.feature_server,
+            host=settings.feature_server_host,
+            port=settings.feature_server_port,
+        )
         self.running = False
         self.command_queue = settings.agent_command_queue
+        self.default_symbol = settings.trading_symbol or settings.agent_symbol
+        timeframe_list = settings.parsed_timeframes()
+        self.timeframes = timeframe_list or [settings.agent_interval]
+        self.primary_interval = self.timeframes[0]
+        self.trading_mode = settings.trading_mode
+        self.initial_balance = settings.initial_balance
+        self.confidence_threshold = settings.min_confidence_threshold
+        self.start_mode = settings.agent_start_mode
         # Response mechanism uses Redis key-value store (response:{request_id})
         # Legacy list-based response queue removed - backend uses get_response() which reads from key-value
     
     async def initialize(self):
         """Initialize agent."""
-        logger.info("agent_initializing", service="agent")
+        # Seed initial context using environment configuration
+        self.context_manager.update_context({
+            "symbol": self.default_symbol,
+            "timeframes": self.timeframes,
+            "trading_mode": self.trading_mode,
+            "confidence_threshold": self.confidence_threshold,
+            "portfolio": {
+                "value": self.initial_balance,
+                "balance": self.initial_balance,
+            },
+        })
+
+        logger.info(
+            "agent_startup",
+            service="agent",
+            environment=settings.environment,
+            agent_mode=self.start_mode,
+            symbol=self.default_symbol,
+            trading_mode=self.trading_mode,
+            timeframes=self.timeframes,
+        )
+        
+        # Log comprehensive configuration for verification
+        logger.info(
+            "agent_configuration_loaded",
+            service="agent",
+            # Agent Configuration
+            agent_start_mode=settings.agent_start_mode,
+            agent_symbol=settings.agent_symbol,
+            agent_interval=settings.agent_interval,
+            trading_symbol=settings.trading_symbol,
+            trading_mode=settings.trading_mode,
+            paper_trading_mode=settings.paper_trading_mode,
+            # Risk Management
+            max_position_size=settings.max_position_size,
+            max_portfolio_heat=settings.max_portfolio_heat,
+            stop_loss_percentage=settings.stop_loss_percentage,
+            take_profit_percentage=settings.take_profit_percentage,
+            max_daily_loss=settings.max_daily_loss,
+            max_drawdown=settings.max_drawdown,
+            max_consecutive_losses=settings.max_consecutive_losses,
+            min_time_between_trades=settings.min_time_between_trades,
+            min_confidence_threshold=settings.min_confidence_threshold,
+            # Trading Session
+            initial_balance=settings.initial_balance,
+            update_interval=settings.update_interval,
+            timeframes=settings.timeframes,
+            # Model Configuration
+            model_path=settings.model_path,
+            model_dir=settings.model_dir,
+            model_discovery_enabled=settings.model_discovery_enabled,
+            model_auto_register=settings.model_auto_register,
+            # Feature Server
+            feature_server_host=settings.feature_server_host,
+            feature_server_port=settings.feature_server_port,
+            message="Agent configuration loaded from environment variables"
+        )
         
         # Initialize event bus
         await event_bus.initialize()
         
         # Initialize MCP orchestrator
         await self.mcp_orchestrator.initialize()
+        await self.feature_server_api.start()
         
         # Initialize model registry (registers event handlers)
         await self.model_registry.initialize()
@@ -156,38 +243,47 @@ class IntelligentAgent:
         
         logger.info("agent_initialized_successfully", service="agent")
         
-        # Transition to OBSERVING
-        await self.state_machine._transition_to(
-            AgentState.OBSERVING,
-            "Initialization complete"
-        )
+        await self._apply_start_mode()
         
-        # Start market data streaming (non-blocking, allow agent to start even if this fails)
-        try:
-            await self.market_data_service.start_market_data_stream(
-                symbols=[settings.agent_symbol],
-                interval=settings.agent_interval
-            )
+        # Start market data streaming when monitoring mode is active
+        if self.start_mode == "MONITORING":
+            try:
+                await self.market_data_service.start_market_data_stream(
+                    symbols=[self.default_symbol],
+                    interval=self.primary_interval
+                )
+                logger.info(
+                    "agent_market_data_stream_started",
+                    service="agent",
+                    symbols=[self.default_symbol],
+                    interval=self.primary_interval,
+                    timeframes=self.timeframes,
+                )
+            except Exception as e:
+                # Log error but don't crash - agent can still operate without market data streaming
+                logger.warning(
+                    "agent_market_data_stream_start_failed",
+                    service="agent",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    message="Agent will continue without market data streaming. Some features may be unavailable.",
+                    exc_info=True
+                )
+        else:
             logger.info(
-                "agent_market_data_stream_started",
+                "agent_market_data_stream_skipped",
                 service="agent",
-                symbols=[settings.agent_symbol],
-                interval=settings.agent_interval
-            )
-        except Exception as e:
-            # Log error but don't crash - agent can still operate without market data streaming
-            logger.warning(
-                "agent_market_data_stream_start_failed",
-                service="agent",
-                error=str(e),
-                error_type=type(e).__name__,
-                message="Agent will continue without market data streaming. Some features may be unavailable.",
-                exc_info=True
+                start_mode=self.start_mode,
+                message="Start mode disables automatic market data streaming",
             )
     
     async def shutdown(self):
         """Shutdown agent."""
-        logger.info("agent_shutting_down", service="agent")
+        logger.info(
+            "agent_shutting_down",
+            service="agent",
+            environment=settings.environment,
+        )
         self.running = False
         
         # Shutdown all components
@@ -196,10 +292,36 @@ class IntelligentAgent:
         await execution_module.shutdown()
         await self.risk_manager.shutdown()
         await self.model_registry.shutdown()
+        await self.feature_server_api.shutdown()
         await self.mcp_orchestrator.shutdown()
         await event_bus.shutdown()
         
-        logger.info("agent_shut_down", service="agent")
+        logger.info(
+            "agent_shut_down",
+            service="agent",
+            environment=settings.environment,
+        )
+    
+    async def _apply_start_mode(self) -> None:
+        """Apply configured start mode to the state machine."""
+        if self.start_mode == "EMERGENCY_STOP":
+            await self.state_machine._transition_to(
+                AgentState.EMERGENCY_STOP,
+                "Agent configured to start in EMERGENCY_STOP mode"
+            )
+            return
+        
+        if self.start_mode == "PAUSED":
+            await self.state_machine._transition_to(
+                AgentState.OBSERVING,
+                "Agent configured to start in PAUSED mode"
+            )
+            return
+        
+        await self.state_machine._transition_to(
+            AgentState.OBSERVING,
+            "Initialization complete"
+        )
     
     async def start(self):
         """Start agent main loop."""
@@ -363,6 +485,8 @@ class IntelligentAgent:
                 response = await self._handle_get_status()
             elif cmd == "control":
                 response = await self._handle_control(params)
+            elif cmd == "register_models":
+                response = await self._handle_register_models(params)
             else:
                 response = {"success": False, "error": f"Unknown command: {cmd}"}
             
@@ -377,7 +501,7 @@ class IntelligentAgent:
     
     async def _handle_predict(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle prediction request."""
-        symbol = params.get("symbol", settings.agent_symbol)
+        symbol = params.get("symbol", self.default_symbol)
         context = params.get("context", {})
         
         decision = await self.mcp_orchestrator.get_trading_decision(
@@ -440,29 +564,71 @@ class IntelligentAgent:
             total_models = model_registry_health.get("total_models", 0)
             healthy_models = model_registry_health.get("healthy_models", 0)
             registry_health = model_registry_health.get("registry_health", "unknown")
+            discovery_info = model_registry_health.get("discovery", {}) or {}
+            discovery_attempted = discovery_info.get("discovery_attempted", False)
+            failed_models = discovery_info.get("failed_models", 0)
             
-            # Determine status based on model registry health
+            # Use status from registry if available (it's now properly mapped)
+            registry_status = model_registry_health.get("status", "unknown")
+            model_status = registry_status
+            note = None
+            
+            # Override status for specific cases to provide better information
             if total_models == 0:
-                model_status = "unknown"  # No models loaded, but not an error
-            elif healthy_models == 0:
+                if discovery_attempted and failed_models > 0:
+                    model_status = "down"
+                    note = "Model discovery attempted but no models loaded successfully."
+                    discovery_reason = "failed_models"
+                elif discovery_attempted:
+                    model_status = "unknown"
+                    note = "Model discovery ran but no model files were found."
+                    discovery_reason = "no_model_files_found"
+                else:
+                    model_status = "unknown"
+                    note = "Model discovery disabled; no ML models were loaded."
+                    discovery_reason = "discovery_disabled"
+                
+                logger.warning(
+                    "model_nodes_discovery_result",
+                    service="agent",
+                    component="model_registry",
+                    session_id=self.session_id,
+                    total_models=total_models,
+                    healthy_models=healthy_models,
+                    discovery_attempted=discovery_attempted,
+                    failed_models=failed_models,
+                    discovery_reason=discovery_reason,
+                    status=model_status,
+                    note=note,
+                )
+            elif healthy_models == 0 and total_models > 0:
+                # Models loaded but all unhealthy
                 model_status = "down"
-            elif healthy_models < total_models:
-                model_status = "degraded"
-            else:
-                model_status = "up"
+            # Otherwise use the status from registry (which is properly mapped)
             
             model_nodes_status = {
                 "status": model_status,
                 "healthy_models": healthy_models,
                 "total_models": total_models,
-                "registry_health": registry_health
+                "registry_health": registry_health,
+                "discovery": discovery_info,
             }
+            if note:
+                model_nodes_status["note"] = note
         else:
             model_nodes_status = {
                 "status": "unknown",
                 "healthy_models": 0,
-                "total_models": 0
+                "total_models": 0,
+                "note": "Model registry health status not available"
             }
+            logger.warning(
+                "model_nodes_status_missing",
+                service="agent",
+                component="model_registry",
+                session_id=self.session_id,
+                note="Model registry health status not available",
+            )
         
         # Build comprehensive health response
         detailed_health = {
@@ -488,6 +654,26 @@ class IntelligentAgent:
                 "health": health,  # Keep original health structure for backward compatibility
                 "detailed_health": detailed_health,  # New detailed structure
                 "latency_ms": 5.0
+            }
+        }
+    
+    async def _handle_register_models(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle manual model registration requests."""
+        model_names = params.get("models")
+        if model_names is not None and not isinstance(model_names, list):
+            return {
+                "success": False,
+                "error": "models parameter must be a list of model names"
+            }
+        
+        registration_result = self.model_registry.register_pending_models(model_names)
+        pending_after = self.model_registry.list_pending_models()
+        return {
+            "success": True,
+            "data": {
+                "registered": registration_result.get("registered", []),
+                "not_found": registration_result.get("not_found", []),
+                "pending": pending_after,
             }
         }
     
@@ -536,7 +722,11 @@ class IntelligentAgent:
         try:
             # Cache response for backend polling using key-value store
             # Backend reads from response:{request_id} key using get_response()
-            await redis.setex(f"response:{request_id}", ttl, json.dumps(response))
+            await redis.setex(
+                f"response:{request_id}",
+                ttl,
+                json.dumps(response, default=_json_serializer),
+            )
             logger.debug(
                 "agent_response_sent",
                 request_id=request_id,

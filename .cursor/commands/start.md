@@ -14,6 +14,8 @@ Before running the start command, ensure the following prerequisites are met:
   - `REDIS_URL` - Redis connection string (defaults to `redis://localhost:6379`)
   - `DELTA_EXCHANGE_API_KEY` and `DELTA_EXCHANGE_API_SECRET` - Required for trading
 
+> ℹ️ The Windows/Linux startup scripts will attempt to launch a local Redis instance automatically if `REDIS_URL` is unreachable. You should still keep your preferred Redis service installed so the fallback is only used as a safety net.
+
 The start script automatically checks these prerequisites before starting services. If any are missing, the script will exit with clear error messages and instructions.
 
 For detailed setup instructions, see `docs/10-deployment.md` and `docs/11-build-guide.md`.
@@ -43,11 +45,21 @@ Run this command to start all services before every development session.
 3. Starts Agent (intelligent_agent)
 4. Starts Frontend (Next.js) on port 3000
 
+## Startup Sequence
+
+1. **Load environment configuration** from the root `.env`
+2. **Check Redis availability** and try to auto-start a local Redis instance if it is unreachable
+3. **Run configuration validation** via `python scripts/validate-env.py`
+4. **Run prerequisite validation** via `python tools/commands/validate-prerequisites.py`
+5. **Ensure dependencies** by creating venvs and installing backend/agent/frontend requirements when signatures change
+6. **Start services** (backend, agent, frontend) through the Python parallel manager
+7. **Run health checks** via `tools/commands/health_check.py` (if present) after services report healthy startup
+
 ## Expected Output
 
 - Backend: http://localhost:8000
 - Frontend: http://localhost:3000
-- Logs are in the `logs/` directory
+- Backend and frontend logs are written to the `logs/` directory; the agent continues to manage its own structured logging internally (no duplicate `logs/agent.log`)
 
 ## Prerequisites Check
 

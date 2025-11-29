@@ -96,7 +96,7 @@ pip install -r requirements.txt
 ```
 
 **Required Agent Dependencies**:
-- xgboost==2.0.0
+- xgboost==2.0.2
 - lightgbm==4.0.0
 - tensorflow==2.14.0
 - scikit-learn==1.3.0
@@ -149,11 +149,54 @@ createdb trading_agent
 psql trading_agent -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 ```
 
-**Run Migrations**:
+**Run Database Setup**:
 ```bash
 cd scripts
 python setup_db.py
 ```
+
+This script will:
+- Enable TimescaleDB extension
+- Create PostgreSQL ENUM types (tradeside, tradestatus, ordertype, positionstatus, signaltype)
+- Create all required tables (trades, positions, decisions, performance_metrics, model_performance)
+- Convert time-series tables to hypertables for optimal performance
+- Create necessary indexes
+
+**Note**: For new installations, the setup script automatically creates ENUM types. For existing databases created with older versions, you need to run the migration script (see below).
+
+---
+
+#### Database Migration (Existing Databases Only)
+
+If you have an existing database created with an older version of the setup script (before ENUM types were introduced), you need to migrate your database schema:
+
+**⚠️ Important**: Always backup your database before running migrations in production.
+
+```bash
+# From project root directory
+python scripts/migrate_enums.py
+```
+
+This migration script will:
+- Create PostgreSQL ENUM types for all enum columns
+- Convert existing VARCHAR columns to ENUM types:
+  - `trades.side`, `trades.order_type`, `trades.status`
+  - `positions.side`, `positions.status` (fixes portfolio service errors)
+  - `decisions.signal`
+- Preserve all existing data during migration
+- Use database transactions for safe rollback on errors
+
+**Verification**:
+After running the migration, restart your backend service and verify:
+1. Portfolio service queries work correctly (no enum type errors)
+2. Check backend logs for any remaining errors
+3. Test the `/api/v1/portfolio/summary` endpoint
+
+**Troubleshooting Migration**:
+- If migration fails, the transaction will be rolled back automatically
+- Ensure PostgreSQL is running: `pg_isready`
+- Verify DATABASE_URL in the root `.env` file is correct
+- Check that all enum values in your data match the ENUM type definitions
 
 ---
 

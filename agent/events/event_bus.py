@@ -81,24 +81,22 @@ class EventBus:
                 )
         except ConnectionError as e:
             # Redis connection error - this is a real problem
-            logger.error(
+            log_error_with_context(
                 "event_bus_consumer_group_connection_error",
+                error=e,
+                component="event_bus",
                 stream=self.stream_name,
-                group=self.consumer_group,
-                error=str(e),
-                error_type=type(e).__name__,
-                exc_info=True
+                group=self.consumer_group
             )
             raise  # Re-raise connection errors as they indicate a real problem
         except Exception as e:
             # Catch any other unexpected exceptions
-            logger.error(
+            log_error_with_context(
                 "event_bus_consumer_group_unexpected_error",
+                error=e,
+                component="event_bus",
                 stream=self.stream_name,
-                group=self.consumer_group,
-                error=str(e),
-                error_type=type(e).__name__,
-                exc_info=True
+                group=self.consumer_group
             )
             # Don't re-raise - allow event bus to continue, but log the error
         
@@ -202,12 +200,12 @@ class EventBus:
                     return False
                 
             except Exception as e:
-                logger.error(
+                log_error_with_context(
                     "event_publish_serialization_failed",
-                    event_id=event.event_id,
-                    event_type=event.event_type,
-                    error=str(e),
-                    exc_info=True
+                    error=e,
+                    component="event_bus",
+                    correlation_id=event.event_id,
+                    event_type=event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
                 )
                 return False
             
@@ -241,12 +239,12 @@ class EventBus:
             return True
             
         except Exception as e:
-            logger.error(
+            log_error_with_context(
                 "event_publish_failed",
-                event_id=event.event_id,
-                event_type=event.event_type if hasattr(event, 'event_type') else 'unknown',
-                error=str(e),
-                exc_info=True
+                error=e,
+                component="event_bus",
+                correlation_id=event.event_id if hasattr(event, 'event_id') else None,
+                event_type=event.event_type.value if hasattr(event, 'event_type') and hasattr(event.event_type, 'value') else (str(event.event_type) if hasattr(event, 'event_type') else 'unknown')
             )
             return False
     
@@ -313,10 +311,12 @@ class EventBus:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(
+                log_error_with_context(
                     "event_consume_loop_error",
-                    error=str(e),
-                    exc_info=True
+                    error=e,
+                    component="event_bus",
+                    stream=self.stream_name,
+                    consumer_group=self.consumer_group
                 )
                 await asyncio.sleep(1)
     
@@ -495,14 +495,13 @@ class EventBus:
             try:
                 event = event_class(**event_dict)
             except Exception as e:
-                logger.error(
+                log_error_with_context(
                     "event_instantiation_failed",
-                    message_id=message_id,
+                    error=e,
+                    component="event_bus",
+                    message_id=str(message_id) if message_id else None,
                     event_class_name=event_class_name,
-                    error=str(e),
-                    error_type=type(e).__name__,
-                    event_dict_keys=list(event_dict.keys()) if isinstance(event_dict, dict) else None,
-                    exc_info=True
+                    event_dict_keys=list(event_dict.keys()) if isinstance(event_dict, dict) else None
                 )
                 await redis.xack(self.stream_name, self.consumer_group, message_id)
                 return
@@ -530,13 +529,13 @@ class EventBus:
                         handler(event)
                     success = True
                 except Exception as e:
-                    logger.error(
+                    log_error_with_context(
                         "event_handler_error",
-                        event_id=event.event_id,
-                        event_type=event.event_type,
-                        handler=handler.__name__ if hasattr(handler, "__name__") else str(handler),
-                        error=str(e),
-                        exc_info=True
+                        error=e,
+                        component="event_bus",
+                        correlation_id=event.event_id if hasattr(event, "event_id") else None,
+                        event_type=event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
+                        handler=handler.__name__ if hasattr(handler, "__name__") else str(handler)
                     )
             
             # Acknowledge message if at least one handler succeeded

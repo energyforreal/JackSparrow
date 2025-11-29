@@ -81,6 +81,12 @@ MIN_CONFIDENCE_THRESHOLD=0.65
 
 Always keep the path **relative to the project root** so build scripts and container images resolve it consistently. Update `MODEL_PATH` whenever you promote a new model into production. If multiple services need different models, define service-specific variables (for example `MODEL_PATH_4H`) and document them alongside the corresponding consumers.
 
+### XGBoost Dependency Requirements
+
+- Runtime environments must install `xgboost==2.0.2` (see `agent/requirements.txt`) so that `XGBClassifier` remains available for deserializing the shipped models.
+- If you rebuild or upgrade the models, ensure `requirements*.txt`, `docs/08-file-structure.md`, and `docs/10-deployment.md` stay synchronized with the version used during training.
+- When the validator reports `ModuleNotFoundError: No module named 'XGBClassifier'`, re-run `pip install -r agent/requirements.txt` inside the active environment before retrying the load.
+
 ### Operational Workflow
 
 1. Store newly trained artefacts in `models/` using timestamped filenames for traceability.  
@@ -88,6 +94,302 @@ Always keep the path **relative to the project root** so build scripts and conta
 3. Adjust the `.env` (or per-service configuration) with the new `MODEL_PATH` value.  
 4. Run the smoke-test commands captured in the [Build Guide](11-build-guide.md#project-commands) before deploying.  
 5. Record the change in this document and reference it from `DOCUMENTATION.md` so other contributors can discover the update quickly.
+
+---
+
+## Model Training
+
+### Training Script
+
+The project includes a comprehensive model training script (`scripts/train_models.py`) that:
+- Fetches historical market data from Delta Exchange API
+- Computes all 49 technical indicators/features
+- Trains XGBoost classifiers for multiple timeframes
+- Saves models correctly (as XGBClassifier instances, not feature names)
+- Validates saved models before completion
+
+### Prerequisites
+
+Before training models, ensure:
+- Delta Exchange API credentials are configured (`.env` file)
+- Sufficient historical data is available (script fetches from API)
+- Python dependencies are installed: `pip install -r agent/requirements.txt`
+
+### Training Process
+
+1. **Run the training script**:
+   ```bash
+   python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
+   ```
+
+2. **Script will**:
+   - Fetch ~3000 candles per timeframe from Delta Exchange
+   - Compute 49 features for each candle
+   - Create labels based on forward-looking returns
+   - Train XGBoost models with train/val/test split (70/15/15)
+   - Save models to correct locations:
+     - `models/xgboost_BTCUSD_15m.pkl`
+     - `agent/model_storage/xgboost/xgboost_BTCUSD_1h.pkl`
+     - `agent/model_storage/xgboost/xgboost_BTCUSD_4h.pkl`
+   - Validate saved models (ensures they're XGBClassifier instances)
+
+3. **Training metrics** are saved to `models/training_summary.csv`
+
+### Feature List (49 Features)
+
+The models use 49 technical indicators:
+
+**Price-based (15)**: SMAs (10, 20, 50, 100, 200), EMAs (12, 26, 50), price ratios, candle patterns
+
+**Momentum (10)**: RSI (7, 14), Stochastic (%K, %D), Williams %R, CCI, ROC, Momentum
+
+**Trend (8)**: MACD, MACD signal, MACD histogram, ADX, Aroon (up, down, oscillator), trend strength
+
+**Volatility (8)**: Bollinger Bands (upper, lower, width, position), ATR (14, 20), volatility (10, 20)
+
+**Volume (6)**: Volume SMA, volume ratio, OBV, volume-price trend, accumulation/distribution, Chaikin oscillator
+
+**Returns (2)**: 1h returns, 24h returns
+
+See `models/feature_list.txt` or `models/feature_list.json` for the complete list.
+
+### Model Validation
+
+**Before deployment**, always validate models:
+```bash
+python scripts/validate_models_before_deployment.py
+```
+
+This checks:
+- Model files exist and are readable
+- Models are XGBClassifier instances (not numpy arrays)
+- Models have required methods (`predict`, `predict_proba`)
+- Models can make predictions on sample data
+
+**During startup** (optional):
+Set `VALIDATE_MODELS_ON_STARTUP=1` in `.env` to validate models before starting the agent.
+
+### Troubleshooting Training
+
+**Issue**: Models contain numpy arrays instead of trained models
+- **Cause**: Model files were saved incorrectly (feature names saved instead of model object)
+- **Fix**: Re-run training script: `python scripts/train_models.py`
+- **Prevention**: Always use the training script, never manually save feature names
+
+**Issue**: Insufficient data for training
+- **Cause**: API returned fewer candles than expected
+- **Fix**: Check Delta Exchange API connectivity and increase `limit` parameter
+
+**Issue**: Feature computation fails
+- **Cause**: Missing candles or invalid data
+- **Fix**: Ensure candles have required fields (open, high, low, close, volume)
+
+---
+
+## Price Prediction Models
+
+### Overview
+
+The project includes a comprehensive price prediction training script (`scripts/train_price_prediction_models.py`) that supports both **regression** (price prediction) and **classification** (buy/sell/hold signal prediction) tasks using XGBoost and LSTM algorithms.
+
+**Key Features**:
+- **Pagination Support**: Automatically handles Delta Exchange API 2,000 candle limit
+- **Data Reversal**: Converts API reverse chronological order to chronological order
+- **Multiple Model Types**: XGBoost Regressor, XGBoost Classifier, LSTM Regressor, LSTM Classifier
+- **Google Colab Optimized**: Designed for cloud training environments
+
+### Delta Exchange API Limitations
+
+The training script properly handles Delta Exchange API constraints:
+
+1. **2,000 Candle Limit**: Maximum candles per request is 2,000
+   - Script automatically implements pagination for datasets > 2,000 candles
+   - Calculates batches: `ceil(total_candles / 2000)`
+   - Makes multiple requests with adjusted time ranges
+
+2. **Reverse Chronological Order**: API returns data in reverse chronological order (newest first)
+   - Script automatically reverses data to chronological order (oldest first)
+   - Critical for time-series models (LSTM) which require chronological sequences
+
+3. **Supported Resolutions**:
+   - Valid: `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `1d`, `1w`
+   - Deprecated (do not use): `7d`, `2w`, `30d`
+
+4. **Rate Limiting**: Script includes automatic rate limiting (0.75s delay between requests)
+
+### Training Script Usage
+
+#### Basic Usage
+
+```bash
+# Train regression and classification models for multiple timeframes
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m 1h 4h \
+  --total-candles 5000
+```
+
+#### Advanced Options
+
+```bash
+# Train only regression models
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m \
+  --total-candles 5000 \
+  --regression \
+  --no-classification
+
+# Train with LSTM models (requires TensorFlow)
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m \
+  --total-candles 5000 \
+  --lstm
+
+# Train only classification models
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m \
+  --total-candles 5000 \
+  --classification \
+  --no-regression
+```
+
+### Model Types
+
+#### 1. XGBoost Regressor
+
+**Purpose**: Predict future price (continuous value)
+
+**Output**: Future price value
+
+**Usage**:
+```python
+import pickle
+import numpy as np
+
+# Load model
+with open("models/xgboost_regressor_BTCUSD_15m.pkl", "rb") as f:
+    model = pickle.load(f)
+
+# Predict
+features = np.array([[...]])  # 49 features
+predicted_price = model.predict(features)
+```
+
+#### 2. XGBoost Classifier
+
+**Purpose**: Predict trading signal (buy/sell/hold)
+
+**Output**: Class label (0=SELL, 1=HOLD, 2=BUY) with probabilities
+
+**Usage**:
+```python
+import pickle
+import numpy as np
+
+# Load model
+with open("models/xgboost_classifier_BTCUSD_15m.pkl", "rb") as f:
+    model = pickle.load(f)
+
+# Predict
+features = np.array([[...]])  # 49 features
+signal = model.predict(features)  # 0, 1, or 2
+probabilities = model.predict_proba(features)  # [P(SELL), P(HOLD), P(BUY)]
+```
+
+#### 3. LSTM Regressor
+
+**Purpose**: Sequence-based price prediction (requires TensorFlow)
+
+**Output**: Future price value
+
+**Usage**:
+```python
+from tensorflow import keras
+import numpy as np
+
+# Load model
+model = keras.models.load_model("models/lstm_regressor_BTCUSD_15m.h5")
+
+# Predict (requires sequence of 60 candles)
+# Shape: (1, 60, 49) - (batch, sequence_length, features)
+sequence = np.array([[[...]]])  # 60 candles × 49 features
+predicted_price = model.predict(sequence)
+```
+
+#### 4. LSTM Classifier
+
+**Purpose**: Sequence-based signal prediction (requires TensorFlow)
+
+**Output**: Class probabilities
+
+**Usage**:
+```python
+from tensorflow import keras
+import numpy as np
+
+# Load model
+model = keras.models.load_model("models/lstm_classifier_BTCUSD_15m.h5")
+
+# Predict (requires sequence of 60 candles)
+sequence = np.array([[[...]]])  # 60 candles × 49 features
+probabilities = model.predict(sequence)  # [P(SELL), P(HOLD), P(BUY)]
+```
+
+### Google Colab Training
+
+For detailed instructions on training models in Google Colab, see:
+
+**[ML Training Guide - Google Colab](ml-training-google-colab.md)**
+
+The guide includes:
+- Step-by-step Colab setup instructions
+- API limitations and solutions
+- Pagination handling details
+- Data reversal explanation
+- Troubleshooting common issues
+
+**Notebook Template**: A comprehensive Jupyter notebook is available at `notebooks/train_btcusd_price_prediction.ipynb` with:
+- Interactive training workflow
+- Data exploration and visualization
+- Model evaluation and comparison
+- Feature importance analysis
+- Comprehensive error handling
+- Works in both Google Colab and local environments
+
+### Training Output
+
+Models are saved to the `models/` directory:
+
+```
+models/
+├── xgboost_regressor_BTCUSD_15m.pkl
+├── xgboost_classifier_BTCUSD_15m.pkl
+├── xgboost_regressor_BTCUSD_1h.pkl
+├── xgboost_classifier_BTCUSD_1h.pkl
+├── lstm_regressor_BTCUSD_15m.h5      # If TensorFlow available
+├── lstm_classifier_BTCUSD_15m.h5     # If TensorFlow available
+└── price_prediction_training_summary.csv
+```
+
+Training metrics are saved to `models/price_prediction_training_summary.csv` with columns:
+- `timeframe`: Timeframe identifier
+- `model_type`: Model type (xgboost_regressor, xgboost_classifier, etc.)
+- `train_metric`: Training metric (RMSE for regression, accuracy for classification)
+- `val_metric`: Validation metric
+- `test_metric`: Test metric
+- `training_time`: Training time in seconds
+- `model_path`: Path to saved model file
+
+### Best Practices
+
+1. **Start with Small Datasets**: Test with 3,000 candles before training on larger datasets
+2. **Monitor API Usage**: Be aware of API rate limits when fetching large datasets
+3. **Validate Models**: Always validate saved models before deployment
+4. **Use Appropriate Timeframes**: Match training timeframe to trading strategy
+5. **Consider LSTM for Sequences**: LSTM models capture temporal dependencies better than XGBoost
 
 ---
 

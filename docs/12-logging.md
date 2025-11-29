@@ -202,37 +202,66 @@ Use the info and error samples when constructing log ingestion tests or validati
 1. **Logging Library**  
    Configure `structlog` with `logging` bridge in `backend/core/logging.py`.
 
-2. **Uvicorn Integration**  
+2. **Error Log Aggregation**  
+   Errors are automatically logged to dedicated files:
+   - `logs/backend/errors.log` - All ERROR and CRITICAL level logs
+   - `logs/backend/warnings.log` - All WARNING level logs
+   - `logs/backend/backend.log` - All logs (main log file)
+
+3. **Uvicorn Integration**  
    Intercept Uvicorn access logs and format them to JSON.
 
-3. **Middleware**  
-   Add `LoggingMiddleware` to inject `correlation_id` per request and record start/end events.
+4. **Middleware**  
+   Add `LoggingMiddleware` to inject `request_id` per request and record start/end events.
 
-4. **Exception Handlers**  
-   Override FastAPI exception handlers to log `ERROR` level entries with stack traces.
+5. **Exception Handlers**  
+   Global exception handler logs `ERROR` level entries with full context:
+   - Request ID, path, method
+   - Error type and message
+   - Stack traces
+   - Client IP and user agent
 
-5. **Startup Clearing**  
-   Clear or archive previous log files before app start. This can be implemented in the startup scripts (`tools/commands/start.sh` or `start.ps1`) or in the application's lifespan startup handler. Ensure a new `session_id` is generated for each service run.
+6. **Startup Clearing**  
+   Clear or archive previous log files before app start. Log files are automatically archived on startup. A new `session_id` is generated for each service run.
 
-6. **Graceful Shutdown**  
+7. **Graceful Shutdown**  
    Emit `system.shutdown` log with request statistics and error counts.
 
 ### Agent Core
 
 1. **Logger Setup**  
-   Initialize structured logger in `agent/core/intelligent_agent.py`.
+   Initialize structured logger in `agent/core/intelligent_agent.py` using `agent/core/logging_utils.py`.
 
-2. **State Machine Events**  
+2. **Error Log Aggregation**  
+   Errors are automatically logged to dedicated files:
+   - `logs/agent/errors.log` - All ERROR and CRITICAL level logs
+   - `logs/agent/warnings.log` - All WARNING level logs
+   - `logs/agent/agent.log` - All logs (main log file)
+
+3. **Global Exception Handlers**  
+   Global exception handlers in `agent/core/exception_handlers.py` catch:
+   - Unhandled synchronous exceptions (`sys.excepthook`)
+   - Unhandled async exceptions (`asyncio.set_exception_handler`)
+   - Thread exceptions (`threading.excepthook`)
+
+4. **Error Metrics Tracking**  
+   Error metrics are automatically tracked in `agent/core/error_metrics.py`:
+   - Error counts by type and component
+   - Error rates over time windows
+   - Periodic error summary logs (every 5 minutes)
+
+5. **State Machine Events**  
    Log every state transition (`state`, `prev_state`, `reason`).
 
-3. **Model Inference Errors**  
+6. **Model Inference Errors**  
    Wrap model calls to capture inference errors, timeouts, degraded performance.
 
-4. **Background Tasks**  
-   Ensure Celery/async tasks propagate correlation IDs and log outcomes.
+7. **Background Tasks**  
+   Ensure async tasks propagate correlation IDs and log outcomes.
 
-5. **Startup Clearing**  
-   Reset `logs/agent/` directory on boot, emit `agent.startup` event with model versions.
+8. **Startup/Shutdown Events**  
+   - Emit `system.startup` event with session_id, commit SHA, environment, model versions
+   - Emit `system.shutdown` event with runtime statistics, error counts, graceful shutdown status
 
 ### Frontend (Next.js)
 
@@ -339,15 +368,84 @@ Use the info and error samples when constructing log ingestion tests or validati
 
 ---
 
+## Error Analysis Tools
+
+The project includes tools for analyzing error logs and identifying issues:
+
+### 1. Error Analysis Script (`tools/commands/analyze-errors.py`)
+
+Generates comprehensive error reports from log files:
+
+```bash
+# Analyze default log files
+python tools/commands/analyze-errors.py
+
+# Analyze specific log files
+python tools/commands/analyze-errors.py --log-file logs/agent/errors.log --log-file logs/backend/errors.log
+
+# Save report to file
+python tools/commands/analyze-errors.py --output logs/error/analysis-report.json
+```
+
+**Report includes:**
+- Error counts by type and component
+- Most frequent errors
+- Errors by component
+- Recent critical errors
+- Runtime error metrics (if available)
+
+### 2. Error Viewer Script (`tools/commands/view-errors.py`)
+
+Interactive error log viewer with filtering:
+
+```bash
+# View recent errors
+python tools/commands/view-errors.py --tail 50
+
+# Filter by component
+python tools/commands/view-errors.py --component execution_module
+
+# Filter by error type
+python tools/commands/view-errors.py --error-type TimeoutError
+
+# Filter by log level
+python tools/commands/view-errors.py --level ERROR
+
+# Show full entry details
+python tools/commands/view-errors.py --full --tail 10
+```
+
+**Features:**
+- Color-coded output by severity
+- Filter by component, error type, log level
+- Show recent entries (tail)
+- Full entry details option
+
+### 3. Error Metrics
+
+Runtime error metrics are automatically tracked and available via:
+
+```python
+from agent.core.error_metrics import get_error_summary
+
+summary = get_error_summary()
+print(f"Total errors: {summary.total_errors}")
+print(f"Error rate: {summary.error_rate_per_minute} errors/minute")
+```
+
+Error summaries are also logged periodically (every 5 minutes) with the event `error_summary_periodic`.
+
 ## Testing the Logging System
 
 1. **Unit Tests**
    - Mock loggers and assert structured output.
    - Verify startup clearing logic deletes/archives files.
+   - Test error metrics tracking.
 
 2. **Integration Tests**
    - Simulate an error in each service and assert log entry with correct schema.
    - Validate correlation IDs propagate across backend → agent → frontend.
+   - Verify errors are written to dedicated error log files.
 
 3. **Performance Tests**
    - Ensure logging does not exceed 5% CPU overhead under load.
@@ -356,6 +454,10 @@ Use the info and error samples when constructing log ingestion tests or validati
 4. **Chaos Tests**
    - Force disk full scenarios; verify graceful degradation.
    - Simulate logger failure and ensure service continues running with fallback.
+
+5. **Error Analysis Tests**
+   - Verify error analysis tools can parse log files correctly.
+   - Test error metrics aggregation.
 
 ---
 
@@ -407,5 +509,11 @@ Use the info and error samples when constructing log ingestion tests or validati
 | Date       | Version | Description                              |
 |------------|---------|------------------------------------------|
 | 2025-01-12 | 1.0.0   | Initial logging system documentation     |
+| 2025-01-XX | 2.0.0   | Comprehensive error logging system:
+|            |         | - Dedicated error/warning log files
+|            |         | - Global exception handlers
+|            |         | - Error metrics tracking
+|            |         | - Error analysis tools (analyze-errors.py, view-errors.py)
+|            |         | - Enhanced error context logging
 
 

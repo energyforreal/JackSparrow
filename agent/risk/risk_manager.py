@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, Optional, List
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, date
 import structlog
 
 from agent.core.config import settings
@@ -30,8 +30,23 @@ class RiskManager:
         self.max_portfolio_heat = settings.max_portfolio_heat
         self.stop_loss_pct = settings.stop_loss_percentage
         self.take_profit_pct = settings.take_profit_percentage
+        self.min_confidence_threshold = settings.min_confidence_threshold
+        self.max_daily_loss = settings.max_daily_loss
+        self.max_drawdown_limit = settings.max_drawdown
+        self.max_consecutive_losses_limit = settings.max_consecutive_losses
+        self.min_time_between_trades = settings.min_time_between_trades
         self.context_manager = context_manager
         self._monitoring = False
+        self.daily_start_value: Optional[float] = None
+        self.daily_start_date: Optional[date] = None
+        self.peak_portfolio_value: Optional[float] = None
+        self.daily_loss_pct: float = 0.0
+        self.current_drawdown: float = 0.0
+        self.consecutive_losses: int = 0
+        self.last_trade_timestamp: Optional[datetime] = None
+        self.pending_order: Optional[Dict[str, Any]] = None
+        self.current_position: Optional[Dict[str, Any]] = None
+        self.last_portfolio_value: float = settings.initial_balance
     
     async def initialize(self):
         """Initialize risk manager and register event handlers."""
@@ -60,12 +75,88 @@ class RiskManager:
             # Skip HOLD signals
             if signal == "HOLD":
                 return
+
+            # Enforce minimum confidence threshold
+            if confidence < self.min_confidence_threshold:
+                await self._emit_risk_alert(
+                    alert_type="CONFIDENCE",
+                    severity="INFO",
+                    message=(
+                        f"Signal confidence {confidence:.2f} is below "
+                        f"threshold {self.min_confidence_threshold:.2f}"
+                    ),
+                    current_value=confidence,
+                    threshold=self.min_confidence_threshold,
+                    symbol=symbol
+                )
+                return
             
             # Get context
             context = self.context_manager.get_current_context()
             portfolio_value = context.portfolio_value
             available_balance = context.available_balance
             current_positions = [context.position] if context.position else []
+            self._refresh_portfolio_metrics(context.timestamp, portfolio_value)
+
+            # Check session-level risk guards
+            if self.max_daily_loss and self.daily_loss_pct >= self.max_daily_loss:
+                await self._emit_risk_alert(
+                    alert_type="DAILY_LOSS",
+                    severity="CRITICAL",
+                    message=(
+                        f"Daily loss {self.daily_loss_pct:.2%} exceeds limit {self.max_daily_loss:.2%}"
+                    ),
+                    current_value=self.daily_loss_pct,
+                    threshold=self.max_daily_loss,
+                    symbol=symbol
+                )
+                return
+
+            if self.max_drawdown_limit and self.current_drawdown >= self.max_drawdown_limit:
+                await self._emit_risk_alert(
+                    alert_type="DRAWDOWN",
+                    severity="CRITICAL",
+                    message=(
+                        f"Drawdown {self.current_drawdown:.2%} exceeds limit "
+                        f"{self.max_drawdown_limit:.2%}"
+                    ),
+                    current_value=self.current_drawdown,
+                    threshold=self.max_drawdown_limit,
+                    symbol=symbol
+                )
+                return
+
+            if (
+                self.max_consecutive_losses_limit
+                and self.consecutive_losses >= self.max_consecutive_losses_limit
+            ):
+                await self._emit_risk_alert(
+                    alert_type="CONSECUTIVE_LOSSES",
+                    severity="WARNING",
+                    message=(
+                        f"Consecutive losses {self.consecutive_losses} exceed limit "
+                        f"{self.max_consecutive_losses_limit}"
+                    ),
+                    current_value=float(self.consecutive_losses),
+                    threshold=float(self.max_consecutive_losses_limit),
+                    symbol=symbol
+                )
+                return
+
+            if self._cooldown_active():
+                remaining = self._cooldown_seconds_remaining()
+                await self._emit_risk_alert(
+                    alert_type="TRADE_COOLDOWN",
+                    severity="INFO",
+                    message=(
+                        "Cooling down between trades – "
+                        f"{remaining:.0f}s remaining before next trade"
+                    ),
+                    current_value=remaining,
+                    threshold=float(self.min_time_between_trades),
+                    symbol=symbol
+                )
+                return
             
             # Assess risk
             risk_assessment = self.assess_risk(
@@ -147,9 +238,31 @@ class RiskManager:
             event: Order fill event
         """
         try:
-            # Update risk metrics after order fill
-            context = self.context_manager.get_current_context()
-            # Risk manager tracks positions for heat calculation
+            payload = event.payload
+            symbol = payload.get("symbol")
+            side = payload.get("side")
+            quantity = float(payload.get("quantity", 0.0) or 0.0)
+            fill_price = float(payload.get("fill_price", payload.get("price", 0.0)) or 0.0)
+
+            pending = self.pending_order or {}
+            action = pending.get("action", "open")
+
+            if action == "close" and self.current_position:
+                pnl = self._calculate_trade_pnl(fill_price)
+                self._record_trade_result(pnl)
+                self.current_position = None
+            elif action == "scale" and self.current_position:
+                self._scale_position(fill_price, quantity)
+            else:
+                self.current_position = {
+                    "symbol": symbol,
+                    "side": side,
+                    "entry_price": fill_price,
+                    "quantity": quantity,
+                }
+
+            self.pending_order = None
+            self._sync_risk_metrics_context()
         except Exception as e:
             logger.error(
                 "risk_manager_order_fill_error",
@@ -157,6 +270,7 @@ class RiskManager:
                 error=str(e),
                 exc_info=True
             )
+            self.pending_order = None
     
     async def _emit_risk_alert(self, alert_type: str, severity: str, message: str,
                                current_value: float, threshold: float, symbol: Optional[str] = None):
@@ -228,7 +342,10 @@ class RiskManager:
                 }
             )
             
+            self._prepare_pending_order(symbol, side, quantity, price)
             await event_bus.publish(event)
+            self.last_trade_timestamp = datetime.utcnow()
+            self._sync_risk_metrics_context()
             
             logger.info(
                 "risk_approved_emitted",
@@ -276,6 +393,132 @@ class RiskManager:
                 error=str(e),
                 exc_info=True
             )
+
+    def _prepare_pending_order(self, symbol: str, side: str, quantity: float, price: float):
+        """Track pending order details for post-trade accounting."""
+        action = "open"
+        if self.current_position:
+            if self.current_position.get("side") == side:
+                action = "scale"
+            else:
+                action = "close"
+        self.pending_order = {
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "price": price,
+            "action": action,
+        }
+
+    def _calculate_trade_pnl(self, fill_price: float) -> float:
+        """Calculate PnL for closing trade."""
+        if not self.current_position:
+            return 0.0
+        entry_price = float(self.current_position.get("entry_price", fill_price) or fill_price)
+        quantity = float(self.current_position.get("quantity", 0.0) or 0.0)
+        if quantity <= 0:
+            return 0.0
+        if self.current_position.get("side") == "BUY":
+            return (fill_price - entry_price) * quantity
+        return (entry_price - fill_price) * quantity
+
+    def _scale_position(self, fill_price: float, quantity: float):
+        """Adjust current position when scaling in."""
+        if not self.current_position:
+            return
+        existing_qty = float(self.current_position.get("quantity", 0.0) or 0.0)
+        quantity = abs(quantity)
+        total_qty = existing_qty + quantity
+        if total_qty <= 0:
+            return
+        weighted_price = (
+            (self.current_position.get("entry_price", fill_price) * existing_qty)
+            + (fill_price * quantity)
+        ) / total_qty
+        self.current_position["entry_price"] = weighted_price
+        self.current_position["quantity"] = total_qty
+
+    def _record_trade_result(self, pnl: float):
+        """Update cumulative metrics after trade closes."""
+        self.last_portfolio_value = max(0.0, self.last_portfolio_value + pnl)
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
+        now = datetime.utcnow()
+        self._ensure_daily_baseline(now, self.last_portfolio_value)
+        self._recalculate_daily_loss(self.last_portfolio_value)
+        self._recalculate_drawdown(self.last_portfolio_value)
+        self.context_manager.update_context({
+            "portfolio": {
+                "value": self.last_portfolio_value,
+                "balance": self.last_portfolio_value
+            }
+        })
+        self._sync_risk_metrics_context()
+
+    def _refresh_portfolio_metrics(self, timestamp: datetime, portfolio_value: float):
+        """Refresh baseline metrics using the latest portfolio value."""
+        effective_timestamp = timestamp or datetime.utcnow()
+        self.last_portfolio_value = portfolio_value
+        self._ensure_daily_baseline(effective_timestamp, portfolio_value)
+        self._recalculate_daily_loss(portfolio_value)
+        self._recalculate_drawdown(portfolio_value)
+        self._sync_risk_metrics_context()
+
+    def _ensure_daily_baseline(self, timestamp: datetime, portfolio_value: float):
+        """Reset daily baseline when a new UTC day starts."""
+        current_date = timestamp.date() if isinstance(timestamp, datetime) else datetime.utcnow().date()
+        if self.daily_start_date != current_date or self.daily_start_value is None:
+            self.daily_start_date = current_date
+            self.daily_start_value = portfolio_value
+            self.daily_loss_pct = 0.0
+
+    def _recalculate_daily_loss(self, portfolio_value: float):
+        """Recompute daily loss percentage."""
+        if self.daily_start_value and self.daily_start_value > 0:
+            drop = max(0.0, self.daily_start_value - portfolio_value)
+            self.daily_loss_pct = drop / self.daily_start_value
+        else:
+            self.daily_loss_pct = 0.0
+
+    def _recalculate_drawdown(self, portfolio_value: float):
+        """Recompute drawdown from recent peak."""
+        if self.peak_portfolio_value is None or portfolio_value > self.peak_portfolio_value:
+            self.peak_portfolio_value = portfolio_value
+        if self.peak_portfolio_value and self.peak_portfolio_value > 0:
+            drop = max(0.0, self.peak_portfolio_value - portfolio_value)
+            self.current_drawdown = drop / self.peak_portfolio_value
+        else:
+            self.current_drawdown = 0.0
+
+    def _cooldown_active(self) -> bool:
+        """Check if trade cooldown is active."""
+        if not self.last_trade_timestamp or self.min_time_between_trades <= 0:
+            return False
+        elapsed = (datetime.utcnow() - self.last_trade_timestamp).total_seconds()
+        return elapsed < self.min_time_between_trades
+
+    def _cooldown_seconds_remaining(self) -> float:
+        """Seconds remaining before cooldown expires."""
+        if not self.last_trade_timestamp:
+            return 0.0
+        elapsed = (datetime.utcnow() - self.last_trade_timestamp).total_seconds()
+        remaining = self.min_time_between_trades - elapsed
+        return max(0.0, remaining)
+
+    def _sync_risk_metrics_context(self):
+        """Push latest risk metrics into shared context."""
+        self.context_manager.update_context({
+            "risk_metrics": {
+                "daily_loss_pct": self.daily_loss_pct,
+                "max_drawdown_current": self.current_drawdown,
+                "consecutive_losses": self.consecutive_losses,
+                "last_trade_timestamp": (
+                    self.last_trade_timestamp.isoformat() if self.last_trade_timestamp else None
+                ),
+            }
+        })
     
     def assess_risk(
         self,

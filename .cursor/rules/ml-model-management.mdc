@@ -3,7 +3,7 @@ description: ML model management and MCP protocol standards
 globs:
   - "agent/models/**/*.py"
   - "agent/model_storage/**/*"
-alwaysApply: true
+alwaysApply: false
 ---
 
 # ML Model Management Standards

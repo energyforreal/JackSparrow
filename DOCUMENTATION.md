@@ -34,6 +34,8 @@ This document serves as the central index for all project documentation. Navigat
    - AI agent intelligence for model interaction
    - Model type detection and understanding
    - Model versioning and management
+   - Price prediction models with pagination and data reversal support
+   - **[ML Training Guide - Google Colab](docs/ml-training-google-colab.md)** - Comprehensive guide for training models in Google Colab
 
 4. **[Features Documentation](docs/04-features.md)**
    - Core trading agent features

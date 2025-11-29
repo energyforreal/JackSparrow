@@ -10,6 +10,7 @@ from collections import deque
 import json
 
 from agent.core.state_machine import AgentState
+from agent.core.config import settings
 
 
 class AgentContext:
@@ -18,7 +19,7 @@ class AgentContext:
     def __init__(self):
         """Initialize agent context."""
         self.current_state: AgentState = AgentState.INITIALIZING
-        self.symbol: str = "BTCUSD"
+        self.symbol: str = settings.trading_symbol or settings.agent_symbol
         self.current_price: Optional[float] = None
         self.market_data: Dict[str, Any] = {}
         self.features: Dict[str, float] = {}
@@ -27,8 +28,15 @@ class AgentContext:
         self.last_decision: Optional[Dict[str, Any]] = None
         self.last_trade: Optional[Dict[str, Any]] = None
         self.position: Optional[Dict[str, Any]] = None
-        self.portfolio_value: float = 10000.0  # Starting balance
-        self.available_balance: float = 10000.0
+        self.portfolio_value: float = settings.initial_balance
+        self.available_balance: float = settings.initial_balance
+        self.timeframes: List[str] = settings.parsed_timeframes() or [settings.agent_interval]
+        self.min_confidence_threshold: float = settings.min_confidence_threshold
+        self.trading_mode: str = settings.trading_mode
+        self.daily_loss_pct: float = 0.0
+        self.max_drawdown_current: float = 0.0
+        self.consecutive_losses: int = 0
+        self.last_trade_timestamp: Optional[datetime] = None
         self.timestamp: datetime = datetime.utcnow()
     
     def to_dict(self) -> Dict[str, Any]:
@@ -46,6 +54,13 @@ class AgentContext:
             "position": self.position,
             "portfolio_value": self.portfolio_value,
             "available_balance": self.available_balance,
+            "timeframes": self.timeframes,
+            "min_confidence_threshold": self.min_confidence_threshold,
+            "trading_mode": self.trading_mode,
+            "daily_loss_pct": self.daily_loss_pct,
+            "max_drawdown_current": self.max_drawdown_current,
+            "consecutive_losses": self.consecutive_losses,
+            "last_trade_timestamp": self.last_trade_timestamp.isoformat() if self.last_trade_timestamp else None,
             "timestamp": self.timestamp.isoformat()
         }
     
@@ -92,6 +107,47 @@ class AgentContext:
         self.portfolio_value = portfolio_value
         self.available_balance = available_balance
         self.timestamp = datetime.utcnow()
+
+    def update_symbol(self, symbol: str):
+        """Update preferred trading symbol."""
+        self.symbol = symbol
+        self.timestamp = datetime.utcnow()
+
+    def update_timeframes(self, timeframes: List[str]):
+        """Update configured timeframes."""
+        if timeframes:
+            self.timeframes = timeframes
+            self.timestamp = datetime.utcnow()
+
+    def update_confidence_threshold(self, threshold: float):
+        """Update minimum confidence threshold."""
+        if threshold is not None:
+            self.min_confidence_threshold = threshold
+            self.timestamp = datetime.utcnow()
+
+    def update_trading_mode(self, mode: str):
+        """Update trading mode indicator."""
+        if mode:
+            self.trading_mode = mode
+            self.timestamp = datetime.utcnow()
+
+    def update_risk_metrics(self, metrics: Dict[str, Any]):
+        """Update tracked risk metrics."""
+        updated = False
+        if "daily_loss_pct" in metrics and metrics["daily_loss_pct"] is not None:
+            self.daily_loss_pct = metrics["daily_loss_pct"]
+            updated = True
+        if "max_drawdown_current" in metrics and metrics["max_drawdown_current"] is not None:
+            self.max_drawdown_current = metrics["max_drawdown_current"]
+            updated = True
+        if "consecutive_losses" in metrics and metrics["consecutive_losses"] is not None:
+            self.consecutive_losses = metrics["consecutive_losses"]
+            updated = True
+        if "last_trade_timestamp" in metrics:
+            self.last_trade_timestamp = metrics["last_trade_timestamp"]
+            updated = True
+        if updated:
+            self.timestamp = datetime.utcnow()
 
 
 class ContextManager:
@@ -145,6 +201,29 @@ class ContextManager:
                 portfolio.get("value", self.current_context.portfolio_value),
                 portfolio.get("balance", self.current_context.available_balance)
             )
+
+        if "symbol" in updates:
+            self.current_context.update_symbol(updates["symbol"])
+
+        if "timeframes" in updates:
+            self.current_context.update_timeframes(updates["timeframes"])
+
+        if "confidence_threshold" in updates:
+            self.current_context.update_confidence_threshold(updates["confidence_threshold"])
+
+        if "trading_mode" in updates:
+            self.current_context.update_trading_mode(updates["trading_mode"])
+
+        if "risk_metrics" in updates:
+            metrics = updates["risk_metrics"]
+            # Normalize timestamp input
+            last_trade_ts = metrics.get("last_trade_timestamp")
+            if isinstance(last_trade_ts, str):
+                try:
+                    metrics["last_trade_timestamp"] = datetime.fromisoformat(last_trade_ts)
+                except ValueError:
+                    metrics["last_trade_timestamp"] = None
+            self.current_context.update_risk_metrics(metrics)
     
     def add_state_transition(self, from_state: AgentState, to_state: AgentState, reason: str = ""):
         """Record state transition."""
@@ -176,6 +255,11 @@ class ContextManager:
             "current_price": self.current_context.current_price,
             "portfolio_value": self.current_context.portfolio_value,
             "available_balance": self.current_context.available_balance,
+            "timeframes": self.current_context.timeframes,
+            "trading_mode": self.current_context.trading_mode,
+            "daily_loss_pct": self.current_context.daily_loss_pct,
+            "max_drawdown_current": self.current_context.max_drawdown_current,
+            "consecutive_losses": self.current_context.consecutive_losses,
             "has_position": self.current_context.position is not None,
             "decisions_count": len(self.decision_history),
             "trades_count": len(self.trade_history),

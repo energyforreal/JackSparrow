@@ -11,7 +11,7 @@ interface HealthMonitorProps {
   health?: HealthStatus
 }
 
-const getStatusIcon = (status: 'up' | 'degraded' | 'down') => {
+const getStatusIcon = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
   switch (status) {
     case 'up':
       return <CheckCircle2 className="h-4 w-4 text-success" />
@@ -19,10 +19,14 @@ const getStatusIcon = (status: 'up' | 'degraded' | 'down') => {
       return <AlertCircle className="h-4 w-4 text-warning" />
     case 'down':
       return <XCircle className="h-4 w-4 text-error" />
+    case 'unknown':
+      return <AlertCircle className="h-4 w-4 text-muted-foreground" />
+    default:
+      return <AlertCircle className="h-4 w-4 text-muted-foreground" />
   }
 }
 
-const getStatusVariant = (status: 'up' | 'degraded' | 'down') => {
+const getStatusVariant = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
   switch (status) {
     case 'up':
       return 'default'
@@ -30,6 +34,10 @@ const getStatusVariant = (status: 'up' | 'degraded' | 'down') => {
       return 'secondary'
     case 'down':
       return 'destructive'
+    case 'unknown':
+      return 'outline'
+    default:
+      return 'outline'
   }
 }
 
@@ -57,7 +65,8 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
         name,
         status: service.status || 'unknown',
         latency: service.latency_ms,
-        error: service.error
+        error: service.error,
+        details: service.details
       }))
     : []
 
@@ -83,27 +92,51 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
         </div>
 
         <div className="space-y-2">
-          {servicesArray.map((service) => (
-            <div
-              key={service.name}
-              className="flex items-center justify-between py-2 border-b last:border-0"
-            >
-              <div className="flex items-center gap-2">
-                {getStatusIcon(service.status)}
-                <span className="text-sm font-medium">{service.name}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                {service.latency !== undefined && service.latency !== null && (
-                  <span className="text-xs text-muted-foreground">
-                    {service.latency}ms
-                  </span>
+          {servicesArray.map((service) => {
+            const details = service.details || {}
+            const healthyModels =
+              typeof details.healthy_models === 'number' ? details.healthy_models : undefined
+            const totalModels =
+              typeof details.total_models === 'number' ? details.total_models : undefined
+            const note = typeof details.note === 'string' ? details.note : undefined
+            const shouldShowDetails =
+              service.status === 'unknown' &&
+              (note || (healthyModels !== undefined && totalModels !== undefined))
+
+            return (
+              <div
+                key={service.name}
+                className="py-2 border-b last:border-0"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {getStatusIcon(service.status)}
+                    <span className="text-sm font-medium">{service.name}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {service.latency !== undefined && service.latency !== null && (
+                      <span className="text-xs text-muted-foreground">
+                        {service.latency}ms
+                      </span>
+                    )}
+                    <Badge variant={getStatusVariant(service.status as 'up' | 'degraded' | 'down' | 'unknown')}>
+                      {service.status.toUpperCase()}
+                    </Badge>
+                  </div>
+                </div>
+                {shouldShowDetails && (
+                  <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                    {healthyModels !== undefined && totalModels !== undefined && (
+                      <p>
+                        Healthy models: {healthyModels}/{totalModels}
+                      </p>
+                    )}
+                    {note && <p>{note}</p>}
+                  </div>
                 )}
-                <Badge variant={getStatusVariant(service.status as 'up' | 'degraded' | 'down')}>
-                  {service.status.toUpperCase()}
-                </Badge>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         {health.degradation_reasons &&

@@ -100,6 +100,20 @@ All 24/7 services now run via Docker images orchestrated with Compose.
 
 The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on `8001`), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./models`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
 
+## Model Training
+
+If you need to train or regenerate ML models:
+
+```bash
+# Train models for all timeframes
+python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
+
+# Validate models before use
+python scripts/validate_models_before_deployment.py
+```
+
+See [ML Models Documentation](docs/03-ml-models.md#model-training) for detailed guide.
+
 ## Testing
 
 The project includes comprehensive test suites and validation scripts. See [Testing Guide](docs/testing-guide.md) for complete documentation.

@@ -55,8 +55,20 @@ export function useAgent() {
 
     const fetchInitialData = async (): Promise<void> => {
       try {
+        // Fetch portfolio data
         const portfolioData = await apiClient.getPortfolioSummary()
         setPortfolio(portfolioData)
+        
+        // Fetch recent trades
+        try {
+          const trades = await apiClient.getTrades()
+          if (Array.isArray(trades)) {
+            setRecentTrades(trades.slice(0, 10)) // Keep only most recent 10
+          }
+        } catch (tradesError) {
+          // Trades fetch is optional, continue with other data
+          console.debug('Could not fetch trades:', tradesError)
+        }
         
         // Fetch agent status to get initial state and lastUpdate
         try {

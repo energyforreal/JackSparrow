@@ -11,6 +11,8 @@ import time
 import structlog
 import json
 
+from backend.core.logging import log_error_with_context
+
 logger = structlog.get_logger()
 
 
@@ -64,16 +66,17 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             # Calculate process time
             process_time = time.time() - start_time
             
-            # Log error
-            logger.error(
+            # Log error with enhanced context
+            log_error_with_context(
                 "request_failed",
+                error=e,
+                component="logging_middleware",
                 request_id=request_id,
                 method=method,
                 path=path,
-                error=str(e),
+                query_params=query_params,
                 process_time_ms=round(process_time * 1000, 2),
                 client_ip=client_ip,
-                exc_info=True
             )
             
             # Re-raise exception

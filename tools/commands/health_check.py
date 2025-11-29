@@ -136,6 +136,7 @@ class HealthChecker:
                     data = response.json()
                     status = data.get("status", "unknown")
                     health_score = data.get("health_score", 0.0)
+                    services = data.get("services", {})
                     
                     health_details = {
                         "status": status,

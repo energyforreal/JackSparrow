@@ -58,6 +58,31 @@ def setup_database():
                     conn.rollback()
                     raise
             
+            # Create ENUM types for enum columns
+            print("Creating ENUM types...")
+            enums = [
+                ("tradeside", ["BUY", "SELL"]),
+                ("tradestatus", ["PENDING", "EXECUTED", "FAILED", "CANCELLED"]),
+                ("ordertype", ["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]),
+                ("positionstatus", ["OPEN", "CLOSED", "LIQUIDATED"]),
+                ("signaltype", ["BUY", "SELL", "HOLD", "STRONG_BUY", "STRONG_SELL"]),
+            ]
+            
+            for enum_name, values in enums:
+                values_str = ", ".join(f"'{v}'" for v in values)
+                try:
+                    conn.execute(text(f"CREATE TYPE IF NOT EXISTS {enum_name} AS ENUM ({values_str});"))
+                    conn.commit()
+                    print(f"  ✓ Created ENUM type '{enum_name}'")
+                except Exception as e:
+                    conn.rollback()
+                    # If enum already exists, that's okay
+                    if "already exists" in str(e).lower():
+                        print(f"  ⚠ ENUM type '{enum_name}' already exists, skipping")
+                    else:
+                        print(f"  ✗ Failed to create ENUM type '{enum_name}': {e}")
+                        raise
+            
             # Create trades table (hypertable)
             print("Creating trades table...")
             conn.execute(text("""
@@ -65,11 +90,11 @@ def setup_database():
                     id SERIAL PRIMARY KEY,
                     trade_id VARCHAR(255) UNIQUE NOT NULL,
                     symbol VARCHAR(50) NOT NULL,
-                    side VARCHAR(10) NOT NULL,
+                    side tradeside NOT NULL,
                     quantity DECIMAL(18, 8) NOT NULL,
                     price DECIMAL(18, 8) NOT NULL,
-                    order_type VARCHAR(20) NOT NULL,
-                    status VARCHAR(20) NOT NULL,
+                    order_type ordertype NOT NULL,
+                    status tradestatus NOT NULL,
                     executed_at TIMESTAMPTZ NOT NULL,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     reasoning_chain_id VARCHAR(255),
@@ -97,14 +122,14 @@ def setup_database():
                     id SERIAL PRIMARY KEY,
                     position_id VARCHAR(255) UNIQUE NOT NULL,
                     symbol VARCHAR(50) NOT NULL,
-                    side VARCHAR(10) NOT NULL,
+                    side tradeside NOT NULL,
                     quantity DECIMAL(18, 8) NOT NULL,
                     entry_price DECIMAL(18, 8) NOT NULL,
                     current_price DECIMAL(18, 8),
                     unrealized_pnl DECIMAL(18, 8),
                     opened_at TIMESTAMPTZ NOT NULL,
                     closed_at TIMESTAMPTZ,
-                    status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+                    status positionstatus NOT NULL DEFAULT 'OPEN'::positionstatus,
                     stop_loss DECIMAL(18, 8),
                     take_profit DECIMAL(18, 8),
                     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -122,7 +147,7 @@ def setup_database():
                     decision_id VARCHAR(255) UNIQUE NOT NULL,
                     timestamp TIMESTAMPTZ NOT NULL,
                     symbol VARCHAR(50) NOT NULL,
-                    signal VARCHAR(20) NOT NULL,
+                    signal signaltype NOT NULL,
                     confidence DECIMAL(5, 4) NOT NULL,
                     position_size DECIMAL(5, 4),
                     reasoning_chain JSONB NOT NULL,

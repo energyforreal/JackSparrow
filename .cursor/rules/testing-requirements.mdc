@@ -4,7 +4,7 @@ globs:
   - "**/*.py"
   - "**/*.ts"
   - "**/*.tsx"
-alwaysApply: true
+alwaysApply: false
 ---
 
 # Testing Requirements

@@ -21,7 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, ENUM as PostgresEnum
 import enum
 
 from backend.core.config import settings
@@ -119,11 +119,11 @@ class Trade(Base):
     id = Column(Integer, primary_key=True, index=True)
     trade_id = Column(String(255), unique=True, nullable=False, index=True)
     symbol = Column(String(50), nullable=False, index=True)
-    side = Column(SQLEnum(TradeSide), nullable=False)
+    side = Column(PostgresEnum(TradeSide, name='tradeside', create_type=False), nullable=False)
     quantity = Column(DECIMAL(18, 8), nullable=False)
     price = Column(DECIMAL(18, 8), nullable=False)
-    order_type = Column(SQLEnum(OrderType), nullable=False)
-    status = Column(SQLEnum(TradeStatus), nullable=False, default=TradeStatus.PENDING)
+    order_type = Column(PostgresEnum(OrderType, name='ordertype', create_type=False), nullable=False)
+    status = Column(PostgresEnum(TradeStatus, name='tradestatus', create_type=False), nullable=False, default=TradeStatus.PENDING)
     executed_at = Column(TIMESTAMPTZ, nullable=False, index=True)
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
     reasoning_chain_id = Column(String(255), nullable=True)
@@ -143,14 +143,14 @@ class Position(Base):
     id = Column(Integer, primary_key=True, index=True)
     position_id = Column(String(255), unique=True, nullable=False, index=True)
     symbol = Column(String(50), nullable=False, index=True)
-    side = Column(SQLEnum(TradeSide), nullable=False)
+    side = Column(PostgresEnum(TradeSide, name='tradeside', create_type=False), nullable=False)
     quantity = Column(DECIMAL(18, 8), nullable=False)
     entry_price = Column(DECIMAL(18, 8), nullable=False)
     current_price = Column(DECIMAL(18, 8), nullable=True)
     unrealized_pnl = Column(DECIMAL(18, 8), nullable=True, default=Decimal("0"))
     opened_at = Column(TIMESTAMPTZ, nullable=False)
     closed_at = Column(TIMESTAMPTZ, nullable=True)
-    status = Column(SQLEnum(PositionStatus), nullable=False, default=PositionStatus.OPEN)
+    status = Column(PostgresEnum(PositionStatus, name='positionstatus', create_type=False), nullable=False, default=PositionStatus.OPEN)
     stop_loss = Column(DECIMAL(18, 8), nullable=True)
     take_profit = Column(DECIMAL(18, 8), nullable=True)
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
@@ -170,7 +170,7 @@ class Decision(Base):
     decision_id = Column(String(255), unique=True, nullable=False, index=True)
     timestamp = Column(TIMESTAMPTZ, nullable=False, index=True)
     symbol = Column(String(50), nullable=False, index=True)
-    signal = Column(SQLEnum(SignalType), nullable=False)
+    signal = Column(PostgresEnum(SignalType, name='signaltype', create_type=False), nullable=False)
     confidence = Column(DECIMAL(5, 4), nullable=False)
     position_size = Column(DECIMAL(5, 4), nullable=True)
     reasoning_chain = Column(JSONB, nullable=False)

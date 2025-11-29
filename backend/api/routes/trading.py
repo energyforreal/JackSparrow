@@ -5,12 +5,16 @@ Handles prediction requests and trade execution.
 """
 
 import asyncio
+from datetime import datetime
+from decimal import Decimal
+from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+import structlog
 
 from backend.api.models.requests import ExecuteTradeRequest, PredictRequest
-from backend.api.models.responses import ErrorResponse, PredictResponse, TradeResponse
+from backend.api.models.responses import ErrorResponse, PredictResponse, TradeResponse, ReasoningChain, ReasoningStep, ModelPrediction
 from backend.core.database import get_db
 from backend.notifications import telegram_notifier
 from backend.services.agent_service import agent_service
@@ -18,6 +22,7 @@ from backend.services.market_service import market_service
 from backend.api.middleware.auth import require_auth
 
 router = APIRouter(dependencies=[Depends(require_auth)])
+logger = structlog.get_logger()
 
 
 @router.post("/predict", response_model=PredictResponse)
@@ -57,23 +62,176 @@ async def predict(request: PredictRequest):
     """
     
     try:
+        logger.info(
+            "predict_request_received",
+            symbol=request.symbol,
+            has_context=bool(request.context)
+        )
+        
         # Request prediction from agent
-        prediction = await agent_service.get_prediction(
+        response = await agent_service.get_prediction(
             symbol=request.symbol,
             context=request.context or {}
         )
         
-        if not prediction:
+        if not response:
+            logger.error(
+                "predict_agent_no_response",
+                symbol=request.symbol,
+                message="Agent service returned None"
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Agent service unavailable"
+                detail="Agent service unavailable - no response received"
             )
         
-        return PredictResponse(**prediction)
+        # Check if response indicates error
+        if isinstance(response, dict) and not response.get("success", True):
+            error_msg = response.get("error", "Unknown error from agent")
+            logger.error(
+                "predict_agent_error",
+                symbol=request.symbol,
+                error=error_msg,
+                response=response
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Agent service error: {error_msg}"
+            )
+        
+        # Extract data from response (agent returns {"success": True, "data": {...}})
+        decision_data = response.get("data", response) if isinstance(response, dict) else response
+        
+        if not isinstance(decision_data, dict):
+            logger.error(
+                "predict_invalid_response_format",
+                symbol=request.symbol,
+                response_type=type(response).__name__,
+                response=response
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid response format from agent service"
+            )
+        
+        logger.debug(
+            "predict_decision_received",
+            symbol=request.symbol,
+            decision_keys=list(decision_data.keys())
+        )
+        
+        # Transform agent response to PredictResponse format
+        try:
+            # Extract and transform reasoning_chain
+            reasoning_chain_dict = decision_data.get("reasoning_chain", {})
+            if isinstance(reasoning_chain_dict, dict):
+                # Convert steps if present
+                steps = reasoning_chain_dict.get("steps", [])
+                reasoning_steps = [
+                    ReasoningStep(**step) if isinstance(step, dict) else step
+                    for step in steps
+                ]
+                
+                reasoning_chain = ReasoningChain(
+                    chain_id=reasoning_chain_dict.get("chain_id", "unknown"),
+                    timestamp=datetime.fromisoformat(
+                        reasoning_chain_dict["timestamp"].replace("Z", "+00:00")
+                    ) if "timestamp" in reasoning_chain_dict else datetime.utcnow(),
+                    steps=reasoning_steps,
+                    conclusion=reasoning_chain_dict.get("conclusion", "No conclusion"),
+                    final_confidence=float(reasoning_chain_dict.get("final_confidence", 0.0))
+                )
+            else:
+                # Create minimal reasoning chain if missing
+                reasoning_chain = ReasoningChain(
+                    chain_id="unknown",
+                    timestamp=datetime.utcnow(),
+                    steps=[],
+                    conclusion="No reasoning chain available",
+                    final_confidence=0.0
+                )
+            
+            # Extract and transform model_predictions
+            model_predictions_list = decision_data.get("model_predictions", [])
+            model_predictions = [
+                ModelPrediction(**pred) if isinstance(pred, dict) else pred
+                for pred in model_predictions_list
+            ]
+            
+            # Extract signal and confidence
+            signal = decision_data.get("signal", "HOLD")
+            confidence = float(decision_data.get("confidence", 0.0))
+            
+            # Extract position_size and convert to Decimal
+            position_size_val = decision_data.get("position_size")
+            position_size = Decimal(str(position_size_val)) if position_size_val is not None else None
+            
+            # Extract timestamp
+            timestamp_str = decision_data.get("timestamp")
+            if timestamp_str:
+                try:
+                    if isinstance(timestamp_str, str):
+                        timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                    else:
+                        timestamp = datetime.utcnow()
+                except (ValueError, AttributeError):
+                    timestamp = datetime.utcnow()
+            else:
+                timestamp = datetime.utcnow()
+            
+            # Extract market_context (may include features, etc.)
+            market_context = decision_data.get("market_context", {})
+            if not market_context:
+                # Try to construct from available data
+                market_context = {
+                    "feature_quality": decision_data.get("feature_quality"),
+                    "symbol": request.symbol
+                }
+            
+            # Create PredictResponse
+            predict_response = PredictResponse(
+                signal=signal,
+                confidence=confidence,
+                position_size=position_size,
+                reasoning_chain=reasoning_chain,
+                model_predictions=model_predictions,
+                market_context=market_context,
+                timestamp=timestamp
+            )
+            
+            logger.info(
+                "predict_success",
+                symbol=request.symbol,
+                signal=signal,
+                confidence=confidence
+            )
+            
+            return predict_response
+            
+        except Exception as transform_error:
+            logger.error(
+                "predict_response_transform_failed",
+                symbol=request.symbol,
+                error=str(transform_error),
+                error_type=type(transform_error).__name__,
+                decision_data=decision_data,
+                exc_info=True
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to transform prediction response: {str(transform_error)}"
+            )
         
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(
+            "predict_endpoint_error",
+            symbol=request.symbol if hasattr(request, 'symbol') else None,
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Prediction failed: {str(e)}"

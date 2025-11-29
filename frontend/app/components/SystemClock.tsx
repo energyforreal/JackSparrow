@@ -1,7 +1,7 @@
 'use client'
 
 import { useSystemClock } from '@/hooks/useSystemClock'
-import { formatDateTime } from '@/utils/formatters'
+import { formatClockDate, formatClockTime, formatTimezone } from '@/utils/formatters'
 import { Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -20,38 +20,71 @@ interface SystemClockProps {
  */
 export function SystemClock({ className }: SystemClockProps) {
   const { currentTime, isSynced, syncError } = useSystemClock()
+  const timeLabel = formatClockTime(currentTime)
+  const dateLabel = formatClockDate(currentTime)
+  const timezone = formatTimezone(currentTime)
+
+  const status = syncError ? 'error' : isSynced ? 'synced' : 'syncing'
+  const statusLabel =
+    status === 'error' ? 'Sync Error' : status === 'synced' ? 'Synced' : 'Syncing…'
+  const statusClasses = cn(
+    'rounded-full px-2 py-0.5 text-xs font-medium',
+    status === 'synced' && 'bg-success/10 text-success',
+    status === 'syncing' && 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+    status === 'error' && 'bg-error/10 text-error'
+  )
 
   return (
     <div
       className={cn(
-        'flex items-center gap-2 text-sm font-mono',
+        'flex flex-col gap-2 text-sm font-mono',
         className
       )}
       role="timer"
       aria-live="polite"
-      aria-label={`System time: ${formatDateTime(currentTime)}`}
+      aria-label={`System time ${timeLabel}. ${dateLabel}`}
     >
-      <Clock
-        className={cn(
-          'h-4 w-4',
-          isSynced ? 'text-muted-foreground' : 'text-yellow-500',
-          syncError && 'text-red-500'
+      <div className="flex items-center gap-3">
+        <div
+          className={cn(
+            'flex h-8 w-8 items-center justify-center rounded-full border',
+            status === 'synced' && 'border-muted text-muted-foreground',
+            status === 'syncing' && 'border-amber-300 text-amber-500 dark:border-amber-500/40',
+            status === 'error' && 'border-error/50 text-error'
+          )}
+          aria-hidden="true"
+        >
+          <Clock className="h-4 w-4" />
+        </div>
+        <div className="flex flex-col leading-tight">
+          <span className="text-base font-semibold tracking-wide text-foreground" suppressHydrationWarning>
+            {timeLabel}
+          </span>
+          <span className="text-xs text-muted-foreground" suppressHydrationWarning>
+            {dateLabel}
+          </span>
+        </div>
+        {timezone && (
+          <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground" suppressHydrationWarning>
+            {timezone}
+          </span>
         )}
-        aria-hidden="true"
-      />
-      <span className="text-foreground" suppressHydrationWarning>
-        {formatDateTime(currentTime)}
-      </span>
-      {!isSynced && !syncError && (
-        <span className="text-xs text-yellow-500" aria-label="Syncing">
-          Syncing...
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <span className={statusClasses} aria-live="polite">
+          {statusLabel}
         </span>
-      )}
-      {syncError && (
-        <span className="text-xs text-red-500" aria-label="Sync error">
-          Sync Error
-        </span>
-      )}
+        {!syncError && (
+          <span className="text-muted-foreground">
+            Updated every second · server synced
+          </span>
+        )}
+        {syncError && (
+          <span className="text-error">
+            Unable to reach time service
+          </span>
+        )}
+      </div>
     </div>
   )
 }

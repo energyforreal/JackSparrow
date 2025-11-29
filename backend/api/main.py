@@ -17,7 +17,10 @@ import structlog
 from sqlalchemy import text
 
 from backend.core.config import settings
+from backend.core.logging import configure_logging, log_error_with_context, get_session_id
 
+# Configure logging and get session ID
+SESSION_ID = configure_logging()
 logger = structlog.get_logger()
 from backend.core.database import engine, Base
 from backend.core.redis import get_redis, close_redis
@@ -49,6 +52,12 @@ async def _verify_database_connection() -> None:
         await connection.execute(text("SELECT 1"))
 
 
+async def _initialize_database_schema() -> None:
+    """Create database tables/enums if they do not exist."""
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
@@ -59,6 +68,13 @@ async def lifespan(app: FastAPI):
     try:
         await _verify_database_connection()
         logger.info("backend_database_connected", service="backend")
+        if settings.auto_create_db_schema:
+            await _initialize_database_schema()
+            logger.info(
+                "backend_database_schema_created",
+                service="backend",
+                auto_create=True
+            )
     except Exception as e:
         logger.error(
             "backend_database_connection_failed",
@@ -198,16 +214,17 @@ async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler for unhandled exceptions."""
     request_id = getattr(request.state, "request_id", None)
     
-    # Log the exception with full context
-    logger.error(
+    # Log the exception with full context using enhanced logging
+    log_error_with_context(
         "unhandled_exception",
-        service="backend",
+        error=exc,
+        component="global_exception_handler",
         request_id=request_id,
         path=request.url.path,
         method=request.method,
-        error=str(exc),
-        error_type=type(exc).__name__,
-        exc_info=True
+        query_params=dict(request.query_params),
+        client_ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
     )
     
     return JSONResponse(

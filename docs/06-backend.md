@@ -115,6 +115,26 @@ Comprehensive health check endpoint that tests all services.
 }
 ```
 
+#### Model Nodes Troubleshooting
+
+When the dashboard shows `model_nodes: UNKNOWN`, the backend is intentionally reporting that the agent cannot confirm any active ML models. Common scenarios:
+
+- **Discovery disabled** – No model directory is configured and discovery was never attempted.
+- **No model files found** – Discovery ran but `MODEL_DIR` was empty.
+- **Failed models** – Discovery attempted to load files but all failed validation.
+- **Agent unavailable** – The backend could not reach the agent process.
+
+Use these steps to recover:
+
+1. Ensure the desired `.pkl`/model artifacts exist under `agent/model_storage` (or the path pointed to by `MODEL_DIR`/`MODEL_PATH`).
+2. Restart the agent or trigger manual discovery so `_handle_get_status` can rebuild the registry.
+3. Tail the agent logs for the new structured events:
+   - `model_nodes_discovery_result` – Emitted whenever discovery completes with zero loaded models. Includes `discovery_reason`, `failed_models`, and `total_models`.
+   - `model_nodes_status_missing` – Emitted when the agent cannot read registry health at all.
+4. Re-run `GET /api/v1/health` or refresh the dashboard to confirm the `model_nodes` entry now reports precise counts.
+
+These log lines surface the exact remediation hint (`note`) that is also forwarded to the frontend `HealthMonitor`, allowing operators to correlate dashboard status with agent logs.
+
 **Status Codes**:
 - `200`: Success
 - `503`: Service unavailable (unhealthy)

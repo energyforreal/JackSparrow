@@ -12,6 +12,7 @@ import structlog
 
 from agent.data.delta_client import DeltaExchangeClient, CircuitBreakerOpenError, DeltaExchangeError
 from agent.core.redis import get_cache, set_cache
+from agent.core.config import settings
 from agent.events.event_bus import event_bus
 from agent.events.schemas import MarketTickEvent, CandleClosedEvent, EventType
 
@@ -90,9 +91,13 @@ class MarketDataService:
                 # Reset error count on successful iteration
                 consecutive_errors = 0
                 
-                # Sleep based on interval
-                sleep_seconds = self._get_interval_seconds(interval)
-                await asyncio.sleep(min(sleep_seconds, 10))  # Max 10 second polling
+                # Sleep based on interval and UPDATE_INTERVAL config
+                # Use UPDATE_INTERVAL as the base polling frequency, but respect interval minimum
+                interval_seconds = self._get_interval_seconds(interval)
+                update_interval = settings.update_interval
+                # Use the smaller of: UPDATE_INTERVAL or interval-based sleep (but at least 1 second)
+                sleep_seconds = max(1, min(update_interval, interval_seconds))
+                await asyncio.sleep(sleep_seconds)
                 
             except asyncio.CancelledError:
                 break

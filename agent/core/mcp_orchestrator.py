@@ -157,21 +157,45 @@ class MCPOrchestrator:
     ) -> Dict[str, Any]:
         """Synthesize final trading decision from all MCP components."""
         
-        # Calculate consensus signal from model predictions
+        # Use consensus_prediction from model registry (already calculated with proper weights)
+        # The registry calculates consensus using only healthy models with proper weights
         predictions = model_response.predictions
-        if not predictions:
+        healthy_predictions = [
+            pred for pred in predictions
+            if pred.health_status == "healthy"
+        ]
+        
+        # Use consensus_prediction from model_response (already calculated correctly)
+        consensus_prediction = model_response.consensus_prediction
+        
+        # Log individual predictions for debugging
+        import structlog
+        logger = structlog.get_logger()
+        if healthy_predictions:
+            logger.debug(
+                "consensus_calculation_details",
+                total_predictions=len(predictions),
+                healthy_predictions=len(healthy_predictions),
+                individual_predictions=[
+                    {
+                        "model": pred.model_name,
+                        "prediction": pred.prediction,
+                        "confidence": pred.confidence,
+                        "health": pred.health_status
+                    }
+                    for pred in healthy_predictions
+                ],
+                consensus_prediction=consensus_prediction,
+                consensus_confidence=model_response.consensus_confidence
+            )
+        
+        # Convert consensus prediction (-1.0 to +1.0) to signal string
+        if not healthy_predictions:
             signal = "HOLD"
             confidence = 0.0
+            weighted_signal = 0.0
         else:
-            # Weighted average of predictions
-            total_weight = sum(pred.confidence for pred in predictions)
-            if total_weight > 0:
-                weighted_signal = sum(
-                    pred.prediction * pred.confidence
-                    for pred in predictions
-                ) / total_weight
-            else:
-                weighted_signal = 0.0
+            weighted_signal = consensus_prediction
             
             # Convert to signal
             if weighted_signal >= 0.7:
@@ -185,10 +209,11 @@ class MCPOrchestrator:
             else:
                 signal = "HOLD"
             
-            confidence = reasoning_chain.final_confidence
+            # Use consensus_confidence from model_response or reasoning chain confidence
+            confidence = model_response.consensus_confidence if model_response.consensus_confidence > 0 else reasoning_chain.final_confidence
         
-        # Calculate position size (simplified)
-        position_size = min(abs(weighted_signal) * 0.1, 0.1) if predictions else 0.0
+        # Calculate position size based on consensus signal strength
+        position_size = min(abs(weighted_signal) * 0.1, 0.1) if healthy_predictions else 0.0
         
         return {
             "signal": signal,

@@ -20,6 +20,7 @@ from agent.events.schemas import (
 )
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
+from agent.core.logging_utils import log_error_with_context, log_warning_with_context, log_exception
 
 logger = structlog.get_logger()
 
@@ -73,8 +74,10 @@ class ExecutionModule:
             
             # Verify paper trading mode before executing trades
             if not settings.paper_trading_mode:
-                logger.warning(
+                log_warning_with_context(
                     "paper_trading_mode_disabled",
+                    component="execution_module",
+                    correlation_id=event.event_id,
                     symbol=symbol,
                     side=side,
                     quantity=quantity,
@@ -108,9 +111,12 @@ class ExecutionModule:
                     except Exception:
                         # If ticker fetch fails, use provided price or a default
                         simulated_price = price if price else 50000.0  # Fallback price
-                        logger.warning(
+                        log_warning_with_context(
                             "paper_trade_ticker_fetch_failed",
+                            component="execution_module",
+                            correlation_id=event.event_id,
                             symbol=symbol,
+                            order_id=order_id,
                             message="Using fallback price for paper trade simulation"
                         )
                     
@@ -206,20 +212,25 @@ class ExecutionModule:
                 )
                 await event_bus.publish(failed_event)
                 
-                logger.error(
+                log_error_with_context(
                     "trade_execution_failed",
+                    error=e,
+                    component="execution_module",
+                    correlation_id=event.event_id,
                     order_id=order_id,
                     symbol=symbol,
-                    error=str(e),
-                    exc_info=True
+                    side=side,
+                    quantity=quantity,
+                    price=price
                 )
                 
         except Exception as e:
-            logger.error(
+            log_error_with_context(
                 "execution_module_risk_approved_error",
-                event_id=event.event_id,
-                error=str(e),
-                exc_info=True
+                error=e,
+                component="execution_module",
+                correlation_id=event.event_id if hasattr(event, "event_id") else None,
+                event_type=event.event_type.value if hasattr(event, "event_type") else None
             )
 
 

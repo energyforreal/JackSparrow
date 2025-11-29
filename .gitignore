@@ -73,4 +73,5 @@ Thumbs.db
 agent/model_storage/custom/*
 !agent/model_storage/custom/.gitkeep
 *.pyc
+frontend/public/logo.png
 
