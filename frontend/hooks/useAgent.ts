@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useWebSocket } from './useWebSocket'
 import { apiClient } from '@/services/api'
-import { Portfolio, Trade } from '@/types'
+import { Portfolio, Trade, Signal } from '@/types'
 
 // Get WebSocket URL from environment variable
 // In production, NEXT_PUBLIC_WS_URL must be set
@@ -15,6 +15,7 @@ export function useAgent() {
   const [agentState, setAgentState] = useState<string>('UNKNOWN')
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [recentTrades, setRecentTrades] = useState<Trade[]>([])
+  const [signal, setSignal] = useState<Signal | null>(null)
   // Initialize with a stable date to prevent hydration mismatch
   const [lastUpdate, setLastUpdate] = useState<Date>(() => new Date(0))
 
@@ -42,6 +43,10 @@ export function useAgent() {
           break
         case 'trade_executed':
           setRecentTrades((prev) => [lastMessage.data as Trade, ...prev].slice(0, 10))
+          break
+        case 'signal_update':
+          const signalData = lastMessage.data as Signal
+          setSignal(signalData)
           break
       }
     }
@@ -102,6 +107,6 @@ export function useAgent() {
     fetchInitialData()
   }, []) // Empty dependency array - only run on mount
 
-  return { agentState, portfolio, recentTrades, isConnected, lastUpdate }
+  return { agentState, portfolio, recentTrades, signal, isConnected, lastUpdate }
 }
 

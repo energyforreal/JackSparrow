@@ -217,7 +217,7 @@ Build a functional AI-powered trading agent (not just a bot) that:
 1. **Read Architecture**: Start with [Architecture Documentation](docs/01-architecture.md) to understand the system design
 2. **Understand MCP Layer**: Review [MCP Layer Documentation](docs/02-mcp-layer.md) to understand the protocol architecture
 3. **Learn Model Management**: Read [ML Models Documentation](docs/03-ml-models.md) to understand model upload and intelligence
-4. **Review Managed Artefacts**: Inspect the new root-level `models/` directory and its summary in [ML Models Documentation](docs/03-ml-models.md#current-production-models-models) before changing any production model paths
+4. **Review Managed Artefacts**: Inspect the model storage directory (`agent/model_storage/`) and its summary in [ML Models Documentation](docs/03-ml-models.md) to understand model organization
 5. **Understand Features**: Review [Features Documentation](docs/04-features.md) to see what the agent can do
 6. **Review Logic**: Study [Logic & Reasoning Documentation](docs/05-logic-reasoning.md) to understand how decisions are made
 7. **Setup Development**: Follow [Deployment Documentation](docs/10-deployment.md) for environment setup, including the new consolidated `.env` guidance

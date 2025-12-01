@@ -11,7 +11,6 @@ This document describes how ML models are managed, uploaded, discovered, and int
 ## Table of Contents
 
 - [Overview](#overview)
-- [Current Production Models (`models/`)](#current-production-models-models)
 - [Model Directory Structure](#model-directory-structure)
 - [Model Upload Process](#model-upload-process)
 - [Model Discovery and Registration](#model-discovery-and-registration)
@@ -27,73 +26,44 @@ This document describes how ML models are managed, uploaded, discovered, and int
 
 ## Model Storage Overview
 
-JackSparrow uses **two distinct model storage locations** for different purposes:
+JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**. Models are automatically discovered and registered on agent startup through the model discovery system.
 
-1. **Root `models/` directory** - Production-ready models shipped with the codebase
-2. **`agent/model_storage/` directory** - Upload directory for new or custom models
-
-### Model Storage Locations
+### Model Storage Location
 
 | Location | Purpose | Environment Variable | Usage |
 |----------|---------|---------------------|-------|
-| `models/` (root) | Production models shipped with codebase | `MODEL_PATH` (points to specific file) | Runtime model selection |
-| `agent/model_storage/` | Upload directory for new/custom models | `MODEL_DIR` (points to directory) | Model discovery and registration |
+| `agent/model_storage/` | All trained ML models | `MODEL_DIR` (points to directory) | Automatic model discovery and registration |
 
-**Key Distinction**:
-- **`models/`**: Contains versioned production models that are source-controlled. Use `MODEL_PATH` to specify which model file to load at runtime.
-- **`agent/model_storage/`**: Contains uploaded models that are discovered automatically. Use `MODEL_DIR` to specify the discovery directory.
+**Current Model Types**:
+- **XGBoost models** are stored in `agent/model_storage/xgboost/` directory
+- Models include both regressor and classifier variants trained in Google Colab
+- The system automatically discovers and registers all models in the storage directory
 
----
+### Environment Configuration
 
-## Current Production Models (`models/`)
-
-JackSparrow now ships trained artefacts inside a top-level `models/` directory. These files are supplied alongside source code so the paper-trading agent can run without re-training. They are source-controlled, but operational scripts treat them as deployable assets that may be replaced between releases.
+The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:
 
 ```
-models/
-├── lightgbm_BTCUSD_4h_production_20251014_115655.pkl
-├── randomforest_BTCUSD_4h_production_20251014_125258.pkl
-├── training_summary.csv
-├── xgboost_BTCUSD_15m.pkl
-├── xgboost_BTCUSD_1h.pkl
-├── xgboost_BTCUSD_4h.pkl
-└── xgboost_BTCUSD_4h_production_20251014_114541.pkl
-```
-
-| File | Purpose | Notes |
-| ---- | ------- | ----- |
-| `lightgbm_BTCUSD_4h_production_20251014_115655.pkl` | Gradient boosting model for 4-hour horizon | Production build generated 2025-10-14 11:56:55 |
-| `randomforest_BTCUSD_4h_production_20251014_125258.pkl` | Random Forest ensemble partner | Helps confirm 4-hour regime changes |
-| `training_summary.csv` | Snapshot of the latest training job | Contains aggregate metrics for the artefacts in this folder |
-| `xgboost_BTCUSD_15m.pkl` | Primary intraday XGBoost model | Default path referenced by configuration |
-| `xgboost_BTCUSD_1h.pkl` | Hourly XGBoost model | Supports medium-term consensus windows |
-| `xgboost_BTCUSD_4h.pkl` | Legacy 4-hour baseline | Retained for comparative backtests |
-| `xgboost_BTCUSD_4h_production_20251014_114541.pkl` | Current production-grade 4-hour model | Preferred candidate once validated against legacy model |
-
-### Environment Binding
-
-The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) now exposes the active artefact through the `MODEL_PATH` variable:
-
-```
-MODEL_PATH=models/xgboost_BTCUSD_15m.pkl
+MODEL_DIR=./agent/model_storage
+MODEL_DISCOVERY_ENABLED=true
 MIN_CONFIDENCE_THRESHOLD=0.65
 ```
 
-Always keep the path **relative to the project root** so build scripts and container images resolve it consistently. Update `MODEL_PATH` whenever you promote a new model into production. If multiple services need different models, define service-specific variables (for example `MODEL_PATH_4H`) and document them alongside the corresponding consumers.
+The `MODEL_DIR` environment variable points to the directory where models are stored. The model discovery system automatically scans this directory and its subdirectories to find and register all available models.
 
 ### XGBoost Dependency Requirements
 
-- Runtime environments must install `xgboost==2.0.2` (see `agent/requirements.txt`) so that `XGBClassifier` remains available for deserializing the shipped models.
-- If you rebuild or upgrade the models, ensure `requirements*.txt`, `docs/08-file-structure.md`, and `docs/10-deployment.md` stay synchronized with the version used during training.
+- Runtime environments must install `xgboost==2.0.2` (see `agent/requirements.txt`) so that `XGBClassifier` and `XGBRegressor` remain available for deserializing the trained models.
+- If you rebuild or upgrade the models, ensure `requirements*.txt` stay synchronized with the version used during training.
 - When the validator reports `ModuleNotFoundError: No module named 'XGBClassifier'`, re-run `pip install -r agent/requirements.txt` inside the active environment before retrying the load.
 
 ### Operational Workflow
 
-1. Store newly trained artefacts in `models/` using timestamped filenames for traceability.  
-2. Update `training_summary.csv` with the metrics from the latest training run.  
-3. Adjust the `.env` (or per-service configuration) with the new `MODEL_PATH` value.  
-4. Run the smoke-test commands captured in the [Build Guide](11-build-guide.md#project-commands) before deploying.  
-5. Record the change in this document and reference it from `DOCUMENTATION.md` so other contributors can discover the update quickly.
+1. Train models using the training scripts (see [Model Training](#model-training) section below)
+2. Models are automatically saved to `agent/model_storage/xgboost/` during training
+3. The model discovery system automatically finds and registers models on agent startup
+4. Run the smoke-test commands captured in the [Build Guide](11-build-guide.md#project-commands) before deploying
+5. Monitor model performance and update models as needed
 
 ---
 
@@ -127,13 +97,13 @@ Before training models, ensure:
    - Compute 49 features for each candle
    - Create labels based on forward-looking returns
    - Train XGBoost models with train/val/test split (70/15/15)
-   - Save models to correct locations:
-     - `models/xgboost_BTCUSD_15m.pkl`
+   - Save models to `agent/model_storage/xgboost/` directory:
+     - `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl`
      - `agent/model_storage/xgboost/xgboost_BTCUSD_1h.pkl`
      - `agent/model_storage/xgboost/xgboost_BTCUSD_4h.pkl`
    - Validate saved models (ensures they're XGBClassifier instances)
 
-3. **Training metrics** are saved to `models/training_summary.csv`
+3. **Training metrics** are saved alongside models in the storage directory
 
 ### Feature List (49 Features)
 
@@ -151,7 +121,7 @@ The models use 49 technical indicators:
 
 **Returns (2)**: 1h returns, 24h returns
 
-See `models/feature_list.txt` or `models/feature_list.json` for the complete list.
+See the feature engineering documentation for the complete list of 49 features.
 
 ### Model Validation
 
@@ -268,9 +238,11 @@ python scripts/train_price_prediction_models.py \
 ```python
 import pickle
 import numpy as np
+from pathlib import Path
 
 # Load model
-with open("models/xgboost_regressor_BTCUSD_15m.pkl", "rb") as f:
+model_path = Path("agent/model_storage/xgboost/xgboost_regressor_BTCUSD_15m.pkl")
+with open(model_path, "rb") as f:
     model = pickle.load(f)
 
 # Predict
@@ -288,9 +260,11 @@ predicted_price = model.predict(features)
 ```python
 import pickle
 import numpy as np
+from pathlib import Path
 
 # Load model
-with open("models/xgboost_classifier_BTCUSD_15m.pkl", "rb") as f:
+model_path = Path("agent/model_storage/xgboost/xgboost_classifier_BTCUSD_15m.pkl")
+with open(model_path, "rb") as f:
     model = pickle.load(f)
 
 # Predict
@@ -309,9 +283,11 @@ probabilities = model.predict_proba(features)  # [P(SELL), P(HOLD), P(BUY)]
 ```python
 from tensorflow import keras
 import numpy as np
+from pathlib import Path
 
 # Load model
-model = keras.models.load_model("models/lstm_regressor_BTCUSD_15m.h5")
+model_path = Path("agent/model_storage/lstm/lstm_regressor_BTCUSD_15m.h5")
+model = keras.models.load_model(model_path)
 
 # Predict (requires sequence of 60 candles)
 # Shape: (1, 60, 49) - (batch, sequence_length, features)
@@ -329,9 +305,11 @@ predicted_price = model.predict(sequence)
 ```python
 from tensorflow import keras
 import numpy as np
+from pathlib import Path
 
 # Load model
-model = keras.models.load_model("models/lstm_classifier_BTCUSD_15m.h5")
+model_path = Path("agent/model_storage/lstm/lstm_classifier_BTCUSD_15m.h5")
+model = keras.models.load_model(model_path)
 
 # Predict (requires sequence of 60 candles)
 sequence = np.array([[[...]]])  # 60 candles × 49 features
@@ -361,20 +339,24 @@ The guide includes:
 
 ### Training Output
 
-Models are saved to the `models/` directory:
+Models are saved to the `agent/model_storage/` directory, organized by model type:
 
 ```
-models/
-├── xgboost_regressor_BTCUSD_15m.pkl
-├── xgboost_classifier_BTCUSD_15m.pkl
-├── xgboost_regressor_BTCUSD_1h.pkl
-├── xgboost_classifier_BTCUSD_1h.pkl
-├── lstm_regressor_BTCUSD_15m.h5      # If TensorFlow available
-├── lstm_classifier_BTCUSD_15m.h5     # If TensorFlow available
+agent/model_storage/
+├── xgboost/
+│   ├── xgboost_regressor_BTCUSD_15m.pkl
+│   ├── xgboost_classifier_BTCUSD_15m.pkl
+│   ├── xgboost_regressor_BTCUSD_1h.pkl
+│   ├── xgboost_classifier_BTCUSD_1h.pkl
+│   └── ...
+├── lstm/                              # If TensorFlow available
+│   ├── lstm_regressor_BTCUSD_15m.h5
+│   ├── lstm_classifier_BTCUSD_15m.h5
+│   └── ...
 └── price_prediction_training_summary.csv
 ```
 
-Training metrics are saved to `models/price_prediction_training_summary.csv` with columns:
+Training metrics are saved to `agent/model_storage/price_prediction_training_summary.csv` with columns:
 - `timeframe`: Timeframe identifier
 - `model_type`: Model type (xgboost_regressor, xgboost_classifier, etc.)
 - `train_metric`: Training metric (RMSE for regression, accuracy for classification)
@@ -429,27 +411,20 @@ trading-agent/
 
 ### Environment Configuration
 
-Model storage is configured via environment variables:
+Model storage is configured via environment variables in the root `.env` file:
 
-**Root `.env`** (for production models):
-```bash
-# Points to a specific model file in models/ directory
-MODEL_PATH=models/xgboost_BTCUSD_15m.pkl
-MIN_CONFIDENCE_THRESHOLD=0.65
-```
-
-**Agent `.env`** (for model discovery):
 ```bash
 # Points to directory for automatic model discovery
 MODEL_DIR=./agent/model_storage
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
+MIN_CONFIDENCE_THRESHOLD=0.65
 ```
 
 **Important**: 
-- `MODEL_PATH` is used at runtime to load a specific production model from `models/`
-- `MODEL_DIR` is used by the model discovery system to find and register models from `agent/model_storage/`
-- Both can coexist: production models in `models/` are loaded via `MODEL_PATH`, while uploaded models in `agent/model_storage/` are discovered via `MODEL_DIR`
+- `MODEL_DIR` is used by the model discovery system to find and register models from `agent/model_storage/` and its subdirectories
+- All models are automatically discovered and registered on agent startup
+- Models are organized by type in subdirectories (e.g., `xgboost/`, `lstm/`, `transformer/`)
 
 ---
 
@@ -984,18 +959,14 @@ Use `scripts/test_model_inference.py` to validate that every model stored under 
 
 ```bash
 python scripts/test_model_inference.py \
-  --model-dir agent/model_storage \
-  [--model-path models/xgboost_BTCUSD_15m.pkl]
+  --model-dir agent/model_storage
 ```
 
 The script runs the standard discovery pipeline, issues a lightweight prediction request to each registered node, and prints a confidence summary so regressions are obvious in CI logs. It also reports which artefacts failed to deserialize so you can remove or regenerate them before production deployments.
 
-### Latest Validation Snapshot (2025-11-25)
+### Latest Validation Snapshot
 
-Running the script against the committed artefacts produced these findings:
-
-- `xgboost_BTCUSD_15m.pkl`, `xgboost_BTCUSD_1h.pkl`, and `xgboost_BTCUSD_4h.pkl` load successfully but currently emit neutral predictions because the sample feature vector lacks their full 49-feature schema. Supply the complete feature list via metadata when updating these models.
-- `xgboost_BTCUSD_4h_production_20251014_114541.pkl`, `lightgbm_BTCUSD_4h_production_20251014_115655.pkl`, and `randomforest_BTCUSD_4h_production_20251014_125258.pkl` fail with `ValueError: invalid load key` during pickle deserialization. Regenerate them by exporting with `Booster.save_model()` (or the equivalent framework-specific method) in the original training environment, then upload the newly serialized files.
+Running the script against models in `agent/model_storage/` validates that all models can be discovered, loaded, and queried. The script reports which models load successfully and which fail to deserialize.
 
 Keep this section updated whenever the script uncovers model-health changes so other contributors know which artefacts require attention.
 

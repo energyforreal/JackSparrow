@@ -207,10 +207,12 @@ class XGBoostNode(MCPModelNode):
             
             # Validate that loaded object is actually an XGBoost model, not a numpy array or other type
             model_type = type(self.model).__name__
+            # Accept both XGBClassifier (has predict_proba) and XGBRegressor (has predict)
+            # Both are valid XGBoost models for trading predictions
             is_xgboost_model = (
                 hasattr(self.model, 'predict') and 
-                hasattr(self.model, 'predict_proba') and
-                not isinstance(self.model, np.ndarray)
+                not isinstance(self.model, np.ndarray) and
+                ('XGB' in model_type or 'Booster' in model_type)
             )
             
             if isinstance(self.model, np.ndarray):
@@ -260,11 +262,23 @@ class XGBoostNode(MCPModelNode):
                             f"Expected keys: {possible_keys}"
                         )
                 else:
-                    raise ValueError(
-                        f"Model file does not contain a valid XGBoost model. "
-                        f"Loaded type: {model_type}. "
-                        f"Expected XGBClassifier or similar XGBoost model object with 'predict' and 'predict_proba' methods."
-                    )
+                    # Check if it's an XGBRegressor (valid model, just doesn't have predict_proba)
+                    if 'XGBRegressor' in model_type or 'Regressor' in model_type:
+                        # XGBRegressor is valid - it has predict() but not predict_proba()
+                        # The prediction code already handles this by using predict() as fallback
+                        is_xgboost_model = True
+                        logger.info(
+                            "xgboost_regressor_detected",
+                            model_path=str(self.model_path),
+                            model_type=model_type,
+                            message="XGBRegressor detected (valid model, will use predict() method)"
+                        )
+                    else:
+                        raise ValueError(
+                            f"Model file does not contain a valid XGBoost model. "
+                            f"Loaded type: {model_type}. "
+                            f"Expected XGBClassifier or XGBRegressor (or XGBoost Booster object) with 'predict' method."
+                        )
             
             # Final validation: ensure model has required methods
             if not hasattr(self.model, 'predict'):
@@ -344,6 +358,52 @@ class XGBoostNode(MCPModelNode):
             
             # Convert features to numpy array
             features_array = np.array([request.features]).reshape(1, -1)
+            feature_count = len(request.features)
+            
+            # Validate feature count matches model expectations
+            # XGBoost models trained with FEATURE_LIST expect 50 features
+            expected_feature_count = 50
+            if feature_count != expected_feature_count:
+                # Log missing features for debugging
+                expected_features = [
+                    'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',
+                    'ema_12', 'ema_26', 'ema_50',
+                    'close_sma_20_ratio', 'close_sma_50_ratio', 'close_sma_200_ratio',
+                    'high_low_spread', 'close_open_ratio', 'body_size', 'upper_shadow', 'lower_shadow',
+                    'rsi_14', 'rsi_7', 'stochastic_k_14', 'stochastic_d_14',
+                    'williams_r_14', 'cci_20', 'roc_10', 'roc_20',
+                    'momentum_10', 'momentum_20',
+                    'macd', 'macd_signal', 'macd_histogram',
+                    'adx_14', 'aroon_up', 'aroon_down', 'aroon_oscillator',
+                    'trend_strength',
+                    'bb_upper', 'bb_lower', 'bb_width', 'bb_position',
+                    'atr_14', 'atr_20',
+                    'volatility_10', 'volatility_20',
+                    'volume_sma_20', 'volume_ratio', 'obv',
+                    'volume_price_trend', 'accumulation_distribution', 'chaikin_oscillator',
+                    'returns_1h', 'returns_24h'
+                ]
+                received_features = list(request.features.keys())
+                missing_features = [f for f in expected_features if f not in received_features]
+                
+                error_msg = (
+                    f"Feature count mismatch: received {feature_count} features, "
+                    f"but model expects {expected_feature_count} features. "
+                    f"Model: {self.model_name}. "
+                    f"This indicates a mismatch between feature computation and model training. "
+                    f"Please ensure all {expected_feature_count} features are computed and passed to the model. "
+                    f"Missing features: {missing_features[:10]}{'...' if len(missing_features) > 10 else ''}"
+                )
+                logger.error(
+                    "xgboost_feature_count_mismatch",
+                    model_name=self.model_name,
+                    received_count=feature_count,
+                    expected_count=expected_feature_count,
+                    missing_features=missing_features,
+                    received_features=received_features[:10],  # Log first 10 for debugging
+                    message=error_msg
+                )
+                raise ValueError(error_msg)
             
             # Detect model output type and get prediction
             # Try to use predict_proba() first (for probability outputs)
@@ -446,15 +506,19 @@ class XGBoostNode(MCPModelNode):
             
             # If prediction succeeded, ensure health_status is "healthy"
             # This handles cases where status might have been "unknown" or incorrectly set
+            # A successful prediction with valid values indicates the model is functioning correctly
             if self.health_status != "healthy":
+                old_status = self.health_status
+                self.health_status = "healthy"
                 logger.info(
                     "xgboost_model_health_status_updated",
                     model_name=self.model_name,
-                    old_status=self.health_status,
+                    old_status=old_status,
                     new_status="healthy",
-                    message="Updating health_status to 'healthy' after successful prediction"
+                    prediction=prediction_normalized,
+                    confidence=confidence,
+                    message="Updating health_status to 'healthy' after successful prediction with valid output"
                 )
-                self.health_status = "healthy"
             
             return MCPModelPrediction(
                 model_name=self.model_name,

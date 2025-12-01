@@ -63,11 +63,37 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
           <div className="flex-1">
             <div className="flex justify-between text-sm mb-1">
               <span className="text-muted-foreground">Confidence</span>
-              <span className="font-medium">{signal.confidence}%</span>
+              <span className="font-medium">
+                {typeof signal.confidence === 'number' 
+                  ? (signal.confidence > 1 && signal.confidence <= 100 
+                      ? `${signal.confidence.toFixed(1)}%` 
+                      : signal.confidence > 1 
+                        ? `${signal.confidence}%` 
+                        : `${(signal.confidence * 100).toFixed(1)}%`)
+                  : `${signal.confidence}%`}
+              </span>
             </div>
-            <Progress value={signal.confidence} className="h-2" />
+            <Progress 
+              value={typeof signal.confidence === 'number' && signal.confidence <= 1 
+                ? signal.confidence * 100 
+                : signal.confidence} 
+              className="h-2" 
+            />
           </div>
         </div>
+
+        {signal.agent_decision_reasoning && (
+          <div className="pt-2 border-t">
+            <p className="text-sm font-medium mb-1">Agent Decision Reasoning</p>
+            <p className="text-xs text-muted-foreground">{signal.agent_decision_reasoning}</p>
+          </div>
+        )}
+
+        {signal.timestamp && (
+          <div className="text-xs text-muted-foreground">
+            Last update: {new Date(signal.timestamp).toLocaleTimeString()}
+          </div>
+        )}
 
         {signal.model_consensus && signal.model_consensus.length > 0 && (
           <Accordion type="single" collapsible className="w-full">
@@ -89,9 +115,36 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
                           {model.signal.replace('_', ' ')}
                         </Badge>
                         <span className="text-muted-foreground">
-                          ({model.confidence}%)
+                          ({typeof model.confidence === 'number' && model.confidence <= 1 
+                            ? (model.confidence * 100).toFixed(1) 
+                            : model.confidence}%)
                         </span>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        )}
+
+        {signal.individual_model_reasoning && signal.individual_model_reasoning.length > 0 && (
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="model_reasoning">
+              <AccordionTrigger>Individual Model Reasoning</AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-3">
+                  {signal.individual_model_reasoning.map((model, index) => (
+                    <div key={index} className="border-l-2 border-muted pl-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium text-sm">{model.model_name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {typeof model.confidence === 'number' && model.confidence <= 1 
+                            ? (model.confidence * 100).toFixed(1) 
+                            : model.confidence}% confidence
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{model.reasoning}</p>
                     </div>
                   ))}
                 </div>

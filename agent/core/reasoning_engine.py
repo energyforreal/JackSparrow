@@ -189,7 +189,9 @@ class MCPReasoningEngine:
                     "reasoning_chain": {
                         "chain_id": reasoning_chain.chain_id,
                         "steps": [step.dict() for step in reasoning_chain.steps],
-                        "conclusion": reasoning_chain.conclusion
+                        "conclusion": reasoning_chain.conclusion,
+                        "market_context": reasoning_chain.market_context,
+                        "model_predictions": reasoning_chain.model_predictions
                     },
                     "timestamp": reasoning_chain.timestamp
                 }

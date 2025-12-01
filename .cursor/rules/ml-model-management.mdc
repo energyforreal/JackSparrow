@@ -10,14 +10,14 @@ alwaysApply: false
 
 ## Model File Organization
 
-- **Production models**: Root `models/` directory (versioned, source-controlled)
-- **Uploaded models**: `agent/model_storage/` directory (discovered automatically)
+- **All models**: Stored in `agent/model_storage/` directory (discovered automatically)
+- **XGBoost models**: `agent/model_storage/xgboost/` (regressor and classifier models trained in Google Colab)
 - User-uploaded models: `agent/model_storage/custom/`
 - Model-specific directories: `agent/model_storage/xgboost/`, `agent/model_storage/lstm/`, etc.
 
 ## Environment Variables
 
-- `MODEL_PATH`: Points to specific production model file (e.g., `models/xgboost_BTCUSD_15m.pkl`)
+- `MODEL_PATH`: Points to specific model file (optional, e.g., `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl`)
 - `MODEL_DIR`: Points to directory for model discovery (e.g., `./agent/model_storage`)
 
 ## Model Implementation

@@ -1,0 +1,114 @@
+# Cursor Ignore File
+# This file tells Cursor which files and directories to exclude from indexing and processing
+# to improve performance and prevent hanging issues.
+
+# Model files (large binary files)
+*.pkl
+*.h5
+*.onnx
+*.joblib
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+agent/model_storage/**/*.pkl
+agent/model_storage/**/*.h5
+agent/model_storage/**/*.onnx
+agent/model_storage/**/*.joblib
+
+# Build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.next/
+out/
+.turbo/
+node_modules/
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Redis dumps
+dump.rdb
+redis-tmp/
+*.rdb
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+Thumbs.db
+.DS_Store
+*.DS_Store
+
+# Large binary assets (browser screenshots, etc.)
+assets/c__Users_*
+assets/*browser-screenshot*
+
+# Test outputs
+test_output.txt
+*.test.log
+
+# OneDrive sync files
+~$*
+
+# Large documentation files that are rarely needed
+# (Keep in .cursor/context/docs but exclude from auto-indexing)
+.cursor/context/docs/*audit*.md
+.cursor/context/docs/*docker*.md
+.cursor/context/docs/*remediation*.md
+
+# Colab upload files (temporary)
+colab file upload/*.txt
+colab file upload/*.pkl
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Coverage reports
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Python compiled files
+*.pyc
+*.pyo
+*.pyd
+
+# Environment files (already in .gitignore but good to be explicit)
+.env.local
+.env.*.local
+.env.production

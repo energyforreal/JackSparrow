@@ -1,0 +1,497 @@
+"""
+Agent Event Subscriber - Bridges Redis Streams to WebSocket.
+
+Subscribes to agent events from Redis Streams and broadcasts them to
+frontend clients via WebSocket.
+"""
+
+import json
+import asyncio
+from typing import Dict, Any, Optional
+from datetime import datetime
+import structlog
+from redis.asyncio import Redis
+from redis.exceptions import ResponseError
+
+from backend.core.redis import get_redis
+from backend.api.websocket.manager import websocket_manager
+from backend.core.logging import log_error_with_context
+
+logger = structlog.get_logger()
+
+
+class AgentEventSubscriber:
+    """Subscribes to agent events and broadcasts via WebSocket."""
+
+    def __init__(
+        self,
+        stream_name: str = "trading_agent_events",
+        consumer_group: str = "backend_websocket_bridge"
+    ):
+        """Initialize agent event subscriber.
+        
+        Args:
+            stream_name: Redis stream name to subscribe to
+            consumer_group: Consumer group name for Redis Streams
+        """
+        self.stream_name = stream_name
+        self.consumer_group = consumer_group
+        self.consumer_name = f"backend_ws_bridge_{id(self)}"
+        self.running = False
+        self._consuming_task: Optional[asyncio.Task] = None
+        self._redis_client: Optional[Redis] = None
+
+    async def initialize(self):
+        """Initialize Redis consumer group."""
+        try:
+            redis = await get_redis()
+            if redis is None:
+                logger.warning(
+                    "agent_event_subscriber_redis_unavailable",
+                    service="backend",
+                    message="Redis unavailable, event subscription disabled"
+                )
+                return
+
+            self._redis_client = redis
+
+            # Create consumer group (ignore if already exists)
+            try:
+                await redis.xgroup_create(
+                    name=self.stream_name,
+                    groupname=self.consumer_group,
+                    id="0",  # Start from beginning
+                    mkstream=True  # Create stream if it doesn't exist
+                )
+                logger.info(
+                    "agent_event_subscriber_consumer_group_created",
+                    service="backend",
+                    stream=self.stream_name,
+                    group=self.consumer_group
+                )
+            except ResponseError as e:
+                # Consumer group already exists, which is fine
+                if "BUSYGROUP" not in str(e):
+                    raise
+                logger.debug(
+                    "agent_event_subscriber_consumer_group_exists",
+                    service="backend",
+                    stream=self.stream_name,
+                    group=self.consumer_group
+                )
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_initialize_error",
+                error=e,
+                component="agent_event_subscriber",
+                stream=self.stream_name,
+                group=self.consumer_group
+            )
+            # Don't raise - allow graceful degradation
+
+    async def start(self):
+        """Start consuming events from Redis Stream."""
+        if self.running:
+            logger.warning(
+                "agent_event_subscriber_already_running",
+                service="backend"
+            )
+            return
+
+        if self._redis_client is None:
+            redis = await get_redis()
+            if redis is None:
+                logger.warning(
+                    "agent_event_subscriber_start_redis_unavailable",
+                    service="backend",
+                    message="Cannot start: Redis unavailable"
+                )
+                return
+            self._redis_client = redis
+
+        self.running = True
+        self._consuming_task = asyncio.create_task(self._consume_loop())
+        logger.info(
+            "agent_event_subscriber_started",
+            service="backend",
+            stream=self.stream_name,
+            consumer_group=self.consumer_group,
+            consumer_name=self.consumer_name
+        )
+
+    async def stop(self):
+        """Stop consuming events."""
+        if not self.running:
+            return
+
+        self.running = False
+
+        if self._consuming_task:
+            self._consuming_task.cancel()
+            try:
+                await self._consuming_task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info(
+            "agent_event_subscriber_stopped",
+            service="backend",
+            stream=self.stream_name
+        )
+
+    async def _consume_loop(self):
+        """Main loop to read from Redis stream."""
+        while self.running:
+            try:
+                if self._redis_client is None:
+                    await asyncio.sleep(1)
+                    continue
+
+                # Read pending messages first (in case of reconnection)
+                pending = await self._redis_client.xpending_range(
+                    name=self.stream_name,
+                    groupname=self.consumer_group,
+                    consumername=self.consumer_name,
+                    min="-",
+                    max="+",
+                    count=10
+                )
+
+                # Process pending messages
+                for msg in pending:
+                    message_id = msg["message_id"]
+                    try:
+                        messages = await self._redis_client.xclaim(
+                            name=self.stream_name,
+                            groupname=self.consumer_group,
+                            consumername=self.consumer_name,
+                            min_idle_time=60000,  # 60 seconds
+                            message_ids=[message_id]
+                        )
+                        for msg_id, msg_data in messages:
+                            await self._process_message(msg_id, msg_data)
+                    except Exception as e:
+                        logger.warning(
+                            "agent_event_subscriber_pending_message_error",
+                            service="backend",
+                            message_id=message_id,
+                            error=str(e)
+                        )
+
+                # Read new messages from stream
+                messages = await self._redis_client.xreadgroup(
+                    groupname=self.consumer_group,
+                    consumername=self.consumer_name,
+                    streams={self.stream_name: ">"},  # Read new messages
+                    count=10,  # Batch size
+                    block=1000  # Block for 1 second
+                )
+
+                for stream_name, stream_messages in messages:
+                    for message_id, message_data in stream_messages:
+                        await self._process_message(message_id, message_data)
+
+            except asyncio.CancelledError:
+                logger.info(
+                    "agent_event_subscriber_consume_loop_cancelled",
+                    service="backend"
+                )
+                raise
+            except Exception as e:
+                log_error_with_context(
+                    "agent_event_subscriber_consume_loop_error",
+                    error=e,
+                    component="agent_event_subscriber",
+                    stream=self.stream_name
+                )
+                # Wait before retrying
+                await asyncio.sleep(1)
+
+    async def _process_message(self, message_id: str, message_data: Dict[str, bytes]):
+        """Process a single message from the stream.
+        
+        Args:
+            message_id: Message ID from Redis stream
+            message_data: Raw message data from stream
+        """
+        try:
+            # Decode message data
+            decoded_data = {}
+            for key, value in message_data.items():
+                if isinstance(value, bytes):
+                    decoded_data[key.decode("utf-8")] = value.decode("utf-8")
+                else:
+                    decoded_data[key] = value
+
+            # Deserialize event JSON
+            if "data" in decoded_data:
+                event_dict = json.loads(decoded_data["data"])
+            elif len(decoded_data) == 1:
+                # If only one field, it's likely the serialized event
+                first_key = list(decoded_data.keys())[0]
+                event_dict = json.loads(decoded_data[first_key])
+            else:
+                # Use decoded_data directly
+                event_dict = decoded_data
+
+            # Extract event type
+            event_type = event_dict.get("event_type")
+            payload = event_dict.get("payload", {})
+
+            if not event_type:
+                logger.warning(
+                    "agent_event_subscriber_missing_event_type",
+                    service="backend",
+                    message_id=message_id
+                )
+                return
+
+            # Dispatch to appropriate handler
+            await self._handle_event(event_type, payload)
+
+            # Acknowledge message
+            if self._redis_client:
+                await self._redis_client.xack(
+                    self.stream_name,
+                    self.consumer_group,
+                    message_id
+                )
+
+        except json.JSONDecodeError as e:
+            logger.error(
+                "agent_event_subscriber_json_decode_error",
+                service="backend",
+                message_id=message_id,
+                error=str(e)
+            )
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_process_message_error",
+                error=e,
+                component="agent_event_subscriber",
+                message_id=message_id
+            )
+
+    async def _handle_event(self, event_type: str, payload: Dict[str, Any]):
+        """Handle different event types.
+        
+        Args:
+            event_type: Type of event
+            payload: Event payload
+        """
+        try:
+            if event_type == "decision_ready":
+                await self._handle_decision_ready(payload)
+            elif event_type == "state_transition":
+                await self._handle_state_transition(payload)
+            elif event_type == "order_fill":
+                await self._handle_order_fill(payload)
+            elif event_type == "model_prediction_complete":
+                await self._handle_model_prediction_complete(payload)
+            # Add more event handlers as needed
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_handle_event_error",
+                error=e,
+                component="agent_event_subscriber",
+                event_type=event_type
+            )
+
+    async def _handle_decision_ready(self, payload: Dict[str, Any]):
+        """Handle DecisionReadyEvent.
+        
+        Args:
+            payload: DecisionReadyEvent payload
+        """
+        try:
+            signal = payload.get("signal", "HOLD")
+            confidence = payload.get("confidence", 0.0)
+            symbol = payload.get("symbol", "BTCUSD")
+            reasoning_chain = payload.get("reasoning_chain", {})
+            timestamp = payload.get("timestamp")
+
+            # Convert confidence from 0-1 to 0-100 range if needed
+            if 0.0 <= confidence <= 1.0:
+                confidence = confidence * 100.0
+
+            # Extract reasoning chain steps
+            reasoning_steps = reasoning_chain.get("steps", [])
+            conclusion = reasoning_chain.get("conclusion", "")
+            
+            # Extract market context and model predictions from reasoning_chain
+            market_context = reasoning_chain.get("market_context", {})
+            model_predictions = reasoning_chain.get("model_predictions", [])
+
+            # Extract model consensus from market_context
+            model_consensus = market_context.get("model_consensus", [])
+            
+            # Extract individual model reasoning from model_predictions
+            individual_model_reasoning = []
+            if isinstance(model_predictions, list):
+                for pred in model_predictions:
+                    if isinstance(pred, dict):
+                        model_name = pred.get("model_name", "Unknown")
+                        reasoning = pred.get("reasoning", "")
+                        pred_confidence = pred.get("confidence", 0.0)
+                        
+                        # Convert confidence to 0-100 if needed
+                        if 0.0 <= pred_confidence <= 1.0:
+                            pred_confidence = pred_confidence * 100.0
+                        
+                        individual_model_reasoning.append({
+                            "model_name": model_name,
+                            "reasoning": reasoning,
+                            "confidence": pred_confidence
+                        })
+
+            # Format signal data for frontend
+            signal_data = {
+                "signal": signal,
+                "confidence": confidence,
+                "symbol": symbol,
+                "model_consensus": model_consensus,
+                "reasoning_chain": reasoning_steps,
+                "individual_model_reasoning": individual_model_reasoning,
+                "agent_decision_reasoning": conclusion,
+                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+            }
+
+            # Broadcast via WebSocket
+            await websocket_manager.broadcast(
+                {"type": "signal_update", "data": signal_data},
+                channel="signal_update"
+            )
+
+            logger.debug(
+                "agent_event_subscriber_decision_ready_broadcast",
+                service="backend",
+                signal=signal,
+                confidence=confidence,
+                symbol=symbol
+            )
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_decision_ready_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+
+    async def _handle_state_transition(self, payload: Dict[str, Any]):
+        """Handle StateTransitionEvent.
+        
+        Args:
+            payload: StateTransitionEvent payload
+        """
+        try:
+            to_state = payload.get("to_state", "UNKNOWN")
+            reason = payload.get("reason", "")
+            timestamp = payload.get("timestamp")
+
+            # Format state data for frontend
+            state_data = {
+                "state": to_state,
+                "reason": reason,
+                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+            }
+
+            # Broadcast via WebSocket
+            await websocket_manager.broadcast(
+                {"type": "agent_state", "data": state_data},
+                channel="agent_state"
+            )
+
+            logger.debug(
+                "agent_event_subscriber_state_transition_broadcast",
+                service="backend",
+                state=to_state,
+                reason=reason
+            )
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_state_transition_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+
+    async def _handle_order_fill(self, payload: Dict[str, Any]):
+        """Handle OrderFillEvent.
+        
+        Args:
+            payload: OrderFillEvent payload
+        """
+        try:
+            order_id = payload.get("order_id", "")
+            trade_id = payload.get("trade_id", "")
+            symbol = payload.get("symbol", "")
+            side = payload.get("side", "")
+            quantity = payload.get("quantity", 0.0)
+            fill_price = payload.get("fill_price", 0.0)
+            timestamp = payload.get("timestamp")
+
+            # Format trade data for frontend
+            trade_data = {
+                "order_id": order_id,
+                "trade_id": trade_id,
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "price": fill_price,
+                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+            }
+
+            # Broadcast via WebSocket
+            await websocket_manager.broadcast(
+                {"type": "trade_executed", "data": trade_data},
+                channel="trade_executed"
+            )
+
+            logger.debug(
+                "agent_event_subscriber_order_fill_broadcast",
+                service="backend",
+                order_id=order_id,
+                symbol=symbol,
+                side=side
+            )
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_order_fill_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+
+    async def _handle_model_prediction_complete(self, payload: Dict[str, Any]):
+        """Handle ModelPredictionCompleteEvent.
+        
+        Args:
+            payload: ModelPredictionCompleteEvent payload
+        """
+        # This event is already included in DecisionReadyEvent,
+        # so we just log it for now
+        try:
+            symbol = payload.get("symbol", "")
+            consensus_signal = payload.get("consensus_signal", 0.0)
+            consensus_confidence = payload.get("consensus_confidence", 0.0)
+
+            logger.debug(
+                "agent_event_subscriber_model_prediction_complete",
+                service="backend",
+                symbol=symbol,
+                consensus_signal=consensus_signal,
+                consensus_confidence=consensus_confidence
+            )
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_model_prediction_complete_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+
+
+# Global subscriber instance
+agent_event_subscriber = AgentEventSubscriber()

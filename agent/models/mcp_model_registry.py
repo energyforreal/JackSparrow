@@ -167,6 +167,7 @@ class MCPModelRegistry:
         
         # Get predictions from all models in parallel
         predictions: List[MCPModelPrediction] = []
+        failed_models = []
         
         tasks = []
         for model in self.models.values():
@@ -174,15 +175,45 @@ class MCPModelRegistry:
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        for result in results:
+        for i, result in enumerate(results):
             if isinstance(result, MCPModelPrediction):
                 predictions.append(result)
             elif isinstance(result, Exception):
+                # Exception was raised despite _get_prediction_safe wrapper
+                # This should be rare, but handle it gracefully
+                model_name = list(self.models.keys())[i] if i < len(self.models) else "unknown"
+                failed_models.append(model_name)
                 logger.error(
-                    "model_registry_prediction_error",
+                    "model_registry_prediction_exception",
+                    model_name=model_name,
                     error=str(result),
+                    error_type=type(result).__name__,
+                    message="Exception raised during prediction despite safe wrapper - model will be excluded from consensus",
                     exc_info=True
                 )
+                # Create a degraded prediction to maintain consistency
+                predictions.append(MCPModelPrediction(
+                    model_name=model_name,
+                    model_version="unknown",
+                    prediction=0.0,
+                    confidence=0.0,
+                    reasoning=f"Exception during prediction: {str(result)}",
+                    features_used=[],
+                    feature_importance={},
+                    computation_time_ms=0.0,
+                    health_status="degraded"
+                ))
+        
+        # Log summary of prediction results
+        if failed_models:
+            logger.warning(
+                "model_registry_some_models_failed",
+                request_id=request.request_id,
+                failed_models=failed_models,
+                total_models=len(self.models),
+                successful_predictions=len([p for p in predictions if p.health_status == "healthy"]),
+                message=f"{len(failed_models)} model(s) failed to predict, continuing with remaining models"
+            )
         
         # Health validation: If a model successfully made a prediction, it should be considered healthy
         # Update health_status for successful predictions
@@ -308,9 +339,12 @@ class MCPModelRegistry:
         
         # Calculate consensus using weighted average by both model performance and confidence
         # Apply weight reduction for non-healthy predictions
+        # Note: Both classifier and regressor outputs are normalized to [-1, 1] range in XGBoostNode,
+        # so they can be treated uniformly in the consensus calculation
         if healthy_predictions:
             # Weighted average: combines model performance weight (from historical accuracy/profit)
             # with prediction confidence to get final weight for each prediction
+            # This works for both classifiers (probability-based) and regressors (direct prediction)
             total_weight = 0.0
             weighted_sum = 0.0
             confidence_sum = 0.0
@@ -732,9 +766,17 @@ class MCPModelRegistry:
             registry_health = "unhealthy"
             status = "down"
         
+        # Update discovery summary to reflect actual registry state if there's a discrepancy
+        # This ensures the discovery summary is accurate
+        if len(self.models) > 0 and self._discovery_summary.get("discovered_models", 0) != len(self.models):
+            self._discovery_summary["discovered_models"] = len(self.models)
+            # If we have models but discovery summary says discovery wasn't attempted, update it
+            if not self._discovery_summary.get("discovery_attempted", False):
+                self._discovery_summary["discovery_attempted"] = True
+        
         return {
             "status": status,  # Standard status field for health checks ("up", "degraded", "down", "unknown")
-            "total_models": len(self.models),
+            "total_models": len(self.models),  # Always use actual registry count
             "healthy_models": healthy_count,
             "unhealthy_models": len(self.models) - healthy_count,
             "model_statuses": health_statuses,

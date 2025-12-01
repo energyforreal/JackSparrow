@@ -58,10 +58,13 @@ Cursor is asking for approval on every file edit or creation, interrupting your 
 3. **Restart Cursor completely** - Close all windows and reopen
 4. **Check workspace settings** - Workspace settings might override user settings
 
-## Settings File Created
+## Settings File (Optional)
 
-I've created a `.vscode/settings.json` file in your project with recommended settings. Cursor should read this automatically.
+You can create a `.vscode/settings.json` file in your project root with recommended settings. Even though `.vscode/` is in `.gitignore`, Cursor will still read `settings.json` from it.
+
+**Note**: Workspace settings override user settings. It's recommended to configure these in user settings instead.
 
 For more details, see:
 - `.cursor/cursor-settings.md` - Detailed guide
-- `docs/cursor-ide-settings.md` - Documentation
+- `.cursor/SETTINGS_VERIFICATION.md` - Settings verification guide
+- `.cursor/TROUBLESHOOTING.md` - Comprehensive troubleshooting guide

@@ -88,15 +88,36 @@ class MarketDataEventHandler:
                 }
             })
             
-            # Trigger feature computation
+            # Trigger feature computation - Request all 50 features required by ML models
+            # This matches the FEATURE_LIST from training scripts and mcp_orchestrator
             feature_request = FeatureRequestEvent(
                 source="market_data_handler",
                 correlation_id=event.event_id,
                 payload={
                     "symbol": symbol,
                     "feature_names": [
-                        "rsi_14", "macd_signal", "bb_upper", "bb_lower",
-                        "volume_sma", "price_sma", "volatility"
+                        # Price-based (16 features)
+                        'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',
+                        'ema_12', 'ema_26', 'ema_50',
+                        'close_sma_20_ratio', 'close_sma_50_ratio', 'close_sma_200_ratio',
+                        'high_low_spread', 'close_open_ratio', 'body_size', 'upper_shadow', 'lower_shadow',
+                        # Momentum (10 features)
+                        'rsi_14', 'rsi_7', 'stochastic_k_14', 'stochastic_d_14',
+                        'williams_r_14', 'cci_20', 'roc_10', 'roc_20',
+                        'momentum_10', 'momentum_20',
+                        # Trend (8 features)
+                        'macd', 'macd_signal', 'macd_histogram',
+                        'adx_14', 'aroon_up', 'aroon_down', 'aroon_oscillator',
+                        'trend_strength',
+                        # Volatility (8 features)
+                        'bb_upper', 'bb_lower', 'bb_width', 'bb_position',
+                        'atr_14', 'atr_20',
+                        'volatility_10', 'volatility_20',
+                        # Volume (6 features)
+                        'volume_sma_20', 'volume_ratio', 'obv',
+                        'volume_price_trend', 'accumulation_distribution', 'chaikin_oscillator',
+                        # Returns (2 features)
+                        'returns_1h', 'returns_24h'
                     ],
                     "timestamp": payload.get("timestamp"),
                     "version": "latest"

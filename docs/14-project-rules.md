@@ -760,13 +760,12 @@ Always bootstrap logging before running the commands (see [Logging Documentation
 ### Model File Organization
 
 **Directory Structure**:
-- **Production models**: Stored in root `models/` directory (versioned, source-controlled)
-- **Uploaded models**: Stored in `agent/model_storage/` directory (discovered automatically)
+- **All models**: Stored in `agent/model_storage/` directory (discovered automatically)
+- XGBoost models stored in `agent/model_storage/xgboost/`
 - User-uploaded models go in `agent/model_storage/custom/`
-- Model-specific directories for organized uploads (xgboost/, lstm/, transformer/)
+- Model-specific directories for organized storage (xgboost/, lstm/, transformer/)
 
 **Environment Variables**:
-- `MODEL_PATH`: Points to specific production model file in `models/` (e.g., `models/xgboost_BTCUSD_15m.pkl`)
 - `MODEL_DIR`: Points to directory for model discovery (e.g., `./agent/model_storage`)
 
 **File Naming**:

@@ -447,7 +447,7 @@ docker compose logs -f
 - Log rotation (10MB max size, 3 files retention)
 
 **Volume Management:**
-- `./models` → `/app/models` (bind-mounted for agent model access)
+- `./agent/model_storage` → `/app/agent/model_storage` (bind-mounted for agent model access)
 - `./logs/<service>` → `/logs` (structured logs from each container)
 - `./kubera_pokisham.db` → `/data/kubera_pokisham.db` (legacy SQLite support)
 - `postgres-data` volume (TimescaleDB persistent storage)
@@ -722,8 +722,8 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | https://api.india.delta.exchange |
 | `QDRANT_URL` | Qdrant vector database URL | No | http://localhost:6333 |
 | `QDRANT_API_KEY` | Qdrant API key | No | - |
-| `MODEL_DIR` | Directory for model discovery (uploaded models) | No | ./agent/model_storage |
-| `MODEL_PATH` | Specific production model file path (from root models/) | No | models/xgboost_BTCUSD_15m.pkl |
+| `MODEL_DIR` | Directory for model discovery (all models) | No | ./agent/model_storage |
+| `MODEL_PATH` | Specific model file path (optional, for direct model loading) | No | agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl |
 | `LOG_LEVEL` | Agent logging level | No | INFO |
 | `LOG_DIR` | Agent log directory | No | `./logs/agent` |
 | `LOG_RETENTION_DAYS` | Days to retain agent logs | No | 7 |
@@ -1054,7 +1054,7 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 **Problem**: Models fail to load
 
 **Solutions**:
-1. Verify model files exist (check MODEL_PATH for production models or MODEL_DIR for uploaded models)
+1. Verify model files exist (check MODEL_DIR for model discovery or MODEL_PATH for specific model file)
 2. Check model file permissions
 3. Verify model format compatibility
 4. Check available memory
@@ -1260,9 +1260,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Copy models directory (mounted as volume in docker-compose)
+# Create model storage directory (mounted as volume in docker-compose)
 # Models are mounted at runtime, but this ensures directory exists
-RUN mkdir -p /app/models
+RUN mkdir -p /app/agent/model_storage/xgboost
 
 # Run agent
 CMD ["python", "-m", "agent.core.intelligent_agent"]
@@ -1421,12 +1421,11 @@ services:
       - DELTA_EXCHANGE_API_KEY=${DELTA_EXCHANGE_API_KEY}
       - DELTA_EXCHANGE_API_SECRET=${DELTA_EXCHANGE_API_SECRET}
       - DELTA_EXCHANGE_BASE_URL=${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
-      - MODEL_PATH=/app/models/xgboost_BTCUSD_15m.pkl
       - MODEL_DIR=/app/agent/model_storage
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_DIR=/app/logs/agent
     volumes:
-      - ./models:/app/models
+      - ./agent/model_storage:/app/agent/model_storage
       - ./logs:/app/logs
       - ./agent:/app
     depends_on:
@@ -1830,12 +1829,12 @@ DATABASE_URL=postgresql://postgres:password@postgres:5432/trading_agent
 
 **Solution**:
 ```bash
-# Verify models directory is mounted
-docker-compose exec agent ls -la /app/models
+# Verify model storage directory is mounted
+docker-compose exec agent ls -la /app/agent/model_storage
 
 # Check volume mount in docker-compose.yml
 volumes:
-  - ./models:/app/models
+  - ./agent/model_storage:/app/agent/model_storage
 ```
 
 #### Container Build Failures

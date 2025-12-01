@@ -61,11 +61,21 @@ export interface ModelConsensus {
   confidence: number
 }
 
+export interface ModelReasoning {
+  model_name: string
+  reasoning: string
+  confidence: number
+}
+
 export interface Signal {
   signal: SignalType
-  confidence: number
+  confidence: number  // Ensure this is 0-100, not 0-1
   model_consensus: ModelConsensus[]
   reasoning_chain?: ReasoningStep[]
+  individual_model_reasoning?: ModelReasoning[]
+  agent_decision_reasoning?: string
+  symbol?: string
+  timestamp?: string | Date
 }
 
 export interface ReasoningStep {

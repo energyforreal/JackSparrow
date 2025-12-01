@@ -26,6 +26,7 @@ from backend.core.database import engine, Base
 from backend.core.redis import get_redis, close_redis
 from backend.api.routes import health, trading, portfolio, market, admin, system
 from backend.api.websocket.manager import websocket_manager
+from backend.services.agent_event_subscriber import agent_event_subscriber
 
 
 def _configure_utf8_stdio() -> None:
@@ -115,6 +116,19 @@ async def lifespan(app: FastAPI):
             exc_info=True
         )
     
+    # Initialize and start agent event subscriber
+    try:
+        await agent_event_subscriber.initialize()
+        await agent_event_subscriber.start()
+        logger.info("backend_agent_event_subscriber_started", service="backend")
+    except Exception as e:
+        logger.warning(
+            "backend_agent_event_subscriber_init_warning",
+            service="backend",
+            error=str(e),
+            exc_info=True
+        )
+    
     logger.info("backend_started_successfully", service="backend")
     
     yield
@@ -122,6 +136,17 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("backend_shutting_down", service="backend")
     try:
+        # Stop agent event subscriber
+        try:
+            await agent_event_subscriber.stop()
+            logger.info("backend_agent_event_subscriber_stopped", service="backend")
+        except Exception as e:
+            logger.warning(
+                "backend_agent_event_subscriber_stop_warning",
+                service="backend",
+                error=str(e)
+            )
+        
         await close_redis()
         await websocket_manager.cleanup()
         logger.info("backend_shut_down", service="backend")

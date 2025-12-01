@@ -20,7 +20,7 @@ The system is operational but has **critical model loading errors** that prevent
 #### Error Details
 
 **Affected Files**:
-- `models/xgboost_BTCUSD_15m.pkl`
+- `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl`
 - `agent/model_storage/xgboost/xgboost_BTCUSD_1h.pkl`
 - `agent/model_storage/xgboost/xgboost_BTCUSD_4h.pkl`
 
@@ -60,7 +60,7 @@ model = XGBClassifier(...)
 model.fit(X_train, y_train)
 
 # Save correctly
-with open('models/xgboost_BTCUSD_15m.pkl', 'wb') as f:
+with open('agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl', 'wb') as f:
     pickle.dump(model, f)  # Save the model object, not feature names
 ```
 
@@ -286,8 +286,7 @@ by calling `Booster.save_model` from that version first, then load it back in cu
 ## 📝 Additional Notes
 
 ### Model File Locations
-- Production models: `models/xgboost_BTCUSD_15m.pkl`
-- Discovered models: `agent/model_storage/xgboost/`
+- All models are stored in: `agent/model_storage/xgboost/`
   - `xgboost_BTCUSD_1h.pkl`
   - `xgboost_BTCUSD_4h.pkl`
 
@@ -311,7 +310,7 @@ After implementing fixes, verify:
 
 1. **Model Loading**:
    ```bash
-   python -c "import pickle; from xgboost import XGBClassifier; m = pickle.load(open('models/xgboost_BTCUSD_15m.pkl', 'rb')); print(type(m)); print(hasattr(m, 'predict'))"
+   python -c "import pickle; from xgboost import XGBClassifier; m = pickle.load(open('agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl', 'rb')); print(type(m)); print(hasattr(m, 'predict'))"
    ```
    Expected: `<class 'xgboost.sklearn.XGBClassifier'>` and `True`
 

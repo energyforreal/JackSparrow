@@ -10,6 +10,8 @@ import { ActivePositions } from './ActivePositions'
 import { RecentTrades } from './RecentTrades'
 import { PerformanceChart } from './PerformanceChart'
 import { ReasoningChainView } from './ReasoningChainView'
+import { ModelReasoningView } from './ModelReasoningView'
+import { TradingDecision } from './TradingDecision'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useAgent } from '@/hooks/useAgent'
@@ -34,13 +36,13 @@ if (process.env.NODE_ENV === 'production' && !process.env.NEXT_PUBLIC_WS_URL) {
 
 export function Dashboard() {
   const { isConnected, lastMessage, error: wsError } = useWebSocket(WS_URL)
-  const { agentState, portfolio, recentTrades, lastUpdate } = useAgent()
+  const { agentState, portfolio, recentTrades, signal: signalFromHook, lastUpdate } = useAgent()
 
   // Extract positions from portfolio
   const positions = portfolio?.positions || []
 
   // State for data that needs to be fetched separately
-  const [signal, setSignal] = useState<Signal | null>(null)
+  const [signal, setSignal] = useState<Signal | null>(signalFromHook || null)
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [reasoningChain, setReasoningChain] = useState<ReasoningStep[]>([])
   const [performanceData, setPerformanceData] = useState<Array<{ date: string; value: number }>>([])
@@ -122,6 +124,20 @@ export function Dashboard() {
 
     fetchInitialData()
   }, [])
+
+  // Sync signal from hook
+  useEffect(() => {
+    if (signalFromHook) {
+      setSignal(signalFromHook)
+      if (signalFromHook.reasoning_chain) {
+        setReasoningChain(
+          Array.isArray(signalFromHook.reasoning_chain)
+            ? signalFromHook.reasoning_chain
+            : []
+        )
+      }
+    }
+  }, [signalFromHook])
 
   // Update data from WebSocket messages
   useEffect(() => {
@@ -209,6 +225,23 @@ export function Dashboard() {
         {/* Performance Chart - Full Width */}
         <ErrorBoundary>
           <PerformanceChart data={performanceData} />
+        </ErrorBoundary>
+
+        {/* Trading Decision Flow - Full Width */}
+        <ErrorBoundary>
+          <TradingDecision 
+            signal={signal}
+            recentTrade={recentTrades?.[0] || null}
+            paperTradingMode={true}
+          />
+        </ErrorBoundary>
+
+        {/* Model Reasoning View - Full Width */}
+        <ErrorBoundary>
+          <ModelReasoningView 
+            modelConsensus={signal?.model_consensus}
+            individualModelReasoning={signal?.individual_model_reasoning}
+          />
         </ErrorBoundary>
 
         {/* Reasoning Chain Viewer - Full Width */}
