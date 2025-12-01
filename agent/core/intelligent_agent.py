@@ -61,7 +61,6 @@ from agent.core.learning_system import LearningSystem
 from agent.core.execution import execution_module
 from agent.core.redis import get_redis
 from agent.models.model_discovery import ModelDiscovery
-from agent.models.mcp_model_registry import MCPModelRegistry
 from agent.risk.risk_manager import RiskManager
 from agent.data.delta_client import DeltaExchangeClient
 from agent.data.market_data_service import MarketDataService
@@ -85,7 +84,9 @@ class IntelligentAgent:
         self.state_machine = AgentStateMachine(context_manager=context_manager)
         self.context_manager = context_manager
         self.mcp_orchestrator = mcp_orchestrator
-        self.model_registry = MCPModelRegistry()
+        # Use orchestrator's registry to ensure single source of truth for models
+        # This ensures status checks and model registration use the same registry instance
+        self.model_registry = self.mcp_orchestrator.model_registry
         self.learning_system = LearningSystem(model_registry=self.model_registry)
         self.risk_manager = RiskManager()
         self.delta_client = DeltaExchangeClient()
@@ -221,14 +222,26 @@ class IntelligentAgent:
                     logger.info(
                         "agent_model_weights_initialized",
                         service="agent",
-                        weights=performance_weights
+                        model_count=len(model_names),
+                        weights=performance_weights,
+                        message="Model weights initialized from performance metrics"
+                    )
+                else:
+                    # No performance data available, use default equal weights
+                    logger.info(
+                        "agent_model_weights_using_defaults",
+                        service="agent",
+                        model_count=len(model_names),
+                        message="No performance data available, using default equal weights for all models"
                     )
         except Exception as e:
             logger.warning(
                 "agent_model_weights_init_failed",
                 service="agent",
                 error=str(e),
-                message="Model weights will use default equal weights"
+                error_type=type(e).__name__,
+                message="Model weights initialization failed, will use default equal weights",
+                exc_info=True
             )
         
         # Register event handlers
@@ -574,7 +587,10 @@ class IntelligentAgent:
             note = None
             
             # Override status for specific cases to provide better information
+            # Use actual total_models from registry (which is always accurate)
+            # If we have models, discovery must have been attempted (even if summary says otherwise)
             if total_models == 0:
+                # No models loaded - determine why
                 if discovery_attempted and failed_models > 0:
                     model_status = "down"
                     note = "Model discovery attempted but no models loaded successfully."
@@ -604,6 +620,15 @@ class IntelligentAgent:
             elif healthy_models == 0 and total_models > 0:
                 # Models loaded but all unhealthy
                 model_status = "down"
+                note = f"{total_models} model(s) loaded but all are unhealthy."
+            else:
+                # Models loaded and at least some are healthy
+                # If discovery_attempted is false but we have models, it's a data inconsistency - don't log warning
+                # The registry state is the source of truth
+                if total_models > 0 and not discovery_attempted:
+                    # This shouldn't happen, but if it does, we know discovery actually happened
+                    # since we have models. Don't log a warning since models are working.
+                    pass
             # Otherwise use the status from registry (which is properly mapped)
             
             model_nodes_status = {

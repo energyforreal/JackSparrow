@@ -313,10 +313,10 @@ pip install -r requirements.txt
 
 ### 6.3 Create Model Storage Directory
 
-**Note**: The root `models/` directory already contains production models. The `agent/model_storage/` directory is for uploading new or custom models.
+**Note**: All trained ML models are stored in the `agent/model_storage/` directory. Models are automatically discovered and registered on agent startup.
 
 ```bash
-# Create upload directory for custom models (if you plan to upload models)
+# Create model storage directories (if they don't exist)
 mkdir -p agent/model_storage/custom
 mkdir -p agent/model_storage/xgboost
 mkdir -p agent/model_storage/lstm
@@ -346,10 +346,7 @@ These variables can be added to the root `.env` file if you need to customize ag
 
 ```bash
 # Model Configuration
-# Option 1: Use production model from root models/ directory (recommended for initial setup)
-# MODEL_PATH=models/xgboost_BTCUSD_15m.pkl
-
-# Option 2: Use model discovery for uploaded models in agent/model_storage/
+# Use model discovery for models in agent/model_storage/
 MODEL_DIR=./agent/model_storage
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
@@ -435,7 +432,7 @@ This checks:
 - All required variables are present
 - Variable formats are correct (URLs, connection strings)
 - Security keys meet minimum requirements
-- Model files exist (if MODEL_PATH specified)
+- Model files exist in MODEL_DIR
 
 ### Validate Prerequisites
 
@@ -904,7 +901,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd frontend; npm 
 After successful build:
 
 1. **Configure Delta Exchange API**: Add your paper trading API keys
-2. **Upload Models**: Place trained models in `agent/model_storage/custom/` (for model discovery) or copy to root `models/` directory (for production use)
+2. **Upload Models**: Place trained models in `agent/model_storage/` directory (organized by type, e.g., `agent/model_storage/xgboost/` for XGBoost models)
 3. **Start Trading**: Use the dashboard or API to start the agent
 4. **Monitor Performance**: Check dashboard for real-time updates
 5. **Review Logs**: Check terminal outputs for debugging

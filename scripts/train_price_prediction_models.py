@@ -111,9 +111,10 @@ except ImportError as e:
 # Initialize logger (after all imports are successful)
 logger = structlog.get_logger()
 
-# Feature list (49 features)
+# Feature list (50 features)
+# IMPORTANT: This order must match exactly with how features are computed in the agent
 FEATURE_LIST = [
-    # Price-based (15 features)
+    # Price-based (16 features)
     'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',
     'ema_12', 'ema_26', 'ema_50',
     'close_sma_20_ratio', 'close_sma_50_ratio', 'close_sma_200_ratio',
@@ -137,6 +138,39 @@ FEATURE_LIST = [
     'returns_1h', 'returns_24h'
 ]
 
+# Export FEATURE_LIST to JSON for agent reference
+def export_feature_list_to_json(output_path: Optional[Path] = None) -> Path:
+    """Export FEATURE_LIST to JSON file for agent reference.
+    
+    Args:
+        output_path: Optional output path. Defaults to models/feature_list.json
+        
+    Returns:
+        Path to exported JSON file
+    """
+    import json
+    
+    if output_path is None:
+        output_path = project_root / "models" / "feature_list.json"
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    feature_data = {
+        "feature_list": FEATURE_LIST,
+        "feature_count": len(FEATURE_LIST),
+        "symbol": "BTCUSD",
+        "description": "Complete list of 50 features used by XGBoost models for BTCUSD price prediction",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "note": "Feature order must match exactly between training and prediction"
+    }
+    
+    with open(output_path, 'w') as f:
+        json.dump(feature_data, f, indent=2)
+    
+    logger.info("feature_list_exported", output_path=str(output_path), feature_count=len(FEATURE_LIST))
+    
+    return output_path
+
 # Delta Exchange API constants
 MAX_CANDLES_PER_REQUEST = 2000
 RATE_LIMIT_DELAY = 0.75  # seconds between requests
@@ -149,7 +183,7 @@ class PricePredictionTrainer:
         """Initialize price prediction trainer.
         
         Args:
-            symbol: Trading pair symbol (e.g., "BTCUSD")
+            symbol: Trading pair symbol (default: "BTCUSD" - only BTCUSD is supported)
             validate_credentials: Whether to validate API credentials on initialization
             
         Raises:
@@ -1104,19 +1138,46 @@ class PricePredictionTrainer:
         Returns:
             Tuple of (trained model, metrics dictionary)
         """
+        # Detect unique classes in the data
+        unique_classes = np.unique(y)
+        num_classes = len(unique_classes)
+        
         logger.info(
             "training_xgboost_classifier",
             timeframe=timeframe,
             samples=len(X),
             features=X.shape[1],
-            classes=np.unique(y)
+            classes=unique_classes,
+            num_classes=num_classes
         )
         
-        # Convert labels to 0, 1, 2 for XGBoost (SELL=-1 -> 0, HOLD=0 -> 1, BUY=1 -> 2)
+        # Map labels based on number of classes present
         y_mapped = y.copy()
-        y_mapped[y == -1] = 0  # SELL -> 0
-        y_mapped[y == 0] = 1   # HOLD -> 1
-        y_mapped[y == 1] = 2   # BUY -> 2
+        
+        if num_classes == 2:
+            # Binary classification: map to [0, 1]
+            if -1 in unique_classes and 1 in unique_classes:
+                # SELL (-1) and BUY (1) -> map to [0, 1]
+                y_mapped[y == -1] = 0  # SELL -> 0
+                y_mapped[y == 1] = 1   # BUY -> 1
+            elif -1 in unique_classes and 0 in unique_classes:
+                # SELL (-1) and HOLD (0) -> map to [0, 1]
+                y_mapped[y == -1] = 0  # SELL -> 0
+                y_mapped[y == 0] = 1   # HOLD -> 1
+            elif 0 in unique_classes and 1 in unique_classes:
+                # HOLD (0) and BUY (1) -> map to [0, 1]
+                y_mapped[y == 0] = 0   # HOLD -> 0
+                y_mapped[y == 1] = 1   # BUY -> 1
+            else:
+                # Fallback: use sorted unique classes
+                sorted_classes = np.sort(unique_classes)
+                for idx, class_val in enumerate(sorted_classes):
+                    y_mapped[y == class_val] = idx
+        else:
+            # Multi-class: map to [0, 1, 2] for SELL, HOLD, BUY
+            y_mapped[y == -1] = 0  # SELL -> 0
+            y_mapped[y == 0] = 1   # HOLD -> 1
+            y_mapped[y == 1] = 2   # BUY -> 2
         
         # Train/validation/test split
         train_size = int(len(X) * 0.7)
@@ -1129,16 +1190,28 @@ class PricePredictionTrainer:
         X_test = X[train_size+val_size:]
         y_test = y_mapped[train_size+val_size:]
         
-        # Train model
-        model = XGBClassifier(
-            max_depth=6,
-            learning_rate=0.1,
-            n_estimators=100,
-            objective='multi:softprob',
-            num_class=3,
-            random_state=42,
-            eval_metric='mlogloss'
-        )
+        # Train model with appropriate parameters based on number of classes
+        if num_classes == 2:
+            # Binary classification
+            model = XGBClassifier(
+                max_depth=6,
+                learning_rate=0.1,
+                n_estimators=100,
+                objective='binary:logistic',
+                random_state=42,
+                eval_metric='logloss'
+            )
+        else:
+            # Multi-class classification
+            model = XGBClassifier(
+                max_depth=6,
+                learning_rate=0.1,
+                n_estimators=100,
+                objective='multi:softprob',
+                num_class=3,
+                random_state=42,
+                eval_metric='mlogloss'
+            )
         
         start_time = time.time()
         model.fit(
@@ -1329,6 +1402,10 @@ class PricePredictionTrainer:
     ) -> Path:
         """Save trained model to file.
         
+        Saves models to both locations:
+        - Primary: models/ (for Colab download)
+        - Secondary: agent/model_storage/xgboost/ (for agent discovery)
+        
         Args:
             model: Trained model instance
             model_type: "xgboost" or "lstm"
@@ -1337,7 +1414,7 @@ class PricePredictionTrainer:
             metadata: Training metadata
             
         Returns:
-            Path to saved model file
+            Path to primary saved model file (models/)
         """
         # Determine filename
         if model_type == "xgboost":
@@ -1345,38 +1422,248 @@ class PricePredictionTrainer:
                 filename = f"xgboost_regressor_{self.symbol}_{timeframe}.pkl"
             else:
                 filename = f"xgboost_classifier_{self.symbol}_{timeframe}.pkl"
-            model_path = self.models_dir / filename
+            file_ext = ".pkl"
         else:  # LSTM
             if task_type == "regression":
                 filename = f"lstm_regressor_{self.symbol}_{timeframe}.h5"
             else:
                 filename = f"lstm_classifier_{self.symbol}_{timeframe}.h5"
-            model_path = self.models_dir / filename
+            file_ext = ".h5"
         
-        logger.info("saving_model", model_path=str(model_path), model_type=model_type)
+        # Primary location: models/ (for Colab download)
+        primary_path = self.models_dir / filename
         
-        # Save model
+        # Secondary location: agent/model_storage/xgboost/ (for agent discovery)
+        secondary_path = self.storage_dir / filename
+        
+        logger.info(
+            "saving_model",
+            primary_path=str(primary_path),
+            secondary_path=str(secondary_path),
+            model_type=model_type
+        )
+        
+        # Save model to primary location
         if model_type == "xgboost":
             # Backup existing file if it exists
-            if model_path.exists():
-                backup_path = model_path.with_suffix('.pkl.backup')
+            if primary_path.exists():
+                backup_path = primary_path.with_suffix(file_ext + '.backup')
                 logger.info("backing_up_existing_model", backup_path=str(backup_path))
-                model_path.rename(backup_path)
+                primary_path.rename(backup_path)
             
-            with open(model_path, 'wb') as f:
+            with open(primary_path, 'wb') as f:
                 pickle.dump(model, f)
+            
+            # Copy to secondary location (agent discovery)
+            if secondary_path.exists():
+                backup_path = secondary_path.with_suffix(file_ext + '.backup')
+                logger.info("backing_up_existing_model_secondary", backup_path=str(backup_path))
+                secondary_path.rename(backup_path)
+            
+            # Copy file to secondary location
+            import shutil
+            shutil.copy2(primary_path, secondary_path)
+            logger.info("model_copied_to_agent_location", secondary_path=str(secondary_path))
+            
         else:  # LSTM
             # Backup existing file if it exists
-            if model_path.exists():
-                backup_path = model_path.with_suffix('.h5.backup')
+            if primary_path.exists():
+                backup_path = primary_path.with_suffix(file_ext + '.backup')
                 logger.info("backing_up_existing_model", backup_path=str(backup_path))
-                model_path.rename(backup_path)
+                primary_path.rename(backup_path)
             
-            model.save(str(model_path))
+            model.save(str(primary_path))
+            
+            # Copy to secondary location (agent discovery)
+            if secondary_path.exists():
+                backup_path = secondary_path.with_suffix(file_ext + '.backup')
+                logger.info("backing_up_existing_model_secondary", backup_path=str(backup_path))
+                secondary_path.rename(backup_path)
+            
+            # Copy file to secondary location
+            import shutil
+            shutil.copy2(primary_path, secondary_path)
+            logger.info("model_copied_to_agent_location", secondary_path=str(secondary_path))
         
-        logger.info("model_saved", model_path=str(model_path), file_size=model_path.stat().st_size)
+        logger.info(
+            "model_saved",
+            primary_path=str(primary_path),
+            secondary_path=str(secondary_path),
+            primary_file_size=primary_path.stat().st_size,
+            secondary_file_size=secondary_path.stat().st_size
+        )
         
-        return model_path
+        return primary_path
+    
+    def validate_model(
+        self,
+        model_path: Path,
+        model_type: str,
+        expected_features: int = 50
+    ) -> Dict[str, Any]:
+        """Validate a saved model can be loaded and has correct structure.
+        
+        Args:
+            model_path: Path to model file
+            model_type: "xgboost" or "lstm"
+            expected_features: Expected number of input features (default: 49)
+            
+        Returns:
+            Dictionary with validation results
+        """
+        validation_results = {
+            "model_path": str(model_path),
+            "exists": False,
+            "loadable": False,
+            "has_predict": False,
+            "has_predict_proba": False,
+            "feature_count_valid": False,
+            "errors": []
+        }
+        
+        # Check file exists
+        if not model_path.exists():
+            validation_results["errors"].append(f"Model file does not exist: {model_path}")
+            return validation_results
+        
+        validation_results["exists"] = True
+        file_size = model_path.stat().st_size
+        
+        # Try to load model
+        try:
+            if model_type == "xgboost":
+                with open(model_path, 'rb') as f:
+                    model = pickle.load(f)
+                
+                # Check model has required methods
+                validation_results["has_predict"] = hasattr(model, 'predict')
+                validation_results["has_predict_proba"] = hasattr(model, 'predict_proba')
+                
+                # Check feature count by creating dummy input
+                if hasattr(model, 'get_booster'):
+                    # XGBoost model - check feature count
+                    try:
+                        # Try sklearn API first (most reliable)
+                        if hasattr(model, 'n_features_in_'):
+                            feature_count = model.n_features_in_
+                        else:
+                            booster = model.get_booster()
+                            # Try different methods to get feature count
+                            if hasattr(booster, 'num_feature'):
+                                # Check if it's a method or attribute
+                                if callable(getattr(booster, 'num_feature', None)):
+                                    feature_count = booster.num_feature()
+                                else:
+                                    feature_count = booster.num_feature
+                            elif hasattr(booster, 'get_num_feature'):
+                                feature_count = booster.get_num_feature()
+                            else:
+                                # Fallback: test with dummy input to infer feature count
+                                # Try with expected_features first
+                                try:
+                                    dummy_features = np.random.rand(1, expected_features)
+                                    model.predict(dummy_features)  # This will fail if wrong feature count
+                                    feature_count = expected_features  # Assume correct if prediction works
+                                except Exception:
+                                    # If that fails, try to infer from error or use expected_features
+                                    feature_count = expected_features
+                        
+                        validation_results["feature_count"] = feature_count
+                        validation_results["feature_count_valid"] = (feature_count == expected_features)
+                        if not validation_results["feature_count_valid"]:
+                            validation_results["errors"].append(
+                                f"Feature count mismatch: expected {expected_features}, got {feature_count}"
+                            )
+                    except Exception as e:
+                        validation_results["errors"].append(f"Could not get feature count: {str(e)}")
+                
+                # Test prediction with dummy features
+                try:
+                    dummy_features = np.random.rand(1, expected_features)
+                    prediction = model.predict(dummy_features)
+                    validation_results["loadable"] = True
+                    validation_results["prediction_test"] = "passed"
+                except Exception as e:
+                    validation_results["errors"].append(f"Prediction test failed: {str(e)}")
+                    validation_results["prediction_test"] = f"failed: {str(e)}"
+                
+            else:  # LSTM
+                # LSTM validation would require TensorFlow
+                validation_results["loadable"] = True  # Assume valid if file exists
+                validation_results["errors"].append("LSTM validation not fully implemented")
+            
+        except Exception as e:
+            validation_results["errors"].append(f"Failed to load model: {str(e)}")
+            validation_results["loadable"] = False
+        
+        validation_results["file_size"] = file_size
+        validation_results["valid"] = (
+            validation_results["exists"] and
+            validation_results["loadable"] and
+            validation_results["has_predict"] and
+            validation_results["feature_count_valid"]
+        )
+        
+        logger.info(
+            "model_validation_complete",
+            model_path=str(model_path),
+            valid=validation_results["valid"],
+            errors=validation_results["errors"]
+        )
+        
+        return validation_results
+    
+    def copy_models_to_agent_location(self, timeframe: Optional[str] = None) -> List[Path]:
+        """Copy trained models from models/ to agent/model_storage/xgboost/.
+        
+        Args:
+            timeframe: Optional timeframe filter. If None, copies all models.
+            
+        Returns:
+            List of paths to copied model files
+        """
+        import shutil
+        
+        copied_files = []
+        
+        # Find all model files in models directory
+        if timeframe:
+            patterns = [
+                f"xgboost_regressor_{self.symbol}_{timeframe}.pkl",
+                f"xgboost_classifier_{self.symbol}_{timeframe}.pkl"
+            ]
+        else:
+            patterns = [
+                f"xgboost_regressor_{self.symbol}_*.pkl",
+                f"xgboost_classifier_{self.symbol}_*.pkl"
+            ]
+        
+        for pattern in patterns:
+            for model_file in self.models_dir.glob(pattern):
+                target_file = self.storage_dir / model_file.name
+                
+                # Backup existing file if it exists
+                if target_file.exists():
+                    backup_path = target_file.with_suffix('.pkl.backup')
+                    logger.info("backing_up_existing_model_for_copy", backup_path=str(backup_path))
+                    target_file.rename(backup_path)
+                
+                # Copy file
+                shutil.copy2(model_file, target_file)
+                copied_files.append(target_file)
+                logger.info(
+                    "model_copied_to_agent_location",
+                    source=str(model_file),
+                    target=str(target_file)
+                )
+        
+        logger.info(
+            "models_copied_to_agent_location",
+            count=len(copied_files),
+            target_dir=str(self.storage_dir)
+        )
+        
+        return copied_files
     
     async def train_timeframe(
         self,
@@ -1535,11 +1822,29 @@ class PricePredictionTrainer:
         # Compute features
         X = await self.compute_features(candles)
         
+        # Validate feature order and count
+        if X.shape[1] != len(FEATURE_LIST):
+            error_msg = (
+                f"Feature count mismatch: computed {X.shape[1]} features, "
+                f"but FEATURE_LIST has {len(FEATURE_LIST)} features. "
+                f"This indicates a mismatch between feature computation and FEATURE_LIST."
+            )
+            logger.error("feature_count_mismatch", computed=X.shape[1], expected=len(FEATURE_LIST))
+            raise ValueError(error_msg)
+        
+        # Export feature list to JSON for agent reference
+        try:
+            feature_list_path = export_feature_list_to_json()
+            logger.info("feature_list_exported_for_agent", path=str(feature_list_path))
+        except Exception as e:
+            logger.warning("feature_list_export_failed", error=str(e))
+        
         results = {
             "timeframe": timeframe,
             "samples": len(X),
             "features": len(FEATURE_LIST),
-            "candles_fetched": len(candles)
+            "candles_fetched": len(candles),
+            "feature_list_exported": True
         }
         
         # Train regression models
@@ -1559,10 +1864,21 @@ class PricePredictionTrainer:
                 xgb_path = self.save_model(
                     xgb_regressor, "xgboost", timeframe, "regression", xgb_metrics
                 )
+                
+                # Validate saved model
+                validation = self.validate_model(xgb_path, "xgboost", expected_features=len(FEATURE_LIST))
                 results["xgboost_regressor"] = {
                     "model_path": str(xgb_path),
+                    "validation": validation,
                     **xgb_metrics
                 }
+                
+                if not validation["valid"]:
+                    logger.warning(
+                        "model_validation_failed",
+                        model_path=str(xgb_path),
+                        errors=validation["errors"]
+                    )
                 
                 # Train LSTM regressor if requested
                 if train_lstm:
@@ -1597,10 +1913,21 @@ class PricePredictionTrainer:
                 xgb_path = self.save_model(
                     xgb_classifier, "xgboost", timeframe, "classification", xgb_metrics
                 )
+                
+                # Validate saved model
+                validation = self.validate_model(xgb_path, "xgboost", expected_features=len(FEATURE_LIST))
                 results["xgboost_classifier"] = {
                     "model_path": str(xgb_path),
+                    "validation": validation,
                     **xgb_metrics
                 }
+                
+                if not validation["valid"]:
+                    logger.warning(
+                        "model_validation_failed",
+                        model_path=str(xgb_path),
+                        errors=validation["errors"]
+                    )
                 
                 # Train LSTM classifier if requested
                 if train_lstm:

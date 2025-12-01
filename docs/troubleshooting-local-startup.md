@@ -505,14 +505,19 @@ venv\Scripts\activate.bat
 
 **Solutions:**
 
-1. **Check MODEL_PATH:**
+1. **Check MODEL_DIR (recommended):**
    ```env
-   MODEL_PATH=models/xgboost_BTCUSD_15m.pkl
+   MODEL_DIR=./agent/model_storage
+   ```
+   
+   Or use MODEL_PATH for specific model:
+   ```env
+   MODEL_PATH=agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl
    ```
 
 2. **Verify model file exists:**
    ```bash
-   ls models/*.pkl
+   ls agent/model_storage/xgboost/*.pkl
    ```
 
 3. **Check MODEL_DIR:**

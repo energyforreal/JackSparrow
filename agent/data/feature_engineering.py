@@ -411,7 +411,20 @@ class FeatureEngineering:
             return 50.0
         k_values = []
         for i in range(3):
-            k = self._compute_stochastic_k(df.iloc[:-(i if i > 0 else None)], period)
+            # Fix: handle i == 0 case properly
+            if i == 0:
+                sliced_df = df
+            else:
+                sliced_df = df.iloc[:-i]
+            
+            # Ensure sliced dataframe has enough data
+            if len(sliced_df) < period:
+                k = 50.0
+            else:
+                k = self._compute_stochastic_k(sliced_df, period)
+                # Ensure k is not None or invalid
+                if k is None or not np.isfinite(k):
+                    k = 50.0
             k_values.append(k)
         return float(np.mean(k_values))
     
@@ -644,14 +657,47 @@ class FeatureEngineering:
         if len(df) < 10:
             return 0.0
         ad = self._compute_accumulation_distribution(df)
+        # Ensure ad is not None or invalid
+        if ad is None or not np.isfinite(ad):
+            ad = 0.0
         # Simplified: use recent AD values
         ad_values = []
         for i in range(min(10, len(df))):
-            ad_val = self._compute_accumulation_distribution(df.iloc[:-(i if i > 0 else None)])
+            # Fix: handle i == 0 case properly
+            if i == 0:
+                sliced_df = df
+            else:
+                sliced_df = df.iloc[:-i]
+            
+            # Ensure sliced dataframe has data
+            if len(sliced_df) == 0:
+                ad_val = 0.0
+            else:
+                ad_val = self._compute_accumulation_distribution(sliced_df)
+                # Ensure ad_val is not None or invalid
+                if ad_val is None or not np.isfinite(ad_val):
+                    ad_val = 0.0
             ad_values.append(ad_val)
-        ema_fast = np.mean(ad_values[-3:]) if len(ad_values) >= 3 else ad
-        ema_slow = np.mean(ad_values[-10:]) if len(ad_values) >= 10 else ad
-        return float(ema_fast - ema_slow)
+        
+        # Calculate EMAs with safety checks
+        if len(ad_values) >= 3:
+            ema_fast = np.mean(ad_values[-3:])
+        else:
+            ema_fast = ad if len(ad_values) == 0 else np.mean(ad_values)
+        
+        if len(ad_values) >= 10:
+            ema_slow = np.mean(ad_values[-10:])
+        else:
+            ema_slow = ad if len(ad_values) == 0 else np.mean(ad_values)
+        
+        # Ensure both values are finite before subtraction
+        if not np.isfinite(ema_fast):
+            ema_fast = 0.0
+        if not np.isfinite(ema_slow):
+            ema_slow = 0.0
+        
+        result = ema_fast - ema_slow
+        return float(result) if np.isfinite(result) else 0.0
     
     def _compute_returns(self, df: pd.DataFrame, periods: int = 1) -> float:
         """Compute returns over specified periods."""
@@ -702,4 +748,33 @@ class FeatureEngineering:
             "volatility": "Volatility (std of returns, 20-period)"
         }
         return methods.get(feature_name, "Unknown")
+    
+    def validate_feature_order(self, feature_list: List[str]) -> Dict[str, Any]:
+        """Validate that feature list matches expected order and count.
+        
+        Args:
+            feature_list: List of feature names to validate
+            
+        Returns:
+            Dictionary with validation results
+        """
+        # Import FEATURE_LIST from training script if available
+        # For now, we'll just check that all features can be computed
+        validation_results = {
+            "valid": True,
+            "feature_count": len(feature_list),
+            "expected_count": 49,
+            "missing_features": [],
+            "errors": []
+        }
+        
+        if len(feature_list) != 49:
+            validation_results["valid"] = False
+            validation_results["errors"].append(
+                f"Feature count mismatch: got {len(feature_list)}, expected 49"
+            )
+        
+        # Check that all features can be computed (basic check)
+        # This is a simplified check - full validation would require candles
+        return validation_results
 

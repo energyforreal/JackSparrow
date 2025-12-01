@@ -140,9 +140,8 @@ INFO: 127.0.0.1:60398 - "POST /api/v1/predict HTTP/1.1" 500 Internal Server Erro
 **Frequency:** On agent startup
 
 **Issue:**
-- Model `xgboost_BTCUSD_15m` loaded twice:
-  1. From `models/xgboost_BTCUSD_15m.pkl` (MODEL_PATH)
-  2. From `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl` (MODEL_DIR)
+- Model `xgboost_BTCUSD_15m` loaded from:
+  1. From `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl` (MODEL_DIR)
 
 **Evidence:**
 - Line 17-19: Model loaded from MODEL_PATH

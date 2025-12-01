@@ -295,6 +295,9 @@ class EnvValidator:
         script_path = Path(__file__).resolve()
         project_root = script_path.parent.parent
         
+        # Check if model discovery is enabled
+        discovery_enabled = self.env_vars.get("MODEL_DISCOVERY_ENABLED", "true").lower() in ("true", "1", "yes")
+        
         # Check MODEL_PATH if specified
         if "MODEL_PATH" in self.env_vars:
             model_path_str = self.env_vars["MODEL_PATH"].strip()
@@ -306,10 +309,18 @@ class EnvValidator:
                     model_path = Path(model_path_str)
                 
                 if not model_path.exists():
-                    self.warnings.append(
-                        f"MODEL_PATH points to non-existent file: {model_path_str}. "
-                        f"Agent may fail to start if model is required."
-                    )
+                    if discovery_enabled:
+                        # If discovery is enabled, MODEL_PATH is optional
+                        self.warnings.append(
+                            f"MODEL_PATH points to non-existent file: {model_path_str}. "
+                            f"Since MODEL_DISCOVERY_ENABLED=true, this is optional - models will be discovered from MODEL_DIR instead."
+                        )
+                    else:
+                        # If discovery is disabled, MODEL_PATH is more critical
+                        self.warnings.append(
+                            f"MODEL_PATH points to non-existent file: {model_path_str}. "
+                            f"Agent may fail to start if model is required. Consider enabling MODEL_DISCOVERY_ENABLED=true or training models first."
+                        )
                 elif not model_path.suffix.lower() in (".pkl", ".h5", ".pb", ".onnx"):
                     self.warnings.append(
                         f"MODEL_PATH file extension '{model_path.suffix}' may not be a valid model format. "
@@ -333,15 +344,20 @@ class EnvValidator:
                              list(model_dir.rglob("*.onnx"))
                 
                 if not model_files:
-                    self.warnings.append(
-                        f"No model files found in MODEL_DIR: {model_dir_str}. "
-                        f"Agent may start in monitoring mode without models."
-                    )
+                    if discovery_enabled:
+                        self.warnings.append(
+                            f"No model files found in MODEL_DIR: {model_dir_str}. "
+                            f"Agent will start in monitoring mode. Train models using: python scripts/train_price_prediction_models.py"
+                        )
+                    else:
+                        # Only warn if discovery is enabled (otherwise MODEL_DIR is ignored)
+                        pass
             else:
-                self.warnings.append(
-                    f"MODEL_DIR does not exist: {model_dir_str}. "
-                    f"Model discovery will be disabled."
-                )
+                if discovery_enabled:
+                    self.warnings.append(
+                        f"MODEL_DIR does not exist: {model_dir_str}. "
+                        f"Model discovery will be skipped. Create the directory or train models first."
+                    )
         
         return True
     

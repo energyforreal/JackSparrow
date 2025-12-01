@@ -500,7 +500,7 @@ Configure `LOG_FORWARDING_ENABLED=true` and `LOG_FORWARDING_ENDPOINT` in `.env` 
 - `redis-data`: Redis data and AOF files
 
 **Bind Mounts (Host Directories):**
-- `./models` → `/app/models`: Model files
+- `./agent/model_storage` → `/app/agent/model_storage`: Model files
 - `./logs/[service]` → `/logs`: Application logs
 - `./kubera_pokisham.db` → `/data/kubera_pokisham.db`: Legacy SQLite database
 
@@ -809,15 +809,15 @@ user: "${UID}:${GID}"
 
 **Solution**:
 ```bash
-# Verify models directory is mounted
-docker compose exec agent ls -la /app/models
+# Verify model storage directory is mounted
+docker compose exec agent ls -la /app/agent/model_storage
 
 # Check volume mount in docker-compose.yml
 # volumes:
-#   - ./models:/app/models
+#   - ./agent/model_storage:/app/agent/model_storage
 
 # Ensure model files exist
-ls -la models/
+ls -la agent/model_storage/xgboost/
 ```
 
 ### Debugging

@@ -81,7 +81,7 @@ All 24/7 services now run via Docker images orchestrated with Compose.
 2. Prepare persistent host paths before the first deployment:
 
    ```bash
-   mkdir -p logs/backend logs/agent logs/frontend models
+   mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/xgboost
    touch kubera_pokisham.db
    ```
 
@@ -98,7 +98,7 @@ All 24/7 services now run via Docker images orchestrated with Compose.
    docker compose logs -f backend
    ```
 
-The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on `8001`), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./models`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
+The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on `8001`), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./agent/model_storage`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
 
 ## Model Training
 
@@ -189,12 +189,12 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for the complete index.
 JackSparrow/
 ├── backend/          # FastAPI backend API
 ├── agent/            # AI agent core with MCP layer
+│   └── model_storage/ # ML models (XGBoost in xgboost/ subdirectory)
 ├── frontend/         # Next.js frontend dashboard
 ├── tests/            # Test suite
 ├── scripts/          # Utility scripts
 ├── tools/            # Command toolkit
 ├── docs/             # Documentation
-├── models/           # Production ML models
 └── logs/             # Application logs
 ```
 

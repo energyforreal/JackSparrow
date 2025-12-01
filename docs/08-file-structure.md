@@ -213,11 +213,6 @@ JackSparrow/
 │   ├── 14-project-rules.md            # Project rules documentation
 │   └── 15-audit-report.md             # Audit report
 │
-├── models/                             # Production-ready ML artefacts (root level)
-│   ├── *.pkl                           # Trained model binaries (versioned production models)
-│   └── training_summary.csv            # Latest training metrics snapshot
-│   # Note: Use MODEL_PATH env var to specify which model file to load
-│
 ├── reference/                          # Reference specifications
 │   ├── tradingagent_rebuild_spec.md
 │   ├── trading_agent_rework.md
@@ -249,7 +244,6 @@ Each directory has a clear, single responsibility:
 - **tests/**: Test code organized by type
 - **scripts/**: Utility and setup scripts
 - **docs/**: Documentation files
-- **models/**: Versioned ML artefacts referenced by runtime configuration
 
 ### Module Boundaries
 
@@ -702,55 +696,47 @@ pydantic==2.5.0
 
 ## ML Model Storage
 
-### Model Storage Locations
+### Model Storage Location
 
-JackSparrow uses two distinct model storage locations:
+JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**:
 
-1. **Root `models/` directory** - Production models shipped with codebase
-   - Contains versioned production model files (`.pkl` files)
-   - Referenced via `MODEL_PATH` environment variable (points to specific file)
-   - Example: `MODEL_PATH=models/xgboost_BTCUSD_15m.pkl`
-   - Used at runtime to load a specific production model
-
-2. **`agent/model_storage/` directory** - Upload directory for new/custom models
-   - Contains uploaded models that are discovered automatically
-   - Referenced via `MODEL_DIR` environment variable (points to directory)
-   - Example: `MODEL_DIR=./agent/model_storage`
-   - Used by model discovery system to find and register models
+- Contains all trained model files (`.pkl`, `.h5`, `.onnx` files)
+- Referenced via `MODEL_DIR` environment variable (points to directory)
+- Example: `MODEL_DIR=./agent/model_storage`
+- Used by model discovery system to automatically find and register models
+- Models are organized by type in subdirectories
 
 ### Model Directory Structure
 
-**Production Models** (`models/` at root):
-```
-models/
-├── xgboost_BTCUSD_15m.pkl              # Production model files
-├── xgboost_BTCUSD_1h.pkl
-├── lightgbm_BTCUSD_4h_production_*.pkl
-└── training_summary.csv                 # Training metrics
-```
-
-**Upload Directory** (`agent/model_storage/`):
+**Model Storage** (`agent/model_storage/`):
 ```
 agent/model_storage/
-├── custom/              # User-uploaded models (discovered automatically)
+├── xgboost/            # XGBoost models (regressor and classifier)
+│   ├── xgboost_regressor_BTCUSD_15m.pkl
+│   ├── xgboost_classifier_BTCUSD_15m.pkl
+│   └── ...
+├── lstm/               # LSTM models (if TensorFlow available)
+│   ├── lstm_regressor_BTCUSD_15m.h5
+│   ├── lstm_classifier_BTCUSD_15m.h5
+│   └── ...
+├── transformer/        # Transformer models
+│   └── ...
+├── custom/             # User-uploaded models (discovered automatically)
 │   ├── *.pkl           # Pickle models (XGBoost, LightGBM, scikit-learn)
 │   ├── *.h5            # TensorFlow/Keras models
 │   ├── *.onnx          # ONNX models
 │   └── metadata.json   # Model metadata
-├── xgboost/            # XGBoost models (uploaded)
-├── lstm/               # LSTM models (uploaded)
-└── transformer/        # Transformer models (uploaded)
+└── price_prediction_training_summary.csv  # Training metrics
 ```
 
 ### Model Discovery
 
 Models in `agent/model_storage/` are automatically discovered on agent startup:
-- Scans directories specified by `MODEL_DIR`
+- Scans directories specified by `MODEL_DIR` and all subdirectories
 - Detects model type from file extension and metadata
 - Registers models with MCP Model Registry
 - Models become available for predictions immediately
-
-**Production models** in `models/` are loaded directly via `MODEL_PATH` and do not require discovery.
+- Currently, XGBoost regressor and classifier models are stored in `agent/model_storage/xgboost/`
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

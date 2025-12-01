@@ -49,7 +49,9 @@ class ModelDiscovery:
             "model_discovery_starting",
             model_path=self.model_path,
             model_dir=str(self.model_dir),
-            discovery_enabled=settings.model_discovery_enabled
+            discovery_enabled=settings.model_discovery_enabled,
+            auto_register=settings.model_auto_register,
+            message="Starting model discovery process"
         )
         
         try:
@@ -127,20 +129,27 @@ class ModelDiscovery:
                         absolute_path=str(model_file.resolve()),
                         message="MODEL_PATH specified but file does not exist"
                     )
+                    # If MODEL_PATH doesn't exist but discovery is enabled, we will attempt MODEL_DIR discovery
+                    # Mark as attempted now if discovery is enabled
+                    if settings.model_discovery_enabled:
+                        discovery_attempted = True
             
             # Option 2: Discover models from MODEL_DIR
             if settings.model_discovery_enabled:
                 try:
                     model_dir_abs = self.model_dir.resolve()
+                    # Mark discovery as attempted when we check MODEL_DIR (even if it doesn't exist)
+                    # This indicates we attempted to discover models
+                    discovery_attempted = True
                     if not self.model_dir.exists():
                         logger.warning(
                             "model_dir_not_found",
                             model_dir=str(self.model_dir),
                             absolute_path=str(model_dir_abs),
-                            message="MODEL_DIR does not exist, skipping discovery"
+                            message="MODEL_DIR does not exist, skipping discovery",
+                            discovery_attempted=True
                         )
                     else:
-                        discovery_attempted = True
                         model_files = self._find_model_files()
                         logger.info(
                             "model_discovery_scanning",
@@ -154,7 +163,9 @@ class ModelDiscovery:
                             logger.info(
                                 "model_discovery_no_files",
                                 model_dir=str(self.model_dir),
-                                message="No model files found in MODEL_DIR"
+                                absolute_path=str(model_dir_abs),
+                                discovery_attempted=True,
+                                message="No model files found in MODEL_DIR. Discovery was attempted but directory is empty or contains no .pkl/.h5/.onnx files."
                             )
                         
                         for model_file in model_files:
@@ -261,19 +272,34 @@ class ModelDiscovery:
                 discovered_count=successful_count,
                 failed_count=failed_count,
                 total_attempted=total_attempted,
+                discovery_attempted=discovery_attempted,
                 models=discovered_models,
                 failed_files=failed_models[:5] if failed_models else [],  # Log first 5 failed files
                 message=message
             )
         else:
+            # Provide clearer message based on whether discovery was attempted
+            if discovery_attempted:
+                if failed_count > 0:
+                    message = f"Model discovery attempted but no models loaded successfully ({failed_count} failed, {total_attempted} total attempted). Agent will continue in monitoring mode without ML predictions."
+                elif total_attempted == 0:
+                    message = f"Model discovery attempted but no model files found in MODEL_DIR. Agent will continue in monitoring mode without ML predictions."
+                else:
+                    message = f"No models were successfully discovered ({failed_count} failed, {total_attempted} total attempted). Agent will continue in monitoring mode without ML predictions."
+            else:
+                message = "Model discovery was not attempted. Check MODEL_DISCOVERY_ENABLED setting. Agent will continue in monitoring mode without ML predictions."
+            
             logger.warning(
                 "model_discovery_no_models",
                 failed_count=failed_count,
                 total_attempted=total_attempted,
+                discovery_attempted=discovery_attempted,
+                discovery_enabled=settings.model_discovery_enabled,
                 failed_files=failed_models[:5] if failed_models else [],  # Log first 5 failed files
                 model_path=self.model_path,
                 model_dir=str(self.model_dir),
-                message=f"No models were successfully discovered ({failed_count} failed, {total_attempted} total attempted). Agent will continue in paper trading mode without ML predictions."
+                model_dir_exists=self.model_dir.exists(),
+                message=message
             )
         
         self.registry.record_discovery_summary(
