@@ -247,7 +247,11 @@ The example illustrates how raw market context, historical success rate, and mod
 - `DELIBERATING` - Weighing decision options
 - `ANALYZING` - Processing signals and evaluating entry conditions
 - `EXECUTING` - Placing or managing trade orders
-- `MONITORING_POSITION` - Active position management (monitoring exit conditions)
+- `MONITORING_POSITION` - Active position management with real-time exit condition monitoring
+  - Monitors stop loss and take profit levels on each market tick
+  - Automatically triggers exit trades when conditions are met
+  - Tracks position PnL and duration
+  - Transitions to OBSERVING when position is closed
 - `DEGRADED` - Partial functionality due to service issues
 - `EMERGENCY_STOP` - Critical failure, no trading allowed
 
@@ -348,6 +352,9 @@ The example illustrates how raw market context, historical success rate, and mod
 - Position duration monitoring
 - Unrealized PnL calculation
 - Position size management
+- Automatic stop loss and take profit monitoring
+- Exit condition evaluation on each market tick
+- Automatic position closure when exit conditions met
 
 **Trade Logging**:
 - Complete trade history

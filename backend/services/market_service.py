@@ -22,7 +22,20 @@ class MarketService:
     def __init__(self):
         """Initialize market service."""
         self.base_url = settings.delta_exchange_base_url
-        self.cache_ttl = 60  # Cache for 60 seconds
+        # Optimized cache TTLs based on data freshness requirements
+        self.cache_ttl_ticker = 2  # Ticker: 1-2 seconds (very fresh)
+        self.cache_ttl_candles = {  # Candles: based on interval
+            "1m": 5,
+            "3m": 5,
+            "5m": 5,
+            "15m": 10,
+            "30m": 15,
+            "1h": 30,
+            "2h": 60,
+            "4h": 120,
+            "1d": 300
+        }
+        self.cache_ttl_orderbook = 1  # Orderbook: 1 second (very fresh)
     
     async def get_market_data(
         self,
@@ -53,8 +66,9 @@ class MarketService:
             if agent_response and agent_response.get("success"):
                 market_data = agent_response.get("data")
                 if market_data:
-                    # Cache result
-                    await set_cache(cache_key, market_data, ttl=self.cache_ttl)
+                    # Cache with interval-based TTL
+                    ttl = self.cache_ttl_candles.get(interval, 15)  # Default 15s for unknown intervals
+                    await set_cache(cache_key, market_data, ttl=ttl)
                     return market_data
         except Exception as e:
             logger.error(
@@ -89,8 +103,8 @@ class MarketService:
             if agent_response and agent_response.get("success"):
                 ticker = agent_response.get("data")
                 if ticker:
-                    # Cache result
-                    await set_cache(cache_key, ticker, ttl=10)  # Shorter cache for ticker
+                    # Cache with optimized TTL for ticker
+                    await set_cache(cache_key, ticker, ttl=self.cache_ttl_ticker)
                     return ticker
         except Exception as e:
             logger.error(
@@ -129,8 +143,8 @@ class MarketService:
             if agent_response and agent_response.get("success"):
                 orderbook = agent_response.get("data")
                 if orderbook:
-                    # Cache result
-                    await set_cache(cache_key, orderbook, ttl=5)  # Short cache for orderbook
+                    # Cache with optimized TTL for orderbook
+                    await set_cache(cache_key, orderbook, ttl=self.cache_ttl_orderbook)
                     return orderbook
         except Exception as e:
             logger.error(

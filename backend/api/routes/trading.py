@@ -14,7 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
 from backend.api.models.requests import ExecuteTradeRequest, PredictRequest
-from backend.api.models.responses import ErrorResponse, PredictResponse, TradeResponse, ReasoningChain, ReasoningStep, ModelPrediction
+from backend.api.models.responses import (
+    ErrorResponse,
+    PredictResponse,
+    TradeResponse,
+    ReasoningChain,
+    ReasoningStep,
+    ModelPrediction,
+    ModelConsensusEntry,
+    ModelReasoningEntry,
+)
 from backend.core.database import get_db
 from backend.notifications import telegram_notifier
 from backend.services.agent_service import agent_service
@@ -180,13 +189,53 @@ async def predict(request: PredictRequest):
                 timestamp = datetime.utcnow()
             
             # Extract market_context (may include features, etc.)
-            market_context = decision_data.get("market_context", {})
+            market_context = decision_data.get("market_context", {}) or {}
             if not market_context:
                 # Try to construct from available data
                 market_context = {
                     "feature_quality": decision_data.get("feature_quality"),
                     "symbol": request.symbol
                 }
+
+            # Derive per-model consensus signals and reasoning so the frontend
+            # can render model-level breakdowns even without WebSocket updates.
+            def _map_prediction_to_signal(pred_value: float) -> str:
+                """Map a continuous prediction in [-1, 1] to a discrete signal."""
+                if abs(pred_value) < 0.2:
+                    return "HOLD"
+                if pred_value > 0.6:
+                    return "STRONG_BUY"
+                if pred_value > 0.2:
+                    return "BUY"
+                if pred_value < -0.6:
+                    return "STRONG_SELL"
+                return "SELL"
+
+            model_consensus: list[ModelConsensusEntry] = []
+            individual_model_reasoning: list[ModelReasoningEntry] = []
+
+            for pred in model_predictions:
+                try:
+                    model_consensus.append(
+                        ModelConsensusEntry(
+                            model_name=pred.model_name,
+                            signal=_map_prediction_to_signal(pred.prediction),
+                            confidence=float(pred.confidence),
+                        )
+                    )
+                    individual_model_reasoning.append(
+                        ModelReasoningEntry(
+                            model_name=pred.model_name,
+                            reasoning=pred.reasoning,
+                            confidence=float(pred.confidence),
+                        )
+                    )
+                except Exception as model_error:
+                    logger.warning(
+                        "predict_model_consensus_build_failed",
+                        model_name=getattr(pred, "model_name", "unknown"),
+                        error=str(model_error),
+                    )
             
             # Create PredictResponse
             predict_response = PredictResponse(
@@ -195,6 +244,8 @@ async def predict(request: PredictRequest):
                 position_size=position_size,
                 reasoning_chain=reasoning_chain,
                 model_predictions=model_predictions,
+                model_consensus=model_consensus,
+                individual_model_reasoning=individual_model_reasoning,
                 market_context=market_context,
                 timestamp=timestamp
             )
@@ -306,6 +357,12 @@ async def execute_trade(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Trade execution failed: {trade_result.get('error', 'Unknown error')}"
             )
+        
+        # Invalidate portfolio cache when trade is executed
+        from backend.core.redis import delete_cache
+        await delete_cache("portfolio:summary")
+        await delete_cache(f"portfolio:performance:30")  # Invalidate common performance cache
+        logger.debug("portfolio_cache_invalidated", reason="trade_executed")
         
         response_payload = TradeResponse(**trade_result)
         

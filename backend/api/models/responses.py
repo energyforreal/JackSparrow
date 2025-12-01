@@ -97,6 +97,50 @@ class ModelPrediction(BaseModel):
     )
 
 
+class ModelConsensusEntry(BaseModel):
+    """Consensus-style view of a single model's prediction."""
+    
+    model_name: str = Field(
+        ...,
+        description="Model name",
+        example="xgboost_BTCUSD_15m"
+    )
+    signal: str = Field(
+        ...,
+        description="Discrete trading signal derived from model prediction",
+        example="BUY"
+    )
+    confidence: float = Field(
+        ...,
+        description="Model confidence (0.0 to 1.0)",
+        ge=0.0,
+        le=1.0,
+        example=0.85
+    )
+
+
+class ModelReasoningEntry(BaseModel):
+    """High-level reasoning summary for a single model."""
+    
+    model_name: str = Field(
+        ...,
+        description="Model name",
+        example="xgboost_BTCUSD_15m"
+    )
+    reasoning: str = Field(
+        ...,
+        description="Natural language explanation of the model's prediction",
+        example="RSI breakout with strong volume confirmation supports a bullish bias."
+    )
+    confidence: float = Field(
+        ...,
+        description="Model confidence (0.0 to 1.0)",
+        ge=0.0,
+        le=1.0,
+        example=0.82
+    )
+
+
 class ReasoningStep(BaseModel):
     """Single step in reasoning chain."""
     
@@ -187,6 +231,14 @@ class PredictResponse(BaseModel):
     model_predictions: List[ModelPrediction] = Field(
         ...,
         description="Individual model predictions"
+    )
+    model_consensus: List[ModelConsensusEntry] = Field(
+        default_factory=list,
+        description="Per-model consensus-style signals used in the frontend"
+    )
+    individual_model_reasoning: List[ModelReasoningEntry] = Field(
+        default_factory=list,
+        description="Per-model natural language reasoning summaries"
     )
     market_context: Dict[str, Any] = Field(
         default_factory=dict,

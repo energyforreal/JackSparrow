@@ -18,6 +18,7 @@ from agent.events.schemas import (
     OrderFillEvent,
     RiskAlertEvent,
     EmergencyStopEvent,
+    PositionClosedEvent,
     StateTransitionEvent,
     EventType,
 )
@@ -78,6 +79,7 @@ class AgentStateMachine:
         event_bus.subscribe(EventType.ORDER_FILL, self._handle_order_fill)
         event_bus.subscribe(EventType.RISK_ALERT, self._handle_risk_alert)
         event_bus.subscribe(EventType.EMERGENCY_STOP, self._handle_emergency_stop)
+        event_bus.subscribe(EventType.POSITION_CLOSED, self._handle_position_closed)
     
     async def _handle_candle_closed(self, event: CandleClosedEvent):
         """Handle candle closed event - transition OBSERVING -> THINKING."""
@@ -107,6 +109,20 @@ class AgentStateMachine:
     async def _handle_emergency_stop(self, event: EmergencyStopEvent):
         """Handle emergency stop event - transition to EMERGENCY_STOP."""
         await self._transition_to(AgentState.EMERGENCY_STOP, f"Emergency stop: {event.payload.get('reason')}")
+    
+    async def _handle_position_closed(self, event: PositionClosedEvent):
+        """Handle position closed event - transition MONITORING_POSITION -> OBSERVING."""
+        if self.current_state == AgentState.MONITORING_POSITION:
+            exit_reason = event.payload.get("exit_reason", "unknown")
+            await self._transition_to(
+                AgentState.OBSERVING,
+                f"Position closed - {exit_reason}"
+            )
+            # Update context to clear position
+            self.context_manager.update_context({
+                "position": None,
+                "position_opened": False
+            })
     
     async def _transition_to(self, new_state: AgentState, reason: str):
         """Transition to new state and emit event.
@@ -221,6 +237,14 @@ class AgentStateMachine:
             AgentState.OBSERVING,
             lambda ctx: ctx.get("execution_failed", False),
             "Execution failed"
+        )
+        
+        # MONITORING_POSITION -> OBSERVING
+        self.add_transition(
+            AgentState.MONITORING_POSITION,
+            AgentState.OBSERVING,
+            lambda ctx: ctx.get("position_closed", False) or ctx.get("position") is None,
+            "Position closed"
         )
         
         # DEGRADED -> OBSERVING

@@ -229,14 +229,43 @@ def setup_database():
             # Create indexes
             print("Creating indexes...")
             conn.execute(text("""
+                -- Trade indexes
                 CREATE INDEX IF NOT EXISTS idx_trades_symbol_executed_at 
                     ON trades(symbol, executed_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_trade_executed_at_status 
+                    ON trades(executed_at, status);
+                CREATE INDEX IF NOT EXISTS idx_trade_status 
+                    ON trades(status);
+                CREATE INDEX IF NOT EXISTS idx_trade_symbol 
+                    ON trades(symbol);
+                
+                -- Position indexes
                 CREATE INDEX IF NOT EXISTS idx_positions_symbol_status 
                     ON positions(symbol, status);
+                CREATE INDEX IF NOT EXISTS idx_position_status 
+                    ON positions(status);
+                CREATE INDEX IF NOT EXISTS idx_position_symbol 
+                    ON positions(symbol);
+                
+                -- Decision indexes
                 CREATE INDEX IF NOT EXISTS idx_decisions_symbol_timestamp 
                     ON decisions(symbol, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_decision_timestamp 
+                    ON decisions(timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_decision_symbol 
+                    ON decisions(symbol);
+                
+                -- Performance metrics indexes
                 CREATE INDEX IF NOT EXISTS idx_performance_metrics_type_timestamp 
                     ON performance_metrics(metric_type, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_performance_metrics_timestamp 
+                    ON performance_metrics(timestamp DESC);
+                
+                -- Model performance indexes
+                CREATE INDEX IF NOT EXISTS idx_model_performance_name_timestamp 
+                    ON model_performance(model_name, timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_model_performance_timestamp 
+                    ON model_performance(timestamp DESC);
             """))
             conn.commit()
             print("✓ Indexes created")

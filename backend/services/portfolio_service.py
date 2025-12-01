@@ -8,11 +8,13 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, desc, select
+from sqlalchemy import func, desc, select, case, cast
+from sqlalchemy.types import Numeric
 import structlog
 
-from backend.core.database import Position, Trade, TradeStatus, PositionStatus
+from backend.core.database import Position, Trade, TradeStatus, PositionStatus, TradeSide
 from backend.core.config import settings
+from backend.core.redis import get_cache, set_cache
 
 logger = structlog.get_logger()
 
@@ -24,41 +26,62 @@ class PortfolioService:
         """Get portfolio summary with positions and PnL.
         
         Uses database transaction to ensure data consistency across multiple queries.
+        Cached for 5 seconds to reduce database load.
         """
+        
+        # Check cache first
+        cache_key = "portfolio:summary"
+        cached = await get_cache(cache_key)
+        if cached:
+            logger.debug("portfolio_summary_cache_hit", cache_key=cache_key)
+            return cached
         
         # Use transaction to ensure consistent snapshot of data
         try:
             async with db.begin():
-                # Get all open positions
+                # Get initial balance from config (defaults to 10000.0)
+                initial_balance = Decimal(str(getattr(settings, 'initial_balance', 10000.0)))
+                
+                # Use SQL aggregation for open positions calculations
+                # Calculate positions value and unrealized PnL using SQL
+                open_positions_agg = select(
+                    func.count(Position.id).label('position_count'),
+                    func.sum(
+                        case(
+                            ((Position.current_price.isnot(None)) & (Position.quantity.isnot(None)),
+                             Position.current_price * Position.quantity),
+                            else_=0
+                        )
+                    ).label('positions_value'),
+                    func.sum(
+                        case(
+                            (Position.unrealized_pnl.isnot(None), Position.unrealized_pnl),
+                            else_=case(
+                                ((Position.current_price.isnot(None)) & (Position.quantity.isnot(None)) & (Position.side == TradeSide.BUY),
+                                 (Position.current_price - Position.entry_price) * Position.quantity),
+                                ((Position.current_price.isnot(None)) & (Position.quantity.isnot(None)) & (Position.side == TradeSide.SELL),
+                                 (Position.entry_price - Position.current_price) * Position.quantity),
+                                else_=0
+                            )
+                        )
+                    ).label('total_unrealized_pnl')
+                ).where(Position.status == PositionStatus.OPEN)
+                
+                result = await db.execute(open_positions_agg)
+                agg_result = result.first()
+                
+                # Extract aggregated values
+                position_count = agg_result.position_count or 0
+                positions_value = Decimal(str(agg_result.positions_value or 0))
+                total_unrealized_pnl = Decimal(str(agg_result.total_unrealized_pnl or 0))
+                
+                # Get position details for response (still need individual positions)
                 query = select(Position).where(Position.status == PositionStatus.OPEN)
                 result = await db.execute(query)
                 open_positions = result.scalars().all()
                 
-                # Get initial balance from config (defaults to 10000.0)
-                initial_balance = Decimal(str(getattr(settings, 'initial_balance', 10000.0)))
-                
-                # Calculate totals - start with initial balance
-                total_unrealized_pnl = Decimal("0.0")
-                positions_value = Decimal("0.0")
-                
-                positions_list = []
-                for pos in open_positions:
-                    if pos.current_price and pos.quantity:
-                        position_value = Decimal(str(pos.current_price)) * Decimal(str(pos.quantity))
-                        positions_value += position_value
-                        
-                        # Calculate unrealized PnL
-                        if pos.side.value == "BUY":
-                            unrealized = (Decimal(str(pos.current_price)) - Decimal(str(pos.entry_price))) * Decimal(str(pos.quantity))
-                        else:
-                            unrealized = (Decimal(str(pos.entry_price)) - Decimal(str(pos.current_price))) * Decimal(str(pos.quantity))
-                        
-                        if pos.unrealized_pnl:
-                            total_unrealized_pnl += Decimal(str(pos.unrealized_pnl))
-                        else:
-                            total_unrealized_pnl += unrealized
-                    
-                    positions_list.append({
+                positions_list = [
+                    {
                         "position_id": pos.position_id,
                         "symbol": pos.symbol,
                         "side": pos.side.value,
@@ -70,7 +93,9 @@ class PortfolioService:
                         "opened_at": pos.opened_at,
                         "stop_loss": pos.stop_loss,
                         "take_profit": pos.take_profit
-                    })
+                    }
+                    for pos in open_positions
+                ]
                 
                 # Calculate available balance (initial balance minus positions value)
                 available_balance = initial_balance - positions_value
@@ -86,27 +111,37 @@ class PortfolioService:
                     )
                     available_balance = Decimal("0.0")
                 
-                # Get realized PnL from closed positions
-                query = select(Position).where(Position.status == PositionStatus.CLOSED)
-                result = await db.execute(query)
-                closed_positions = result.scalars().all()
+                # Get realized PnL from closed positions using SQL aggregation
+                closed_positions_agg = select(
+                    func.sum(
+                        case(
+                            (Position.unrealized_pnl.isnot(None), Position.unrealized_pnl),
+                            else_=0
+                        )
+                    ).label('total_realized_pnl')
+                ).where(Position.status == PositionStatus.CLOSED)
                 
-                total_realized_pnl = Decimal("0.0")
-                for pos in closed_positions:
-                    if pos.unrealized_pnl:  # This would be realized PnL when closed
-                        total_realized_pnl += Decimal(str(pos.unrealized_pnl))
+                result = await db.execute(closed_positions_agg)
+                agg_result = result.first()
+                total_realized_pnl = Decimal(str(agg_result.total_realized_pnl or 0))
                 
                 # Calculate total portfolio value: initial balance + unrealized PnL + realized PnL
                 total_value = initial_balance + total_unrealized_pnl + total_realized_pnl
                 
-                return {
+                summary = {
                     "total_value": total_value,
                     "available_balance": available_balance,
-                    "open_positions": len(open_positions),
+                    "open_positions": position_count,
                     "total_unrealized_pnl": total_unrealized_pnl,
                     "total_realized_pnl": total_realized_pnl,
                     "positions": positions_list
                 }
+                
+                # Cache result for 5 seconds
+                await set_cache(cache_key, summary, ttl=5)
+                logger.debug("portfolio_summary_cache_set", cache_key=cache_key, ttl=5)
+                
+                return summary
                 
         except Exception as e:
             error_msg = str(e)
@@ -139,7 +174,15 @@ class PortfolioService:
         """Get performance metrics for specified period.
         
         Uses database transaction to ensure data consistency.
+        Cached for 30 seconds to reduce database load.
         """
+        
+        # Check cache first
+        cache_key = f"portfolio:performance:{days}"
+        cached = await get_cache(cache_key)
+        if cached:
+            logger.debug("portfolio_performance_cache_hit", cache_key=cache_key, days=days)
+            return cached
         
         # Use transaction to ensure consistent snapshot of data
         async with db.begin():
@@ -148,15 +191,24 @@ class PortfolioService:
                 end_date = datetime.utcnow()
                 start_date = end_date - timedelta(days=days)
                 
-                # Get trades in period
-                query = select(Trade).where(
+                # Use SQL aggregation for performance metrics
+                # Note: This assumes Trade model has pnl field or we calculate from positions
+                # For now, we'll use SQL aggregation for trade counts and basic metrics
+                metrics_query = select(
+                    func.count(Trade.id).label('total_trades'),
+                    # Note: Actual PnL calculation would require trade outcomes or position data
+                    # This is a placeholder structure for when trade PnL tracking is implemented
+                ).where(
                     Trade.executed_at >= start_date,
                     Trade.status == TradeStatus.EXECUTED
                 )
-                result = await db.execute(query)
-                trades = result.scalars().all()
                 
-                if not trades:
+                result = await db.execute(metrics_query)
+                metrics = result.first()
+                
+                total_trades = metrics.total_trades or 0
+                
+                if total_trades == 0:
                     return {
                         "total_return": 0,
                         "total_return_pct": 0,
@@ -170,26 +222,33 @@ class PortfolioService:
                         "sharpe_ratio": 0
                     }
                 
-                # Calculate metrics (simplified - actual implementation would need trade outcomes)
-                total_trades = len(trades)
-                winning_trades = 0  # Would need to calculate from trade outcomes
-                losing_trades = 0
-                total_profit = Decimal("0.0")
-                total_loss = Decimal("0.0")
+                # TODO: When trade PnL tracking is implemented, use SQL aggregation:
+                # winning_trades = func.sum(case((Trade.pnl > 0, 1), else_=0))
+                # losing_trades = func.sum(case((Trade.pnl < 0, 1), else_=0))
+                # total_profit = func.sum(case((Trade.pnl > 0, Trade.pnl), else_=0))
+                # total_loss = func.sum(case((Trade.pnl < 0, abs(Trade.pnl)), else_=0))
+                # average_win = func.avg(case((Trade.pnl > 0, Trade.pnl), else_=None))
+                # average_loss = func.avg(case((Trade.pnl < 0, Trade.pnl), else_=None))
                 
-                # For now, return placeholder metrics
-                return {
+                # Placeholder metrics until trade PnL tracking is implemented
+                metrics = {
                     "total_return": 0,
                     "total_return_pct": 0,
                     "win_rate": 0,
                     "total_trades": total_trades,
-                    "winning_trades": winning_trades,
-                    "losing_trades": losing_trades,
+                    "winning_trades": 0,
+                    "losing_trades": 0,
                     "average_win": 0,
                     "average_loss": 0,
                     "profit_factor": 0,
                     "sharpe_ratio": 0
                 }
+                
+                # Cache result for 30 seconds
+                await set_cache(cache_key, metrics, ttl=30)
+                logger.debug("portfolio_performance_cache_set", cache_key=cache_key, ttl=30, days=days)
+                
+                return metrics
                 
             except Exception as e:
                 logger.error(

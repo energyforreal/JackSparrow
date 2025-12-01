@@ -46,9 +46,15 @@ The agent's model discovery system is configured to:
 3. **Registration**: Models are registered in `MCPModelRegistry` for use in predictions
 
 ### Model Types Supported
-- **Classifiers**: Detect direction (buy/sell/hold) - have `predict_proba()` method
-- **Regressors**: Predict price movements - use `predict()` method
+- **Classifiers**: Predict trading signals directly (buy/sell/hold) - have `predict_proba()` method
+  - Training target: Signal labels based on return thresholds (BUY if return > 0.5%, SELL if return < -0.5%, HOLD otherwise)
+  - Output: Class probabilities or labels, normalized to [-1, 1] range
+- **Regressors**: Predict absolute future prices - use `predict()` method
+  - Training target: Future close prices (absolute values)
+  - Output: Absolute price values, converted to relative returns and normalized to [-1, 1] range
+  - Normalization: `(predicted_price - current_price) / current_price` → normalized to [-1, 1] with ±10% mapping to ±1.0
 - Both types are handled by the same `XGBoostNode` class which auto-detects the model type
+- Both model types output normalized values in [-1, 1] range for consensus calculation
 
 ### Model Usage
 Models are used by:

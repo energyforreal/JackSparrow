@@ -17,8 +17,9 @@ from agent.core.config import settings
 
 logger = structlog.get_logger()
 
-# Global Redis client
+# Global Redis client and connection pool
 _redis_client: Optional[Redis] = None
+_redis_pool: Optional[aioredis.ConnectionPool] = None
 _redis_connection_failed: bool = False
 _redis_optional: bool = True  # Agent can operate without Redis (event bus disabled)
 _reconnection_attempts: int = 0
@@ -49,7 +50,7 @@ async def _reconnect_redis() -> Optional[Redis]:
     Returns:
         Redis client or None if connection failed.
     """
-    global _redis_client, _redis_connection_failed, _reconnection_attempts, _last_reconnection_attempt
+    global _redis_client, _redis_pool, _redis_connection_failed, _reconnection_attempts, _last_reconnection_attempt
     
     # Calculate exponential backoff delay
     if _reconnection_attempts > 0:
@@ -65,14 +66,19 @@ async def _reconnect_redis() -> Optional[Redis]:
     _last_reconnection_attempt = time.time()
     
     try:
-        client = await aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=3,
-            retry_on_error=[ConnectionError, TimeoutError],
-            retry_on_timeout=True,
-        )
+        # Use connection pool for better concurrency
+        if _redis_pool is None:
+            _redis_pool = aioredis.ConnectionPool.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                max_connections=50,  # Maximum pool size
+                socket_connect_timeout=3,
+                retry_on_error=[ConnectionError, TimeoutError],
+                retry_on_timeout=True,
+            )
+        
+        client = aioredis.Redis(connection_pool=_redis_pool)
         
         # Verify connection with ping
         if await _check_redis_health(client):
@@ -81,7 +87,8 @@ async def _reconnect_redis() -> Optional[Redis]:
             _reconnection_attempts = 0
             logger.info(
                 "agent_redis_reconnected",
-                attempts=_reconnection_attempts
+                attempts=_reconnection_attempts,
+                pool_size=50
             )
             return client
         else:
@@ -180,8 +187,8 @@ async def get_redis() -> Optional[Redis]:
 
 
 async def close_redis():
-    """Close Redis connection."""
-    global _redis_client, _redis_connection_failed, _reconnection_attempts
+    """Close Redis connection and connection pool."""
+    global _redis_client, _redis_pool, _redis_connection_failed, _reconnection_attempts
     
     if _redis_client is not None:
         try:
@@ -192,6 +199,17 @@ async def close_redis():
                 error=str(e)
             )
         _redis_client = None
+    
+    if _redis_pool is not None:
+        try:
+            await _redis_pool.disconnect()
+        except Exception as e:
+            logger.warning(
+                "agent_redis_pool_close_error",
+                error=str(e)
+            )
+        _redis_pool = None
+    
     _redis_connection_failed = False
     _reconnection_attempts = 0
 

@@ -71,9 +71,15 @@ class RiskManager:
             signal = payload.get("signal")
             position_size = payload.get("position_size", 0.0)
             confidence = payload.get("confidence", 0.0)
+            exit_reason = payload.get("exit_reason")
             
             # Skip HOLD signals
             if signal == "HOLD":
+                return
+            
+            # Skip exit decisions - they are handled directly by execution module
+            # Exit decisions come from risk manager itself when monitoring positions
+            if exit_reason or event.source == "risk_manager":
                 return
 
             # Enforce minimum confidence threshold
@@ -217,12 +223,35 @@ class RiskManager:
             return
         
         try:
+            payload = event.payload
+            symbol = payload.get("symbol")
+            current_price = payload.get("price", 0.0)
+            
             # Check portfolio heat continuously
             context = self.context_manager.get_current_context()
-            if context.position:
-                # Monitor position for stop loss / take profit
-                # This would be handled by execution module
-                pass
+            if not context.position:
+                return  # No position to monitor
+            
+            # Verify this tick is for our position symbol
+            position_symbol = context.position.get("symbol")
+            if position_symbol != symbol:
+                return  # Not our position symbol
+            
+            # Check exit conditions (stop loss / take profit)
+            exit_reason = await self._check_exit_conditions(
+                symbol=symbol,
+                current_price=current_price,
+                position=context.position
+            )
+            
+            if exit_reason:
+                # Emit exit decision
+                await self._emit_exit_decision(
+                    symbol=symbol,
+                    exit_reason=exit_reason,
+                    current_price=current_price
+                )
+                
         except Exception as e:
             logger.error(
                 "risk_manager_market_tick_error",
@@ -559,4 +588,153 @@ class RiskManager:
             return entry_price * (1 + self.take_profit_pct)
         else:
             return entry_price * (1 - self.take_profit_pct)
+    
+    async def _check_exit_conditions(
+        self,
+        symbol: str,
+        current_price: float,
+        position: Dict[str, Any]
+    ) -> Optional[str]:
+        """Check if exit conditions (stop loss or take profit) are met.
+        
+        Args:
+            symbol: Trading symbol
+            current_price: Current market price
+            position: Position dictionary from context
+            
+        Returns:
+            Exit reason if condition met, None otherwise
+        """
+        if not position:
+            return None
+        
+        entry_price = float(position.get("entry_price", 0.0))
+        side = position.get("side")
+        stop_loss = position.get("stop_loss")
+        take_profit = position.get("take_profit")
+        
+        if not entry_price or not side:
+            return None
+        
+        # Calculate stop loss and take profit if not stored
+        if not stop_loss:
+            stop_loss = self.calculate_stop_loss(entry_price, side)
+        if not take_profit:
+            take_profit = self.calculate_take_profit(entry_price, side)
+        
+        # Check stop loss
+        if side == "BUY":
+            # For long position: exit if price drops to or below stop loss
+            if current_price <= stop_loss:
+                logger.warning(
+                    "stop_loss_triggered",
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    stop_loss=stop_loss,
+                    side=side
+                )
+                return "stop_loss"
+            # For long position: exit if price rises to or above take profit
+            if current_price >= take_profit:
+                logger.info(
+                    "take_profit_triggered",
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    take_profit=take_profit,
+                    side=side
+                )
+                return "take_profit"
+        else:  # SELL (short position)
+            # For short position: exit if price rises to or above stop loss
+            if current_price >= stop_loss:
+                logger.warning(
+                    "stop_loss_triggered",
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    stop_loss=stop_loss,
+                    side=side
+                )
+                return "stop_loss"
+            # For short position: exit if price drops to or below take profit
+            if current_price <= take_profit:
+                logger.info(
+                    "take_profit_triggered",
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    current_price=current_price,
+                    take_profit=take_profit,
+                    side=side
+                )
+                return "take_profit"
+        
+        return None
+    
+    async def _emit_exit_decision(
+        self,
+        symbol: str,
+        exit_reason: str,
+        current_price: float
+    ):
+        """Emit exit decision event when exit condition is met.
+        
+        Args:
+            symbol: Trading symbol
+            exit_reason: Reason for exit (stop_loss, take_profit)
+            current_price: Current market price
+        """
+        try:
+            context = self.context_manager.get_current_context()
+            position = context.position
+            if not position:
+                return
+            
+            # Determine exit signal based on position side
+            position_side = position.get("side")
+            if position_side == "BUY":
+                exit_signal = "SELL"  # Close long position
+            else:
+                exit_signal = "BUY"  # Close short position
+            
+            # Create exit decision event
+            exit_decision = DecisionReadyEvent(
+                source="risk_manager",
+                payload={
+                    "symbol": symbol,
+                    "signal": exit_signal,
+                    "confidence": 1.0,  # High confidence for stop loss/take profit exits
+                    "position_size": 0.0,  # Full position exit
+                    "exit_reason": exit_reason,
+                    "current_price": current_price,
+                    "reasoning_chain": {
+                        "exit_reason": exit_reason,
+                        "triggered_at_price": current_price,
+                        "position_side": position_side,
+                        "entry_price": position.get("entry_price")
+                    },
+                    "timestamp": datetime.utcnow()
+                }
+            )
+            
+            await event_bus.publish(exit_decision)
+            
+            logger.info(
+                "exit_decision_emitted",
+                symbol=symbol,
+                exit_reason=exit_reason,
+                exit_signal=exit_signal,
+                current_price=current_price,
+                event_id=exit_decision.event_id
+            )
+            
+        except Exception as e:
+            logger.error(
+                "exit_decision_emit_failed",
+                symbol=symbol,
+                exit_reason=exit_reason,
+                error=str(e),
+                exc_info=True
+            )
 

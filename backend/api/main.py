@@ -6,6 +6,7 @@ Main application initialization with routes, middleware, and lifecycle events.
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import asyncio
@@ -18,6 +19,7 @@ from sqlalchemy import text
 
 from backend.core.config import settings
 from backend.core.logging import configure_logging, log_error_with_context, get_session_id
+from backend.core.exceptions import BackendException
 
 # Configure logging and get session ID
 SESSION_ID = configure_logging()
@@ -177,6 +179,12 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "X-Process-Time", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
+# GZip compression middleware (compress responses > 1000 bytes)
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000,  # Only compress responses larger than 1KB
+)
+
 
 # Request ID middleware
 @app.middleware("http")
@@ -234,6 +242,42 @@ async def root():
 
 
 # Global exception handler
+@app.exception_handler(BackendException)
+async def backend_exception_handler(request: Request, exc: BackendException):
+    """Handle custom backend exceptions."""
+    request_id = getattr(request.state, "request_id", None)
+    
+    # Log the exception
+    log_error_with_context(
+        "backend_exception",
+        error=exc,
+        component="backend_exception_handler",
+        request_id=request_id,
+        error_code=exc.error_code,
+        path=request.url.path,
+        method=request.method,
+    )
+    
+    status_code = 500
+    if exc.error_code == "VALIDATION_ERROR":
+        status_code = 400
+    elif exc.error_code == "RATE_LIMIT_EXCEEDED":
+        status_code = 429
+    
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": exc.error_code,
+                "message": exc.message,
+                "request_id": request_id,
+                "details": exc.details,
+                "timestamp": time.time()
+            }
+        }
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler for unhandled exceptions."""

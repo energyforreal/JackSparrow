@@ -16,6 +16,7 @@ from agent.events.schemas import (
     OrderSubmittedEvent,
     OrderFillEvent,
     ExecutionFailedEvent,
+    PositionClosedEvent,
     EventType
 )
 from agent.core.context_manager import context_manager
@@ -36,6 +37,7 @@ class ExecutionModule:
     async def initialize(self):
         """Initialize execution module and register event handlers."""
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
+        event_bus.subscribe(EventType.DECISION_READY, self._handle_exit_decision)
     
     async def shutdown(self):
         """Shutdown execution module."""
@@ -168,6 +170,12 @@ class ExecutionModule:
                 )
                 await event_bus.publish(fill_event)
                 
+                # Calculate stop loss and take profit levels
+                from agent.risk.risk_manager import RiskManager
+                risk_manager = RiskManager()
+                stop_loss_price = risk_manager.calculate_stop_loss(fill_price, side)
+                take_profit_price = risk_manager.calculate_take_profit(fill_price, side)
+                
                 # Update context
                 self.context_manager.update_context({
                     "trade": {
@@ -183,8 +191,11 @@ class ExecutionModule:
                         "side": side,
                         "quantity": quantity,
                         "entry_price": fill_price,
+                        "stop_loss": stop_loss_price,
+                        "take_profit": take_profit_price,
                         "timestamp": datetime.utcnow().isoformat()
-                    }
+                    },
+                    "position_opened": True
                 })
                 
                 logger.info(
@@ -231,6 +242,152 @@ class ExecutionModule:
                 component="execution_module",
                 correlation_id=event.event_id if hasattr(event, "event_id") else None,
                 event_type=event.event_type.value if hasattr(event, "event_type") else None
+            )
+    
+    async def _handle_exit_decision(self, event):
+        """Handle exit decision event to close position.
+        
+        Args:
+            event: DecisionReadyEvent with signal indicating exit
+        """
+        from agent.events.schemas import DecisionReadyEvent
+        
+        # Only handle exit decisions (CLOSE signal or when already in position)
+        if not isinstance(event, DecisionReadyEvent):
+            return
+        
+        payload = event.payload
+        signal = payload.get("signal")
+        
+        # Check if this is an exit signal
+        context = self.context_manager.get_current_context()
+        if not context.position:
+            return  # No position to close
+        
+        # Exit signals: CLOSE, or opposite signal when in position
+        position_side = context.position.get("side")
+        is_exit_signal = (
+            signal == "CLOSE" or
+            (signal in ["SELL", "STRONG_SELL"] and position_side == "BUY") or
+            (signal in ["BUY", "STRONG_BUY"] and position_side == "SELL")
+        )
+        
+        if not is_exit_signal:
+            return
+        
+        try:
+            symbol = payload.get("symbol") or context.position.get("symbol")
+            position_quantity = context.position.get("quantity", 0.0)
+            entry_price = context.position.get("entry_price", 0.0)
+            entry_timestamp_str = context.position.get("timestamp")
+            
+            # Calculate exit side (opposite of entry)
+            exit_side = "SELL" if position_side == "BUY" else "BUY"
+            
+            # Get current price for exit
+            try:
+                ticker = await self.delta_client.get_ticker(symbol)
+                exit_price = ticker.get("close") if ticker else entry_price
+            except Exception:
+                exit_price = entry_price
+            
+            order_id = str(uuid.uuid4())
+            
+            # Execute exit trade
+            if settings.paper_trading_mode:
+                # Simulate exit trade
+                result = {
+                    "id": str(uuid.uuid4()),
+                    "symbol": symbol,
+                    "side": exit_side,
+                    "quantity": position_quantity,
+                    "price": exit_price,
+                    "status": "filled",
+                    "paper_trading": True
+                }
+            else:
+                # Real exit trade
+                result = await self.delta_client.place_order(
+                    symbol=symbol,
+                    side=exit_side,
+                    quantity=position_quantity,
+                    order_type="MARKET",
+                    price=None
+                )
+            
+            trade_id = result.get("id", str(uuid.uuid4()))
+            fill_price = result.get("price", exit_price)
+            
+            # Calculate PnL
+            if position_side == "BUY":
+                pnl = (fill_price - entry_price) * position_quantity
+            else:
+                pnl = (entry_price - fill_price) * position_quantity
+            
+            # Calculate duration
+            duration_seconds = 0.0
+            if entry_timestamp_str:
+                try:
+                    entry_timestamp = datetime.fromisoformat(entry_timestamp_str.replace('Z', '+00:00'))
+                    duration_seconds = (datetime.utcnow() - entry_timestamp.replace(tzinfo=None)).total_seconds()
+                except Exception:
+                    pass
+            
+            # Determine exit reason
+            exit_reason = payload.get("exit_reason", "signal_reversal")
+            if not exit_reason:
+                # Check if stop loss or take profit was hit
+                stop_loss = context.position.get("stop_loss")
+                take_profit = context.position.get("take_profit")
+                if stop_loss and fill_price <= stop_loss:
+                    exit_reason = "stop_loss"
+                elif take_profit and fill_price >= take_profit:
+                    exit_reason = "take_profit"
+                else:
+                    exit_reason = "signal_reversal"
+            
+            # Emit PositionClosedEvent
+            position_closed_event = PositionClosedEvent(
+                source="execution_module",
+                correlation_id=event.event_id,
+                payload={
+                    "position_id": context.position.get("position_id", trade_id),
+                    "symbol": symbol,
+                    "entry_price": entry_price,
+                    "exit_price": fill_price,
+                    "pnl": pnl,
+                    "duration_seconds": duration_seconds,
+                    "exit_reason": exit_reason,
+                    "timestamp": datetime.utcnow()
+                }
+            )
+            await event_bus.publish(position_closed_event)
+            
+            # Clear position from context and set position_closed flag
+            self.context_manager.update_context({
+                "position": None,
+                "position_opened": False,
+                "position_closed": True
+            })
+            
+            logger.info(
+                "position_closed",
+                position_id=position_closed_event.payload["position_id"],
+                symbol=symbol,
+                entry_price=entry_price,
+                exit_price=fill_price,
+                pnl=pnl,
+                exit_reason=exit_reason,
+                event_id=position_closed_event.event_id
+            )
+            
+        except Exception as e:
+            log_error_with_context(
+                "exit_trade_execution_failed",
+                error=e,
+                component="execution_module",
+                correlation_id=event.event_id if hasattr(event, "event_id") else None,
+                symbol=context.position.get("symbol") if context.position else None
             )
 
 

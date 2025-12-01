@@ -625,15 +625,29 @@ Include the checklist in runbooks so operators know which mitigation should trig
 
 ### Trade Execution Flow
 
+**Entry Flow:**
 ```
 1. Decision Engine → Generate trade decision
 2. Risk Manager → Validate risk limits
 3. Execution Engine → Place order via Delta Exchange
 4. Order Management → Track order status
-5. Position Manager → Update positions
-6. Learning System → Record decision for learning
+5. Position Manager → Update positions (with stop loss/take profit)
+6. State Machine → Transition to MONITORING_POSITION
 7. WebSocket → Broadcast trade execution
 8. Database → Store trade record
+```
+
+**Exit Flow:**
+```
+1. Market Data Service → Emit MarketTickEvent on price updates
+2. Risk Manager → Check exit conditions (stop loss/take profit)
+3. Risk Manager → Emit exit DecisionReadyEvent when condition met
+4. Execution Engine → Execute exit trade (opposite side)
+5. Execution Engine → Emit PositionClosedEvent with PnL
+6. State Machine → Transition MONITORING_POSITION → OBSERVING
+7. Learning System → Record trade outcome for learning
+8. WebSocket → Broadcast position closed
+9. Database → Update trade record with exit details
 ```
 
 ### Learning Flow

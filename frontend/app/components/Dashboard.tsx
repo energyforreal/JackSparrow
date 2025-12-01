@@ -12,12 +12,14 @@ import { PerformanceChart } from './PerformanceChart'
 import { ReasoningChainView } from './ReasoningChainView'
 import { ModelReasoningView } from './ModelReasoningView'
 import { TradingDecision } from './TradingDecision'
+import { RealTimePrice } from './RealTimePrice'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useAgent } from '@/hooks/useAgent'
 import { apiClient } from '@/services/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Signal, HealthStatus, ReasoningStep } from '@/types'
+import { normalizeConfidenceToPercent } from '@/utils/formatters'
 
 // Get WebSocket URL from environment variable
 // In production, NEXT_PUBLIC_WS_URL must be set
@@ -42,13 +44,17 @@ export function Dashboard() {
   const positions = portfolio?.positions || []
 
   // State for data that needs to be fetched separately
+  // Use signal from hook as primary source, only override with WebSocket updates
   const [signal, setSignal] = useState<Signal | null>(signalFromHook || null)
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [reasoningChain, setReasoningChain] = useState<ReasoningStep[]>([])
   const [performanceData, setPerformanceData] = useState<Array<{ date: string; value: number }>>([])
   const [isLoading, setIsLoading] = useState(true)
+  // Track if we've received a WebSocket signal update to prioritize it over initial fetch
+  const [hasWebSocketSignal, setHasWebSocketSignal] = useState(false)
 
   // Fetch initial data on mount (independent of WebSocket)
+  // Only fetch signal if we haven't received one via WebSocket yet
   useEffect(() => {
     const fetchInitialData = async () => {
       setIsLoading(true)
@@ -92,28 +98,55 @@ export function Dashboard() {
           console.debug('Could not fetch performance metrics:', perfError)
         }
 
-        // Fetch latest prediction for signal
-        try {
-          const prediction = await apiClient.getPrediction()
-          if (prediction) {
-            setSignal({
-              signal: prediction.signal,
-              confidence: prediction.confidence,
-              timestamp: prediction.timestamp
-            })
-            if (prediction.reasoning_chain) {
-              setReasoningChain(
-                Array.isArray(prediction.reasoning_chain)
-                  ? prediction.reasoning_chain
-                  : []
-              )
+        // Only fetch signal if we haven't received one via WebSocket
+        // This prevents stale initial data from overriding real-time updates
+        if (!hasWebSocketSignal) {
+          try {
+            const prediction = await apiClient.getPrediction()
+            if (prediction) {
+              // Only set if we still haven't received WebSocket update
+              setSignal((currentSignal) => {
+                // Don't override if we've already received a WebSocket signal
+                if (hasWebSocketSignal || (currentSignal && currentSignal.timestamp)) {
+                  return currentSignal
+                }
+
+                const normalizedConfidence = normalizeConfidenceToPercent(
+                  prediction.confidence
+                )
+
+                return {
+                  signal: prediction.signal as Signal['signal'],
+                  confidence: normalizedConfidence,
+                  model_consensus: prediction.model_consensus ?? [],
+                  individual_model_reasoning:
+                    prediction.individual_model_reasoning ?? [],
+                  model_predictions: prediction.model_predictions ?? [],
+                  reasoning_chain:
+                    prediction.reasoning_chain?.steps ?? [],
+                  reasoning_chain_full: prediction.reasoning_chain,
+                  agent_decision_reasoning:
+                    prediction.reasoning_chain?.conclusion,
+                  symbol:
+                    (prediction.market_context?.symbol as string | undefined) ??
+                    'BTCUSD',
+                  timestamp: prediction.timestamp,
+                }
+              })
+              if (prediction.reasoning_chain && !hasWebSocketSignal) {
+                setReasoningChain(
+                  Array.isArray(prediction.reasoning_chain.steps)
+                    ? prediction.reasoning_chain.steps
+                    : []
+                )
+              }
             }
+          } catch (err) {
+            // Prediction fetch is optional - log for debugging
+            const errorMessage = err instanceof Error ? err.message : String(err)
+            console.warn('Could not fetch prediction:', errorMessage)
+            // Don't set signal state - leave it null to show "No signal available"
           }
-        } catch (err) {
-          // Prediction fetch is optional - log for debugging
-          const errorMessage = err instanceof Error ? err.message : String(err)
-          console.warn('Could not fetch prediction:', errorMessage)
-          // Don't set signal state - leave it null to show "No signal available"
         }
       } catch (error) {
         console.error('Error fetching initial dashboard data:', error)
@@ -123,23 +156,29 @@ export function Dashboard() {
     }
 
     fetchInitialData()
-  }, [])
+  }, [hasWebSocketSignal, portfolio?.total_value])
 
-  // Sync signal from hook
+  // Sync signal from hook (which also receives WebSocket updates)
   useEffect(() => {
     if (signalFromHook) {
-      setSignal(signalFromHook)
-      if (signalFromHook.reasoning_chain) {
-        setReasoningChain(
-          Array.isArray(signalFromHook.reasoning_chain)
-            ? signalFromHook.reasoning_chain
-            : []
-        )
+      // Check if this signal is newer than current signal
+      const shouldUpdate = !signal || !signal.timestamp || 
+        (signalFromHook.timestamp && new Date(signalFromHook.timestamp) > new Date(signal.timestamp))
+      
+      if (shouldUpdate) {
+        setSignal(signalFromHook)
+        if (signalFromHook.reasoning_chain) {
+          setReasoningChain(
+            Array.isArray(signalFromHook.reasoning_chain)
+              ? signalFromHook.reasoning_chain
+              : []
+          )
+        }
       }
     }
   }, [signalFromHook])
 
-  // Update data from WebSocket messages
+  // Update data from WebSocket messages - PRIORITIZE these updates
   useEffect(() => {
     if (lastMessage) {
       switch (lastMessage.type) {
@@ -148,13 +187,23 @@ export function Dashboard() {
           break
         case 'signal_update':
           const signalData = lastMessage.data as Signal
-          setSignal(signalData)
-          if (signalData?.reasoning_chain) {
-            setReasoningChain(
-              Array.isArray(signalData.reasoning_chain)
-                ? signalData.reasoning_chain
-                : []
-            )
+          // Always replace signal on WebSocket update - these are real-time
+          if (signalData) {
+            setHasWebSocketSignal(true)
+            setSignal(signalData)
+            if (signalData?.reasoning_chain) {
+              setReasoningChain(
+                Array.isArray(signalData.reasoning_chain)
+                  ? signalData.reasoning_chain
+                  : []
+              )
+            }
+            // Log for debugging
+            console.log('Signal update received via WebSocket:', {
+              signal: signalData.signal,
+              confidence: signalData.confidence,
+              timestamp: signalData.timestamp
+            })
           }
           break
         case 'performance_update':
@@ -190,8 +239,11 @@ export function Dashboard() {
           </Card>
         )}
         
-        {/* Top Row: Agent Status, Signal Indicator, Health Monitor */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* Top Row: Real-Time Price, Agent Status, Signal Indicator, Health Monitor */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <ErrorBoundary>
+            <RealTimePrice symbol="BTCUSD" />
+          </ErrorBoundary>
           <ErrorBoundary>
             <AgentStatus 
               state={agentState} 
@@ -248,6 +300,7 @@ export function Dashboard() {
         <ErrorBoundary>
           <ReasoningChainView 
             reasoningChain={reasoningChain}
+            chainMeta={signal?.reasoning_chain_full}
             overallConfidence={signal?.confidence}
           />
         </ErrorBoundary>

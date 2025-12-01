@@ -11,6 +11,35 @@ export function formatPercent(value: number): string {
   return `${(value * 100).toFixed(2)}%`
 }
 
+/**
+ * Normalize a confidence value to a 0-100 percentage.
+ *
+ * Backends sometimes return confidences in the 0-1 range while
+ * WebSocket payloads may already be in 0-100. This helper accepts
+ * either and always returns a clamped percentage for display.
+ */
+export function normalizeConfidenceToPercent(
+  value: number | null | undefined
+): number {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return 0
+  }
+
+  // If the value already looks like a percentage, clamp to [0, 100].
+  if (value > 1) {
+    if (value < 0) return 0
+    if (value > 100) return 100
+    return value
+  }
+
+  // Treat as 0-1 float and convert to percentage.
+  if (value < 0) {
+    return 0
+  }
+
+  return Math.min(100, Math.max(0, value * 100))
+}
+
 function normalizeDate(date: Date | string): Date {
   return typeof date === 'string' ? new Date(date) : date
 }

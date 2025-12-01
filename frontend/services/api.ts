@@ -187,8 +187,36 @@ class ApiClient {
     signal: string
     confidence: number
     position_size?: number
-    reasoning_chain: unknown
-    model_predictions: unknown[]
+    reasoning_chain: {
+      chain_id: string
+      timestamp: string
+      steps: Array<{
+        step_number: number
+        step_name: string
+        description: string
+        confidence: number
+        evidence?: string[]
+      }>
+      conclusion: string
+      final_confidence: number
+    }
+    model_predictions: Array<{
+      model_name: string
+      prediction: number
+      confidence: number
+      reasoning: string
+    }>
+    model_consensus: Array<{
+      model_name: string
+      signal: string
+      confidence: number
+    }>
+    individual_model_reasoning: Array<{
+      model_name: string
+      reasoning: string
+      confidence: number
+    }>
+    market_context?: Record<string, unknown>
     timestamp: string
   }> {
     return this.request('/api/v1/predict', {

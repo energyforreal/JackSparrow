@@ -148,6 +148,42 @@ class MCPOrchestrator:
         context["symbol"] = symbol
         context["feature_names"] = list(features_dict.keys())
         
+        # Extract current price for regressor normalization
+        # Try multiple sources: market_context, feature metadata, or compute from latest candle
+        current_price = None
+        
+        # Try from market_context first
+        if "current_price" in context:
+            current_price = context["current_price"]
+        elif "market_data" in context:
+            market_data = context["market_data"]
+            if "price" in market_data:
+                current_price = market_data["price"]
+            elif "close" in market_data:
+                current_price = market_data["close"]
+            elif "candles" in market_data and market_data["candles"]:
+                # Get latest candle close price
+                latest_candle = market_data["candles"][-1]
+                if isinstance(latest_candle, dict) and "close" in latest_candle:
+                    current_price = latest_candle["close"]
+        
+        # If still not found, try to get from feature server's market data
+        if current_price is None:
+            # Feature server should have access to latest candles
+            # We can try to get it from the feature metadata or request it separately
+            # For now, we'll log a warning and let the regressor use fallback normalization
+            import structlog
+            logger = structlog.get_logger()
+            logger.warning(
+                "current_price_not_found_in_context",
+                symbol=symbol,
+                message="Current price not found in context. Regressor models will use fallback normalization."
+            )
+        
+        # Add current_price to context for regressor normalization
+        if current_price is not None:
+            context["current_price"] = float(current_price)
+        
         model_response = await self.get_predictions(
             features=list(features_dict.values()),
             context=context,

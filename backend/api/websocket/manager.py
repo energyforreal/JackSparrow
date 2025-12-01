@@ -210,8 +210,9 @@ class WebSocketManager:
         disconnected = []
         for websocket in self.active_connections:
             try:
-                # If channel specified, only send to subscribed clients
-                if channel and websocket in self.subscriptions:
+                # If channel specified AND client has subscriptions, filter by channel
+                # Otherwise, send to all clients (for backward compatibility and default behavior)
+                if channel and websocket in self.subscriptions and self.subscriptions[websocket]:
                     if channel not in self.subscriptions[websocket]:
                         continue
                 

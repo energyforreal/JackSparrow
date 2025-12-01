@@ -374,5 +374,6 @@ class PositionClosedEvent(BaseEvent):
         exit_price: float
         pnl: float
         duration_seconds: float
+        exit_reason: str  # stop_loss, take_profit, manual, signal_reversal
         timestamp: datetime
 

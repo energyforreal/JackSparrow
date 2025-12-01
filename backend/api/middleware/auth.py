@@ -8,6 +8,7 @@ from fastapi import Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from typing import Optional
+import secrets
 
 from backend.core.config import settings
 
@@ -51,7 +52,7 @@ async def verify_api_key(request: Request) -> bool:
         return False
     
     # Compare securely to prevent timing attacks
-    is_valid = api_key == settings.api_key
+    is_valid = secrets.compare_digest(api_key, settings.api_key)
     
     if not is_valid:
         logger.warning(

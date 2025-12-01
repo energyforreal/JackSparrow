@@ -168,6 +168,22 @@ The project includes a comprehensive price prediction training script (`scripts/
 - **Multiple Model Types**: XGBoost Regressor, XGBoost Classifier, LSTM Regressor, LSTM Classifier
 - **Google Colab Optimized**: Designed for cloud training environments
 
+### Regressor vs Classifier: Key Differences
+
+**Regressor Models**:
+- **Predict**: Absolute future prices (e.g., $50,500)
+- **Training**: Uses future close prices as targets
+- **Normalization**: Converts absolute price to relative return, then normalizes to [-1, 1]
+- **Use Case**: Price prediction with magnitude information
+
+**Classifier Models**:
+- **Predict**: Trading signals directly (BUY/SELL/HOLD)
+- **Training**: Uses return-based signal labels (BUY if return > 0.5%, SELL if return < -0.5%, HOLD otherwise)
+- **Normalization**: Directly normalizes probabilities/class labels to [-1, 1]
+- **Use Case**: Direct signal classification without price magnitude
+
+**Consensus Calculation**: Both model types output normalized values in [-1, 1] range, allowing them to be combined in weighted consensus calculations.
+
 ### Delta Exchange API Limitations
 
 The training script properly handles Delta Exchange API constraints:
@@ -230,9 +246,22 @@ python scripts/train_price_prediction_models.py \
 
 #### 1. XGBoost Regressor
 
-**Purpose**: Predict future price (continuous value)
+**Purpose**: Predict absolute future price (continuous value)
 
-**Output**: Future price value
+**Training Target**: Future close price (e.g., if current price is $50,000, predicts $50,500)
+
+**Raw Output**: Absolute price value (e.g., 50500.0)
+
+**Normalization**: The agent automatically converts regressor outputs to relative returns:
+1. Calculates return percentage: `(predicted_price - current_price) / current_price`
+2. Normalizes return to [-1, 1] range: ±10% return maps to ±1.0
+3. Returns beyond ±10% are clamped to ±1.0
+
+**Example**: 
+- Current price: $50,000
+- Predicted price: $50,500
+- Return: +1.0%
+- Normalized output: +0.1 (in [-1, 1] range)
 
 **Usage**:
 ```python
@@ -246,15 +275,26 @@ with open(model_path, "rb") as f:
     model = pickle.load(f)
 
 # Predict
-features = np.array([[...]])  # 49 features
-predicted_price = model.predict(features)
+features = np.array([[...]])  # 50 features
+predicted_price = model.predict(features)  # Absolute price value
 ```
+
+**Note**: When used in the agent, regressor predictions are automatically normalized to [-1, 1] range using current price from context. If current price is not available, a fallback normalization is used.
 
 #### 2. XGBoost Classifier
 
-**Purpose**: Predict trading signal (buy/sell/hold)
+**Purpose**: Predict trading signal directly (buy/sell/hold)
 
-**Output**: Class label (0=SELL, 1=HOLD, 2=BUY) with probabilities
+**Training Target**: Trading signals based on return thresholds:
+- `1` (BUY) if return > 0.5%
+- `-1` (SELL) if return < -0.5%
+- `0` (HOLD) otherwise
+
+**Raw Output**: Class probabilities or class labels
+
+**Normalization**: Classifier outputs are normalized to [-1, 1] range:
+- Probability output [0, 1] → [-1, 1]: `(probability - 0.5) * 2.0`
+- Class label (0 or 1) → [-1, 1]: `(label * 2.0) - 1.0`
 
 **Usage**:
 ```python
@@ -268,10 +308,12 @@ with open(model_path, "rb") as f:
     model = pickle.load(f)
 
 # Predict
-features = np.array([[...]])  # 49 features
-signal = model.predict(features)  # 0, 1, or 2
-probabilities = model.predict_proba(features)  # [P(SELL), P(HOLD), P(BUY)]
+features = np.array([[...]])  # 50 features
+signal = model.predict(features)  # 0, 1, or 2 (or -1, 0, 1 depending on training)
+probabilities = model.predict_proba(features)  # [P(SELL), P(HOLD), P(BUY)] or [P(0), P(1)]
 ```
+
+**Note**: Classifier models directly predict trading signals, so their outputs are more directly interpretable as buy/sell/hold decisions compared to regressors.
 
 #### 3. LSTM Regressor
 

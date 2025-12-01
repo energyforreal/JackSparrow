@@ -165,19 +165,49 @@ class MCPModelRegistry:
                 timestamp=datetime.utcnow()
             )
         
-        # Get predictions from all models in parallel
+        # Get predictions from all models in parallel with timeout per model
         predictions: List[MCPModelPrediction] = []
         failed_models = []
         
+        # Timeout per model: 5 seconds (prevents slow models from blocking others)
+        MODEL_PREDICTION_TIMEOUT = 5.0
+        
         tasks = []
         for model in self.models.values():
-            tasks.append(self._get_prediction_safe(model, request))
+            # Wrap each prediction with timeout
+            task = asyncio.wait_for(
+                self._get_prediction_safe(model, request),
+                timeout=MODEL_PREDICTION_TIMEOUT
+            )
+            tasks.append(task)
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         for i, result in enumerate(results):
             if isinstance(result, MCPModelPrediction):
                 predictions.append(result)
+            elif isinstance(result, asyncio.TimeoutError):
+                # Model prediction timed out
+                model_name = list(self.models.keys())[i] if i < len(self.models) else "unknown"
+                failed_models.append(model_name)
+                logger.warning(
+                    "model_registry_prediction_timeout",
+                    model_name=model_name,
+                    timeout=MODEL_PREDICTION_TIMEOUT,
+                    message="Model prediction timed out - model will be excluded from consensus"
+                )
+                # Create a degraded prediction for timeout
+                predictions.append(MCPModelPrediction(
+                    model_name=model_name,
+                    model_version="unknown",
+                    prediction=0.0,
+                    confidence=0.0,
+                    reasoning=f"Model prediction timed out after {MODEL_PREDICTION_TIMEOUT}s",
+                    features_used=[],
+                    feature_importance={},
+                    computation_time_ms=MODEL_PREDICTION_TIMEOUT * 1000,
+                    health_status="degraded"
+                ))
             elif isinstance(result, Exception):
                 # Exception was raised despite _get_prediction_safe wrapper
                 # This should be rare, but handle it gracefully

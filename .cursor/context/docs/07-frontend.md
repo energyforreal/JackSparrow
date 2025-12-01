@@ -45,6 +45,7 @@ frontend/
 │   │   ├── PerformanceChart.tsx
 │   │   ├── HealthMonitor.tsx
 │   │   ├── ReasoningChainView.tsx
+│   │   ├── ModelReasoningView.tsx
 │   │   └── LearningReport.tsx
 │   └── api/                    # API routes (if needed)
 ├── hooks/
@@ -371,6 +372,33 @@ interface ReasoningChainViewProps {
 - Confidence bars
 - Evidence tags
 - Conclusion section
+
+---
+
+### ModelReasoningView Component
+
+**File**: `app/components/ModelReasoningView.tsx`
+
+**Purpose**: Display model consensus showing how individual ML models contribute to the overall prediction.
+
+**Props**:
+```typescript
+interface ModelReasoningViewProps {
+  modelConsensus?: ModelConsensus[];
+  // Individual model reasoning data is accepted but not displayed
+  // to keep the UI focused on consensus signals.
+  individualModelReasoning?: ModelReasoning[];
+}
+```
+
+**Features**:
+- Model consensus breakdown showing each model's signal and confidence
+- Color-coded signal badges (STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL)
+- Confidence progress bars for each model
+- Model name display with timeframe information
+- Clean, focused UI showing only consensus-level information
+
+**Note**: The component intentionally displays only the Model Consensus section. Individual model reasoning details are not shown in the UI to maintain a clean, focused user experience. The backend still provides `individual_model_reasoning` data for potential future use, but it is not rendered.
 
 ---
 

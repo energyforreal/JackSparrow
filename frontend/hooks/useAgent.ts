@@ -46,7 +46,16 @@ export function useAgent() {
           break
         case 'signal_update':
           const signalData = lastMessage.data as Signal
-          setSignal(signalData)
+          if (signalData) {
+            // Always replace signal completely on WebSocket update
+            setSignal(signalData)
+            // Log for debugging
+            console.log('Agent hook: Signal update received', {
+              signal: signalData.signal,
+              confidence: signalData.confidence,
+              timestamp: signalData.timestamp
+            })
+          }
           break
       }
     }

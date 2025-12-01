@@ -76,6 +76,7 @@ class XGBoostNode(MCPModelNode):
         self._model_name = model_path.stem
         self._model_version = "1.0.0"
         self._model_type = "xgboost"
+        self._is_regressor = None  # Will be set during initialization
         self.health_status = "unknown"
     
     @classmethod
@@ -284,12 +285,25 @@ class XGBoostNode(MCPModelNode):
             if not hasattr(self.model, 'predict'):
                 raise ValueError(f"Loaded model object (type: {model_type}) does not have 'predict' method")
             
+            # Detect if model is a regressor or classifier
+            # Regressors predict absolute prices, classifiers predict signals
+            self._is_regressor = (
+                'XGBRegressor' in model_type or 
+                'Regressor' in model_type or
+                'regressor' in self._model_name.lower()
+            )
+            
+            # If model doesn't have predict_proba, it's likely a regressor
+            if self._is_regressor is None:
+                self._is_regressor = not hasattr(self.model, 'predict_proba')
+            
             self.health_status = "healthy"
             logger.info(
                 "xgboost_model_loaded",
                 model_path=str(self.model_path),
                 model_name=self._model_name,
                 model_type=model_type,
+                is_regressor=self._is_regressor,
                 health_status=self.health_status,
                 file_size_bytes=file_size,
                 has_predict=hasattr(self.model, 'predict'),
@@ -425,17 +439,77 @@ class XGBoostNode(MCPModelNode):
                     f"Available methods: {[m for m in dir(self.model) if not m.startswith('_')][:10]}"
                 )
             
+            # Get model classes to understand label mapping
+            # Training maps: SELL(-1)→0, HOLD(0)→1, BUY(1)→2 for 3-class
+            # Or: SELL(-1)→0, BUY(1)→1 for binary
+            model_classes = None
+            if hasattr(self.model, 'classes_'):
+                model_classes = self.model.classes_
+            
+            proba = None
+            num_classes = 0
             if hasattr(self.model, 'predict_proba'):
                 try:
                     proba = self.model.predict_proba(features_array)[0]
-                    # For binary classification, use probability of positive class
-                    if len(proba) == 2:
-                        prediction_raw = proba[1]  # Probability of class 1
+                    num_classes = len(proba)
+                    
+                    if num_classes == 2:
+                        # Binary classification
+                        # Check which classes are present based on training mapping
+                        # Training could map: SELL(-1)→0/BUY(1)→1, or SELL(-1)→0/HOLD(0)→1, or HOLD(0)→0/BUY(1)→1
+                        # For binary, class 1 is typically the "positive" class
+                        # If SELL→0 and BUY→1: proba[1] = BUY prob → positive is BUY
+                        # If SELL→0 and HOLD→1: proba[1] = HOLD prob → positive is HOLD (neutral)
+                        # If HOLD→0 and BUY→1: proba[1] = BUY prob → positive is BUY
+                        # We assume the most common case: SELL→0, BUY→1
+                        # proba[1] = probability of class 1 (BUY in most cases)
+                        prediction_raw = proba[1]  # Probability of class 1 (positive class)
                         is_probability = True
+                    elif num_classes == 3:
+                        # Multi-class: SELL(-1)→0, HOLD(0)→1, BUY(1)→2
+                        # Calculate weighted direction: BUY probability - SELL probability
+                        # This gives us the directional signal: positive = BUY, negative = SELL
+                        # proba[0] = P(SELL), proba[1] = P(HOLD), proba[2] = P(BUY)
+                        buy_prob = proba[2]  # Class 2 = BUY
+                        sell_prob = proba[0]  # Class 0 = SELL
+                        hold_prob = proba[1]  # Class 1 = HOLD
+                        
+                        # Calculate directional signal: BUY - SELL
+                        # Range: [-1, 1] where -1 = 100% SELL, +1 = 100% BUY
+                        # Normalize by total probability to get clean [-1, 1] range
+                        total_directional_prob = buy_prob + sell_prob
+                        if total_directional_prob > 0:
+                            # Weighted direction: (BUY - SELL) / (BUY + SELL)
+                            # This gives us a clean [-1, 1] range
+                            prediction_raw = (buy_prob - sell_prob) / total_directional_prob
+                        else:
+                            # Both BUY and SELL probabilities are 0 (100% HOLD)
+                            prediction_raw = 0.0
+                        
+                        # Confidence is based on how far from neutral (0.0)
+                        # High confidence = strong BUY or strong SELL
+                        # Low confidence = HOLD or mixed signals
+                        is_probability = True
+                        
+                        logger.debug(
+                            "multiclass_classifier_interpretation",
+                            model_name=self.model_name,
+                            sell_prob=sell_prob,
+                            hold_prob=hold_prob,
+                            buy_prob=buy_prob,
+                            directional_signal=prediction_raw
+                        )
                     else:
-                        # Multi-class: use max probability
-                        prediction_raw = np.max(proba)
+                        # More than 3 classes - use max probability as fallback
+                        max_class_idx = np.argmax(proba)
+                        prediction_raw = proba[max_class_idx]
                         is_probability = True
+                        logger.warning(
+                            "unexpected_num_classes",
+                            model_name=self.model_name,
+                            num_classes=num_classes,
+                            message="Unexpected number of classes, using max probability"
+                        )
                 except Exception as e:
                     # Fallback to predict() if predict_proba fails
                     logger.warning(
@@ -445,23 +519,90 @@ class XGBoostNode(MCPModelNode):
                         message="predict_proba failed, falling back to predict()"
                     )
                     prediction_raw = self.model.predict(features_array)[0]
+                    is_probability = False
             else:
-                # No predict_proba, use predict()
+                # No predict_proba, use predict() - returns class label
                 prediction_raw = self.model.predict(features_array)[0]
+                is_probability = False
             
             # Normalize to -1.0 to +1.0 range
             if is_probability:
-                # Probability output [0, 1] -> [-1, 1]
-                # Map: 0.0 -> -1.0, 0.5 -> 0.0, 1.0 -> +1.0
-                prediction_normalized = (prediction_raw - 0.5) * 2.0
-            else:
-                # Class label output (0 or 1) or other numeric output
-                # If it's a binary class (0 or 1), map: 0 -> -1, 1 -> +1
-                if prediction_raw in [0, 1] or (isinstance(prediction_raw, (int, np.integer)) and prediction_raw in [0, 1]):
-                    prediction_normalized = (prediction_raw * 2.0) - 1.0  # 0 -> -1, 1 -> +1
+                # For binary: prediction_raw is already probability of positive class [0, 1]
+                # For multi-class: prediction_raw is already directional signal [-1, 1]
+                if num_classes == 3:
+                    # Multi-class: prediction_raw is already in [-1, 1] range (BUY - SELL)
+                    prediction_normalized = max(-1.0, min(1.0, float(prediction_raw)))
                 else:
-                    # Assume it's already in a reasonable range, normalize to [-1, 1]
-                    # This handles regression outputs or other numeric outputs
+                    # Binary: probability [0, 1] -> [-1, 1]
+                    # Map: 0.0 -> -1.0, 0.5 -> 0.0, 1.0 -> +1.0
+                    prediction_normalized = (prediction_raw - 0.5) * 2.0
+            elif self._is_regressor:
+                # Regressor: Convert absolute price prediction to relative return
+                # Regressor models predict absolute future prices (e.g., $50,500)
+                # We need to convert this to a relative return percentage
+                current_price = request.context.get('current_price')
+                
+                if current_price is not None and current_price > 0:
+                    # Calculate relative return: (predicted_price - current_price) / current_price
+                    return_pct = (prediction_raw - current_price) / current_price
+                    
+                    # Normalize return percentage to [-1, 1] range
+                    # Use a reasonable return range: ±10% maps to ±1.0
+                    # Returns beyond ±10% are clamped to ±1.0
+                    max_return_range = 0.10  # 10% return maps to ±1.0
+                    prediction_normalized = max(-1.0, min(1.0, return_pct / max_return_range))
+                    
+                    logger.debug(
+                        "regressor_price_to_return_converted",
+                        model_name=self.model_name,
+                        predicted_price=prediction_raw,
+                        current_price=current_price,
+                        return_pct=return_pct * 100,
+                        normalized_prediction=prediction_normalized
+                    )
+                else:
+                    # Fallback: If current price not available, use tanh normalization
+                    # This is not ideal but prevents errors
+                    logger.warning(
+                        "regressor_current_price_missing",
+                        model_name=self.model_name,
+                        predicted_price=prediction_raw,
+                        message="Current price not available in context, using fallback normalization"
+                    )
+                    # Use a conservative normalization assuming price is in reasonable range
+                    # This is a fallback and should be avoided
+                    prediction_normalized = np.tanh((prediction_raw - 50000) / 10000)  # Rough normalization
+            else:
+                # Classifier: Class label output from predict() (not predict_proba)
+                # Training maps: SELL(-1)→0, HOLD(0)→1, BUY(1)→2 for 3-class
+                # Or: SELL(-1)→0, BUY(1)→1 for binary
+                if isinstance(prediction_raw, (int, np.integer)):
+                    if prediction_raw == 0:
+                        # Class 0: SELL (in both binary and 3-class)
+                        prediction_normalized = -1.0
+                    elif prediction_raw == 1:
+                        # Class 1: Could be BUY (binary) or HOLD (3-class)
+                        # Check if it's 3-class by checking model_classes or num_classes
+                        if model_classes is not None and len(model_classes) == 3:
+                            # 3-class: class 1 = HOLD (neutral)
+                            prediction_normalized = 0.0
+                        else:
+                            # Binary: class 1 = BUY (positive)
+                            prediction_normalized = 1.0
+                    elif prediction_raw == 2:
+                        # Class 2: BUY (3-class only)
+                        prediction_normalized = 1.0
+                    else:
+                        # Unexpected class label
+                        logger.warning(
+                            "unexpected_class_label",
+                            model_name=self.model_name,
+                            class_label=prediction_raw,
+                            message="Unexpected class label, treating as neutral"
+                        )
+                        prediction_normalized = 0.0
+                else:
+                    # Non-integer output - assume it's already in a reasonable range
                     if prediction_raw > 1.0 or prediction_raw < 0.0:
                         # If outside [0, 1], assume it needs normalization
                         # Use sigmoid-like normalization: map to [-1, 1]
@@ -477,8 +618,14 @@ class XGBoostNode(MCPModelNode):
             # For probabilities: confidence is how far from 0.5
             # For normalized: confidence is absolute value
             if is_probability:
-                # Confidence is how certain the model is (distance from 0.5)
-                confidence = abs(prediction_raw - 0.5) * 2.0  # [0, 1] range
+                if num_classes == 3:
+                    # Multi-class: prediction_raw is already in [-1, 1] range
+                    # Confidence is absolute value (distance from neutral)
+                    confidence = abs(prediction_raw)
+                else:
+                    # Binary: prediction_raw is probability [0, 1]
+                    # Confidence is how certain the model is (distance from 0.5)
+                    confidence = abs(prediction_raw - 0.5) * 2.0  # [0, 1] range
             else:
                 # Confidence is absolute value of normalized prediction
                 confidence = abs(prediction_normalized)

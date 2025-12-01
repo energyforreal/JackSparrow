@@ -95,8 +95,9 @@ The agent uses an enhanced state machine that reflects its thinking process:
 
 7. **MONITORING_POSITION**
    - Active position management
-   - Monitoring exit conditions (stop-loss, take-profit)
-   - Tracking position performance
+   - Monitoring exit conditions (stop-loss, take-profit) on each market tick
+   - Tracking position performance and PnL
+   - Automatically triggers exit when stop loss or take profit levels are hit
    - **Transition to**: OBSERVING when position closed
 
 > **Note**: The historical `LEARNING` state is intentionally disabled in this build to avoid heavy post-trade computation. Outcome analysis can be re-enabled in future releases without impacting the current lightweight runtime.
@@ -846,6 +847,65 @@ All model interactions use the **MCP Model Protocol**:
 For detailed MCP Model Protocol documentation, see [MCP Layer Documentation - Model Protocol](02-mcp-layer.md#mcp-model-protocol).
 
 ---
+
+## Position Monitoring and Exit Logic
+
+### Overview
+
+When the agent enters the `MONITORING_POSITION` state, it actively monitors open positions for exit conditions. This ensures proper risk management and profit-taking.
+
+### Monitoring Process
+
+1. **Market Tick Events**: The market data service emits `MarketTickEvent` for each significant price update (throttled to prevent excessive processing)
+
+2. **Exit Condition Checking**: The risk manager's `_handle_market_tick()` method:
+   - Verifies a position exists for the symbol
+   - Retrieves stored stop loss and take profit levels (calculated at entry)
+   - Compares current price against exit levels
+   - Determines if exit condition is met
+
+3. **Exit Decision**: When an exit condition is met:
+   - Risk manager emits a `DecisionReadyEvent` with exit signal
+   - Event includes exit reason (stop_loss, take_profit, signal_reversal)
+   - High confidence (1.0) is assigned to exit decisions
+
+4. **Exit Execution**: Execution module:
+   - Detects exit decision for existing position
+   - Executes opposite-side trade to close position
+   - Calculates PnL and position duration
+   - Emits `PositionClosedEvent` with complete trade details
+
+5. **State Transition**: State machine:
+   - Receives `PositionClosedEvent`
+   - Transitions from `MONITORING_POSITION` to `OBSERVING`
+   - Clears position from context
+
+### Exit Conditions
+
+**Stop Loss**:
+- For long positions (BUY): Triggered when price drops to or below stop loss level
+- For short positions (SELL): Triggered when price rises to or above stop loss level
+- Stop loss percentage is configurable via `STOP_LOSS_PERCENTAGE` setting
+
+**Take Profit**:
+- For long positions (BUY): Triggered when price rises to or above take profit level
+- For short positions (SELL): Triggered when price drops to or below take profit level
+- Take profit percentage is configurable via `TAKE_PROFIT_PERCENTAGE` setting
+
+**Signal Reversal**:
+- Exit can also be triggered by signal reversal (opposite signal when in position)
+- Handled through normal decision flow when reasoning engine generates opposite signal
+
+### Position Context Storage
+
+When a position is opened, the following information is stored in context:
+- Symbol and side (BUY/SELL)
+- Entry price and quantity
+- Stop loss price (calculated)
+- Take profit price (calculated)
+- Entry timestamp
+
+This information is used throughout the monitoring process to evaluate exit conditions.
 
 ## Related Documentation
 

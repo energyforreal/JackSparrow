@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/accordion'
 import { Signal, SignalType } from '@/types'
 import { cn } from '@/lib/utils'
+import { normalizeConfidenceToPercent } from '@/utils/formatters'
 
 interface SignalIndicatorProps {
   signal?: Signal
@@ -50,6 +51,8 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
     )
   }
 
+  const overallConfidence = normalizeConfidenceToPercent(signal.confidence)
+
   return (
     <Card>
       <CardHeader>
@@ -64,19 +67,11 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
             <div className="flex justify-between text-sm mb-1">
               <span className="text-muted-foreground">Confidence</span>
               <span className="font-medium">
-                {typeof signal.confidence === 'number' 
-                  ? (signal.confidence > 1 && signal.confidence <= 100 
-                      ? `${signal.confidence.toFixed(1)}%` 
-                      : signal.confidence > 1 
-                        ? `${signal.confidence}%` 
-                        : `${(signal.confidence * 100).toFixed(1)}%`)
-                  : `${signal.confidence}%`}
+                {`${overallConfidence.toFixed(1)}%`}
               </span>
             </div>
             <Progress 
-              value={typeof signal.confidence === 'number' && signal.confidence <= 1 
-                ? signal.confidence * 100 
-                : signal.confidence} 
+              value={overallConfidence}
               className="h-2" 
             />
           </div>
@@ -115,9 +110,7 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
                           {model.signal.replace('_', ' ')}
                         </Badge>
                         <span className="text-muted-foreground">
-                          ({typeof model.confidence === 'number' && model.confidence <= 1 
-                            ? (model.confidence * 100).toFixed(1) 
-                            : model.confidence}%)
+                          ({normalizeConfidenceToPercent(model.confidence).toFixed(1)}%)
                         </span>
                       </div>
                     </div>
@@ -139,9 +132,7 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-medium text-sm">{model.model_name}</span>
                         <span className="text-xs text-muted-foreground">
-                          {typeof model.confidence === 'number' && model.confidence <= 1 
-                            ? (model.confidence * 100).toFixed(1) 
-                            : model.confidence}% confidence
+                          {normalizeConfidenceToPercent(model.confidence).toFixed(1)}% confidence
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground">{model.reasoning}</p>

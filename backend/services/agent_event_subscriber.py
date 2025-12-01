@@ -238,6 +238,14 @@ class AgentEventSubscriber:
             # Extract event type
             event_type = event_dict.get("event_type")
             payload = event_dict.get("payload", {})
+            
+            # Log event receipt for debugging
+            logger.debug(
+                "agent_event_subscriber_event_received",
+                service="backend",
+                event_type=event_type,
+                message_id=message_id
+            )
 
             if not event_type:
                 logger.warning(
@@ -289,6 +297,8 @@ class AgentEventSubscriber:
                 await self._handle_order_fill(payload)
             elif event_type == "model_prediction_complete":
                 await self._handle_model_prediction_complete(payload)
+            elif event_type == "market_tick":
+                await self._handle_market_tick(payload)
             # Add more event handlers as needed
 
         except Exception as e:
@@ -310,7 +320,18 @@ class AgentEventSubscriber:
             confidence = payload.get("confidence", 0.0)
             symbol = payload.get("symbol", "BTCUSD")
             reasoning_chain = payload.get("reasoning_chain", {})
+            
+            # Extract timestamp - check multiple possible locations
             timestamp = payload.get("timestamp")
+            if not timestamp and reasoning_chain:
+                # Check if timestamp is in reasoning_chain
+                if isinstance(reasoning_chain, dict):
+                    timestamp = reasoning_chain.get("timestamp")
+                    if not timestamp:
+                        # Check in market_context
+                        market_context = reasoning_chain.get("market_context", {})
+                        if isinstance(market_context, dict):
+                            timestamp = market_context.get("timestamp")
 
             # Convert confidence from 0-1 to 0-100 range if needed
             if 0.0 <= confidence <= 1.0:
@@ -346,6 +367,21 @@ class AgentEventSubscriber:
                             "confidence": pred_confidence
                         })
 
+            # Handle timestamp - ensure it's properly formatted
+            formatted_timestamp = timestamp
+            if timestamp:
+                if isinstance(timestamp, datetime):
+                    formatted_timestamp = timestamp.isoformat()
+                elif isinstance(timestamp, str):
+                    # Already a string, use as-is
+                    formatted_timestamp = timestamp
+                else:
+                    # Fallback to current time if invalid
+                    formatted_timestamp = datetime.utcnow().isoformat()
+            else:
+                # No timestamp provided, use current time
+                formatted_timestamp = datetime.utcnow().isoformat()
+
             # Format signal data for frontend
             signal_data = {
                 "signal": signal,
@@ -355,7 +391,7 @@ class AgentEventSubscriber:
                 "reasoning_chain": reasoning_steps,
                 "individual_model_reasoning": individual_model_reasoning,
                 "agent_decision_reasoning": conclusion,
-                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+                "timestamp": formatted_timestamp
             }
 
             # Broadcast via WebSocket
@@ -364,12 +400,13 @@ class AgentEventSubscriber:
                 channel="signal_update"
             )
 
-            logger.debug(
+            logger.info(
                 "agent_event_subscriber_decision_ready_broadcast",
                 service="backend",
                 signal=signal,
                 confidence=confidence,
-                symbol=symbol
+                symbol=symbol,
+                timestamp=formatted_timestamp
             )
 
         except Exception as e:
@@ -488,6 +525,46 @@ class AgentEventSubscriber:
         except Exception as e:
             log_error_with_context(
                 "agent_event_subscriber_model_prediction_complete_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+
+    async def _handle_market_tick(self, payload: Dict[str, Any]):
+        """Handle MarketTickEvent.
+        
+        Args:
+            payload: MarketTickEvent payload
+        """
+        try:
+            symbol = payload.get("symbol", "BTCUSD")
+            price = payload.get("price", 0.0)
+            volume = payload.get("volume", 0.0)
+            timestamp = payload.get("timestamp")
+
+            # Format ticker data for frontend
+            ticker_data = {
+                "symbol": symbol,
+                "price": float(price),
+                "volume": float(volume),
+                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+            }
+
+            # Broadcast via WebSocket
+            await websocket_manager.broadcast(
+                {"type": "market_tick", "data": ticker_data},
+                channel="market_data"
+            )
+
+            logger.debug(
+                "agent_event_subscriber_market_tick_broadcast",
+                service="backend",
+                symbol=symbol,
+                price=price
+            )
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_market_tick_error",
                 error=e,
                 component="agent_event_subscriber"
             )

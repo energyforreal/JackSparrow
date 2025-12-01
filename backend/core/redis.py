@@ -16,8 +16,9 @@ from backend.core.config import settings
 
 logger = structlog.get_logger()
 
-# Global Redis client
+# Global Redis client and connection pool
 _redis_client: Optional[Redis] = None
+_redis_pool: Optional[aioredis.ConnectionPool] = None
 _redis_connection_failed: bool = False
 _reconnection_attempts: int = 0
 _last_reconnection_attempt: float = 0.0
@@ -156,21 +157,27 @@ async def get_redis(required: bool = False) -> Optional[Redis]:
             _redis_connection_failed = False
     
     try:
-        client = await aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=3,
-            retry_on_error=[ConnectionError, TimeoutError],
-            retry_on_timeout=True,
-        )
+        # Use connection pool for better concurrency
+        if _redis_pool is None:
+            _redis_pool = aioredis.ConnectionPool.from_url(
+                settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                max_connections=50,  # Maximum pool size
+                socket_connect_timeout=3,
+                retry_on_error=[ConnectionError, TimeoutError],
+                retry_on_timeout=True,
+            )
+            logger.debug("redis_connection_pool_created", max_connections=50, service="backend")
+        
+        client = aioredis.Redis(connection_pool=_redis_pool)
         
         # Verify connection with ping
         if await _check_redis_health(client):
             _redis_client = client
             _redis_connection_failed = False
             _reconnection_attempts = 0
-            logger.info("redis_connected", service="backend")
+            logger.info("redis_connected", service="backend", pool_size=50)
             return client
         else:
             await client.close()
@@ -191,8 +198,8 @@ async def get_redis(required: bool = False) -> Optional[Redis]:
 
 
 async def close_redis():
-    """Close Redis connection."""
-    global _redis_client, _redis_connection_failed, _reconnection_attempts
+    """Close Redis connection and connection pool."""
+    global _redis_client, _redis_pool, _redis_connection_failed, _reconnection_attempts
     
     if _redis_client is not None:
         try:
@@ -204,6 +211,18 @@ async def close_redis():
                 error=str(e)
             )
         _redis_client = None
+    
+    if _redis_pool is not None:
+        try:
+            await _redis_pool.disconnect()
+        except Exception as e:
+            logger.warning(
+                "redis_pool_close_error",
+                service="backend",
+                error=str(e)
+            )
+        _redis_pool = None
+    
     _redis_connection_failed = False
     _reconnection_attempts = 0
 
@@ -307,12 +326,25 @@ async def cache_response(request_id: str, response: Dict[str, Any], ttl: int = 3
 
 # Cache operations
 async def get_cache(key: str) -> Optional[Any]:
-    """Get value from cache."""
+    """Get value from cache.
+    
+    Tracks cache hit/miss metrics for monitoring.
+    """
     try:
         client = await get_redis()
         value = await client.get(key)
         if value:
+            # Cache hit - increment hit counter
+            try:
+                await client.incr("cache:stats:hits")
+            except Exception:
+                pass  # Don't fail on metrics tracking
             return json.loads(value)
+        # Cache miss - increment miss counter
+        try:
+            await client.incr("cache:stats:misses")
+        except Exception:
+            pass  # Don't fail on metrics tracking
         return None
     except Exception as e:
         logger.error(
@@ -325,10 +357,18 @@ async def get_cache(key: str) -> Optional[Any]:
 
 
 async def set_cache(key: str, value: Any, ttl: int = 60) -> bool:
-    """Set value in cache with TTL."""
+    """Set value in cache with TTL.
+    
+    Tracks cache sets for monitoring.
+    """
     try:
         client = await get_redis()
         await client.setex(key, ttl, json.dumps(value))
+        # Track cache sets
+        try:
+            await client.incr("cache:stats:sets")
+        except Exception:
+            pass  # Don't fail on metrics tracking
         return True
     except Exception as e:
         logger.error(
@@ -371,4 +411,41 @@ async def get_cache_keys(pattern: str) -> List[str]:
             exc_info=True
         )
         return []
+
+
+async def get_cache_stats() -> Dict[str, Any]:
+    """Get cache statistics (hits, misses, sets).
+    
+    Returns:
+        Dictionary with cache statistics
+    """
+    try:
+        client = await get_redis()
+        if client is None:
+            return {"hits": 0, "misses": 0, "sets": 0, "hit_rate": 0.0}
+        
+        hits = await client.get("cache:stats:hits")
+        misses = await client.get("cache:stats:misses")
+        sets = await client.get("cache:stats:sets")
+        
+        hits = int(hits) if hits else 0
+        misses = int(misses) if misses else 0
+        sets = int(sets) if sets else 0
+        
+        total = hits + misses
+        hit_rate = (hits / total) if total > 0 else 0.0
+        
+        return {
+            "hits": hits,
+            "misses": misses,
+            "sets": sets,
+            "hit_rate": round(hit_rate, 4)
+        }
+    except Exception as e:
+        logger.error(
+            "redis_get_cache_stats_failed",
+            error=str(e),
+            exc_info=True
+        )
+        return {"hits": 0, "misses": 0, "sets": 0, "hit_rate": 0.0}
 

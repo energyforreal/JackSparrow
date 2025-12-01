@@ -13,7 +13,7 @@ from collections import defaultdict
 from typing import Dict, Tuple
 
 from backend.core.database import get_db
-from backend.core.redis import redis_health_check
+from backend.core.redis import redis_health_check, get_cache, set_cache
 from backend.api.models.responses import HealthResponse, HealthServiceStatus
 from backend.services.agent_service import agent_service
 
@@ -246,7 +246,14 @@ async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
     - Model nodes
     
     Rate limited to 100 requests per minute per IP to prevent abuse.
+    Results are cached for 30 seconds to reduce downstream load.
     """
+    # Check cache first (30 second TTL)
+    cache_key = "health:check"
+    cached = await get_cache(cache_key)
+    if cached:
+        return HealthResponse(**cached)
+    
     # Apply lightweight rate limiting
     client_ip = request.client.host if request.client else "unknown"
     if not _check_health_rate_limit(client_ip):
@@ -354,7 +361,7 @@ async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
     else:
         status = "unhealthy"
     
-    return HealthResponse(
+    health_response = HealthResponse(
         status=status,
         health_score=round(health_score, 3),
         services={
@@ -370,4 +377,9 @@ async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
         degradation_reasons=degradation_reasons,
         timestamp=datetime.utcnow()
     )
+    
+    # Cache result for 30 seconds
+    await set_cache(cache_key, health_response.dict(), ttl=30)
+    
+    return health_response
 
