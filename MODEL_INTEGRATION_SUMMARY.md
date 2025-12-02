@@ -4,6 +4,10 @@
 
 Successfully integrated 6 trained XGBoost models into the trading agent's model discovery system.
 
+> **Note:** For detailed documentation on model management, see:
+> - [ML Models Documentation](docs/03-ml-models.md) - Complete model management guide
+> - [File Structure Documentation](docs/08-file-structure.md#ml-model-storage) - Model storage structure
+
 ## Models Integrated
 
 ### Source Location

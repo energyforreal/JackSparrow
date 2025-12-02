@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Position } from '@/types'
 import { cn } from '@/lib/utils'
 import { LoadingSpinner, LoadingSkeleton } from './LoadingSpinner'
+import { formatDateTime } from '@/utils/formatters'
 
 interface ActivePositionsProps {
   positions?: Position[]
@@ -54,7 +55,7 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
   }
 
   const formatDate = (date: Date | string) => {
-    return new Date(date).toLocaleString()
+    return formatDateTime(date)
   }
 
   const getDuration = (openedAt: Date | string) => {
@@ -71,64 +72,66 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
         <CardTitle>Active Positions</CardTitle>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Side</TableHead>
-              <TableHead>Quantity</TableHead>
-              <TableHead>Entry Price</TableHead>
-              <TableHead>Current Price</TableHead>
-              <TableHead>PnL</TableHead>
-              <TableHead>Duration</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {positions.map((position) => (
-              <TableRow key={position.position_id}>
-                <TableCell className="font-medium">{position.symbol}</TableCell>
-                <TableCell>
-                  <Badge
-                    variant={position.side === 'BUY' ? 'default' : 'destructive'}
-                  >
-                    {position.side}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  {typeof position.quantity === 'string' 
-                    ? parseFloat(position.quantity).toLocaleString()
-                    : position.quantity.toLocaleString()}
-                </TableCell>
-                <TableCell>{formatPrice(position.entry_price)}</TableCell>
-                <TableCell>{formatPrice(position.current_price)}</TableCell>
-                <TableCell>
-                  {position.unrealized_pnl !== undefined && position.unrealized_pnl !== null ? (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        (typeof position.unrealized_pnl === 'string' 
-                          ? parseFloat(position.unrealized_pnl) 
-                          : position.unrealized_pnl) >= 0
-                          ? 'text-success border-success'
-                          : 'text-error border-error'
-                      )}
-                    >
-                      {(typeof position.unrealized_pnl === 'string' 
-                        ? parseFloat(position.unrealized_pnl) 
-                        : position.unrealized_pnl) >= 0 ? '+' : ''}
-                      {formatPrice(position.unrealized_pnl)}
-                    </Badge>
-                  ) : (
-                    'N/A'
-                  )}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {getDuration(position.opened_at)}
-                </TableCell>
+        <div className="overflow-x-auto -mx-6 px-6">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Symbol</TableHead>
+                <TableHead>Side</TableHead>
+                <TableHead>Quantity</TableHead>
+                <TableHead>Entry Price</TableHead>
+                <TableHead>Current Price</TableHead>
+                <TableHead>PnL</TableHead>
+                <TableHead>Duration</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {positions.map((position) => (
+                <TableRow key={position.position_id}>
+                  <TableCell className="font-medium">{position.symbol}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={position.side === 'BUY' ? 'default' : 'destructive'}
+                    >
+                      {position.side}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {typeof position.quantity === 'string' 
+                      ? parseFloat(position.quantity).toLocaleString()
+                      : position.quantity.toLocaleString()}
+                  </TableCell>
+                  <TableCell>{formatPrice(position.entry_price)}</TableCell>
+                  <TableCell>{formatPrice(position.current_price)}</TableCell>
+                  <TableCell>
+                    {position.unrealized_pnl !== undefined && position.unrealized_pnl !== null ? (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          (typeof position.unrealized_pnl === 'string' 
+                            ? parseFloat(position.unrealized_pnl) 
+                            : position.unrealized_pnl) >= 0
+                            ? 'text-success border-success'
+                            : 'text-error border-error'
+                        )}
+                      >
+                        {(typeof position.unrealized_pnl === 'string' 
+                          ? parseFloat(position.unrealized_pnl) 
+                          : position.unrealized_pnl) >= 0 ? '+' : ''}
+                        {formatPrice(position.unrealized_pnl)}
+                      </Badge>
+                    ) : (
+                      'N/A'
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {getDuration(position.opened_at)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   )

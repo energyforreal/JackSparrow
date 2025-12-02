@@ -3,6 +3,11 @@
 **Date:** 2025-01-27  
 **Commit:** Major system overhaul and production-ready deployment
 
+> **Note:** For detailed documentation on these changes, see:
+> - [Architecture Documentation](docs/01-architecture.md#recent-architectural-enhancements) - Recent architectural enhancements section
+> - [Deployment Documentation](docs/10-deployment.md) - Docker setup and CI/CD details
+> - [ML Models Documentation](docs/03-ml-models.md) - Model integration details
+
 ## 🚀 Major Architectural Changes
 
 ### 1. **Docker Containerization**

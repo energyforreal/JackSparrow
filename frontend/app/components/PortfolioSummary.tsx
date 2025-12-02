@@ -49,7 +49,7 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
   const availableBalance = parseNumber(portfolio.available_balance)
 
   return (
-    <Card>
+    <Card role="region" aria-label="Portfolio Summary">
       <CardHeader>
         <CardTitle>Portfolio Value</CardTitle>
       </CardHeader>

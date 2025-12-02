@@ -38,4 +38,8 @@ The `.cursor/context/docs` directory mirrors the entire `docs/` tree. Reference 
 - `.cursor/context/docs/docker-hot-reload.md`
 - `.cursor/context/docs/remediation-plan.md`
 
+**Important Reference Documents** (in project root):
+- `MAJOR_CHANGES.md` - Complete change log for architectural improvements (2025-01-27)
+- `MODEL_INTEGRATION_SUMMARY.md` - Details on integration of 6 XGBoost models for BTCUSD trading
+
 **Note:** This rule does not auto-load documentation. Documentation files should be loaded explicitly when needed to reduce context token usage and improve performance.

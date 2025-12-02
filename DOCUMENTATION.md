@@ -35,7 +35,9 @@ This document serves as the central index for all project documentation. Navigat
    - Model type detection and understanding
    - Model versioning and management
    - Price prediction models with pagination and data reversal support
+   - Currently integrated: 6 XGBoost models (3 classifiers + 3 regressors) for BTCUSD trading
    - **[ML Training Guide - Google Colab](docs/ml-training-google-colab.md)** - Comprehensive guide for training models in Google Colab
+   - **[Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md)** - Details on recent model integration
 
 4. **[Features Documentation](docs/04-features.md)**
    - Core trading agent features
@@ -344,9 +346,14 @@ When adding or updating documentation:
 
 ## 📅 Last Updated
 
-Documentation last updated: 2025-01-27
+Documentation last updated: 2025-01-28
 
 For the latest specifications and implementation details, refer to the files in the `reference/` directory.
+
+### Recent Changes
+
+- **[Major Changes Summary](MAJOR_CHANGES.md)** - Complete change log for architectural improvements (2025-01-27)
+- **[Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md)** - Details on integration of 6 XGBoost models for BTCUSD trading
 
 ---
 

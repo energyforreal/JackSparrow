@@ -14,10 +14,13 @@ import { ModelReasoningView } from './ModelReasoningView'
 import { TradingDecision } from './TradingDecision'
 import { RealTimePrice } from './RealTimePrice'
 import { ErrorBoundary } from './ErrorBoundary'
+import { PaperTradingBanner } from './PaperTradingBanner'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useAgent } from '@/hooks/useAgent'
 import { apiClient } from '@/services/api'
 import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { AlertCircle, RefreshCw } from 'lucide-react'
 import { Signal, HealthStatus, ReasoningStep } from '@/types'
 import { normalizeConfidenceToPercent } from '@/utils/formatters'
 
@@ -52,6 +55,7 @@ export function Dashboard() {
   const [isLoading, setIsLoading] = useState(true)
   // Track if we've received a WebSocket signal update to prioritize it over initial fetch
   const [hasWebSocketSignal, setHasWebSocketSignal] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
 
   // Fetch initial data on mount (independent of WebSocket)
   // Only fetch signal if we haven't received one via WebSocket yet
@@ -224,16 +228,55 @@ export function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       <Header isConnected={isConnected} />
+      <PaperTradingBanner isPaperTrading={true} />
       
       <div className="container mx-auto px-4 py-6 space-y-6">
         {wsError && (
-          <Card className="border-destructive">
+          <Card className="border-destructive bg-destructive/5">
             <CardContent className="pt-6">
-              <div className="text-destructive font-medium">
-                WebSocket Error: {wsError.message}
-              </div>
-              <div className="text-sm text-muted-foreground mt-2">
-                Real-time updates unavailable. Ensure backend is running on port 8000 and WebSocket endpoint is accessible.
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <div className="text-destructive font-semibold mb-1">
+                    WebSocket Connection Error
+                  </div>
+                  <div className="text-sm text-muted-foreground mb-4">
+                    {wsError.message || 'Unable to connect to real-time updates.'}
+                    <br />
+                    <span className="text-xs mt-1 block">
+                      Ensure backend is running on port 8000 and WebSocket endpoint is accessible.
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setRetryCount((prev) => prev + 1)
+                        window.location.reload()
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Retry Connection
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        // Clear error state - user acknowledges
+                        console.log('User dismissed WebSocket error')
+                      }}
+                    >
+                      Dismiss
+                    </Button>
+                  </div>
+                  {retryCount > 0 && (
+                    <div className="text-xs text-muted-foreground mt-3">
+                      Retry attempts: {retryCount}
+                    </div>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -43,13 +43,14 @@ class PortfolioService:
                 initial_balance = Decimal(str(getattr(settings, 'initial_balance', 10000.0)))
                 
                 # Use SQL aggregation for open positions calculations
-                # Calculate positions value and unrealized PnL using SQL
+                # Calculate positions value (cost basis) and unrealized PnL using SQL
+                # positions_value should be entry_price * quantity (cost basis), not current_price * quantity
                 open_positions_agg = select(
                     func.count(Position.id).label('position_count'),
                     func.sum(
                         case(
-                            ((Position.current_price.isnot(None)) & (Position.quantity.isnot(None)),
-                             Position.current_price * Position.quantity),
+                            ((Position.entry_price.isnot(None)) & (Position.quantity.isnot(None)),
+                             Position.entry_price * Position.quantity),
                             else_=0
                         )
                     ).label('positions_value'),

@@ -176,6 +176,9 @@ class ExecutionModule:
                 stop_loss_price = risk_manager.calculate_stop_loss(fill_price, side)
                 take_profit_price = risk_manager.calculate_take_profit(fill_price, side)
                 
+                # Generate position_id for tracking
+                position_id = str(uuid.uuid4())
+                
                 # Update context
                 self.context_manager.update_context({
                     "trade": {
@@ -187,6 +190,7 @@ class ExecutionModule:
                         "price": fill_price
                     },
                     "position": {
+                        "position_id": position_id,
                         "symbol": symbol,
                         "side": side,
                         "quantity": quantity,
@@ -346,12 +350,25 @@ class ExecutionModule:
                 else:
                     exit_reason = "signal_reversal"
             
+            # Get position_id from context or generate one
+            position_id = context.position.get("position_id") if context.position else None
+            if not position_id:
+                # Try to find position_id from database using symbol and entry_price
+                # For now, generate a new one if not found
+                position_id = str(uuid.uuid4())
+                logger.warning(
+                    "position_id_not_found_in_context",
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    message="Position ID not found in context, using generated ID"
+                )
+            
             # Emit PositionClosedEvent
             position_closed_event = PositionClosedEvent(
                 source="execution_module",
                 correlation_id=event.event_id,
                 payload={
-                    "position_id": context.position.get("position_id", trade_id),
+                    "position_id": position_id,
                     "symbol": symbol,
                     "entry_price": entry_price,
                     "exit_price": fill_price,

@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
+import { ConfidenceProgress } from './ConfidenceProgress'
 import { HealthStatus } from '@/types'
 import { CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -78,7 +78,7 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
     : 0
 
   return (
-    <Card>
+    <Card role="region" aria-label="System Health Status">
       <CardHeader>
         <CardTitle>System Health</CardTitle>
       </CardHeader>
@@ -88,7 +88,7 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
             <span className="text-muted-foreground">Overall Score</span>
             <span className="font-medium">{healthScore}%</span>
           </div>
-          <Progress value={healthScore} className="h-2" />
+          <ConfidenceProgress value={healthScore} className="h-2" variant="health" />
         </div>
 
         <div className="space-y-2">

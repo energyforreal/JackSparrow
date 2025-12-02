@@ -7,10 +7,10 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
-import { Progress } from '@/components/ui/progress'
+import { ConfidenceProgress } from './ConfidenceProgress'
 import { Badge } from '@/components/ui/badge'
 import { ReasoningChain, ReasoningStep } from '@/types'
-import { normalizeConfidenceToPercent } from '@/utils/formatters'
+import { normalizeConfidenceToPercent, formatConfidence } from '@/utils/formatters'
 
 interface ReasoningChainViewProps {
   // Array of reasoning steps as sent over WebSocket.
@@ -105,7 +105,7 @@ export function ReasoningChainView({
           <div className="flex items-center gap-3">
             {finalConfidencePercent > 0 && (
               <Badge variant="outline" className="text-sm">
-                Confidence: {finalConfidencePercent.toFixed(1)}%
+                Confidence: {formatConfidence(finalConfidencePercent)}
               </Badge>
             )}
           </div>
@@ -116,7 +116,7 @@ export function ReasoningChainView({
         </p>
       </CardHeader>
       <CardContent>
-        <Accordion type="single" collapsible className="w-full">
+        <Accordion type="single" collapsible className="w-full" aria-label="Reasoning steps">
           {sortedSteps.map((step) => {
             const stepConfidence = normalizeConfidenceToPercent(step.confidence)
             const title = STEP_TITLES[step.step_number] ?? step.step_name
@@ -141,17 +141,19 @@ export function ReasoningChainView({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        {stepConfidence.toFixed(1)}%
+                        {formatConfidence(stepConfidence)}
                       </span>
-                      <Progress value={stepConfidence} className="w-20 h-2" />
+                      <ConfidenceProgress value={stepConfidence} className="w-20 h-2" />
                     </div>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent>
                   <div className="space-y-3 pt-2">
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                      {step.description}
-                    </p>
+                    <div className="max-h-96 overflow-y-auto pr-2">
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                        {step.description}
+                      </p>
+                    </div>
                     {step.evidence && step.evidence.length > 0 && (
                       <div className="flex flex-wrap gap-1.5">
                         {step.evidence.map((evidence, index) => (
@@ -180,7 +182,7 @@ export function ReasoningChainView({
                   Average step confidence
                 </span>
                 <span className="text-sm font-medium">
-                  {averageStepConfidence.toFixed(1)}%
+                  {formatConfidence(averageStepConfidence)}
                 </span>
               </div>
             </CardContent>
@@ -192,7 +194,7 @@ export function ReasoningChainView({
                   Consistency score
                 </span>
                 <span className="text-sm font-medium">
-                  {consistencyScore.toFixed(1)}%
+                  {formatConfidence(consistencyScore)}
                 </span>
               </div>
             </CardContent>
@@ -206,9 +208,11 @@ export function ReasoningChainView({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-foreground whitespace-pre-wrap">
-              {conclusionText}
-            </p>
+            <div className="max-h-64 overflow-y-auto pr-2">
+              <p className="text-sm text-foreground whitespace-pre-wrap break-words">
+                {conclusionText}
+              </p>
+            </div>
           </CardContent>
         </Card>
       </CardContent>

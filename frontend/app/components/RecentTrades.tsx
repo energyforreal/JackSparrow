@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Trade } from '@/types'
+import { formatTime } from '@/utils/formatters'
 
 interface RecentTradesProps {
   trades?: Trade[]
@@ -38,7 +39,7 @@ export function RecentTrades({ trades }: RecentTradesProps) {
   }
 
   const formatDate = (date: Date | string) => {
-    return new Date(date).toLocaleTimeString()
+    return formatTime(date)
   }
 
   const getStatusVariant = (status: string) => {
@@ -61,46 +62,48 @@ export function RecentTrades({ trades }: RecentTradesProps) {
         <CardTitle>Recent Trades</CardTitle>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Side</TableHead>
-              <TableHead>Symbol</TableHead>
-              <TableHead>Quantity</TableHead>
-              <TableHead>Price</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {trades.slice(0, 10).map((trade) => (
-              <TableRow key={trade.trade_id}>
-                <TableCell className="text-muted-foreground">
-                  {formatDate(trade.executed_at)}
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={trade.side === 'BUY' ? 'default' : 'destructive'}
-                  >
-                    {trade.side}
-                  </Badge>
-                </TableCell>
-                <TableCell className="font-medium">{trade.symbol}</TableCell>
-                <TableCell>
-                  {typeof trade.quantity === 'string' 
-                    ? parseFloat(trade.quantity).toLocaleString()
-                    : trade.quantity.toLocaleString()}
-                </TableCell>
-                <TableCell>{formatPrice(trade.price)}</TableCell>
-                <TableCell>
-                  <Badge variant={getStatusVariant(trade.status)}>
-                    {trade.status}
-                  </Badge>
-                </TableCell>
+        <div className="overflow-x-auto -mx-6 px-6">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>Side</TableHead>
+                <TableHead>Symbol</TableHead>
+                <TableHead>Quantity</TableHead>
+                <TableHead>Price</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {trades.slice(0, 10).map((trade) => (
+                <TableRow key={trade.trade_id}>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(trade.executed_at)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={trade.side === 'BUY' ? 'default' : 'destructive'}
+                    >
+                      {trade.side}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-medium">{trade.symbol}</TableCell>
+                  <TableCell>
+                    {typeof trade.quantity === 'string' 
+                      ? parseFloat(trade.quantity).toLocaleString()
+                      : trade.quantity.toLocaleString()}
+                  </TableCell>
+                  <TableCell>{formatPrice(trade.price)}</TableCell>
+                  <TableCell>
+                    <Badge variant={getStatusVariant(trade.status)}>
+                      {trade.status}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   )

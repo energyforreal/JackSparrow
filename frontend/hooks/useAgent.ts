@@ -57,6 +57,11 @@ export function useAgent() {
             })
           }
           break
+        case 'position_closed':
+          // When position is closed, refresh portfolio to update positions list
+          // Portfolio update will be broadcast separately, but we can trigger a refresh here
+          // The portfolio_update message will handle the actual update
+          break
       }
     }
   }, [lastMessage])

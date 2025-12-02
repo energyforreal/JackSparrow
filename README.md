@@ -102,6 +102,8 @@ The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server
 
 ## Model Training
 
+The system currently includes **6 integrated XGBoost models** (3 classifiers + 3 regressors) for BTCUSD trading across 15m, 1h, and 4h timeframes. These models are automatically discovered and registered on agent startup.
+
 If you need to train or regenerate ML models:
 
 ```bash
@@ -112,7 +114,7 @@ python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
 python scripts/validate_models_before_deployment.py
 ```
 
-See [ML Models Documentation](docs/03-ml-models.md#model-training) for detailed guide.
+See [ML Models Documentation](docs/03-ml-models.md#model-training) for detailed guide. For information on the current model integration, see [Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md).
 
 ## Testing
 

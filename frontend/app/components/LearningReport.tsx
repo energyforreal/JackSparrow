@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { LearningUpdate } from '@/types'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { formatDateTime } from '@/utils/formatters'
 
 interface LearningReportProps {
   learningUpdate?: LearningUpdate
@@ -27,7 +28,7 @@ export function LearningReport({ learningUpdate }: LearningReportProps) {
   }
 
   const formatDate = (date: Date) => {
-    return new Date(date).toLocaleString()
+    return formatDateTime(date)
   }
 
   return (

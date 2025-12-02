@@ -8,11 +8,14 @@ Provides unified interface for agent core.
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import uuid
+import structlog
 
 from agent.data.feature_server import MCPFeatureServer, MCPFeatureRequest, MCPFeatureResponse
 from agent.models.mcp_model_registry import MCPModelRegistry, MCPModelRequest, MCPModelResponse
 from agent.core.reasoning_engine import MCPReasoningEngine, MCPReasoningRequest, MCPReasoningChain
 from decimal import Decimal
+
+logger = structlog.get_logger()
 
 
 class MCPOrchestrator:
@@ -167,17 +170,45 @@ class MCPOrchestrator:
                 if isinstance(latest_candle, dict) and "close" in latest_candle:
                     current_price = latest_candle["close"]
         
-        # If still not found, try to get from feature server's market data
+        # If still not found, try to get from market data service directly
         if current_price is None:
-            # Feature server should have access to latest candles
-            # We can try to get it from the feature metadata or request it separately
-            # For now, we'll log a warning and let the regressor use fallback normalization
-            import structlog
-            logger = structlog.get_logger()
+            # Query market data service for latest candle to get current price
+            # Use the primary interval (typically "1h") to get the latest candle
+            try:
+                # Get market data with minimal limit to fetch just the latest candle
+                market_data = await self.feature_server.market_data_service.get_market_data(
+                    symbol=symbol,
+                    interval="1h",  # Use primary interval
+                    limit=1  # Just need the latest candle
+                )
+                
+                if market_data and market_data.get("candles"):
+                    latest_candle = market_data["candles"][-1]
+                    if isinstance(latest_candle, dict):
+                        # Try 'close' first (most common in OHLC data)
+                        if "close" in latest_candle:
+                            current_price = latest_candle["close"]
+                        # Fallback to 'price' if available
+                        elif "price" in latest_candle:
+                            current_price = latest_candle["price"]
+                        # Fallback: use high if close not available (better than nothing)
+                        elif "high" in latest_candle:
+                            current_price = latest_candle["high"]
+                            
+            except Exception as e:
+                logger.warning(
+                    "current_price_fetch_failed",
+                    symbol=symbol,
+                    error=str(e),
+                    message="Failed to fetch current price from market data service. Regressor models will use fallback normalization."
+                )
+        
+        # Log warning if still not found after all attempts
+        if current_price is None:
             logger.warning(
                 "current_price_not_found_in_context",
                 symbol=symbol,
-                message="Current price not found in context. Regressor models will use fallback normalization."
+                message="Current price not found in context or market data. Regressor models will use fallback normalization."
             )
         
         # Add current_price to context for regressor normalization
@@ -189,6 +220,18 @@ class MCPOrchestrator:
             context=context,
             require_explanation=True
         )
+        
+        # Add model predictions to context for reasoning engine
+        # The reasoning engine needs model_predictions to calculate consensus
+        context["model_predictions"] = [
+            {
+                "prediction": pred.prediction,
+                "confidence": pred.confidence,
+                "model_name": pred.model_name,
+                "model_type": "regressor" if "regressor" in pred.model_name.lower() else "classifier"
+            }
+            for pred in model_response.predictions
+        ]
         
         # Step 3: Generate reasoning chain
         reasoning_chain = await self.generate_reasoning(
@@ -226,8 +269,6 @@ class MCPOrchestrator:
         consensus_prediction = model_response.consensus_prediction
         
         # Log individual predictions for debugging
-        import structlog
-        logger = structlog.get_logger()
         if healthy_predictions:
             logger.debug(
                 "consensus_calculation_details",

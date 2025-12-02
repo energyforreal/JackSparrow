@@ -30,6 +30,7 @@ class WebSocketManager:
         self._redis_subscriber = None
         self._redis_task = None
         self._time_sync_task = None
+        self._health_sync_task = None
         self._redis_publisher = None
         self._redis_channel = "websocket:broadcast"
         self._instance_id = str(uuid.uuid4())[:8]  # Unique instance identifier
@@ -67,6 +68,9 @@ class WebSocketManager:
             # Start periodic time sync task
             self._time_sync_task = asyncio.create_task(self._time_sync_loop())
             
+            # Start periodic health update task
+            self._health_sync_task = asyncio.create_task(self._health_sync_loop())
+            
             logger.info(
                 "websocket_manager_initialized",
                 instance_id=self._instance_id,
@@ -103,6 +107,13 @@ class WebSocketManager:
             except asyncio.CancelledError:
                 pass
         
+        if self._health_sync_task:
+            self._health_sync_task.cancel()
+            try:
+                await self._health_sync_task
+            except asyncio.CancelledError:
+                pass
+        
         if self._redis_subscriber:
             try:
                 await self._redis_subscriber.close()
@@ -116,6 +127,7 @@ class WebSocketManager:
         self._redis_publisher = None
         self._redis_task = None
         self._time_sync_task = None
+        self._health_sync_task = None
     
     async def connect(self, websocket: WebSocket):
         """Accept new WebSocket connection."""
@@ -365,6 +377,164 @@ class WebSocketManager:
         except Exception as e:
             logger.error(
                 "websocket_time_sync_loop_error",
+                error=str(e),
+                exc_info=True
+            )
+    
+    async def _health_sync_loop(self):
+        """Background task to send periodic health update messages."""
+        try:
+            while True:
+                await asyncio.sleep(60)  # Send every 60 seconds
+                
+                if not self.active_connections:
+                    continue
+                
+                try:
+                    from backend.api.routes.health import (
+                        check_database_health,
+                        redis_health_check,
+                        check_agent_health,
+                        check_feature_server_health,
+                        check_model_nodes_health,
+                        check_delta_exchange_health,
+                        check_reasoning_engine_health
+                    )
+                    from backend.core.database import AsyncSessionLocal
+                    from backend.api.models.responses import HealthServiceStatus
+                    from datetime import datetime
+                    
+                    async with AsyncSessionLocal() as db:
+                        degradation_reasons = []
+                        health_scores = []
+                        
+                        # Check database
+                        db_health = await check_database_health(db)
+                        if db_health.status == "up":
+                            health_scores.append(0.05)
+                        else:
+                            degradation_reasons.append("Database is down")
+                            health_scores.append(0.0)
+                        
+                        # Check Redis
+                        redis_health_dict = await redis_health_check()
+                        redis_health = HealthServiceStatus(**redis_health_dict)
+                        if redis_health.status == "up":
+                            health_scores.append(0.05)
+                        else:
+                            degradation_reasons.append("Redis is down")
+                            health_scores.append(0.0)
+                        
+                        # Check agent
+                        agent_health = await check_agent_health()
+                        agent_weight = 0.15
+                        if agent_health.status == "up":
+                            health_scores.append(agent_weight)
+                            agent_state = agent_health.details.get("state") if agent_health.details else None
+                        else:
+                            degradation_reasons.append("Agent service is down")
+                            health_scores.append(0.0)
+                            agent_state = None
+                        
+                        # Check feature server
+                        feature_health = await check_feature_server_health()
+                        feature_weight = 0.20
+                        if feature_health.status == "up":
+                            health_scores.append(feature_weight)
+                        elif feature_health.status != "unknown":
+                            degradation_reasons.append("Feature server is down")
+                            health_scores.append(0.0)
+                        else:
+                            health_scores.append(0.0)
+                        
+                        # Check model nodes
+                        model_health = await check_model_nodes_health()
+                        model_weight = 0.25
+                        if model_health.status == "up":
+                            if model_health.details:
+                                healthy_count = model_health.details.get("healthy_models", 0)
+                                total_count = model_health.details.get("total_models", 1)
+                                if healthy_count < 3 and total_count > 0:
+                                    degradation_reasons.append(f"Only {healthy_count}/{total_count} models are healthy")
+                                health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
+                            else:
+                                health_scores.append(model_weight)
+                        elif model_health.status != "unknown":
+                            degradation_reasons.append("No model nodes are healthy")
+                            health_scores.append(0.0)
+                        else:
+                            health_scores.append(0.0)
+                        
+                        # Check Delta Exchange
+                        delta_health = await check_delta_exchange_health()
+                        delta_weight = 0.15
+                        if delta_health.status == "up":
+                            health_scores.append(delta_weight)
+                        elif delta_health.status != "unknown":
+                            degradation_reasons.append("Delta Exchange API is down")
+                            health_scores.append(0.0)
+                        else:
+                            health_scores.append(0.0)
+                        
+                        # Check reasoning engine
+                        reasoning_health = await check_reasoning_engine_health()
+                        reasoning_weight = 0.15
+                        if reasoning_health.status == "up":
+                            health_scores.append(reasoning_weight)
+                        elif reasoning_health.status != "unknown":
+                            degradation_reasons.append("Reasoning engine is down")
+                            health_scores.append(0.0)
+                        else:
+                            health_scores.append(0.0)
+                        
+                        # Calculate overall health score
+                        health_score = sum(health_scores)
+                        
+                        # Determine status
+                        if health_score >= 0.9:
+                            status = "healthy"
+                        elif health_score >= 0.6:
+                            status = "degraded"
+                        else:
+                            status = "unhealthy"
+                        
+                        health_data = {
+                            "status": status,
+                            "health_score": round(health_score, 3),
+                            "services": {
+                                "database": db_health.dict(),
+                                "redis": redis_health.dict(),
+                                "agent": agent_health.dict(),
+                                "feature_server": feature_health.dict(),
+                                "model_nodes": model_health.dict(),
+                                "delta_exchange": delta_health.dict(),
+                                "reasoning_engine": reasoning_health.dict()
+                            },
+                            "agent_state": agent_state,
+                            "degradation_reasons": degradation_reasons,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                        
+                        health_message = {
+                            "type": "health_update",
+                            "data": health_data
+                        }
+                        
+                        await self.broadcast(health_message, channel="health")
+                        
+                except Exception as health_error:
+                    logger.warning(
+                        "websocket_health_sync_error",
+                        error=str(health_error),
+                        message="Failed to broadcast health update, will retry on next cycle"
+                    )
+                
+        except asyncio.CancelledError:
+            logger.info("websocket_health_sync_loop_cancelled")
+            raise
+        except Exception as e:
+            logger.error(
+                "websocket_health_sync_loop_error",
                 error=str(e),
                 exc_info=True
             )

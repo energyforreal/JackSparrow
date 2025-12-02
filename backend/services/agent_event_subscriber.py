@@ -16,6 +16,8 @@ from redis.exceptions import ResponseError
 from backend.core.redis import get_redis
 from backend.api.websocket.manager import websocket_manager
 from backend.core.logging import log_error_with_context
+from backend.services.trade_persistence_service import trade_persistence_service
+from decimal import Decimal
 
 logger = structlog.get_logger()
 
@@ -295,6 +297,8 @@ class AgentEventSubscriber:
                 await self._handle_state_transition(payload)
             elif event_type == "order_fill":
                 await self._handle_order_fill(payload)
+            elif event_type == "position_closed":
+                await self._handle_position_closed(payload)
             elif event_type == "model_prediction_complete":
                 await self._handle_model_prediction_complete(payload)
             elif event_type == "market_tick":
@@ -468,6 +472,63 @@ class AgentEventSubscriber:
             quantity = payload.get("quantity", 0.0)
             fill_price = payload.get("fill_price", 0.0)
             timestamp = payload.get("timestamp")
+            
+            # Convert timestamp to datetime if it's a string
+            if isinstance(timestamp, str):
+                try:
+                    timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                except Exception:
+                    timestamp = datetime.utcnow()
+            elif not isinstance(timestamp, datetime):
+                timestamp = datetime.utcnow()
+
+            # Persist trade and position to database
+            try:
+                # Calculate stop loss and take profit (using same logic as execution module)
+                from backend.core.config import settings
+                stop_loss_pct = settings.stop_loss_percentage
+                take_profit_pct = settings.take_profit_percentage
+                
+                if side.upper() == "BUY":
+                    stop_loss = fill_price * (1 - stop_loss_pct) if stop_loss_pct else None
+                    take_profit = fill_price * (1 + take_profit_pct) if take_profit_pct else None
+                else:  # SELL
+                    stop_loss = fill_price * (1 + stop_loss_pct) if stop_loss_pct else None
+                    take_profit = fill_price * (1 - take_profit_pct) if take_profit_pct else None
+                
+                persistence_result = await trade_persistence_service.create_trade_and_position(
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    fill_price=fill_price,
+                    order_type="MARKET",
+                    reasoning_chain_id=None,  # Could be enhanced to include this
+                    model_predictions=None,  # Could be enhanced to include this
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    executed_at=timestamp
+                )
+                
+                logger.info(
+                    "trade_persisted_to_database",
+                    service="backend",
+                    trade_id=trade_id,
+                    position_id=persistence_result.get("position_id"),
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    fill_price=fill_price
+                )
+            except Exception as persistence_error:
+                # Log error but don't fail the entire handler
+                log_error_with_context(
+                    "trade_persistence_failed",
+                    error=persistence_error,
+                    component="agent_event_subscriber",
+                    trade_id=trade_id,
+                    symbol=symbol
+                )
 
             # Format trade data for frontend
             trade_data = {
@@ -493,6 +554,9 @@ class AgentEventSubscriber:
                 symbol=symbol,
                 side=side
             )
+            
+            # Broadcast portfolio update after trade execution
+            await self._broadcast_portfolio_update()
 
         except Exception as e:
             log_error_with_context(
@@ -501,6 +565,105 @@ class AgentEventSubscriber:
                 component="agent_event_subscriber"
             )
 
+    async def _handle_position_closed(self, payload: Dict[str, Any]):
+        """Handle PositionClosedEvent.
+        
+        Args:
+            payload: PositionClosedEvent payload
+        """
+        try:
+            position_id = payload.get("position_id", "")
+            symbol = payload.get("symbol", "")
+            entry_price = payload.get("entry_price", 0.0)
+            exit_price = payload.get("exit_price", 0.0)
+            pnl = payload.get("pnl", 0.0)
+            exit_reason = payload.get("exit_reason", "unknown")
+            timestamp = payload.get("timestamp")
+            
+            # Convert timestamp to datetime if needed
+            if isinstance(timestamp, str):
+                try:
+                    timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                except Exception:
+                    timestamp = datetime.utcnow()
+            elif not isinstance(timestamp, datetime):
+                timestamp = datetime.utcnow()
+            
+            # Update position in database
+            try:
+                close_result = await trade_persistence_service.close_position(
+                    position_id=position_id,
+                    exit_price=exit_price,
+                    exit_reason=exit_reason,
+                    pnl=pnl,
+                    closed_at=timestamp
+                )
+                
+                if close_result.get("success"):
+                    logger.info(
+                        "position_closed_in_database",
+                        service="backend",
+                        position_id=position_id,
+                        symbol=symbol,
+                        entry_price=entry_price,
+                        exit_price=exit_price,
+                        pnl=pnl,
+                        exit_reason=exit_reason,
+                        is_profit=close_result.get("is_profit"),
+                        is_loss=close_result.get("is_loss")
+                    )
+                else:
+                    logger.warning(
+                        "position_close_failed_in_database",
+                        service="backend",
+                        position_id=position_id,
+                        error=close_result.get("error")
+                    )
+            except Exception as persistence_error:
+                # Log error but don't fail the entire handler
+                log_error_with_context(
+                    "position_close_persistence_failed",
+                    error=persistence_error,
+                    component="agent_event_subscriber",
+                    position_id=position_id,
+                    symbol=symbol
+                )
+            
+            # Format position closed data for frontend
+            position_data = {
+                "position_id": position_id,
+                "symbol": symbol,
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "pnl": pnl,
+                "exit_reason": exit_reason,
+                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+            }
+            
+            # Broadcast via WebSocket
+            await websocket_manager.broadcast(
+                {"type": "position_closed", "data": position_data},
+                channel="position_closed"
+            )
+            
+            logger.debug(
+                "agent_event_subscriber_position_closed_broadcast",
+                service="backend",
+                position_id=position_id,
+                symbol=symbol,
+                pnl=pnl
+            )
+            
+            # Broadcast portfolio update after position closed
+            await self._broadcast_portfolio_update()
+            
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_position_closed_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+    
     async def _handle_model_prediction_complete(self, payload: Dict[str, Any]):
         """Handle ModelPredictionCompleteEvent.
         
@@ -561,10 +724,107 @@ class AgentEventSubscriber:
                 symbol=symbol,
                 price=price
             )
+            
+            # Update position prices and broadcast portfolio update
+            await self._update_position_prices(symbol, float(price))
+            await self._broadcast_portfolio_update()
 
         except Exception as e:
             log_error_with_context(
                 "agent_event_subscriber_market_tick_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+    
+    async def _update_position_prices(self, symbol: str, current_price: float):
+        """Update current_price and unrealized_pnl for open positions matching symbol.
+        
+        Args:
+            symbol: Trading symbol
+            current_price: Current market price
+        """
+        try:
+            from backend.core.database import AsyncSessionLocal, Position, PositionStatus, TradeSide
+            
+            async with AsyncSessionLocal() as session:
+                # Get all open positions for this symbol
+                from sqlalchemy import select
+                query = select(Position).where(
+                    Position.symbol == symbol,
+                    Position.status == PositionStatus.OPEN
+                )
+                result = await session.execute(query)
+                positions = result.scalars().all()
+                
+                if not positions:
+                    return
+                
+                # Update each position
+                for position in positions:
+                    position.current_price = Decimal(str(current_price))
+                    
+                    # Calculate unrealized PnL
+                    if position.side == TradeSide.BUY:
+                        unrealized_pnl = (current_price - float(position.entry_price)) * float(position.quantity)
+                    else:  # SELL
+                        unrealized_pnl = (float(position.entry_price) - current_price) * float(position.quantity)
+                    
+                    position.unrealized_pnl = Decimal(str(unrealized_pnl))
+                
+                await session.commit()
+                
+                logger.debug(
+                    "agent_event_subscriber_position_prices_updated",
+                    service="backend",
+                    symbol=symbol,
+                    current_price=current_price,
+                    positions_updated=len(positions)
+                )
+                
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_update_position_prices_error",
+                error=e,
+                component="agent_event_subscriber",
+                symbol=symbol
+            )
+    
+    async def _broadcast_portfolio_update(self):
+        """Broadcast portfolio update via WebSocket."""
+        try:
+            from backend.core.database import AsyncSessionLocal
+            from backend.services.portfolio_service import portfolio_service
+            
+            async with AsyncSessionLocal() as session:
+                portfolio_summary = await portfolio_service.get_portfolio_summary(session)
+                
+                if portfolio_summary:
+                    # Format portfolio data for frontend
+                    portfolio_data = {
+                        "total_value": float(portfolio_summary.get("total_value", 0)),
+                        "available_balance": float(portfolio_summary.get("available_balance", 0)),
+                        "open_positions": portfolio_summary.get("open_positions", 0),
+                        "total_unrealized_pnl": float(portfolio_summary.get("total_unrealized_pnl", 0)),
+                        "total_realized_pnl": float(portfolio_summary.get("total_realized_pnl", 0)),
+                        "positions": portfolio_summary.get("positions", [])
+                    }
+                    
+                    # Broadcast via WebSocket
+                    await websocket_manager.broadcast(
+                        {"type": "portfolio_update", "data": portfolio_data},
+                        channel="portfolio"
+                    )
+                    
+                    logger.debug(
+                        "agent_event_subscriber_portfolio_update_broadcast",
+                        service="backend",
+                        total_value=portfolio_data["total_value"],
+                        open_positions=portfolio_data["open_positions"]
+                    )
+                    
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_broadcast_portfolio_update_error",
                 error=e,
                 component="agent_event_subscriber"
             )

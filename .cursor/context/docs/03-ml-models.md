@@ -27,67 +27,34 @@ This document describes how ML models are managed, uploaded, discovered, and int
 
 ## Model Storage Overview
 
-JackSparrow uses **two distinct model storage locations** for different purposes:
+JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**. Models are automatically discovered and registered on agent startup through the model discovery system.
 
-1. **Root `models/` directory** - Production-ready models shipped with the codebase
-2. **`agent/model_storage/` directory** - Upload directory for new or custom models
-
-### Model Storage Locations
+### Model Storage Location
 
 | Location | Purpose | Environment Variable | Usage |
 |----------|---------|---------------------|-------|
-| `models/` (root) | Production models shipped with codebase | `MODEL_PATH` (points to specific file) | Runtime model selection |
-| `agent/model_storage/` | Upload directory for new/custom models | `MODEL_DIR` (points to directory) | Model discovery and registration |
+| `agent/model_storage/` | All trained ML models | `MODEL_DIR` (points to directory) | Automatic model discovery and registration |
 
-**Key Distinction**:
-- **`models/`**: Contains versioned production models that are source-controlled. Use `MODEL_PATH` to specify which model file to load at runtime.
-- **`agent/model_storage/`**: Contains uploaded models that are discovered automatically. Use `MODEL_DIR` to specify the discovery directory.
+**Current Model Types**:
+- **XGBoost models** are stored in `agent/model_storage/xgboost/` directory
+- Models include both regressor and classifier variants trained in Google Colab
+- The system automatically discovers and registers all models in the storage directory
 
----
+### Currently Integrated Models
 
-## Current Production Models (`models/`)
+As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **6 XGBoost models** for BTCUSD trading:
 
-JackSparrow now ships trained artefacts inside a top-level `models/` directory. These files are supplied alongside source code so the paper-trading agent can run without re-training. They are source-controlled, but operational scripts treat them as deployable assets that may be replaced between releases.
+**Classifier Models** (3 models - predict trading signals directly):
+- `xgboost_classifier_BTCUSD_15m.pkl` - 15-minute timeframe classifier
+- `xgboost_classifier_BTCUSD_1h.pkl` - 1-hour timeframe classifier
+- `xgboost_classifier_BTCUSD_4h.pkl` - 4-hour timeframe classifier
 
-```
-models/
-├── lightgbm_BTCUSD_4h_production_20251014_115655.pkl
-├── randomforest_BTCUSD_4h_production_20251014_125258.pkl
-├── training_summary.csv
-├── xgboost_BTCUSD_15m.pkl
-├── xgboost_BTCUSD_1h.pkl
-├── xgboost_BTCUSD_4h.pkl
-└── xgboost_BTCUSD_4h_production_20251014_114541.pkl
-```
+**Regressor Models** (3 models - predict absolute future prices):
+- `xgboost_regressor_BTCUSD_15m.pkl` - 15-minute timeframe regressor
+- `xgboost_regressor_BTCUSD_1h.pkl` - 1-hour timeframe regressor
+- `xgboost_regressor_BTCUSD_4h.pkl` - 4-hour timeframe regressor
 
-| File | Purpose | Notes |
-| ---- | ------- | ----- |
-| `lightgbm_BTCUSD_4h_production_20251014_115655.pkl` | Gradient boosting model for 4-hour horizon | Production build generated 2025-10-14 11:56:55 |
-| `randomforest_BTCUSD_4h_production_20251014_125258.pkl` | Random Forest ensemble partner | Helps confirm 4-hour regime changes |
-| `training_summary.csv` | Snapshot of the latest training job | Contains aggregate metrics for the artefacts in this folder |
-| `xgboost_BTCUSD_15m.pkl` | Primary intraday XGBoost model | Default path referenced by configuration |
-| `xgboost_BTCUSD_1h.pkl` | Hourly XGBoost model | Supports medium-term consensus windows |
-| `xgboost_BTCUSD_4h.pkl` | Legacy 4-hour baseline | Retained for comparative backtests |
-| `xgboost_BTCUSD_4h_production_20251014_114541.pkl` | Current production-grade 4-hour model | Preferred candidate once validated against legacy model |
-
-### Environment Binding
-
-The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) now exposes the active artefact through the `MODEL_PATH` variable:
-
-```
-MODEL_PATH=models/xgboost_BTCUSD_15m.pkl
-MIN_CONFIDENCE_THRESHOLD=0.65
-```
-
-Always keep the path **relative to the project root** so build scripts and container images resolve it consistently. Update `MODEL_PATH` whenever you promote a new model into production. If multiple services need different models, define service-specific variables (for example `MODEL_PATH_4H`) and document them alongside the corresponding consumers.
-
-### Operational Workflow
-
-1. Store newly trained artefacts in `models/` using timestamped filenames for traceability.  
-2. Update `training_summary.csv` with the metrics from the latest training run.  
-3. Adjust the `.env` (or per-service configuration) with the new `MODEL_PATH` value.  
-4. Run the smoke-test commands captured in the [Build Guide](11-build-guide.md#project-commands) before deploying.  
-5. Record the change in this document and reference it from `DOCUMENTATION.md` so other contributors can discover the update quickly.
+All models are stored in `agent/model_storage/xgboost/` and are automatically discovered and registered on agent startup. For detailed integration information, see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md).
 
 ---
 

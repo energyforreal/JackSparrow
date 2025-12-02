@@ -407,26 +407,89 @@ class MCPReasoningEngine:
             consensus = 0.0
             avg_confidence = 0.5
         else:
-            # Calculate weighted average by confidence
-            total_weight = 0.0
-            weighted_sum = 0.0
+            # Separate classifier and regressor predictions
+            # Regressors predict prices directly and are generally more reliable for price direction
+            classifier_predictions = [
+                p for p in model_predictions 
+                if p.get("model_type", "").lower() == "classifier"
+            ]
+            regressor_predictions = [
+                p for p in model_predictions 
+                if p.get("model_type", "").lower() == "regressor"
+            ]
             
-            for p in model_predictions:
-                prediction = p.get("prediction", 0.0)
-                confidence = p.get("confidence", 0.5)  # Default to 0.5 if missing
-                # Ensure confidence is in valid range [0, 1]
-                confidence = max(0.0, min(1.0, confidence))
-                
-                weighted_sum += prediction * confidence
-                total_weight += confidence
+            # Calculate consensus for each type
+            classifier_consensus = 0.0
+            regressor_consensus = 0.0
+            classifier_confidence = 0.0
+            regressor_confidence = 0.0
             
-            if total_weight > 0:
-                consensus = weighted_sum / total_weight
-                avg_confidence = total_weight / len(model_predictions)
+            if classifier_predictions:
+                classifier_weight = 0.0
+                classifier_sum = 0.0
+                for p in classifier_predictions:
+                    prediction = p.get("prediction", 0.0)
+                    confidence = max(0.0, min(1.0, p.get("confidence", 0.5)))
+                    classifier_sum += prediction * confidence
+                    classifier_weight += confidence
+                if classifier_weight > 0:
+                    classifier_consensus = classifier_sum / classifier_weight
+                    classifier_confidence = classifier_weight / len(classifier_predictions)
+            
+            if regressor_predictions:
+                regressor_weight = 0.0
+                regressor_sum = 0.0
+                for p in regressor_predictions:
+                    prediction = p.get("prediction", 0.0)
+                    confidence = max(0.0, min(1.0, p.get("confidence", 0.5)))
+                    regressor_sum += prediction * confidence
+                    regressor_weight += confidence
+                if regressor_weight > 0:
+                    regressor_consensus = regressor_sum / regressor_weight
+                    regressor_confidence = regressor_weight / len(regressor_predictions)
+            
+            # Combine consensus: prefer regressors if available (they predict prices directly)
+            # If both exist, use weighted average with higher weight for regressors (2:1 ratio)
+            if regressor_predictions and classifier_predictions:
+                # Both types present: weighted average favoring regressors
+                regressor_weight_ratio = 2.0  # Regressors get 2x weight
+                total_combined_weight = regressor_confidence * regressor_weight_ratio + classifier_confidence
+                if total_combined_weight > 0:
+                    consensus = (
+                        regressor_consensus * regressor_confidence * regressor_weight_ratio +
+                        classifier_consensus * classifier_confidence
+                    ) / total_combined_weight
+                    avg_confidence = total_combined_weight / (regressor_weight_ratio + 1.0)
+                else:
+                    consensus = (regressor_consensus + classifier_consensus) / 2.0
+                    avg_confidence = (regressor_confidence + classifier_confidence) / 2.0
+                evidence_detail = f"Regressor consensus: {regressor_consensus:.2f} (weight: {regressor_weight_ratio}x), Classifier consensus: {classifier_consensus:.2f}"
+            elif regressor_predictions:
+                # Only regressors available
+                consensus = regressor_consensus
+                avg_confidence = regressor_confidence
+                evidence_detail = f"Regressor consensus: {consensus:.2f} ({len(regressor_predictions)} models)"
+            elif classifier_predictions:
+                # Only classifiers available
+                consensus = classifier_consensus
+                avg_confidence = classifier_confidence
+                evidence_detail = f"Classifier consensus: {consensus:.2f} ({len(classifier_predictions)} models)"
             else:
-                # Fallback to simple average if all confidences are zero
-                consensus = sum(p.get("prediction", 0) for p in model_predictions) / len(model_predictions)
-                avg_confidence = 0.5
+                # Fallback: simple average if type detection failed
+                total_weight = 0.0
+                weighted_sum = 0.0
+                for p in model_predictions:
+                    prediction = p.get("prediction", 0.0)
+                    confidence = max(0.0, min(1.0, p.get("confidence", 0.5)))
+                    weighted_sum += prediction * confidence
+                    total_weight += confidence
+                if total_weight > 0:
+                    consensus = weighted_sum / total_weight
+                    avg_confidence = total_weight / len(model_predictions)
+                else:
+                    consensus = sum(p.get("prediction", 0) for p in model_predictions) / len(model_predictions)
+                    avg_confidence = 0.5
+                evidence_detail = f"Combined consensus: {consensus:.2f} (fallback calculation)"
             
             if consensus > 0.7:
                 conclusion = "STRONG_BUY - High confidence bullish signal"
@@ -440,9 +503,10 @@ class MCPReasoningEngine:
                 conclusion = "HOLD - Mixed signals, waiting for clearer direction"
             
             evidence = [
-                f"Model consensus: {consensus:.2f} (weighted by confidence, avg: {avg_confidence:.2f})",
+                f"Final consensus: {consensus:.2f} (weighted avg confidence: {avg_confidence:.2f})",
+                evidence_detail,
                 f"Based on {len(previous_steps)} analysis steps",
-                f"{len(model_predictions)} model predictions"
+                f"Total models: {len(model_predictions)} ({len(classifier_predictions)} classifiers, {len(regressor_predictions)} regressors)"
             ]
         
         return ReasoningStep(

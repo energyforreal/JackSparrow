@@ -55,10 +55,18 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
     }
 
     fetchTicker()
-    // Refresh ticker every 30 seconds as fallback
-    const interval = setInterval(fetchTicker, 30000)
-    return () => clearInterval(interval)
-  }, [symbol])
+    // Only poll as fallback when WebSocket is not connected
+    // When WebSocket is connected, rely on real-time market_tick updates
+    let interval: NodeJS.Timeout | null = null
+    if (!isConnected) {
+      interval = setInterval(fetchTicker, 30000)
+    }
+    return () => {
+      if (interval) {
+        clearInterval(interval)
+      }
+    }
+  }, [symbol, isConnected])
 
   // Handle WebSocket market tick updates
   useEffect(() => {
@@ -109,7 +117,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
   }
 
   return (
-    <Card className={cn('relative overflow-hidden', className)}>
+    <Card className={cn('relative overflow-hidden', className)} role="region" aria-label={`Real-time price for ${symbol}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg font-semibold">{symbol}</CardTitle>
@@ -120,6 +128,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
               isConnected && 'bg-green-500/10 text-green-600 dark:text-green-400',
               !isConnected && 'bg-gray-500/10 text-gray-600 dark:text-gray-400'
             )}
+            aria-label={isConnected ? 'Live data connection' : 'Offline - no data connection'}
           >
             {isConnected ? 'Live' : 'Offline'}
           </Badge>
@@ -173,10 +182,15 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
                     trend24h === 'down' && 'text-red-600 dark:text-red-400',
                     trend24h === 'neutral' && 'text-muted-foreground'
                   )}
+                  title={ticker.change_24h_pct === undefined ? '24-hour change data not available from exchange' : undefined}
                 >
                   {ticker.change_24h_pct !== undefined
                     ? `${ticker.change_24h_pct > 0 ? '+' : ''}${ticker.change_24h_pct.toFixed(2)}%`
-                    : 'N/A'}
+                    : (
+                      <span className="text-muted-foreground/70" title="24-hour change data not available">
+                        Not available
+                      </span>
+                    )}
                 </div>
               </div>
               <div>
@@ -215,7 +229,31 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
             )}
           </div>
         ) : (
-          <div className="text-sm text-muted-foreground">No price data available</div>
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <div className="text-muted-foreground mb-2">
+              <svg
+                className="mx-auto h-10 w-10 text-muted-foreground/50"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+            <p className="text-sm font-medium text-foreground mb-1">
+              No Price Data Available
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Unable to fetch market data for {symbol}. 
+              {!isConnected && ' Check your connection and ensure the backend is running.'}
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>

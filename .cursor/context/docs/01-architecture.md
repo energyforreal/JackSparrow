@@ -717,6 +717,48 @@ Include the checklist in runbooks so operators know which mitigation should trig
 
 ---
 
+## Recent Architectural Enhancements
+
+As of 2025-01-27, the system has undergone major architectural improvements. For a complete change log, see [Major Changes Summary](../../MAJOR_CHANGES.md).
+
+### Docker Containerization
+
+The system now supports full containerization for production and development:
+
+- **Production Dockerfiles** (`Dockerfile`) - Optimized multi-stage builds for all services
+- **Development Dockerfiles** (`Dockerfile.dev`) - Hot-reload enabled for faster iteration
+- **Docker Compose** - Orchestration for backend, agent, frontend, PostgreSQL, and Redis
+- **Volume Management** - Persistent storage for databases, logs, and model files
+- **Health Checks** - Built-in health monitoring for all containerized services
+- **Resource Limits** - CPU and memory constraints for production stability
+
+See [Deployment Documentation](10-deployment.md) for Docker setup and usage instructions.
+
+### CI/CD Pipeline
+
+Automated continuous integration and deployment:
+
+- **GitHub Actions Workflow** (`.github/workflows/cicd.yml`) - Automated testing and deployment
+- **Automated Testing** - Python pytest for backend/agent, Jest for frontend
+- **Code Quality Checks** - Linting (ruff, black, ESLint) and type checking (mypy, TypeScript)
+- **Docker Image Building** - Automated builds pushed to GitHub Container Registry (GHCR)
+- **Automated Deployment** - SSH-based deployment to production servers
+- **Multi-Service Matrix Builds** - Parallel builds for backend, agent, and frontend
+
+### Event-Driven Architecture
+
+Decoupled component communication through an event bus system:
+
+- **Event Bus** (`agent/events/event_bus.py`) - Central event routing and distribution
+- **Event Handlers** - Specialized handlers for features, market data, models, and reasoning
+- **Event Schemas** - Typed event definitions for type safety
+- **Decoupled Communication** - Components communicate via events rather than direct calls
+- **Asynchronous Processing** - Non-blocking event processing for better performance
+
+This architecture enables better scalability, testability, and maintainability by reducing tight coupling between components.
+
+---
+
 ## Related Documentation
 
 - [MCP Layer Documentation](02-mcp-layer.md) - Detailed MCP architecture and orchestration
@@ -727,4 +769,5 @@ Include the checklist in runbooks so operators know which mitigation should trig
 - [Frontend Documentation](07-frontend.md) - UI implementation
 - [Deployment Documentation](10-deployment.md) - Setup and deployment
 - [Build Guide](11-build-guide.md) - Complete build instructions
+- [Major Changes Summary](../../MAJOR_CHANGES.md) - Detailed change log for recent architectural improvements
 

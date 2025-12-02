@@ -20,6 +20,7 @@ from agent.events.schemas import (
     EmergencyStopEvent,
     PositionClosedEvent,
     StateTransitionEvent,
+    DecisionReadyEvent,
     EventType,
 )
 
@@ -75,6 +76,7 @@ class AgentStateMachine:
         """Initialize state machine and register event handlers."""
         event_bus.subscribe(EventType.CANDLE_CLOSED, self._handle_candle_closed)
         event_bus.subscribe(EventType.REASONING_COMPLETE, self._handle_reasoning_complete)
+        event_bus.subscribe(EventType.DECISION_READY, self._handle_decision_ready)
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
         event_bus.subscribe(EventType.ORDER_FILL, self._handle_order_fill)
         event_bus.subscribe(EventType.RISK_ALERT, self._handle_risk_alert)
@@ -90,6 +92,16 @@ class AgentStateMachine:
         """Handle reasoning complete event - transition THINKING -> DELIBERATING."""
         if self.current_state == AgentState.THINKING:
             await self._transition_to(AgentState.DELIBERATING, "Reasoning chain complete")
+    
+    async def _handle_decision_ready(self, event: DecisionReadyEvent):
+        """Handle decision ready event - transition DELIBERATING -> OBSERVING if HOLD, or stay in DELIBERATING for trade signals."""
+        if self.current_state == AgentState.DELIBERATING:
+            signal = event.payload.get("signal", "")
+            # If HOLD decision, transition back to OBSERVING to continue monitoring
+            if signal == "HOLD":
+                await self._transition_to(AgentState.OBSERVING, "HOLD decision - returning to observation mode")
+            # For BUY/SELL signals, stay in DELIBERATING to wait for risk approval
+            # The transition to EXECUTING will happen when RISK_APPROVED event is received
     
     async def _handle_risk_approved(self, event: RiskApprovedEvent):
         """Handle risk approved event - transition DELIBERATING/ANALYZING -> EXECUTING."""
@@ -205,6 +217,14 @@ class AgentStateMachine:
             AgentState.EXECUTING,
             lambda ctx: ctx.get("trade_decision", False) and ctx.get("can_execute", True),
             "Trade decision made"
+        )
+        
+        # DELIBERATING -> OBSERVING (when HOLD decision is made)
+        self.add_transition(
+            AgentState.DELIBERATING,
+            AgentState.OBSERVING,
+            lambda ctx: ctx.get("decision_signal") == "HOLD",
+            "HOLD decision - no trade"
         )
         
         # ANALYZING -> EXECUTING

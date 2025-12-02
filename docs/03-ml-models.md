@@ -39,6 +39,22 @@ JackSparrow stores all trained ML models in the **`agent/model_storage/` directo
 - Models include both regressor and classifier variants trained in Google Colab
 - The system automatically discovers and registers all models in the storage directory
 
+### Currently Integrated Models
+
+As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **6 XGBoost models** for BTCUSD trading:
+
+**Classifier Models** (3 models - predict trading signals directly):
+- `xgboost_classifier_BTCUSD_15m.pkl` - 15-minute timeframe classifier
+- `xgboost_classifier_BTCUSD_1h.pkl` - 1-hour timeframe classifier
+- `xgboost_classifier_BTCUSD_4h.pkl` - 4-hour timeframe classifier
+
+**Regressor Models** (3 models - predict absolute future prices):
+- `xgboost_regressor_BTCUSD_15m.pkl` - 15-minute timeframe regressor
+- `xgboost_regressor_BTCUSD_1h.pkl` - 1-hour timeframe regressor
+- `xgboost_regressor_BTCUSD_4h.pkl` - 4-hour timeframe regressor
+
+All models are stored in `agent/model_storage/xgboost/` and are automatically discovered and registered on agent startup. For detailed integration information, see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md).
+
 ### Environment Configuration
 
 The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:

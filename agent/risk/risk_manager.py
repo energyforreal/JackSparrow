@@ -83,19 +83,44 @@ class RiskManager:
                 return
 
             # Enforce minimum confidence threshold
-            if confidence < self.min_confidence_threshold:
-                await self._emit_risk_alert(
-                    alert_type="CONFIDENCE",
-                    severity="INFO",
-                    message=(
-                        f"Signal confidence {confidence:.2f} is below "
-                        f"threshold {self.min_confidence_threshold:.2f}"
-                    ),
-                    current_value=confidence,
-                    threshold=self.min_confidence_threshold,
-                    symbol=symbol
-                )
-                return
+            # For paper trading, use lower threshold (50% of normal) to allow validation
+            # of lower confidence signals for testing purposes
+            effective_threshold = (
+                self.min_confidence_threshold * 0.5
+                if settings.paper_trading_mode
+                else self.min_confidence_threshold
+            )
+            
+            if confidence < effective_threshold:
+                if settings.paper_trading_mode:
+                    # In paper trading mode, log but don't block - allow validation
+                    logger.info(
+                        "paper_trade_low_confidence",
+                        symbol=symbol,
+                        confidence=confidence,
+                        threshold=effective_threshold,
+                        normal_threshold=self.min_confidence_threshold,
+                        message=(
+                            f"Paper trade with confidence {confidence:.2f} below normal threshold "
+                            f"{self.min_confidence_threshold:.2f}, but allowing for validation "
+                            f"(effective threshold: {effective_threshold:.2f})"
+                        )
+                    )
+                    # Continue to allow trade execution for validation
+                else:
+                    # In live trading, block low confidence trades
+                    await self._emit_risk_alert(
+                        alert_type="CONFIDENCE",
+                        severity="INFO",
+                        message=(
+                            f"Signal confidence {confidence:.2f} is below "
+                            f"threshold {effective_threshold:.2f}"
+                        ),
+                        current_value=confidence,
+                        threshold=effective_threshold,
+                        symbol=symbol
+                    )
+                    return
             
             # Get context
             context = self.context_manager.get_current_context()

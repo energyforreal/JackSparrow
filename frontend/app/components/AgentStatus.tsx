@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Eye, Brain, Zap, AlertTriangle, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatTime } from '@/utils/formatters'
+import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 
 interface AgentStatusProps {
   state: string
@@ -87,6 +88,7 @@ export function AgentStatus({
           )}
           role="status"
           aria-live="polite"
+          aria-label={`Agent status: ${state}`}
         >
           <span className={cn('h-2 w-2 rounded-full', config.bgColor)} aria-hidden="true" />
           <Icon className="h-4 w-4" />
@@ -100,8 +102,8 @@ export function AgentStatus({
           )}
         </div>
 
-        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
-          <span>Last update: {formatTime(lastUpdate)}</span>
+        <div className="flex items-center justify-between text-xs pt-2 border-t">
+          <DataFreshnessIndicator timestamp={lastUpdate} />
           <div className="flex items-center gap-1">
             <span
               className={cn(
@@ -109,7 +111,11 @@ export function AgentStatus({
                 isConnected ? 'bg-success' : 'bg-error'
               )}
             />
-            <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
+            <span className={cn(
+              isConnected ? 'text-success' : 'text-error'
+            )}>
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </span>
           </div>
         </div>
       </CardContent>

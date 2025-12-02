@@ -712,9 +712,12 @@ JackSparrow stores all trained ML models in the **`agent/model_storage/` directo
 ```
 agent/model_storage/
 ├── xgboost/            # XGBoost models (regressor and classifier)
-│   ├── xgboost_regressor_BTCUSD_15m.pkl
-│   ├── xgboost_classifier_BTCUSD_15m.pkl
-│   └── ...
+│   ├── xgboost_classifier_BTCUSD_15m.pkl   # 15-minute classifier
+│   ├── xgboost_classifier_BTCUSD_1h.pkl    # 1-hour classifier
+│   ├── xgboost_classifier_BTCUSD_4h.pkl    # 4-hour classifier
+│   ├── xgboost_regressor_BTCUSD_15m.pkl    # 15-minute regressor
+│   ├── xgboost_regressor_BTCUSD_1h.pkl    # 1-hour regressor
+│   └── xgboost_regressor_BTCUSD_4h.pkl    # 4-hour regressor
 ├── lstm/               # LSTM models (if TensorFlow available)
 │   ├── lstm_regressor_BTCUSD_15m.h5
 │   ├── lstm_classifier_BTCUSD_15m.h5
@@ -729,6 +732,12 @@ agent/model_storage/
 └── price_prediction_training_summary.csv  # Training metrics
 ```
 
+**Currently Integrated Models** (as of latest integration - see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)):
+- **6 XGBoost models** for BTCUSD trading:
+  - 3 classifier models (15m, 1h, 4h timeframes)
+  - 3 regressor models (15m, 1h, 4h timeframes)
+- All models are automatically discovered and registered on agent startup
+
 ### Model Discovery
 
 Models in `agent/model_storage/` are automatically discovered on agent startup:
@@ -736,7 +745,7 @@ Models in `agent/model_storage/` are automatically discovered on agent startup:
 - Detects model type from file extension and metadata
 - Registers models with MCP Model Registry
 - Models become available for predictions immediately
-- Currently, XGBoost regressor and classifier models are stored in `agent/model_storage/xgboost/`
+- Currently, 6 XGBoost models (3 classifiers + 3 regressors) are stored in `agent/model_storage/xgboost/` for BTCUSD trading across 15m, 1h, and 4h timeframes
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

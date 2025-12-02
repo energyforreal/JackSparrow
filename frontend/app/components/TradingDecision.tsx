@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
+import { formatConfidence, formatDateTime } from '@/utils/formatters'
+import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 
 interface TradingDecisionProps {
   signal?: Signal | null
@@ -51,7 +53,7 @@ const formatPrice = (price: number | string | undefined) => {
 }
 
 const formatDate = (date: Date | string) => {
-  return new Date(date).toLocaleString()
+  return formatDateTime(date)
 }
 
 export function TradingDecision({
@@ -63,11 +65,15 @@ export function TradingDecision({
   const hasRecentTrade = recentTrade !== null && recentTrade !== undefined
 
   return (
-    <Card>
+    <Card role="region" aria-label="Trading Decision Flow">
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>Trading Decision Flow</CardTitle>
-          <Badge variant="outline" className="ml-2">
+          <Badge 
+            variant="outline" 
+            className="ml-2"
+            aria-label={paperTradingMode ? 'Paper Trading Mode' : 'Live Trading Mode'}
+          >
             {paperTradingMode ? '📝 Paper Trading' : '💰 Live Trading'}
           </Badge>
         </div>
@@ -93,13 +99,7 @@ export function TradingDecision({
                     {getDecisionAction(signal.signal)}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    Confidence: {typeof signal.confidence === 'number'
-                      ? (signal.confidence > 1 && signal.confidence <= 100
-                          ? `${signal.confidence.toFixed(1)}%`
-                          : signal.confidence > 1
-                            ? `${signal.confidence}%`
-                            : `${(signal.confidence * 100).toFixed(1)}%`)
-                      : `${signal.confidence}%`}
+                    Confidence: {formatConfidence(signal.confidence)}
                   </div>
                 </div>
               </div>
@@ -120,9 +120,10 @@ export function TradingDecision({
               )}
 
               {signal.timestamp && (
-                <div className="text-xs text-muted-foreground">
-                  Decision time: {formatDate(signal.timestamp)}
-                </div>
+                <DataFreshnessIndicator 
+                  timestamp={signal.timestamp} 
+                  label="Decision time"
+                />
               )}
             </div>
           ) : (
