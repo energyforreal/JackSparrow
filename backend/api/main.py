@@ -212,11 +212,11 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(system.router, prefix="/api/v1", tags=["system"])
 
 
-# WebSocket endpoint
+# WebSocket endpoint for frontend clients
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates."""
-    await websocket_manager.connect(websocket)
+    """WebSocket endpoint for real-time updates to frontend clients."""
+    await websocket_manager.connect(websocket, is_agent=False)
     try:
         await websocket_manager.handle_client(websocket)
     except Exception as e:
@@ -226,7 +226,24 @@ async def websocket_endpoint(websocket: WebSocket):
             exc_info=True
         )
     finally:
-        await websocket_manager.disconnect(websocket)
+        await websocket_manager.disconnect(websocket, is_agent=False)
+
+
+# WebSocket endpoint for agent connections
+@app.websocket("/ws/agent")
+async def agent_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for agent to send events directly."""
+    await websocket_manager.connect(websocket, is_agent=True)
+    try:
+        await websocket_manager.handle_agent_client(websocket)
+    except Exception as e:
+        logger.error(
+            "agent_websocket_endpoint_error",
+            error=str(e),
+            exc_info=True
+        )
+    finally:
+        await websocket_manager.disconnect(websocket, is_agent=True)
 
 
 # Root endpoint

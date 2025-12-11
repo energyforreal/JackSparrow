@@ -50,3 +50,6 @@ pytz==2023.3
 pytest==7.4.3
 pytest-asyncio==0.21.1
 
+# WebSocket server (optional, used for backend↔agent real-time commands)
+websockets==12.0
+

@@ -149,7 +149,8 @@ JackSparrow/
 │   ├── types/
 │   │   └── index.ts                   # TypeScript type definitions
 │   ├── utils/
-│   │   ├── formatters.ts              # Data formatting utilities
+│   │   ├── formatters.ts              # Data formatting utilities (currency, percentages, timestamps)
+│   │   │                              # Includes UTC→IST time conversion and normalization
 │   │   └── calculations.ts            # Calculation utilities
 │   ├── styles/
 │   │   └── globals.css                # Global styles

@@ -236,6 +236,37 @@ class EventBus:
                 correlation_id=event.correlation_id
             )
             
+            # Also publish to WebSocket client if available (for low-latency delivery)
+            try:
+                from agent.api.websocket_client import get_websocket_client
+                ws_client = await get_websocket_client()
+                if ws_client and ws_client.is_connected:
+                    # Format event for WebSocket (backend expects this format)
+                    ws_message = {
+                        "type": "agent_event",
+                        "event_type": event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
+                        "payload": event_data.get("payload", event_data),
+                        "timestamp": event_data.get("timestamp", datetime.utcnow().isoformat()),
+                        "event_id": event.event_id,
+                        "correlation_id": event.correlation_id,
+                    }
+                    sent = await ws_client.send_event(ws_message)
+                    if sent:
+                        logger.debug(
+                            "event_published_websocket",
+                            event_id=event.event_id,
+                            event_type=event.event_type,
+                        )
+            except Exception as ws_error:
+                # Don't fail Redis publish if WebSocket fails
+                logger.debug(
+                    "event_websocket_publish_failed",
+                    event_id=event.event_id,
+                    event_type=event.event_type,
+                    error=str(ws_error),
+                    message="Event still published to Redis Stream"
+                )
+            
             return True
             
         except Exception as e:

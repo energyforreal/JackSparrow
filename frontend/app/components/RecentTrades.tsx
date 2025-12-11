@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Trade } from '@/types'
-import { formatTime } from '@/utils/formatters'
+import { formatClockTime } from '@/utils/formatters'
 
 interface RecentTradesProps {
   trades?: Trade[]
@@ -39,7 +39,7 @@ export function RecentTrades({ trades }: RecentTradesProps) {
   }
 
   const formatDate = (date: Date | string) => {
-    return formatTime(date)
+    return formatClockTime(date)
   }
 
   const getStatusVariant = (status: string) => {

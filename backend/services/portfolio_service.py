@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, desc, select, case, cast
+from sqlalchemy import func, desc, select, case, cast, String
 from sqlalchemy.types import Numeric
 import structlog
 
@@ -58,15 +58,21 @@ class PortfolioService:
                         case(
                             (Position.unrealized_pnl.isnot(None), Position.unrealized_pnl),
                             else_=case(
-                                ((Position.current_price.isnot(None)) & (Position.quantity.isnot(None)) & (Position.side == TradeSide.BUY),
+                                (
+                                    (Position.current_price.isnot(None))
+                                    & (Position.quantity.isnot(None))
+                                    & (cast(Position.side, String) == TradeSide.BUY.value),
                                  (Position.current_price - Position.entry_price) * Position.quantity),
-                                ((Position.current_price.isnot(None)) & (Position.quantity.isnot(None)) & (Position.side == TradeSide.SELL),
+                                (
+                                    (Position.current_price.isnot(None))
+                                    & (Position.quantity.isnot(None))
+                                    & (cast(Position.side, String) == TradeSide.SELL.value),
                                  (Position.entry_price - Position.current_price) * Position.quantity),
                                 else_=0
                             )
                         )
                     ).label('total_unrealized_pnl')
-                ).where(Position.status == PositionStatus.OPEN)
+                ).where(cast(Position.status, String) == PositionStatus.OPEN.value)
                 
                 result = await db.execute(open_positions_agg)
                 agg_result = result.first()

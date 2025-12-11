@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useWebSocket } from './useWebSocket'
 import { apiClient } from '@/services/api'
 import { Portfolio, Trade, Signal } from '@/types'
+import { normalizeDate } from '@/utils/formatters'
 
 // Get WebSocket URL from environment variable
 // In production, NEXT_PUBLIC_WS_URL must be set
@@ -16,8 +17,8 @@ export function useAgent() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [recentTrades, setRecentTrades] = useState<Trade[]>([])
   const [signal, setSignal] = useState<Signal | null>(null)
-  // Initialize with a stable date to prevent hydration mismatch
-  const [lastUpdate, setLastUpdate] = useState<Date>(() => new Date(0))
+  // Initialize with null to prevent hydration mismatch - will be set on client mount
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
 
   useEffect(() => {
     if (lastMessage) {
@@ -27,14 +28,79 @@ export function useAgent() {
           if (data?.state) {
             setAgentState(data.state)
           }
-          // Extract timestamp from message - handle various formats
+          // Always update timestamp - use message timestamp or current time
+          // Use normalizeDate to ensure UTC timestamps are parsed correctly before IST conversion
           if (data?.last_update) {
-            setLastUpdate(new Date(data.last_update))
+            try {
+              const ts = normalizeDate(data.last_update)
+              if (!isNaN(ts.getTime())) {
+                setLastUpdate(ts)
+                // Debug logging in development mode
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('Agent state update:', {
+                    state: data?.state,
+                    last_update: data?.last_update,
+                    parsed_timestamp: ts,
+                    parsed_utc: ts.toISOString(),
+                    is_valid: true
+                  })
+                }
+              } else {
+                setLastUpdate(new Date()) // Fallback to current time
+                if (process.env.NODE_ENV === 'development') {
+                  console.warn('Agent state: Invalid last_update timestamp, using current time', {
+                    last_update: data?.last_update
+                  })
+                }
+              }
+            } catch (error) {
+              setLastUpdate(new Date()) // Fallback to current time
+              if (process.env.NODE_ENV === 'development') {
+                console.warn('Agent state: Error parsing last_update timestamp, using current time', {
+                  last_update: data?.last_update,
+                  error
+                })
+              }
+            }
           } else if (data?.timestamp) {
-            setLastUpdate(new Date(data.timestamp))
+            try {
+              const ts = normalizeDate(data.timestamp)
+              if (!isNaN(ts.getTime())) {
+                setLastUpdate(ts)
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('Agent state update:', {
+                    state: data?.state,
+                    timestamp: data?.timestamp,
+                    parsed_timestamp: ts,
+                    parsed_utc: ts.toISOString(),
+                    is_valid: true
+                  })
+                }
+              } else {
+                setLastUpdate(new Date()) // Fallback to current time
+                if (process.env.NODE_ENV === 'development') {
+                  console.warn('Agent state: Invalid timestamp, using current time', {
+                    timestamp: data?.timestamp
+                  })
+                }
+              }
+            } catch (error) {
+              setLastUpdate(new Date()) // Fallback to current time
+              if (process.env.NODE_ENV === 'development') {
+                console.warn('Agent state: Error parsing timestamp, using current time', {
+                  timestamp: data?.timestamp,
+                  error
+                })
+              }
+            }
           } else {
-            // Use current time if no timestamp provided
+            // Always update to current time if no timestamp in message
             setLastUpdate(new Date())
+            if (process.env.NODE_ENV === 'development') {
+              console.log('Agent state update: No timestamp in message, using current time', {
+                state: data?.state
+              })
+            }
           }
           break
         }
@@ -49,12 +115,65 @@ export function useAgent() {
           if (signalData) {
             // Always replace signal completely on WebSocket update
             setSignal(signalData)
+            // Update lastUpdate based on signal timestamp so UI shows fresh time
+            // Use normalizeDate to ensure UTC timestamps are parsed correctly
+            if (signalData.timestamp) {
+              try {
+                const ts = normalizeDate(signalData.timestamp as any)
+                if (!isNaN(ts.getTime())) {
+                  setLastUpdate(ts)
+                  // Enhanced debug logging in development mode
+                  if (process.env.NODE_ENV === 'development') {
+                    console.log('[useAgent] Signal update - timestamp parsed:', {
+                      raw_timestamp: signalData.timestamp,
+                      timestamp_type: typeof signalData.timestamp,
+                      parsed_date: ts,
+                      parsed_utc_iso: ts.toISOString(),
+                      parsed_local_string: ts.toString(),
+                      current_time_utc: new Date().toISOString(),
+                      current_time_local: new Date().toString(),
+                      time_difference_ms: new Date().getTime() - ts.getTime(),
+                      signal: signalData.signal,
+                      confidence: signalData.confidence
+                    })
+                  }
+                } else {
+                  setLastUpdate(new Date())
+                  if (process.env.NODE_ENV === 'development') {
+                    console.warn('[useAgent] Signal update - invalid timestamp, using current time:', {
+                      raw_timestamp: signalData.timestamp,
+                      timestamp_type: typeof signalData.timestamp
+                    })
+                  }
+                }
+              } catch (error) {
+                setLastUpdate(new Date())
+                if (process.env.NODE_ENV === 'development') {
+                  console.error('[useAgent] Signal update - error parsing timestamp:', {
+                    raw_timestamp: signalData.timestamp,
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined
+                  })
+                }
+              }
+            } else {
+              setLastUpdate(new Date())
+              if (process.env.NODE_ENV === 'development') {
+                console.log('[useAgent] Signal update - no timestamp, using current time:', {
+                  signal: signalData.signal,
+                  confidence: signalData.confidence
+                })
+              }
+            }
             // Log for debugging
-            console.log('Agent hook: Signal update received', {
-              signal: signalData.signal,
-              confidence: signalData.confidence,
-              timestamp: signalData.timestamp
-            })
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[useAgent] Signal update received:', {
+                signal: signalData.signal,
+                confidence: signalData.confidence,
+                timestamp: signalData.timestamp,
+                has_timestamp: !!signalData.timestamp
+              })
+            }
           }
           break
         case 'position_closed':
@@ -62,9 +181,96 @@ export function useAgent() {
           // Portfolio update will be broadcast separately, but we can trigger a refresh here
           // The portfolio_update message will handle the actual update
           break
+        case 'reasoning_chain_update': {
+          const reasoningData = lastMessage.data as {
+            reasoning_chain?: any[]
+            conclusion?: string
+            final_confidence?: number
+            timestamp?: string | Date
+          }
+          // Update signal with reasoning chain if signal exists
+          setSignal((prev) => {
+            if (prev) {
+              return {
+                ...prev,
+                reasoning_chain: reasoningData.reasoning_chain || prev.reasoning_chain,
+                agent_decision_reasoning: reasoningData.conclusion || prev.agent_decision_reasoning,
+                confidence: reasoningData.final_confidence !== undefined 
+                  ? reasoningData.final_confidence 
+                  : prev.confidence,
+                timestamp: reasoningData.timestamp || prev.timestamp
+              }
+            }
+            return prev
+          })
+          // Update lastUpdate if timestamp provided
+          // Use normalizeDate to ensure UTC timestamps are parsed correctly
+          if (reasoningData.timestamp) {
+            try {
+              const ts = normalizeDate(reasoningData.timestamp)
+              if (!isNaN(ts.getTime())) {
+                setLastUpdate(ts)
+              }
+            } catch (error) {
+              // Silently ignore parsing errors
+            }
+          }
+          console.log('Agent hook: Reasoning chain update received', {
+            stepCount: reasoningData.reasoning_chain?.length || 0,
+            conclusion: reasoningData.conclusion
+          })
+          break
+        }
+        case 'model_prediction_update': {
+          const modelData = lastMessage.data as {
+            consensus_signal?: number
+            consensus_confidence?: number
+            individual_model_reasoning?: any[]
+            model_consensus?: any[]
+            model_predictions?: any[]
+            timestamp?: string | Date
+          }
+          // Update signal with model predictions
+          setSignal((prev) => {
+            if (prev) {
+              return {
+                ...prev,
+                model_consensus: modelData.model_consensus || prev.model_consensus,
+                individual_model_reasoning: modelData.individual_model_reasoning || prev.individual_model_reasoning,
+                model_predictions: modelData.model_predictions || prev.model_predictions,
+                timestamp: modelData.timestamp || prev.timestamp
+              }
+            }
+            return prev
+          })
+          // Update lastUpdate if timestamp provided
+          // Use normalizeDate to ensure UTC timestamps are parsed correctly
+          if (modelData.timestamp) {
+            try {
+              const ts = normalizeDate(modelData.timestamp)
+              if (!isNaN(ts.getTime())) {
+                setLastUpdate(ts)
+              }
+            } catch (error) {
+              // Silently ignore parsing errors
+            }
+          }
+          console.log('Agent hook: Model prediction update received', {
+            consensusSignal: modelData.consensus_signal,
+            consensusConfidence: modelData.consensus_confidence,
+            modelCount: modelData.model_consensus?.length || 0
+          })
+          break
+        }
       }
     }
   }, [lastMessage])
+
+  // Initialize lastUpdate on client mount to prevent hydration mismatch
+  useEffect(() => {
+    // Only set initial timestamp on client side after mount (runs once)
+    setLastUpdate(new Date())
+  }, []) // Empty dependency array - only run once on mount
 
   // Fetch initial data on mount, independent of WebSocket state
   useEffect(() => {
@@ -95,8 +301,6 @@ export function useAgent() {
           if (agentStatus?.state) {
             setAgentState(agentStatus.state)
           }
-          // Use current time as fallback
-          setLastUpdate(new Date())
         } catch (statusError) {
           // Agent status fetch is optional, continue with portfolio data
           console.debug('Could not fetch agent status:', statusError)

@@ -8,6 +8,8 @@ import json
 import asyncio
 import time
 from typing import Optional, Dict, Any, List
+from decimal import Decimal
+from datetime import datetime, date
 import redis.asyncio as aioredis
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError, TimeoutError
@@ -24,6 +26,20 @@ _reconnection_attempts: int = 0
 _last_reconnection_attempt: float = 0.0
 _max_reconnection_attempts: int = 5
 _base_backoff_seconds: float = 1.0
+
+
+def _json_default_encoder(obj: Any):
+    """JSON encoder for non-serializable types.
+    
+    - Decimal values → float (for numerical correctness)
+    - datetime/date → ISO 8601 strings
+    - Fallback: string representation to avoid TypeError
+    """
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    return str(obj)
 
 
 async def _check_redis_health(client: Redis) -> bool:
@@ -253,7 +269,7 @@ async def enqueue_command(command: Dict[str, Any], queue_name: Optional[str] = N
             return False
         
         queue = queue_name or settings.agent_command_queue
-        await client.lpush(queue, json.dumps(command))
+        await client.lpush(queue, json.dumps(command, default=_json_default_encoder))
         return True
     except Exception as e:
         logger.error(
@@ -313,7 +329,7 @@ async def cache_response(request_id: str, response: Dict[str, Any], ttl: int = 3
         client = await get_redis()
         key = f"response:{request_id}"
         
-        await client.setex(key, ttl, json.dumps(response))
+        await client.setex(key, ttl, json.dumps(response, default=_json_default_encoder))
     except Exception as e:
         logger.error(
             "redis_cache_response_failed",
@@ -363,7 +379,7 @@ async def set_cache(key: str, value: Any, ttl: int = 60) -> bool:
     """
     try:
         client = await get_redis()
-        await client.setex(key, ttl, json.dumps(value))
+        await client.setex(key, ttl, json.dumps(value, default=_json_default_encoder))
         # Track cache sets
         try:
             await client.incr("cache:stats:sets")

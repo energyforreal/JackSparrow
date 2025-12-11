@@ -464,9 +464,16 @@ Emergency stop - immediately halt all trading.
 
 ## WebSocket Protocol
 
-### Connection
+### Connection Endpoints
 
-**Endpoint**: `ws://localhost:8000/ws`
+**Frontend Client Endpoint**: `ws://localhost:8000/ws`
+- Used by frontend for real-time updates
+- Handles: `agent_state`, `signal_update`, `trade_executed`, `portfolio_update`, `health_update`, `reasoning_chain_update`, `model_prediction_update`, `market_tick`
+
+**Agent Event Endpoint**: `ws://localhost:8000/ws/agent`
+- Used by agent to send events directly to backend
+- Lower latency than Redis Streams
+- Backend routes agent events to frontend clients
 
 **Authentication**: Token-based (optional for development)
 
@@ -528,14 +535,81 @@ Emergency stop - immediately halt all trading.
 }
 ```
 
-**Prediction Generated**:
+**Signal Update** (Trading Decision):
 ```json
 {
-  "type": "prediction_generated",
+  "type": "signal_update",
   "data": {
     "signal": "BUY",
-    "confidence": 0.75,
-    "reasoning_chain_id": "chain_123",
+    "confidence": 75.0,
+    "symbol": "BTCUSD",
+    "model_consensus": [...],
+    "reasoning_chain": [...],
+    "individual_model_reasoning": [...],
+    "agent_decision_reasoning": "Market shows bullish trend...",
+    "timestamp": "2025-01-12T10:30:00Z"
+  }
+}
+```
+
+**Reasoning Chain Update**:
+```json
+{
+  "type": "reasoning_chain_update",
+  "data": {
+    "symbol": "BTCUSD",
+    "reasoning_chain": [
+      {
+        "step_number": 1,
+        "description": "Situational assessment...",
+        "confidence": 0.8
+      }
+    ],
+    "conclusion": "Final decision reasoning...",
+    "final_confidence": 75.0,
+    "chain_id": "chain_123",
+    "timestamp": "2025-01-12T10:30:00Z"
+  }
+}
+```
+
+**Model Prediction Update**:
+```json
+{
+  "type": "model_prediction_update",
+  "data": {
+    "symbol": "BTCUSD",
+    "consensus_signal": 0.75,
+    "consensus_confidence": 82.5,
+    "model_consensus": [
+      {
+        "model_name": "xgboost_v1",
+        "signal": "BUY",
+        "confidence": 85.0,
+        "prediction": 0.8
+      }
+    ],
+    "individual_model_reasoning": [
+      {
+        "model_name": "xgboost_v1",
+        "reasoning": "RSI indicates oversold...",
+        "confidence": 85.0,
+        "prediction": 0.8
+      }
+    ],
+    "timestamp": "2025-01-12T10:30:00Z"
+  }
+}
+```
+
+**Market Tick Update**:
+```json
+{
+  "type": "market_tick",
+  "data": {
+    "symbol": "BTCUSD",
+    "price": 50000.0,
+    "volume": 1234.56,
     "timestamp": "2025-01-12T10:30:00Z"
   }
 }
@@ -565,6 +639,177 @@ Emergency stop - immediately halt all trading.
   "channels": ["health"]
 }
 ```
+
+#### Agent → Backend Messages (via `/ws/agent`)
+
+**Agent Event**:
+```json
+{
+  "type": "agent_event",
+  "event_type": "decision_ready|state_transition|order_fill|...",
+  "payload": {
+    "symbol": "BTCUSD",
+    "signal": "BUY",
+    "confidence": 0.75,
+    ...
+  },
+  "event_id": "uuid",
+  "correlation_id": "uuid",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+**Ping**:
+```json
+{
+  "type": "ping",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+#### Backend → Agent Messages (via Agent WebSocket Server)
+
+**Command**:
+```json
+{
+  "type": "command",
+  "request_id": "uuid",
+  "command": "predict|execute_trade|get_status|control",
+  "parameters": {}
+}
+```
+
+**Ping**:
+```json
+{
+  "type": "ping",
+  "request_id": "uuid"
+}
+```
+
+#### Agent → Backend Response Messages
+
+**Response**:
+```json
+{
+  "type": "response",
+  "request_id": "uuid",
+  "success": true,
+  "data": {},
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+**Error**:
+```json
+{
+  "type": "error",
+  "request_id": "uuid",
+  "success": false,
+  "error": "Error message",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+**Pong**:
+```json
+{
+  "type": "pong",
+  "request_id": "uuid",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+---
+
+### Data Freshness Protocol
+
+The backend implements a comprehensive data freshness protocol to ensure frontend clients receive timely updates with accurate timestamps.
+
+#### Server Timestamp Injection
+
+All WebSocket messages broadcast via `websocket_manager.broadcast()` automatically receive server-side timestamps:
+
+```json
+{
+  "type": "message_type",
+  "data": {
+    "field1": "value1",
+    "timestamp": "2025-01-27T12:00:00Z"
+  },
+  "server_timestamp": "2025-01-27T12:00:00.123Z",
+  "server_timestamp_ms": 1706356800123
+}
+```
+
+**Fields**:
+- `server_timestamp`: ISO 8601 formatted server time when message was broadcast
+- `server_timestamp_ms`: Unix timestamp in milliseconds for precise age calculation
+- `data.timestamp`: Event-specific timestamp (when the event occurred)
+
+**Implementation**: The `WebSocketManager.broadcast()` method automatically injects these timestamps using `time_service.get_time_info()` before sending messages to clients.
+
+#### Message-Level Timestamps
+
+All event handlers in `agent_event_subscriber.py` add `timestamp` fields to their message data:
+
+- `market_tick`: Includes timestamp from market data event
+- `signal_update`: Includes timestamp from decision ready event
+- `reasoning_chain_update`: Includes timestamp from reasoning complete event
+- `model_prediction_update`: Includes timestamp from model prediction event
+- `portfolio_update`: Includes current UTC timestamp
+- `agent_state`: Includes timestamp from state transition or periodic sync
+- `trade_executed`: Includes execution timestamp
+- `health_update`: Includes health check timestamp
+
+#### Periodic Update Frequencies
+
+The backend maintains several periodic sync loops to ensure fresh data:
+
+1. **Agent State Sync** (`_agent_state_sync_loop`):
+   - Frequency: Every 30 seconds
+   - Purpose: Broadcast current agent state even when idle
+   - Ensures frontend always has up-to-date agent status
+
+2. **Health Status Sync** (`_health_sync_loop`):
+   - Frequency: Every 60 seconds
+   - Purpose: Broadcast system health status
+   - Includes all service health checks
+
+3. **Time Sync** (`_time_sync_loop`):
+   - Frequency: Every 30 seconds
+   - Purpose: Synchronize client clocks with server time
+   - Helps with accurate freshness calculations
+
+4. **Market Ticks**:
+   - Frequency: Every 5 seconds (time-based fallback) OR on price change >0.01%
+   - Purpose: Provide real-time price updates
+   - Ensures frequent updates even during low volatility
+
+5. **Portfolio Updates**:
+   - Triggered: On market tick or trade execution
+   - Purpose: Keep portfolio data synchronized with market changes
+
+#### Timestamp Format
+
+All timestamps use ISO 8601 format:
+- **Backend sends**: `YYYY-MM-DDTHH:mm:ss.sss` (UTC, no timezone suffix)
+- **Example**: `2025-01-27T12:00:00.123456` (from `datetime.utcnow().isoformat()`)
+- **Frontend normalizes**: Appends 'Z' to treat as UTC: `2025-01-27T12:00:00.123456Z`
+- **Display format**: Converted to IST (Asia/Kolkata) and displayed as `HH:mm:ss am/pm`
+- Milliseconds included for precision
+- Frontend assumes UTC when timezone is missing (standard practice)
+
+#### Freshness Calculation
+
+Frontend calculates data freshness using:
+1. Primary: `data.timestamp` (event-specific timestamp)
+2. Fallback: `server_timestamp_ms` (server broadcast time)
+3. Age calculation: `current_time - timestamp`
+4. Color coding:
+   - Green: < 1 minute old (fresh)
+   - Amber: 1-5 minutes old (stale)
+   - Red: > 5 minutes old (very stale)
 
 ---
 

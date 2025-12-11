@@ -14,6 +14,7 @@ from agent.events.schemas import (
     EmergencyStopEvent,
     MarketTickEvent,
     OrderFillEvent,
+    PositionClosedEvent,
     EventType
 )
 from agent.core.context_manager import context_manager
@@ -53,6 +54,7 @@ class RiskManager:
         event_bus.subscribe(EventType.DECISION_READY, self._handle_decision_ready)
         event_bus.subscribe(EventType.MARKET_TICK, self._handle_market_tick)
         event_bus.subscribe(EventType.ORDER_FILL, self._handle_order_fill)
+        event_bus.subscribe(EventType.POSITION_CLOSED, self._handle_position_closed)
         self._monitoring = True
     
     async def shutdown(self):
@@ -73,8 +75,16 @@ class RiskManager:
             confidence = payload.get("confidence", 0.0)
             exit_reason = payload.get("exit_reason")
             
-            # Skip HOLD signals
+            # Skip HOLD signals – log explicitly so it's clear in paper trading
             if signal == "HOLD":
+                logger.info(
+                    "risk_manager_skip_hold_signal",
+                    symbol=symbol,
+                    confidence=confidence,
+                    position_size=position_size,
+                    paper_trading_mode=settings.paper_trading_mode,
+                    message="DecisionReadyEvent has HOLD signal, no trade will be executed"
+                )
                 return
             
             # Skip exit decisions - they are handled directly by execution module
@@ -255,11 +265,24 @@ class RiskManager:
             # Check portfolio heat continuously
             context = self.context_manager.get_current_context()
             if not context.position:
+                logger.debug(
+                    "risk_manager_market_tick_no_position",
+                    symbol=symbol,
+                    current_price=current_price,
+                    message="Received market tick but there is no open position to monitor"
+                )
                 return  # No position to monitor
             
             # Verify this tick is for our position symbol
             position_symbol = context.position.get("symbol")
             if position_symbol != symbol:
+                logger.debug(
+                    "risk_manager_market_tick_symbol_mismatch",
+                    tick_symbol=symbol,
+                    position_symbol=position_symbol,
+                    current_price=current_price,
+                    message="Market tick does not match current position symbol"
+                )
                 return  # Not our position symbol
             
             # Check exit conditions (stop loss / take profit)
@@ -270,6 +293,12 @@ class RiskManager:
             )
             
             if exit_reason:
+                logger.info(
+                    "risk_manager_exit_condition_met",
+                    symbol=symbol,
+                    exit_reason=exit_reason,
+                    current_price=current_price
+                )
                 # Emit exit decision
                 await self._emit_exit_decision(
                     symbol=symbol,
@@ -510,6 +539,44 @@ class RiskManager:
             }
         })
         self._sync_risk_metrics_context()
+    
+    async def _handle_position_closed(self, event: PositionClosedEvent):
+        """Handle position closed event and update portfolio with PnL.
+        
+        This ensures portfolio value is updated when positions are closed,
+        whether through stop loss, take profit, or signal reversal.
+        
+        Args:
+            event: Position closed event
+        """
+        try:
+            payload = event.payload
+            pnl = float(payload.get("pnl", 0.0))
+            
+            # Update portfolio with realized PnL
+            self._record_trade_result(pnl)
+            
+            # Clear current position tracking
+            self.current_position = None
+            self.pending_order = None
+            
+            logger.info(
+                "risk_manager_position_closed_processed",
+                position_id=payload.get("position_id"),
+                symbol=payload.get("symbol"),
+                pnl=pnl,
+                exit_reason=payload.get("exit_reason"),
+                new_portfolio_value=self.last_portfolio_value,
+                event_id=event.event_id
+            )
+            
+        except Exception as e:
+            logger.error(
+                "risk_manager_position_closed_error",
+                event_id=event.event_id,
+                error=str(e),
+                exc_info=True
+            )
 
     def _refresh_portfolio_metrics(self, timestamp: datetime, portfolio_value: float):
         """Refresh baseline metrics using the latest portfolio value."""
@@ -584,7 +651,15 @@ class RiskManager:
         """Assess risk for trade."""
         
         # Calculate portfolio heat
-        total_exposure = sum(pos.get("value", 0) for pos in current_positions)
+        # Position exposure = quantity * entry_price (cost basis)
+        total_exposure = 0.0
+        for pos in current_positions:
+            if pos:  # Skip None positions
+                quantity = float(pos.get("quantity", 0.0) or 0.0)
+                entry_price = float(pos.get("entry_price", 0.0) or 0.0)
+                position_value = quantity * entry_price
+                total_exposure += position_value
+        
         portfolio_heat = total_exposure / portfolio_value if portfolio_value > 0 else 0.0
         
         # Check limits

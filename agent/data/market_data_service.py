@@ -34,6 +34,7 @@ class MarketDataService:
         self._last_candle_cache: Dict[str, Dict[str, Any]] = {}
         self._tick_throttle_ms = 100  # Throttle ticks to max 10 per second per symbol
         self._last_tick_time: Dict[str, datetime] = {}
+        self._tick_force_emit_interval = 5.0  # Force emit tick every 5 seconds even if price hasn't changed much
     
     async def initialize(self):
         """Initialize market data service."""
@@ -103,15 +104,16 @@ class MarketDataService:
                 break
             except CircuitBreakerOpenError as e:
                 # Circuit breaker is OPEN - service unavailable
-                consecutive_errors += 1
-                if consecutive_errors <= 3:  # Log first few times
+                # Don't increment consecutive_errors for circuit breaker - this is expected behavior
+                # Log periodically to avoid spam
+                if consecutive_errors == 0:  # Log first time
                     logger.warning(
                         "market_data_stream_circuit_breaker_open",
                         error=str(e),
-                        consecutive_errors=consecutive_errors,
-                        message="Delta Exchange circuit breaker is OPEN - pausing stream"
+                        message="Delta Exchange circuit breaker is OPEN - pausing stream. Will retry after timeout."
                     )
-                # Sleep longer when circuit breaker is open
+                # Sleep longer when circuit breaker is open to allow recovery
+                # Circuit breaker will transition to HALF_OPEN after timeout
                 await asyncio.sleep(30)  # Wait 30 seconds before retry
             except DeltaExchangeError as e:
                 # Delta Exchange API error
@@ -185,13 +187,18 @@ class MarketDataService:
         return start_time, end_time
     
     async def _check_and_emit_ticker(self, symbol: str):
-        """Check ticker and emit tick event if changed."""
+        """Check ticker and emit tick event if changed.
+        
+        Emits tick if:
+        1. Price changed by >0.01% (reduced from 0.1% for more frequent updates)
+        2. OR at least 5 seconds have passed since last tick (time-based fallback for realtime display)
+        """
         try:
             ticker = await self.get_ticker(symbol)
             if not ticker:
                 return
             
-            # Throttle ticks
+            # Throttle ticks (prevent too frequent updates)
             now = datetime.now(timezone.utc)
             last_tick_time = self._last_tick_time.get(symbol)
             if last_tick_time:
@@ -199,18 +206,30 @@ class MarketDataService:
                 if elapsed_ms < self._tick_throttle_ms:
                     return
             
-            # Check if price changed significantly (>0.1%)
+            # Check if we should emit tick
+            should_emit = False
             last_ticker = self._last_ticker_cache.get(symbol)
+            
             if last_ticker:
+                # Check if price changed significantly (>0.01% - reduced threshold for more frequent updates)
                 price_change_pct = abs((ticker["price"] - last_ticker["price"]) / last_ticker["price"])
-                if price_change_pct < 0.001:  # Less than 0.1% change
-                    return
+                if price_change_pct >= 0.0001:  # At least 0.01% change
+                    should_emit = True
+                else:
+                    # Time-based fallback: emit tick at least every N seconds even if price hasn't changed much
+                    elapsed_seconds = (now - last_tick_time).total_seconds()
+                    if elapsed_seconds >= self._tick_force_emit_interval:
+                        should_emit = True
+            else:
+                # No previous ticker cached, always emit first tick
+                should_emit = True
             
-            # Emit tick event
-            await self._on_tick(symbol, ticker)
-            
-            self._last_ticker_cache[symbol] = ticker
-            self._last_tick_time[symbol] = now
+            if should_emit:
+                # Emit tick event
+                await self._on_tick(symbol, ticker)
+                
+                self._last_ticker_cache[symbol] = ticker
+                self._last_tick_time[symbol] = now
             
         except Exception as e:
             logger.error(

@@ -346,11 +346,18 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 
 ### Backend ↔ Agent Communication
 
-**Pattern**: Message queue with command/response
-- Backend sends commands to agent via queue
-- Agent processes and responds via response queue
-- Timeout handling for unresponsive agent
-- Health check ping mechanism
+**Pattern**: WebSocket (preferred) + Redis Queue (fallback)
+- **WebSocket**: Real-time bidirectional communication
+  - Backend connects to agent WebSocket server (`ws://localhost:8002`)
+  - Commands sent via WebSocket with instant responses (<10ms latency)
+  - Agent sends events directly to backend WebSocket (`ws://localhost:8000/ws/agent`)
+  - Automatic reconnection with exponential backoff
+- **Redis Queue**: Fallback for resilience
+  - Backend sends commands via Redis queue if WebSocket unavailable
+  - Agent polls Redis queue and responds via key-value store
+  - Polling interval: 200ms (higher latency but reliable)
+- **Dual-mode operation**: Events published to both Redis Streams (persistence) and WebSocket (low latency)
+- Configuration: `USE_AGENT_WEBSOCKET=true` (default) enables WebSocket, falls back to Redis if unavailable
 
 ### Frontend ↔ Backend Communication
 
@@ -420,14 +427,71 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 
 ### WebSocket Protocol
 
+#### Frontend ↔ Backend
+
 **Connection**: `ws://localhost:8000/ws`
 
 **Message Types**:
 - `agent_state` - Agent state updates
+- `signal_update` - AI signal updates (BUY/SELL/HOLD) with full decision data
+- `reasoning_chain_update` - Reasoning chain updates (6-step reasoning process)
+- `model_prediction_update` - ML model prediction updates (consensus and individual models)
+- `market_tick` - Real-time price updates (BTCUSD and other symbols)
 - `trade_executed` - New trade notifications
 - `portfolio_update` - Portfolio value changes
-- `health_status` - Health status changes
-- `prediction_generated` - New prediction available
+- `health_update` - Health status changes
+
+**Message Structure with Timestamps**:
+All WebSocket messages include timestamp fields for freshness calculation:
+
+```json
+{
+  "type": "message_type",
+  "data": {
+    "field1": "value1",
+    "timestamp": "2025-01-27T12:00:00Z"
+  },
+  "server_timestamp": "2025-01-27T12:00:00.123Z",
+  "server_timestamp_ms": 1706356800123
+}
+```
+
+**Timestamp Fields**:
+- `server_timestamp`: ISO 8601 formatted server time when message was broadcast
+- `server_timestamp_ms`: Unix timestamp in milliseconds (for precise age calculation)
+- `data.timestamp`: Event-specific timestamp (when the event actually occurred)
+
+**Periodic Update Frequencies**:
+- Agent State: Every 30 seconds (heartbeat mechanism)
+- Health Status: Every 60 seconds
+- Time Sync: Every 30 seconds
+- Market Ticks: Every 5 seconds (fallback) or on price change >0.01%
+- Portfolio Updates: On market tick or trade execution
+
+**Client Actions**:
+- `subscribe` - Subscribe to channels
+- `unsubscribe` - Unsubscribe from channels
+- `get_state` - Request current connection state
+- `get_agent_state` - Request current agent state on demand
+
+#### Backend ↔ Agent
+
+**Agent WebSocket Server**: `ws://localhost:8002` (agent side)
+- Backend connects to agent for command/response
+- Commands: `predict`, `execute_trade`, `get_status`, `control`
+- Responses: JSON with `success`, `data`, `error` fields
+- Latency: <10ms (vs ~200ms with Redis polling)
+
+**Backend WebSocket Endpoint**: `ws://localhost:8000/ws/agent` (backend side)
+- Agent connects to backend to send events directly
+- Events: `decision_ready`, `state_transition`, `order_fill`, `position_closed`, etc.
+- Backend routes events to frontend clients
+- Dual publishing: Events sent to both WebSocket (low latency) and Redis Streams (persistence)
+
+**Fallback Mechanism**:
+- If WebSocket unavailable, automatically falls back to Redis queue/streams
+- Configuration: `USE_AGENT_WEBSOCKET=true` (default) enables WebSocket
+- Redis remains as backup for reliability
 
 **Client Actions**:
 - `subscribe` - Subscribe to channels

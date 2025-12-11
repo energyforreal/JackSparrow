@@ -16,10 +16,22 @@ import platform
 import shutil
 import socket
 import builtins
+import json
+import asyncio
+from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
+
+# Try to import websockets for WebSocket monitoring
+try:
+    import websockets
+    from websockets.client import WebSocketClientProtocol
+    WEBSOCKETS_AVAILABLE = True
+except ImportError:
+    WEBSOCKETS_AVAILABLE = False
+    websockets = None  # type: ignore
 
 # Try to import database libraries for schema verification
 try:
@@ -79,6 +91,629 @@ class ServiceConfig:
     check_delay: float = 2.0
 
 
+class PaperTradingValidator:
+    """Validates paper trading mode configuration."""
+    
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+        self.is_paper_mode = True
+        self.verification_time: Optional[datetime] = None
+        self.status_message = ""
+        
+    def validate_startup(self) -> Tuple[bool, str]:
+        """Validate paper trading mode during startup.
+        
+        Returns:
+            Tuple of (is_valid: bool, status_message: str)
+        """
+        # Check environment variable
+        paper_mode_env = os.environ.get("PAPER_TRADING_MODE", "").lower()
+        trading_mode_env = os.environ.get("TRADING_MODE", "").lower()
+        
+        # Determine paper trading mode
+        if trading_mode_env:
+            self.is_paper_mode = trading_mode_env != "live"
+        elif paper_mode_env:
+            self.is_paper_mode = paper_mode_env in ("true", "1", "yes")
+        else:
+            # Default to paper trading
+            self.is_paper_mode = True
+        
+        self.verification_time = datetime.now()
+        
+        if self.is_paper_mode:
+            self.status_message = "PAPER TRADING (Safe)"
+            return True, self.status_message
+        else:
+            self.status_message = "LIVE TRADING (WARNING: Real trades will be executed!)"
+            return False, self.status_message
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current paper trading status.
+        
+        Returns:
+            Dictionary with status information
+        """
+        return {
+            "is_paper_mode": self.is_paper_mode,
+            "status_message": self.status_message,
+            "verification_time": self.verification_time.isoformat() if self.verification_time else None,
+        }
+
+
+class WebSocketMonitor:
+    """Monitors WebSocket connection and tracks message freshness."""
+    
+    def __init__(self, url: str, thresholds: Dict[str, int]):
+        self.url = url
+        self.thresholds = thresholds
+        self.connected = False
+        self.last_messages: Dict[str, Dict[str, Any]] = {}
+        self.message_counts: Dict[str, int] = {}
+        self.message_timestamps: Dict[str, List[float]] = {}
+        self.freshness_scores: Dict[str, float] = {}
+        # Signal-specific tracking
+        self.signal_history: List[Dict[str, Any]] = []  # Track last 50 signals
+        self.signal_generation_times: List[float] = []  # Track intervals between signals
+        self.last_signal_time: Optional[float] = None
+        self._websocket: Optional[WebSocketClientProtocol] = None
+        self._monitoring_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        
+    def start(self):
+        """Start WebSocket monitoring in background thread."""
+        if not WEBSOCKETS_AVAILABLE:
+            print(f"{Colors.YELLOW}[Monitoring] WebSocket monitoring disabled (websockets library not available){Colors.RESET}")
+            return
+        
+        self._monitoring_thread = threading.Thread(target=self._run_monitor, daemon=True)
+        self._monitoring_thread.start()
+    
+    def stop(self):
+        """Stop WebSocket monitoring."""
+        self._stop_event.set()
+        if self._loop and self._loop.is_running() and not self._loop.is_closed():
+            try:
+                # Schedule close in the event loop
+                asyncio.run_coroutine_threadsafe(self._close_websocket(), self._loop)
+            except Exception:
+                # Ignore errors during shutdown
+                pass
+    
+    async def _close_websocket(self):
+        """Close WebSocket connection."""
+        if self._websocket:
+            try:
+                await self._websocket.close()
+            except Exception:
+                pass
+            self._websocket = None
+        self.connected = False
+    
+    def _run_monitor(self):
+        """Run WebSocket monitor in background thread."""
+        # Create new event loop for this thread
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._monitor())
+        except Exception as e:
+            print(f"{Colors.ERROR}WebSocket monitor error: {e}{Colors.RESET}")
+        finally:
+            self._loop.close()
+    
+    async def _monitor(self):
+        """Monitor WebSocket connection and messages."""
+        max_retries = 5
+        retry_delay = 2.0
+        
+        for attempt in range(max_retries):
+            if self._stop_event.is_set():
+                return
+            
+            try:
+                async with websockets.connect(self.url) as ws:  # type: ignore
+                    self._websocket = ws
+                    self.connected = True
+                    
+                    # Subscribe to all channels
+                    subscribe_msg = json.dumps({
+                        "action": "subscribe",
+                        "channels": ["agent_state", "market_tick", "signal_update", 
+                                   "reasoning_chain_update", "model_prediction_update", 
+                                   "portfolio_update", "trade_executed", "health_update"]
+                    })
+                    await ws.send(subscribe_msg)
+                    
+                    # Monitor messages
+                    async for message in ws:
+                        if self._stop_event.is_set():
+                            break
+                        self._process_message(message)
+                        
+            except Exception as e:
+                self.connected = False
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    # Final attempt failed, stop trying
+                    break
+    
+    def _process_message(self, message: str):
+        """Process incoming WebSocket message."""
+        try:
+            data = json.loads(message)
+            msg_type = data.get("type", "unknown")
+            
+            # Track message count
+            self.message_counts[msg_type] = self.message_counts.get(msg_type, 0) + 1
+            
+            # Extract timestamps
+            server_ts_ms = data.get("server_timestamp_ms")
+            data_ts = data.get("data", {}).get("timestamp")
+            
+            current_time_ms = int(time.time() * 1000)
+            current_time = time.time()
+            
+            # Calculate age
+            age_ms = None
+            if server_ts_ms:
+                age_ms = current_time_ms - server_ts_ms
+            elif data_ts:
+                try:
+                    ts_dt = datetime.fromisoformat(data_ts.replace("Z", "+00:00"))
+                    ts_ms = int(ts_dt.timestamp() * 1000)
+                    age_ms = current_time_ms - ts_ms
+                except Exception:
+                    pass
+            
+            # Store message info
+            self.last_messages[msg_type] = {
+                "type": msg_type,
+                "age_ms": age_ms,
+                "age_seconds": age_ms / 1000.0 if age_ms else None,
+                "timestamp": datetime.now().isoformat(),
+                "server_timestamp_ms": server_ts_ms,
+            }
+            
+            # Signal-specific tracking
+            if msg_type == "signal_update":
+                signal_data = data.get("data", {})
+                signal_info = {
+                    "signal": signal_data.get("signal", "UNKNOWN"),
+                    "confidence": signal_data.get("confidence", 0.0),
+                    "timestamp": data_ts or datetime.now().isoformat(),
+                    "server_timestamp_ms": server_ts_ms,
+                    "age_seconds": age_ms / 1000.0 if age_ms else None,
+                    "received_at": current_time,
+                }
+                
+                # Track signal generation interval
+                if self.last_signal_time is not None:
+                    interval = current_time - self.last_signal_time
+                    self.signal_generation_times.append(interval)
+                    # Keep only last 50 intervals
+                    if len(self.signal_generation_times) > 50:
+                        self.signal_generation_times.pop(0)
+                
+                self.last_signal_time = current_time
+                
+                # Add to signal history
+                self.signal_history.append(signal_info)
+                # Keep only last 50 signals
+                if len(self.signal_history) > 50:
+                    self.signal_history.pop(0)
+            
+            # Track timestamps for freshness calculation
+            if age_ms is not None:
+                if msg_type not in self.message_timestamps:
+                    self.message_timestamps[msg_type] = []
+                self.message_timestamps[msg_type].append(age_ms)
+                # Keep only last 100 timestamps
+                if len(self.message_timestamps[msg_type]) > 100:
+                    self.message_timestamps[msg_type].pop(0)
+                
+                # Calculate freshness score
+                self._calculate_freshness_score(msg_type)
+                
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            # Silently ignore processing errors
+            pass
+    
+    def _calculate_freshness_score(self, msg_type: str):
+        """Calculate freshness score for a message type."""
+        if msg_type not in self.message_timestamps or not self.message_timestamps[msg_type]:
+            return
+        
+        threshold_ms = self.thresholds.get(msg_type, self.thresholds.get("other", 30000)) * 1000
+        ages = self.message_timestamps[msg_type]
+        
+        if not ages:
+            return
+        
+        # Score based on how many messages are within threshold
+        fresh_count = sum(1 for age in ages if age < threshold_ms)
+        score = (fresh_count / len(ages)) * 100.0 if ages else 0.0
+        
+        self.freshness_scores[msg_type] = score
+    
+    def get_freshness_stats(self) -> Dict[str, Any]:
+        """Get freshness statistics.
+        
+        Returns:
+            Dictionary with freshness statistics
+        """
+        overall_freshness = 0.0
+        if self.freshness_scores:
+            overall_freshness = sum(self.freshness_scores.values()) / len(self.freshness_scores)
+        
+        stale_messages = []
+        for msg_type, last_msg in self.last_messages.items():
+            threshold = self.thresholds.get(msg_type, self.thresholds.get("other", 30))
+            age_seconds = last_msg.get("age_seconds")
+            if age_seconds and age_seconds > threshold:
+                stale_messages.append(msg_type)
+        
+        # Calculate signal generation statistics
+        signal_stats = {}
+        if self.signal_generation_times:
+            avg_interval = sum(self.signal_generation_times) / len(self.signal_generation_times)
+            signal_stats = {
+                "total_signals": len(self.signal_history),
+                "average_interval_seconds": avg_interval,
+                "min_interval_seconds": min(self.signal_generation_times),
+                "max_interval_seconds": max(self.signal_generation_times),
+                "last_signal_age_seconds": time.time() - self.last_signal_time if self.last_signal_time else None,
+            }
+            # Calculate expected frequency (signals per hour)
+            if signal_stats["average_interval_seconds"] > 0:
+                signals_per_hour = 3600.0 / signal_stats["average_interval_seconds"]
+                signal_stats["signals_per_hour"] = signals_per_hour
+            else:
+                signal_stats["signals_per_hour"] = 0.0
+        else:
+            signal_stats = {
+                "total_signals": len(self.signal_history),
+                "average_interval_seconds": None,
+                "signals_per_hour": None,
+                "last_signal_age_seconds": time.time() - self.last_signal_time if self.last_signal_time else None,
+            }
+        
+        # Get last signal info
+        last_signal = None
+        if self.signal_history:
+            last_signal = self.signal_history[-1]
+        
+        return {
+            "connected": self.connected,
+            "overall_freshness": overall_freshness,
+            "stale_messages": stale_messages,
+            "message_counts": dict(self.message_counts),
+            "freshness_scores": dict(self.freshness_scores),
+            "signal_stats": signal_stats,
+            "last_signal": last_signal,
+        }
+    
+    def get_last_messages(self) -> Dict[str, Dict[str, Any]]:
+        """Get last received messages per type.
+        
+        Returns:
+            Dictionary mapping message type to last message info
+        """
+        return dict(self.last_messages)
+
+
+class MonitoringDashboard:
+    """Real-time monitoring dashboard."""
+    
+    def __init__(self, services: Dict[str, "ServiceManager"], paper_validator: PaperTradingValidator, 
+                 ws_monitor: Optional[WebSocketMonitor], refresh_interval: float = 2.0,
+                 clear_screen: bool = False):
+        self.services = services
+        self.paper_validator = paper_validator
+        self.ws_monitor = ws_monitor
+        self.refresh_interval = refresh_interval
+        self.clear_screen = clear_screen
+        self._running = False
+        self._dashboard_thread: Optional[threading.Thread] = None
+        
+    def start(self):
+        """Start dashboard rendering thread."""
+        self._running = True
+        self._dashboard_thread = threading.Thread(target=self._render_loop, daemon=True)
+        self._dashboard_thread.start()
+    
+    def stop(self):
+        """Stop dashboard rendering."""
+        self._running = False
+    
+    def _render_loop(self):
+        """Dashboard rendering loop."""
+        while self._running:
+            try:
+                self.render()
+                time.sleep(self.refresh_interval)
+            except Exception:
+                # Silently continue on errors
+                time.sleep(self.refresh_interval)
+    
+    def render(self):
+        """Render the monitoring dashboard."""
+        if self.clear_screen:
+            # Clear screen (works on most terminals)
+            print("\033[2J\033[H", end="")
+        
+        # Dashboard header
+        now = datetime.now().strftime("%H:%M:%S")
+        print(f"\n{Colors.BOLD}{'='*60}{Colors.RESET}")
+        print(f"{Colors.BOLD}JackSparrow Monitoring Dashboard    Last Update: {now}{Colors.RESET}")
+        print(f"{Colors.BOLD}{'='*60}{Colors.RESET}")
+        
+        # Service Status
+        print(f"\n{Colors.BOLD}Service Status{Colors.RESET}")
+        for name, manager in self.services.items():
+            status = "Running" if manager.is_alive() else "Stopped"
+            symbol = "OK" if manager.is_alive() else "X"
+            if platform.system() != "Windows":
+                symbol = "✓" if manager.is_alive() else "✗"
+            color = Colors.GREEN if manager.is_alive() else Colors.ERROR
+            print(f"  {color}{symbol}{Colors.RESET} {name}: {status}")
+        
+        # Paper Trading Status
+        paper_status = self.paper_validator.get_status()
+        print(f"\n{Colors.BOLD}Paper Trading{Colors.RESET}")
+        if paper_status["is_paper_mode"]:
+            symbol = "OK" if platform.system() == "Windows" else "✓"
+            print(f"  {Colors.GREEN}{symbol}{Colors.RESET} ENABLED ({paper_status['status_message']})")
+        else:
+            symbol = "X" if platform.system() == "Windows" else "✗"
+            print(f"  {Colors.ERROR}{symbol}{Colors.RESET} DISABLED - {Colors.ERROR}LIVE TRADING MODE{Colors.RESET}")
+        
+        # Data Freshness
+        if self.ws_monitor:
+            print(f"\n{Colors.BOLD}Data Freshness{Colors.RESET}")
+            stats = self.ws_monitor.get_freshness_stats()
+            last_messages = self.ws_monitor.get_last_messages()
+            
+            ws_status = "Connected" if stats["connected"] else "Disconnected"
+            ws_symbol = "OK" if stats["connected"] else "X"
+            if platform.system() != "Windows":
+                ws_symbol = "✓" if stats["connected"] else "✗"
+            ws_color = Colors.GREEN if stats["connected"] else Colors.ERROR
+            print(f"  {ws_color}{ws_symbol}{Colors.RESET} WebSocket: {ws_status}")
+            
+            if stats["connected"] and last_messages:
+                # Show freshness for each message type
+                for msg_type in ["agent_state", "market_tick", "signal_update", "reasoning_chain_update"]:
+                    if msg_type in last_messages:
+                        msg_info = last_messages[msg_type]
+                        age_seconds = msg_info.get("age_seconds")
+                        threshold = self.ws_monitor.thresholds.get(msg_type, self.ws_monitor.thresholds.get("other", 30))
+                        
+                        if age_seconds is not None:
+                            age_str = f"{int(age_seconds)}s ago"
+                            if age_seconds < threshold:
+                                status_str = "Fresh"
+                                status_color = Colors.GREEN
+                                status_symbol = "OK" if platform.system() == "Windows" else "✓"
+                            elif age_seconds < threshold * 2:
+                                status_str = "Warning"
+                                status_color = Colors.YELLOW
+                                status_symbol = "!" if platform.system() == "Windows" else "⚠"
+                            else:
+                                status_str = f"Stale (>={threshold}s)"
+                                status_color = Colors.ERROR
+                                status_symbol = "X" if platform.system() == "Windows" else "✗"
+                            
+                            print(f"    {status_color}{status_symbol}{Colors.RESET} {msg_type}: {age_str:>10}  {status_str}")
+                
+                # Signal Generation Statistics
+                signal_stats = stats.get("signal_stats", {})
+                if signal_stats and signal_stats.get("total_signals", 0) > 0:
+                    print(f"\n{Colors.BOLD}Signal Generation{Colors.RESET}")
+                    total_signals = signal_stats.get("total_signals", 0)
+                    avg_interval = signal_stats.get("average_interval_seconds")
+                    signals_per_hour = signal_stats.get("signals_per_hour")
+                    last_signal_age = signal_stats.get("last_signal_age_seconds")
+                    
+                    print(f"  Total Signals: {total_signals}")
+                    if avg_interval is not None:
+                        # Format interval display - show decimals for small intervals
+                        if avg_interval < 1.0:
+                            print(f"  Avg Interval: {avg_interval:.3f}s ({avg_interval/60:.3f} min)")
+                        else:
+                            print(f"  Avg Interval: {int(avg_interval)}s ({avg_interval/60:.1f} min)")
+                    if signals_per_hour is not None:
+                        # Cap unrealistic frequencies for display
+                        if signals_per_hour > 1000:
+                            print(f"  Frequency: >1000 signals/hour (interval too small)")
+                        else:
+                            print(f"  Frequency: {signals_per_hour:.1f} signals/hour")
+                    if last_signal_age is not None:
+                        age_min = int(last_signal_age / 60)
+                        age_sec = int(last_signal_age % 60)
+                        if last_signal_age < 300:  # 5 minutes
+                            age_color = Colors.GREEN
+                        elif last_signal_age < 900:  # 15 minutes
+                            age_color = Colors.YELLOW
+                        else:
+                            age_color = Colors.ERROR
+                        print(f"  Last Signal: {age_color}{age_min}m {age_sec}s ago{Colors.RESET}")
+                    
+                    # Show last signal details
+                    last_signal = stats.get("last_signal")
+                    if last_signal:
+                        signal_type = last_signal.get("signal", "UNKNOWN")
+                        confidence = last_signal.get("confidence", 0.0)
+                        signal_color = Colors.GREEN if signal_type in ["BUY", "STRONG_BUY"] else Colors.ERROR if signal_type in ["SELL", "STRONG_SELL"] else Colors.YELLOW
+                        print(f"  Last Signal: {signal_color}{signal_type}{Colors.RESET} (Confidence: {confidence:.1f}%)")
+                
+                # Overall freshness score
+                freshness = stats.get("overall_freshness", 0.0)
+                print(f"\n  Freshness Score: {freshness:.0f}%")
+        
+        print(f"{Colors.BOLD}{'='*60}{Colors.RESET}\n")
+
+
+class ValidationReporter:
+    """Generates validation reports."""
+    
+    def __init__(self, project_root: Path):
+        self.project_root = project_root
+        self.logs_dir = project_root / "logs"
+        self.logs_dir.mkdir(exist_ok=True)
+    
+    def generate_report(self, services: Dict[str, "ServiceManager"], 
+                       paper_validator: PaperTradingValidator,
+                       ws_monitor: Optional[WebSocketMonitor]) -> Dict[str, Any]:
+        """Generate validation report.
+        
+        Returns:
+            Dictionary with validation report data
+        """
+        report = {
+            "timestamp": datetime.now().isoformat(),
+            "paper_trading": {
+                "validated": True,
+                "mode": "paper" if paper_validator.is_paper_mode else "live",
+                "status": paper_validator.status_message,
+            },
+            "data_freshness": {
+                "status": "unknown",
+                "average_freshness": 0.0,
+                "stale_messages": [],
+            },
+            "service_health": {},
+            "recommendations": [],
+        }
+        
+        # Service health
+        for name, manager in services.items():
+            report["service_health"][name] = {
+                "running": manager.is_alive(),
+                "status": "healthy" if manager.is_alive() else "stopped",
+            }
+        
+        # Data freshness
+        if ws_monitor:
+            stats = ws_monitor.get_freshness_stats()
+            signal_stats = stats.get("signal_stats", {})
+            report["data_freshness"] = {
+                "status": "good" if stats["connected"] and stats["overall_freshness"] > 80 else "degraded",
+                "connected": stats["connected"],
+                "average_freshness": stats["overall_freshness"],
+                "stale_messages": stats["stale_messages"],
+                "message_counts": stats["message_counts"],
+            }
+            # Add signal generation statistics
+            if signal_stats:
+                report["signal_generation"] = {
+                    "total_signals": signal_stats.get("total_signals", 0),
+                    "average_interval_seconds": signal_stats.get("average_interval_seconds"),
+                    "signals_per_hour": signal_stats.get("signals_per_hour"),
+                    "last_signal_age_seconds": signal_stats.get("last_signal_age_seconds"),
+                    "last_signal": stats.get("last_signal"),
+                }
+        
+        # Recommendations
+        if not paper_validator.is_paper_mode:
+            report["recommendations"].append("WARNING: Live trading mode detected. Ensure this is intentional.")
+        
+        if ws_monitor and ws_monitor.connected:
+            if stats["overall_freshness"] < 80:
+                report["recommendations"].append("Data freshness is below optimal. Check WebSocket connection and agent activity.")
+            if stats["stale_messages"]:
+                report["recommendations"].append(f"Some message types are stale: {', '.join(stats['stale_messages'])}")
+            
+            # Signal-specific recommendations
+            signal_stats = stats.get("signal_stats", {})
+            if signal_stats:
+                last_signal_age = signal_stats.get("last_signal_age_seconds")
+                if last_signal_age is not None:
+                    if last_signal_age > 1800:  # 30 minutes
+                        report["recommendations"].append(f"WARNING: No signals received for {int(last_signal_age/60)} minutes. Check agent activity and candle close events.")
+                    elif last_signal_age > 900:  # 15 minutes
+                        report["recommendations"].append(f"CAUTION: Last signal was {int(last_signal_age/60)} minutes ago. Expected frequency: ~15 minutes.")
+                
+                avg_interval = signal_stats.get("average_interval_seconds")
+                if avg_interval and avg_interval > 1200:  # 20 minutes
+                    report["recommendations"].append(f"Signal generation interval ({int(avg_interval/60)} min) is longer than expected (15 min). Check agent configuration.")
+        
+        if not report["recommendations"]:
+            report["recommendations"].append("System operating normally")
+        
+        return report
+    
+    def save_json(self, report: Dict[str, Any], filename: Optional[str] = None) -> Path:
+        """Save report as JSON file.
+        
+        Returns:
+            Path to saved report file
+        """
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"validation_report_{timestamp}.json"
+        
+        report_path = self.logs_dir / filename
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2)
+        
+        return report_path
+    
+    def print_summary(self, report: Dict[str, Any]):
+        """Print validation report summary to console."""
+        print(f"\n{Colors.BOLD}{'='*60}{Colors.RESET}")
+        print(f"{Colors.BOLD}Validation Report{Colors.RESET}")
+        print(f"{Colors.BOLD}{'='*60}{Colors.RESET}\n")
+        
+        # Paper Trading
+        paper = report["paper_trading"]
+        symbol = "OK" if paper["validated"] and paper["mode"] == "paper" else "X"
+        if platform.system() != "Windows":
+            symbol = "✓" if paper["validated"] and paper["mode"] == "paper" else "✗"
+        color = Colors.GREEN if paper["mode"] == "paper" else Colors.ERROR
+        print(f"Paper Trading: {color}{symbol}{Colors.RESET} {'VALIDATED' if paper['validated'] else 'WARNING'}")
+        print(f"  Mode: {paper['mode'].title()} Trading")
+        print(f"  Status: {paper['status']}\n")
+        
+        # Data Freshness
+        freshness = report["data_freshness"]
+        if freshness.get("connected"):
+            status = freshness.get("status", "unknown")
+            symbol = "OK" if status == "good" else "!"
+            if platform.system() != "Windows":
+                symbol = "✓" if status == "good" else "⚠"
+            color = Colors.GREEN if status == "good" else Colors.YELLOW
+            print(f"Data Freshness: {color}{symbol}{Colors.RESET} {status.upper()}")
+            print(f"  WebSocket: {'Connected' if freshness.get('connected') else 'Disconnected'}")
+            print(f"  Average freshness: {freshness.get('average_freshness', 0):.0f}%")
+            if freshness.get("stale_messages"):
+                print(f"  Stale messages: {len(freshness['stale_messages'])} ({', '.join(freshness['stale_messages'])})")
+        else:
+            print(f"Data Freshness: {Colors.YELLOW}⚠{Colors.RESET} NOT MONITORED")
+        print()
+        
+        # Service Health
+        print("Service Health:")
+        for name, health in report["service_health"].items():
+            symbol = "OK" if health["running"] else "X"
+            if platform.system() != "Windows":
+                symbol = "✓" if health["running"] else "✗"
+            color = Colors.GREEN if health["running"] else Colors.ERROR
+            print(f"  {color}{symbol}{Colors.RESET} {name}: {health['status']}")
+        print()
+        
+        # Recommendations
+        print("Recommendations:")
+        for rec in report["recommendations"]:
+            print(f"  - {rec}")
+        print()
+
+
 class ServiceManager:
     """Manages a single service process."""
     
@@ -88,6 +723,10 @@ class ServiceManager:
         self.process: Optional[subprocess.Popen] = None
         self.log_thread: Optional[threading.Thread] = None
         self.running = False
+        self.error_count = 0
+        self.warning_count = 0
+        self.recent_errors: List[str] = []
+        self.recent_warnings: List[str] = []
         
     def start(self) -> bool:
         """Start the service process."""
@@ -206,6 +845,39 @@ class ServiceManager:
                             # Log file write error, but continue streaming to console
                             pass
                     
+                    # Try to parse structured JSON logs for statistics
+                    try:
+                        # Check if line is JSON (structured log)
+                        if line.strip().startswith('{'):
+                            log_data = json.loads(line.strip())
+                            log_level = log_data.get("level", "").upper()
+                            
+                            if log_level == "ERROR":
+                                self.error_count += 1
+                                msg = log_data.get("event", log_data.get("message", ""))
+                                if msg:
+                                    self.recent_errors.append(msg)
+                                    if len(self.recent_errors) > 5:
+                                        self.recent_errors.pop(0)
+                            elif log_level == "WARNING":
+                                self.warning_count += 1
+                                msg = log_data.get("event", log_data.get("message", ""))
+                                if msg:
+                                    self.recent_warnings.append(msg)
+                                    if len(self.recent_warnings) > 5:
+                                        self.recent_warnings.pop(0)
+                    except (json.JSONDecodeError, KeyError, AttributeError):
+                        # Not JSON or missing fields, check for plain text errors/warnings
+                        line_upper = line.upper()
+                        if "ERROR" in line_upper or "ERR" in line_upper:
+                            self.error_count += 1
+                            if len(self.recent_errors) < 5:
+                                self.recent_errors.append(line.strip()[:100])
+                        elif "WARNING" in line_upper or "WARN" in line_upper:
+                            self.warning_count += 1
+                            if len(self.recent_warnings) < 5:
+                                self.recent_warnings.append(line.strip()[:100])
+                    
                     # Print to console with service prefix
                     prefix = f"{self.config.color}[{self.config.name}]{Colors.RESET}"
                     try:
@@ -282,6 +954,10 @@ class ParallelProcessManager:
         self.project_root = project_root
         self.services: Dict[str, ServiceManager] = {}
         self.shutdown_event = threading.Event()
+        self.paper_validator: Optional[PaperTradingValidator] = None
+        self.ws_monitor: Optional[WebSocketMonitor] = None
+        self.dashboard: Optional[MonitoringDashboard] = None
+        self.validation_reporter: Optional[ValidationReporter] = None
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -373,7 +1049,12 @@ class ParallelProcessManager:
         # Display comprehensive startup summary
         print(f"{Colors.BOLD}Full Stack Components:{Colors.RESET}")
         print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.BACKEND}Backend API{Colors.RESET}: http://localhost:8000")
-        print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.AGENT}Agent Service{Colors.RESET}: Running (includes Feature Server on port 8001)")
+        # Show paper trading mode status in agent description
+        if self.paper_validator:
+            paper_status = "Paper Trading Mode" if self.paper_validator.is_paper_mode else "LIVE TRADING MODE"
+        else:
+            paper_status = "Running"
+        print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.AGENT}Agent Service{Colors.RESET}: Running ({paper_status})")
         print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.AGENT}Feature Server API{Colors.RESET}: http://localhost:8001")
         print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} {Colors.FRONTEND}Frontend{Colors.RESET}: http://localhost:3000")
         
@@ -399,9 +1080,61 @@ class ParallelProcessManager:
         # Run health checks after services start
         self._run_health_checks()
         
+        # Initialize monitoring components
+        self._initialize_monitoring()
+        
         print(f"\nPress Ctrl+C to stop all services\n")
         
         return True
+    
+    def _initialize_monitoring(self):
+        """Initialize monitoring components."""
+        # Use existing paper validator if available, otherwise create new one
+        if self.paper_validator is None:
+            self.paper_validator = PaperTradingValidator(self.project_root)
+        
+        # Initialize WebSocket monitor
+        enable_dashboard = os.environ.get("ENABLE_MONITORING_DASHBOARD", "true").lower() in ("true", "1", "yes")
+        refresh_interval = float(os.environ.get("MONITORING_REFRESH_INTERVAL", "2.0"))
+        clear_screen = os.environ.get("CLEAR_SCREEN_DASHBOARD", "false").lower() in ("true", "1", "yes")
+        
+        # Configure freshness thresholds
+        thresholds = {
+            "agent_state": int(os.environ.get("FRESHNESS_THRESHOLD_AGENT_STATE", "60")),
+            "market_tick": int(os.environ.get("FRESHNESS_THRESHOLD_MARKET_TICK", "10")),
+            "other": int(os.environ.get("FRESHNESS_THRESHOLD_OTHER", "30")),
+        }
+        
+        if WEBSOCKETS_AVAILABLE:
+            # Wait a bit for backend to be ready
+            time.sleep(3)
+            
+            # Start WebSocket monitor
+            self.ws_monitor = WebSocketMonitor("ws://localhost:8000/ws", thresholds)
+            self.ws_monitor.start()
+            print(f"{Colors.BOLD}[Monitoring] Starting WebSocket monitor...{Colors.RESET}")
+            time.sleep(1)  # Give it time to connect
+            if self.ws_monitor.connected:
+                print(f"{Colors.GREEN}[Monitoring] WebSocket connected successfully{Colors.RESET}")
+            else:
+                print(f"{Colors.YELLOW}[Monitoring] WebSocket connection pending...{Colors.RESET}")
+        else:
+            print(f"{Colors.YELLOW}[Monitoring] WebSocket monitoring disabled (websockets library not available){Colors.RESET}")
+        
+        # Initialize dashboard
+        if enable_dashboard:
+            self.dashboard = MonitoringDashboard(
+                self.services, 
+                self.paper_validator, 
+                self.ws_monitor,
+                refresh_interval=refresh_interval,
+                clear_screen=clear_screen
+            )
+            self.dashboard.start()
+            print(f"{Colors.BOLD}[Monitoring] Dashboard enabled (refresh: {refresh_interval}s){Colors.RESET}")
+        
+        # Initialize validation reporter
+        self.validation_reporter = ValidationReporter(self.project_root)
     
     def _run_health_checks(self):
         """Run comprehensive health checks for all services after startup."""
@@ -511,6 +1244,27 @@ class ParallelProcessManager:
     
     def stop_all(self):
         """Stop all services."""
+        # Stop monitoring components
+        if self.dashboard:
+            self.dashboard.stop()
+        
+        if self.ws_monitor:
+            self.ws_monitor.stop()
+        
+        # Generate validation report
+        if self.validation_reporter and self.paper_validator:
+            enable_report = os.environ.get("ENABLE_VALIDATION_REPORT", "true").lower() in ("true", "1", "yes")
+            if enable_report:
+                print(f"\n{Colors.BOLD}[Monitoring] Generating validation report...{Colors.RESET}")
+                report = self.validation_reporter.generate_report(
+                    self.services,
+                    self.paper_validator,
+                    self.ws_monitor
+                )
+                self.validation_reporter.print_summary(report)
+                report_path = self.validation_reporter.save_json(report)
+                print(f"Report saved to: {report_path}\n")
+        
         print(f"\n{Colors.BOLD}Stopping all services...{Colors.RESET}")
         for manager in self.services.values():
             manager.stop()
@@ -1123,6 +1877,11 @@ def run_validation_script(script_path: Path, script_name: str, project_root: Pat
     Returns:
         True if validation passed, False otherwise
     """
+    # Always print what script is being run
+    print(f"{Colors.BOLD}Running {script_name}...{Colors.RESET}")
+    print(f"  Script path: {script_path}")
+    sys.stdout.flush()
+    
     try:
         result = subprocess.run(
             [sys.executable, str(script_path)],
@@ -1132,137 +1891,219 @@ def run_validation_script(script_path: Path, script_name: str, project_root: Pat
             timeout=30,
         )
         
-        # Print output
+        # Always print output, even if empty - this ensures visibility
         if result.stdout:
             print(result.stdout)
+        else:
+            print(f"  {script_name} produced no output")
+        
         if result.stderr:
             print(result.stderr, file=sys.stderr)
         
+        # Flush after printing
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
+        # Show result clearly
+        if result.returncode != 0:
+            error_symbol = "X" if platform.system() == "Windows" else "✗"
+            print(f"{Colors.ERROR}{error_symbol} {script_name} failed with exit code {result.returncode}{Colors.RESET}")
+            sys.stdout.flush()
+        
         return result.returncode == 0
     except subprocess.TimeoutExpired:
-        print(f"{Colors.ERROR}Timeout running {script_name}{Colors.RESET}")
+        print(f"{Colors.ERROR}Timeout running {script_name} (exceeded 30 seconds){Colors.RESET}")
+        sys.stdout.flush()
         return False
     except Exception as e:
         print(f"{Colors.ERROR}Error running {script_name}: {e}{Colors.RESET}")
+        import traceback
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
         return False
 
 
 def main():
     """Main entry point."""
-    # Get project root (parent of tools/commands directory)
-    script_path = Path(__file__).resolve()
-    project_root = script_path.parent.parent.parent
-    
-    # Change to project root
-    os.chdir(str(project_root))
-
-    print(f"{Colors.BOLD}JackSparrow startup sequence initiated (PID {os.getpid()}){Colors.RESET}")
-    print(f"Project root: {project_root}")
-    print()
-    
-    # Resolve npm command early (raises if missing)
+    # Wrap entire execution in try/except for comprehensive error handling
     try:
-        npm_cmd = get_npm_executable()
-    except FileNotFoundError as exc:
-        print(f"{Colors.ERROR}{exc}{Colors.RESET}")
-        print(f"\n{Colors.BOLD}Please install Node.js 18+ and ensure npm is in your PATH{Colors.RESET}")
-        sys.exit(1)
-
-    print(f"{Colors.BOLD}Step 1/4: Loading environment configuration...{Colors.RESET}")
-    # Load root .env so child processes inherit environment variables
-    load_root_env(project_root)
-    print()
-
-    print(f"{Colors.BOLD}Step 2/4: Checking Redis availability...{Colors.RESET}")
-    # Attempt to start Redis if not already running
-    attempt_start_redis(project_root)
-    print()  # Empty line after Redis attempt
-
-    print(f"{Colors.BOLD}Step 3/4: Running configuration validators...{Colors.RESET}")
-    # Validate .env file contents before proceeding
-    env_validator_path = project_root / "scripts" / "validate-env.py"
-    if env_validator_path.exists():
-        print(f"{Colors.BOLD}Validating environment variables...{Colors.RESET}")
-        if not run_validation_script(env_validator_path, "validate-env.py", project_root):
-            print(
-                f"\n{Colors.ERROR}Environment validation failed. Please fix .env file issues above.{Colors.RESET}"
-            )
-            print(f"Run manually: python {env_validator_path}")
-            sys.exit(1)
-        print()  # Empty line after validation
-    
-    # Validate prerequisites (Python, Node.js, PostgreSQL, Redis)
-    prereq_validator_path = project_root / "tools" / "commands" / "validate-prerequisites.py"
-    if prereq_validator_path.exists():
-        if not run_validation_script(prereq_validator_path, "validate-prerequisites.py", project_root):
-            print(f"\n{Colors.ERROR}Prerequisite validation failed. Please fix issues above.{Colors.RESET}")
-            print(f"Run manually: python {prereq_validator_path}")
-            sys.exit(1)
-    else:
-        # Fallback to built-in prerequisite check
-        print(f"{Colors.BOLD}Checking prerequisites...{Colors.RESET}")
-        if not check_prerequisites():
-            sys.exit(1)
-    
-    # Optional model validation (if enabled)
-    validate_models_on_startup = os.environ.get("VALIDATE_MODELS_ON_STARTUP", "").lower() in ("1", "true", "yes")
-    if validate_models_on_startup:
-        print(f"{Colors.BOLD}Validating model files...{Colors.RESET}")
-        model_validator_path = project_root / "scripts" / "validate_model_files.py"
-        if model_validator_path.exists():
-            if not run_validation_script(model_validator_path, "validate_model_files.py", project_root):
-                print(f"\n{Colors.ERROR}Model validation failed. Models may be corrupted.{Colors.RESET}")
-                print(
-                    f"{Colors.YELLOW}Warning: Continuing startup despite model validation failure.{Colors.RESET}"
-                )
-                print("   To fix models, run: python scripts/train_models.py")
-                print(
-                    "   To disable this check, unset VALIDATE_MODELS_ON_STARTUP environment variable"
-                )
-            print()  # Empty line after validation
-
-    print(f"{Colors.BOLD}Step 4/4: Ensuring service dependencies...{Colors.RESET}")
-    # Ensure dependencies are set up
-    try:
-        ensure_dependencies(project_root, npm_cmd)
-    except Exception as e:
-        print(f"{Colors.ERROR}Error setting up dependencies: {e}{Colors.RESET}")
-        print(f"\n{Colors.BOLD}Troubleshooting:{Colors.RESET}")
-        print(f"  1. Ensure Python 3.11+ is installed: python --version")
-        print(f"  2. Ensure Node.js 18+ is installed: node --version")
-        print(f"  3. Check virtual environment creation permissions")
-        print(f"  4. See docs/troubleshooting-local-startup.md for more help")
-        sys.exit(1)
-    
-    print(f"{Colors.BOLD}Preparing service manager...{Colors.RESET}")
-    # Setup and start services
-    try:
-        manager = setup_services(project_root, npm_cmd)
+        # Get project root (parent of tools/commands directory)
+        script_path = Path(__file__).resolve()
+        project_root = script_path.parent.parent.parent
         
-        if not manager.start_all():
-            print(f"\n{Colors.ERROR}Failed to start services. Check logs above for details.{Colors.RESET}")
-            print(f"\n{Colors.BOLD}Troubleshooting:{Colors.RESET}")
-            print(f"  1. Check service logs in logs/ directory")
-            print(f"  2. Verify all prerequisites are running (PostgreSQL, Redis)")
-            print(f"  3. Ensure ports 8000 and 3000 are available (port 8001 is only needed if you run the optional feature server separately)")
-            print(f"  4. Run validation scripts manually:")
-            print(f"     - python scripts/validate-env.py")
-            print(f"     - python tools/commands/validate-prerequisites.py")
-            print(f"  5. See docs/troubleshooting-local-startup.md for more help")
+        # Change to project root
+        os.chdir(str(project_root))
+        
+        # Startup banner - always printed
+        print(f"{Colors.BOLD}{'='*60}{Colors.RESET}")
+        print(f"{Colors.BOLD}JackSparrow Trading Agent - Startup Sequence{Colors.RESET}")
+        print(f"{Colors.BOLD}Process ID: {os.getpid()}{Colors.RESET}")
+        print(f"{Colors.BOLD}Project root: {project_root}{Colors.RESET}")
+        print(f"{Colors.BOLD}{'='*60}{Colors.RESET}")
+        print()
+        sys.stdout.flush()
+        
+        # Resolve npm command early (raises if missing)
+        try:
+            npm_cmd = get_npm_executable()
+        except FileNotFoundError as exc:
+            print(f"{Colors.ERROR}{exc}{Colors.RESET}")
+            print(f"\n{Colors.BOLD}Please install Node.js 18+ and ensure npm is in your PATH{Colors.RESET}")
+            sys.stdout.flush()
+            sys.stderr.flush()
             sys.exit(1)
-    except Exception as e:
-        print(f"\n{Colors.ERROR}Unexpected error during service startup: {e}{Colors.RESET}")
-        import traceback
-        traceback.print_exc()
-        print(f"\n{Colors.BOLD}Please report this error and include the traceback above.{Colors.RESET}")
-        sys.exit(1)
+
+        print(f"{Colors.BOLD}Step 1/4: Loading environment configuration...{Colors.RESET}")
+        sys.stdout.flush()
+        # Load root .env so child processes inherit environment variables
+        load_root_env(project_root)
+        print()
+        sys.stdout.flush()
+        
+        # Validate paper trading mode before starting services
+        print(f"{Colors.BOLD}[Paper Trading] Validating configuration...{Colors.RESET}")
+        sys.stdout.flush()
+        paper_validator = PaperTradingValidator(project_root)
+        is_valid, status_msg = paper_validator.validate_startup()
+        if is_valid:
+            success_symbol = "OK" if platform.system() == "Windows" else "✓"
+            print(f"{Colors.BOLD}[Paper Trading] {Colors.GREEN}{success_symbol}{Colors.RESET} Mode: {status_msg}{Colors.RESET}")
+        else:
+            warning_symbol = "!" if platform.system() == "Windows" else "⚠"
+            print(f"{Colors.BOLD}[Paper Trading] {Colors.ERROR}{warning_symbol}{Colors.RESET} Mode: {status_msg}{Colors.RESET}")
+            print(f"{Colors.ERROR}WARNING: Live trading mode detected! Real trades will be executed!{Colors.RESET}")
+        print()
+        sys.stdout.flush()
+
+        print(f"{Colors.BOLD}Step 2/4: Checking Redis availability...{Colors.RESET}")
+        sys.stdout.flush()
+        # Attempt to start Redis if not already running
+        attempt_start_redis(project_root)
+        print()  # Empty line after Redis attempt
+        sys.stdout.flush()
+
+        print(f"{Colors.BOLD}Step 3/4: Running configuration validators...{Colors.RESET}")
+        sys.stdout.flush()
+        # Validate .env file contents before proceeding
+        env_validator_path = project_root / "scripts" / "validate-env.py"
+        if env_validator_path.exists():
+            print(f"{Colors.BOLD}Validating environment variables...{Colors.RESET}")
+            sys.stdout.flush()
+            if not run_validation_script(env_validator_path, "validate-env.py", project_root):
+                print(
+                    f"\n{Colors.ERROR}Environment validation failed. Please fix .env file issues above.{Colors.RESET}"
+                )
+                print(f"Run manually: python {env_validator_path}")
+                sys.stdout.flush()
+                sys.stderr.flush()
+                sys.exit(1)
+            print()  # Empty line after validation
+            sys.stdout.flush()
+        
+        # Validate prerequisites (Python, Node.js, PostgreSQL, Redis)
+        prereq_validator_path = project_root / "tools" / "commands" / "validate-prerequisites.py"
+        if prereq_validator_path.exists():
+            if not run_validation_script(prereq_validator_path, "validate-prerequisites.py", project_root):
+                print(f"\n{Colors.ERROR}Prerequisite validation failed. Please fix issues above.{Colors.RESET}")
+                print(f"Run manually: python {prereq_validator_path}")
+                sys.stdout.flush()
+                sys.stderr.flush()
+                sys.exit(1)
+        else:
+            # Fallback to built-in prerequisite check
+            print(f"{Colors.BOLD}Checking prerequisites...{Colors.RESET}")
+            sys.stdout.flush()
+            if not check_prerequisites():
+                sys.stdout.flush()
+                sys.stderr.flush()
+                sys.exit(1)
     
-    # Wait for shutdown signal
-    try:
-        manager.wait_for_shutdown()
-    except KeyboardInterrupt:
-        manager.stop_all()
-        sys.exit(0)
+        # Optional model validation (if enabled)
+        validate_models_on_startup = os.environ.get("VALIDATE_MODELS_ON_STARTUP", "").lower() in ("1", "true", "yes")
+        if validate_models_on_startup:
+            print(f"{Colors.BOLD}Validating model files...{Colors.RESET}")
+            sys.stdout.flush()
+            model_validator_path = project_root / "scripts" / "validate_model_files.py"
+            if model_validator_path.exists():
+                if not run_validation_script(model_validator_path, "validate_model_files.py", project_root):
+                    print(f"\n{Colors.ERROR}Model validation failed. Models may be corrupted.{Colors.RESET}")
+                    print(
+                        f"{Colors.YELLOW}Warning: Continuing startup despite model validation failure.{Colors.RESET}"
+                    )
+                    print("   To fix models, run: python scripts/train_models.py")
+                    print(
+                        "   To disable this check, unset VALIDATE_MODELS_ON_STARTUP environment variable"
+                    )
+                print()  # Empty line after validation
+                sys.stdout.flush()
+
+        print(f"{Colors.BOLD}Step 4/4: Ensuring service dependencies...{Colors.RESET}")
+        sys.stdout.flush()
+        # Ensure dependencies are set up
+        try:
+            ensure_dependencies(project_root, npm_cmd)
+        except Exception as e:
+            print(f"{Colors.ERROR}Error setting up dependencies: {e}{Colors.RESET}")
+            print(f"\n{Colors.BOLD}Troubleshooting:{Colors.RESET}")
+            print(f"  1. Ensure Python 3.11+ is installed: python --version")
+            print(f"  2. Ensure Node.js 18+ is installed: node --version")
+            print(f"  3. Check virtual environment creation permissions")
+            print(f"  4. See docs/troubleshooting-local-startup.md for more help")
+            sys.stdout.flush()
+            sys.stderr.flush()
+            sys.exit(1)
+        
+        print(f"{Colors.BOLD}Preparing service manager...{Colors.RESET}")
+        sys.stdout.flush()
+        # Setup and start services
+        try:
+            manager = setup_services(project_root, npm_cmd)
+            # Store paper validator reference for monitoring
+            manager.paper_validator = paper_validator
+            
+            if not manager.start_all():
+                print(f"\n{Colors.ERROR}Failed to start services. Check logs above for details.{Colors.RESET}")
+                print(f"\n{Colors.BOLD}Troubleshooting:{Colors.RESET}")
+                print(f"  1. Check service logs in logs/ directory")
+                print(f"  2. Verify all prerequisites are running (PostgreSQL, Redis)")
+                print(f"  3. Ensure ports 8000 and 3000 are available (port 8001 is only needed if you run the optional feature server separately)")
+                print(f"  4. Run validation scripts manually:")
+                print(f"     - python scripts/validate-env.py")
+                print(f"     - python tools/commands/validate-prerequisites.py")
+                print(f"  5. See docs/troubleshooting-local-startup.md for more help")
+                sys.stdout.flush()
+                sys.stderr.flush()
+                sys.exit(1)
+        except Exception as e:
+            print(f"\n{Colors.ERROR}Unexpected error during service startup: {e}{Colors.RESET}")
+            import traceback
+            traceback.print_exc()
+            print(f"\n{Colors.BOLD}Please report this error and include the traceback above.{Colors.RESET}")
+            sys.stdout.flush()
+            sys.stderr.flush()
+            sys.exit(1)
+        
+        # Wait for shutdown signal
+        try:
+            manager.wait_for_shutdown()
+        except KeyboardInterrupt:
+            manager.stop_all()
+            sys.stdout.flush()
+            sys.stderr.flush()
+            sys.exit(0)
+    except Exception as e:
+        # Catch any unexpected errors at the top level
+        print(f"\n{Colors.ERROR}{'='*60}{Colors.RESET}")
+        print(f"{Colors.ERROR}CRITICAL ERROR: Unexpected exception in main(){Colors.RESET}")
+        print(f"{Colors.ERROR}Error: {e}{Colors.RESET}")
+        print(f"{Colors.ERROR}{'='*60}{Colors.RESET}")
+        import traceback
+        print("\nFull traceback:")
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

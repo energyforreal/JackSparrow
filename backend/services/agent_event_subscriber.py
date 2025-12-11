@@ -301,6 +301,8 @@ class AgentEventSubscriber:
                 await self._handle_position_closed(payload)
             elif event_type == "model_prediction_complete":
                 await self._handle_model_prediction_complete(payload)
+            elif event_type == "reasoning_complete":
+                await self._handle_reasoning_complete(payload)
             elif event_type == "market_tick":
                 await self._handle_market_tick(payload)
             # Add more event handlers as needed
@@ -665,24 +667,90 @@ class AgentEventSubscriber:
             )
     
     async def _handle_model_prediction_complete(self, payload: Dict[str, Any]):
-        """Handle ModelPredictionCompleteEvent.
+        """Handle ModelPredictionCompleteEvent - broadcast to frontend.
         
         Args:
             payload: ModelPredictionCompleteEvent payload
         """
-        # This event is already included in DecisionReadyEvent,
-        # so we just log it for now
         try:
             symbol = payload.get("symbol", "")
+            predictions = payload.get("predictions", [])
             consensus_signal = payload.get("consensus_signal", 0.0)
             consensus_confidence = payload.get("consensus_confidence", 0.0)
+            timestamp = payload.get("timestamp")
+            
+            # Extract individual model reasoning from predictions
+            individual_reasoning = []
+            model_consensus = []
+            
+            if isinstance(predictions, list):
+                for pred in predictions:
+                    if isinstance(pred, dict):
+                        model_name = pred.get("model_name", "Unknown")
+                        reasoning = pred.get("reasoning", "")
+                        pred_confidence = pred.get("confidence", 0.0)
+                        prediction_value = pred.get("prediction", 0.0)
+                        signal_value = pred.get("signal", "HOLD")
+                        
+                        # Convert confidence to 0-100 if needed
+                        if 0.0 <= pred_confidence <= 1.0:
+                            pred_confidence = pred_confidence * 100.0
+                        
+                        individual_reasoning.append({
+                            "model_name": model_name,
+                            "reasoning": reasoning,
+                            "confidence": pred_confidence,
+                            "prediction": prediction_value
+                        })
+                        
+                        # Build model consensus entry
+                        model_consensus.append({
+                            "model_name": model_name,
+                            "signal": signal_value,
+                            "confidence": pred_confidence,
+                            "prediction": prediction_value
+                        })
+            
+            # Handle timestamp formatting
+            formatted_timestamp = timestamp
+            if timestamp:
+                if isinstance(timestamp, datetime):
+                    formatted_timestamp = timestamp.isoformat()
+                elif isinstance(timestamp, str):
+                    formatted_timestamp = timestamp
+                else:
+                    formatted_timestamp = datetime.utcnow().isoformat()
+            else:
+                formatted_timestamp = datetime.utcnow().isoformat()
+            
+            # Convert consensus confidence to 0-100 if needed
+            if 0.0 <= consensus_confidence <= 1.0:
+                consensus_confidence = consensus_confidence * 100.0
+            
+            # Broadcast model prediction update
+            await websocket_manager.broadcast(
+                {
+                    "type": "model_prediction_update",
+                    "data": {
+                        "symbol": symbol,
+                        "consensus_signal": consensus_signal,
+                        "consensus_confidence": consensus_confidence,
+                        "individual_model_reasoning": individual_reasoning,
+                        "model_consensus": model_consensus,
+                        "model_predictions": predictions,
+                        "timestamp": formatted_timestamp
+                    }
+                },
+                channel="model_predictions"
+            )
 
-            logger.debug(
-                "agent_event_subscriber_model_prediction_complete",
+            logger.info(
+                "agent_event_subscriber_model_prediction_complete_broadcast",
                 service="backend",
                 symbol=symbol,
                 consensus_signal=consensus_signal,
-                consensus_confidence=consensus_confidence
+                consensus_confidence=consensus_confidence,
+                prediction_count=len(predictions)
             )
 
         except Exception as e:
@@ -692,6 +760,73 @@ class AgentEventSubscriber:
                 component="agent_event_subscriber"
             )
 
+    async def _handle_reasoning_complete(self, payload: Dict[str, Any]):
+        """Handle ReasoningCompleteEvent.
+        
+        Args:
+            payload: ReasoningCompleteEvent payload
+        """
+        try:
+            reasoning_chain = payload.get("reasoning_chain", {})
+            symbol = payload.get("symbol", "BTCUSD")
+            final_confidence = payload.get("final_confidence", 0.0)
+            timestamp = payload.get("timestamp")
+            
+            # Extract reasoning chain steps
+            reasoning_steps = reasoning_chain.get("steps", []) if isinstance(reasoning_chain, dict) else []
+            conclusion = reasoning_chain.get("conclusion", "") if isinstance(reasoning_chain, dict) else ""
+            chain_id = reasoning_chain.get("chain_id", "") if isinstance(reasoning_chain, dict) else ""
+            market_context = reasoning_chain.get("market_context", {}) if isinstance(reasoning_chain, dict) else {}
+            
+            # Convert confidence to 0-100 if needed
+            if 0.0 <= final_confidence <= 1.0:
+                final_confidence = final_confidence * 100.0
+            
+            # Handle timestamp formatting
+            formatted_timestamp = timestamp
+            if timestamp:
+                if isinstance(timestamp, datetime):
+                    formatted_timestamp = timestamp.isoformat()
+                elif isinstance(timestamp, str):
+                    formatted_timestamp = timestamp
+                else:
+                    formatted_timestamp = datetime.utcnow().isoformat()
+            else:
+                formatted_timestamp = datetime.utcnow().isoformat()
+            
+            # Broadcast reasoning chain update
+            await websocket_manager.broadcast(
+                {
+                    "type": "reasoning_chain_update",
+                    "data": {
+                        "symbol": symbol,
+                        "reasoning_chain": reasoning_steps,
+                        "conclusion": conclusion,
+                        "final_confidence": final_confidence,
+                        "chain_id": chain_id,
+                        "market_context": market_context,
+                        "timestamp": formatted_timestamp
+                    }
+                },
+                channel="reasoning"
+            )
+
+            logger.info(
+                "agent_event_subscriber_reasoning_complete_broadcast",
+                service="backend",
+                symbol=symbol,
+                chain_id=chain_id,
+                final_confidence=final_confidence,
+                step_count=len(reasoning_steps)
+            )
+
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_reasoning_complete_error",
+                error=e,
+                component="agent_event_subscriber"
+            )
+    
     async def _handle_market_tick(self, payload: Dict[str, Any]):
         """Handle MarketTickEvent.
         
@@ -806,7 +941,8 @@ class AgentEventSubscriber:
                         "open_positions": portfolio_summary.get("open_positions", 0),
                         "total_unrealized_pnl": float(portfolio_summary.get("total_unrealized_pnl", 0)),
                         "total_realized_pnl": float(portfolio_summary.get("total_realized_pnl", 0)),
-                        "positions": portfolio_summary.get("positions", [])
+                        "positions": portfolio_summary.get("positions", []),
+                        "timestamp": datetime.utcnow().isoformat()
                     }
                     
                     # Broadcast via WebSocket

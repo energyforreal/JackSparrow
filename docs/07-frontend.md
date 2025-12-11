@@ -667,6 +667,42 @@ export const apiClient = new ApiClient(API_BASE_URL);
 
 The frontend uses WebSocket for real-time updates:
 
+### WebSocket Message Types
+
+The frontend handles the following WebSocket message types:
+
+1. **`agent_state`**: Agent state transitions
+   - Updates agent status display
+   - Includes state, reason, and timestamp
+
+2. **`signal_update`**: Trading decision updates
+   - Includes signal, confidence, reasoning chain, model consensus
+   - Updates signal indicator and trading decision components
+
+3. **`reasoning_chain_update`**: Reasoning chain updates (separate from signal)
+   - Includes full 6-step reasoning chain
+   - Updates reasoning chain viewer component
+
+4. **`model_prediction_update`**: ML model prediction updates
+   - Includes model consensus and individual model reasoning
+   - Updates model reasoning view component
+
+5. **`market_tick`**: Real-time price updates
+   - Includes symbol, price, volume, timestamp
+   - Updates real-time price display
+
+6. **`trade_executed`**: Trade execution notifications
+   - Updates recent trades list
+   - Triggers portfolio refresh
+
+7. **`portfolio_update`**: Portfolio state changes
+   - Updates portfolio summary and positions
+
+8. **`health_update`**: System health status
+   - Updates health monitor component
+
+### Message Handling Flow
+
 1. **Connection**: Establish WebSocket connection on mount
 2. **Subscription**: Subscribe to relevant channels
 3. **Message Handling**: Update local state based on message types
@@ -681,10 +717,237 @@ WebSocket Message → Message Handler → State Update → Component Re-render
 
 **Message Types Handled**:
 - `agent_state`: Update agent state
+- `signal_update`: Update trading signal and decision
+- `reasoning_chain_update`: Update reasoning chain display
+- `model_prediction_update`: Update model predictions and consensus
+- `market_tick`: Update real-time price display
 - `trade_executed`: Add to recent trades
 - `portfolio_update`: Update portfolio data
-- `health_status`: Update health status
-- `prediction_generated`: Update signal indicator
+- `health_update`: Update health status
+
+---
+
+## Data Freshness Display
+
+The frontend implements visual indicators to show data freshness, helping users understand how current the displayed information is.
+
+### DataFreshnessIndicator Component
+
+**File**: `app/components/DataFreshnessIndicator.tsx`
+
+**Purpose**: Display timestamp with color-coded freshness indicator.
+
+**Props**:
+```typescript
+interface DataFreshnessIndicatorProps {
+  timestamp: Date | string | null | undefined
+  label?: string  // Default: "Last update"
+  className?: string
+}
+```
+
+**Features**:
+- Color-coded freshness based on age
+- Formatted time display (IST timezone)
+- Visual dot indicator
+- Handles missing timestamps gracefully
+
+**Freshness Color Thresholds**:
+- Green (< 1 minute): Data is fresh and current
+- Amber (1-5 minutes): Data is somewhat stale but acceptable
+- Red (> 5 minutes): Data is very stale and may need refresh
+
+**Usage Example**:
+```typescript
+<DataFreshnessIndicator 
+  timestamp={signal.timestamp} 
+  label="Signal time"
+/>
+```
+
+### Timestamp Normalization
+
+**File**: `utils/formatters.ts`
+
+The frontend normalizes timestamps to handle various formats and ensures consistent UTC → IST conversion:
+
+1. **UTC Assumption**: If timestamp string lacks timezone, assumes UTC by appending 'Z'
+2. **ISO 8601 Parsing**: Handles multiple timezone formats:
+   - `YYYY-MM-DDTHH:mm:ss.sssZ` (with Z suffix)
+   - `YYYY-MM-DDTHH:mm:ss.sss+00:00` (with timezone offset)
+   - `YYYY-MM-DDTHH:mm:ss.sss+0000` (without colon)
+   - `YYYY-MM-DDTHH:mm:ss.sss` (no timezone - treated as UTC)
+3. **IST Display**: All times displayed in IST (Asia/Kolkata) timezone using `toLocaleTimeString`
+4. **Format Functions**:
+   - `normalizeDate()`: Normalizes timestamps to Date objects with UTC parsing
+   - `formatTime()`: Formats time in IST (HH:mm:ss AM/PM)
+   - `formatClockTime()`: Formats time matching system clock format (HH:mm:ss am/pm IST)
+   - `formatDateTime()`: Formats date and time
+   - `getDataFreshnessColor()`: Returns color class based on age with granular thresholds
+
+**Normalization Logic** (Updated):
+```typescript
+export function normalizeDate(date: Date | string): Date {
+  if (typeof date === 'string') {
+    // Backend sends timestamps like "2025-12-02T10:11:11.976865" without timezone
+    // These should be treated as UTC and displayed in IST on the frontend
+    const trimmedDate = date.trim()
+    const hasExplicitTimezone =
+      trimmedDate.endsWith('Z') || 
+      /[+-]\d{2}:\d{2}$/.test(trimmedDate) ||
+      /[+-]\d{4}$/.test(trimmedDate) // Handle formats like +0000 (without colon)
+
+    const isoString = hasExplicitTimezone ? trimmedDate : `${trimmedDate}Z`
+    return new Date(isoString)
+  }
+  return date
+}
+```
+
+**Key Improvements**:
+- Trims whitespace from timestamp strings
+- Handles multiple timezone formats (+00:00, +0000, Z)
+- Appends 'Z' to timestamps without timezone to ensure UTC parsing
+- Includes debug logging in development mode for troubleshooting
+
+**Clock Time Formatting**:
+```typescript
+export function formatClockTime(date: Date | string | null | undefined): string {
+  if (!date || !isValidDate(date)) {
+    return '--:--:--'
+  }
+  const d = normalizeDate(date)
+  return d.toLocaleTimeString(IST_LOCALE, {
+    timeZone: IST_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
+}
+```
+
+This ensures all timestamps are:
+1. Parsed as UTC (via `normalizeDate`)
+2. Converted to IST using `toLocaleTimeString` with `timeZone: 'Asia/Kolkata'`
+3. Displayed in consistent format matching system clock (HH:mm:ss am/pm)
+
+### Components Using Freshness Indicators
+
+1. **AgentStatus** (`app/components/AgentStatus.tsx`):
+   - Displays `lastUpdate` timestamp
+   - Shows when agent state was last updated
+   - Updates on `agent_state` WebSocket messages
+
+2. **SignalIndicator** (`app/components/SignalIndicator.tsx`):
+   - Displays `signal.timestamp`
+   - Shows when trading signal was generated
+   - Updates on `signal_update` WebSocket messages
+
+3. **TradingDecision** (`app/components/TradingDecision.tsx`):
+   - Displays `signal.timestamp`
+   - Shows when trading decision was made
+   - Updates on `signal_update` WebSocket messages
+
+### Timestamp Sources
+
+Frontend extracts timestamps from WebSocket messages in priority order:
+
+1. **Primary**: `data.timestamp` - Event-specific timestamp
+2. **Fallback**: `server_timestamp_ms` - Server broadcast time (available but not currently used)
+3. **Default**: Current time if no timestamp available
+
+**Example from useAgent hook** (Updated):
+```typescript
+case 'agent_state': {
+  const data = lastMessage.data
+  if (data?.last_update) {
+    try {
+      const ts = normalizeDate(data.last_update)
+      if (!isNaN(ts.getTime())) {
+        setLastUpdate(ts)
+      } else {
+        setLastUpdate(new Date()) // Fallback to current time
+      }
+    } catch (error) {
+      setLastUpdate(new Date()) // Fallback to current time
+    }
+  } else if (data?.timestamp) {
+    try {
+      const ts = normalizeDate(data.timestamp)
+      if (!isNaN(ts.getTime())) {
+        setLastUpdate(ts)
+      } else {
+        setLastUpdate(new Date()) // Fallback to current time
+      }
+    } catch (error) {
+      setLastUpdate(new Date()) // Fallback to current time
+    }
+  } else {
+    setLastUpdate(new Date()) // Fallback to current time
+  }
+  break
+}
+
+case 'signal_update': {
+  const signalData = lastMessage.data as Signal
+  if (signalData?.timestamp) {
+    try {
+      const ts = normalizeDate(signalData.timestamp)
+      if (!isNaN(ts.getTime())) {
+        setLastUpdate(ts)
+      }
+    } catch (error) {
+      setLastUpdate(new Date())
+    }
+  }
+  setSignal(signalData)
+  break
+}
+```
+
+**Key Changes**:
+- All timestamp parsing uses `normalizeDate()` to ensure UTC parsing
+- Error handling for invalid timestamps
+- Debug logging in development mode for troubleshooting
+
+### Freshness Calculation
+
+The frontend calculates data age using:
+
+1. **Extract timestamp** from message data
+2. **Normalize to Date object** using `normalizeDate()` (handles string/Date, UTC assumption)
+3. **Calculate age**: `Date.now() - timestamp.getTime()`
+4. **Apply granular thresholds** (Updated):
+   - < 30 seconds: Green (very fresh)
+   - 30-60 seconds: Light green (fresh)
+   - 1-2 minutes: Yellow (recent)
+   - 2-5 minutes: Amber (moderate)
+   - 5-15 minutes: Orange (stale)
+   - >= 15 minutes: Red (very stale)
+5. **Display** formatted time with colored indicator and dot
+
+**Color Coding Implementation**:
+- Text color: `getDataFreshnessColor(timestamp)` - returns Tailwind color class
+- Dot indicator: `getFreshnessDotColor(timestamp)` - matches text color thresholds
+- Both use `normalizeDate()` for consistent age calculation
+
+### Server Timestamp Availability
+
+All WebSocket messages include `server_timestamp_ms` at the message root level:
+
+```typescript
+{
+  type: "signal_update",
+  data: { ... },
+  server_timestamp_ms: 1706356800123  // Available for freshness calculation
+}
+```
+
+While the frontend currently uses `data.timestamp` as primary source, `server_timestamp_ms` is available for:
+- Fallback when `data.timestamp` is missing
+- More precise latency calculation
+- Server-side freshness validation
 
 ---
 

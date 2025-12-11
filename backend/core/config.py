@@ -69,6 +69,16 @@ class Settings(BaseSettings):
         env="AGENT_RESPONSE_QUEUE",
         description="Redis queue for agent responses"
     )
+    agent_websocket_url: str = Field(
+        default="ws://localhost:8002",
+        env="AGENT_WS_URL",
+        description="Agent WebSocket URL for backend client connections"
+    )
+    use_agent_websocket: bool = Field(
+        default=True,
+        env="USE_AGENT_WEBSOCKET",
+        description="Use WebSocket for agent communication (fallback to Redis queue if False or unavailable)"
+    )
     
     # Feature Server
     feature_server_url: str = Field(

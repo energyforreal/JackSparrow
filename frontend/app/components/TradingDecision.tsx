@@ -67,16 +67,7 @@ export function TradingDecision({
   return (
     <Card role="region" aria-label="Trading Decision Flow">
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>Trading Decision Flow</CardTitle>
-          <Badge 
-            variant="outline" 
-            className="ml-2"
-            aria-label={paperTradingMode ? 'Paper Trading Mode' : 'Live Trading Mode'}
-          >
-            {paperTradingMode ? '📝 Paper Trading' : '💰 Live Trading'}
-          </Badge>
-        </div>
+        <CardTitle>Trading Decision Flow</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Current Decision */}
@@ -201,22 +192,6 @@ export function TradingDecision({
           </div>
         )}
 
-        {/* Paper Trading Notice */}
-        {paperTradingMode && (
-          <div className="pt-2 border-t">
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
-              <span className="text-blue-600 dark:text-blue-400">ℹ️</span>
-              <div className="flex-1">
-                <p className="text-xs font-medium text-blue-900 dark:text-blue-100">
-                  Paper Trading Mode Active
-                </p>
-                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                  All trades are simulated. No real money is being used.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   )

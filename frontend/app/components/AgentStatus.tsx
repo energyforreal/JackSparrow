@@ -4,12 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Eye, Brain, Zap, AlertTriangle, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { formatTime } from '@/utils/formatters'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 
 interface AgentStatusProps {
   state: string
-  lastUpdate: Date
+  lastUpdate: Date | null
   message?: string
   isConnected?: boolean
 }

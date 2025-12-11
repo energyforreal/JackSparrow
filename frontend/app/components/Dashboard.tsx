@@ -14,7 +14,6 @@ import { ModelReasoningView } from './ModelReasoningView'
 import { TradingDecision } from './TradingDecision'
 import { RealTimePrice } from './RealTimePrice'
 import { ErrorBoundary } from './ErrorBoundary'
-import { PaperTradingBanner } from './PaperTradingBanner'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useAgent } from '@/hooks/useAgent'
 import { apiClient } from '@/services/api'
@@ -210,6 +209,70 @@ export function Dashboard() {
             })
           }
           break
+        case 'reasoning_chain_update': {
+          const reasoningData = lastMessage.data as {
+            reasoning_chain?: ReasoningStep[]
+            conclusion?: string
+            final_confidence?: number
+            timestamp?: string | Date
+          }
+          // Update reasoning chain separately from signal
+          if (reasoningData.reasoning_chain) {
+            setReasoningChain(
+              Array.isArray(reasoningData.reasoning_chain)
+                ? reasoningData.reasoning_chain
+                : []
+            )
+          }
+          // Also update signal if it exists to include conclusion
+          if (reasoningData.conclusion) {
+            setSignal((prev) => {
+              if (prev) {
+                return {
+                  ...prev,
+                  agent_decision_reasoning: reasoningData.conclusion || prev.agent_decision_reasoning,
+                  confidence: reasoningData.final_confidence !== undefined 
+                    ? reasoningData.final_confidence 
+                    : prev.confidence
+                }
+              }
+              return prev
+            })
+          }
+          console.log('Reasoning chain update received via WebSocket:', {
+            stepCount: reasoningData.reasoning_chain?.length || 0,
+            conclusion: reasoningData.conclusion
+          })
+          break
+        }
+        case 'model_prediction_update': {
+          const modelData = lastMessage.data as {
+            consensus_signal?: number
+            consensus_confidence?: number
+            individual_model_reasoning?: any[]
+            model_consensus?: any[]
+            model_predictions?: any[]
+            timestamp?: string | Date
+          }
+          // Update signal with model predictions
+          setSignal((prev) => {
+            if (prev) {
+              return {
+                ...prev,
+                model_consensus: modelData.model_consensus || prev.model_consensus,
+                individual_model_reasoning: modelData.individual_model_reasoning || prev.individual_model_reasoning,
+                model_predictions: modelData.model_predictions || prev.model_predictions
+              }
+            }
+            return prev
+          })
+          console.log('Model prediction update received via WebSocket:', {
+            consensusSignal: modelData.consensus_signal,
+            consensusConfidence: modelData.consensus_confidence,
+            modelCount: modelData.model_consensus?.length || 0
+          })
+          break
+        }
         case 'performance_update':
           const perfData = lastMessage.data
           if (Array.isArray(perfData)) {
@@ -228,8 +291,6 @@ export function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       <Header isConnected={isConnected} />
-      <PaperTradingBanner isPaperTrading={true} />
-      
       <div className="container mx-auto px-4 py-6 space-y-6">
         {wsError && (
           <Card className="border-destructive bg-destructive/5">

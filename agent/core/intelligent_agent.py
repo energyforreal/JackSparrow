@@ -250,6 +250,55 @@ class IntelligentAgent:
         await model_handler.register_handlers()
         await reasoning_handler.register_handlers()
         
+        # Initialize WebSocket server for backend connections
+        try:
+            from agent.api.websocket_server import get_websocket_server
+            self.websocket_server = await get_websocket_server(self)
+            await self.websocket_server.start()
+            logger.info(
+                "agent_websocket_server_initialized",
+                service="agent",
+                host=settings.agent_websocket_host,
+                port=settings.agent_websocket_port
+            )
+        except Exception as e:
+            logger.warning(
+                "agent_websocket_server_init_failed",
+                service="agent",
+                error=str(e),
+                message="Agent will continue without WebSocket server, using Redis queue only",
+                exc_info=True
+            )
+            self.websocket_server = None
+        
+        # Initialize WebSocket client for sending events to backend
+        try:
+            from agent.api.websocket_client import get_websocket_client
+            self.websocket_client = await get_websocket_client()
+            if self.websocket_client:
+                await self.websocket_client.start()
+                logger.info(
+                    "agent_websocket_client_initialized",
+                    service="agent",
+                    url=settings.backend_websocket_url,
+                    message="Agent events will be sent via WebSocket and Redis Streams"
+                )
+            else:
+                logger.info(
+                    "agent_websocket_client_unavailable",
+                    service="agent",
+                    message="WebSocket client not available, events will only be sent via Redis Streams"
+                )
+        except Exception as e:
+            logger.warning(
+                "agent_websocket_client_init_failed",
+                service="agent",
+                error=str(e),
+                message="Agent will continue without WebSocket client, using Redis Streams only",
+                exc_info=True
+            )
+            self.websocket_client = None
+        
         # Initialize state machine
         self.state_machine.current_state = AgentState.INITIALIZING
         self.context_manager.update_context({"state": AgentState.INITIALIZING})
@@ -298,6 +347,28 @@ class IntelligentAgent:
             environment=settings.environment,
         )
         self.running = False
+        
+        # Shutdown WebSocket server
+        if hasattr(self, 'websocket_server') and self.websocket_server:
+            try:
+                await self.websocket_server.stop()
+            except Exception as e:
+                logger.warning(
+                    "agent_websocket_server_shutdown_error",
+                    service="agent",
+                    error=str(e)
+                )
+        
+        # Shutdown WebSocket client
+        if hasattr(self, 'websocket_client') and self.websocket_client:
+            try:
+                await self.websocket_client.stop()
+            except Exception as e:
+                logger.warning(
+                    "agent_websocket_client_shutdown_error",
+                    service="agent",
+                    error=str(e)
+                )
         
         # Shutdown all components
         await self.market_data_service.shutdown()

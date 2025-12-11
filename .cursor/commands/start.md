@@ -22,21 +22,41 @@ For detailed setup instructions, see `docs/10-deployment.md` and `docs/11-build-
 
 ## Usage
 
-Run this command to start all services before every development session.
+**In Cursor**: Type `/start` in the command palette or chat. This executes `.cursor/commands/start.py`, which delegates to `tools/commands/start_parallel.py` with proper error handling and output visibility.
+
+**Command Line**: Run this command to start all services before every development session.
 
 **Related Commands**: See [restart.md](restart.md) for clean restart, [error.md](error.md) for diagnostics.
 
 ## Implementation
 
+When you type `/start` in Cursor, it executes `.cursor/commands/start.py`, which delegates to `tools/commands/start_parallel.py`.
+
 **Windows (PowerShell)**:
+
 ```powershell
 .\tools\commands\start.ps1
+# Or directly:
+python tools\commands\start_parallel.py
 ```
 
 **Linux/macOS (Bash)**:
+
 ```bash
 ./tools/commands/start.sh
+# Or directly:
+python tools/commands/start_parallel.py
 ```
+
+**Cursor Command**:
+
+When using `/start` in Cursor, the command handler (`.cursor/commands/start.py`) automatically:
+
+1. Sets up proper output buffering and encoding
+2. Validates project structure and script existence
+3. Loads and executes `tools/commands/start_parallel.py` as a module
+4. Handles errors with specific exception types and full tracebacks
+5. Ensures all output is visible
 
 ## What It Does
 
@@ -57,8 +77,8 @@ Run this command to start all services before every development session.
 
 ## Expected Output
 
-- Backend: http://localhost:8000
-- Frontend: http://localhost:3000
+- Backend: <http://localhost:8000>
+- Frontend: <http://localhost:3000>
 - Backend and frontend logs are written to the `logs/` directory; the agent continues to manage its own structured logging internally (no duplicate `logs/agent.log`)
 
 ## Prerequisites Check
@@ -69,12 +89,14 @@ The start script automatically performs a prerequisites check before starting se
 2. **Redis Check**: Verifies Redis is accessible at the host/port specified in `REDIS_URL`
 
 If prerequisites are not met, the script will:
+
 - Display clear error messages listing missing services
 - Provide platform-specific instructions (Windows/Linux/macOS) to start services
 - Exit before attempting to start any services
 
 Example output when prerequisites are missing:
-```
+
+```text
 ✗ Prerequisites Check Failed
 
 The following required services are not running:
@@ -92,14 +114,15 @@ To fix this:
 **Error**: `PostgreSQL is not accessible at localhost:5432`
 
 **Solutions**:
-- **Windows**: 
+
+- **Windows**:
   - Check if PostgreSQL service is running: `Get-Service postgresql*`
   - Start service: `net start postgresql-x64-15` (or your specific service name)
   - Or use PowerShell: `Get-Service postgresql* | Start-Service`
-- **Linux**: 
+- **Linux**:
   - Check status: `sudo systemctl status postgresql`
   - Start service: `sudo systemctl start postgresql`
-- **macOS**: 
+- **macOS**:
   - Check status: `brew services list`
   - Start service: `brew services start postgresql@15`
 
@@ -108,14 +131,15 @@ To fix this:
 **Error**: `Redis is not accessible at localhost:6379`
 
 **Solutions**:
-- **Windows**: 
+
+- **Windows**:
   - Check if Redis service is running: `Get-Service redis*`
   - Start service: `net start redis` (if installed as Windows service)
   - Or run manually: `redis-server.exe`
-- **Linux**: 
+- **Linux**:
   - Check status: `sudo systemctl status redis`
   - Start service: `sudo systemctl start redis`
-- **macOS**: 
+- **macOS**:
   - Check status: `brew services list`
   - Start service: `brew services start redis`
 
@@ -124,7 +148,8 @@ To fix this:
 **Error**: `DATABASE_URL environment variable not set`
 
 **Solution**: Create a `.env` file in the project root with:
-```
+
+```env
 DATABASE_URL=postgresql://user:password@localhost:5432/trading_agent
 ```
 
@@ -165,10 +190,17 @@ If the frontend appears to start but is not accessible:
 
 ## Notes
 
+- **Cursor Integration**: When using `/start` in Cursor, the command handler (`.cursor/commands/start.py`) ensures:
+  - Proper UTF-8 encoding and output buffering
+  - Full error tracebacks on failures with specific exception types
+  - All validation output is visible
+  - Script execution is properly wrapped with error handling
+  - Secure module loading (no `exec()` usage)
+  - Type-safe code with comprehensive type hints
 - The start script checks prerequisites automatically before starting services
 - On both Windows and macOS/Linux, the command attempts to start a local Redis instance automatically if port 6379 is unavailable
 - Ensure `logs/` directory exists (created automatically)
 - Confirms backend, agent, and frontend are reachable on `localhost` after successful start
 - Always bootstrap logging before running commands (see `docs/12-logging.md`)
 - Services run in parallel and share the same terminal output with color-coded prefixes
-
+- All output is flushed immediately to ensure visibility in Cursor's terminal

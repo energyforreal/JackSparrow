@@ -254,6 +254,23 @@ class Settings(BaseSettings):
         description="Redis queue for agent responses"
     )
     
+    # WebSocket Configuration
+    agent_websocket_host: str = Field(
+        default="0.0.0.0",
+        env="AGENT_WS_HOST",
+        description="Host for agent WebSocket server"
+    )
+    agent_websocket_port: int = Field(
+        default=8002,
+        env="AGENT_WS_PORT",
+        description="Port for agent WebSocket server"
+    )
+    backend_websocket_url: str = Field(
+        default="ws://localhost:8000/ws/agent",
+        env="BACKEND_WS_URL",
+        description="Backend WebSocket URL for agent event client"
+    )
+    
     # Trading Session Defaults
     initial_balance: float = Field(
         default=10000.0,

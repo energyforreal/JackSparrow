@@ -10,6 +10,8 @@ import json
 import asyncio
 import uuid
 import time
+from datetime import datetime, date
+from decimal import Decimal
 import structlog
 
 from backend.core.redis import get_redis
@@ -20,17 +22,46 @@ import redis.asyncio as aioredis
 logger = structlog.get_logger()
 
 
+def _json_default_encoder(obj: Any):
+    """JSON encoder for WebSocket payloads.
+    
+    Ensures all messages are safe for json.dumps / send_json by converting:
+    - datetime/date → ISO 8601 strings
+    - Decimal → float
+    - all other unsupported types → string representation
+    """
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return float(obj)
+    return str(obj)
+
+
+def _sanitize_for_json(value: Any) -> Any:
+    """Recursively convert complex types to JSON-serializable primitives."""
+    if isinstance(value, dict):
+        return {k: _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_for_json(v) for v in value]
+    if isinstance(value, (datetime, date, Decimal)):
+        return _json_default_encoder(value)
+    # Let json handle primitives (str, int, float, bool, None) and other simple types
+    return value
+
+
 class WebSocketManager:
     """WebSocket connection manager."""
     
     def __init__(self):
         """Initialize WebSocket manager."""
         self.active_connections: List[WebSocket] = []
+        self.agent_connections: List[WebSocket] = []  # Separate pool for agent connections
         self.subscriptions: Dict[WebSocket, Set[str]] = {}
         self._redis_subscriber = None
         self._redis_task = None
         self._time_sync_task = None
         self._health_sync_task = None
+        self._agent_state_sync_task = None
         self._redis_publisher = None
         self._redis_channel = "websocket:broadcast"
         self._instance_id = str(uuid.uuid4())[:8]  # Unique instance identifier
@@ -70,6 +101,9 @@ class WebSocketManager:
             
             # Start periodic health update task
             self._health_sync_task = asyncio.create_task(self._health_sync_loop())
+            
+            # Start periodic agent state update task
+            self._agent_state_sync_task = asyncio.create_task(self._agent_state_sync_loop())
             
             logger.info(
                 "websocket_manager_initialized",
@@ -114,6 +148,13 @@ class WebSocketManager:
             except asyncio.CancelledError:
                 pass
         
+        if self._agent_state_sync_task:
+            self._agent_state_sync_task.cancel()
+            try:
+                await self._agent_state_sync_task
+            except asyncio.CancelledError:
+                pass
+        
         if self._redis_subscriber:
             try:
                 await self._redis_subscriber.close()
@@ -128,27 +169,80 @@ class WebSocketManager:
         self._redis_task = None
         self._time_sync_task = None
         self._health_sync_task = None
+        self._agent_state_sync_task = None
     
-    async def connect(self, websocket: WebSocket):
-        """Accept new WebSocket connection."""
+    async def connect(self, websocket: WebSocket, is_agent: bool = False):
+        """Accept new WebSocket connection.
+        
+        Args:
+            websocket: WebSocket connection
+            is_agent: If True, add to agent_connections pool instead of active_connections
+        """
         await websocket.accept()
-        self.active_connections.append(websocket)
-        self.subscriptions[websocket] = set()
-        logger.info(
-            "websocket_connected",
-            total_connections=len(self.active_connections)
-        )
+        if is_agent:
+            self.agent_connections.append(websocket)
+            logger.info(
+                "websocket_agent_connected",
+                total_agent_connections=len(self.agent_connections),
+                total_frontend_connections=len(self.active_connections)
+            )
+        else:
+            self.active_connections.append(websocket)
+            self.subscriptions[websocket] = set()
+            logger.info(
+                "websocket_connected",
+                total_connections=len(self.active_connections)
+            )
+            
+            # Send initial agent state immediately
+            try:
+                from backend.services.agent_service import agent_service
+                current_state = await agent_service.get_current_state()
+                if current_state:
+                    state_data = {
+                        "state": current_state.get("state", "UNKNOWN"),
+                        "timestamp": current_state.get("timestamp", datetime.utcnow()).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.utcnow().isoformat()),
+                        "reason": current_state.get("reason", "")
+                    }
+                    await self.send_personal_message(websocket, {
+                        "type": "agent_state",
+                        "data": state_data
+                    })
+                    logger.debug(
+                        "websocket_initial_agent_state_sent",
+                        state=state_data.get("state")
+                    )
+            except Exception as e:
+                logger.debug(
+                    "websocket_initial_agent_state_send_failed",
+                    error=str(e),
+                    message="Failed to send initial agent state, will be sent on next sync"
+                )
     
-    async def disconnect(self, websocket: WebSocket):
-        """Disconnect WebSocket connection."""
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        if websocket in self.subscriptions:
-            del self.subscriptions[websocket]
-        logger.info(
-            "websocket_disconnected",
-            total_connections=len(self.active_connections)
-        )
+    async def disconnect(self, websocket: WebSocket, is_agent: bool = False):
+        """Disconnect WebSocket connection.
+        
+        Args:
+            websocket: WebSocket connection
+            is_agent: If True, remove from agent_connections pool
+        """
+        if is_agent:
+            if websocket in self.agent_connections:
+                self.agent_connections.remove(websocket)
+            logger.info(
+                "websocket_agent_disconnected",
+                total_agent_connections=len(self.agent_connections),
+                total_frontend_connections=len(self.active_connections)
+            )
+        else:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+            if websocket in self.subscriptions:
+                del self.subscriptions[websocket]
+            logger.info(
+                "websocket_disconnected",
+                total_connections=len(self.active_connections)
+            )
     
     async def subscribe(self, websocket: WebSocket, channels: List[str]):
         """Subscribe WebSocket to channels."""
@@ -171,7 +265,8 @@ class WebSocketManager:
     async def send_personal_message(self, websocket: WebSocket, message: Dict[str, Any]):
         """Send message to specific WebSocket connection."""
         try:
-            await websocket.send_json(message)
+            safe_message = _sanitize_for_json(message)
+            await websocket.send_json(safe_message)
         except Exception as e:
             logger.error(
                 "websocket_send_personal_message_failed",
@@ -188,11 +283,14 @@ class WebSocketManager:
             message["server_timestamp"] = time_info["server_time"]
             message["server_timestamp_ms"] = time_info["timestamp_ms"]
         
+        # Sanitize message for JSON serialization (for both Redis and direct WebSocket)
+        safe_message = _sanitize_for_json(message)
+        
         # Add metadata to message for Redis pub/sub
         broadcast_message = {
             "instance_id": self._instance_id,
             "channel": channel,
-            "message": message,
+            "message": safe_message,
             "timestamp": time.time()
         }
         
@@ -201,7 +299,7 @@ class WebSocketManager:
             try:
                 await self._redis_publisher.publish(
                     self._redis_channel,
-                    json.dumps(broadcast_message)
+                    json.dumps(broadcast_message, default=_json_default_encoder)
                 )
             except Exception as e:
                 logger.warning(
@@ -212,7 +310,7 @@ class WebSocketManager:
                 )
         
         # Also broadcast locally
-        await self._broadcast_local(message, channel)
+        await self._broadcast_local(safe_message, channel)
     
     async def _broadcast_local(self, message: Dict[str, Any], channel: str = None):
         """Broadcast message to local WebSocket connections only."""
@@ -329,7 +427,7 @@ class WebSocketManager:
                     await self.unsubscribe(websocket, channels)
                 
                 elif action == "get_state":
-                    # Send current state
+                    # Send current WebSocket connection state
                     await self.send_personal_message(websocket, {
                         "type": "state",
                         "data": {
@@ -337,6 +435,40 @@ class WebSocketManager:
                             "subscribed_channels": list(self.subscriptions.get(websocket, set()))
                         }
                     })
+                
+                elif action == "get_agent_state":
+                    # Send current agent state on demand
+                    try:
+                        from backend.services.agent_service import agent_service
+                        current_state = await agent_service.get_current_state()
+                        if current_state:
+                            state_data = {
+                                "state": current_state.get("state", "UNKNOWN"),
+                                "timestamp": current_state.get("timestamp", datetime.utcnow()).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.utcnow().isoformat()),
+                                "reason": current_state.get("reason", "")
+                            }
+                            await self.send_personal_message(websocket, {
+                                "type": "agent_state",
+                                "data": state_data
+                            })
+                        else:
+                            await self.send_personal_message(websocket, {
+                                "type": "agent_state",
+                                "data": {
+                                    "state": "UNKNOWN",
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "reason": "Agent state unavailable"
+                                }
+                            })
+                    except Exception as e:
+                        logger.warning(
+                            "websocket_get_agent_state_error",
+                            error=str(e)
+                        )
+                        await self.send_personal_message(websocket, {
+                            "type": "error",
+                            "message": f"Failed to get agent state: {str(e)}"
+                        })
                 
                 else:
                     await self.send_personal_message(websocket, {
@@ -353,6 +485,65 @@ class WebSocketManager:
                 exc_info=True
             )
             await self.disconnect(websocket)
+    
+    async def handle_agent_client(self, websocket: WebSocket):
+        """Handle WebSocket messages from agent.
+        
+        Agent sends events directly via WebSocket, which we then broadcast
+        to frontend clients. This bypasses Redis Streams for lower latency.
+        """
+        try:
+            while True:
+                # Receive message from agent
+                data = await websocket.receive_json()
+                
+                msg_type = data.get("type")
+                
+                if msg_type == "agent_event":
+                    # Agent is sending an event - route it to frontend clients
+                    event_type = data.get("event_type")
+                    payload = data.get("payload", {})
+                    
+                    logger.debug(
+                        "websocket_agent_event_received",
+                        event_type=event_type,
+                        event_id=data.get("event_id")
+                    )
+                    
+                    # Route event to appropriate handler (same as Redis Stream subscriber)
+                    from backend.services.agent_event_subscriber import agent_event_subscriber
+                    await agent_event_subscriber._handle_event(event_type, payload)
+                    
+                    # Also send pong/acknowledgment if needed
+                    if data.get("request_ack"):
+                        await self.send_personal_message(websocket, {
+                            "type": "ack",
+                            "event_id": data.get("event_id"),
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                
+                elif msg_type == "ping":
+                    # Respond to agent ping
+                    await self.send_personal_message(websocket, {
+                        "type": "pong",
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                
+                else:
+                    logger.warning(
+                        "websocket_agent_unknown_message_type",
+                        msg_type=msg_type
+                    )
+        
+        except WebSocketDisconnect:
+            await self.disconnect(websocket, is_agent=True)
+        except Exception as e:
+            logger.error(
+                "websocket_agent_client_handler_error",
+                error=str(e),
+                exc_info=True
+            )
+            await self.disconnect(websocket, is_agent=True)
     
     async def _time_sync_loop(self):
         """Background task to send periodic time sync messages."""
@@ -535,6 +726,55 @@ class WebSocketManager:
         except Exception as e:
             logger.error(
                 "websocket_health_sync_loop_error",
+                error=str(e),
+                exc_info=True
+            )
+    
+    async def _agent_state_sync_loop(self):
+        """Background task to send periodic agent state updates."""
+        try:
+            while True:
+                await asyncio.sleep(30)  # Send every 30 seconds
+                
+                if not self.active_connections:
+                    continue
+                
+                try:
+                    from backend.services.agent_service import agent_service
+                    current_state = await agent_service.get_current_state()
+                    
+                    if current_state:
+                        state_data = {
+                            "state": current_state.get("state", "UNKNOWN"),
+                            "timestamp": current_state.get("timestamp", datetime.utcnow()).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.utcnow().isoformat()),
+                            "reason": current_state.get("reason", "")
+                        }
+                        
+                        state_message = {
+                            "type": "agent_state",
+                            "data": state_data
+                        }
+                        
+                        await self.broadcast(state_message, channel="agent_state")
+                        
+                        logger.debug(
+                            "websocket_agent_state_sync_broadcast",
+                            state=state_data.get("state"),
+                            connections=len(self.active_connections)
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "websocket_agent_state_sync_error",
+                        error=str(e),
+                        message="Failed to sync agent state, will retry on next cycle"
+                    )
+                
+        except asyncio.CancelledError:
+            logger.info("websocket_agent_state_sync_loop_cancelled")
+            raise
+        except Exception as e:
+            logger.error(
+                "websocket_agent_state_sync_loop_error",
                 error=str(e),
                 exc_info=True
             )

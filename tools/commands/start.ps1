@@ -37,8 +37,31 @@ if (Test-Path $ServiceScript) {
 # Ensure Python and child processes flush immediately
 $env:PYTHONUNBUFFERED = "1"
 
-# Launch Python parallel manager
-Write-Host "Launching parallel process manager..." -ForegroundColor Green
-python $PythonScript
+# Ensure output encoding is UTF-8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
-exit $LASTEXITCODE
+# Launch Python parallel manager
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "JackSparrow Trading Agent - Startup" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Launching parallel process manager..." -ForegroundColor Green
+Write-Host ""
+
+# Execute Python script with explicit output handling
+try {
+    python $PythonScript 2>&1 | ForEach-Object {
+        # Pass through all output immediately
+        Write-Host $_ -NoNewline
+    }
+    $exitCode = $LASTEXITCODE
+} catch {
+    Write-Host "ERROR: Failed to execute startup script: $_" -ForegroundColor Red
+    Write-Host "Script path: $PythonScript" -ForegroundColor Yellow
+    exit 1
+}
+
+# Flush output before exiting
+[Console]::Out.Flush()
+exit $exitCode

@@ -56,6 +56,16 @@ class ExecutionModule:
             quantity = payload.get("quantity")
             price = payload.get("price")
             
+            logger.info(
+                "execution_risk_approved_received",
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                price=price,
+                paper_trading_mode=settings.paper_trading_mode,
+                event_id=event.event_id,
+            )
+            
             # Execute trade
             order_id = str(uuid.uuid4())
             
@@ -153,6 +163,18 @@ class ExecutionModule:
                 # Extract trade details from result
                 trade_id = result.get("id", str(uuid.uuid4()))
                 fill_price = result.get("price", price)  # Use price from result or requested price
+                
+                logger.info(
+                    "execution_trade_result",
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    requested_price=price,
+                    fill_price=fill_price,
+                    paper_trading_mode=settings.paper_trading_mode,
+                    trade_id=trade_id,
+                    order_id=order_id,
+                )
                 
                 # Emit order fill event
                 fill_event = OrderFillEvent(
@@ -323,10 +345,26 @@ class ExecutionModule:
             fill_price = result.get("price", exit_price)
             
             # Calculate PnL
-            if position_side == "BUY":
-                pnl = (fill_price - entry_price) * position_quantity
+            # position_quantity is in dollars (USD value), need to convert to asset quantity
+            # Asset quantity = dollar quantity / entry_price
+            if entry_price > 0:
+                asset_quantity = position_quantity / entry_price
             else:
-                pnl = (entry_price - fill_price) * position_quantity
+                asset_quantity = 0.0
+                logger.warning(
+                    "pnl_calculation_invalid_entry_price",
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    message="Entry price is zero or invalid, PnL calculation may be incorrect"
+                )
+            
+            # Calculate PnL using asset quantity
+            if position_side == "BUY":
+                # Long position: profit when exit_price > entry_price
+                pnl = (fill_price - entry_price) * asset_quantity
+            else:
+                # Short position: profit when exit_price < entry_price
+                pnl = (entry_price - fill_price) * asset_quantity
             
             # Calculate duration
             duration_seconds = 0.0
@@ -338,17 +376,27 @@ class ExecutionModule:
                     pass
             
             # Determine exit reason
-            exit_reason = payload.get("exit_reason", "signal_reversal")
+            exit_reason = payload.get("exit_reason")
             if not exit_reason:
                 # Check if stop loss or take profit was hit
                 stop_loss = context.position.get("stop_loss")
                 take_profit = context.position.get("take_profit")
-                if stop_loss and fill_price <= stop_loss:
-                    exit_reason = "stop_loss"
-                elif take_profit and fill_price >= take_profit:
-                    exit_reason = "take_profit"
-                else:
-                    exit_reason = "signal_reversal"
+                if position_side == "BUY":
+                    # For long positions: stop loss if price drops, take profit if price rises
+                    if stop_loss and fill_price <= stop_loss:
+                        exit_reason = "stop_loss"
+                    elif take_profit and fill_price >= take_profit:
+                        exit_reason = "take_profit"
+                    else:
+                        exit_reason = "signal_reversal"
+                else:  # SELL (short position)
+                    # For short positions: stop loss if price rises, take profit if price drops
+                    if stop_loss and fill_price >= stop_loss:
+                        exit_reason = "stop_loss"
+                    elif take_profit and fill_price <= take_profit:
+                        exit_reason = "take_profit"
+                    else:
+                        exit_reason = "signal_reversal"
             
             # Get position_id from context or generate one
             position_id = context.position.get("position_id") if context.position else None

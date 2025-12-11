@@ -69,7 +69,7 @@ export function getConfidenceColorClass(confidence: number): string {
 
 /**
  * Calculate data freshness indicator color based on timestamp age.
- * Returns color class for freshness indicators.
+ * Returns color class for freshness indicators with more granular thresholds.
  */
 export function getDataFreshnessColor(timestamp: Date | string | null | undefined): string {
   if (!timestamp) return 'text-muted-foreground'
@@ -77,14 +77,26 @@ export function getDataFreshnessColor(timestamp: Date | string | null | undefine
   const now = new Date()
   const dataTime = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
   const ageMs = now.getTime() - dataTime.getTime()
-  const ageMinutes = ageMs / (1000 * 60)
+  const ageSeconds = ageMs / 1000
+  const ageMinutes = ageSeconds / 60
   
-  if (ageMinutes < 1) return 'text-green-600 dark:text-green-400'
-  if (ageMinutes < 5) return 'text-amber-600 dark:text-amber-400'
-  return 'text-red-600 dark:text-red-400'
+  // More granular color coding for better visual feedback
+  if (ageSeconds < 30) return 'text-green-600 dark:text-green-400'      // Very fresh (< 30s)
+  if (ageMinutes < 1) return 'text-green-500 dark:text-green-500'       // Fresh (< 1 min)
+  if (ageMinutes < 2) return 'text-yellow-500 dark:text-yellow-500'      // Recent (< 2 min)
+  if (ageMinutes < 5) return 'text-amber-600 dark:text-amber-400'       // Moderate (< 5 min)
+  if (ageMinutes < 15) return 'text-orange-600 dark:text-orange-400'     // Stale (< 15 min)
+  return 'text-red-600 dark:text-red-400'                                 // Very stale (>= 15 min)
 }
 
-function normalizeDate(date: Date | string): Date {
+/**
+ * Normalize a date string or Date object to a Date object.
+ * Ensures UTC timestamps are properly parsed before IST conversion.
+ * 
+ * This function is exported so it can be used in hooks to ensure
+ * consistent timestamp parsing throughout the application.
+ */
+export function normalizeDate(date: Date | string): Date {
   if (typeof date === 'string') {
     // Backend currently sends timestamps like "2025-12-02T10:11:11.976865"
     // without an explicit timezone. Those should be treated as UTC and then
@@ -94,12 +106,48 @@ function normalizeDate(date: Date | string): Date {
     // - If the string already has a timezone (ends with Z or contains +hh:mm/-hh:mm),
     //   let the Date constructor handle it.
     // - Otherwise, assume UTC by appending 'Z'.
+    // 
+    // Check for timezone indicators:
+    // 1. Ends with 'Z' (UTC indicator)
+    // 2. Contains timezone offset like +00:00, +05:30, -05:00 at the end
+    // 3. Handle edge cases with microseconds: "2025-01-27T12:33:19.976865+00:00"
+    const trimmedDate = date.trim()
     const hasExplicitTimezone =
-      date.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(date)
+      trimmedDate.endsWith('Z') || 
+      /[+-]\d{2}:\d{2}$/.test(trimmedDate) ||
+      /[+-]\d{4}$/.test(trimmedDate) // Handle formats like +0000 (without colon)
 
-    const isoString = hasExplicitTimezone ? date : `${date}Z`
-    return new Date(isoString)
+    const isoString = hasExplicitTimezone ? trimmedDate : `${trimmedDate}Z`
+    const parsedDate = new Date(isoString)
+    
+    // Debug logging in development mode
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[normalizeDate] Timestamp normalization:', {
+        raw_input: date,
+        has_explicit_timezone: hasExplicitTimezone,
+        normalized_iso_string: isoString,
+        parsed_date: parsedDate,
+        parsed_utc_iso: parsedDate.toISOString(),
+        parsed_local_string: parsedDate.toString(),
+        is_valid: !isNaN(parsedDate.getTime()),
+        current_time: new Date().toISOString(),
+        current_time_local: new Date().toString()
+      })
+    }
+    
+    return parsedDate
   }
+  
+  // Debug logging for Date objects
+  if (process.env.NODE_ENV === 'development' && date instanceof Date) {
+    console.log('[normalizeDate] Date object passed:', {
+      input_date: date,
+      utc_iso: date.toISOString(),
+      local_string: date.toString(),
+      is_valid: !isNaN(date.getTime())
+    })
+  }
+  
   return date
 }
 
@@ -167,16 +215,39 @@ export function formatClockDate(date: Date | string | null | undefined): string 
 
 export function formatClockTime(date: Date | string | null | undefined): string {
   if (!date || !isValidDate(date)) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[formatClockTime] Invalid or null date:', { date })
+    }
     return '--:--:--'
   }
   const d = normalizeDate(date)
-  return d.toLocaleTimeString(IST_LOCALE, {
+  const formatted = d.toLocaleTimeString(IST_LOCALE, {
     timeZone: IST_TIMEZONE,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
   })
+  
+  // Debug logging in development mode
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[formatClockTime] Time formatting:', {
+      input: date,
+      normalized_date: d,
+      normalized_utc_iso: d.toISOString(),
+      formatted_ist_time: formatted,
+      current_time_utc: new Date().toISOString(),
+      current_time_ist: new Date().toLocaleTimeString(IST_LOCALE, {
+        timeZone: IST_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      })
+    })
+  }
+  
+  return formatted
 }
 
 export function formatTimezone(date: Date | string | null | undefined): string {
