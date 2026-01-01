@@ -75,6 +75,19 @@ class RiskManager:
             confidence = payload.get("confidence", 0.0)
             exit_reason = payload.get("exit_reason")
             
+            logger.info(
+                "risk_manager_decision_ready_received",
+                event_id=event.event_id,
+                source=event.source,
+                symbol=symbol,
+                signal=signal,
+                confidence=confidence,
+                position_size=position_size,
+                exit_reason=exit_reason,
+                paper_trading_mode=settings.paper_trading_mode,
+                message="RiskManager received DecisionReadyEvent - starting risk assessment"
+            )
+            
             # Skip HOLD signals – log explicitly so it's clear in paper trading
             if signal == "HOLD":
                 logger.info(
@@ -90,6 +103,13 @@ class RiskManager:
             # Skip exit decisions - they are handled directly by execution module
             # Exit decisions come from risk manager itself when monitoring positions
             if exit_reason or event.source == "risk_manager":
+                logger.debug(
+                    "risk_manager_skip_exit_decision",
+                    event_id=event.event_id,
+                    exit_reason=exit_reason,
+                    source=event.source,
+                    message="Skipping exit decision - handled by execution module"
+                )
                 return
 
             # Enforce minimum confidence threshold
@@ -137,6 +157,36 @@ class RiskManager:
             portfolio_value = context.portfolio_value
             available_balance = context.available_balance
             current_positions = [context.position] if context.position else []
+            current_price = context.current_price or 0.0
+            
+            logger.info(
+                "risk_manager_context_loaded",
+                symbol=symbol,
+                portfolio_value=portfolio_value,
+                available_balance=available_balance,
+                current_price=current_price,
+                has_existing_position=bool(context.position),
+                message="Loaded context for risk assessment"
+            )
+            
+            # Validate portfolio_value
+            if portfolio_value is None or portfolio_value <= 0:
+                logger.error(
+                    "risk_manager_invalid_portfolio_value",
+                    symbol=symbol,
+                    portfolio_value=portfolio_value,
+                    message="Portfolio value is zero or negative - cannot calculate quantity"
+                )
+                await self._emit_risk_alert(
+                    alert_type="INVALID_PORTFOLIO_VALUE",
+                    severity="CRITICAL",
+                    message=f"Portfolio value {portfolio_value} is invalid",
+                    current_value=portfolio_value or 0.0,
+                    threshold=0.0,
+                    symbol=symbol
+                )
+                return
+            
             self._refresh_portfolio_metrics(context.timestamp, portfolio_value)
 
             # Check session-level risk guards
@@ -207,6 +257,16 @@ class RiskManager:
                 current_positions=current_positions
             )
             
+            logger.info(
+                "risk_manager_assessment_complete",
+                symbol=symbol,
+                can_trade=risk_assessment.get("can_trade", False),
+                portfolio_heat=risk_assessment.get("portfolio_heat", 0),
+                max_portfolio_heat=self.max_portfolio_heat,
+                available_balance=available_balance,
+                message="Risk assessment completed"
+            )
+            
             if not risk_assessment.get("can_trade", False):
                 # Emit risk alert
                 await self._emit_risk_alert(
@@ -231,12 +291,68 @@ class RiskManager:
                 )
                 return
             
+            # Calculate quantity (USD value)
+            calculated_quantity = position_size * portfolio_value
+            
+            # Validate quantity
+            if calculated_quantity <= 0:
+                logger.error(
+                    "risk_manager_invalid_quantity",
+                    symbol=symbol,
+                    position_size=position_size,
+                    portfolio_value=portfolio_value,
+                    calculated_quantity=calculated_quantity,
+                    message="Calculated quantity is zero or negative - cannot approve trade"
+                )
+                await self._emit_risk_alert(
+                    alert_type="INVALID_QUANTITY",
+                    severity="WARNING",
+                    message=f"Calculated quantity {calculated_quantity} is invalid",
+                    current_value=calculated_quantity,
+                    threshold=0.0,
+                    symbol=symbol
+                )
+                return
+            
+            # Validate price
+            if current_price <= 0:
+                logger.error(
+                    "risk_manager_invalid_price",
+                    symbol=symbol,
+                    current_price=current_price,
+                    message="Current price is zero or negative - cannot approve trade"
+                )
+                await self._emit_risk_alert(
+                    alert_type="INVALID_PRICE",
+                    severity="WARNING",
+                    message=f"Current price {current_price} is invalid",
+                    current_value=current_price,
+                    threshold=0.0,
+                    symbol=symbol
+                )
+                return
+            
+            trade_side = "BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL"
+            
+            logger.info(
+                "risk_manager_approving_trade",
+                symbol=symbol,
+                side=trade_side,
+                signal=signal,
+                quantity=calculated_quantity,
+                price=current_price,
+                position_size=position_size,
+                portfolio_value=portfolio_value,
+                risk_score=1.0 - risk_assessment.get("portfolio_heat", 0),
+                message="All risk checks passed - approving trade"
+            )
+            
             # Approve trade
             await self._emit_risk_approved(
                 symbol=symbol,
-                side="BUY" if signal in ["BUY", "STRONG_BUY"] else "SELL",
-                quantity=position_size * portfolio_value,
-                price=context.current_price or 0.0,
+                side=trade_side,
+                quantity=calculated_quantity,
+                price=current_price,
                 risk_score=1.0 - risk_assessment.get("portfolio_heat", 0)
             )
             
@@ -650,6 +766,22 @@ class RiskManager:
     ) -> Dict[str, Any]:
         """Assess risk for trade."""
         
+        # RISK CHECK: Log risk assessment entry with context
+        logger.info(
+            "RISK CHECK: position_size=%s portfolio_value=%s",
+            signal_strength, portfolio_value
+        )
+        
+        # RISK CHECK: Validate position_size > 0
+        if signal_strength <= 0:
+            logger.warning("RISK CHECK: position_size <=0 — blocking trade")
+            return {
+                "can_trade": False,
+                "portfolio_heat": 0.0,
+                "max_portfolio_heat": self.max_portfolio_heat,
+                "available_balance": available_balance
+            }
+        
         # Calculate portfolio heat
         # Position exposure = quantity * entry_price (cost basis)
         total_exposure = 0.0
@@ -661,6 +793,12 @@ class RiskManager:
                 total_exposure += position_value
         
         portfolio_heat = total_exposure / portfolio_value if portfolio_value > 0 else 0.0
+        
+        # RISK CHECK: Log heat calculation
+        logger.info(
+            "RISK CHECK: position_size=%s portfolio_value=%s heat=%s",
+            signal_strength, portfolio_value, portfolio_heat
+        )
         
         # Check limits
         can_trade = (

@@ -177,17 +177,18 @@ class WebSocketMonitor:
             try:
                 # Schedule close in the event loop
                 asyncio.run_coroutine_threadsafe(self._close_websocket(), self._loop)
-            except Exception:
-                # Ignore errors during shutdown
-                pass
+            except Exception as e:
+                # Log WebSocket shutdown errors instead of silently ignoring
+                print(f"{Colors.YELLOW}[Monitoring] WebSocket shutdown error: {e}{Colors.RESET}", file=sys.stderr)
     
     async def _close_websocket(self):
         """Close WebSocket connection."""
         if self._websocket:
             try:
                 await self._websocket.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # Log WebSocket close errors instead of silently ignoring
+                print(f"{Colors.YELLOW}[Monitoring] WebSocket close error: {e}{Colors.RESET}", file=sys.stderr)
             self._websocket = None
         self.connected = False
     
@@ -234,11 +235,14 @@ class WebSocketMonitor:
                         
             except Exception as e:
                 self.connected = False
+                # Log connection failures instead of silently ignoring
                 if attempt < max_retries - 1:
+                    print(f"{Colors.YELLOW}[Monitoring] WebSocket connection attempt {attempt + 1}/{max_retries} failed: {e}{Colors.RESET}", file=sys.stderr)
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                 else:
-                    # Final attempt failed, stop trying
+                    # Final attempt failed, log and stop trying
+                    print(f"{Colors.YELLOW}[Monitoring] WebSocket monitor failed after {max_retries} attempts: {e}{Colors.RESET}", file=sys.stderr)
                     break
     
     def _process_message(self, message: str):
@@ -319,10 +323,11 @@ class WebSocketMonitor:
                 self._calculate_freshness_score(msg_type)
                 
         except json.JSONDecodeError:
+            # JSON decode errors are expected for non-JSON messages, no need to log
             pass
         except Exception as e:
-            # Silently ignore processing errors
-            pass
+            # Log processing errors instead of silently ignoring
+            print(f"{Colors.YELLOW}[Monitoring] WebSocket message processing error: {e}{Colors.RESET}", file=sys.stderr)
     
     def _calculate_freshness_score(self, msg_type: str):
         """Calculate freshness score for a message type."""
@@ -437,8 +442,9 @@ class MonitoringDashboard:
             try:
                 self.render()
                 time.sleep(self.refresh_interval)
-            except Exception:
-                # Silently continue on errors
+            except Exception as e:
+                # Log dashboard render errors instead of silently continuing
+                print(f"{Colors.YELLOW}[Dashboard] Render error: {e}{Colors.RESET}", file=sys.stderr)
                 time.sleep(self.refresh_interval)
     
     def render(self):
@@ -727,6 +733,8 @@ class ServiceManager:
         self.warning_count = 0
         self.recent_errors: List[str] = []
         self.recent_warnings: List[str] = []
+        self.startup_error_threshold = 5  # Fail if more than 5 errors in first 30 seconds
+        self.startup_start_time: Optional[float] = None
         
     def start(self) -> bool:
         """Start the service process."""
@@ -753,13 +761,29 @@ class ServiceManager:
             )
             
             # Check if process started successfully
-            if self.process.poll() is not None:
-                # Process exited immediately - capture error output
-                stdout, _ = self.process.communicate(timeout=1)
-                error_msg = stdout.strip() if stdout else "Process exited immediately"
-                error_symbol = "X" if platform.system() == "Windows" else "✗"
-                print(f"{Colors.ERROR}{error_symbol} {self.config.name} failed to start: {error_msg}{Colors.RESET}")
-                return False
+            # Use wait(timeout=0) for immediate check instead of poll() to avoid race condition
+            try:
+                return_code = self.process.wait(timeout=0)
+                if return_code is not None:
+                    # Process exited immediately - capture error output
+                    # Also capture stderr separately if available
+                    try:
+                        stdout, stderr = self.process.communicate(timeout=2)
+                        error_msg = stdout.strip() if stdout else "Process exited immediately"
+                        if stderr and stderr.strip():
+                            error_msg += f"\n   stderr: {stderr.strip()[:200]}"
+                    except subprocess.TimeoutExpired:
+                        # Process may have output but communicate timed out
+                        error_msg = "Process exited immediately (output capture timed out)"
+                    except Exception as e:
+                        error_msg = f"Process exited immediately (error capturing output: {e})"
+                    
+                    error_symbol = "X" if platform.system() == "Windows" else "✗"
+                    print(f"{Colors.ERROR}{error_symbol} {self.config.name} failed to start (exit code: {return_code}): {error_msg}{Colors.RESET}")
+                    return False
+            except subprocess.TimeoutExpired:
+                # Process is still running, which is good
+                pass
             
             # Write PID file
             if self.config.pid_file:
@@ -768,6 +792,7 @@ class ServiceManager:
                     f.write(str(self.process.pid))
             
             self.running = True
+            self.startup_start_time = time.time()
             
             # Start log streaming thread
             self.log_thread = threading.Thread(
@@ -842,8 +867,14 @@ class ServiceManager:
                             log_file_handle.write(line)
                             log_file_handle.flush()
                         except Exception as e:
-                            # Log file write error, but continue streaming to console
-                            pass
+                            # Log file write errors to stderr instead of silently ignoring
+                            print(f"{Colors.ERROR}[{self.config.name}] Log file write error: {e}{Colors.RESET}", file=sys.stderr)
+                            # Close and remove handle to prevent repeated errors
+                            try:
+                                log_file_handle.close()
+                            except Exception:
+                                pass
+                            log_file_handle = None
                     
                     # Try to parse structured JSON logs for statistics
                     try:
@@ -897,16 +928,22 @@ class ServiceManager:
             error_msg = str(e)
             # Don't show encoding errors in a way that causes more encoding errors
             try:
-                print(f"{Colors.ERROR}Log streaming error for {self.config.name}: {error_msg}{Colors.RESET}")
+                print(f"{Colors.ERROR}Log streaming error for {self.config.name}: {error_msg}{Colors.RESET}", file=sys.stderr)
             except UnicodeEncodeError:
-                print(f"[ERROR] Log streaming error for {self.config.name}: {repr(error_msg)}")
+                print(f"[ERROR] Log streaming error for {self.config.name}: {repr(error_msg)}", file=sys.stderr)
+            # Track that log streaming failed
+            self.error_count += 1
+            if len(self.recent_errors) < 5:
+                self.recent_errors.append(f"Log streaming failed: {error_msg[:100]}")
         finally:
             if log_file_handle:
                 try:
                     log_file_handle.close()
                 except Exception:
                     pass
-            self.running = False
+            # Only set running to False if process is actually dead
+            if not self.is_alive():
+                self.running = False
     
     def is_alive(self) -> bool:
         """Check if process is still running."""
@@ -1011,6 +1048,18 @@ class ParallelProcessManager:
         )
         time.sleep(max_delay)
         
+        # Check for excessive errors during startup
+        for name in started_services:
+            manager = self.services[name]
+            if manager.startup_start_time:
+                elapsed = time.time() - manager.startup_start_time
+                if elapsed < 30 and manager.error_count > manager.startup_error_threshold:
+                    error_symbol = "X" if platform.system() == "Windows" else "✗"
+                    print(f"{Colors.ERROR}{error_symbol} {name} has {manager.error_count} errors in first {int(elapsed)}s (threshold: {manager.startup_error_threshold}){Colors.RESET}")
+                    if manager.recent_errors:
+                        print(f"   Recent errors: {', '.join(manager.recent_errors[:3])}")
+                    dead_services.append(name)
+        
         # Check if all started services are still alive
         alive_services = []
         dead_services = []
@@ -1025,14 +1074,17 @@ class ParallelProcessManager:
                 log_file = self.services[name].config.log_file
                 if log_file and log_file.exists():
                     try:
-                        with open(log_file, 'r') as f:
+                        with open(log_file, 'r', encoding='utf-8') as f:
                             lines = f.readlines()
                             if lines:
-                                last_line = lines[-1].strip()
-                                if last_line:
-                                    print(f"   Last log entry: {last_line[:100]}")
-                    except Exception:
-                        pass
+                                # Show last 5 lines instead of just last line, and don't truncate
+                                last_lines = lines[-5:]
+                                print(f"   Last log entries:")
+                                for line in last_lines:
+                                    print(f"     {line.rstrip()}")
+                    except Exception as e:
+                        # Log file read errors instead of silently ignoring
+                        print(f"   Could not read log file: {e}", file=sys.stderr)
         
         if dead_services:
             error_symbol = "X" if platform.system() == "Windows" else "✗"
@@ -1042,9 +1094,19 @@ class ParallelProcessManager:
             print(f"   Check logs in {logs_dir} for details")
             return False
         
-        # All services started successfully
+        # All services started successfully - report error/warning counts
         success_symbol = "OK" if platform.system() == "Windows" else "✓"
         print(f"\n{Colors.BOLD}{success_symbol} All services started successfully!{Colors.RESET}\n")
+        
+        # Report error and warning counts for transparency
+        total_errors = sum(manager.error_count for manager in self.services.values())
+        total_warnings = sum(manager.warning_count for manager in self.services.values())
+        if total_errors > 0 or total_warnings > 0:
+            print(f"{Colors.YELLOW}Startup summary: {total_errors} errors, {total_warnings} warnings detected{Colors.RESET}")
+            for name, manager in self.services.items():
+                if manager.error_count > 0 or manager.warning_count > 0:
+                    print(f"  {name}: {manager.error_count} errors, {manager.warning_count} warnings")
+            print()
         
         # Display comprehensive startup summary
         print(f"{Colors.BOLD}Full Stack Components:{Colors.RESET}")
@@ -1188,15 +1250,18 @@ class ParallelProcessManager:
                     timeout=20,
                     capture_output=False,
                 )
-                # Don't fail startup if health check fails, just report
+                # Health check failures should be reported but don't prevent startup
+                # (inline checks above are primary validation)
                 if result.returncode != 0:
                     print(
                         f"{Colors.YELLOW}[WARN] Additional health checks reported issues. "
                         f"Check logs above.{Colors.RESET}"
                     )
-            except (subprocess.TimeoutExpired, Exception):
-                # Already have inline checks above; ignore secondary health script failures
-                pass
+            except subprocess.TimeoutExpired:
+                print(f"{Colors.YELLOW}[WARN] Health check script timed out after 20 seconds{Colors.RESET}")
+            except Exception as e:
+                # Log health check script errors instead of silently ignoring
+                print(f"{Colors.YELLOW}[WARN] Health check script error: {e}{Colors.RESET}", file=sys.stderr)
     
     def _check_http_endpoint(self, url: str, expected_status: int = 200, timeout: float = 3.0) -> bool:
         """Check if an HTTP endpoint is responding.
@@ -1224,6 +1289,105 @@ class ParallelProcessManager:
         except (urllib.error.URLError, socket.timeout, Exception):
             return False
     
+    def wait_for_services_ready(self, timeout: float = 60.0, retry_interval: float = 2.0) -> Dict[str, bool]:
+        """Wait for all services to be healthy and ready.
+        
+        Args:
+            timeout: Maximum time to wait in seconds
+            retry_interval: Time between health check retries in seconds
+            
+        Returns:
+            Dictionary mapping service name to health status (True if healthy)
+        """
+        print(f"\n{Colors.BOLD}Waiting for services to be ready...{Colors.RESET}")
+        
+        start_time = time.time()
+        services_status: Dict[str, bool] = {}
+        services_checked: Dict[str, bool] = {}  # Track which services have been checked and logged
+        max_retries = int(timeout / retry_interval)
+        
+        # Service endpoints to check
+        endpoints = {
+            "Backend": "http://localhost:8000/api/v1/health",
+            "Feature Server": "http://localhost:8001/health",
+            "Frontend": "http://localhost:3000"
+        }
+        
+        # Database and Redis URLs
+        database_url = os.environ.get("DATABASE_URL", "")
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        
+        status_symbol = "OK" if platform.system() == "Windows" else "✓"
+        error_symbol = "X" if platform.system() == "Windows" else "✗"
+        
+        retry_count = 0
+        while retry_count < max_retries:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                break
+            
+            all_ready = True
+            
+            # Check HTTP endpoints
+            for service_name, url in endpoints.items():
+                is_healthy = self._check_http_endpoint(url, timeout=5.0)
+                services_status[service_name] = is_healthy
+                if is_healthy and not services_checked.get(service_name, False):
+                    print(f"  {Colors.GREEN}{status_symbol}{Colors.RESET} {service_name}: Ready")
+                    services_checked[service_name] = True
+                elif not is_healthy:
+                    all_ready = False
+            
+            # Check database
+            if database_url:
+                db_ready = check_postgres_running(database_url)
+                services_status["Database"] = db_ready
+                if db_ready and not services_checked.get("Database", False):
+                    print(f"  {Colors.GREEN}{status_symbol}{Colors.RESET} Database: Ready")
+                    services_checked["Database"] = True
+                elif not db_ready:
+                    all_ready = False
+            
+            # Check Redis
+            redis_ready = check_redis_running(redis_url)
+            services_status["Redis"] = redis_ready
+            if redis_ready and not services_checked.get("Redis", False):
+                print(f"  {Colors.GREEN}{status_symbol}{Colors.RESET} Redis: Ready")
+                services_checked["Redis"] = True
+            elif not redis_ready:
+                all_ready = False
+            
+            # Check WebSocket (optional but nice to have)
+            ws_ready = self._check_http_endpoint("http://localhost:8000/ws", timeout=2.0)
+            services_status["WebSocket"] = ws_ready
+            if ws_ready and not services_checked.get("WebSocket", False):
+                print(f"  {Colors.GREEN}{status_symbol}{Colors.RESET} WebSocket: Ready")
+                services_checked["WebSocket"] = True
+            elif not ws_ready:
+                # WebSocket is optional, don't fail if it's not ready
+                pass
+            
+            if all_ready and all(services_status.get(k, False) for k in endpoints.keys() if k in services_status):
+                if database_url:
+                    all_ready = all_ready and services_status.get("Database", False)
+                all_ready = all_ready and services_status.get("Redis", False)
+                
+                if all_ready:
+                    print(f"\n{Colors.BOLD}{Colors.GREEN}All services are ready!{Colors.RESET}\n")
+                    return services_status
+            
+            retry_count += 1
+            if retry_count < max_retries:
+                time.sleep(retry_interval)
+        
+        # Timeout reached - report what's not ready
+        print(f"\n{Colors.YELLOW}Timeout waiting for services (after {timeout}s){Colors.RESET}")
+        for service_name, is_ready in services_status.items():
+            if not is_ready:
+                print(f"  {Colors.ERROR}{error_symbol}{Colors.RESET} {service_name}: Not ready")
+        
+        return services_status
+    
     def wait_for_shutdown(self):
         """Wait for shutdown signal."""
         try:
@@ -1233,6 +1397,21 @@ class ParallelProcessManager:
                 for name, manager in self.services.items():
                     if manager.running and not manager.is_alive():
                         print(f"\n{Colors.ERROR}{error_symbol} {name} process died unexpectedly{Colors.RESET}")
+                        # Try to get error information
+                        if manager.recent_errors:
+                            print(f"   Recent errors: {', '.join(manager.recent_errors[:3])}")
+                        # Check log file for last entries
+                        log_file = manager.config.log_file
+                        if log_file and log_file.exists():
+                            try:
+                                with open(log_file, 'r', encoding='utf-8') as f:
+                                    lines = f.readlines()
+                                    if lines:
+                                        print(f"   Last log entries:")
+                                        for line in lines[-3:]:
+                                            print(f"     {line.rstrip()}")
+                            except Exception:
+                                pass
                         self.shutdown_event.set()
                         break
                 
@@ -1393,8 +1572,9 @@ def setup_services(project_root: Path, npm_cmd: str) -> ParallelProcessManager:
             "-m", "agent.core.intelligent_agent"
         ],
         cwd=project_root,
-        # Agent manages its own structured log file; avoid duplicating stream capture here.
-        log_file=None,
+        # Capture agent logs for visibility in startup script
+        # Agent also writes structured logs, but we capture stdout/stderr here
+        log_file=logs_dir / "agent_startup.log",
         pid_file=logs_dir / "agent.pid",
         check_delay=2.0
     )
@@ -1486,6 +1666,8 @@ def load_root_env(project_root: Path):
                     os.environ.setdefault("DELTA_EXCHANGE_BASE_URL", value)
     except Exception as exc:
         print(f"{Colors.ERROR}Failed to load .env: {exc}{Colors.RESET}")
+        print(f"{Colors.ERROR}Startup cannot continue without valid .env file.{Colors.RESET}")
+        # Don't exit here - let validation scripts handle it, but make it clear this is an error
 
 
 def parse_database_url(url: str) -> Tuple[str, int, str]:
@@ -1707,8 +1889,9 @@ def attempt_start_redis(project_root: Path) -> bool:
                     check_mark = get_safe_symbol("✓", "+")
                     print(f"{Colors.GREEN}{check_mark} Redis service started: {service_name}{Colors.RESET}")
                     return True
-        except Exception:
-            pass
+        except Exception as e:
+            # Log Redis service start errors instead of silently ignoring
+            print(f"{Colors.YELLOW}[Redis] Service start attempt failed: {e}{Colors.RESET}", file=sys.stderr)
     else:
         # Unix/Linux/macOS: Try redis-server command
         try:
@@ -1773,8 +1956,12 @@ def verify_database_schema(database_url: str) -> Tuple[bool, bool]:
         if missing_tables:
             # Schema is missing - check if auto-initialization is enabled
             auto_init = os.environ.get("AUTO_INIT_DB", "").lower() in ("1", "true", "yes")
+            auto_create_schema = os.environ.get("AUTO_CREATE_DB_SCHEMA", "").lower() in ("1", "true", "yes")
             
-            if auto_init:
+            # Use AUTO_CREATE_DB_SCHEMA if set, otherwise fall back to AUTO_INIT_DB
+            should_auto_init = auto_create_schema or auto_init
+            
+            if should_auto_init:
                 # Attempt to auto-initialize database
                 setup_script = Path(__file__).parent.parent.parent / "scripts" / "setup_db.py"
                 if setup_script.exists():
@@ -1802,11 +1989,12 @@ def verify_database_schema(database_url: str) -> Tuple[bool, bool]:
                     print(f"{Colors.ERROR}Database setup script not found: {setup_script}{Colors.RESET}")
                     return False, False
             else:
-                # Schema missing but auto-init not enabled
-                warning_symbol = "!" if platform.system() == "Windows" else "⚠"
-                print(f"{Colors.YELLOW}{warning_symbol} Database schema missing: {', '.join(missing_tables)}{Colors.RESET}")
+                # Schema missing but auto-init not enabled - this should prevent startup
+                error_symbol = "X" if platform.system() == "Windows" else "✗"
+                print(f"{Colors.ERROR}{error_symbol} Database schema missing: {', '.join(missing_tables)}{Colors.RESET}")
                 print(f"  Run 'python scripts/setup_db.py' to initialize schema")
-                print(f"  Or set AUTO_INIT_DB=1 to auto-initialize on startup")
+                print(f"  Or set AUTO_CREATE_DB_SCHEMA=1 or AUTO_INIT_DB=1 to auto-initialize on startup")
+                print(f"{Colors.ERROR}Startup cannot continue without database schema.{Colors.RESET}")
                 return False, False
         else:
             # Schema exists
@@ -1850,9 +2038,8 @@ def check_prerequisites() -> bool:
         # Database is accessible, verify schema
         schema_exists, auto_init = verify_database_schema(database_url)
         if not schema_exists:
-            # Schema check failed - this is a warning, not a fatal error
-            # But we'll allow startup to continue
-            pass
+            # Schema check failed - this should prevent startup
+            issues.append("Database schema is missing or invalid. Run 'python scripts/setup_db.py' to initialize.")
     
     if not check_redis_running(redis_url):
         host, port = parse_redis_url(redis_url)

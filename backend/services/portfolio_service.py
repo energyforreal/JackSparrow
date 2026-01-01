@@ -14,13 +14,86 @@ import structlog
 
 from backend.core.database import Position, Trade, TradeStatus, PositionStatus, TradeSide
 from backend.core.config import settings
-from backend.core.redis import get_cache, set_cache
+from backend.core.redis import get_cache, set_cache, delete_cache
+from backend.services.time_service import time_service
 
 logger = structlog.get_logger()
 
 
 class PortfolioService:
     """Service for portfolio calculations."""
+    
+    def serialize_portfolio_summary(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Serialize portfolio summary for consistent format across API and WebSocket.
+        
+        Converts Decimal types to float and ensures consistent field names and structure.
+        This ensures WebSocket broadcasts and API responses have identical formats.
+        
+        Args:
+            summary: Raw portfolio summary dictionary with Decimal types
+            
+        Returns:
+            Serialized portfolio summary with float types and consistent structure
+            
+        Raises:
+            ValueError: If summary data structure is invalid
+        """
+        if not summary:
+            logger.warning("portfolio_serialization_empty_summary", message="Empty summary provided")
+            return {}
+        
+        # Validate required fields
+        required_fields = ["total_value", "available_balance", "open_positions", "total_unrealized_pnl", "total_realized_pnl"]
+        missing_fields = [field for field in required_fields if field not in summary]
+        if missing_fields:
+            logger.error(
+                "portfolio_serialization_missing_fields",
+                missing_fields=missing_fields,
+                available_fields=list(summary.keys()),
+                message="Required fields missing from portfolio summary"
+            )
+            raise ValueError(f"Portfolio summary missing required fields: {missing_fields}")
+        
+        # Serialize positions list - convert Decimal to float, ensure consistent structure
+        positions_list = []
+        for pos in summary.get("positions", []):
+            serialized_pos = {
+                "position_id": str(pos.get("position_id", "")),
+                "symbol": str(pos.get("symbol", "")),
+                "side": str(pos.get("side", "")),
+                "quantity": float(pos.get("quantity", 0)),
+                "entry_price": float(pos.get("entry_price", 0)),
+                "current_price": float(pos.get("current_price", 0)) if pos.get("current_price") else None,
+                "unrealized_pnl": float(pos.get("unrealized_pnl", 0)),
+                "status": str(pos.get("status", "")),
+                "opened_at": pos.get("opened_at").isoformat() if isinstance(pos.get("opened_at"), datetime) else str(pos.get("opened_at", "")),
+                "stop_loss": float(pos.get("stop_loss", 0)) if pos.get("stop_loss") else None,
+                "take_profit": float(pos.get("take_profit", 0)) if pos.get("take_profit") else None,
+            }
+            positions_list.append(serialized_pos)
+        
+        # Get timestamp from time_service for consistency
+        time_info = time_service.get_time_info()
+        
+        # Serialize portfolio summary - convert Decimal to float, ensure consistent field names
+        serialized = {
+            "total_value": float(summary.get("total_value", 0)),
+            "available_balance": float(summary.get("available_balance", 0)),
+            "open_positions": int(summary.get("open_positions", 0)),  # Ensure int type
+            "total_unrealized_pnl": float(summary.get("total_unrealized_pnl", 0)),
+            "total_realized_pnl": float(summary.get("total_realized_pnl", 0)),
+            "positions": positions_list,
+            "timestamp": time_info["server_time"]  # Use time_service for consistent format
+        }
+        
+        logger.debug(
+            "portfolio_summary_serialized",
+            total_value=serialized["total_value"],
+            open_positions=serialized["open_positions"],
+            positions_count=len(positions_list)
+        )
+        
+        return serialized
     
     async def get_portfolio_summary(self, db: AsyncSession) -> Optional[Dict[str, Any]]:
         """Get portfolio summary with positions and PnL.
@@ -144,7 +217,7 @@ class PortfolioService:
                     "positions": positions_list
                 }
                 
-                # Cache result for 5 seconds
+                # Cache result for 5 seconds (store raw summary with Decimal types)
                 await set_cache(cache_key, summary, ttl=5)
                 logger.debug("portfolio_summary_cache_set", cache_key=cache_key, ttl=5)
                 
@@ -172,6 +245,15 @@ class PortfolioService:
                 )
             # Transaction will be rolled back automatically on exception
             return None
+    
+    async def invalidate_portfolio_cache(self):
+        """Invalidate portfolio summary cache.
+        
+        Call this immediately after trade/position creation to ensure fresh data.
+        """
+        cache_key = "portfolio:summary"
+        await delete_cache(cache_key)
+        logger.debug("portfolio_summary_cache_invalidated", cache_key=cache_key)
     
     async def get_performance_metrics(
         self,

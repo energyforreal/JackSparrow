@@ -71,17 +71,26 @@ def setup_database():
             for enum_name, values in enums:
                 values_str = ", ".join(f"'{v}'" for v in values)
                 try:
-                    conn.execute(text(f"CREATE TYPE IF NOT EXISTS {enum_name} AS ENUM ({values_str});"))
-                    conn.commit()
-                    print(f"  ✓ Created ENUM type '{enum_name}'")
+                    # PostgreSQL doesn't support IF NOT EXISTS for CREATE TYPE
+                    # Check if type exists first
+                    check_query = text(f"""
+                        SELECT EXISTS (
+                            SELECT 1 FROM pg_type WHERE typname = '{enum_name}'
+                        );
+                    """)
+                    result = conn.execute(check_query)
+                    exists = result.scalar()
+                    
+                    if not exists:
+                        conn.execute(text(f"CREATE TYPE {enum_name} AS ENUM ({values_str});"))
+                        conn.commit()
+                        print(f"  ✓ Created ENUM type '{enum_name}'")
+                    else:
+                        print(f"  ✓ ENUM type '{enum_name}' already exists")
                 except Exception as e:
                     conn.rollback()
-                    # If enum already exists, that's okay
-                    if "already exists" in str(e).lower():
-                        print(f"  ⚠ ENUM type '{enum_name}' already exists, skipping")
-                    else:
-                        print(f"  ✗ Failed to create ENUM type '{enum_name}': {e}")
-                        raise
+                    print(f"  ✗ Failed to create ENUM type '{enum_name}': {e}")
+                    raise
             
             # Create trades table (hypertable)
             print("Creating trades table...")

@@ -55,18 +55,21 @@ export function Dashboard() {
   // Track if we've received a WebSocket signal update to prioritize it over initial fetch
   const [hasWebSocketSignal, setHasWebSocketSignal] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
+  // Track data source for debugging
+  const [signalDataSource, setSignalDataSource] = useState<string>('none')
 
   // Fetch initial data on mount (independent of WebSocket)
-  // Only fetch signal if we haven't received one via WebSocket yet
+  // Use shared hooks (useAgent) for portfolio, trades, signal - avoid duplicate fetching
+  // Only fetch data not available from hooks (health, performance)
   useEffect(() => {
     const fetchInitialData = async () => {
       setIsLoading(true)
       try {
-        // Fetch health status
+        // Fetch health status (not available from useAgent hook)
         const healthData = await apiClient.getHealth()
         setHealth(healthData)
 
-        // Fetch performance metrics for chart
+        // Fetch performance metrics for chart (not available from useAgent hook)
         try {
           const performance = await apiClient.request<{
             total_return?: number
@@ -101,16 +104,22 @@ export function Dashboard() {
           console.debug('Could not fetch performance metrics:', perfError)
         }
 
-        // Only fetch signal if we haven't received one via WebSocket
+        // Signal, portfolio, and trades come from useAgent hook - don't fetch here
+        // Only fetch signal if we haven't received one via WebSocket yet
         // This prevents stale initial data from overriding real-time updates
-        if (!hasWebSocketSignal) {
+        // Also check if WebSocket is connected - if connected, wait for WebSocket update instead
+        if (!hasWebSocketSignal && !isConnected) {
           try {
             const prediction = await apiClient.getPrediction()
             if (prediction) {
               // Only set if we still haven't received WebSocket update
               setSignal((currentSignal) => {
                 // Don't override if we've already received a WebSocket signal
-                if (hasWebSocketSignal || (currentSignal && currentSignal.timestamp)) {
+                // Also check if WebSocket connected in meantime
+                if (hasWebSocketSignal || isConnected || (currentSignal && currentSignal.timestamp)) {
+                  if (process.env.NODE_ENV === 'development') {
+                    console.log('[Dashboard] Skipping API signal fetch - WebSocket signal already received, WebSocket connected, or current signal exists')
+                  }
                   return currentSignal
                 }
 
@@ -118,7 +127,7 @@ export function Dashboard() {
                   prediction.confidence
                 )
 
-                return {
+                const apiSignal: Signal = {
                   signal: prediction.signal as Signal['signal'],
                   confidence: normalizedConfidence,
                   model_consensus: prediction.model_consensus ?? [],
@@ -135,6 +144,21 @@ export function Dashboard() {
                     'BTCUSD',
                   timestamp: prediction.timestamp,
                 }
+
+                setSignalDataSource('api_fetch')
+
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('[Dashboard] Signal fetched from API (initial load):', {
+                    signal: apiSignal.signal,
+                    raw_confidence: prediction.confidence,
+                    normalized_confidence: normalizedConfidence,
+                    timestamp: apiSignal.timestamp,
+                    data_source: 'api_fetch',
+                    note: 'This will be overridden by WebSocket updates'
+                  })
+                }
+
+                return apiSignal
               })
               if (prediction.reasoning_chain && !hasWebSocketSignal) {
                 setReasoningChain(
@@ -159,17 +183,33 @@ export function Dashboard() {
     }
 
     fetchInitialData()
-  }, [hasWebSocketSignal, portfolio?.total_value])
+  }, [hasWebSocketSignal, isConnected, portfolio?.total_value])
 
   // Sync signal from hook (which also receives WebSocket updates)
+  // Only use hook signal if we haven't received a direct WebSocket update
+  // This is a fallback - Dashboard's direct WebSocket handler should take priority
   useEffect(() => {
+    // Skip if we've already received a direct WebSocket signal update
+    if (hasWebSocketSignal) {
+      return
+    }
+    
     if (signalFromHook) {
       // Check if this signal is newer than current signal
       const shouldUpdate = !signal || !signal.timestamp || 
         (signalFromHook.timestamp && new Date(signalFromHook.timestamp) > new Date(signal.timestamp))
       
       if (shouldUpdate) {
-        setSignal(signalFromHook)
+        // Normalize confidence to ensure consistent 0-100 range
+        const normalizedConfidence = normalizeConfidenceToPercent(signalFromHook.confidence)
+        const normalizedSignal: Signal = {
+          ...signalFromHook,
+          confidence: normalizedConfidence
+        }
+        
+        setSignalDataSource('useAgent_hook')
+        setSignal(normalizedSignal)
+        
         if (signalFromHook.reasoning_chain) {
           setReasoningChain(
             Array.isArray(signalFromHook.reasoning_chain)
@@ -177,9 +217,20 @@ export function Dashboard() {
               : []
           )
         }
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Dashboard] Signal synced from useAgent hook (fallback):', {
+            signal: signalFromHook.signal,
+            raw_confidence: signalFromHook.confidence,
+            normalized_confidence: normalizedConfidence,
+            timestamp: signalFromHook.timestamp,
+            data_source: 'useAgent_hook',
+            note: 'Fallback only - direct WebSocket updates take priority'
+          })
+        }
       }
     }
-  }, [signalFromHook])
+  }, [signalFromHook, hasWebSocketSignal, signal])
 
   // Update data from WebSocket messages - PRIORITIZE these updates
   useEffect(() => {
@@ -193,7 +244,19 @@ export function Dashboard() {
           // Always replace signal on WebSocket update - these are real-time
           if (signalData) {
             setHasWebSocketSignal(true)
-            setSignal(signalData)
+            setSignalDataSource('websocket')
+            
+            // Normalize confidence to ensure consistent 0-100 range
+            const normalizedConfidence = normalizeConfidenceToPercent(signalData.confidence)
+            
+            // Create normalized signal object
+            const normalizedSignal: Signal = {
+              ...signalData,
+              confidence: normalizedConfidence
+            }
+            
+            setSignal(normalizedSignal)
+            
             if (signalData?.reasoning_chain) {
               setReasoningChain(
                 Array.isArray(signalData.reasoning_chain)
@@ -201,12 +264,19 @@ export function Dashboard() {
                   : []
               )
             }
-            // Log for debugging
-            console.log('Signal update received via WebSocket:', {
-              signal: signalData.signal,
-              confidence: signalData.confidence,
-              timestamp: signalData.timestamp
-            })
+            
+            // Enhanced logging for debugging
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[Dashboard] Signal update received via WebSocket (DIRECT):', {
+                signal: signalData.signal,
+                raw_confidence: signalData.confidence,
+                normalized_confidence: normalizedConfidence,
+                timestamp: signalData.timestamp,
+                data_source: 'websocket_direct',
+                message_type: 'signal_update',
+                will_override_api_data: true
+              })
+            }
           }
           break
         case 'reasoning_chain_update': {

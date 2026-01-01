@@ -43,6 +43,16 @@ class _ClientContext:
 
     websocket: WebSocketServerProtocol
     remote: str
+    
+    def __hash__(self) -> int:
+        """Make context hashable by using websocket object id."""
+        return id(self.websocket)
+    
+    def __eq__(self, other: object) -> bool:
+        """Compare contexts by websocket object identity."""
+        if not isinstance(other, _ClientContext):
+            return False
+        return self.websocket is other.websocket
 
 
 class AgentWebSocketServer:
@@ -151,6 +161,9 @@ class AgentWebSocketServer:
     # ------------------------------------------------------------------
     async def _handle_connection(self, websocket: WebSocketServerProtocol, path: str) -> None:
         """Handle an individual client connection."""
+        
+        # AGENT WS: Client connected logging
+        logger.info("AGENT WS: Client connected")
 
         remote = "unknown"
         try:
@@ -194,6 +207,9 @@ class AgentWebSocketServer:
                 remote=remote,
             )
         except Exception as exc:  # pragma: no cover - unexpected connection error
+            logger.error("AGENT WS ERROR: %s", exc)
+            logger.warning("AGENT WS: Forcing reconnect in 1s")
+            await asyncio.sleep(1)
             log_error_with_context(
                 "agent_websocket_connection_error",
                 error=exc,

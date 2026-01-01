@@ -49,6 +49,14 @@ class ExecutionModule:
         Args:
             event: Risk approved event
         """
+        # EXECUTION: Entry logging with decision context
+        logger.info("EXECUTION: Entered execute_trade with decision=%s", event)
+        
+        # EXECUTION: Validate event is not None
+        if event is None:
+            logger.warning("EXECUTION: Skipping trade — decision is None")
+            return
+        
         try:
             payload = event.payload
             symbol = payload.get("symbol")
@@ -64,7 +72,53 @@ class ExecutionModule:
                 price=price,
                 paper_trading_mode=settings.paper_trading_mode,
                 event_id=event.event_id,
+                message="ExecutionModule received RiskApprovedEvent - starting trade execution"
             )
+            
+            # Validate inputs
+            if not symbol:
+                logger.error(
+                    "execution_invalid_symbol",
+                    event_id=event.event_id,
+                    symbol=symbol,
+                    message="Symbol is missing or empty - cannot execute trade"
+                )
+                return
+            
+            if not side or side.upper() not in ["BUY", "SELL"]:
+                logger.error(
+                    "execution_invalid_side",
+                    event_id=event.event_id,
+                    side=side,
+                    message="Side is missing or invalid - cannot execute trade"
+                )
+                return
+            
+            if quantity is None or quantity <= 0:
+                logger.error(
+                    "execution_invalid_quantity",
+                    event_id=event.event_id,
+                    symbol=symbol,
+                    quantity=quantity,
+                    message="Quantity is missing, zero, or negative - cannot execute trade"
+                )
+                return
+            
+            if price is None or price <= 0:
+                logger.warning(
+                    "execution_invalid_price",
+                    event_id=event.event_id,
+                    symbol=symbol,
+                    price=price,
+                    message="Price is missing or invalid - will attempt to fetch from market"
+                )
+                # Will try to fetch price from ticker below
+            
+            # EXECUTION: Check features are available before trade execution
+            context = self.context_manager.get_current_context()
+            if context.features is None or len(context.features) == 0:
+                logger.warning("EXECUTION: Features missing — aborting trade")
+                return
             
             # Execute trade
             order_id = str(uuid.uuid4())
@@ -176,6 +230,30 @@ class ExecutionModule:
                     order_id=order_id,
                 )
                 
+                # Validate fill_price before emitting event
+                if fill_price <= 0:
+                    logger.error(
+                        "execution_invalid_fill_price",
+                        order_id=order_id,
+                        trade_id=trade_id,
+                        symbol=symbol,
+                        fill_price=fill_price,
+                        requested_price=price,
+                        message="Fill price is invalid - cannot emit OrderFillEvent"
+                    )
+                    raise ValueError(f"Invalid fill price: {fill_price}")
+                
+                logger.info(
+                    "execution_emitting_order_fill",
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    fill_price=fill_price,
+                    message="Emitting OrderFillEvent - trade execution successful"
+                )
+                
                 # Emit order fill event
                 fill_event = OrderFillEvent(
                     source="execution_module",
@@ -191,6 +269,21 @@ class ExecutionModule:
                     }
                 )
                 await event_bus.publish(fill_event)
+                
+                # EXECUTION: Order filled confirmation logging
+                logger.info(
+                    "EXECUTION: Order filled — id=%s qty=%s price=%s side=%s",
+                    order_id, quantity, fill_price, side
+                )
+                
+                logger.info(
+                    "execution_order_fill_event_published",
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    fill_event_id=fill_event.event_id,
+                    message="OrderFillEvent published successfully"
+                )
                 
                 # Calculate stop loss and take profit levels
                 from agent.risk.risk_manager import RiskManager
@@ -273,32 +366,59 @@ class ExecutionModule:
     async def _handle_exit_decision(self, event):
         """Handle exit decision event to close position.
         
+        Only processes exit decisions that originate from the risk manager
+        with an explicit exit_reason field. This prevents incorrectly closing
+        positions when the reasoning engine generates legitimate opposite signals.
+        
         Args:
-            event: DecisionReadyEvent with signal indicating exit
+            event: DecisionReadyEvent with exit_reason field indicating exit
         """
         from agent.events.schemas import DecisionReadyEvent
         
-        # Only handle exit decisions (CLOSE signal or when already in position)
+        # Only handle DecisionReadyEvent instances
         if not isinstance(event, DecisionReadyEvent):
             return
         
         payload = event.payload
-        signal = payload.get("signal")
         
-        # Check if this is an exit signal
+        # Only process exit decisions that have an explicit exit_reason field
+        # This ensures we only process exits from the risk manager, not new
+        # trading signals from the reasoning engine.
+        # 
+        # The reasoning engine emits DECISION_READY events without exit_reason
+        # (these are new trading signals, not exits). The risk manager emits
+        # DECISION_READY events with exit_reason when stop loss/take profit
+        # conditions are met.
+        exit_reason = payload.get("exit_reason")
+        if not exit_reason:
+            # This is not an exit decision (no exit_reason field), ignore it
+            # This prevents incorrectly closing positions when the reasoning
+            # engine generates legitimate opposite signals (e.g., SELL when
+            # holding BUY position as a new trading signal, not an exit)
+            return
+        
+        # Verify source is risk_manager for additional safety
+        # Only the risk manager should emit exit decisions with exit_reason
+        if event.source != "risk_manager":
+            logger.warning(
+                "exit_decision_rejected_unexpected_source",
+                event_id=event.event_id,
+                source=event.source,
+                exit_reason=exit_reason,
+                message="Exit decision rejected: unexpected source (expected risk_manager)"
+            )
+            return
+        
+        # Verify we have a position to close
         context = self.context_manager.get_current_context()
         if not context.position:
-            return  # No position to close
-        
-        # Exit signals: CLOSE, or opposite signal when in position
-        position_side = context.position.get("side")
-        is_exit_signal = (
-            signal == "CLOSE" or
-            (signal in ["SELL", "STRONG_SELL"] and position_side == "BUY") or
-            (signal in ["BUY", "STRONG_BUY"] and position_side == "SELL")
-        )
-        
-        if not is_exit_signal:
+            logger.debug(
+                "exit_decision_ignored_no_position",
+                event_id=event.event_id,
+                exit_reason=exit_reason,
+                source=event.source,
+                message="Exit decision received but no active position to close"
+            )
             return
         
         try:
@@ -306,6 +426,7 @@ class ExecutionModule:
             position_quantity = context.position.get("quantity", 0.0)
             entry_price = context.position.get("entry_price", 0.0)
             entry_timestamp_str = context.position.get("timestamp")
+            position_side = context.position.get("side")
             
             # Calculate exit side (opposite of entry)
             exit_side = "SELL" if position_side == "BUY" else "BUY"
@@ -375,28 +496,9 @@ class ExecutionModule:
                 except Exception:
                     pass
             
-            # Determine exit reason
-            exit_reason = payload.get("exit_reason")
-            if not exit_reason:
-                # Check if stop loss or take profit was hit
-                stop_loss = context.position.get("stop_loss")
-                take_profit = context.position.get("take_profit")
-                if position_side == "BUY":
-                    # For long positions: stop loss if price drops, take profit if price rises
-                    if stop_loss and fill_price <= stop_loss:
-                        exit_reason = "stop_loss"
-                    elif take_profit and fill_price >= take_profit:
-                        exit_reason = "take_profit"
-                    else:
-                        exit_reason = "signal_reversal"
-                else:  # SELL (short position)
-                    # For short positions: stop loss if price rises, take profit if price drops
-                    if stop_loss and fill_price >= stop_loss:
-                        exit_reason = "stop_loss"
-                    elif take_profit and fill_price <= take_profit:
-                        exit_reason = "take_profit"
-                    else:
-                        exit_reason = "signal_reversal"
+            # Exit reason is already present in payload (from risk manager)
+            # This is guaranteed by the check at the start of the function
+            # Use the exit_reason from payload, which was already extracted above
             
             # Get position_id from context or generate one
             position_id = context.position.get("position_id") if context.position else None

@@ -93,6 +93,7 @@ class MarketService:
             return cached
         
         # Try to get from agent service
+        agent_available = False
         try:
             agent_response = await agent_service._send_command(
                 "get_ticker",
@@ -106,9 +107,58 @@ class MarketService:
                     # Cache with optimized TTL for ticker
                     await set_cache(cache_key, ticker, ttl=self.cache_ttl_ticker)
                     return ticker
+                agent_available = True
+        except Exception as e:
+            logger.warning(
+                "market_service_get_ticker_agent_failed",
+                symbol=symbol,
+                error=str(e),
+                message="Agent unavailable, falling back to Delta Exchange API"
+            )
+        
+        # Fallback: fetch directly from Delta Exchange API
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                url = f"{self.base_url}/v2/tickers/{symbol}"
+                response = await client.get(url)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    result = data.get("result", {})
+                    
+                    # Format ticker data to match agent response format
+                    ticker = {
+                        "symbol": symbol,
+                        "price": float(result.get("close", 0)),
+                        "open": float(result.get("open", 0)),
+                        "high": float(result.get("high", 0)),
+                        "low": float(result.get("low", 0)),
+                        "volume": float(result.get("volume", 0)),
+                        "change_24h": float(result.get("change_24h", 0)),
+                        "timestamp": result.get("timestamp") or result.get("close_time")
+                    }
+                    
+                    # Cache the result
+                    await set_cache(cache_key, ticker, ttl=self.cache_ttl_ticker)
+                    
+                    logger.info(
+                        "market_service_get_ticker_fallback_success",
+                        symbol=symbol,
+                        source="delta_exchange_api",
+                        agent_available=agent_available
+                    )
+                    
+                    return ticker
+                else:
+                    logger.error(
+                        "market_service_get_ticker_delta_api_error",
+                        symbol=symbol,
+                        status_code=response.status_code,
+                        response_text=response.text[:200]
+                    )
         except Exception as e:
             logger.error(
-                "market_service_get_ticker_failed",
+                "market_service_get_ticker_fallback_failed",
                 symbol=symbol,
                 error=str(e),
                 exc_info=True

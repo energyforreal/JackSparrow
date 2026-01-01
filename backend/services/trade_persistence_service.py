@@ -56,12 +56,58 @@ class TradePersistenceService:
         Returns:
             Dictionary with created trade and position IDs
         """
+        logger.info(
+            "trade_persistence_service_create_called",
+            trade_id=trade_id,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            fill_price=fill_price,
+            order_type=order_type,
+            message="TradePersistenceService.create_trade_and_position called"
+        )
+        
+        # Validate inputs
+        if not trade_id:
+            error_msg = "Trade ID is required"
+            logger.error("trade_persistence_service_validation_failed", error=error_msg)
+            raise ValueError(error_msg)
+        
+        if not symbol:
+            error_msg = "Symbol is required"
+            logger.error("trade_persistence_service_validation_failed", error=error_msg)
+            raise ValueError(error_msg)
+        
+        if not side or side.upper() not in ["BUY", "SELL"]:
+            error_msg = f"Invalid side: {side}. Must be BUY or SELL"
+            logger.error("trade_persistence_service_validation_failed", side=side, error=error_msg)
+            raise ValueError(error_msg)
+        
+        if quantity is None or quantity <= 0:
+            error_msg = f"Invalid quantity: {quantity}. Must be greater than zero"
+            logger.error("trade_persistence_service_validation_failed", quantity=quantity, error=error_msg)
+            raise ValueError(error_msg)
+        
+        if fill_price is None or fill_price <= 0:
+            error_msg = f"Invalid fill_price: {fill_price}. Must be greater than zero"
+            logger.error("trade_persistence_service_validation_failed", fill_price=fill_price, error=error_msg)
+            raise ValueError(error_msg)
+        
         async with AsyncSessionLocal() as session:
             try:
                 executed_at = executed_at or datetime.utcnow()
                 
                 # Convert side to TradeSide enum
                 trade_side = TradeSide.BUY if side.upper() == "BUY" else TradeSide.SELL
+                
+                logger.debug(
+                    "trade_persistence_service_starting_transaction",
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    fill_price=fill_price
+                )
                 
                 # Check if trade already exists
                 existing_trade = await session.execute(
@@ -119,7 +165,10 @@ class TradePersistenceService:
                     side=side,
                     quantity=quantity,
                     fill_price=fill_price,
-                    message="Trade and position records created successfully"
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    executed_at=executed_at.isoformat(),
+                    message="Trade and position records created successfully in database"
                 )
                 
                 return {

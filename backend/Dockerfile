@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
+# Build arguments for metadata
+ARG BUILD_DATE
+ARG VERSION=latest
+ARG COMMIT_SHA=unknown
+
 # Stage 1: Dependencies builder
 FROM python:3.11-slim AS builder
 
@@ -48,6 +53,13 @@ COPY --from=builder --chown=backend:backend /root/.local /home/backend/.local
 
 # Copy application code - maintain backend directory structure
 COPY --chown=backend:backend backend /app/backend
+
+# Add build metadata labels
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT_SHA}" \
+      org.opencontainers.image.title="JackSparrow Backend" \
+      org.opencontainers.image.description="FastAPI backend for JackSparrow Trading Agent"
 
 # Switch to non-root user
 USER backend

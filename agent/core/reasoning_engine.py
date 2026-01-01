@@ -205,7 +205,9 @@ class MCPReasoningEngine:
                 signal=signal,
                 confidence=reasoning_chain.final_confidence,
                 position_size=position_size,
-                event_id=event.event_id
+                event_id=event.event_id,
+                timestamp=reasoning_chain.timestamp,
+                message="Decision ready event published - will trigger signal_update broadcast to frontend"
             )
             
         except Exception as e:

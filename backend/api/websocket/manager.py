@@ -10,7 +10,7 @@ import json
 import asyncio
 import uuid
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from decimal import Decimal
 import structlog
 
@@ -201,7 +201,7 @@ class WebSocketManager:
                 if current_state:
                     state_data = {
                         "state": current_state.get("state", "UNKNOWN"),
-                        "timestamp": current_state.get("timestamp", datetime.utcnow()).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.utcnow().isoformat()),
+                        "timestamp": current_state.get("timestamp", datetime.now(timezone.utc)).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.now(timezone.utc).isoformat()),
                         "reason": current_state.get("reason", "")
                     }
                     await self.send_personal_message(websocket, {
@@ -248,19 +248,47 @@ class WebSocketManager:
         """Subscribe WebSocket to channels."""
         if websocket in self.subscriptions:
             self.subscriptions[websocket].update(channels)
+            logger.info(
+                "websocket_subscribed",
+                service="backend",
+                channels=channels,
+                total_subscriptions=len(self.subscriptions[websocket]),
+                total_connections=len(self.active_connections)
+            )
             await self.send_personal_message(websocket, {
                 "type": "subscribed",
                 "channels": channels
             })
+        else:
+            logger.warning(
+                "websocket_subscribe_failed",
+                service="backend",
+                channels=channels,
+                message="WebSocket not in subscriptions dictionary"
+            )
     
     async def unsubscribe(self, websocket: WebSocket, channels: List[str]):
         """Unsubscribe WebSocket from channels."""
         if websocket in self.subscriptions:
             self.subscriptions[websocket].difference_update(channels)
+            logger.info(
+                "websocket_unsubscribed",
+                service="backend",
+                channels=channels,
+                remaining_subscriptions=len(self.subscriptions[websocket]),
+                total_connections=len(self.active_connections)
+            )
             await self.send_personal_message(websocket, {
                 "type": "unsubscribed",
                 "channels": channels
             })
+        else:
+            logger.warning(
+                "websocket_unsubscribe_failed",
+                service="backend",
+                channels=channels,
+                message="WebSocket not in subscriptions dictionary"
+            )
     
     async def send_personal_message(self, websocket: WebSocket, message: Dict[str, Any]):
         """Send message to specific WebSocket connection."""
@@ -277,6 +305,11 @@ class WebSocketManager:
     
     async def broadcast(self, message: Dict[str, Any], channel: str = None):
         """Broadcast message to all connected clients (optionally filtered by channel)."""
+        # WS MANAGER: Validate message is not None
+        if message is None:
+            logger.warning("WS MANAGER: Ignoring empty broadcast")
+            return
+        
         # Add server timestamp to message
         if "server_timestamp" not in message:
             time_info = time_service.get_time_info()
@@ -318,15 +351,20 @@ class WebSocketManager:
             return
         
         disconnected = []
+        sent_count = 0
+        filtered_count = 0
+        
         for websocket in self.active_connections:
             try:
                 # If channel specified AND client has subscriptions, filter by channel
                 # Otherwise, send to all clients (for backward compatibility and default behavior)
                 if channel and websocket in self.subscriptions and self.subscriptions[websocket]:
                     if channel not in self.subscriptions[websocket]:
+                        filtered_count += 1
                         continue
                 
                 await websocket.send_json(message)
+                sent_count += 1
             except Exception as e:
                 logger.error(
                     "websocket_broadcast_failed",
@@ -335,6 +373,18 @@ class WebSocketManager:
                     exc_info=True
                 )
                 disconnected.append(websocket)
+        
+        # Log broadcast statistics at DEBUG level
+        logger.debug(
+            "websocket_broadcast_local",
+            service="backend",
+            channel=channel,
+            message_type=message.get("type"),
+            sent_count=sent_count,
+            filtered_count=filtered_count,
+            total_connections=len(self.active_connections),
+            disconnected_count=len(disconnected)
+        )
         
         # Clean up disconnected clients
         for websocket in disconnected:
@@ -444,7 +494,7 @@ class WebSocketManager:
                         if current_state:
                             state_data = {
                                 "state": current_state.get("state", "UNKNOWN"),
-                                "timestamp": current_state.get("timestamp", datetime.utcnow()).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.utcnow().isoformat()),
+                                "timestamp": current_state.get("timestamp", datetime.now(timezone.utc)).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.now(timezone.utc).isoformat()),
                                 "reason": current_state.get("reason", "")
                             }
                             await self.send_personal_message(websocket, {
@@ -456,7 +506,7 @@ class WebSocketManager:
                                 "type": "agent_state",
                                 "data": {
                                     "state": "UNKNOWN",
-                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
                                     "reason": "Agent state unavailable"
                                 }
                             })
@@ -519,14 +569,14 @@ class WebSocketManager:
                         await self.send_personal_message(websocket, {
                             "type": "ack",
                             "event_id": data.get("event_id"),
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now(timezone.utc).isoformat()
                         })
                 
                 elif msg_type == "ping":
                     # Respond to agent ping
                     await self.send_personal_message(websocket, {
                         "type": "pong",
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.now(timezone.utc).isoformat()
                     })
                 
                 else:
@@ -689,9 +739,13 @@ class WebSocketManager:
                         else:
                             status = "unhealthy"
                         
+                        # Standardize health_score to 0-100 range for WebSocket (API returns 0.0-1.0)
+                        health_score_percent = round(health_score * 100, 1)
+                        
                         health_data = {
                             "status": status,
-                            "health_score": round(health_score, 3),
+                            "health_score": health_score_percent,  # 0-100 range for WebSocket
+                            "score": health_score_percent,  # Alias for backward compatibility
                             "services": {
                                 "database": db_health.dict(),
                                 "redis": redis_health.dict(),
@@ -703,7 +757,7 @@ class WebSocketManager:
                             },
                             "agent_state": agent_state,
                             "degradation_reasons": degradation_reasons,
-                            "timestamp": datetime.utcnow().isoformat()
+                            "timestamp": datetime.now(timezone.utc).isoformat()
                         }
                         
                         health_message = {
@@ -746,7 +800,7 @@ class WebSocketManager:
                     if current_state:
                         state_data = {
                             "state": current_state.get("state", "UNKNOWN"),
-                            "timestamp": current_state.get("timestamp", datetime.utcnow()).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.utcnow().isoformat()),
+                            "timestamp": current_state.get("timestamp", datetime.now(timezone.utc)).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.now(timezone.utc).isoformat()),
                             "reason": current_state.get("reason", "")
                         }
                         

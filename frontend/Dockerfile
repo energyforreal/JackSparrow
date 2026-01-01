@@ -1,5 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
+# Build arguments for metadata and environment variables
+ARG BUILD_DATE
+ARG VERSION=latest
+ARG COMMIT_SHA=unknown
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ARG NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+ARG NEXT_PUBLIC_BACKEND_API_KEY=dev-api-key
+
 # Stage 1: Dependencies
 FROM node:20-bullseye-slim AS deps
 WORKDIR /app
@@ -9,7 +17,17 @@ RUN npm ci --only=production && npm cache clean --force
 # Stage 2: Builder
 FROM node:20-bullseye-slim AS builder
 WORKDIR /app
-ENV NEXT_TELEMETRY_DISABLED=1
+
+# Re-declare build-time arguments for Next.js environment variables
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_BACKEND_API_KEY
+
+# Convert ARGs to ENV for Next.js build process
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL} \
+    NEXT_PUBLIC_BACKEND_API_KEY=${NEXT_PUBLIC_BACKEND_API_KEY}
 
 # Copy package files
 COPY package*.json ./
@@ -20,7 +38,7 @@ RUN npm ci && npm cache clean --force
 # Copy source code
 COPY . ./
 
-# Build Next.js application
+# Build Next.js application (environment variables are embedded at build time)
 RUN npm run build
 
 # Stage 3: Runtime
@@ -45,6 +63,16 @@ COPY --from=builder --chown=frontend:frontend /app/.next ./.next
 COPY --from=builder --chown=frontend:frontend /app/package*.json ./
 # Copy public directory from builder if it exists (Next.js may create it during build)
 COPY --from=builder --chown=frontend:frontend /app/public ./public
+
+# Add build metadata labels
+ARG BUILD_DATE
+ARG VERSION
+ARG COMMIT_SHA
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT_SHA}" \
+      org.opencontainers.image.title="JackSparrow Frontend" \
+      org.opencontainers.image.description="Next.js frontend for JackSparrow Trading Agent"
 
 # Switch to non-root user
 USER frontend

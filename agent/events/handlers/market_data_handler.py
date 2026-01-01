@@ -130,7 +130,9 @@ class MarketDataEventHandler:
                 "candle_closed_handled",
                 symbol=symbol,
                 interval=interval,
-                close=payload.get("close"),
+                candle_timestamp=payload.get("timestamp"),
+                close_price=payload.get("close"),
+                message="Candle closed - triggering decision generation pipeline (features -> models -> reasoning -> decision)",
                 event_id=event.event_id,
                 feature_request_id=feature_request.event_id
             )

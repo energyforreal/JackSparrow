@@ -8,7 +8,7 @@ frontend clients via WebSocket.
 import json
 import asyncio
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import structlog
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
@@ -42,6 +42,8 @@ class AgentEventSubscriber:
         self.running = False
         self._consuming_task: Optional[asyncio.Task] = None
         self._redis_client: Optional[Redis] = None
+        self._portfolio_update_lock = asyncio.Lock()  # Lock for portfolio updates to prevent race conditions
+        self._processed_events: set = set()  # Track processed event IDs for deduplication
 
     async def initialize(self):
         """Initialize Redis consumer group."""
@@ -284,12 +286,46 @@ class AgentEventSubscriber:
             )
 
     async def _handle_event(self, event_type: str, payload: Dict[str, Any]):
-        """Handle different event types.
+        """Handle different event types with deduplication.
         
         Args:
             event_type: Type of event
             payload: Event payload
         """
+        # Extract event ID for deduplication
+        event_id = payload.get("event_id") or payload.get("correlation_id")
+        
+        # Check if event was already processed (deduplication)
+        if event_id:
+            # Use Redis SET to track processed events with TTL (5 minutes)
+            redis = await get_redis()
+            if redis:
+                try:
+                    # Check if event ID exists in processed events set
+                    key = f"processed_event:{event_id}"
+                    exists = await redis.exists(key)
+                    if exists:
+                        logger.debug(
+                            "agent_event_subscriber_duplicate_event_skipped",
+                            service="backend",
+                            event_id=event_id,
+                            event_type=event_type,
+                            message="Event already processed, skipping duplicate"
+                        )
+                        return
+                    
+                    # Mark event as processed with 5 minute TTL
+                    await redis.setex(key, 300, "1")
+                except Exception as e:
+                    # If Redis check fails, log but continue processing
+                    logger.warning(
+                        "agent_event_subscriber_dedup_check_failed",
+                        service="backend",
+                        event_id=event_id,
+                        error=str(e),
+                        message="Continuing with event processing despite deduplication check failure"
+                    )
+        
         try:
             if event_type == "decision_ready":
                 await self._handle_decision_ready(payload)
@@ -312,7 +348,8 @@ class AgentEventSubscriber:
                 "agent_event_subscriber_handle_event_error",
                 error=e,
                 component="agent_event_subscriber",
-                event_type=event_type
+                event_type=event_type,
+                event_id=event_id
             )
 
     async def _handle_decision_ready(self, payload: Dict[str, Any]):
@@ -374,30 +411,78 @@ class AgentEventSubscriber:
                         })
 
             # Handle timestamp - ensure it's properly formatted
-            formatted_timestamp = timestamp
+            formatted_timestamp = None
             if timestamp:
                 if isinstance(timestamp, datetime):
-                    formatted_timestamp = timestamp.isoformat()
+                    # Validate datetime is not epoch time or invalid
+                    if timestamp.year >= 2000:  # Reasonable minimum year
+                        formatted_timestamp = timestamp.isoformat() + "Z"  # Explicitly mark as UTC
                 elif isinstance(timestamp, str):
-                    # Already a string, use as-is
-                    formatted_timestamp = timestamp
-                else:
-                    # Fallback to current time if invalid
-                    formatted_timestamp = datetime.utcnow().isoformat()
-            else:
-                # No timestamp provided, use current time
-                formatted_timestamp = datetime.utcnow().isoformat()
+                    # Validate string timestamp is not empty and not epoch time
+                    try:
+                        # Try to parse and validate
+                        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        if parsed.year >= 2000:  # Reasonable minimum year
+                            # Ensure timezone is present
+                            if "Z" in timestamp or "+" in timestamp or "-" in timestamp[-6:]:
+                                formatted_timestamp = timestamp
+                            else:
+                                # Add Z to mark as UTC
+                                formatted_timestamp = timestamp + "Z"
+                    except (ValueError, AttributeError):
+                        # Invalid format, will use fallback
+                        pass
+            
+            # Fallback to current time if timestamp is missing or invalid
+            if not formatted_timestamp:
+                # Use time_service to ensure consistent format with 'Z' suffix
+                from backend.services.time_service import time_service
+                time_info = time_service.get_time_info()
+                formatted_timestamp = time_info["server_time"]
 
-            # Format signal data for frontend
+            # Format signal data for frontend - validate and ensure consistent format
+            # Validate signal value
+            valid_signals = ["BUY", "SELL", "HOLD", "STRONG_BUY", "STRONG_SELL"]
+            if signal not in valid_signals:
+                logger.warning(
+                    "agent_event_subscriber_invalid_signal",
+                    service="backend",
+                    signal=signal,
+                    valid_signals=valid_signals,
+                    message="Invalid signal value, using HOLD as fallback"
+                )
+                signal = "HOLD"
+            
+            # Ensure confidence is in 0-100 range
+            if confidence < 0 or confidence > 100:
+                logger.warning(
+                    "agent_event_subscriber_invalid_confidence",
+                    service="backend",
+                    confidence=confidence,
+                    message="Confidence out of range, clamping to 0-100"
+                )
+                confidence = max(0, min(100, confidence))
+            
+            # Ensure timestamp is present
+            if not formatted_timestamp:
+                from backend.services.time_service import time_service
+                time_info = time_service.get_time_info()
+                formatted_timestamp = time_info["server_time"]
+                logger.debug(
+                    "agent_event_subscriber_signal_timestamp_fallback",
+                    service="backend",
+                    message="Using current time as timestamp fallback"
+                )
+            
             signal_data = {
                 "signal": signal,
-                "confidence": confidence,
-                "symbol": symbol,
-                "model_consensus": model_consensus,
-                "reasoning_chain": reasoning_steps,
-                "individual_model_reasoning": individual_model_reasoning,
-                "agent_decision_reasoning": conclusion,
-                "timestamp": formatted_timestamp
+                "confidence": confidence,  # Validated to 0-100 range
+                "symbol": symbol or "BTCUSD",  # Default symbol if missing
+                "model_consensus": model_consensus or [],
+                "reasoning_chain": reasoning_steps or [],  # Array of reasoning steps
+                "individual_model_reasoning": individual_model_reasoning or [],
+                "agent_decision_reasoning": conclusion or "",
+                "timestamp": formatted_timestamp  # ISO 8601 with Z suffix
             }
 
             # Broadcast via WebSocket
@@ -475,6 +560,59 @@ class AgentEventSubscriber:
             fill_price = payload.get("fill_price", 0.0)
             timestamp = payload.get("timestamp")
             
+            logger.info(
+                "agent_event_subscriber_order_fill_received",
+                service="backend",
+                order_id=order_id,
+                trade_id=trade_id,
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                fill_price=fill_price,
+                message="AgentEventSubscriber received OrderFillEvent - starting persistence"
+            )
+            
+            # Validate inputs
+            if not trade_id:
+                logger.error(
+                    "agent_event_subscriber_missing_trade_id",
+                    order_id=order_id,
+                    symbol=symbol,
+                    message="Trade ID is missing - cannot persist trade"
+                )
+                return
+            
+            if not symbol:
+                logger.error(
+                    "agent_event_subscriber_missing_symbol",
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    message="Symbol is missing - cannot persist trade"
+                )
+                return
+            
+            if quantity <= 0:
+                logger.error(
+                    "agent_event_subscriber_invalid_quantity",
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    quantity=quantity,
+                    message="Quantity is zero or negative - cannot persist trade"
+                )
+                return
+            
+            if fill_price <= 0:
+                logger.error(
+                    "agent_event_subscriber_invalid_fill_price",
+                    order_id=order_id,
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    fill_price=fill_price,
+                    message="Fill price is zero or negative - cannot persist trade"
+                )
+                return
+            
             # Convert timestamp to datetime if it's a string
             if isinstance(timestamp, str):
                 try:
@@ -484,8 +622,21 @@ class AgentEventSubscriber:
             elif not isinstance(timestamp, datetime):
                 timestamp = datetime.utcnow()
 
+            # Initialize position_id variable for use after try block
+            position_id = None
+            
             # Persist trade and position to database
             try:
+                logger.info(
+                    "agent_event_subscriber_persisting_trade",
+                    service="backend",
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    fill_price=fill_price,
+                    message="Calling trade_persistence_service.create_trade_and_position"
+                )
                 # Calculate stop loss and take profit (using same logic as execution module)
                 from backend.core.config import settings
                 stop_loss_pct = settings.stop_loss_percentage
@@ -512,16 +663,38 @@ class AgentEventSubscriber:
                     executed_at=timestamp
                 )
                 
-                logger.info(
-                    "trade_persisted_to_database",
-                    service="backend",
-                    trade_id=trade_id,
-                    position_id=persistence_result.get("position_id"),
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    fill_price=fill_price
-                )
+                position_id = persistence_result.get("position_id")
+                
+                if not position_id:
+                    logger.error(
+                        "agent_event_subscriber_position_not_created",
+                        service="backend",
+                        trade_id=trade_id,
+                        symbol=symbol,
+                        persistence_result=persistence_result,
+                        message="Position ID is missing from persistence result - position may not have been created"
+                    )
+                else:
+                    logger.info(
+                        "trade_persisted_to_database",
+                        service="backend",
+                        trade_id=trade_id,
+                        position_id=position_id,
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        fill_price=fill_price,
+                        message="Trade and position successfully persisted to database"
+                    )
+                    
+                    # Invalidate portfolio cache immediately to ensure fresh data
+                    from backend.services.portfolio_service import portfolio_service
+                    await portfolio_service.invalidate_portfolio_cache()
+                    logger.debug(
+                        "portfolio_cache_invalidated_after_position_creation",
+                        trade_id=trade_id,
+                        position_id=position_id
+                    )
             except Exception as persistence_error:
                 # Log error but don't fail the entire handler
                 log_error_with_context(
@@ -529,10 +702,14 @@ class AgentEventSubscriber:
                     error=persistence_error,
                     component="agent_event_subscriber",
                     trade_id=trade_id,
-                    symbol=symbol
+                    symbol=symbol,
+                    order_id=order_id,
+                    quantity=quantity,
+                    fill_price=fill_price,
+                    message="Failed to persist trade and position to database"
                 )
 
-            # Format trade data for frontend
+            # Format trade data for frontend - include position_id if available
             trade_data = {
                 "order_id": order_id,
                 "trade_id": trade_id,
@@ -542,6 +719,25 @@ class AgentEventSubscriber:
                 "price": fill_price,
                 "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
             }
+            
+            # Add position_id if position was created successfully
+            if position_id:
+                trade_data["position_id"] = position_id
+                logger.debug(
+                    "trade_executed_with_position_id",
+                    service="backend",
+                    trade_id=trade_id,
+                    position_id=position_id,
+                    message="Including position_id in trade_executed message"
+                )
+            else:
+                logger.warning(
+                    "trade_executed_without_position_id",
+                    service="backend",
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    message="Position ID not available - position may not have been created"
+                )
 
             # Broadcast via WebSocket
             await websocket_manager.broadcast(
@@ -613,6 +809,14 @@ class AgentEventSubscriber:
                         exit_reason=exit_reason,
                         is_profit=close_result.get("is_profit"),
                         is_loss=close_result.get("is_loss")
+                    )
+                    
+                    # Invalidate portfolio cache immediately to ensure fresh data
+                    from backend.services.portfolio_service import portfolio_service
+                    await portfolio_service.invalidate_portfolio_cache()
+                    logger.debug(
+                        "portfolio_cache_invalidated_after_position_closed",
+                        position_id=position_id
                     )
                 else:
                     logger.warning(
@@ -711,17 +915,27 @@ class AgentEventSubscriber:
                             "prediction": prediction_value
                         })
             
-            # Handle timestamp formatting
-            formatted_timestamp = timestamp
+            # Handle timestamp formatting - ensure 'Z' suffix for UTC
+            from backend.services.time_service import time_service
+            formatted_timestamp = None
             if timestamp:
                 if isinstance(timestamp, datetime):
-                    formatted_timestamp = timestamp.isoformat()
+                    # Ensure UTC and add 'Z' suffix
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    formatted_timestamp = timestamp.isoformat().replace('+00:00', 'Z')
+                    if not formatted_timestamp.endswith('Z'):
+                        formatted_timestamp += 'Z'
                 elif isinstance(timestamp, str):
-                    formatted_timestamp = timestamp
+                    # Ensure 'Z' suffix if not present
+                    if not (timestamp.endswith('Z') or '+' in timestamp[-6:] or '-' in timestamp[-6:]):
+                        formatted_timestamp = timestamp + 'Z'
+                    else:
+                        formatted_timestamp = timestamp
                 else:
-                    formatted_timestamp = datetime.utcnow().isoformat()
+                    formatted_timestamp = time_service.get_time_info()["server_time"]
             else:
-                formatted_timestamp = datetime.utcnow().isoformat()
+                formatted_timestamp = time_service.get_time_info()["server_time"]
             
             # Convert consensus confidence to 0-100 if needed
             if 0.0 <= consensus_confidence <= 1.0:
@@ -782,17 +996,27 @@ class AgentEventSubscriber:
             if 0.0 <= final_confidence <= 1.0:
                 final_confidence = final_confidence * 100.0
             
-            # Handle timestamp formatting
-            formatted_timestamp = timestamp
+            # Handle timestamp formatting - ensure 'Z' suffix for UTC
+            from backend.services.time_service import time_service
+            formatted_timestamp = None
             if timestamp:
                 if isinstance(timestamp, datetime):
-                    formatted_timestamp = timestamp.isoformat()
+                    # Ensure UTC and add 'Z' suffix
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    formatted_timestamp = timestamp.isoformat().replace('+00:00', 'Z')
+                    if not formatted_timestamp.endswith('Z'):
+                        formatted_timestamp += 'Z'
                 elif isinstance(timestamp, str):
-                    formatted_timestamp = timestamp
+                    # Ensure 'Z' suffix if not present
+                    if not (timestamp.endswith('Z') or '+' in timestamp[-6:] or '-' in timestamp[-6:]):
+                        formatted_timestamp = timestamp + 'Z'
+                    else:
+                        formatted_timestamp = timestamp
                 else:
-                    formatted_timestamp = datetime.utcnow().isoformat()
+                    formatted_timestamp = time_service.get_time_info()["server_time"]
             else:
-                formatted_timestamp = datetime.utcnow().isoformat()
+                formatted_timestamp = time_service.get_time_info()["server_time"]
             
             # Broadcast reasoning chain update
             await websocket_manager.broadcast(
@@ -874,6 +1098,8 @@ class AgentEventSubscriber:
     async def _update_position_prices(self, symbol: str, current_price: float):
         """Update current_price and unrealized_pnl for open positions matching symbol.
         
+        Uses database transaction to ensure atomicity - all positions updated or none.
+        
         Args:
             symbol: Trading symbol
             current_price: Current market price
@@ -882,39 +1108,46 @@ class AgentEventSubscriber:
             from backend.core.database import AsyncSessionLocal, Position, PositionStatus, TradeSide
             
             async with AsyncSessionLocal() as session:
-                # Get all open positions for this symbol
-                from sqlalchemy import select
-                query = select(Position).where(
-                    Position.symbol == symbol,
-                    Position.status == PositionStatus.OPEN
-                )
-                result = await session.execute(query)
-                positions = result.scalars().all()
-                
-                if not positions:
-                    return
-                
-                # Update each position
-                for position in positions:
-                    position.current_price = Decimal(str(current_price))
+                try:
+                    # Get all open positions for this symbol
+                    from sqlalchemy import select
+                    query = select(Position).where(
+                        Position.symbol == symbol,
+                        Position.status == PositionStatus.OPEN
+                    )
+                    result = await session.execute(query)
+                    positions = result.scalars().all()
                     
-                    # Calculate unrealized PnL
-                    if position.side == TradeSide.BUY:
-                        unrealized_pnl = (current_price - float(position.entry_price)) * float(position.quantity)
-                    else:  # SELL
-                        unrealized_pnl = (float(position.entry_price) - current_price) * float(position.quantity)
+                    if not positions:
+                        return
                     
-                    position.unrealized_pnl = Decimal(str(unrealized_pnl))
-                
-                await session.commit()
-                
-                logger.debug(
-                    "agent_event_subscriber_position_prices_updated",
-                    service="backend",
-                    symbol=symbol,
-                    current_price=current_price,
-                    positions_updated=len(positions)
-                )
+                    # Update each position within transaction
+                    for position in positions:
+                        position.current_price = Decimal(str(current_price))
+                        
+                        # Calculate unrealized PnL
+                        if position.side == TradeSide.BUY:
+                            unrealized_pnl = (current_price - float(position.entry_price)) * float(position.quantity)
+                        else:  # SELL
+                            unrealized_pnl = (float(position.entry_price) - current_price) * float(position.quantity)
+                        
+                        position.unrealized_pnl = Decimal(str(unrealized_pnl))
+                    
+                    # Commit all updates atomically
+                    await session.commit()
+                    
+                    logger.debug(
+                        "agent_event_subscriber_position_prices_updated",
+                        service="backend",
+                        symbol=symbol,
+                        current_price=current_price,
+                        positions_updated=len(positions)
+                    )
+                    
+                except Exception as e:
+                    # Rollback on any error to maintain consistency
+                    await session.rollback()
+                    raise
                 
         except Exception as e:
             log_error_with_context(
@@ -925,45 +1158,70 @@ class AgentEventSubscriber:
             )
     
     async def _broadcast_portfolio_update(self):
-        """Broadcast portfolio update via WebSocket."""
-        try:
-            from backend.core.database import AsyncSessionLocal
-            from backend.services.portfolio_service import portfolio_service
-            
-            async with AsyncSessionLocal() as session:
-                portfolio_summary = await portfolio_service.get_portfolio_summary(session)
+        """Broadcast portfolio update via WebSocket.
+        
+        Uses async lock to prevent race conditions when multiple events trigger updates.
+        Uses shared serialization function to ensure identical format with API responses.
+        """
+        # Use lock to prevent concurrent portfolio updates
+        async with self._portfolio_update_lock:
+            try:
+                from backend.core.database import AsyncSessionLocal
+                from backend.services.portfolio_service import portfolio_service
                 
-                if portfolio_summary:
-                    # Format portfolio data for frontend
-                    portfolio_data = {
-                        "total_value": float(portfolio_summary.get("total_value", 0)),
-                        "available_balance": float(portfolio_summary.get("available_balance", 0)),
-                        "open_positions": portfolio_summary.get("open_positions", 0),
-                        "total_unrealized_pnl": float(portfolio_summary.get("total_unrealized_pnl", 0)),
-                        "total_realized_pnl": float(portfolio_summary.get("total_realized_pnl", 0)),
-                        "positions": portfolio_summary.get("positions", []),
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                async with AsyncSessionLocal() as session:
+                    # Get portfolio summary (may be cached)
+                    portfolio_summary = await portfolio_service.get_portfolio_summary(session)
                     
-                    # Broadcast via WebSocket
-                    await websocket_manager.broadcast(
-                        {"type": "portfolio_update", "data": portfolio_data},
-                        channel="portfolio"
-                    )
-                    
-                    logger.debug(
-                        "agent_event_subscriber_portfolio_update_broadcast",
-                        service="backend",
-                        total_value=portfolio_data["total_value"],
-                        open_positions=portfolio_data["open_positions"]
-                    )
-                    
-        except Exception as e:
-            log_error_with_context(
-                "agent_event_subscriber_broadcast_portfolio_update_error",
-                error=e,
-                component="agent_event_subscriber"
-            )
+                    if portfolio_summary:
+                        try:
+                            # Use shared serialization function to ensure identical format with API
+                            portfolio_data = portfolio_service.serialize_portfolio_summary(portfolio_summary)
+                            
+                            # Validate portfolio data structure before broadcasting
+                            if not portfolio_data or "total_value" not in portfolio_data:
+                                logger.error(
+                                    "portfolio_data_validation_failed",
+                                    service="backend",
+                                    message="Portfolio data missing required fields after serialization"
+                                )
+                                return
+                            
+                            # Broadcast via WebSocket
+                            await websocket_manager.broadcast(
+                                {"type": "portfolio_update", "data": portfolio_data},
+                                channel="portfolio"
+                            )
+                            
+                            logger.debug(
+                                "agent_event_subscriber_portfolio_update_broadcast",
+                                service="backend",
+                                total_value=portfolio_data["total_value"],
+                                open_positions=portfolio_data["open_positions"],
+                                positions_count=len(portfolio_data.get("positions", [])),
+                                timestamp=portfolio_data.get("timestamp"),
+                                data_source="websocket"
+                            )
+                        except ValueError as e:
+                            # Log validation error but don't fail - return empty data
+                            logger.error(
+                                "portfolio_serialization_validation_failed",
+                                error=str(e),
+                                message="Portfolio data validation failed, skipping broadcast"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                "portfolio_serialization_error",
+                                error=str(e),
+                                message="Error serializing portfolio data"
+                            )
+                        
+            except Exception as e:
+                log_error_with_context(
+                    "agent_event_subscriber_broadcast_portfolio_update_error",
+                    error=e,
+                    component="agent_event_subscriber"
+                )
 
 
 # Global subscriber instance

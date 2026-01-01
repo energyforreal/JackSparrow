@@ -10,7 +10,7 @@ import uuid
 import asyncio
 import time
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import structlog
 
 try:
@@ -139,6 +139,8 @@ class AgentService:
         
         Tries WebSocket first if available, falls back to Redis queue.
         """
+        # BACKEND → AGENT: Entry logging
+        logger.info("BACKEND → AGENT: Sending command=%s", command)
         
         # Lazy initialization of WebSocket connection
         if self.use_websocket and websockets is not None and not self._initialization_attempted:
@@ -162,7 +164,7 @@ class AgentService:
                     "request_id": request_id,
                     "command": command,
                     "parameters": parameters or {},
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
                 # Create future for response
@@ -198,30 +200,30 @@ class AgentService:
                     # Fall through to Redis fallback
             
             except Exception as e:
-                logger.warning(
-                    "agent_service_websocket_send_failed",
-                    service="backend",
-                    request_id=request_id,
-                    command=command,
-                    error=str(e),
-                    message="Falling back to Redis queue"
-                )
+                logger.error("BACKEND → AGENT WS FAIL: %s — falling back to Redis", e)
                 # Fall through to Redis fallback
+                # Note: Redis fallback will be handled below
         
         # Fallback to Redis queue
-        message = {
-            "request_id": request_id,
-            "command": command,
-            "parameters": parameters or {},
-            "timestamp": time.time()
-        }
-        
-        # Send command via Redis
-        success = await enqueue_command(message, self.command_queue)
-        if not success:
+        try:
+            message = {
+                "request_id": request_id,
+                "command": command,
+                "parameters": parameters or {},
+                "timestamp": time.time()
+            }
+            
+            # Send command via Redis
+            success = await enqueue_command(message, self.command_queue)
+            if not success:
+                logger.error("BACKEND → AGENT: Redis enqueue failed for command=%s", command)
+                return None
+            
+            logger.debug("BACKEND → AGENT: Command sent via Redis fallback, command=%s", command)
+            return await self._wait_for_response(request_id, timeout)
+        except Exception as e:
+            logger.error("BACKEND → AGENT: Redis fallback failed: %s", e)
             return None
-        
-        return await self._wait_for_response(request_id, timeout)
     
     async def get_prediction(
         self,
@@ -293,7 +295,7 @@ class AgentService:
             if status:
                 return {
                     "state": status.get("state", "UNKNOWN"),
-                    "timestamp": status.get("last_update", datetime.utcnow()),
+                    "timestamp": status.get("last_update", datetime.now(timezone.utc)),
                     "reason": status.get("message", "")
                 }
             
@@ -317,7 +319,7 @@ class AgentService:
         )
         latency_ms = (time.time() - start_time) * 1000
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         if not response:
             return {
@@ -388,6 +390,17 @@ class AgentService:
         )
         
         return response
+    
+    async def heartbeat(self):
+        """Send heartbeat ping to agent via WebSocket."""
+        try:
+            if self.use_websocket and self._websocket_connected and self._websocket:
+                await self._websocket.send(json.dumps({"type": "ping"}))
+            else:
+                logger.debug("HEARTBEAT: WebSocket not connected, skipping heartbeat")
+        except Exception as e:
+            logger.error("HEARTBEAT FAIL — triggering reconnect: %s", e)
+            self._websocket_connected = False
 
 
 # Global agent service instance

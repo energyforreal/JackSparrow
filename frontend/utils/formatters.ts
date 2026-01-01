@@ -20,6 +20,9 @@ export function formatPercent(value: number): string {
  * Backends sometimes return confidences in the 0-1 range while
  * WebSocket payloads may already be in 0-100. This helper accepts
  * either and always returns a clamped percentage for display.
+ * 
+ * This is the single source of truth for confidence normalization.
+ * Use this function everywhere confidence values are processed.
  */
 export function normalizeConfidenceToPercent(
   value: number | null | undefined
@@ -42,6 +45,12 @@ export function normalizeConfidenceToPercent(
 
   return Math.min(100, Math.max(0, value * 100))
 }
+
+/**
+ * Alias for normalizeConfidenceToPercent for consistency.
+ * Use normalizeConfidence() or normalizeConfidenceToPercent() - both do the same thing.
+ */
+export const normalizeConfidence = normalizeConfidenceToPercent
 
 /**
  * Format confidence as a percentage string with consistent decimal places.
@@ -96,8 +105,24 @@ export function getDataFreshnessColor(timestamp: Date | string | null | undefine
  * This function is exported so it can be used in hooks to ensure
  * consistent timestamp parsing throughout the application.
  */
-export function normalizeDate(date: Date | string): Date {
+export function normalizeDate(date: Date | string | null | undefined): Date {
+  // Handle null/undefined
+  if (!date) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('[normalizeDate] Null or undefined date provided, using current time')
+    }
+    return new Date()
+  }
+
   if (typeof date === 'string') {
+    // Reject empty strings
+    if (!date.trim()) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[normalizeDate] Empty string date provided, using current time')
+      }
+      return new Date()
+    }
+
     // Backend currently sends timestamps like "2025-12-02T10:11:11.976865"
     // without an explicit timezone. Those should be treated as UTC and then
     // displayed in IST on the frontend.
@@ -120,6 +145,19 @@ export function normalizeDate(date: Date | string): Date {
     const isoString = hasExplicitTimezone ? trimmedDate : `${trimmedDate}Z`
     const parsedDate = new Date(isoString)
     
+    // Validate parsed date is not epoch time or invalid
+    if (isNaN(parsedDate.getTime()) || parsedDate.getFullYear() < 2000) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[normalizeDate] Invalid or epoch date detected:', {
+          raw_input: date,
+          parsed_date: parsedDate,
+          parsed_utc_iso: parsedDate.toISOString(),
+          is_epoch: parsedDate.getFullYear() < 2000
+        })
+      }
+      return new Date()  // Return current time for invalid dates
+    }
+    
     // Debug logging in development mode
     if (process.env.NODE_ENV === 'development') {
       console.log('[normalizeDate] Timestamp normalization:', {
@@ -138,17 +176,38 @@ export function normalizeDate(date: Date | string): Date {
     return parsedDate
   }
   
-  // Debug logging for Date objects
-  if (process.env.NODE_ENV === 'development' && date instanceof Date) {
-    console.log('[normalizeDate] Date object passed:', {
-      input_date: date,
-      utc_iso: date.toISOString(),
-      local_string: date.toString(),
-      is_valid: !isNaN(date.getTime())
-    })
+  // Handle Date objects
+  if (date instanceof Date) {
+    // Validate Date is not invalid or epoch time
+    if (isNaN(date.getTime()) || date.getFullYear() < 2000) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[normalizeDate] Invalid or epoch Date object:', {
+          input_date: date,
+          is_epoch: date.getFullYear() < 2000,
+          is_invalid: isNaN(date.getTime())
+        })
+      }
+      return new Date()  // Return current time for invalid dates
+    }
+    
+    // Debug logging for Date objects
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[normalizeDate] Date object passed:', {
+        input_date: date,
+        utc_iso: date.toISOString(),
+        local_string: date.toString(),
+        is_valid: !isNaN(date.getTime())
+      })
+    }
+    
+    return date
   }
   
-  return date
+  // Fallback for any other type
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('[normalizeDate] Unexpected date type:', typeof date, date)
+  }
+  return new Date()
 }
 
 function isValidDate(date: Date | string): boolean {

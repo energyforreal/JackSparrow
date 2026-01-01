@@ -167,6 +167,18 @@ class Settings(BaseSettings):
         description="Initial balance for paper trading (in USD)"
     )
     
+    # Risk Management Settings (must match agent config)
+    stop_loss_percentage: float = Field(
+        default=0.02,
+        env="STOP_LOSS_PERCENTAGE",
+        description="Stop loss percentage (default: 2%)"
+    )
+    take_profit_percentage: float = Field(
+        default=0.05,
+        env="TAKE_PROFIT_PERCENTAGE",
+        description="Take profit percentage (default: 5%)"
+    )
+    
     # CORS
     cors_origins: Union[str, List[str]] = Field(
         default="http://localhost:3000,http://localhost:3001",

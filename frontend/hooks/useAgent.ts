@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useWebSocket } from './useWebSocket'
 import { apiClient } from '@/services/api'
 import { Portfolio, Trade, Signal } from '@/types'
-import { normalizeDate } from '@/utils/formatters'
+import { normalizeDate, normalizeConfidenceToPercent } from '@/utils/formatters'
 
 // Get WebSocket URL from environment variable
 // In production, NEXT_PUBLIC_WS_URL must be set
@@ -19,6 +19,8 @@ export function useAgent() {
   const [signal, setSignal] = useState<Signal | null>(null)
   // Initialize with null to prevent hydration mismatch - will be set on client mount
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  // Track data source for debugging
+  const [dataSource, setDataSource] = useState<'websocket' | 'api' | 'none'>('none')
 
   useEffect(() => {
     if (lastMessage) {
@@ -105,16 +107,81 @@ export function useAgent() {
           break
         }
         case 'portfolio_update':
-          setPortfolio(lastMessage.data as Portfolio)
+          // Prioritize WebSocket updates - immediately replace API data
+          const portfolioData = lastMessage.data as Portfolio
+          if (portfolioData) {
+            // Clear any cached/old portfolio data and set new data immediately
+            setPortfolio(portfolioData)
+            setDataSource('websocket')
+            
+            // Update lastUpdate timestamp if available
+            if (portfolioData.timestamp) {
+              try {
+                const ts = normalizeDate(portfolioData.timestamp)
+                if (!isNaN(ts.getTime())) {
+                  setLastUpdate(ts)
+                }
+              } catch {
+                // Ignore timestamp parsing errors
+              }
+            }
+            
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[useAgent] Portfolio update received via WebSocket:', {
+                total_value: portfolioData.total_value,
+                open_positions: portfolioData.open_positions,
+                positions_count: portfolioData.positions?.length || 0,
+                timestamp: portfolioData.timestamp,
+                data_source: 'websocket',
+                will_replace_api_data: true
+              })
+            }
+          }
           break
         case 'trade_executed':
-          setRecentTrades((prev) => [lastMessage.data as Trade, ...prev].slice(0, 10))
+          // Add new trade to recent trades list - prioritize WebSocket updates
+          const tradeData = lastMessage.data as Trade
+          if (tradeData) {
+            setRecentTrades((prev) => {
+              // Avoid duplicates - check if trade_id already exists
+              const exists = prev.some(t => t.trade_id === tradeData.trade_id)
+              if (exists) {
+                return prev // Don't add duplicate
+              }
+              return [tradeData, ...prev].slice(0, 10)
+            })
+            setDataSource('websocket')
+            
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[useAgent] Trade executed received via WebSocket:', {
+                trade_id: tradeData.trade_id,
+                symbol: tradeData.symbol,
+                side: tradeData.side,
+                price: tradeData.price,
+                timestamp: tradeData.timestamp,
+                data_source: 'websocket',
+                position_id: (tradeData as any).position_id // Include position_id if available
+              })
+            }
+          }
           break
         case 'signal_update':
           const signalData = lastMessage.data as Signal
           if (signalData) {
+            // Normalize confidence to ensure consistent 0-100 range
+            // Backend sends confidence in 0-100 range, but normalize to be safe
+            const normalizedConfidence = normalizeConfidenceToPercent(signalData.confidence)
+            
+            // Create normalized signal object
+            const normalizedSignal: Signal = {
+              ...signalData,
+              confidence: normalizedConfidence
+            }
+            
             // Always replace signal completely on WebSocket update
-            setSignal(signalData)
+            setSignal(normalizedSignal)
+            setDataSource('websocket')
+            
             // Update lastUpdate based on signal timestamp so UI shows fresh time
             // Use normalizeDate to ensure UTC timestamps are parsed correctly
             if (signalData.timestamp) {
@@ -134,7 +201,9 @@ export function useAgent() {
                       current_time_local: new Date().toString(),
                       time_difference_ms: new Date().getTime() - ts.getTime(),
                       signal: signalData.signal,
-                      confidence: signalData.confidence
+                      raw_confidence: signalData.confidence,
+                      normalized_confidence: normalizedConfidence,
+                      data_source: 'websocket'
                     })
                   }
                 } else {
@@ -273,6 +342,7 @@ export function useAgent() {
   }, []) // Empty dependency array - only run once on mount
 
   // Fetch initial data on mount, independent of WebSocket state
+  // WebSocket updates will replace this data immediately when received
   useEffect(() => {
     let retryCount = 0
     const maxRetries = 3
@@ -280,11 +350,11 @@ export function useAgent() {
 
     const fetchInitialData = async (): Promise<void> => {
       try {
-        // Fetch portfolio data
+        // Fetch portfolio data (will be replaced by WebSocket update if available)
         const portfolioData = await apiClient.getPortfolioSummary()
         setPortfolio(portfolioData)
         
-        // Fetch recent trades
+        // Fetch recent trades (will be replaced by WebSocket updates)
         try {
           const trades = await apiClient.getTrades()
           if (Array.isArray(trades)) {
@@ -307,6 +377,16 @@ export function useAgent() {
         }
         
         retryCount = 0 // Reset retry count on success
+        setDataSource('api')
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[useAgent] Initial data fetched from API:', {
+            has_portfolio: !!portfolioData,
+            portfolio_total_value: portfolioData?.total_value,
+            data_source: 'api_initial',
+            note: 'This will be replaced by WebSocket updates when received'
+          })
+        }
       } catch (error) {
         console.error('Error fetching initial data:', error)
         
@@ -322,9 +402,18 @@ export function useAgent() {
     }
 
     // Fetch immediately on mount
+    // Note: WebSocket updates will replace this data when received
     fetchInitialData()
   }, []) // Empty dependency array - only run on mount
 
-  return { agentState, portfolio, recentTrades, signal, isConnected, lastUpdate }
+  return { 
+    agentState, 
+    portfolio, 
+    recentTrades, 
+    signal, 
+    isConnected, 
+    lastUpdate,
+    dataSource // Expose data source for debugging
+  }
 }
 

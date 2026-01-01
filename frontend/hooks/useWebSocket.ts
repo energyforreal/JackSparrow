@@ -13,12 +13,26 @@ interface UseWebSocketReturn {
   error: Error | null
 }
 
+// Channels to subscribe to for real-time updates
+const SUBSCRIBE_CHANNELS = [
+  'agent_state',
+  'signal_update',
+  'reasoning_chain_update',
+  'model_prediction_update',
+  'market_tick',
+  'trade_executed',
+  'portfolio_update',
+  'health_update',
+]
+
 export function useWebSocket(url: string): UseWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false)
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null)
   const [error, setError] = useState<Error | null>(null)
+  const [isSubscribed, setIsSubscribed] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
+  const subscribedChannelsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     // Validate WebSocket URL
@@ -58,7 +72,7 @@ export function useWebSocket(url: string): UseWebSocketReturn {
     }
 
     const baseDelay = 1000 // 1 second
-    const maxDelay = 60000 // 60 seconds
+    const maxDelay = 5000 // 5 seconds (reduced from 60s for faster reconnection)
     let reconnectAttempts = 0
     let shouldReconnect = true
 
@@ -80,13 +94,66 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           setIsConnected(true)
           reconnectAttempts = 0 // Reset on successful connection
           setError(null)
+          
+          // Subscribe to all required channels when connection opens
+          try {
+            const subscribeMessage = {
+              action: 'subscribe',
+              channels: SUBSCRIBE_CHANNELS,
+            }
+            ws.send(JSON.stringify(subscribeMessage))
+            
+            if (process.env.NODE_ENV === 'development') {
+              console.log('[useWebSocket] Subscribing to channels:', SUBSCRIBE_CHANNELS)
+            }
+          } catch (subError) {
+            console.error('[useWebSocket] Failed to send subscribe message:', subError)
+          }
         }
 
         ws.onmessage = (event) => {
+          // WS MESSAGE: Debug log for message tracking
+          console.log('WS MESSAGE:', event.data)
+          
           try {
-            const message = JSON.parse(event.data) as WebSocketMessage
+            const message = JSON.parse(event.data) as WebSocketMessage & {
+              server_timestamp_ms?: number
+            }
+            
+            // Validate message timestamp to detect stale messages
+            const staleThresholdMs = 10000 // 10 seconds
+            if (message.server_timestamp_ms) {
+              const now = Date.now()
+              const age = now - message.server_timestamp_ms
+              
+              if (age > staleThresholdMs) {
+                if (process.env.NODE_ENV === 'development') {
+                  console.warn('[useWebSocket] Stale message detected:', {
+                    message_type: message.type,
+                    age_seconds: age / 1000,
+                    threshold_seconds: staleThresholdMs / 1000,
+                    server_timestamp_ms: message.server_timestamp_ms,
+                    current_time_ms: now
+                  })
+                }
+                // Still process the message but log warning
+                // In production, you might want to reject stale messages
+              }
+            }
+            
             setLastMessage(message)
             setError(null)
+            
+            // Handle subscription confirmation
+            if (message.type === 'subscribed') {
+              const channels = (message.channels as string[]) || []
+              subscribedChannelsRef.current = new Set(channels)
+              setIsSubscribed(true)
+              
+              if (process.env.NODE_ENV === 'development') {
+                console.log('[useWebSocket] Successfully subscribed to channels:', channels)
+              }
+            }
             
             // Handle time sync messages
             if (message.type === 'time_sync' && message.data) {
@@ -110,11 +177,16 @@ export function useWebSocket(url: string): UseWebSocketReturn {
 
         ws.onclose = (event) => {
           setIsConnected(false)
+          setIsSubscribed(false) // Reset subscription status on disconnect
+          subscribedChannelsRef.current.clear()
           
           // Only reconnect if not a normal closure and should reconnect
           if (shouldReconnect && event.code !== 1000) {
             const delay = calculateBackoffDelay(reconnectAttempts)
             reconnectAttempts++
+            
+            // WS CLOSED: Log disconnection with retry delay info
+            console.warn(`WS CLOSED — reconnecting in ${delay}ms (attempt ${reconnectAttempts})`)
             
             console.log(
               `WebSocket closed. Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`
@@ -151,6 +223,25 @@ export function useWebSocket(url: string): UseWebSocketReturn {
       }
     }
   }, [url])
+
+  // Ensure subscription when connected (backup in case onopen subscription didn't work)
+  useEffect(() => {
+    if (isConnected && !isSubscribed && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        const subscribeMessage = {
+          action: 'subscribe',
+          channels: SUBSCRIBE_CHANNELS,
+        }
+        wsRef.current.send(JSON.stringify(subscribeMessage))
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[useWebSocket] Re-subscribing to channels (backup):', SUBSCRIBE_CHANNELS)
+        }
+      } catch (subError) {
+        console.error('[useWebSocket] Failed to send subscribe message (backup):', subError)
+      }
+    }
+  }, [isConnected, isSubscribed])
 
   const sendMessage = useCallback((message: unknown) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {

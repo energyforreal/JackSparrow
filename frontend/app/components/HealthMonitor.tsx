@@ -70,11 +70,13 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
       }))
     : []
 
-  // Calculate health score percentage (backend returns 0.0-1.0, frontend expects 0-100)
-  const healthScore = typeof health.health_score === 'number' 
-    ? Math.round(health.health_score * 100) 
+  // Health score is now standardized to 0-100 range in WebSocket messages
+  // API still returns 0.0-1.0, but WebSocket sends 0-100
+  // Handle both formats for backward compatibility
+  const healthScore = typeof health.health_score === 'number'
+    ? (health.health_score > 1 ? health.health_score : Math.round(health.health_score * 100)) // If > 1, already in 0-100 range
     : typeof health.score === 'number'
-    ? health.score
+    ? (health.score > 1 ? health.score : Math.round(health.score * 100))
     : 0
 
   return (

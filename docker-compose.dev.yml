@@ -27,7 +27,7 @@ services:
     # Mount source code for hot-reload
     volumes:
       - ./agent:/app/agent:rw
-      - ./models:/app/models:ro
+      - ./agent/model_storage:/app/agent/model_storage:ro
       - ./logs/agent:/logs:rw
     # Development environment
     environment:

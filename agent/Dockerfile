@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
+# Build arguments for metadata
+ARG BUILD_DATE
+ARG VERSION=latest
+ARG COMMIT_SHA=unknown
+
 # Stage 1: Dependencies builder
 FROM python:3.11-slim AS builder
 
@@ -32,7 +37,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PATH="/home/agent/.local/bin:${PATH}" \
-    MODEL_DIR=/app/models \
+    MODEL_DIR=/app/agent/model_storage \
     MODEL_PATH= \
     AGENT_SYMBOL=BTCUSD \
     AGENT_INTERVAL=15m
@@ -50,7 +55,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create non-root user
 RUN groupadd -r agent && useradd -r -g agent agent && \
-    mkdir -p /app /app/models /logs && \
+    mkdir -p /app /app/agent/model_storage /logs && \
     chown -R agent:agent /app /logs
 
 # Copy Python dependencies from builder
@@ -58,6 +63,13 @@ COPY --from=builder --chown=agent:agent /root/.local /home/agent/.local
 
 # Copy application code - maintain agent directory structure  
 COPY --chown=agent:agent agent /app/agent
+
+# Add build metadata labels
+LABEL org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT_SHA}" \
+      org.opencontainers.image.title="JackSparrow Agent" \
+      org.opencontainers.image.description="AI Trading Agent for JackSparrow"
 
 # Switch to non-root user
 USER agent

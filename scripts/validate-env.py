@@ -90,6 +90,12 @@ class EnvValidator:
             "API_KEY": "API key for authentication (minimum 32 characters recommended)",
         }
         
+        # Risk management settings (should match between backend and agent)
+        risk_settings = {
+            "STOP_LOSS_PERCENTAGE": "Stop loss percentage (e.g., 0.02 for 2%)",
+            "TAKE_PROFIT_PERCENTAGE": "Take profit percentage (e.g., 0.05 for 5%)",
+        }
+        
         missing = []
         for var, description in required_vars.items():
             if var not in self.env_vars or not self.env_vars[var].strip():
@@ -108,6 +114,16 @@ class EnvValidator:
         if backend_missing:
             self.warnings.append("Missing backend-specific variables (required for backend service):")
             self.warnings.extend(backend_missing)
+        
+        # Check risk settings (warn if missing, but don't fail - defaults exist)
+        risk_missing = []
+        for var, description in risk_settings.items():
+            if var not in self.env_vars or not self.env_vars[var].strip():
+                risk_missing.append(f"  - {var}: {description} (using default)")
+        
+        if risk_missing:
+            self.warnings.append("Risk management settings not set (using defaults):")
+            self.warnings.extend(risk_missing)
         
         return len(missing) == 0
     
@@ -286,6 +302,78 @@ class EnvValidator:
         
         return valid
     
+    def validate_risk_settings(self) -> bool:
+        """Validate risk management settings format and values.
+        
+        Returns:
+            True if valid or not set (using defaults), False otherwise
+        """
+        valid = True
+        
+        # Validate STOP_LOSS_PERCENTAGE if set
+        if "STOP_LOSS_PERCENTAGE" in self.env_vars:
+            stop_loss_str = self.env_vars["STOP_LOSS_PERCENTAGE"].strip()
+            if stop_loss_str:
+                try:
+                    stop_loss = float(stop_loss_str)
+                    if stop_loss <= 0 or stop_loss >= 1:
+                        self.errors.append(
+                            f"STOP_LOSS_PERCENTAGE must be between 0 and 1 (e.g., 0.02 for 2%). "
+                            f"Got: {stop_loss}"
+                        )
+                        valid = False
+                    elif stop_loss > 0.1:  # More than 10% stop loss is unusual
+                        self.warnings.append(
+                            f"STOP_LOSS_PERCENTAGE is quite high ({stop_loss*100:.1f}%). "
+                            f"Typical values are 1-5%."
+                        )
+                except ValueError:
+                    self.errors.append(
+                        f"STOP_LOSS_PERCENTAGE must be a number. Got: {stop_loss_str}"
+                    )
+                    valid = False
+        
+        # Validate TAKE_PROFIT_PERCENTAGE if set
+        if "TAKE_PROFIT_PERCENTAGE" in self.env_vars:
+            take_profit_str = self.env_vars["TAKE_PROFIT_PERCENTAGE"].strip()
+            if take_profit_str:
+                try:
+                    take_profit = float(take_profit_str)
+                    if take_profit <= 0 or take_profit >= 1:
+                        self.errors.append(
+                            f"TAKE_PROFIT_PERCENTAGE must be between 0 and 1 (e.g., 0.05 for 5%). "
+                            f"Got: {take_profit}"
+                        )
+                        valid = False
+                    elif take_profit < 0.01:  # Less than 1% take profit is very small
+                        self.warnings.append(
+                            f"TAKE_PROFIT_PERCENTAGE is quite low ({take_profit*100:.1f}%). "
+                            f"Typical values are 3-10%."
+                        )
+                except ValueError:
+                    self.errors.append(
+                        f"TAKE_PROFIT_PERCENTAGE must be a number. Got: {take_profit_str}"
+                    )
+                    valid = False
+        
+        # Validate that take profit is greater than stop loss if both are set
+        if "STOP_LOSS_PERCENTAGE" in self.env_vars and "TAKE_PROFIT_PERCENTAGE" in self.env_vars:
+            stop_loss_str = self.env_vars["STOP_LOSS_PERCENTAGE"].strip()
+            take_profit_str = self.env_vars["TAKE_PROFIT_PERCENTAGE"].strip()
+            if stop_loss_str and take_profit_str:
+                try:
+                    stop_loss = float(stop_loss_str)
+                    take_profit = float(take_profit_str)
+                    if take_profit <= stop_loss:
+                        self.warnings.append(
+                            f"TAKE_PROFIT_PERCENTAGE ({take_profit*100:.1f}%) should be greater than "
+                            f"STOP_LOSS_PERCENTAGE ({stop_loss*100:.1f}%) for profitable trading."
+                        )
+                except ValueError:
+                    pass  # Already handled above
+        
+        return valid
+    
     def validate_model_files(self) -> bool:
         """Validate ML model files if MODEL_PATH is specified.
         
@@ -376,6 +464,7 @@ class EnvValidator:
         valid &= self.validate_redis_url()
         valid &= self.validate_api_keys()
         valid &= self.validate_urls()
+        valid &= self.validate_risk_settings()
         self.validate_model_files()  # Warnings only, don't fail validation
         
         return valid

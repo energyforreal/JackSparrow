@@ -68,7 +68,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
     }
   }, [symbol, isConnected])
 
-  // Handle WebSocket market tick updates
+  // Handle WebSocket market tick updates - prioritize these over polling
   useEffect(() => {
     if (lastMessage?.type === 'market_tick') {
       const tickData = lastMessage.data as TickerData

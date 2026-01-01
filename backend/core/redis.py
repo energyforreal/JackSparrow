@@ -146,7 +146,7 @@ async def get_redis(required: bool = False) -> Optional[Redis]:
     Returns:
         Redis client or None if unavailable and not required.
     """
-    global _redis_client, _redis_connection_failed, _reconnection_attempts
+    global _redis_client, _redis_pool, _redis_connection_failed, _reconnection_attempts
     
     # If we have a cached client, check its health
     if _redis_client is not None:

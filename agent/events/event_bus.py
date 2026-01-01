@@ -140,6 +140,11 @@ class EventBus:
         Returns:
             True if published successfully
         """
+        # EVENT BUS: Validate event is not None
+        if event is None:
+            logger.warning("EVENT BUS: Skipping publish — event is None")
+            return False
+        
         try:
             redis = await get_redis()
             
@@ -351,6 +356,52 @@ class EventBus:
                 )
                 await asyncio.sleep(1)
     
+    async def _move_to_dlq(self, redis: Redis, message_id: str, message_data: Dict[str, bytes], reason: str):
+        """Move a message to the dead letter queue.
+        
+        Args:
+            redis: Redis client
+            message_id: Original message ID
+            message_data: Original message data
+            reason: Reason for moving to DLQ
+        """
+        try:
+            # Try to extract event data if available
+            event_data_str = "{}"
+            try:
+                event_json_bytes = message_data.get(b"event") or message_data.get("event".encode("utf-8"))
+                if event_json_bytes:
+                    if isinstance(event_json_bytes, bytes):
+                        event_data_str = event_json_bytes.decode("utf-8", errors="replace")
+                    else:
+                        event_data_str = str(event_json_bytes)
+            except Exception:
+                pass
+            
+            await redis.xadd(
+                self._dead_letter_stream,
+                {
+                    "original_message_id": message_id,
+                    "failed_at": datetime.utcnow().isoformat() + "Z",
+                    "reason": reason,
+                    "event_data": event_data_str[:1000]  # Limit size
+                }
+            )
+            logger.warning(
+                "event_moved_to_dlq_validation",
+                message_id=message_id,
+                reason=reason,
+                dlq_stream=self._dead_letter_stream
+            )
+        except Exception as e:
+            logger.error(
+                "event_dlq_move_failed",
+                message_id=message_id,
+                reason=reason,
+                error=str(e),
+                exc_info=True
+            )
+    
     async def _process_message(self, message_id: str, message_data: Dict[str, bytes], redis: Redis):
         """Process a single message.
         
@@ -423,6 +474,8 @@ class EventBus:
                     message_keys=[k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k) for k in (list(message_data.keys()) if isinstance(message_data, dict) else [])],
                     message_data_type=type(message_data).__name__
                 )
+                # Move message with no event data to DLQ
+                await self._move_to_dlq(redis, message_id, message_data, "No event data in message")
                 await redis.xack(self.stream_name, self.consumer_group, message_id)
                 return
             
@@ -445,6 +498,8 @@ class EventBus:
                     event_json_type=type(event_json_bytes).__name__,
                     exc_info=True
                 )
+                # Move malformed message to DLQ instead of just acknowledging
+                await self._move_to_dlq(redis, message_id, message_data, f"Deserialization failed: {str(e)}")
                 await redis.xack(self.stream_name, self.consumer_group, message_id)
                 return
             
@@ -457,7 +512,8 @@ class EventBus:
                     event_data=str(event_dict)[:200] if event_dict else "empty",
                     event_dict_type=type(event_dict).__name__
                 )
-                # Acknowledge corrupted message to prevent retry loops
+                # Move invalid message to DLQ instead of just acknowledging
+                await self._move_to_dlq(redis, message_id, message_data, "Empty or invalid event dictionary")
                 await redis.xack(self.stream_name, self.consumer_group, message_id)
                 return
             
@@ -469,7 +525,8 @@ class EventBus:
                     reason="Missing required fields (event_type or source)",
                     event_data=str(event_dict)[:200]
                 )
-                # Acknowledge corrupted message to prevent retry loops
+                # Move invalid message to DLQ instead of just acknowledging
+                await self._move_to_dlq(redis, message_id, message_data, "Missing required fields (event_type or source)")
                 await redis.xack(self.stream_name, self.consumer_group, message_id)
                 return
             

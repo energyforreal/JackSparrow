@@ -43,8 +43,14 @@ class TimeService:
         server_time = TimeService.get_server_time()
         timestamp_ms = TimeService.get_timestamp_ms()
         
+        # Ensure timestamp includes 'Z' suffix for UTC (ISO 8601 format)
+        iso_time = server_time.isoformat()
+        if not iso_time.endswith('Z') and '+' not in iso_time and iso_time.count('-') < 3:
+            # Add 'Z' suffix if timezone not present
+            iso_time = iso_time + 'Z'
+        
         return {
-            "server_time": server_time.isoformat(),
+            "server_time": iso_time,
             "timestamp_ms": timestamp_ms,
             "timezone": "UTC"
         }

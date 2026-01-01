@@ -3,7 +3,7 @@ Pydantic response models for API endpoints.
 """
 
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -61,7 +61,7 @@ class HealthResponse(BaseModel):
         description="Reasons for degraded status"
     )
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Health check timestamp"
     )
 
@@ -245,7 +245,7 @@ class PredictResponse(BaseModel):
         description="Market context used"
     )
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Prediction timestamp"
     )
 
@@ -410,7 +410,7 @@ class MarketDataResponse(BaseModel):
         example=50000.0
     )
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Data timestamp"
     )
 
@@ -464,7 +464,7 @@ class ErrorResponse(BaseModel):
         error_data = {
             "code": code,
             "message": message,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if details:
             error_data["details"] = details

@@ -162,7 +162,11 @@ async def get_portfolio_summary(
                     positions=[]
                 )
         
-        return PortfolioSummaryResponse(**summary)
+        # Use shared serialization function to ensure identical format with WebSocket
+        serialized_summary = portfolio_service.serialize_portfolio_summary(summary)
+        
+        # Convert serialized summary to PortfolioSummaryResponse (Pydantic handles float to Decimal)
+        return PortfolioSummaryResponse(**serialized_summary)
         
     except HTTPException:
         # Re-raise HTTP exceptions (like the 503 above)

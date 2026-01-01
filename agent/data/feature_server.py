@@ -260,6 +260,10 @@ class MCPFeatureServer:
         quality_score = self._calculate_quality_score(features)
         overall_quality = self._determine_overall_quality(quality_score)
         
+        # FEATURE SERVER: Log warning if quality is DEGRADED
+        if overall_quality == FeatureQuality.DEGRADED:
+            logger.warning("FEATURE SERVER: DEGRADED — Sending partial features")
+        
         return MCPFeatureResponse(
             features=features,
             quality_score=quality_score,

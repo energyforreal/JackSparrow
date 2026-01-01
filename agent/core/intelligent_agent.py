@@ -259,13 +259,15 @@ class IntelligentAgent:
                 "agent_websocket_server_initialized",
                 service="agent",
                 host=settings.agent_websocket_host,
-                port=settings.agent_websocket_port
+                port=settings.agent_websocket_port,
+                url=f"ws://{settings.agent_websocket_host}:{settings.agent_websocket_port}"
             )
         except Exception as e:
             logger.warning(
                 "agent_websocket_server_init_failed",
                 service="agent",
                 error=str(e),
+                error_type=type(e).__name__,
                 message="Agent will continue without WebSocket server, using Redis queue only",
                 exc_info=True
             )
@@ -417,8 +419,11 @@ class IntelligentAgent:
         # Start event bus consumption (replaces polling loop)
         event_task = asyncio.create_task(event_bus.start_consuming())
         
+        # Start periodic monitoring task
+        monitoring_task = asyncio.create_task(self._periodic_monitoring())
+        
         try:
-            await asyncio.gather(command_task, event_task)
+            await asyncio.gather(command_task, event_task, monitoring_task)
         except asyncio.CancelledError:
             pass
     
@@ -796,6 +801,81 @@ class IntelligentAgent:
     
     # Main loop replaced by event bus consumption
     # Events drive all agent behavior now
+    
+    async def _periodic_monitoring(self):
+        """Periodic monitoring task to log agent status and decision generation metrics."""
+        import time
+        
+        last_decision_time = None
+        last_candle_time = None
+        
+        # Subscribe to decision ready events to track last decision time
+        async def track_decision(event):
+            nonlocal last_decision_time
+            last_decision_time = time.time()
+        
+        # Subscribe to candle closed events to track last candle time
+        async def track_candle(event):
+            nonlocal last_candle_time
+            last_candle_time = time.time()
+        
+        from agent.events.schemas import DecisionReadyEvent, CandleClosedEvent
+        event_bus.subscribe(EventType.DECISION_READY, track_decision)
+        event_bus.subscribe(EventType.CANDLE_CLOSED, track_candle)
+        
+        while self.running:
+            try:
+                await asyncio.sleep(300)  # Log every 5 minutes
+                
+                current_state = self.state_machine.current_state.value
+                time_since_last_decision = None
+                time_since_last_candle = None
+                
+                if last_decision_time:
+                    time_since_last_decision = time.time() - last_decision_time
+                
+                if last_candle_time:
+                    time_since_last_candle = time.time() - last_candle_time
+                
+                logger.info(
+                    "agent_periodic_status",
+                    service="agent",
+                    state=current_state,
+                    time_since_last_decision_seconds=time_since_last_decision,
+                    time_since_last_candle_seconds=time_since_last_candle,
+                    message="Agent periodic status check - decision generation monitoring"
+                )
+                
+                # Log warning if no decisions generated in last 30 minutes
+                if time_since_last_decision and time_since_last_decision > 1800:
+                    logger.warning(
+                        "agent_no_decisions_generated",
+                        service="agent",
+                        state=current_state,
+                        time_since_last_decision_minutes=int(time_since_last_decision / 60),
+                        message="No decisions generated in last 30 minutes - check candle close events and decision pipeline"
+                    )
+                
+                # Log warning if no candle close events in last 20 minutes
+                if time_since_last_candle and time_since_last_candle > 1200:
+                    logger.warning(
+                        "agent_no_candle_closes",
+                        service="agent",
+                        state=current_state,
+                        time_since_last_candle_minutes=int(time_since_last_candle / 60),
+                        message="No candle close events detected in last 20 minutes - check market data service"
+                    )
+                    
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(
+                    "agent_periodic_monitoring_error",
+                    service="agent",
+                    error=str(e),
+                    exc_info=True
+                )
+                await asyncio.sleep(60)  # Wait before retrying on error
 
     async def _send_response(self, request_id: str, payload: Dict[str, Any], ttl: int = 120):
         """Send response back to backend via Redis key-value store.
