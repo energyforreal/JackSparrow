@@ -121,12 +121,97 @@ jobs:
         run: npm test -- --ci
         working-directory: frontend
 
+  functionality-tests:
+    name: Functionality tests (including frontend)
+    runs-on: ubuntu-latest
+    needs:
+      - python-tests
+      - frontend-tests
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jacksparrow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install -r agent/requirements.txt
+          pip install aiohttp websockets
+
+      - name: Install Frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Set up environment variables
+        run: |
+          echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/jacksparrow_test" >> $GITHUB_ENV
+          echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+          echo "API_KEY=test-api-key" >> $GITHUB_ENV
+          echo "FRONTEND_URL=http://localhost:3000" >> $GITHUB_ENV
+
+      - name: Start services (backend, agent, frontend)
+        run: |
+          # Start services in background
+          python tools/commands/start_parallel.py &
+          sleep 30  # Wait for services to start
+        continue-on-error: true
+
+      - name: Run functionality tests
+        run: |
+          python tools/commands/start_and_test.py --no-startup --test-mode grouped
+        continue-on-error: true
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functionality-test-reports
+          path: |
+            tests/functionality/reports/*.json
+            tests/functionality/reports/*.md
+          retention-days: 7
+
   docker-images:
     name: Build & push Docker images
     runs-on: ubuntu-latest
     needs:
       - python-tests
       - frontend-tests
+      - functionality-tests
     strategy:
       matrix:
         include:

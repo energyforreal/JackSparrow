@@ -330,16 +330,32 @@ python tools/commands/start_parallel.py
 # Windows: .\tools\commands\start.ps1
 ```
 
-The startup system uses a Python-based parallel process manager that launches all services simultaneously:
-- Backend (`uvicorn backend.api.main:app --port 8000`)
-- Agent (`python -m agent.core.intelligent_agent`)
-- Frontend (`npm run dev`)
+The startup system uses a Python-based parallel process manager that performs a comprehensive startup sequence:
+
+#### Startup Sequence
+
+The `start_parallel.py` script executes a 4-step validation and startup process:
+
+1. **Environment Loading**: Loads and validates the root `.env` configuration file
+2. **Paper Trading Validation**: Verifies safe paper trading mode (blocks live trading startup)
+3. **Redis Availability**: Checks Redis service and attempts auto-startup if available
+4. **Configuration Validation**: Runs comprehensive validation including:
+   - Environment variables (`validate-env.py`)
+   - System prerequisites (Python, Node.js, PostgreSQL, Redis)
+   - Optional ML model validation
+5. **Service Dependencies**: Ensures all virtual environments and dependencies are set up
+6. **Parallel Startup**: Launches backend, agent, and frontend services simultaneously
+7. **Health Checks**: Performs post-startup HTTP health verification
+8. **Monitoring Dashboard**: Activates real-time monitoring with data freshness tracking
 
 **Key Benefits of Parallel Startup:**
 - **Faster initialization**: All services start simultaneously instead of sequentially
 - **Real-time log streaming**: Color-coded logs from all services in a single console
 - **Cross-platform**: Single Python script works on Windows, macOS, and Linux
-- **Better monitoring**: Service health checks and automatic dependency setup
+- **Built-in validation**: Automatic configuration and prerequisite validation
+- **Safety mechanisms**: Paper trading validation prevents accidental live trading
+- **Health monitoring**: Automatic health checks and monitoring dashboard
+- **Comprehensive error handling**: Clear error messages with troubleshooting guidance
 
 Each service logs to `logs/{service}.log` while also streaming to the console with service name prefixes. The command automatically sets up virtual environments and installs dependencies if needed.
 
@@ -864,6 +880,151 @@ brew services start grafana
 4. Save and Test
 ---
 
+## Startup Validation System
+
+The startup system includes comprehensive validation to ensure safe and reliable operation:
+
+### Paper Trading Validation
+
+**Safety Feature**: Prevents accidental live trading by validating environment variables before startup.
+
+- **Environment Variables Checked**: `PAPER_TRADING_MODE`, `TRADING_MODE`
+- **Validation Logic**: Blocks startup if live trading mode is detected
+- **Error Messages**: Clear warnings with configuration guidance
+- **Monitoring Integration**: Status displayed in monitoring dashboard
+
+**Configuration Examples**:
+```bash
+# Safe paper trading (default)
+PAPER_TRADING_MODE=true
+TRADING_MODE=paper
+
+# Live trading (blocks startup with warnings)
+TRADING_MODE=live
+```
+
+### Environment Variable Validation
+
+**Script**: `scripts/validate-env.py`
+
+Validates the root `.env` file for:
+- Required database connection strings
+- API credentials (Delta Exchange)
+- Security keys (JWT, API keys)
+- Frontend configuration variables
+- Optional service configurations
+
+**Automatic Execution**: Runs during startup sequence Step 3.
+
+### Prerequisite Validation
+
+**Script**: `tools/commands/validate-prerequisites.py`
+
+Validates system requirements:
+- Python 3.11+ availability and version
+- Node.js 18+ availability and version
+- PostgreSQL connection and version
+- Redis connection and version
+
+**Automatic Execution**: Runs during startup sequence Step 3.
+
+### Optional Model Validation
+
+**Environment Variable**: `VALIDATE_MODELS_ON_STARTUP=true`
+
+Validates ML model files before startup:
+- Model file existence and integrity
+- Model loading capability
+- Basic prediction functionality
+
+**Default Behavior**: Disabled (set to `false`) for faster startup.
+
+## Health Checks
+
+The system performs comprehensive health checks after service startup:
+
+### Post-Startup Health Verification
+
+**Automatic Execution**: Runs after all services start successfully.
+
+**Services Checked**:
+- **Backend**: HTTP GET to `http://localhost:8000/api/v1/health`
+- **Feature Server**: HTTP GET to `http://localhost:8001/health`
+- **Frontend**: HTTP GET to configured frontend port (default: 3000)
+
+**Success Criteria**:
+- HTTP 200 status code
+- Response contains expected health data
+- Services respond within timeout (default: 5 seconds)
+
+**Error Handling**: Startup continues with warnings if health checks fail.
+
+### Health Check Commands
+
+```bash
+# Check all services
+python tools/commands/health_check.py
+
+# Enhanced health validation with detailed reporting
+python tools/commands/validate-health.py
+```
+
+## Monitoring Dashboard
+
+The startup system includes a real-time monitoring dashboard that provides comprehensive system visibility:
+
+### Dashboard Features
+
+**Real-time Updates**: Refreshes every 2 seconds with current system status.
+
+**Service Status Panel**:
+- Backend service status (Running/Stopped)
+- Agent service status (Running/Stopped)
+- Frontend service status (Running/Stopped)
+
+**Paper Trading Status**:
+- Clear display of paper/live trading mode
+- Safety warnings for live trading configuration
+
+**WebSocket Monitoring**:
+- Connection status (Connected/Disconnected)
+- Message freshness tracking per message type
+- Stale message detection with thresholds
+
+**Data Freshness Tracking**:
+- Age tracking for agent_state, market_tick, signal_update messages
+- Color-coded freshness indicators (Fresh/Warning/Stale)
+- Overall freshness score calculation
+
+**Signal Generation Statistics**:
+- Total signals generated
+- Average interval between signals
+- Signals per hour frequency
+- Last signal timestamp and age
+
+### Message Types Monitored
+
+- `agent_state`: Agent state transitions and status
+- `market_tick`: Real-time market data updates
+- `signal_update`: Trading signal generation
+- `reasoning_chain_update`: AI reasoning process updates
+- `model_prediction_update`: ML model prediction results
+- `portfolio_update`: Portfolio status changes
+- `trade_executed`: Trade execution confirmations
+- `health_update`: Service health status updates
+
+### Freshness Thresholds
+
+- **Fresh**: < 30 seconds old
+- **Warning**: 30-60 seconds old
+- **Stale**: > 60 seconds old
+
+### Dashboard Activation
+
+The monitoring dashboard starts automatically when using `start_parallel.py` and runs in the background alongside the services.
+
+---
+
 ## Operations & Maintenance Commands
 Run these commands from the project root (`JackSparrow/`). Each command is available as a shell script under `tools/commands/` (`.sh` for macOS/Linux, `.ps1` for Windows PowerShell) or can be run directly as Python scripts.
 
@@ -955,6 +1116,58 @@ What is collected:
 - Diagnostic output stored in `logs/error/error-dump-<timestamp>.md`
 
 For deeper inspection guidance, see the [Backend Documentation – Command Operations](06-backend.md#command-operations).
+
+### `validate-prerequisites`
+Validate system prerequisites before starting services.
+
+- macOS/Linux
+  ```bash
+  python tools/commands/validate-prerequisites.py
+  ```
+- Windows PowerShell
+  ```powershell
+  python tools\commands\validate-prerequisites.py
+  ```
+
+**Validates:**
+- Python 3.11+ availability and version
+- Node.js 18+ availability and version
+- PostgreSQL connection and version
+- Redis connection and version
+
+### `health_check`
+Perform health checks on running services.
+
+- macOS/Linux
+  ```bash
+  python tools/commands/health_check.py
+  ```
+- Windows PowerShell
+  ```powershell
+  python tools\commands\health_check.py
+  ```
+
+**Checks:**
+- Backend service health (`http://localhost:8000/api/v1/health`)
+- Feature server health (`http://localhost:8001/health`)
+- Frontend accessibility
+
+### `validate-health`
+Enhanced health validation with detailed reporting.
+
+- macOS/Linux
+  ```bash
+  python tools/commands/validate-health.py
+  ```
+- Windows PowerShell
+  ```powershell
+  python tools\commands\validate-health.py
+  ```
+
+**Provides:**
+- Detailed health status for all services
+- Performance metrics and latency information
+- Recommendations for failed services
 
 ---
 
@@ -1072,6 +1285,78 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 3. Verify feature definitions
 4. Check data quality
 5. Review feature server health
+
+---
+
+#### Paper Trading Validation Failed
+
+**Problem**: Startup blocked with "PAPER TRADING (Safe)" or live trading warnings
+
+**Solutions**:
+1. Check `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
+2. Set `PAPER_TRADING_MODE=true` or `TRADING_MODE=paper` for safe operation
+3. Remove or comment out live trading configuration
+4. Verify `.env` file has correct paper trading settings
+
+---
+
+#### Environment Validation Failed
+
+**Problem**: `validate-env.py` reports configuration errors
+
+**Solutions**:
+1. Run manual validation: `python scripts/validate-env.py`
+2. Check required environment variables are set:
+   - `DATABASE_URL` - PostgreSQL connection string
+   - `DELTA_EXCHANGE_API_KEY` - API credentials
+   - `DELTA_EXCHANGE_API_SECRET` - API credentials
+   - `JWT_SECRET_KEY` - Security key
+   - `API_KEY` - API access key
+3. Verify variable formats and values
+4. Check `.env` file permissions and location
+
+---
+
+#### Prerequisite Validation Failed
+
+**Problem**: `validate-prerequisites.py` reports system requirement issues
+
+**Solutions**:
+1. Run manual validation: `python tools/commands/validate-prerequisites.py`
+2. Verify Python 3.11+: `python --version`
+3. Verify Node.js 18+: `node --version`
+4. Check PostgreSQL connection: `psql -d trading_agent -c "SELECT 1"`
+5. Check Redis connection: `redis-cli ping`
+6. Install missing dependencies
+7. Update PATH if commands not found
+
+---
+
+#### Model Validation Failed
+
+**Problem**: Model validation fails during startup (when `VALIDATE_MODELS_ON_STARTUP=true`)
+
+**Solutions**:
+1. Check model files exist in `agent/model_storage/`
+2. Verify model file integrity and format
+3. Check available disk space and memory
+4. Review model loading error messages
+5. Disable validation with `VALIDATE_MODELS_ON_STARTUP=false` for faster startup
+6. Re-train models if corrupted: `python scripts/train_models.py`
+
+---
+
+#### Health Check Failures
+
+**Problem**: Services fail health checks after startup
+
+**Solutions**:
+1. Run manual health check: `python tools/commands/health_check.py`
+2. Check service logs in `logs/` directory
+3. Verify ports are available (8000, 8001, 3000)
+4. Check database and Redis connectivity
+5. Restart services if health checks fail
+6. Review detailed health validation: `python tools/commands/validate-health.py`
 
 ---
 

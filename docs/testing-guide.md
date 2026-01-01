@@ -7,6 +7,7 @@ This guide provides comprehensive instructions for running tests and validating 
 The project includes comprehensive test suites covering:
 - Unit tests for individual components
 - Integration tests for component interactions
+- **Functionality tests** for end-to-end system validation (including frontend)
 - Validation scripts for fix verification
 - Encoding tests for cross-platform compatibility
 
@@ -65,6 +66,39 @@ pytest tests/integration/test_model_loading.py -v
 pytest tests/integration/test_startup_scripts.py -v
 ```
 
+#### Functionality Tests
+
+**Complete System Tests (Backend + Agent + Frontend)**
+```bash
+# Run all functionality tests including frontend
+python tools/commands/start_and_test.py
+
+# Run specific test groups
+python tools/commands/start_and_test.py --groups infrastructure,core-services
+
+# Run tests without starting services (assume already running)
+python tools/commands/start_and_test.py --no-startup
+```
+
+**Frontend Functionality Tests**
+```bash
+# Frontend tests are included in the integration test group
+python tools/commands/start_and_test.py --groups integration
+```
+
+The functionality test suite includes:
+- **Infrastructure Tests**: Database, Redis, Delta Exchange connectivity
+- **Core Services Tests**: Feature computation, ML models, WebSocket communication
+- **Agent Logic Tests**: Decision making, risk management, signal generation
+- **Integration Tests**: Agent communication, portfolio management, **frontend functionality**
+
+**Frontend Functionality Test Coverage**:
+- Frontend accessibility (HTTP endpoint)
+- Frontend API integration (backend communication)
+- Frontend WebSocket connection (real-time data)
+- Frontend health endpoints
+- CORS headers validation
+
 ### Validation Scripts
 
 #### Validate Fixes
@@ -107,6 +141,7 @@ python tools/commands/test-startup-sequence.py
 
 - **Unit Tests**: Core components have unit test coverage
 - **Integration Tests**: Key integration points are tested
+- **Functionality Tests**: End-to-end system validation including frontend (101+ tests)
 - **Validation Scripts**: All fixes are validated
 
 ### Coverage Requirements
@@ -176,9 +211,21 @@ Tests use minimal environment variables. Default test values are set in test fil
 
 Tests should be run:
 - Before committing code
-- In CI/CD pipeline
+- In CI/CD pipeline (includes functionality tests with frontend)
 - Before releases
 - After major refactoring
+
+### CI/CD Test Execution
+
+The CI/CD pipeline automatically runs:
+1. **Unit Tests**: Python unit tests for backend and agent
+2. **Frontend Tests**: Next.js/React unit tests
+3. **Functionality Tests**: Complete system tests including frontend integration
+   - Services are started automatically
+   - Tests run against running services
+   - Reports are uploaded as artifacts
+
+See `.github/workflows/cicd.yml` for the complete CI/CD configuration.
 
 ## Test Maintenance
 

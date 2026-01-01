@@ -64,8 +64,10 @@ JackSparrow is a **production-ready AI-powered autonomous trading agent** design
 **Purpose**: Real-time and historical market data collection from Delta Exchange
 
 **Features**:
-- Real-time ticker data streaming
-- Historical OHLCV data retrieval
+- **Continuous price monitoring**: Real-time BTCUSD ticker data (0.5-second polling intervals)
+- **Fluctuation-based signal generation**: ML pipeline triggered on ≥0.5% price changes
+- **Instant frontend updates**: Real-time price display updates on any price movement
+- Historical OHLCV data retrieval for analysis
 - Order book data fetching
 - Circuit breaker protection for API failures
 - Automatic retry with exponential backoff
@@ -79,6 +81,29 @@ JackSparrow is a **production-ready AI-powered autonomous trading agent** design
 **Data Flow**:
 ```
 Delta Exchange API → Delta Client → Market Data Service → Feature Server → Agent Core
+```
+
+### 1.1 Signal Generation Behavior
+
+**Overview**: JackSparrow uses fluctuation-based signal generation instead of time-based intervals for more responsive trading.
+
+**Key Changes**:
+- **Before**: Signals generated every 15 minutes (candle close events)
+- **After**: Signals generated on ≥0.5% BTCUSD price fluctuations
+
+**Configuration**:
+- `PRICE_FLUCTUATION_THRESHOLD_PCT`: Threshold for triggering ML pipeline (default: 0.5%)
+- `FAST_POLL_INTERVAL`: Price monitoring frequency (default: 0.5 seconds)
+
+**Benefits**:
+- **Responsive**: Captures major market moves immediately
+- **Adaptive**: Frequency adjusts automatically to market volatility
+- **Efficient**: Reduces unnecessary computation during stable periods
+- **Real-time UI**: Frontend shows instant price updates regardless of signal generation
+
+**Event Flow**:
+```
+Price Change ≥0.5% → PriceFluctuationEvent → Feature Computation → ML Models → Reasoning → Decision
 ```
 
 ### 2. Feature Engineering

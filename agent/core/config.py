@@ -295,7 +295,17 @@ class Settings(BaseSettings):
     update_interval: int = Field(
         default=900,
         env="UPDATE_INTERVAL",
-        description="Update interval in seconds"
+        description="Update interval in seconds (legacy - used for candle-based operations)"
+    )
+    price_fluctuation_threshold_pct: float = Field(
+        default=0.5,
+        env="PRICE_FLUCTUATION_THRESHOLD_PCT",
+        description="Percentage threshold for price fluctuations that trigger ML pipeline (e.g., 0.5 = 0.5%)"
+    )
+    fast_poll_interval: float = Field(
+        default=0.5,
+        env="FAST_POLL_INTERVAL",
+        description="Fast polling interval in seconds for continuous ticker monitoring (controls API call frequency)"
     )
     timeframes: str = Field(
         default="15m,1h,4h",
@@ -337,6 +347,36 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             cleaned = [tf.strip() for tf in value.split(",") if tf.strip()]
             return ",".join(dict.fromkeys(cleaned)) or "15m"
+
+    @field_validator("price_fluctuation_threshold_pct", mode="before")
+    @classmethod
+    def validate_price_fluctuation_threshold(cls, value: Optional[float]) -> float:
+        """Validate price fluctuation threshold is positive."""
+        if value is None:
+            return 0.5
+        if isinstance(value, (int, float)):
+            threshold = float(value)
+            if threshold <= 0:
+                raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT must be positive")
+            if threshold > 100:
+                raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT cannot exceed 100%")
+            return threshold
+        raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT must be a number")
+
+    @field_validator("fast_poll_interval", mode="before")
+    @classmethod
+    def validate_fast_poll_interval(cls, value: Optional[float]) -> float:
+        """Validate fast poll interval is reasonable."""
+        if value is None:
+            return 0.5
+        if isinstance(value, (int, float)):
+            interval = float(value)
+            if interval <= 0:
+                raise ValueError("FAST_POLL_INTERVAL must be positive")
+            if interval > 60:
+                raise ValueError("FAST_POLL_INTERVAL cannot exceed 60 seconds (too slow for real-time)")
+            return interval
+        raise ValueError("FAST_POLL_INTERVAL must be a number")
         raise ValueError("TIMEFRAMES must be a comma-separated string")
 
     @model_validator(mode="after")

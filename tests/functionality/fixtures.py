@@ -93,7 +93,14 @@ class SharedResources:
     async def get_backend_client(self) -> aiohttp.ClientSession:
         """Get or create shared backend HTTP client."""
         if self._backend_client is None or self._backend_client.closed:
-            self._backend_client = aiohttp.ClientSession(base_url=config.backend_url)
+            # Add API key header if available
+            headers = {}
+            if config.api_key:
+                headers["X-API-Key"] = config.api_key
+            self._backend_client = aiohttp.ClientSession(
+                base_url=config.backend_url,
+                headers=headers
+            )
         return self._backend_client
     
     async def get_agent_websocket(self):

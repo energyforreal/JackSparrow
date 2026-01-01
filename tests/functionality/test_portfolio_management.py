@@ -44,7 +44,7 @@ class PortfolioManagementTestSuite(TestSuiteBase):
             if self.backend_client:
                 # Test portfolio endpoint if available
                 try:
-                    async with self.backend_client.get("/api/v1/portfolio") as resp:
+                    async with self.backend_client.get("/api/v1/portfolio/summary") as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             result.details["portfolio_endpoint_available"] = True
@@ -114,7 +114,7 @@ class PortfolioManagementTestSuite(TestSuiteBase):
             if self.backend_client:
                 # Test positions endpoint
                 try:
-                    async with self.backend_client.get("/api/v1/positions") as resp:
+                    async with self.backend_client.get("/api/v1/portfolio/positions") as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             result.details["positions_endpoint_available"] = True
@@ -169,7 +169,7 @@ class PortfolioManagementTestSuite(TestSuiteBase):
             if self.backend_client:
                 # Test performance/metrics endpoint
                 try:
-                    async with self.backend_client.get("/api/v1/performance") as resp:
+                    async with self.backend_client.get("/api/v1/portfolio/performance") as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             result.details["performance_endpoint_available"] = True

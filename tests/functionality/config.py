@@ -29,6 +29,9 @@ class TestConfig:
     delta_exchange_api_key: Optional[str] = None
     delta_exchange_api_secret: Optional[str] = None
     
+    # Backend API Authentication
+    api_key: Optional[str] = None
+    
     # Test execution
     max_workers: int = 4
     timeout_seconds: int = 300
@@ -61,7 +64,8 @@ class TestConfig:
             "test_agent_communication",
             "test_data_freshness",
             "test_portfolio_management",
-            "test_learning_system"
+            "test_learning_system",
+            "test_frontend_functionality"
         ]
     })
     
@@ -82,11 +86,31 @@ class TestConfig:
         self.backend_url = os.getenv("TEST_BACKEND_URL", self.backend_url)
         self.agent_websocket_url = os.getenv("TEST_AGENT_WS_URL", self.agent_websocket_url)
         self.backend_websocket_url = os.getenv("TEST_BACKEND_WS_URL", self.backend_websocket_url)
-        self.database_url = os.getenv("DATABASE_URL", self.database_url)
-        self.redis_url = os.getenv("REDIS_URL", self.redis_url)
+        self.frontend_url = os.getenv("FRONTEND_URL", os.getenv("TEST_FRONTEND_URL", self.frontend_url))
+        
+        # Load database and Redis URLs - try multiple sources
+        self.database_url = (
+            os.getenv("DATABASE_URL") or 
+            os.getenv("TEST_DATABASE_URL") or 
+            self.database_url
+        )
+        self.redis_url = (
+            os.getenv("REDIS_URL") or 
+            os.getenv("TEST_REDIS_URL") or 
+            self.redis_url or
+            "redis://localhost:6379"  # Default fallback
+        )
+        
         self.delta_exchange_base_url = os.getenv("DELTA_EXCHANGE_BASE_URL", self.delta_exchange_base_url)
         self.delta_exchange_api_key = os.getenv("DELTA_EXCHANGE_API_KEY", self.delta_exchange_api_key)
         self.delta_exchange_api_secret = os.getenv("DELTA_EXCHANGE_API_SECRET", self.delta_exchange_api_secret)
+        
+        # Load API key for backend authentication
+        self.api_key = (
+            os.getenv("API_KEY") or 
+            os.getenv("TEST_API_KEY") or 
+            self.api_key
+        )
         
         # Startup timing configuration from environment
         self.startup_wait_timeout = int(os.getenv("STARTUP_WAIT_TIMEOUT", str(self.startup_wait_timeout)))
@@ -95,6 +119,28 @@ class TestConfig:
         
         # Create report directory
         self.report_dir.mkdir(parents=True, exist_ok=True)
+    
+    def validate_config(self) -> tuple[bool, list[str]]:
+        """Validate configuration and return issues.
+        
+        Returns:
+            Tuple of (is_valid, list_of_issues)
+        """
+        issues = []
+        
+        # Database URL validation
+        if not self.database_url:
+            issues.append("Database URL not configured. Set DATABASE_URL or TEST_DATABASE_URL environment variable.")
+        elif not self.database_url.startswith(("postgresql://", "postgres://")):
+            issues.append(f"Database URL format may be invalid. Expected postgresql:// or postgres://, got: {self.database_url[:20]}...")
+        
+        # Redis URL validation
+        if not self.redis_url:
+            issues.append("Redis URL not configured. Set REDIS_URL or TEST_REDIS_URL environment variable.")
+        elif not self.redis_url.startswith("redis://"):
+            issues.append(f"Redis URL format may be invalid. Expected redis://, got: {self.redis_url[:20]}...")
+        
+        return len(issues) == 0, issues
     
     def get_test_group(self, test_name: str) -> Optional[str]:
         """Get the test group for a given test name."""

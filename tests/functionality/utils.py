@@ -208,14 +208,25 @@ class ServiceHealthChecker:
             return {"status": "down", "error": str(e)}
     
     @staticmethod
-    async def check_redis(url: str, timeout: float = 2.0) -> Dict[str, Any]:
-        """Check Redis connectivity."""
+    async def check_redis(url: str, timeout: float = 5.0) -> Dict[str, Any]:
+        """Check Redis connectivity.
+        
+        Args:
+            url: Redis connection URL
+            timeout: Connection timeout in seconds (default: 5.0)
+            
+        Returns:
+            Dictionary with status and optional error message
+        """
         try:
             import redis.asyncio as redis
+            # Use asyncio timeout wrapper for better control
             client = redis.from_url(url, socket_connect_timeout=timeout)
-            await client.ping()
+            await asyncio.wait_for(client.ping(), timeout=timeout)
             await client.aclose()
             return {"status": "up"}
+        except asyncio.TimeoutError:
+            return {"status": "down", "error": f"Timeout connecting to server (>{timeout}s)"}
         except Exception as e:
             return {"status": "down", "error": str(e)}
     

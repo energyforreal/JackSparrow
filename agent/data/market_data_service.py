@@ -14,7 +14,7 @@ from agent.data.delta_client import DeltaExchangeClient, CircuitBreakerOpenError
 from agent.core.redis import get_cache, set_cache
 from agent.core.config import settings
 from agent.events.event_bus import event_bus
-from agent.events.schemas import MarketTickEvent, CandleClosedEvent, EventType
+from agent.events.schemas import MarketTickEvent, CandleClosedEvent, PriceFluctuationEvent, EventType
 
 logger = structlog.get_logger()
 
@@ -35,6 +35,9 @@ class MarketDataService:
         self._tick_throttle_ms = 100  # Throttle ticks to max 10 per second per symbol
         self._last_tick_time: Dict[str, datetime] = {}
         self._tick_force_emit_interval = 5.0  # Force emit tick every 5 seconds even if price hasn't changed much
+        # New: Track last major price change for fluctuation threshold
+        self._last_major_price: Dict[str, float] = {}
+        self._price_fluctuation_threshold_pct = settings.price_fluctuation_threshold_pct
     
     async def initialize(self):
         """Initialize market data service."""
@@ -79,27 +82,25 @@ class MarketDataService:
         logger.info("market_data_stream_stopped")
     
     async def _stream_loop(self, interval: str):
-        """Main streaming loop."""
+        """Main streaming loop - now continuously monitors price fluctuations."""
         consecutive_errors = 0
         max_consecutive_errors = 10
-        
+
         while self.streaming_running:
             try:
                 for symbol in self.streaming_symbols:
-                    await self._check_and_emit_ticker(symbol)
+                    # Continuously monitor tickers for price fluctuations
+                    await self._check_and_emit_ticker_with_fluctuation(symbol)
+                    # Keep candle monitoring for longer-term analysis (less frequent)
                     await self._check_and_emit_candle(symbol, interval)
-                
+
                 # Reset error count on successful iteration
                 consecutive_errors = 0
-                
-                # Sleep based on interval and UPDATE_INTERVAL config
-                # Use UPDATE_INTERVAL as the base polling frequency, but respect interval minimum
-                interval_seconds = self._get_interval_seconds(interval)
-                update_interval = settings.update_interval
-                # Use the smaller of: UPDATE_INTERVAL or interval-based sleep (but at least 1 second)
-                sleep_seconds = max(1, min(update_interval, interval_seconds))
-                await asyncio.sleep(sleep_seconds)
-                
+
+                # Use fast polling interval for continuous price monitoring
+                # This controls how often we check for price updates
+                await asyncio.sleep(settings.fast_poll_interval)
+
             except asyncio.CancelledError:
                 break
             except CircuitBreakerOpenError as e:
@@ -238,7 +239,55 @@ class MarketDataService:
                 error=str(e),
                 exc_info=True
             )
-    
+
+    async def _check_and_emit_ticker_with_fluctuation(self, symbol: str):
+        """Check ticker and emit both tick and fluctuation events as needed.
+
+        Emits MarketTickEvent for UI updates and PriceFluctuationEvent for ML pipeline triggers.
+        """
+        try:
+            ticker = await self.get_ticker(symbol)
+            if not ticker:
+                return
+
+            current_price = ticker["price"]
+
+            # First, handle regular tick emission for UI updates
+            await self._check_and_emit_ticker(symbol)
+
+            # Now check for major price fluctuations that should trigger ML pipeline
+            last_major_price = self._last_major_price.get(symbol)
+
+            if last_major_price is not None:
+                # Calculate percentage change from last major fluctuation
+                price_change_pct = abs((current_price - last_major_price) / last_major_price) * 100
+
+                # Check if change exceeds fluctuation threshold
+                if price_change_pct >= self._price_fluctuation_threshold_pct:
+                    # Emit fluctuation event for ML pipeline
+                    await self._on_price_fluctuation(
+                        symbol=symbol,
+                        current_price=current_price,
+                        previous_price=last_major_price,
+                        change_pct=price_change_pct,
+                        volume=ticker["volume"],
+                        threshold_pct=self._price_fluctuation_threshold_pct
+                    )
+
+                    # Update last major price
+                    self._last_major_price[symbol] = current_price
+            else:
+                # First price reading - set baseline
+                self._last_major_price[symbol] = current_price
+
+        except Exception as e:
+            logger.error(
+                "market_data_ticker_fluctuation_check_error",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True
+            )
+
     async def _check_and_emit_candle(self, symbol: str, interval: str):
         """Check for new candle and emit candle closed event."""
         try:
@@ -368,7 +417,57 @@ class MarketDataService:
                 error=str(e),
                 exc_info=True
             )
-    
+
+    async def _on_price_fluctuation(self, symbol: str, current_price: float, previous_price: float,
+                                   change_pct: float, volume: float, threshold_pct: float):
+        """Handle price fluctuation event and emit to event bus.
+
+        Args:
+            symbol: Trading symbol
+            current_price: Current price
+            previous_price: Previous major price level
+            change_pct: Percentage change from previous major price
+            volume: Trading volume
+            threshold_pct: Threshold percentage that triggered this event
+        """
+        try:
+            event = PriceFluctuationEvent(
+                source="market_data_service",
+                payload={
+                    "symbol": symbol,
+                    "price": current_price,
+                    "previous_price": previous_price,
+                    "change_pct": change_pct,
+                    "volume": volume,
+                    "timestamp": datetime.now(timezone.utc),
+                    "threshold_pct": threshold_pct
+                }
+            )
+
+            await event_bus.publish(event)
+
+            logger.info(
+                "price_fluctuation_event_emitted",
+                symbol=symbol,
+                current_price=current_price,
+                previous_price=previous_price,
+                change_pct=f"{change_pct:.2f}%",
+                threshold_pct=f"{threshold_pct:.2f}%",
+                event_id=event.event_id,
+                message="Major price fluctuation detected - triggering ML pipeline"
+            )
+
+        except Exception as e:
+            logger.error(
+                "price_fluctuation_event_emit_failed",
+                symbol=symbol,
+                current_price=current_price,
+                previous_price=previous_price,
+                change_pct=change_pct,
+                error=str(e),
+                exc_info=True
+            )
+
     async def get_market_data(
         self,
         symbol: str,

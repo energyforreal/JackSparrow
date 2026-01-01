@@ -19,6 +19,8 @@ JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 ## Key Requirements
 
 - **Paper trading only** on Delta Exchange India (BTCUSD initially)
+- **Real-time price monitoring** with instant BTCUSD price updates in frontend
+- **Fluctuation-based signal generation** triggered by ≥0.5% price changes (not time-based)
 - **Reliable frontend-backend integration** with real-time communication
 - **True AI agent behavior** with autonomous decision-making capabilities
 - **Comprehensive monitoring** with health checks and degradation detection
@@ -68,9 +70,45 @@ python tools/commands/start_parallel.py
 # Restart services: Stop services (Ctrl+C) then run start command again
 ```
 
+#### Startup Sequence
+
+The `start_parallel.py` script performs a comprehensive 4-step startup sequence:
+
+1. **Environment Loading**: Loads and validates environment configuration
+2. **Paper Trading Validation**: Verifies safe paper trading mode (blocks live trading)
+3. **Redis Availability**: Ensures Redis service is available and starts it if needed
+4. **Configuration Validation**: Runs environment variable and prerequisite validation
+5. **Optional Model Validation**: Validates ML model files if `VALIDATE_MODELS_ON_STARTUP=true`
+6. **Service Dependencies**: Ensures all dependencies are properly set up
+7. **Parallel Startup**: Starts backend, agent, and frontend services simultaneously
+8. **Health Checks**: Performs post-startup health verification
+9. **Monitoring Dashboard**: Launches real-time monitoring with data freshness tracking
+
 **Note**: The startup script (`start_parallel.py`) automatically validates your configuration and prerequisites before starting services and runs health checks after services start. If validation fails, startup will stop with clear error messages. It's recommended to run validation manually first to catch issues early.
 
 **Note**: The startup system uses a Python-based parallel process manager that starts all services (backend, agent, frontend) simultaneously, providing faster initialization and real-time log streaming. See [Deployment Documentation](docs/10-deployment.md) for details.
+
+### Paper Trading Validation
+
+**JackSparrow** includes built-in safety mechanisms to prevent accidental live trading:
+
+- **Startup Validation**: The startup script validates `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
+- **Live Trading Protection**: If live trading mode is detected, startup is blocked with clear warnings
+- **Safety Indicators**: The monitoring dashboard displays paper trading status throughout operation
+- **Configuration Verification**: All configuration is validated before services start
+
+### Monitoring Dashboard
+
+The startup system includes a real-time monitoring dashboard that provides:
+
+- **Service Status**: Real-time health monitoring of backend, agent, and frontend services
+- **Paper Trading Status**: Clear indicators showing safe paper trading mode
+- **WebSocket Monitoring**: Automatic connection monitoring and message freshness tracking
+- **Data Freshness**: Per-message type freshness scores and stale message detection
+- **Signal Generation Statistics**: Frequency analysis and last signal tracking
+- **Overall Health Score**: Comprehensive system health assessment
+
+The monitoring dashboard updates every 2 seconds and provides immediate visibility into system operation.
 
 ## Containerized Deployment
 
@@ -150,6 +188,17 @@ python tools/commands/validate-health.py
 - **Monitoring**: Continuous health monitoring
 
 See [Testing Guide](docs/testing-guide.md) and [Troubleshooting Guide](docs/troubleshooting.md) for detailed information.
+
+### Common Startup Issues
+
+The startup script provides clear error messages for common issues:
+
+- **Paper Trading Validation Failed**: Check `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
+- **Environment Validation Failed**: Run `python scripts/validate-env.py` to check `.env` file configuration
+- **Prerequisite Validation Failed**: Run `python tools/commands/validate-prerequisites.py` to check Python, Node.js, PostgreSQL, Redis
+- **Model Validation Failed**: Check ML model files or disable with `VALIDATE_MODELS_ON_STARTUP=false`
+
+For detailed troubleshooting, see [Troubleshooting Guide](docs/troubleshooting.md).
 
 ## CI/CD Pipeline
 

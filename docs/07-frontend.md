@@ -1088,10 +1088,69 @@ NEXT_PUBLIC_BACKEND_API_KEY=your_api_key
 
 ---
 
+## Testing
+
+### Frontend Functionality Tests
+
+The frontend includes comprehensive functionality tests that validate:
+- Frontend accessibility and HTTP responses
+- API integration with backend
+- WebSocket connectivity and real-time data flow
+- Health endpoint availability
+- CORS headers configuration
+
+**Running Frontend Tests**:
+
+```bash
+# Run all functionality tests (includes frontend)
+python tools/commands/start_and_test.py
+
+# Run only integration tests (includes frontend functionality)
+python tools/commands/start_and_test.py --groups integration
+
+# Run tests without starting services (assume services already running)
+python tools/commands/start_and_test.py --no-startup
+```
+
+**Test Suite Location**: `tests/functionality/test_frontend_functionality.py`
+
+**Test Coverage**:
+- ✅ Frontend HTTP accessibility
+- ✅ Backend API integration
+- ✅ WebSocket connection and subscriptions
+- ✅ Health endpoint checks
+- ✅ CORS headers validation
+
+**Test Configuration**:
+
+Frontend tests use the `FRONTEND_URL` environment variable (defaults to `http://localhost:3000`). If the frontend starts on a different port, the test runner automatically configures the correct URL.
+
+**CI/CD Integration**:
+
+Frontend functionality tests are automatically run in the CI/CD pipeline as part of the functionality test suite. See `.github/workflows/cicd.yml` for details.
+
+### Frontend Unit Tests
+
+The frontend also includes React component unit tests using Jest and React Testing Library:
+
+```bash
+# Run frontend unit tests
+cd frontend
+npm test
+
+# Run with coverage
+npm test -- --coverage
+```
+
+**Test Location**: `frontend/__tests__/` and `frontend/**/*.test.tsx`
+
+---
+
 ## Related Documentation
 
 - [Backend Documentation](06-backend.md) - API specifications
 - [UI/UX Documentation](09-ui-ux.md) - Design guidelines
 - [Architecture Documentation](01-architecture.md) - System design
 - [Deployment Documentation](10-deployment.md) - Setup instructions
+- [Testing Guide](testing-guide.md) - Comprehensive testing documentation
 

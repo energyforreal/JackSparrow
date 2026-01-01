@@ -590,28 +590,168 @@ Supporting helper scripts live under `scripts/` and are invoked automatically by
 - Directory: `tools/commands/`
 - Companion docs: `tools/README.md`
 
-### Available Commands
-- `start_parallel.py`: Python-based parallel process manager (cross-platform) - starts all services simultaneously
-- `start.sh` / `start.ps1`: Wrapper scripts that invoke `start_parallel.py` for convenience
-- `restart.sh` / `restart.ps1`: Perform a clean shutdown and restart
-- `audit.sh` / `audit.ps1`: Run formatting, tests, health checks, and log review
-- `error.sh` / `error.ps1`: Gather live diagnostics and recent log summaries
+### Core Startup System
+
+#### `start_parallel.py` - Parallel Process Manager
+
+**Purpose**: Comprehensive startup system with validation, monitoring, and health checks.
+
+**Key Features**:
+- **4-Step Startup Sequence**: Environment loading → Paper trading validation → Redis check → Configuration validation → Service startup
+- **Paper Trading Safety**: Validates `PAPER_TRADING_MODE` and `TRADING_MODE` to prevent accidental live trading
+- **Configuration Validation**: Automatic environment variable and prerequisite validation
+- **Health Checks**: Post-startup HTTP health verification for all services
+- **Monitoring Dashboard**: Real-time service monitoring with data freshness tracking
+- **WebSocket Monitoring**: Automatic connection monitoring and message freshness analysis
+- **Validation Reporting**: Comprehensive validation reports with recommendations
+
+**Capabilities**:
+- Cross-platform (Windows, macOS, Linux)
+- Parallel service startup (faster than sequential)
+- Real-time log streaming with color coding
+- Graceful shutdown handling
+- Process lifecycle management
+
+**Usage**:
+```bash
+python tools/commands/start_parallel.py
+```
+
+#### `start.sh` / `start.ps1` - Convenience Wrappers
+
+**Purpose**: Shell script wrappers for `start_parallel.py`.
+
+**Platforms**:
+- `start.sh`: Linux/macOS
+- `start.ps1`: Windows PowerShell
+
+**Functionality**: Invoke `start_parallel.py` with appropriate shell integration.
+
+### Validation Commands
+
+#### `validate-prerequisites.py` - System Prerequisites
+
+**Purpose**: Validate system requirements before starting services.
+
+**Validates**:
+- Python 3.11+ availability and version
+- Node.js 18+ availability and version
+- PostgreSQL connection and version
+- Redis connection and version
+
+**Usage**:
+```bash
+python tools/commands/validate-prerequisites.py
+```
+
+#### `validate-health.py` - Enhanced Health Validation
+
+**Purpose**: Comprehensive health validation with detailed reporting.
+
+**Features**:
+- Detailed health status for all services
+- Performance metrics and latency information
+- Recommendations for failed services
+- Troubleshooting guidance
+
+**Usage**:
+```bash
+python tools/commands/validate-health.py
+```
+
+#### `health_check.py` - Basic Health Checks
+
+**Purpose**: Quick health verification for running services.
+
+**Checks**:
+- Backend service health (`http://localhost:8000/api/v1/health`)
+- Feature server health (`http://localhost:8001/health`)
+- Frontend accessibility
+
+**Usage**:
+```bash
+python tools/commands/health_check.py
+```
+
+### Testing and Monitoring
+
+#### `start_and_test.py` - Orchestrated Testing
+
+**Purpose**: Start services and run continuous functionality tests.
+
+**Features**:
+- Automated service startup
+- Continuous test execution (configurable intervals)
+- Parallel test execution modes
+- Failure detection and termination
+- Comprehensive test reporting
+
+**Usage**:
+```bash
+python tools/commands/start_and_test.py
+python tools/commands/start_and_test.py --test-interval 60
+python tools/commands/start_and_test.py --groups infrastructure,core-services
+```
+
+### Management Commands
+
+#### `restart.sh` / `restart.ps1` - Clean Restart
+
+**Purpose**: Perform clean shutdown and restart of all services.
+
+**Actions**:
+1. Gracefully stop backend, agent, and frontend processes
+2. Clear temporary artifacts (PID files, cached sockets)
+3. Re-run the startup command
+
+#### `audit.sh` / `audit.ps1` - System Audit
+
+**Purpose**: Run comprehensive system audit.
+
+**Checks**:
+- Python code quality (ruff, black, pytest)
+- Frontend quality (lint, test)
+- Service health checks
+- Log review for errors/warnings
+- Report generation
+
+#### `error.sh` / `error.ps1` - Diagnostics Collection
+
+**Purpose**: Gather live diagnostics and recent log summaries.
+
+**Collects**:
+- Process status for all services
+- Latest log lines per service
+- Summary of new warnings/errors
+- Diagnostic output with timestamps
 
 ### Invocation Options
-- Direct Python execution (`python tools/commands/start_parallel.py`) - recommended for fastest startup
-- Direct script execution (`./tools/commands/start.sh` or `start.ps1`)
-- Command scripts (`tools/commands/start_parallel.py`, `tools/commands/audit.sh`, etc.)
-- PowerShell scripts for Windows environments
+
+**Recommended Methods**:
+1. **Direct Python**: `python tools/commands/start_parallel.py` (fastest, most reliable)
+2. **Shell Scripts**: `./tools/commands/start.sh` or `.\tools/commands\start.ps1`
+3. **PowerShell**: For Windows environments with proper execution policy
 
 ### Log Outputs
-- All commands write to the `logs/` tree:
-  - `logs/backend.log` - Backend service logs
-  - `logs/agent.log` - Agent service logs
-  - `logs/frontend.log` - Frontend service logs
-  - `logs/backend.pid`, `logs/agent.pid`, `logs/frontend.pid` - Process ID files
-  - `logs/restart.log` - Restart operation logs
-  - `logs/audit/` - Audit reports
-  - `logs/error/`
+
+**All commands write to the `logs/` directory**:
+
+**Service Logs**:
+- `logs/backend.log` - Backend service logs
+- `logs/agent.log` - Agent service logs
+- `logs/frontend.log` - Frontend service logs
+
+**Process Management**:
+- `logs/backend.pid`, `logs/agent.pid`, `logs/frontend.pid` - Process ID files
+
+**Operation Logs**:
+- `logs/start.log` - Startup sequence logs
+- `logs/restart.log` - Restart operation logs
+- `logs/audit/` - Audit reports and results
+- `logs/error/` - Diagnostic collections
+
+**Validation Reports**:
+- `logs/validation/` - Configuration and prerequisite validation results
 
 ---
 

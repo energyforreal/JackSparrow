@@ -69,8 +69,16 @@ class RiskManagementTestSuite(TestSuiteBase):
                         }
                         
                         # Try to call assess_risk or evaluate_risk
+                        # Note: assess_risk is synchronous, not async
                         if risk_methods.get("assess_risk"):
-                            risk_assessment = await risk_manager.assess_risk(test_context)
+                            # assess_risk requires: signal_strength, portfolio_value, available_balance, current_positions
+                            portfolio_value = getattr(self.agent, "initial_balance", 10000.0)
+                            risk_assessment = risk_manager.assess_risk(
+                                signal_strength=test_context.get("confidence", 75.0) / 100.0,
+                                portfolio_value=portfolio_value,
+                                available_balance=portfolio_value,
+                                current_positions=[]
+                            )
                         elif risk_methods.get("evaluate_risk"):
                             risk_assessment = await risk_manager.evaluate_risk(test_context)
                         else:
@@ -132,7 +140,8 @@ class RiskManagementTestSuite(TestSuiteBase):
                         calculated_sizes = []
                         for test_case in test_cases:
                             try:
-                                position_size = await risk_manager.calculate_position_size(
+                                # calculate_position_size is synchronous, not async
+                                position_size = risk_manager.calculate_position_size(
                                     signal=test_case["signal"],
                                     confidence=test_case["confidence"],
                                     symbol=getattr(self.agent, "default_symbol", "BTCUSD"),
@@ -268,7 +277,11 @@ class RiskManagementTestSuite(TestSuiteBase):
                             "max_loss": 1000.0
                         }
                         
-                        limits_ok = await risk_manager.check_risk_limits(test_context)
+                        # check_risk_limits is synchronous, not async
+                        limits_ok = risk_manager.check_risk_limits(
+                            position_size=test_context.get("position_size", 0.1),
+                            current_exposure=test_context.get("current_exposure", 0.0)
+                        )
                         
                         if limits_ok is not None:
                             result.details["risk_limit_check_working"] = True
@@ -336,6 +349,17 @@ class RiskManagementTestSuite(TestSuiteBase):
                 
                 if any(portfolio_methods.values()):
                     result.details["portfolio_risk_calculation_available"] = True
+                    
+                    # Test calculate_portfolio_risk if available
+                    if portfolio_methods.get("calculate_portfolio_risk"):
+                        try:
+                            portfolio_risk = risk_manager.calculate_portfolio_risk()
+                            if isinstance(portfolio_risk, dict):
+                                result.details["portfolio_risk_calculated"] = True
+                                result.details["portfolio_risk_keys"] = list(portfolio_risk.keys())[:10]
+                        except Exception as e:
+                            result.status = TestStatus.WARNING
+                            result.issues.append(f"Portfolio risk calculation failed: {e}")
                 else:
                     result.status = TestStatus.WARNING
                     result.issues.append("Portfolio risk calculation methods not found")

@@ -204,8 +204,12 @@ class AgentCommunicationTestSuite(TestSuiteBase):
                             result.issues.append(f"Response is not a dictionary: {type(data)}")
                     else:
                         result.status = TestStatus.WARNING
-                        result.issues.append(f"Prediction request returned status {resp.status}")
-                        result.solutions.append("Check backend and agent are running and communicating")
+                        if resp.status == 401:
+                            result.issues.append(f"Prediction request returned status {resp.status} (authentication required)")
+                            result.solutions.append("Ensure API_KEY is set in environment variables and backend authentication is configured")
+                        else:
+                            result.issues.append(f"Prediction request returned status {resp.status}")
+                            result.solutions.append("Check backend and agent are running and communicating")
             except Exception as e:
                 result.status = TestStatus.WARNING
                 result.error = str(e)
@@ -249,7 +253,10 @@ class AgentCommunicationTestSuite(TestSuiteBase):
                             tested.append(cmd_type)
                             result.details[f"{cmd_type}_status"] = resp.status
                         else:
-                            failed.append(f"{cmd_type} (status {resp.status})")
+                            if resp.status == 401:
+                                failed.append(f"{cmd_type} (status {resp.status} - authentication required)")
+                            else:
+                                failed.append(f"{cmd_type} (status {resp.status})")
                 elif cmd_type in ["get_status", "health"]:
                     async with self.backend_client.get(endpoint) as resp:
                         if resp.status == 200:
@@ -262,7 +269,10 @@ class AgentCommunicationTestSuite(TestSuiteBase):
                                 if isinstance(data, dict):
                                     result.details[f"{cmd_type}_has_data"] = True
                         else:
-                            failed.append(f"{cmd_type} (status {resp.status})")
+                            if resp.status == 401:
+                                failed.append(f"{cmd_type} (status {resp.status} - authentication required)")
+                            else:
+                                failed.append(f"{cmd_type} (status {resp.status})")
             except Exception as e:
                 failed.append(f"{cmd_type} (error: {str(e)[:50]})")
         

@@ -468,59 +468,116 @@ python scripts/validate-env.py && python tools/commands/validate-prerequisites.p
 
 ## Step 8: Start Services
 
-You'll need **three separate terminal windows** for this step.
+**Recommended**: Use the parallel startup script for faster initialization and automatic validation.
 
-### 8.1 Terminal 1: Start Backend
+### 8.1 Pre-Startup Validation (Recommended)
 
+Before starting services, validate your configuration:
+
+```bash
+# Validate environment variables
+python scripts/validate-env.py
+
+# Validate system prerequisites
+python tools/commands/validate-prerequisites.py
+
+# Optional: Validate model files (set VALIDATE_MODELS_ON_STARTUP=true in .env)
+```
+
+### 8.2 Parallel Startup (Recommended)
+
+Start all services simultaneously with automatic validation:
+
+```bash
+# From project root directory
+python tools/commands/start_parallel.py
+```
+
+**Startup Sequence Performed:**
+1. **Environment Loading**: Loads and validates `.env` configuration
+2. **Paper Trading Validation**: Verifies safe paper trading mode (blocks live trading)
+3. **Redis Availability**: Checks Redis service and attempts auto-startup if needed
+4. **Configuration Validation**: Runs environment variable and prerequisite validation
+5. **Optional Model Validation**: Validates ML model files if enabled
+6. **Service Dependencies**: Ensures all dependencies are properly set up
+7. **Parallel Startup**: Launches backend, agent, and frontend services simultaneously
+8. **Health Checks**: Performs post-startup health verification
+9. **Monitoring Dashboard**: Activates real-time monitoring with data freshness tracking
+
+**Expected Output:**
+```
+JackSparrow Trading Agent - Startup Sequence
+Process ID: 12345
+Project root: /path/to/JackSparrow
+
+Step 1/4: Loading environment configuration...
+Step 2/4: Checking Redis availability...
+[PAPER TRADING] Validating configuration...
+[PAPER TRADING] ✓ Mode: PAPER TRADING (Safe)
+Step 3/4: Running configuration validators...
+Step 4/4: Ensuring service dependencies...
+
+[BACKEND] INFO: Uvicorn running on http://127.0.0.1:8000
+[AGENT] INFO: Agent initialized
+[FRONTEND] - ready started server on 0.0.0.0:3000
+
+Running health checks...
+✓ Backend: healthy
+✓ Feature Server: healthy
+✓ Frontend: healthy
+
+Monitoring dashboard started - refresh rate: 2s
+```
+
+### 8.3 Alternative: Manual Startup
+
+If you prefer separate terminals (not recommended for production):
+
+#### Terminal 1: Backend
 ```bash
 cd backend
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 uvicorn api.main:app --reload --port 8000
 ```
 
-Expected output:
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000
-INFO:     Application startup complete.
-```
-
-### 8.2 Terminal 2: Start Agent
-
+#### Terminal 2: Agent
 ```bash
 cd agent
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 python -m agent.core.intelligent_agent
 ```
 
-Expected output:
-```
-INFO: Agent initialized
-INFO: Model discovery started
-INFO: Models registered: XGBoost, LSTM, Transformer
-INFO: Agent ready
-```
-
-### 8.3 Terminal 3: Start Frontend
-
+#### Terminal 3: Frontend
 ```bash
 cd frontend
 npm run dev
 ```
 
-Expected output:
-```
-- ready started server on 0.0.0.0:3000
-- Local:        http://localhost:3000
-```
+### 8.4 Verification Checklist
 
-### 8.4 Smoke Test Checklist
+After successful parallel startup:
 
-After all three terminals report successful startup:
+#### Automatic Verification (Built-in)
+The startup script automatically performs:
+- ✅ **Health Checks**: HTTP endpoints verified for backend, feature server, and frontend
+- ✅ **Configuration Validation**: Environment variables and prerequisites validated
+- ✅ **Paper Trading Safety**: Live trading mode blocked with clear warnings
+- ✅ **Monitoring Dashboard**: Real-time monitoring activated
 
-1. Visit `http://localhost:3000` and confirm the dashboard renders without console errors.
-2. Open `http://localhost:8000/api/v1/health` in a second tab—health score should be ≥ `0.90` when all components are healthy.
-3. Trigger a manual prediction with `curl -X POST http://localhost:8000/api/v1/predict -d '{}' -H 'Content-Type: application/json'` and verify the response arrives in the dashboard.
-4. Inspect `logs/start.log` for any WARN/ERROR entries; resolve before continuing development.
+#### Manual Verification Steps
+1. **Check Startup Output**: Verify all services show "healthy" in the startup summary
+2. **Visit Dashboard**: `http://localhost:3000` should load without console errors
+3. **API Health Check**: Visit `http://localhost:8000/api/v1/health` - should show health score ≥ 0.90
+4. **Monitoring Dashboard**: Look for real-time updates showing service status and paper trading mode
+5. **Test Prediction**: Run `curl -X POST http://localhost:8000/api/v1/predict -d '{}' -H 'Content-Type: application/json'` and verify response
+6. **Check Logs**: Review `logs/start.log` for any WARN/ERROR entries
+
+#### Troubleshooting Startup Issues
+If startup fails:
+- **Paper Trading Error**: Check `PAPER_TRADING_MODE` and `TRADING_MODE` in `.env`
+- **Validation Failed**: Run `python scripts/validate-env.py` and `python tools/commands/validate-prerequisites.py`
+- **Health Check Failed**: Run `python tools/commands/health_check.py` to diagnose service issues
+- **Port Conflicts**: Ensure ports 8000, 8001, and 3000 are available
 
 ---
 
@@ -841,6 +898,62 @@ pip install -r requirements.txt
 rm -rf node_modules .next
 npm install
 npm run build
+```
+
+### Validation Errors
+
+**Problem**: Startup fails with validation errors
+
+**Solutions**:
+```bash
+# Run individual validations to diagnose
+python scripts/validate-env.py
+python tools/commands/validate-prerequisites.py
+
+# Common fixes:
+# 1. Check .env file exists and has required variables
+# 2. Verify DATABASE_URL format: postgresql://user:pass@host:port/db
+# 3. Check API credentials: DELTA_EXCHANGE_API_KEY and SECRET
+# 4. Ensure Python 3.11+ and Node.js 18+ are installed
+# 5. Verify PostgreSQL and Redis are running
+```
+
+### Paper Trading Validation Failed
+
+**Problem**: Startup blocked with paper trading safety warnings
+
+**Solutions**:
+```bash
+# Check environment variables
+echo $PAPER_TRADING_MODE
+echo $TRADING_MODE
+
+# Set safe paper trading mode
+# Add to .env file:
+PAPER_TRADING_MODE=true
+TRADING_MODE=paper
+
+# Remove any live trading configuration
+# Remove or comment: TRADING_MODE=live
+```
+
+### Health Check Failures
+
+**Problem**: Services start but health checks fail
+
+**Solutions**:
+```bash
+# Run manual health check
+python tools/commands/health_check.py
+
+# Check detailed health status
+python tools/commands/validate-health.py
+
+# Common fixes:
+# 1. Verify ports 8000, 8001, 3000 are available
+# 2. Check database and Redis connectivity
+# 3. Review service logs in logs/ directory
+# 4. Restart services: stop then run startup again
 ```
 
 ---

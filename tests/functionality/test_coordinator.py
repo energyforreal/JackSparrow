@@ -2,7 +2,7 @@
 
 import asyncio
 import importlib
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from datetime import datetime
 from dataclasses import dataclass, field
 
@@ -203,7 +203,7 @@ class TestCoordinator:
         
         return all_results
     
-    def get_summary(self) -> Dict[str, any]:
+    def get_summary(self) -> Dict[str, Any]:
         """Get execution summary."""
         total_tests = 0
         total_passed = 0

@@ -227,14 +227,39 @@ Build a functional AI-powered trading agent (not just a bot) that:
 
 **Building the Project**: The [Build Guide](docs/11-build-guide.md) contains executable commands that will build the entire project when followed sequentially. Use the `start` command (documented in the Build Guide) to launch JackSparrow locally after setup.
 
+### Startup System Overview
+
+The JackSparrow startup system provides comprehensive validation and monitoring:
+
+#### Advanced Startup Features
+- **4-Step Startup Sequence**: Environment loading → Paper trading validation → Configuration validation → Parallel service startup
+- **Paper Trading Safety**: Built-in validation prevents accidental live trading execution
+- **Configuration Validation**: Automatic environment variable and prerequisite checking
+- **Health Checks**: Post-startup HTTP verification of all services
+- **Real-time Monitoring**: Live dashboard with service status and data freshness tracking
+- **WebSocket Monitoring**: Automatic connection monitoring and message freshness analysis
+
+#### Key Startup Components
+- `start_parallel.py`: Parallel process manager with comprehensive validation
+- `PaperTradingValidator`: Safety mechanism preventing live trading accidents
+- `MonitoringDashboard`: Real-time service monitoring and data freshness tracking
+- `WebSocketMonitor`: WebSocket connection and message freshness monitoring
+- `ValidationReporter`: Comprehensive validation reporting and recommendations
+
+See [Architecture Documentation – Startup and Operations](docs/01-architecture.md#startup-and-operations) for detailed startup system architecture.
+
 ---
 
 ## 🔧 Command Reference
 
 | Command | Purpose | Detailed Documentation |
 | ------- | ------- | ---------------------- |
-| `start` | Launch all JackSparrow services on the local workstation (backend, agent, frontend) | [Build Guide – Project Commands](docs/11-build-guide.md#project-commands) |
+| `start` | Launch all JackSparrow services with comprehensive validation and monitoring | [Build Guide – Project Commands](docs/11-build-guide.md#project-commands) |
 | `restart` | Stop any running services and relaunch the full stack from a clean slate | [Deployment Documentation – Operations](docs/10-deployment.md#project-commands) |
+| `validate-prerequisites` | Validate system prerequisites before starting services | [Deployment Documentation – Startup Validation](docs/10-deployment.md#startup-validation-system) |
+| `health_check` | Perform health checks on running services | [Deployment Documentation – Health Checks](docs/10-deployment.md#health-checks) |
+| `validate-health` | Enhanced health validation with detailed reporting | [Deployment Documentation – Health Checks](docs/10-deployment.md#health-checks) |
+| `start_and_test` | Start services and run continuous functionality tests | [File Structure – Command Toolkit](docs/08-file-structure.md#command-toolkit) |
 | `audit` | Run a comprehensive system audit (code checks, service health, log review) | [Audit Report](docs/15-audit-report.md) |
 | `error` | Inspect running services and log files for warnings or errors | [Backend Documentation – Operations](docs/06-backend.md#command-operations) |
 
@@ -320,6 +345,13 @@ Trading Agent Documentation
 - [Logging Documentation](docs/12-logging.md) - Centralized logging strategy
 - [Project Rules Documentation](docs/14-project-rules.md) - Development standards
 
+**Startup & Operations**
+- [Architecture – Startup and Operations](docs/01-architecture.md#startup-and-operations) - Startup sequence and operational safety
+- [Deployment – Startup Validation](docs/10-deployment.md#startup-validation-system) - Configuration and prerequisite validation
+- [Deployment – Health Checks](docs/10-deployment.md#health-checks) - Service health verification
+- [Deployment – Monitoring Dashboard](docs/10-deployment.md#monitoring-dashboard) - Real-time system monitoring
+- [File Structure – Command Toolkit](docs/08-file-structure.md#command-toolkit) - Complete command reference
+
 ---
 
 ## 📝 Documentation Standards
@@ -346,7 +378,7 @@ When adding or updating documentation:
 
 ## 📅 Last Updated
 
-Documentation last updated: 2025-01-28
+Documentation last updated: 2025-01-30
 
 For the latest specifications and implementation details, refer to the files in the `reference/` directory.
 
@@ -354,6 +386,10 @@ For the latest specifications and implementation details, refer to the files in 
 
 - **[Major Changes Summary](MAJOR_CHANGES.md)** - Complete change log for architectural improvements (2025-01-27)
 - **[Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md)** - Details on integration of 6 XGBoost models for BTCUSD trading
+- **Startup System Documentation** - Comprehensive documentation of the advanced startup system including validation, health checks, and monitoring (2025-01-30)
+- **Paper Trading Safety Features** - Documentation of safety mechanisms preventing accidental live trading
+- **Real-time Monitoring Dashboard** - Documentation of the monitoring system with data freshness tracking
+- **Command Toolkit Updates** - Expanded command reference with validation and health check tools
 
 ---
 

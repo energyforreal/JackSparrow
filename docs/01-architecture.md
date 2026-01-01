@@ -42,8 +42,9 @@ The Data Layer is responsible for:
 #### Components
 
 **Market Data Service**
-- Fetches real-time ticker data from Delta Exchange API
-- Retrieves historical OHLCV data
+- Continuously monitors real-time BTCUSD ticker prices (every 0.5 seconds)
+- Emits PriceFluctuationEvent when price changes exceed threshold (≥0.5%)
+- Retrieves historical OHLCV data for analysis
 - Implements circuit breakers for API failures
 - Caches frequently accessed data
 
@@ -531,6 +532,102 @@ All WebSocket messages include timestamp fields for freshness calculation:
 
 ---
 
+## Startup and Operations
+
+### Startup Sequence Architecture
+
+The system employs a comprehensive 4-step startup sequence managed by `start_parallel.py`:
+
+#### Step 1: Environment Loading
+- Loads root `.env` configuration file
+- Validates environment variable format and presence
+- Sets up child process environment inheritance
+
+#### Step 2: Paper Trading Validation
+- **Safety Feature**: Validates `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
+- **Protection Logic**: Blocks startup if live trading mode is detected
+- **Safety Indicators**: Displays clear status messages and warnings
+
+#### Step 3: Configuration Validation
+- **Environment Validation**: Runs `validate-env.py` to check required variables
+- **Prerequisite Validation**: Runs `validate-prerequisites.py` for system requirements
+- **Optional Model Validation**: Validates ML model files if `VALIDATE_MODELS_ON_STARTUP=true`
+
+#### Step 4: Service Dependencies & Startup
+- Ensures virtual environments and dependencies are set up
+- Performs parallel service startup (backend, agent, frontend)
+- Executes post-startup health checks
+- Activates monitoring dashboard
+
+### Validation System Architecture
+
+#### Paper Trading Validator (`PaperTradingValidator`)
+- **Purpose**: Prevents accidental live trading execution
+- **Configuration Check**: Validates environment variables for safe operation
+- **Startup Blocking**: Terminates startup with clear warnings for live trading mode
+- **Status Reporting**: Provides current trading mode status to monitoring systems
+
+#### Environment Validator (`validate-env.py`)
+- **Configuration Verification**: Validates all required environment variables
+- **Format Checking**: Ensures proper connection string formats
+- **Security Validation**: Verifies API keys and security tokens
+- **Error Reporting**: Provides specific guidance for configuration issues
+
+#### Prerequisite Validator (`validate-prerequisites.py`)
+- **System Requirements**: Validates Python, Node.js, PostgreSQL, Redis versions
+- **Connectivity Testing**: Verifies database and cache connections
+- **Dependency Checking**: Ensures required libraries are available
+- **Platform Compatibility**: Handles Windows/macOS/Linux differences
+
+### Health Check System
+
+#### Post-Startup Health Verification
+- **HTTP Endpoint Checks**: Validates backend, feature server, and frontend health
+- **Service Readiness**: Ensures all services are responding correctly
+- **Automatic Retry**: Continues startup with warnings if health checks fail
+- **Status Reporting**: Provides detailed health status information
+
+#### Health Check Components
+- **Backend Health**: `GET http://localhost:8000/api/v1/health`
+- **Feature Server Health**: `GET http://localhost:8001/health`
+- **Frontend Accessibility**: HTTP connectivity check on configured port
+
+### Monitoring Architecture
+
+#### Real-time Monitoring Dashboard (`MonitoringDashboard`)
+- **Service Status Tracking**: Real-time health monitoring of all services
+- **Paper Trading Status**: Continuous display of trading mode safety
+- **Data Freshness Monitoring**: Message age tracking across WebSocket channels
+- **Signal Generation Analytics**: Frequency and timing analysis of trading signals
+
+#### WebSocket Monitoring (`WebSocketMonitor`)
+- **Connection Management**: Automatic WebSocket connection establishment and monitoring
+- **Message Freshness Tracking**: Age analysis for different message types
+- **Stale Message Detection**: Threshold-based alerts for data freshness issues
+- **Signal Analysis**: Generation frequency and interval tracking
+
+#### Validation Reporting (`ValidationReporter`)
+- **Comprehensive Reports**: Generates detailed validation status reports
+- **Service Health Status**: Current health status of all components
+- **Data Freshness Metrics**: WebSocket message freshness statistics
+- **Recommendations**: Actionable guidance for identified issues
+
+### Operational Safety Mechanisms
+
+#### Live Trading Protection
+- **Environment Validation**: Blocks startup with live trading configuration
+- **Configuration Verification**: Multiple checkpoints for trading mode safety
+- **Clear Warnings**: Unambiguous messages about live trading risks
+- **Forced Paper Mode**: Defaults to safe paper trading operation
+
+#### Process Lifecycle Management
+- **Graceful Startup**: Parallel service initialization with dependency checking
+- **Health Verification**: Post-startup validation before declaring success
+- **Clean Shutdown**: Proper process termination and resource cleanup
+- **Restart Capability**: Clean restart functionality for configuration changes
+
+---
+
 ## Error Handling Strategy
 
 ### Graceful Degradation
@@ -629,6 +726,71 @@ When a circuit breaker opens:
 
 Include the checklist in runbooks so operators know which mitigation should trigger automatically and which ones need manual verification.
 
+### Validation Error Handling
+
+The startup and configuration validation system implements comprehensive error handling for safe system operation:
+
+#### Startup Validation Errors
+
+**Paper Trading Validation Failures**:
+- **Detection**: Invalid `PAPER_TRADING_MODE` or `TRADING_MODE` environment variables
+- **Response**: Immediate startup termination with clear warnings
+- **Recovery**: User must correct environment configuration and restart
+- **Safety**: Prevents accidental live trading execution
+
+**Environment Validation Failures**:
+- **Detection**: Missing or malformed required environment variables
+- **Response**: Detailed error messages with specific configuration guidance
+- **Recovery**: Automatic validation scripts provide actionable fixes
+- **Examples**: Database URL format, API credential validation, security key verification
+
+**Prerequisite Validation Failures**:
+- **Detection**: Missing system dependencies or version incompatibilities
+- **Response**: Platform-specific installation and configuration guidance
+- **Recovery**: Automatic prerequisite checking with clear error messages
+- **Examples**: Python/Node.js version checks, database connectivity, Redis availability
+
+#### Health Check Error Handling
+
+**Service Health Failures**:
+- **Detection**: HTTP endpoint failures during post-startup verification
+- **Response**: Startup continues with warnings, detailed health status reporting
+- **Recovery**: Automatic retry mechanisms and troubleshooting guidance
+- **Monitoring**: Real-time health status tracking in monitoring dashboard
+
+**WebSocket Connection Failures**:
+- **Detection**: WebSocket monitoring connection drops or message staleness
+- **Response**: Automatic reconnection attempts with exponential backoff
+- **Recovery**: Connection status displayed in monitoring dashboard
+- **Alerting**: Freshness threshold violations trigger status warnings
+
+#### Configuration Error Recovery
+
+**Validation Error Categories**:
+- **Critical**: Block startup (paper trading mode, missing credentials)
+- **Warning**: Allow startup with reduced functionality (optional services)
+- **Informational**: Log issues but continue operation (performance optimizations)
+
+**Error Response Format for Validation**:
+```json
+{
+  "validation": {
+    "component": "paper_trading_validator",
+    "status": "failed",
+    "error": {
+      "code": "LIVE_TRADING_DETECTED",
+      "message": "Live trading mode detected - startup blocked for safety",
+      "details": {
+        "PAPER_TRADING_MODE": "false",
+        "TRADING_MODE": "live"
+      },
+      "guidance": "Set PAPER_TRADING_MODE=true or TRADING_MODE=paper"
+    },
+    "timestamp": "2025-01-12T10:30:00Z"
+  }
+}
+```
+
 ### Error Response Format
 
 **Standard Error Response**:
@@ -676,14 +838,28 @@ Include the checklist in runbooks so operators know which mitigation should trig
 
 ### Prediction Flow
 
+**Primary Flow (Fluctuation-Based):**
 ```
-1. Market Data Service → Fetch current ticker
-2. Feature Server → Compute features
-3. Model Registry → Get predictions from all models
-4. Reasoning Engine → Generate reasoning chain
-5. Risk Manager → Assess risks
-6. Decision Engine → Synthesize decision
-7. Backend API → Return prediction to client
+1. Market Data Service → Continuous price monitoring (0.5s intervals)
+2. PriceFluctuationEvent → Triggered on ≥0.5% price change
+3. Feature Server → Compute all 50 features
+4. Model Registry → Get predictions from all models
+5. Reasoning Engine → Generate reasoning chain
+6. Risk Manager → Assess risks
+7. Decision Engine → Synthesize decision
+8. Backend API → Return prediction to client
+9. WebSocket → Broadcast signal_update
+```
+
+**Secondary Flow (Time-Based):**
+```
+1. Market Data Service → Monitor candle closes
+2. CandleClosedEvent → Periodic analysis (15m intervals)
+3. Feature Server → Compute features
+4. Model Registry → Get predictions
+5. Reasoning Engine → Generate reasoning chain
+6. Risk Manager → Assess risks
+7. Decision Engine → Synthesize decision
 8. WebSocket → Broadcast update
 ```
 

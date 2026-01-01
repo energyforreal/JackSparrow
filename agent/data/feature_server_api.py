@@ -7,6 +7,8 @@ feature computation endpoints so the backend can call them via REST.
 
 from __future__ import annotations
 
+import socket
+import asyncio
 from typing import Any, Dict, Optional
 from aiohttp import web
 import structlog
@@ -18,6 +20,41 @@ from agent.data.feature_server import (
 )
 
 logger = structlog.get_logger()
+
+
+def _is_port_available(host: str, port: int) -> bool:
+    """Check if a port is available for binding.
+    
+    Args:
+        host: Host address to check
+        port: Port number to check
+        
+    Returns:
+        True if port is available, False otherwise
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            result = s.bind((host, port))
+            return True
+    except OSError:
+        return False
+
+
+def _find_free_port(start_port: int, max_attempts: int = 10) -> Optional[int]:
+    """Find a free port starting from start_port.
+    
+    Args:
+        start_port: Starting port number
+        max_attempts: Maximum number of ports to try
+        
+    Returns:
+        First available port number, or None if none found
+    """
+    for port in range(start_port, start_port + max_attempts):
+        if _is_port_available("0.0.0.0", port):
+            return port
+    return None
 
 
 class FeatureServerAPI:
@@ -33,6 +70,7 @@ class FeatureServerAPI:
         """
         self.feature_server = feature_server
         self.host = host
+        self.original_port = port
         self.port = port
         self._app = web.Application()
         self._app.add_routes(
@@ -44,31 +82,166 @@ class FeatureServerAPI:
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
 
-    async def start(self) -> None:
-        """Start HTTP server if not already running."""
+    async def start(self, max_retries: int = 3, retry_delay: float = 1.0) -> None:
+        """Start HTTP server if not already running.
+        
+        Args:
+            max_retries: Maximum number of retry attempts with port conflict resolution
+            retry_delay: Initial delay between retries (exponential backoff)
+            
+        Raises:
+            OSError: If port binding fails after all retries and conflict resolution attempts
+        """
         if self._runner is not None:
             return
 
-        try:
-            self._runner = web.AppRunner(self._app)
-            await self._runner.setup()
-            self._site = web.TCPSite(self._runner, self.host, self.port)
-            await self._site.start()
-            logger.info(
-                "feature_server_api_started",
-                host=self.host,
-                port=self.port,
-            )
-        except Exception as exc:
-            logger.error(
-                "feature_server_api_start_failed",
-                host=self.host,
-                port=self.port,
-                error=str(exc),
-                exc_info=True,
-            )
-            await self.shutdown()
-            raise
+        last_exception: Optional[Exception] = None
+        
+        for attempt in range(max_retries):
+            try:
+                # Check if port is available before attempting to bind
+                if not _is_port_available(self.host, self.port):
+                    if attempt < max_retries - 1:
+                        # Try to find an alternative port
+                        alternative_port = _find_free_port(
+                            self.port + 1, 
+                            max_attempts=20
+                        )
+                        if alternative_port:
+                            logger.warning(
+                                "feature_server_api_port_conflict",
+                                original_port=self.port,
+                                alternative_port=alternative_port,
+                                attempt=attempt + 1,
+                                message=f"Port {self.port} is in use, trying alternative port {alternative_port}"
+                            )
+                            self.port = alternative_port
+                        else:
+                            # Wait and retry with exponential backoff
+                            wait_time = retry_delay * (2 ** attempt)
+                            logger.warning(
+                                "feature_server_api_port_busy",
+                                port=self.port,
+                                attempt=attempt + 1,
+                                wait_time=wait_time,
+                                message=f"Port {self.port} is busy, waiting {wait_time}s before retry"
+                            )
+                            await asyncio.sleep(wait_time)
+                            continue
+                    else:
+                        # Last attempt - provide helpful error message
+                        raise OSError(
+                            f"Port {self.port} is not available. "
+                            f"This usually means another process is using the port. "
+                            f"Solutions:\n"
+                            f"1. Stop the process using port {self.port}:\n"
+                            f"   Windows: Get-NetTCPConnection -LocalPort {self.port} | "
+                            f"Select-Object -ExpandProperty OwningProcess | "
+                            f"ForEach-Object {{ Stop-Process -Id $_ -Force }}\n"
+                            f"   Linux/Mac: lsof -ti:{self.port} | xargs kill -9\n"
+                            f"2. Set FEATURE_SERVER_PORT environment variable to a different port\n"
+                            f"3. Wait for the port to be released"
+                        )
+                
+                # Attempt to start the server
+                self._runner = web.AppRunner(self._app)
+                await self._runner.setup()
+                self._site = web.TCPSite(self._runner, self.host, self.port)
+                await self._site.start()
+                
+                if self.port != self.original_port:
+                    logger.info(
+                        "feature_server_api_started_alternative_port",
+                        host=self.host,
+                        original_port=self.original_port,
+                        actual_port=self.port,
+                        message=f"Started on alternative port {self.port} (requested {self.original_port})"
+                    )
+                else:
+                    logger.info(
+                        "feature_server_api_started",
+                        host=self.host,
+                        port=self.port,
+                    )
+                return
+                
+            except OSError as exc:
+                last_exception = exc
+                error_code = getattr(exc, 'winerror', None) or getattr(exc, 'errno', None)
+                
+                # Check if it's a port conflict error
+                is_port_conflict = (
+                    error_code == 10048 or  # Windows: WSAEADDRINUSE
+                    error_code == 98 or     # Linux: EADDRINUSE
+                    "Address already in use" in str(exc) or
+                    "only one usage of each socket address" in str(exc)
+                )
+                
+                if is_port_conflict and attempt < max_retries - 1:
+                    # Try to find an alternative port
+                    alternative_port = _find_free_port(
+                        self.port + 1,
+                        max_attempts=20
+                    )
+                    if alternative_port:
+                        logger.warning(
+                            "feature_server_api_port_conflict_retry",
+                            original_port=self.port,
+                            alternative_port=alternative_port,
+                            attempt=attempt + 1,
+                            error=str(exc),
+                            message=f"Port conflict detected, switching to port {alternative_port}"
+                        )
+                        self.port = alternative_port
+                        continue
+                    else:
+                        # Wait and retry with exponential backoff
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.warning(
+                            "feature_server_api_port_conflict_wait",
+                            port=self.port,
+                            attempt=attempt + 1,
+                            wait_time=wait_time,
+                            error=str(exc),
+                            message=f"Port conflict, waiting {wait_time}s before retry"
+                        )
+                        await asyncio.sleep(wait_time)
+                        continue
+                else:
+                    # Not a port conflict or last attempt
+                    logger.error(
+                        "feature_server_api_start_failed",
+                        host=self.host,
+                        port=self.port,
+                        attempt=attempt + 1,
+                        error=str(exc),
+                        error_code=error_code,
+                        exc_info=True,
+                    )
+                    await self.shutdown()
+                    if attempt == max_retries - 1:
+                        raise
+                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                    
+            except Exception as exc:
+                last_exception = exc
+                logger.error(
+                    "feature_server_api_start_failed",
+                    host=self.host,
+                    port=self.port,
+                    attempt=attempt + 1,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                await self.shutdown()
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(retry_delay * (2 ** attempt))
+        
+        # If we get here, all retries failed
+        if last_exception:
+            raise last_exception
+        raise RuntimeError(f"Failed to start feature server API after {max_retries} attempts")
 
     async def shutdown(self) -> None:
         """Stop HTTP server."""

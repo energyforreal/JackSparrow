@@ -88,16 +88,30 @@ class RiskManager:
                 message="RiskManager received DecisionReadyEvent - starting risk assessment"
             )
             
-            # Skip HOLD signals – log explicitly so it's clear in paper trading
+            # Handle HOLD signals - log as paper trade entry in paper trading mode
             if signal == "HOLD":
-                logger.info(
-                    "risk_manager_skip_hold_signal",
-                    symbol=symbol,
-                    confidence=confidence,
-                    position_size=position_size,
-                    paper_trading_mode=settings.paper_trading_mode,
-                    message="DecisionReadyEvent has HOLD signal, no trade will be executed"
-                )
+                if settings.paper_trading_mode:
+                    # In paper trading mode, log HOLD decisions as paper trade entries
+                    logger.info(
+                        "paper_trade_entry_hold_signal",
+                        symbol=symbol,
+                        signal=signal,
+                        confidence=confidence,
+                        position_size=position_size,
+                        paper_trading_mode=settings.paper_trading_mode,
+                        event_id=event.event_id,
+                        message="Paper trade entry: HOLD signal - decision logged but no execution needed (low confidence/no clear opportunity)"
+                    )
+                else:
+                    # In live trading, just log normally
+                    logger.info(
+                        "risk_manager_skip_hold_signal",
+                        symbol=symbol,
+                        confidence=confidence,
+                        position_size=position_size,
+                        paper_trading_mode=settings.paper_trading_mode,
+                        message="DecisionReadyEvent has HOLD signal, no trade will be executed"
+                    )
                 return
             
             # Skip exit decisions - they are handled directly by execution module
@@ -764,8 +778,17 @@ class RiskManager:
         available_balance: float,
         current_positions: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Assess risk for trade."""
+        """Assess risk for trade.
         
+        Args:
+            signal_strength: Signal strength (position size as fraction of portfolio)
+            portfolio_value: Total portfolio value
+            available_balance: Available balance for trading
+            current_positions: List of current positions
+            
+        Returns:
+            Dictionary with risk assessment results
+        """
         # RISK CHECK: Log risk assessment entry with context
         logger.info(
             "RISK CHECK: position_size=%s portfolio_value=%s",
@@ -811,6 +834,189 @@ class RiskManager:
             "portfolio_heat": portfolio_heat,
             "max_portfolio_heat": self.max_portfolio_heat,
             "available_balance": available_balance
+        }
+    
+    def calculate_position_size(
+        self,
+        signal: str,
+        confidence: float,
+        symbol: str,
+        price: float,
+        portfolio_value: Optional[float] = None
+    ) -> float:
+        """Calculate position size based on signal strength and confidence.
+        
+        Args:
+            signal: Trading signal (BUY, SELL, STRONG_BUY, etc.)
+            confidence: Signal confidence (0.0 to 1.0)
+            symbol: Trading symbol
+            price: Current price
+            portfolio_value: Portfolio value (optional, uses context if not provided)
+            
+        Returns:
+            Position size as fraction of portfolio (0.0 to max_position_size)
+        """
+        # Get portfolio value from context if not provided
+        if portfolio_value is None:
+            context = self.context_manager.get_current_context()
+            portfolio_value = context.portfolio_value or settings.initial_balance
+        
+        if portfolio_value <= 0:
+            logger.warning(
+                "risk_manager_invalid_portfolio_for_position_size",
+                portfolio_value=portfolio_value,
+                message="Portfolio value is invalid, returning 0 position size"
+            )
+            return 0.0
+        
+        # Base position size from signal strength
+        if signal in ["STRONG_BUY", "STRONG_SELL"]:
+            base_size = self.max_position_size * 0.8  # Use 80% of max for strong signals
+        elif signal in ["BUY", "SELL"]:
+            base_size = self.max_position_size * 0.5  # Use 50% of max for normal signals
+        else:
+            base_size = self.max_position_size * 0.3  # Use 30% for other signals
+        
+        # Scale by confidence
+        confidence_multiplier = min(1.0, max(0.0, confidence / 100.0)) if confidence > 1.0 else confidence
+        position_size = base_size * confidence_multiplier
+        
+        # Ensure position size doesn't exceed max
+        position_size = min(position_size, self.max_position_size)
+        
+        # Ensure we have enough balance
+        context = self.context_manager.get_current_context()
+        available_balance = context.available_balance or portfolio_value
+        max_affordable_size = available_balance / portfolio_value if portfolio_value > 0 else 0.0
+        position_size = min(position_size, max_affordable_size)
+        
+        logger.debug(
+            "risk_manager_position_size_calculated",
+            signal=signal,
+            confidence=confidence,
+            base_size=base_size,
+            confidence_multiplier=confidence_multiplier,
+            calculated_size=position_size,
+            max_position_size=self.max_position_size,
+            available_balance=available_balance
+        )
+        
+        return position_size
+    
+    def check_risk_limits(
+        self,
+        position_size: float,
+        current_exposure: Optional[float] = None,
+        max_position_size: Optional[float] = None,
+        max_loss: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Check if proposed trade violates risk limits.
+        
+        Args:
+            position_size: Proposed position size (fraction of portfolio)
+            current_exposure: Current portfolio exposure (optional)
+            max_position_size: Maximum position size (optional, uses instance default)
+            max_loss: Maximum loss limit (optional)
+            
+        Returns:
+            Dictionary with limit check results
+        """
+        max_pos_size = max_position_size or self.max_position_size
+        context = self.context_manager.get_current_context()
+        portfolio_value = context.portfolio_value or settings.initial_balance
+        
+        # Check position size limit
+        position_size_ok = position_size <= max_pos_size
+        
+        # Check portfolio heat
+        if current_exposure is None:
+            # Calculate from context
+            current_positions = [context.position] if context.position else []
+            total_exposure = 0.0
+            for pos in current_positions:
+                if pos:
+                    quantity = float(pos.get("quantity", 0.0) or 0.0)
+                    entry_price = float(pos.get("entry_price", 0.0) or 0.0)
+                    total_exposure += quantity * entry_price
+            current_exposure = total_exposure
+        
+        portfolio_heat = current_exposure / portfolio_value if portfolio_value > 0 else 0.0
+        portfolio_heat_ok = portfolio_heat < self.max_portfolio_heat
+        
+        # Check daily loss limit
+        daily_loss_ok = self.daily_loss_pct < self.max_daily_loss if self.max_daily_loss else True
+        
+        # Check drawdown limit
+        drawdown_ok = self.current_drawdown < self.max_drawdown_limit if self.max_drawdown_limit else True
+        
+        # Check consecutive losses
+        consecutive_losses_ok = (
+            self.consecutive_losses < self.max_consecutive_losses_limit
+            if self.max_consecutive_losses_limit
+            else True
+        )
+        
+        all_limits_ok = (
+            position_size_ok and
+            portfolio_heat_ok and
+            daily_loss_ok and
+            drawdown_ok and
+            consecutive_losses_ok
+        )
+        
+        return {
+            "limits_ok": all_limits_ok,
+            "position_size_ok": position_size_ok,
+            "portfolio_heat_ok": portfolio_heat_ok,
+            "daily_loss_ok": daily_loss_ok,
+            "drawdown_ok": drawdown_ok,
+            "consecutive_losses_ok": consecutive_losses_ok,
+            "position_size": position_size,
+            "max_position_size": max_pos_size,
+            "portfolio_heat": portfolio_heat,
+            "max_portfolio_heat": self.max_portfolio_heat,
+            "daily_loss_pct": self.daily_loss_pct,
+            "max_daily_loss": self.max_daily_loss,
+            "current_drawdown": self.current_drawdown,
+            "max_drawdown": self.max_drawdown_limit,
+            "consecutive_losses": self.consecutive_losses,
+            "max_consecutive_losses": self.max_consecutive_losses_limit
+        }
+    
+    def calculate_portfolio_risk(self) -> Dict[str, Any]:
+        """Calculate portfolio-level risk metrics.
+        
+        Returns:
+            Dictionary with portfolio risk metrics
+        """
+        context = self.context_manager.get_current_context()
+        portfolio_value = context.portfolio_value or settings.initial_balance
+        available_balance = context.available_balance or portfolio_value
+        
+        # Calculate current exposure
+        current_positions = [context.position] if context.position else []
+        total_exposure = 0.0
+        for pos in current_positions:
+            if pos:
+                quantity = float(pos.get("quantity", 0.0) or 0.0)
+                entry_price = float(pos.get("entry_price", 0.0) or 0.0)
+                total_exposure += quantity * entry_price
+        
+        portfolio_heat = total_exposure / portfolio_value if portfolio_value > 0 else 0.0
+        
+        return {
+            "portfolio_value": portfolio_value,
+            "available_balance": available_balance,
+            "total_exposure": total_exposure,
+            "portfolio_heat": portfolio_heat,
+            "max_portfolio_heat": self.max_portfolio_heat,
+            "daily_loss_pct": self.daily_loss_pct,
+            "max_daily_loss": self.max_daily_loss,
+            "current_drawdown": self.current_drawdown,
+            "max_drawdown": self.max_drawdown_limit,
+            "consecutive_losses": self.consecutive_losses,
+            "max_consecutive_losses": self.max_consecutive_losses_limit,
+            "risk_score": 1.0 - min(1.0, portfolio_heat / self.max_portfolio_heat) if self.max_portfolio_heat > 0 else 1.0
         }
     
     def calculate_stop_loss(self, entry_price: float, side: str) -> float:

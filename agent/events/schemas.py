@@ -13,9 +13,10 @@ import uuid
 
 class EventType(str, Enum):
     """Event type enumeration."""
-    
+
     # Market data events
     MARKET_TICK = "market_tick"
+    PRICE_FLUCTUATION = "price_fluctuation"
     CANDLE_CLOSED = "candle_closed"
     
     # Feature events
@@ -74,14 +75,29 @@ class BaseEvent(BaseModel):
 
 class MarketTickEvent(BaseEvent):
     """Real-time market price tick event."""
-    
+
     event_type: EventType = EventType.MARKET_TICK
-    
+
     class Payload(BaseModel):
         symbol: str
         price: float
         volume: float
         timestamp: datetime
+
+
+class PriceFluctuationEvent(BaseEvent):
+    """Major price fluctuation event that triggers ML pipeline."""
+
+    event_type: EventType = EventType.PRICE_FLUCTUATION
+
+    class Payload(BaseModel):
+        symbol: str
+        price: float
+        previous_price: float
+        change_pct: float
+        volume: float
+        timestamp: datetime
+        threshold_pct: float
 
 
 class CandleClosedEvent(BaseEvent):

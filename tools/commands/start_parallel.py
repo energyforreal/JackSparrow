@@ -89,6 +89,7 @@ class ServiceConfig:
     log_file: Optional[Path] = None
     pid_file: Optional[Path] = None
     check_delay: float = 2.0
+    env: Optional[Dict[str, str]] = None  # Optional environment variables
 
 
 class PaperTradingValidator:
@@ -747,10 +748,16 @@ class ServiceManager:
             if self.config.log_file:
                 self.config.log_file.parent.mkdir(parents=True, exist_ok=True)
             
+            # Prepare environment variables
+            process_env = os.environ.copy()
+            if self.config.env:
+                process_env.update(self.config.env)
+            
             # Start process with UTF-8 encoding to handle Windows charmap issues
             self.process = subprocess.Popen(
                 cmd,
                 cwd=str(cwd),
+                env=process_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -1205,10 +1212,12 @@ class ParallelProcessManager:
         # Wait a bit more for services to fully initialize
         time.sleep(2)
         
+        # Use dynamic frontend port if stored, otherwise default to 3000
+        frontend_port = getattr(self, 'frontend_port', 3000)
         services_status = {
             "Backend": {"url": "http://localhost:8000/api/v1/health", "status": "unknown"},
             "Feature Server": {"url": "http://localhost:8001/health", "status": "unknown"},
-            "Frontend": {"url": "http://localhost:3000", "status": "unknown"},
+            "Frontend": {"url": f"http://localhost:{frontend_port}", "status": "unknown"},
         }
         
         # Check Backend
@@ -1265,28 +1274,71 @@ class ParallelProcessManager:
     
     def _check_http_endpoint(self, url: str, expected_status: int = 200, timeout: float = 3.0) -> bool:
         """Check if an HTTP endpoint is responding.
-        
+
         Args:
             url: URL to check
             expected_status: Expected HTTP status code
             timeout: Request timeout in seconds
-            
+
         Returns:
             True if endpoint responds with expected status, False otherwise
         """
         try:
             import urllib.request
             import urllib.error
-            
+
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "JackSparrow-Startup-HealthCheck/1.0")
-            
+
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.status == expected_status
         except urllib.error.HTTPError as e:
             # HTTP error but service is responding
             return e.code == expected_status
         except (urllib.error.URLError, socket.timeout, Exception):
+            return False
+
+    def _check_websocket_endpoint(self, url: str, timeout: float = 3.0) -> bool:
+        """Check if a WebSocket endpoint is accessible.
+
+        Args:
+            url: WebSocket URL to check (ws:// or wss://)
+            timeout: Connection timeout in seconds
+
+        Returns:
+            True if WebSocket endpoint accepts connections, False otherwise
+        """
+        if not WEBSOCKETS_AVAILABLE:
+            # WebSocket library not available, skip check
+            return False
+
+        try:
+            import asyncio
+            from urllib.parse import urlparse
+
+            # Parse the URL to extract host and port
+            parsed = urlparse(url)
+            host = parsed.hostname
+            port = parsed.port or (443 if parsed.scheme == 'wss' else 80)
+
+            # Use asyncio to test WebSocket connection
+            async def test_connection():
+                try:
+                    # Create a simple connection test
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(host, port),
+                        timeout=timeout
+                    )
+                    writer.close()
+                    await writer.wait_closed()
+                    return True
+                except Exception:
+                    return False
+
+            # Run the async test
+            return asyncio.run(test_connection())
+
+        except Exception:
             return False
     
     def wait_for_services_ready(self, timeout: float = 60.0, retry_interval: float = 2.0) -> Dict[str, bool]:
@@ -1307,10 +1359,12 @@ class ParallelProcessManager:
         max_retries = int(timeout / retry_interval)
         
         # Service endpoints to check
+        # Use dynamic frontend port if stored, otherwise default to 3000
+        frontend_port = getattr(self, 'frontend_port', 3000)
         endpoints = {
             "Backend": "http://localhost:8000/api/v1/health",
             "Feature Server": "http://localhost:8001/health",
-            "Frontend": "http://localhost:3000"
+            "Frontend": f"http://localhost:{frontend_port}"
         }
         
         # Database and Redis URLs
@@ -1358,14 +1412,18 @@ class ParallelProcessManager:
                 all_ready = False
             
             # Check WebSocket (optional but nice to have)
-            ws_ready = self._check_http_endpoint("http://localhost:8000/ws", timeout=2.0)
+            # Use proper WebSocket health check instead of HTTP check
+            ws_ready = self._check_websocket_endpoint("ws://localhost:8000/ws", timeout=2.0)
             services_status["WebSocket"] = ws_ready
             if ws_ready and not services_checked.get("WebSocket", False):
                 print(f"  {Colors.GREEN}{status_symbol}{Colors.RESET} WebSocket: Ready")
                 services_checked["WebSocket"] = True
             elif not ws_ready:
                 # WebSocket is optional, don't fail if it's not ready
-                pass
+                # Only log once to avoid spam
+                if not services_checked.get("WebSocket", False) and retry_count >= max_retries - 1:
+                    # Only show warning on final attempt
+                    pass
             
             if all_ready and all(services_status.get(k, False) for k in endpoints.keys() if k in services_status):
                 if database_url:
@@ -1580,15 +1638,32 @@ def setup_services(project_root: Path, npm_cmd: str) -> ParallelProcessManager:
     )
     manager.add_service(agent_config)
     
+    # Frontend service - check for port conflicts
+    frontend_port = 3000
+    if check_port_accessible("localhost", frontend_port):
+        # Port 3000 is in use, try to find an alternative
+        for alt_port in range(3001, 3010):
+            if not check_port_accessible("localhost", alt_port):
+                frontend_port = alt_port
+                print(f"{Colors.YELLOW}⚠ Port 3000 is in use, using port {frontend_port} for frontend{Colors.RESET}")
+                break
+        else:
+            # If no free port found, warn but continue (Next.js will handle the error)
+            print(f"{Colors.YELLOW}⚠ Port 3000 is in use and no alternative port found, frontend may fail to start{Colors.RESET}")
+    
+    # Store frontend port in manager for health checks
+    manager.frontend_port = frontend_port
+    
     # Frontend service
+    # Use npm run dev with -- to pass arguments, overriding package.json script
     frontend_config = ServiceConfig(
         name="Frontend",
         color=Colors.FRONTEND,
-        command=[npm_cmd, "run", "dev"],
+        command=[npm_cmd, "run", "dev", "--", "-p", str(frontend_port)],  # Use dynamic port
         cwd=project_root / "frontend",
         log_file=logs_dir / "frontend.log",
         pid_file=logs_dir / "frontend.pid",
-        check_delay=3.0  # Frontend takes longer to start
+        check_delay=3.0,  # Frontend takes longer to start
     )
     manager.add_service(frontend_config)
     
