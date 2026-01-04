@@ -119,8 +119,11 @@ async def lifespan(app: FastAPI):
         )
     
     # Initialize and start agent event subscriber
+    logger.info("backend_starting_agent_event_subscriber", service="backend")
     try:
+        logger.info("backend_agent_event_subscriber_initializing", service="backend")
         await agent_event_subscriber.initialize()
+        logger.info("backend_agent_event_subscriber_starting", service="backend")
         await agent_event_subscriber.start()
         logger.info("backend_agent_event_subscriber_started", service="backend")
     except Exception as e:
@@ -159,6 +162,15 @@ async def lifespan(app: FastAPI):
             error=str(e),
             exc_info=True
         )
+
+    except Exception as e:
+        logger.error(
+            "backend_lifespan_unhandled_error",
+            service="backend",
+            error=str(e),
+            exc_info=True
+        )
+        raise
 
 
 # Create FastAPI app

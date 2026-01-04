@@ -22,7 +22,7 @@ import structlog
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.core.config import settings
-from agent.core.redis import get_redis
+from agent.core.redis_config import get_redis
 
 logger = structlog.get_logger()
 

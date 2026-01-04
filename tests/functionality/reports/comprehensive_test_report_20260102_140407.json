@@ -1,0 +1,399 @@
+{
+  "timestamp": "2026-01-02T14:04:07.769713+00:00",
+  "summary": {
+    "total_tests": 18,
+    "passed": 8,
+    "failed": 0,
+    "warnings": 10,
+    "degraded": 0,
+    "health_score": 44.44,
+    "total_duration_ms": 19759.45,
+    "groups_tested": 1
+  },
+  "startup": {
+    "services_status": {
+      "Backend": true,
+      "Feature Server": true,
+      "Frontend": true,
+      "Database": true,
+      "Redis": true,
+      "WebSocket": true
+    },
+    "all_services_ready": true,
+    "startup_errors": [],
+    "startup_warnings": [],
+    "errors_count": 0,
+    "warnings_count": 0
+  },
+  "test_groups": {
+    "core-services": [
+      {
+        "suite_name": "feature computation",
+        "status": "WARNING",
+        "duration_ms": 13074.625,
+        "total_tests": 6,
+        "passed": 5,
+        "failed": 0,
+        "warnings": 1,
+        "issues": [
+          "Feature server health check failed: Cannot connect to host 0.0.0.0:8001 ssl:default [The format of the specified network name is invalid]"
+        ],
+        "solutions": [],
+        "results": [
+          {
+            "name": "mcp_feature_protocol",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "feature_server_available": true,
+              "mcp_protocol_available": true,
+              "get_features_method_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_calculation",
+            "status": "PASS",
+            "duration_ms": 1946.112,
+            "details": {
+              "features_computed": 3,
+              "requested_features": 3,
+              "feature_calculation_working": true,
+              "valid_features": 3,
+              "invalid_features": 0
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "all_50_features",
+            "status": "PASS",
+            "duration_ms": 193.67000000000002,
+            "details": {
+              "total_features_requested": 50,
+              "total_features_computed": 50,
+              "missing_features": 0,
+              "valid_feature_values": 50,
+              "invalid_feature_values": 0,
+              "feature_coverage_percent": 100.0,
+              "high_coverage": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_server",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "feature_server_api_available": true,
+              "feature_server_available": true,
+              "feature_server_host": "0.0.0.0",
+              "feature_server_port": 8001
+            },
+            "issues": [
+              "Feature server health check failed: Cannot connect to host 0.0.0.0:8001 ssl:default [The format of the specified network name is invalid]"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_performance",
+            "status": "PASS",
+            "duration_ms": 15.730999999999998,
+            "details": {
+              "computation_time_ms": 15.73,
+              "features_computed": 5,
+              "performance_target_met": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_caching",
+            "status": "PASS",
+            "duration_ms": 2038.302,
+            "details": {
+              "caching_mechanism_available": false,
+              "redis_available_for_caching": true,
+              "feature_caching_enabled": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "ml model communication",
+        "status": "WARNING",
+        "duration_ms": 0.0,
+        "total_tests": 6,
+        "passed": 3,
+        "failed": 0,
+        "warnings": 3,
+        "issues": [
+          "Model inference test requires feature data",
+          "Expected at least 6 model(s) but found 0"
+        ],
+        "solutions": [
+          "Check model loading logic and model file formats"
+        ],
+        "results": [
+          {
+            "name": "model_discovery",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "model_discovery_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_registration",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "registered_models": 0,
+              "model_names": []
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_inference",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "inference_test": "requires_feature_data"
+            },
+            "issues": [
+              "Model inference test requires feature data"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_consensus",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "consensus_test": "requires_multiple_models"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_health_monitoring",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "health_monitoring": "tested"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_loading_sources",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "model_path_configured": false,
+              "model_path_exists": false,
+              "model_dir_exists": true,
+              "total_models_registered": 0,
+              "model_names": []
+            },
+            "issues": [
+              "Expected at least 6 model(s) but found 0"
+            ],
+            "solutions": [
+              "Check model loading logic and model file formats"
+            ],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "websocket communication",
+        "status": "WARNING",
+        "duration_ms": 6684.821999999999,
+        "total_tests": 6,
+        "passed": 0,
+        "failed": 0,
+        "warnings": 6,
+        "issues": [
+          "Backend WebSocket not available",
+          "Backend WebSocket not available",
+          "Backend WebSocket not available",
+          "Backend WebSocket not available",
+          "Backend WebSocket not available",
+          "Backend WebSocket not available"
+        ],
+        "solutions": [
+          "Ensure backend WebSocket server is running on ws://localhost:8000/ws"
+        ],
+        "results": [
+          {
+            "name": "connection_management",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "agent_websocket_connected": true,
+              "agent_websocket_ping_successful": true,
+              "reconnection_test": "basic_check_complete",
+              "full_reconnection_test": "requires_connection_interruption_simulation"
+            },
+            "issues": [
+              "Backend WebSocket not available"
+            ],
+            "solutions": [
+              "Ensure backend WebSocket server is running on ws://localhost:8000/ws"
+            ],
+            "error": null
+          },
+          {
+            "name": "message_types",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "Backend WebSocket not available"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "message_format",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "Backend WebSocket not available"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "message_subscription",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "Backend WebSocket not available"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "broadcast_to_multiple_clients",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "Backend WebSocket not available"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "connection_cleanup",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "agent_websocket_cleanup_available": true
+            },
+            "issues": [
+              "Backend WebSocket not available"
+            ],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      }
+    ]
+  },
+  "all_issues": [
+    {
+      "group": "core-services",
+      "suite": "feature computation",
+      "test": "feature_server",
+      "issue": "Feature server health check failed: Cannot connect to host 0.0.0.0:8001 ssl:default [The format of the specified network name is invalid]",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "core-services",
+      "suite": "ml model communication",
+      "test": "model_inference",
+      "issue": "Model inference test requires feature data",
+      "solution": "Check model files exist and are valid"
+    },
+    {
+      "group": "core-services",
+      "suite": "ml model communication",
+      "test": "model_loading_sources",
+      "issue": "Expected at least 6 model(s) but found 0",
+      "solution": "Check model files exist and are valid"
+    },
+    {
+      "group": "core-services",
+      "suite": "websocket communication",
+      "test": "connection_management",
+      "issue": "Backend WebSocket not available",
+      "solution": "Verify WebSocket server is running and port is correct"
+    },
+    {
+      "group": "core-services",
+      "suite": "websocket communication",
+      "test": "message_types",
+      "issue": "Backend WebSocket not available",
+      "solution": "Verify WebSocket server is running and port is correct"
+    },
+    {
+      "group": "core-services",
+      "suite": "websocket communication",
+      "test": "message_format",
+      "issue": "Backend WebSocket not available",
+      "solution": "Verify WebSocket server is running and port is correct"
+    },
+    {
+      "group": "core-services",
+      "suite": "websocket communication",
+      "test": "message_subscription",
+      "issue": "Backend WebSocket not available",
+      "solution": "Verify WebSocket server is running and port is correct"
+    },
+    {
+      "group": "core-services",
+      "suite": "websocket communication",
+      "test": "broadcast_to_multiple_clients",
+      "issue": "Backend WebSocket not available",
+      "solution": "Verify WebSocket server is running and port is correct"
+    },
+    {
+      "group": "core-services",
+      "suite": "websocket communication",
+      "test": "connection_cleanup",
+      "issue": "Backend WebSocket not available",
+      "solution": "Verify WebSocket server is running and port is correct"
+    }
+  ],
+  "all_solutions": [
+    "Check model loading logic and model file formats",
+    "Ensure backend WebSocket server is running on ws://localhost:8000/ws"
+  ],
+  "recommendations": [
+    "Review 10 warnings to identify potential issues",
+    "System health score is below 80%. Review failing tests and warnings"
+  ]
+}

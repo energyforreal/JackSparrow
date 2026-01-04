@@ -10,8 +10,13 @@ from datetime import datetime, timedelta, timezone
 import asyncio
 import structlog
 
-from agent.data.delta_client import DeltaExchangeClient, CircuitBreakerOpenError, DeltaExchangeError
-from agent.core.redis import get_cache, set_cache
+from agent.data.delta_client import (
+    DeltaExchangeClient,
+    DeltaExchangeWebSocketClient,
+    CircuitBreakerOpenError,
+    DeltaExchangeError
+)
+from agent.core.redis_config import get_cache, set_cache
 from agent.core.config import settings
 from agent.events.event_bus import event_bus
 from agent.events.schemas import MarketTickEvent, CandleClosedEvent, PriceFluctuationEvent, EventType
@@ -25,31 +30,113 @@ class MarketDataService:
     def __init__(self):
         """Initialize market data service."""
         self.delta_client = DeltaExchangeClient()
+        self.websocket_client = DeltaExchangeWebSocketClient(
+            api_key=settings.delta_exchange_api_key,
+            api_secret=settings.delta_exchange_api_secret,
+            base_url=settings.websocket_url,
+            max_reconnect_attempts=settings.websocket_reconnect_attempts,
+            reconnect_delay=settings.websocket_reconnect_delay,
+            heartbeat_interval=settings.websocket_heartbeat_interval
+        )
+        self._websocket_enabled = settings.websocket_enabled
         self.cache_ttl = 60  # Cache for 60 seconds
         self.ticker_cache_ttl = 10  # Shorter cache for ticker
         self.streaming_symbols: List[str] = []
         self.streaming_running = False
         self._streaming_task: Optional[asyncio.Task] = None
+        self._websocket_connected = False
         self._last_ticker_cache: Dict[str, Dict[str, Any]] = {}
         self._last_candle_cache: Dict[str, Dict[str, Any]] = {}
-        self._tick_throttle_ms = 100  # Throttle ticks to max 10 per second per symbol
+        self._tick_throttle_ms = 50  # Reduced throttling for real-time updates (20 per second max)
         self._last_tick_time: Dict[str, datetime] = {}
-        self._tick_force_emit_interval = 5.0  # Force emit tick every 5 seconds even if price hasn't changed much
+        self._tick_force_emit_interval = 2.0  # Force emit tick every 2 seconds for real-time display
         # New: Track last major price change for fluctuation threshold
         self._last_major_price: Dict[str, float] = {}
         self._price_fluctuation_threshold_pct = settings.price_fluctuation_threshold_pct
     
     async def initialize(self):
         """Initialize market data service."""
-        pass
-    
+        # Set up WebSocket message handler for ticker updates if WebSocket is enabled
+        if self._websocket_enabled:
+            self.websocket_client.add_message_handler("ticker", self._handle_websocket_ticker)
+            self.websocket_client.add_message_handler("v2/ticker", self._handle_websocket_ticker)
+
+            # Attempt to connect WebSocket
+            try:
+                await self._connect_websocket()
+                logger.info("market_data_websocket_initialized", connected=self._websocket_connected)
+            except Exception as e:
+                logger.warning("websocket_initialization_failed", error=str(e))
+                # Continue without WebSocket - will fall back to REST API
+        else:
+            logger.info("websocket_disabled", message="WebSocket streaming is disabled, using REST API polling only")
+
+    async def _connect_websocket(self) -> None:
+        """Connect to Delta Exchange WebSocket."""
+        try:
+            await self.websocket_client.connect()
+            self._websocket_connected = True
+            logger.info("market_data_websocket_connected")
+        except Exception as e:
+            logger.error("market_data_websocket_connection_failed", error=str(e))
+            self._websocket_connected = False
+            # Will fall back to REST API polling
+
+    async def _handle_websocket_ticker(self, message: Dict[str, Any]) -> None:
+        """Handle incoming WebSocket ticker message."""
+        try:
+            symbol = message.get("symbol")
+            if not symbol:
+                return
+
+            # Convert WebSocket message to ticker format compatible with existing code
+            ticker_data = {
+                "symbol": symbol,
+                "price": float(message.get("mark_price", 0)),
+                "volume": float(message.get("volume", 0)),
+                "timestamp": message.get("timestamp", 0),
+                "bid": float(message.get("quotes", {}).get("best_bid", 0)),
+                "ask": float(message.get("quotes", {}).get("best_ask", 0)),
+                "mark_change_24h": message.get("mark_change_24h"),  # Price change percentage
+                "open": float(message.get("open", 0)),
+                "close": float(message.get("close", 0)),
+                "high": float(message.get("high", 0)),
+                "low": float(message.get("low", 0)),
+                "oi": float(message.get("oi", 0)),  # Open interest
+                "turnover_usd": float(message.get("turnover_usd", 0)),
+                "spot_price": float(message.get("spot_price", 0))
+            }
+
+            # Process the ticker data (same logic as before)
+            await self._process_ticker_update(symbol, ticker_data)
+
+        except Exception as e:
+            logger.error(
+                "websocket_ticker_handler_error",
+                error=str(e),
+                message=message,
+                exc_info=True
+            )
+
+    async def _process_ticker_update(self, symbol: str, ticker_data: Dict[str, Any]) -> None:
+        """Process ticker update from either WebSocket or REST API."""
+        # Check for price fluctuations (same logic as before)
+        await self._check_and_emit_ticker_with_fluctuation_from_data(symbol, ticker_data)
+
+        # Update cache
+        self._last_ticker_cache[symbol] = ticker_data
+        self._last_tick_time[symbol] = datetime.now(timezone.utc)
+
     async def shutdown(self):
         """Shutdown market data service."""
         await self.stop_market_data_stream()
+        # Disconnect WebSocket if enabled
+        if self._websocket_enabled:
+            await self.websocket_client.disconnect()
     
     async def start_market_data_stream(self, symbols: List[str], interval: str = "15m"):
         """Start streaming market data for symbols.
-        
+
         Args:
             symbols: List of symbols to stream
             interval: Candle interval to monitor
@@ -57,15 +144,26 @@ class MarketDataService:
         if self.streaming_running:
             logger.warning("market_data_stream_already_running")
             return
-        
+
         self.streaming_symbols = symbols
         self.streaming_running = True
+
+        # Subscribe to WebSocket if enabled and connected
+        if self._websocket_enabled and self._websocket_connected:
+            try:
+                await self.websocket_client.subscribe_ticker(symbols)
+                logger.info("market_data_websocket_subscribed", symbols=symbols)
+            except Exception as e:
+                logger.warning("market_data_websocket_subscription_failed", error=str(e))
+                # Fall back to REST API polling
+
         self._streaming_task = asyncio.create_task(self._stream_loop(interval))
-        
+
         logger.info(
             "market_data_stream_started",
             symbols=symbols,
-            interval=interval
+            interval=interval,
+            websocket_enabled=self._websocket_connected
         )
     
     async def stop_market_data_stream(self):
@@ -82,24 +180,38 @@ class MarketDataService:
         logger.info("market_data_stream_stopped")
     
     async def _stream_loop(self, interval: str):
-        """Main streaming loop - now continuously monitors price fluctuations."""
+        """Main streaming loop - optimized for WebSocket or REST API fallback."""
         consecutive_errors = 0
         max_consecutive_errors = 10
+
+        # Determine polling interval based on WebSocket availability
+        # When WebSocket is connected, use fallback polling interval since we get real-time updates
+        poll_interval = settings.fast_poll_interval if not (self._websocket_enabled and self._websocket_connected) else settings.websocket_fallback_poll_interval
+
+        logger.info(
+            "market_data_stream_mode",
+            websocket_enabled=self._websocket_enabled,
+            websocket_connected=self._websocket_connected,
+            poll_interval=poll_interval,
+            symbols=self.streaming_symbols
+        )
 
         while self.streaming_running:
             try:
                 for symbol in self.streaming_symbols:
-                    # Continuously monitor tickers for price fluctuations
-                    await self._check_and_emit_ticker_with_fluctuation(symbol)
-                    # Keep candle monitoring for longer-term analysis (less frequent)
+                    # Only poll tickers via REST API if WebSocket is not available or enabled
+                    if not (self._websocket_enabled and self._websocket_connected):
+                        # Continuously monitor tickers for price fluctuations (REST fallback)
+                        await self._check_and_emit_ticker_with_fluctuation(symbol)
+
+                    # Keep candle monitoring for longer-term analysis (always via REST)
                     await self._check_and_emit_candle(symbol, interval)
 
                 # Reset error count on successful iteration
                 consecutive_errors = 0
 
-                # Use fast polling interval for continuous price monitoring
-                # This controls how often we check for price updates
-                await asyncio.sleep(settings.fast_poll_interval)
+                # Use appropriate polling interval
+                await asyncio.sleep(poll_interval)
 
             except asyncio.CancelledError:
                 break
@@ -189,10 +301,10 @@ class MarketDataService:
     
     async def _check_and_emit_ticker(self, symbol: str):
         """Check ticker and emit tick event if changed.
-        
+
         Emits tick if:
-        1. Price changed by >0.01% (reduced from 0.1% for more frequent updates)
-        2. OR at least 5 seconds have passed since last tick (time-based fallback for realtime display)
+        1. Price changed by >0.001% (very sensitive for real-time updates)
+        2. OR at least 2 seconds have passed since last tick (time-based fallback for realtime display)
         """
         try:
             ticker = await self.get_ticker(symbol)
@@ -212,12 +324,12 @@ class MarketDataService:
             last_ticker = self._last_ticker_cache.get(symbol)
             
             if last_ticker:
-                # Check if price changed significantly (>0.01% - reduced threshold for more frequent updates)
+                # Check if price changed significantly (>0.001% - very sensitive for real-time updates)
                 price_change_pct = abs((ticker["price"] - last_ticker["price"]) / last_ticker["price"])
-                if price_change_pct >= 0.0001:  # At least 0.01% change
+                if price_change_pct >= 0.00001:  # At least 0.001% change (very responsive)
                     should_emit = True
                 else:
-                    # Time-based fallback: emit tick at least every N seconds even if price hasn't changed much
+                    # Time-based fallback: emit tick at least every N seconds for real-time display
                     elapsed_seconds = (now - last_tick_time).total_seconds()
                     if elapsed_seconds >= self._tick_force_emit_interval:
                         should_emit = True
@@ -240,20 +352,21 @@ class MarketDataService:
                 exc_info=True
             )
 
-    async def _check_and_emit_ticker_with_fluctuation(self, symbol: str):
-        """Check ticker and emit both tick and fluctuation events as needed.
+    async def _check_and_emit_ticker_with_fluctuation_from_data(self, symbol: str, ticker_data: Dict[str, Any]):
+        """Process ticker data and emit both tick and fluctuation events as needed.
 
+        Works with pre-fetched ticker data (from WebSocket or REST API).
         Emits MarketTickEvent for UI updates and PriceFluctuationEvent for ML pipeline triggers.
+
+        Args:
+            symbol: Trading symbol
+            ticker_data: Ticker data dictionary
         """
         try:
-            ticker = await self.get_ticker(symbol)
-            if not ticker:
-                return
-
-            current_price = ticker["price"]
+            current_price = ticker_data["price"]
 
             # First, handle regular tick emission for UI updates
-            await self._check_and_emit_ticker(symbol)
+            await self._check_and_emit_ticker_from_data(symbol, ticker_data)
 
             # Now check for major price fluctuations that should trigger ML pipeline
             last_major_price = self._last_major_price.get(symbol)
@@ -270,7 +383,7 @@ class MarketDataService:
                         current_price=current_price,
                         previous_price=last_major_price,
                         change_pct=price_change_pct,
-                        volume=ticker["volume"],
+                        volume=ticker_data["volume"],
                         threshold_pct=self._price_fluctuation_threshold_pct
                     )
 
@@ -279,6 +392,80 @@ class MarketDataService:
             else:
                 # First price reading - set baseline
                 self._last_major_price[symbol] = current_price
+
+        except Exception as e:
+            logger.error(
+                "market_data_ticker_fluctuation_check_error",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True
+            )
+
+    async def _check_and_emit_ticker_from_data(self, symbol: str, ticker_data: Dict[str, Any]):
+        """Check ticker data and emit tick event if changed (works with pre-fetched data).
+
+        Emits tick if:
+        1. Price changed by >0.001% (very sensitive for real-time updates)
+        2. OR at least 2 seconds have passed since last tick (time-based fallback for realtime display)
+
+        Args:
+            symbol: Trading symbol
+            ticker_data: Pre-fetched ticker data
+        """
+        try:
+            # Throttle ticks (prevent too frequent updates)
+            now = datetime.now(timezone.utc)
+            last_tick_time = self._last_tick_time.get(symbol)
+            if last_tick_time:
+                elapsed_ms = (now - last_tick_time).total_seconds() * 1000
+                if elapsed_ms < self._tick_throttle_ms:
+                    return
+
+            # Check if we should emit tick
+            should_emit = False
+            last_ticker = self._last_ticker_cache.get(symbol)
+
+            if last_ticker:
+                # Check if price changed significantly (>0.001% - very sensitive for real-time updates)
+                price_change_pct = abs((ticker_data["price"] - last_ticker["price"]) / last_ticker["price"])
+                if price_change_pct >= 0.00001:  # At least 0.001% change (very responsive)
+                    should_emit = True
+                else:
+                    # Time-based fallback: emit tick at least every N seconds for real-time display
+                    elapsed_seconds = (now - last_tick_time).total_seconds()
+                    if elapsed_seconds >= self._tick_force_emit_interval:
+                        should_emit = True
+            else:
+                # No previous ticker cached, always emit first tick
+                should_emit = True
+
+            if should_emit:
+                # Emit tick event
+                await self._on_tick(symbol, ticker_data)
+
+                self._last_ticker_cache[symbol] = ticker_data
+                self._last_tick_time[symbol] = now
+
+        except Exception as e:
+            logger.error(
+                "market_data_ticker_check_error",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True
+            )
+
+    async def _check_and_emit_ticker_with_fluctuation(self, symbol: str):
+        """Check ticker and emit both tick and fluctuation events as needed (REST API fallback).
+
+        Emits MarketTickEvent for UI updates and PriceFluctuationEvent for ML pipeline triggers.
+        """
+        try:
+            ticker = await self.get_ticker(symbol)
+            if not ticker:
+                return
+
+            # Process using the unified method
+            await self._process_ticker_update(symbol, ticker)
 
         except Exception as e:
             logger.error(
@@ -330,16 +517,71 @@ class MarketDataService:
             ticker_data: Ticker data dictionary
         """
         try:
+            # Extract timestamp
+            timestamp_raw = ticker_data.get("timestamp")
+            if isinstance(timestamp_raw, str):
+                timestamp = datetime.fromisoformat(timestamp_raw)
+            elif isinstance(timestamp_raw, (int, float)):
+                # Handle Unix timestamp - Delta Exchange sends microseconds (13 digits)
+                # or milliseconds (10 digits), or seconds (10 digits before decimal)
+                if timestamp_raw > 1e12:  # Microseconds (13+ digits)
+                    timestamp = datetime.fromtimestamp(timestamp_raw / 1_000_000, tz=timezone.utc)
+                elif timestamp_raw > 1e10:  # Milliseconds (10-12 digits)
+                    timestamp = datetime.fromtimestamp(timestamp_raw / 1_000, tz=timezone.utc)
+                else:  # Seconds (10 or fewer digits)
+                    timestamp = datetime.fromtimestamp(timestamp_raw, tz=timezone.utc)
+            else:
+                timestamp = datetime.now(timezone.utc)
+
+            # Create payload with all available market data
+            payload = {
+                "symbol": symbol,
+                "price": float(ticker_data.get("price", 0.0)),
+                "volume": float(ticker_data.get("volume", 0.0)),
+                "timestamp": timestamp,
+            }
+
+            # Add 24h statistics if available (from Delta Exchange WebSocket)
+            if "mark_change_24h" in ticker_data:
+                payload["change_24h_pct"] = float(ticker_data["mark_change_24h"])
+            if "open" in ticker_data:
+                payload["open_24h"] = float(ticker_data["open"])
+            if "high" in ticker_data:
+                payload["high_24h"] = float(ticker_data["high"])
+            if "low" in ticker_data:
+                payload["low_24h"] = float(ticker_data["low"])
+            if "close" in ticker_data:
+                payload["close_24h"] = float(ticker_data["close"])
+            if "turnover_usd" in ticker_data:
+                payload["turnover_usd"] = float(ticker_data["turnover_usd"])
+            if "oi" in ticker_data:
+                payload["oi"] = float(ticker_data["oi"])
+            if "spot_price" in ticker_data:
+                payload["spot_price"] = float(ticker_data["spot_price"])
+            if "mark_price" in ticker_data:
+                payload["mark_price"] = float(ticker_data["mark_price"])
+
+            # Add order book data if available
+            if "quotes" in ticker_data:
+                quotes = ticker_data["quotes"]
+                if "best_bid" in quotes:
+                    payload["bid_price"] = float(quotes["best_bid"])
+                if "best_ask" in quotes:
+                    payload["ask_price"] = float(quotes["best_ask"])
+                if "bid_size" in quotes:
+                    payload["bid_size"] = float(quotes["bid_size"])
+                if "ask_size" in quotes:
+                    payload["ask_size"] = float(quotes["ask_size"])
+
+            # Calculate absolute change if percentage is available
+            if payload.get("change_24h_pct") is not None and payload.get("open_24h") is not None:
+                change_pct = payload["change_24h_pct"]
+                open_price = payload["open_24h"]
+                payload["change_24h"] = open_price * (change_pct / 100)
+
             event = MarketTickEvent(
                 source="market_data_service",
-                payload={
-                    "symbol": symbol,
-                    "price": ticker_data.get("price", 0.0),
-                    "volume": ticker_data.get("volume", 0.0),
-                    "timestamp": datetime.fromisoformat(ticker_data.get("timestamp", datetime.now(timezone.utc).isoformat()))
-                    if isinstance(ticker_data.get("timestamp"), str)
-                    else ticker_data.get("timestamp", datetime.now(timezone.utc))
-                }
+                payload=payload
             )
             
             await event_bus.publish(event)

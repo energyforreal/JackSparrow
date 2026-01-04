@@ -225,6 +225,41 @@ class ApiClient {
     })
   }
 
+  async predictWithContext(symbol: string, marketContext: Record<string, unknown>): Promise<{
+    success: boolean
+    data: {
+      decision: 'BUY' | 'SELL' | 'HOLD'
+      confidence: number
+      reasoning: string
+      model_predictions: Array<{
+        model_name: string
+        prediction: number
+        confidence: number
+        reasoning: string
+      }>
+      model_consensus: Array<{
+        model_name: string
+        signal: string
+        confidence: number
+      }>
+      individual_model_reasoning: Array<{
+        model_name: string
+        reasoning: string
+        confidence: number
+      }>
+      market_context?: Record<string, unknown>
+      timestamp: string
+    }
+  }> {
+    return this.request('/api/v1/predict', {
+      method: 'POST',
+      body: JSON.stringify({
+        symbol,
+        market_context: marketContext
+      }),
+    })
+  }
+
   async getPortfolioSummary(): Promise<{
     total_value: number
     available_balance: number

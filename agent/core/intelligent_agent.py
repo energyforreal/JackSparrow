@@ -59,7 +59,7 @@ from agent.core.context_manager import ContextManager, context_manager
 from agent.core.mcp_orchestrator import MCPOrchestrator, mcp_orchestrator
 from agent.core.learning_system import LearningSystem
 from agent.core.execution import execution_module
-from agent.core.redis import get_redis
+from agent.core.redis_config import get_redis
 from agent.models.model_discovery import ModelDiscovery
 from agent.risk.risk_manager import RiskManager
 from agent.data.delta_client import DeltaExchangeClient
@@ -484,13 +484,13 @@ class IntelligentAgent:
                         reconnect_attempt=reconnect_attempts
                     )
                     # Invalidate Redis connection to force reconnection
-                    from agent.core.redis import _redis_client
+                    from agent.core.redis_config import _redis_client
                     if _redis_client is not None:
                         try:
                             await _redis_client.close()
                         except Exception:
                             pass
-                    from agent.core.redis import _redis_client
+                    from agent.core.redis_config import _redis_client
                     import agent.core.redis as redis_module
                     redis_module._redis_client = None
                     

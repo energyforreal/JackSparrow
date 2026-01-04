@@ -30,19 +30,19 @@ def setup_output_buffering() -> None:
 
 def get_project_root() -> Path:
     """Get the project root directory (parent of .cursor directory).
-    
+
     Returns:
         Path to project root directory.
-        
+
     Raises:
         RuntimeError: If project root cannot be determined.
     """
     script_path = Path(__file__).resolve()
-    project_root = script_path.parent.parent
-    
+    project_root = script_path.parent.parent.parent
+
     if not project_root.exists():
         raise RuntimeError(f"Project root does not exist: {project_root}")
-    
+
     return project_root
 
 

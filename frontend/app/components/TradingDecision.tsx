@@ -123,7 +123,7 @@ export function TradingDecision({
                 No trading decision available
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                Waiting for signal from agent. Ensure agent service is running.
+                Waiting for real-time signal updates via WebSocket. Ensure backend and agent services are running.
               </p>
             </div>
           )}

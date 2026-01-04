@@ -313,6 +313,38 @@ class Settings(BaseSettings):
         description="Comma-separated list of timeframes"
     )
 
+    # WebSocket Configuration
+    websocket_enabled: bool = Field(
+        default=True,
+        env="WEBSOCKET_ENABLED",
+        description="Enable WebSocket streaming for real-time data (default: True)"
+    )
+    websocket_url: str = Field(
+        default="wss://socket.india.delta.exchange",
+        env="WEBSOCKET_URL",
+        description="Delta Exchange WebSocket URL"
+    )
+    websocket_reconnect_attempts: int = Field(
+        default=5,
+        env="WEBSOCKET_RECONNECT_ATTEMPTS",
+        description="Maximum WebSocket reconnection attempts"
+    )
+    websocket_reconnect_delay: float = Field(
+        default=5.0,
+        env="WEBSOCKET_RECONNECT_DELAY",
+        description="Delay between WebSocket reconnection attempts in seconds"
+    )
+    websocket_heartbeat_interval: float = Field(
+        default=30.0,
+        env="WEBSOCKET_HEARTBEAT_INTERVAL",
+        description="WebSocket heartbeat interval in seconds"
+    )
+    websocket_fallback_poll_interval: float = Field(
+        default=60.0,
+        env="WEBSOCKET_FALLBACK_POLL_INTERVAL",
+        description="REST API polling interval when WebSocket is unavailable (seconds)"
+    )
+
     @field_validator("trading_mode", mode="before")
     @classmethod
     def normalize_trading_mode(cls, value: Optional[str]) -> str:
@@ -354,14 +386,23 @@ class Settings(BaseSettings):
         """Validate price fluctuation threshold is positive."""
         if value is None:
             return 0.5
-        if isinstance(value, (int, float)):
+
+        # Handle string inputs from environment variables
+        if isinstance(value, str):
+            try:
+                threshold = float(value)
+            except ValueError:
+                raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT must be a valid number")
+        elif isinstance(value, (int, float)):
             threshold = float(value)
-            if threshold <= 0:
-                raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT must be positive")
-            if threshold > 100:
-                raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT cannot exceed 100%")
-            return threshold
-        raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT must be a number")
+        else:
+            raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT must be a number")
+
+        if threshold <= 0:
+            raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT must be positive")
+        if threshold > 100:
+            raise ValueError("PRICE_FLUCTUATION_THRESHOLD_PCT cannot exceed 100%")
+        return threshold
 
     @field_validator("fast_poll_interval", mode="before")
     @classmethod
@@ -369,14 +410,23 @@ class Settings(BaseSettings):
         """Validate fast poll interval is reasonable."""
         if value is None:
             return 0.5
-        if isinstance(value, (int, float)):
+
+        # Handle string inputs from environment variables
+        if isinstance(value, str):
+            try:
+                interval = float(value)
+            except ValueError:
+                raise ValueError("FAST_POLL_INTERVAL must be a valid number")
+        elif isinstance(value, (int, float)):
             interval = float(value)
-            if interval <= 0:
-                raise ValueError("FAST_POLL_INTERVAL must be positive")
-            if interval > 60:
-                raise ValueError("FAST_POLL_INTERVAL cannot exceed 60 seconds (too slow for real-time)")
-            return interval
-        raise ValueError("FAST_POLL_INTERVAL must be a number")
+        else:
+            raise ValueError("FAST_POLL_INTERVAL must be a number")
+
+        if interval <= 0:
+            raise ValueError("FAST_POLL_INTERVAL must be positive")
+        if interval > 60:
+            raise ValueError("FAST_POLL_INTERVAL cannot exceed 60 seconds (too slow for real-time)")
+        return interval
         raise ValueError("TIMEFRAMES must be a comma-separated string")
 
     @model_validator(mode="after")

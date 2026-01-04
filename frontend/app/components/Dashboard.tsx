@@ -104,77 +104,8 @@ export function Dashboard() {
           console.debug('Could not fetch performance metrics:', perfError)
         }
 
-        // Signal, portfolio, and trades come from useAgent hook - don't fetch here
-        // Only fetch signal if we haven't received one via WebSocket yet
-        // This prevents stale initial data from overriding real-time updates
-        // Also check if WebSocket is connected - if connected, wait for WebSocket update instead
-        if (!hasWebSocketSignal && !isConnected) {
-          try {
-            const prediction = await apiClient.getPrediction()
-            if (prediction) {
-              // Only set if we still haven't received WebSocket update
-              setSignal((currentSignal) => {
-                // Don't override if we've already received a WebSocket signal
-                // Also check if WebSocket connected in meantime
-                if (hasWebSocketSignal || isConnected || (currentSignal && currentSignal.timestamp)) {
-                  if (process.env.NODE_ENV === 'development') {
-                    console.log('[Dashboard] Skipping API signal fetch - WebSocket signal already received, WebSocket connected, or current signal exists')
-                  }
-                  return currentSignal
-                }
-
-                const normalizedConfidence = normalizeConfidenceToPercent(
-                  prediction.confidence
-                )
-
-                const apiSignal: Signal = {
-                  signal: prediction.signal as Signal['signal'],
-                  confidence: normalizedConfidence,
-                  model_consensus: prediction.model_consensus ?? [],
-                  individual_model_reasoning:
-                    prediction.individual_model_reasoning ?? [],
-                  model_predictions: prediction.model_predictions ?? [],
-                  reasoning_chain:
-                    prediction.reasoning_chain?.steps ?? [],
-                  reasoning_chain_full: prediction.reasoning_chain,
-                  agent_decision_reasoning:
-                    prediction.reasoning_chain?.conclusion,
-                  symbol:
-                    (prediction.market_context?.symbol as string | undefined) ??
-                    'BTCUSD',
-                  timestamp: prediction.timestamp,
-                }
-
-                setSignalDataSource('api_fetch')
-
-                if (process.env.NODE_ENV === 'development') {
-                  console.log('[Dashboard] Signal fetched from API (initial load):', {
-                    signal: apiSignal.signal,
-                    raw_confidence: prediction.confidence,
-                    normalized_confidence: normalizedConfidence,
-                    timestamp: apiSignal.timestamp,
-                    data_source: 'api_fetch',
-                    note: 'This will be overridden by WebSocket updates'
-                  })
-                }
-
-                return apiSignal
-              })
-              if (prediction.reasoning_chain && !hasWebSocketSignal) {
-                setReasoningChain(
-                  Array.isArray(prediction.reasoning_chain.steps)
-                    ? prediction.reasoning_chain.steps
-                    : []
-                )
-              }
-            }
-          } catch (err) {
-            // Prediction fetch is optional - log for debugging
-            const errorMessage = err instanceof Error ? err.message : String(err)
-            console.warn('Could not fetch prediction:', errorMessage)
-            // Don't set signal state - leave it null to show "No signal available"
-          }
-        }
+        // WebSocket-only approach: Signals come from useAgent hook via WebSocket
+        // No REST API fallback - rely entirely on WebSocket signal_update messages
       } catch (error) {
         console.error('Error fetching initial dashboard data:', error)
       } finally {

@@ -4,7 +4,7 @@ import asyncio
 import sys
 import structlog
 
-from agent.core.redis import get_redis, close_redis
+from agent.core.redis_config import get_redis, close_redis
 
 # Initialize logger for healthcheck
 logger = structlog.get_logger()

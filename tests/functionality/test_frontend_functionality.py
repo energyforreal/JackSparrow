@@ -37,6 +37,7 @@ class FrontendFunctionalityTestSuite(TestSuiteBase):
         await self._test_frontend_accessible()
         await self._test_frontend_api_integration()
         await self._test_frontend_websocket_connection()
+        await self._test_frontend_realtime_price_data()
         await self._test_frontend_health_endpoint()
         await self._test_frontend_cors_headers()
         await self._test_frontend_error_handling()
@@ -143,14 +144,14 @@ class FrontendFunctionalityTestSuite(TestSuiteBase):
                     await self.backend_ws.ping()
                     result.details["websocket_connected"] = True
                     result.details["ping_successful"] = True
-                    
+
                     # Test subscription (frontend would subscribe to channels)
                     subscribe_msg = {
-                        "type": "subscribe",
+                        "action": "subscribe",
                         "channels": ["agent_state", "signal_update"]
                     }
                     await self.backend_ws.send(json.dumps(subscribe_msg))
-                    
+
                     # Wait for subscription confirmation
                     try:
                         response = await asyncio.wait_for(self.backend_ws.recv(), timeout=2.0)
@@ -174,7 +175,127 @@ class FrontendFunctionalityTestSuite(TestSuiteBase):
         
         result.duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
         self.add_result(result)
-    
+
+    async def _test_frontend_realtime_price_data(self):
+        """Test that frontend can receive real-time price data via WebSocket."""
+        result = TestResult(name="frontend_realtime_price_data", status=TestStatus.PASS, duration_ms=0.0)
+        start_time = datetime.utcnow()
+
+        try:
+            if not self.backend_ws:
+                self.backend_ws = await get_shared_backend_websocket()
+
+            if not self.backend_ws:
+                result.status = TestStatus.WARNING
+                result.issues.append("Backend WebSocket not available for price data test")
+                result.solutions.append("Ensure backend WebSocket server is running")
+                result.duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+                self.add_result(result)
+                return
+
+            # Subscribe to market_tick channel
+            subscribe_msg = {
+                "action": "subscribe",
+                "channels": ["market_tick"]
+            }
+            await self.backend_ws.send(json.dumps(subscribe_msg))
+
+            # Wait for subscription confirmation
+            subscription_confirmed = False
+            try:
+                response = await asyncio.wait_for(self.backend_ws.recv(), timeout=2.0)
+                response_data = json.loads(response)
+                if response_data.get("type") == "subscribed":
+                    subscription_confirmed = True
+                    result.details["market_tick_subscription_confirmed"] = True
+            except asyncio.TimeoutError:
+                result.status = TestStatus.WARNING
+                result.issues.append("market_tick subscription confirmation timeout")
+
+            if not subscription_confirmed:
+                result.status = TestStatus.WARNING
+                result.issues.append("Failed to subscribe to market_tick channel")
+                result.solutions.append("Check backend WebSocket market data forwarding")
+
+            # Wait for actual market tick data
+            market_tick_received = False
+            enhanced_data_fields = []
+
+            try:
+                # Wait up to 10 seconds for market tick data
+                timeout = 10.0
+                start_wait = datetime.utcnow()
+
+                while (datetime.utcnow() - start_wait).total_seconds() < timeout and not market_tick_received:
+                    try:
+                        message_raw = await asyncio.wait_for(self.backend_ws.recv(), timeout=1.0)
+                        message = json.loads(message_raw)
+
+                        if message.get("type") == "market_tick":
+                            market_tick_received = True
+                            tick_data = message.get("data", {})
+
+                            # Check for basic required fields
+                            required_fields = ["symbol", "price", "volume", "timestamp"]
+                            for field in required_fields:
+                                if field in tick_data:
+                                    result.details[f"has_{field}"] = True
+
+                            # Check for enhanced 24h statistics
+                            enhanced_fields = [
+                                "change_24h_pct", "high_24h", "low_24h", "open_24h",
+                                "turnover_usd", "oi", "spot_price", "mark_price",
+                                "bid_price", "ask_price"
+                            ]
+
+                            for field in enhanced_fields:
+                                if field in tick_data:
+                                    enhanced_data_fields.append(field)
+
+                            result.details["market_tick_received"] = True
+                            result.details["symbol"] = tick_data.get("symbol")
+                            result.details["price"] = tick_data.get("price")
+                            result.details["enhanced_fields_present"] = enhanced_data_fields
+
+                            # Verify BTCUSD data
+                            if tick_data.get("symbol") == "BTCUSD":
+                                result.details["btcusd_data_received"] = True
+                            else:
+                                result.status = TestStatus.WARNING
+                                result.issues.append(f"Expected BTCUSD data, received {tick_data.get('symbol')}")
+
+                            break
+
+                    except asyncio.TimeoutError:
+                        continue  # Keep waiting
+
+            except Exception as e:
+                result.status = TestStatus.WARNING
+                result.issues.append(f"Error waiting for market tick data: {e}")
+
+            if not market_tick_received:
+                result.status = TestStatus.WARNING
+                result.issues.append("No market tick data received within timeout period")
+                result.solutions.append("Check if agent is running and connected to Delta Exchange")
+
+            # Check if enhanced data is present
+            if market_tick_received and len(enhanced_data_fields) == 0:
+                result.status = TestStatus.WARNING
+                result.issues.append("Market tick received but no enhanced 24h statistics present")
+                result.solutions.append("Check WebSocket data processing and Delta Exchange API response")
+
+            if len(enhanced_data_fields) > 0:
+                result.details["enhanced_data_available"] = True
+                result.details["enhanced_field_count"] = len(enhanced_data_fields)
+
+        except Exception as e:
+            result.status = TestStatus.FAIL
+            result.error = str(e)
+            result.issues.append(f"Frontend real-time price data test failed: {e}")
+
+        result.duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+        self.add_result(result)
+
     async def _test_frontend_health_endpoint(self):
         """Test frontend health/status endpoint if available."""
         result = TestResult(name="frontend_health_endpoint", status=TestStatus.PASS, duration_ms=0.0)

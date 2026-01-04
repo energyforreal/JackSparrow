@@ -1609,7 +1609,8 @@ def setup_services(project_root: Path, npm_cmd: str) -> ParallelProcessManager:
             "-m", "uvicorn",
             "backend.api.main:app",
             "--host", "0.0.0.0",
-            "--port", "8000"
+            "--port", "8000",
+            "--lifespan", "on"
         ],
         cwd=project_root,
         log_file=logs_dir / "backend.log",

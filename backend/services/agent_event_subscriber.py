@@ -104,15 +104,15 @@ class AgentEventSubscriber:
             return
 
         if self._redis_client is None:
-            redis = await get_redis()
-            if redis is None:
+            redis_client = await get_redis()
+            if redis_client is None:
                 logger.warning(
                     "agent_event_subscriber_start_redis_unavailable",
                     service="backend",
                     message="Cannot start: Redis unavailable"
                 )
                 return
-            self._redis_client = redis
+            self._redis_client = redis_client
 
         self.running = True
         self._consuming_task = asyncio.create_task(self._consume_loop())
@@ -1063,18 +1063,32 @@ class AgentEventSubscriber:
             volume = payload.get("volume", 0.0)
             timestamp = payload.get("timestamp")
 
-            # Format ticker data for frontend
+            # Format ticker data for frontend with all available market data
             ticker_data = {
                 "symbol": symbol,
                 "price": float(price),
                 "volume": float(volume),
-                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp,
+                # Include 24h statistics if available
+                "change_24h_pct": payload.get("change_24h_pct"),
+                "change_24h": payload.get("change_24h"),
+                "high_24h": payload.get("high_24h"),
+                "low_24h": payload.get("low_24h"),
+                # Additional market data
+                "turnover_usd": payload.get("turnover_usd"),
+                "oi": payload.get("oi"),
+                "spot_price": payload.get("spot_price"),
+                "mark_price": payload.get("mark_price"),
+                "bid_price": payload.get("bid_price"),
+                "ask_price": payload.get("ask_price"),
+                "bid_size": payload.get("bid_size"),
+                "ask_size": payload.get("ask_size"),
             }
 
             # Broadcast via WebSocket
             await websocket_manager.broadcast(
                 {"type": "market_tick", "data": ticker_data},
-                channel="market_data"
+                channel="market_tick"
             )
 
             logger.debug(

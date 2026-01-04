@@ -94,7 +94,8 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           setIsConnected(true)
           reconnectAttempts = 0 // Reset on successful connection
           setError(null)
-          
+          console.log('[WebSocket] ✅ Connected to:', url)
+
           // Subscribe to all required channels when connection opens
           try {
             const subscribeMessage = {
@@ -102,20 +103,25 @@ export function useWebSocket(url: string): UseWebSocketReturn {
               channels: SUBSCRIBE_CHANNELS,
             }
             ws.send(JSON.stringify(subscribeMessage))
-            
-            if (process.env.NODE_ENV === 'development') {
-              console.log('[useWebSocket] Subscribing to channels:', SUBSCRIBE_CHANNELS)
-            }
+            console.log('[WebSocket] 📤 Sent subscription:', SUBSCRIBE_CHANNELS)
           } catch (subError) {
-            console.error('[useWebSocket] Failed to send subscribe message:', subError)
+            console.error('[WebSocket] ❌ Failed to send subscribe message:', subError)
           }
         }
 
         ws.onmessage = (event) => {
           // WS MESSAGE: Debug log for message tracking
           console.log('WS MESSAGE:', event.data)
-          
+
           try {
+            const rawMessage = JSON.parse(event.data) as WebSocketMessage & {
+              server_timestamp_ms?: number
+            }
+
+            // Special logging for market_tick messages
+            if (rawMessage.type === 'market_tick') {
+              console.log('[useWebSocket] Received market_tick:', rawMessage.data)
+            }
             const message = JSON.parse(event.data) as WebSocketMessage & {
               server_timestamp_ms?: number
             }
@@ -149,10 +155,9 @@ export function useWebSocket(url: string): UseWebSocketReturn {
               const channels = (message.channels as string[]) || []
               subscribedChannelsRef.current = new Set(channels)
               setIsSubscribed(true)
-              
-              if (process.env.NODE_ENV === 'development') {
-                console.log('[useWebSocket] Successfully subscribed to channels:', channels)
-              }
+
+              console.log('[useWebSocket] Successfully subscribed to channels:', channels)
+              console.log('[useWebSocket] market_tick included:', channels.includes('market_tick'))
             }
             
             // Handle time sync messages

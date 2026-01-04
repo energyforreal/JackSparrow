@@ -3,7 +3,7 @@
 import asyncio
 import functools
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
 import threading
@@ -29,7 +29,12 @@ class TestResult:
     issues: List[str] = field(default_factory=list)
     solutions: List[str] = field(default_factory=list)
     error: Optional[str] = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: Optional[datetime] = None
+
+    def __post_init__(self):
+        """Set timestamp if not provided."""
+        if self.timestamp is None:
+            self.timestamp = datetime.now(timezone.utc)
 
 
 @dataclass

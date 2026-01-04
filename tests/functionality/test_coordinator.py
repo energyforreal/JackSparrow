@@ -3,7 +3,7 @@
 import asyncio
 import importlib
 from typing import Any, Dict, List, Optional, Set, Tuple
-from datetime import datetime
+import datetime
 from dataclasses import dataclass, field
 
 from tests.functionality.config import config
@@ -93,24 +93,30 @@ class TestCoordinator:
     
     async def run_test_suite(self, test_suite: TestSuiteBase) -> TestSuiteResult:
         """Run a single test suite."""
-        test_suite.start_time = datetime.utcnow()
-        
+        start_time = datetime.datetime.utcnow()
+        test_suite.start_time = start_time
+
         try:
             await test_suite.setup()
             await test_suite.run_all_tests()
             await test_suite.teardown()
         except Exception as e:
-            # Add error result
-            from tests.functionality.utils import TestResult
+            # Add error result - create proper TestResult object
+            from tests.functionality.utils import TestResult, TestStatus
+
             error_result = TestResult(
                 name="setup_error",
                 status=TestStatus.FAIL,
                 duration_ms=0.0,
+                details={},
+                issues=[f"Setup/run/teardown failed: {str(e)}"],
+                solutions=["Check test suite implementation and dependencies"],
                 error=str(e)
             )
-            test_suite.add_result(error_result)
+            test_suite.results.append(error_result)
         finally:
-            test_suite.end_time = datetime.utcnow()
+            end_time = datetime.datetime.utcnow()
+            test_suite.end_time = end_time
         
         # Generate result
         status = test_suite.get_status()

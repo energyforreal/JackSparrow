@@ -9,11 +9,13 @@ import json
 import time
 import hmac
 import hashlib
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Callable, Set
 from datetime import datetime, timezone
 import httpx
 import asyncio
 import structlog
+import websockets
+from websockets.exceptions import ConnectionClosedError, WebSocketException
 
 from agent.core.logging_utils import log_error_with_context, log_warning_with_context, log_exception
 
@@ -606,4 +608,369 @@ class DeltaExchangeClient:
                 exc_info=True
             )
             raise DeltaExchangeError(f"Failed to serialize payload: {e}") from e
+
+
+class DeltaExchangeWebSocketClient:
+    """WebSocket client for real-time Delta Exchange data streaming."""
+
+    def __init__(self, api_key: str, api_secret: str, base_url: Optional[str] = None,
+                 max_reconnect_attempts: int = 5, reconnect_delay: float = 5.0,
+                 heartbeat_interval: float = 30.0):
+        """Initialize WebSocket client.
+
+        Args:
+            api_key: Delta Exchange API key
+            api_secret: Delta Exchange API secret
+            base_url: WebSocket base URL (uses config default if None)
+            max_reconnect_attempts: Maximum reconnection attempts
+            reconnect_delay: Delay between reconnection attempts
+            heartbeat_interval: Heartbeat interval in seconds
+        """
+        # Import settings here to avoid circular imports
+        from agent.core.config import settings
+
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.base_url = base_url or settings.websocket_url
+        self.websocket: Optional[websockets.WebSocketClientProtocol] = None
+        self.connected = False
+        self.subscribed_symbols: Set[str] = set()
+        self.message_handlers: Dict[str, List[Callable]] = {}
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._message_task: Optional[asyncio.Task] = None
+        self.max_reconnect_attempts = max_reconnect_attempts
+        self.reconnect_delay = reconnect_delay
+        self.heartbeat_interval = heartbeat_interval
+        self._last_heartbeat = time.time()
+        self._circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60)
+
+    async def connect(self) -> None:
+        """Establish WebSocket connection with authentication."""
+        try:
+            # Generate authentication headers for WebSocket
+            timestamp = str(int(time.time() * 1000))
+            method = "GET"
+            endpoint = "/socket.io/"
+
+            # Create signature for authentication
+            message = f"{method}{endpoint}{timestamp}"
+            signature = hmac.new(
+                self.api_secret.encode('utf-8'),
+                message.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+
+            # WebSocket URL with authentication parameters
+            auth_url = f"{self.base_url}?api-key={self.api_key}&signature={signature}&timestamp={timestamp}"
+
+            logger.info("delta_websocket_connecting", url=self.base_url)
+
+            # Use circuit breaker to protect the connection
+            await self._circuit_breaker.call(self._connect_websocket, auth_url)
+
+            self.connected = True
+            logger.info("delta_websocket_connected")
+
+            # Start background tasks
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            self._message_task = asyncio.create_task(self._message_loop())
+
+            # Resubscribe to previously subscribed symbols
+            if self.subscribed_symbols:
+                await self._resubscribe_all()
+
+        except Exception as e:
+            logger.error("delta_websocket_connection_failed", error=str(e), exc_info=True)
+            raise DeltaExchangeError(f"WebSocket connection failed: {e}") from e
+
+    async def _connect_websocket(self, url: str) -> None:
+        """Internal method to establish WebSocket connection."""
+        self.websocket = await websockets.connect(
+            url,
+            ping_interval=20.0,  # Send ping every 20 seconds
+            ping_timeout=10.0,
+            close_timeout=5.0
+        )
+
+    async def disconnect(self) -> None:
+        """Close WebSocket connection and cleanup tasks."""
+        self.connected = False
+
+        # Cancel background tasks
+        for task in [self._reconnect_task, self._heartbeat_task, self._message_task]:
+            if task and not task.done():
+                task.cancel()
+
+        # Close WebSocket connection
+        if self.websocket:
+            try:
+                await self.websocket.close()
+            except Exception as e:
+                logger.warning("delta_websocket_close_error", error=str(e))
+            finally:
+                self.websocket = None
+
+        logger.info("delta_websocket_disconnected")
+
+    async def subscribe_ticker(self, symbols: List[str]) -> None:
+        """Subscribe to v2/ticker channel for real-time ticker updates.
+
+        Args:
+            symbols: List of symbols to subscribe to (e.g., ['BTCUSD'])
+        """
+        if not self.connected or not self.websocket:
+            raise DeltaExchangeError("WebSocket not connected")
+
+        subscription_message = {
+            "type": "subscribe",
+            "payload": {
+                "channels": [
+                    {
+                        "name": "v2/ticker",
+                        "symbols": symbols
+                    }
+                ]
+            }
+        }
+
+        try:
+            await self.websocket.send(json.dumps(subscription_message))
+            self.subscribed_symbols.update(symbols)
+
+            logger.info(
+                "delta_websocket_subscribed_ticker",
+                symbols=symbols,
+                channel="v2/ticker"
+            )
+
+        except Exception as e:
+            logger.error(
+                "delta_websocket_subscription_failed",
+                error=str(e),
+                symbols=symbols,
+                channel="v2/ticker"
+            )
+            raise DeltaExchangeError(f"Subscription failed: {e}") from e
+
+    async def unsubscribe_ticker(self, symbols: List[str]) -> None:
+        """Unsubscribe from v2/ticker channel.
+
+        Args:
+            symbols: List of symbols to unsubscribe from
+        """
+        if not self.connected or not self.websocket:
+            raise DeltaExchangeError("WebSocket not connected")
+
+        unsubscription_message = {
+            "type": "unsubscribe",
+            "payload": {
+                "channels": [
+                    {
+                        "name": "v2/ticker",
+                        "symbols": symbols
+                    }
+                ]
+            }
+        }
+
+        try:
+            await self.websocket.send(json.dumps(unsubscription_message))
+            self.subscribed_symbols.difference_update(symbols)
+
+            logger.info(
+                "delta_websocket_unsubscribed_ticker",
+                symbols=symbols,
+                channel="v2/ticker"
+            )
+
+        except Exception as e:
+            logger.error(
+                "delta_websocket_unsubscription_failed",
+                error=str(e),
+                symbols=symbols,
+                channel="v2/ticker"
+            )
+            raise DeltaExchangeError(f"Unsubscription failed: {e}") from e
+
+    def add_message_handler(self, message_type: str, handler: Callable) -> None:
+        """Add a handler for specific message types.
+
+        Args:
+            message_type: Type of message to handle (e.g., 'ticker')
+            handler: Async callable that takes message data
+        """
+        if message_type not in self.message_handlers:
+            self.message_handlers[message_type] = []
+        self.message_handlers[message_type].append(handler)
+
+    def remove_message_handler(self, message_type: str, handler: Callable) -> None:
+        """Remove a message handler.
+
+        Args:
+            message_type: Type of message
+            handler: Handler to remove
+        """
+        if message_type in self.message_handlers:
+            try:
+                self.message_handlers[message_type].remove(handler)
+                if not self.message_handlers[message_type]:
+                    del self.message_handlers[message_type]
+            except ValueError:
+                pass  # Handler not found
+
+    async def _resubscribe_all(self) -> None:
+        """Resubscribe to all previously subscribed symbols after reconnection."""
+        if self.subscribed_symbols:
+            symbols_list = list(self.subscribed_symbols)
+            await self.subscribe_ticker(symbols_list)
+            logger.info("delta_websocket_resubscribed", symbols=symbols_list)
+
+    async def _heartbeat_loop(self) -> None:
+        """Send periodic heartbeat messages to keep connection alive."""
+        try:
+            while self.connected:
+                await asyncio.sleep(self.heartbeat_interval)
+
+                if self.websocket and self.connected:
+                    try:
+                        # Send a simple ping or heartbeat
+                        heartbeat_msg = {"type": "ping"}
+                        await self.websocket.send(json.dumps(heartbeat_msg))
+                        self._last_heartbeat = time.time()
+
+                        logger.debug("delta_websocket_heartbeat_sent")
+
+                    except Exception as e:
+                        logger.warning("delta_websocket_heartbeat_failed", error=str(e))
+                        break
+
+        except asyncio.CancelledError:
+            logger.debug("delta_websocket_heartbeat_cancelled")
+        except Exception as e:
+            logger.error("delta_websocket_heartbeat_error", error=str(e), exc_info=True)
+
+    async def _message_loop(self) -> None:
+        """Main message processing loop."""
+        try:
+            while self.connected and self.websocket:
+                try:
+                    # Receive message with timeout
+                    message_raw = await asyncio.wait_for(
+                        self.websocket.recv(),
+                        timeout=60.0
+                    )
+
+                    # Parse JSON message
+                    message = json.loads(message_raw)
+
+                    # Process message
+                    await self._process_message(message)
+
+                except asyncio.TimeoutError:
+                    # Timeout is normal, continue listening
+                    continue
+                except (ConnectionClosedError, WebSocketException) as e:
+                    logger.warning("delta_websocket_connection_lost", error=str(e))
+                    # Trigger reconnection
+                    if self.connected:  # Only reconnect if we haven't manually disconnected
+                        asyncio.create_task(self._reconnect())
+                    break
+                except json.JSONDecodeError as e:
+                    logger.warning("delta_websocket_invalid_json", error=str(e), raw_message=message_raw[:200])
+                    continue
+                except Exception as e:
+                    logger.error("delta_websocket_message_error", error=str(e), exc_info=True)
+                    continue
+
+        except asyncio.CancelledError:
+            logger.debug("delta_websocket_message_loop_cancelled")
+        except Exception as e:
+            logger.error("delta_websocket_message_loop_error", error=str(e), exc_info=True)
+
+    async def _process_message(self, message: Dict[str, Any]) -> None:
+        """Process incoming WebSocket message."""
+        try:
+            message_type = message.get("type", "unknown")
+
+            # Handle subscription confirmations
+            if message_type == "subscription":
+                logger.info("delta_websocket_subscription_confirmed", payload=message.get("payload"))
+                return
+
+            # Handle ticker updates (both v2/ticker and ticker formats)
+            if message_type in ("ticker", "v2/ticker"):
+                symbol = message.get("symbol")
+                if symbol and "ticker" in self.message_handlers:
+                    # Call all registered handlers
+                    for handler in self.message_handlers["ticker"]:
+                        try:
+                            await handler(message)
+                        except Exception as e:
+                            logger.error(
+                                "delta_websocket_handler_error",
+                                error=str(e),
+                                symbol=symbol,
+                                handler=handler.__name__,
+                                exc_info=True
+                            )
+
+            # Handle other message types
+            elif message_type in self.message_handlers:
+                for handler in self.message_handlers[message_type]:
+                    try:
+                        await handler(message)
+                    except Exception as e:
+                        logger.error(
+                            "delta_websocket_handler_error",
+                            error=str(e),
+                            message_type=message_type,
+                            handler=handler.__name__,
+                            exc_info=True
+                        )
+
+            # Log unknown message types for debugging
+            else:
+                logger.debug("delta_websocket_unknown_message_type", message_type=message_type, message=message)
+
+        except Exception as e:
+            logger.error("delta_websocket_message_processing_error", error=str(e), message=message, exc_info=True)
+
+    async def _reconnect(self) -> None:
+        """Handle reconnection logic."""
+        if self._reconnect_task and not self._reconnect_task.done():
+            return  # Reconnection already in progress
+
+        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _reconnect_loop(self) -> None:
+        """Reconnection loop with exponential backoff."""
+        for attempt in range(self.max_reconnect_attempts):
+            try:
+                logger.info(
+                    "delta_websocket_reconnecting",
+                    attempt=attempt + 1,
+                    max_attempts=self.max_reconnect_attempts
+                )
+
+                await asyncio.sleep(self.reconnect_delay * (2 ** attempt))  # Exponential backoff
+
+                await self.connect()
+                logger.info("delta_websocket_reconnected")
+                return
+
+            except Exception as e:
+                logger.warning(
+                    "delta_websocket_reconnect_failed",
+                    attempt=attempt + 1,
+                    error=str(e)
+                )
+
+                if attempt == self.max_reconnect_attempts - 1:
+                    logger.error(
+                        "delta_websocket_max_reconnect_attempts_reached",
+                        max_attempts=self.max_reconnect_attempts
+                    )
+                    # Could emit an event or callback here for application-level handling
+                    break
 

@@ -1,0 +1,2153 @@
+{
+  "timestamp": "2026-01-01T10:11:20.243644+00:00",
+  "summary": {
+    "total_tests": 103,
+    "passed": 80,
+    "failed": 0,
+    "warnings": 23,
+    "degraded": 0,
+    "health_score": 77.67,
+    "total_duration_ms": 46221.61,
+    "groups_tested": 4
+  },
+  "startup": {
+    "services_status": {
+      "Backend": false,
+      "Feature Server": false,
+      "Frontend": true,
+      "Database": true,
+      "Redis": true,
+      "WebSocket": false
+    },
+    "all_services_ready": false,
+    "startup_errors": [],
+    "startup_warnings": [],
+    "errors_count": 0,
+    "warnings_count": 0
+  },
+  "test_groups": {
+    "infrastructure": [
+      {
+        "suite_name": "database operations",
+        "status": "WARNING",
+        "duration_ms": 0.0,
+        "total_tests": 3,
+        "passed": 2,
+        "failed": 0,
+        "warnings": 1,
+        "issues": [
+          "Database URL not configured"
+        ],
+        "solutions": [],
+        "results": [
+          {
+            "name": "database_connection",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "Database URL not configured"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "data_operations",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "data_operations": "tested"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "data_integrity",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "data_integrity": "tested"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "delta exchange connection",
+        "status": "WARNING",
+        "duration_ms": 2701.5600000000004,
+        "total_tests": 7,
+        "passed": 5,
+        "failed": 0,
+        "warnings": 2,
+        "issues": [
+          "Rate limiting test requires special setup",
+          "Error handling test requires failure simulation"
+        ],
+        "solutions": [
+          "Implement rate limiting test with multiple rapid requests"
+        ],
+        "results": [
+          {
+            "name": "api_authentication",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "api_key_configured": true,
+              "api_key_length": 30
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "base_url_connectivity",
+            "status": "PASS",
+            "duration_ms": 721.6089999999999,
+            "details": {
+              "connectivity": "success",
+              "ticker_received": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "rate_limiting",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "rate_limiting_test": "requires_multiple_requests"
+            },
+            "issues": [
+              "Rate limiting test requires special setup"
+            ],
+            "solutions": [
+              "Implement rate limiting test with multiple rapid requests"
+            ],
+            "error": null
+          },
+          {
+            "name": "circuit_breaker",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "circuit_breaker_exists": true,
+              "circuit_breaker_state": "CLOSED"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "ticker_retrieval",
+            "status": "PASS",
+            "duration_ms": 641.345,
+            "details": {
+              "ticker_retrieved": true,
+              "has_price": false
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "historical_candles",
+            "status": "PASS",
+            "duration_ms": 664.1629999999999,
+            "details": {
+              "candles_retrieved": true,
+              "candle_count": 0
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "error_handling",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "error_handling_test": "requires_failure_simulation"
+            },
+            "issues": [
+              "Error handling test requires failure simulation"
+            ],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "agent loading",
+        "status": "WARNING",
+        "duration_ms": 16697.738999999998,
+        "total_tests": 11,
+        "passed": 8,
+        "failed": 0,
+        "warnings": 3,
+        "issues": [
+          "Backend service may not be available",
+          "Database URL not configured",
+          "Vector memory store not available"
+        ],
+        "solutions": [
+          "Ensure backend is running on http://localhost:8000",
+          "Set DATABASE_URL in environment or config (Database is optional)",
+          "Vector memory store may be optional or not configured"
+        ],
+        "results": [
+          {
+            "name": "service_health_check",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "Backend service may not be available"
+            ],
+            "solutions": [
+              "Ensure backend is running on http://localhost:8000"
+            ],
+            "error": null
+          },
+          {
+            "name": "agent_initialization",
+            "status": "PASS",
+            "duration_ms": 7098.817,
+            "details": {
+              "agent_initialized": true,
+              "session_id": "a7496e4e3ad14b1bb9a07c6fd6610959",
+              "default_symbol": "BTCUSD",
+              "trading_mode": "paper"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_discovery",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "model_discovery_initialized": true,
+              "models_discovered": 6,
+              "model_names": [
+                "xgboost_classifier_BTCUSD_15m",
+                "xgboost_classifier_BTCUSD_1h",
+                "xgboost_classifier_BTCUSD_4h",
+                "xgboost_regressor_BTCUSD_15m",
+                "xgboost_regressor_BTCUSD_1h",
+                "xgboost_regressor_BTCUSD_4h"
+              ],
+              "model_path_configured": false,
+              "model_path_exists": false,
+              "model_dir": "agent\\model_storage"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "mcp_orchestrator",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "mcp_orchestrator_initialized": true,
+              "feature_server": true,
+              "model_registry": true,
+              "reasoning_engine": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_server",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "feature_server_api_initialized": true,
+              "feature_server_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_registry",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "model_registry_initialized": true,
+              "registered_models": 6
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "state_machine",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "state_machine_initialized": true,
+              "current_state": "AgentState.OBSERVING"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "database_connection",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "Database URL not configured"
+            ],
+            "solutions": [
+              "Set DATABASE_URL in environment or config (Database is optional)"
+            ],
+            "error": null
+          },
+          {
+            "name": "redis_connection",
+            "status": "PASS",
+            "duration_ms": 2037.4880000000003,
+            "details": {
+              "redis_health": {
+                "status": "up"
+              }
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "delta_client",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "delta_client_initialized": true,
+              "has_api_key": "urZSbq5b6MmkOyZ8B2XzPgpT0gus7N"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "vector_memory_store",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "learning_system_initialized": true
+            },
+            "issues": [
+              "Vector memory store not available"
+            ],
+            "solutions": [
+              "Vector memory store may be optional or not configured"
+            ],
+            "error": null
+          }
+        ]
+      }
+    ],
+    "core-services": [
+      {
+        "suite_name": "feature computation",
+        "status": "WARNING",
+        "duration_ms": 4278.432,
+        "total_tests": 6,
+        "passed": 5,
+        "failed": 0,
+        "warnings": 1,
+        "issues": [
+          "Feature server health check failed: Cannot connect to host 0.0.0.0:8001 ssl:default [The format of the specified network name is invalid]"
+        ],
+        "solutions": [],
+        "results": [
+          {
+            "name": "mcp_feature_protocol",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "feature_server_available": true,
+              "mcp_protocol_available": true,
+              "get_features_method_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_calculation",
+            "status": "PASS",
+            "duration_ms": 2055.862,
+            "details": {
+              "features_computed": 3,
+              "requested_features": 3,
+              "feature_calculation_working": true,
+              "valid_features": 3,
+              "invalid_features": 0
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "all_50_features",
+            "status": "PASS",
+            "duration_ms": 161.98000000000002,
+            "details": {
+              "total_features_requested": 50,
+              "total_features_computed": 50,
+              "missing_features": 0,
+              "valid_feature_values": 50,
+              "invalid_feature_values": 0,
+              "feature_coverage_percent": 100.0,
+              "high_coverage": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_server",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "feature_server_api_available": true,
+              "feature_server_available": true,
+              "feature_server_host": "0.0.0.0",
+              "feature_server_port": 8001
+            },
+            "issues": [
+              "Feature server health check failed: Cannot connect to host 0.0.0.0:8001 ssl:default [The format of the specified network name is invalid]"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_performance",
+            "status": "PASS",
+            "duration_ms": 31.55,
+            "details": {
+              "computation_time_ms": 31.55,
+              "features_computed": 5,
+              "performance_target_met": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "feature_caching",
+            "status": "PASS",
+            "duration_ms": 2029.0400000000002,
+            "details": {
+              "caching_mechanism_available": false,
+              "redis_available_for_caching": true,
+              "feature_caching_enabled": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "ml model communication",
+        "status": "WARNING",
+        "duration_ms": 0.0,
+        "total_tests": 6,
+        "passed": 4,
+        "failed": 0,
+        "warnings": 2,
+        "issues": [
+          "Model inference test requires feature data"
+        ],
+        "solutions": [],
+        "results": [
+          {
+            "name": "model_discovery",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "model_discovery_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_registration",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "registered_models": 6,
+              "model_names": [
+                "xgboost_classifier_BTCUSD_15m",
+                "xgboost_classifier_BTCUSD_1h",
+                "xgboost_classifier_BTCUSD_4h",
+                "xgboost_regressor_BTCUSD_15m",
+                "xgboost_regressor_BTCUSD_1h",
+                "xgboost_regressor_BTCUSD_4h"
+              ]
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_inference",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "inference_test": "requires_feature_data"
+            },
+            "issues": [
+              "Model inference test requires feature data"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_consensus",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "consensus_test": "requires_multiple_models"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_health_monitoring",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "health_monitoring": "tested"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_loading_sources",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "model_path_configured": false,
+              "model_path_exists": false,
+              "model_dir_exists": true,
+              "total_models_registered": 6,
+              "model_names": [
+                "xgboost_classifier_BTCUSD_15m",
+                "xgboost_classifier_BTCUSD_1h",
+                "xgboost_classifier_BTCUSD_4h",
+                "xgboost_regressor_BTCUSD_15m",
+                "xgboost_regressor_BTCUSD_1h",
+                "xgboost_regressor_BTCUSD_4h"
+              ],
+              "models_loaded_successfully": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "websocket communication",
+        "status": "WARNING",
+        "duration_ms": 4369.065,
+        "total_tests": 6,
+        "passed": 5,
+        "failed": 0,
+        "warnings": 1,
+        "issues": [
+          "Agent WebSocket ping failed: received 1011 (internal error); then sent 1011 (internal error)"
+        ],
+        "solutions": [],
+        "results": [
+          {
+            "name": "connection_management",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "backend_websocket_connected": true,
+              "backend_websocket_ping_successful": true,
+              "connection_state_check": "available",
+              "connection_management_working": true,
+              "reconnection_test": "basic_check_complete",
+              "full_reconnection_test": "requires_connection_interruption_simulation"
+            },
+            "issues": [
+              "Agent WebSocket ping failed: received 1011 (internal error); then sent 1011 (internal error)"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "message_types",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "expected_message_types": [
+                "agent_state",
+                "signal_update",
+                "reasoning_chain_update",
+                "model_prediction_update",
+                "market_tick",
+                "trade_executed",
+                "portfolio_update",
+                "health_update"
+              ],
+              "total_message_types": 8,
+              "subscribed_to_all_channels": true,
+              "received_message_types": [
+                "market_tick",
+                "portfolio_update"
+              ],
+              "message_types_received": 2,
+              "message_types_working": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "message_format",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "message_is_valid_json": true,
+              "required_fields_present": [
+                "type"
+              ],
+              "optional_fields_present": [
+                "data",
+                "server_timestamp_ms"
+              ],
+              "message_format_valid": true,
+              "message_type": "portfolio_update",
+              "message_type_valid": true,
+              "has_timestamp": true,
+              "timestamp_format_valid": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "message_subscription",
+            "status": "PASS",
+            "duration_ms": 106.28,
+            "details": {
+              "subscription_sent": true,
+              "subscription_processed": true,
+              "unsubscription_sent": true,
+              "unsubscription_processed": true,
+              "subscription_mechanism_working": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "broadcast_to_multiple_clients",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "websocket_available": true,
+              "multi_client_broadcast": "supported_by_backend",
+              "broadcast_mechanism": "available",
+              "full_multi_client_test": "requires_multiple_connections"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "connection_cleanup",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "connection_managed": true,
+              "connection_cleanup_supported": true,
+              "graceful_close_available": true,
+              "full_cleanup_test": "requires_connection_closure",
+              "agent_websocket_cleanup_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      }
+    ],
+    "agent-logic": [
+      {
+        "suite_name": "agent decision",
+        "status": "PASS",
+        "duration_ms": 2.006,
+        "total_tests": 8,
+        "passed": 8,
+        "failed": 0,
+        "warnings": 0,
+        "issues": [],
+        "solutions": [],
+        "results": [
+          {
+            "name": "reasoning_chain_generation",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "reasoning_chain_generated": true,
+              "steps_count": 6,
+              "complete_reasoning_chain": true,
+              "step_names": [
+                "Situational Assessment",
+                "Historical Context Retrieval",
+                "Model Consensus Analysis",
+                "Risk Assessment",
+                "Decision Synthesis",
+                "Confidence Calibration"
+              ],
+              "all_steps_present": true,
+              "has_final_confidence": true,
+              "final_confidence": 0.49699999999999994
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "situational_assessment",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "step1_generated": true,
+              "step_name": "Situational Assessment"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "historical_context_retrieval",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "step2_present": true,
+              "step_name": "Historical Context Retrieval",
+              "memory_store_available": false
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_consensus_analysis",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "step3_present": true,
+              "step_name": "Model Consensus Analysis",
+              "models_available": 6,
+              "can_analyze_consensus": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "risk_assessment",
+            "status": "PASS",
+            "duration_ms": 2.006,
+            "details": {
+              "risk_manager_available": true,
+              "step4_present": true,
+              "step_name": "Risk Assessment"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "decision_synthesis",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "step5_present": true,
+              "step_name": "Decision Synthesis"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "confidence_calibration",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "step6_present": true,
+              "step_name": "Confidence Calibration",
+              "confidence_calibrated": true,
+              "final_confidence": 0.49699999999999994,
+              "confidence_valid": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "state_machine_transitions",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "state_machine_available": true,
+              "current_state": "AgentState.OBSERVING",
+              "transitions_configured": true,
+              "transition_count": 9,
+              "state_transitions_available": true,
+              "context_manager_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "risk management",
+        "status": "PASS",
+        "duration_ms": 0.0,
+        "total_tests": 5,
+        "passed": 5,
+        "failed": 0,
+        "warnings": 0,
+        "issues": [],
+        "solutions": [],
+        "results": [
+          {
+            "name": "risk_assessment",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "risk_manager_available": true,
+              "available_methods": {
+                "assess_risk": true,
+                "calculate_position_size": true,
+                "check_risk_limits": true
+              },
+              "risk_assessment_generated": true,
+              "risk_assessment_type": "dict",
+              "risk_assessment_keys": [
+                "can_trade",
+                "portfolio_heat",
+                "max_portfolio_heat",
+                "available_balance"
+              ],
+              "has_risk_level": false,
+              "has_risk_score": false
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "position_size_calculation",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "position_size_calculation_working": true,
+              "test_cases_passed": 3,
+              "calculated_sizes": [
+                {
+                  "confidence": 50.0,
+                  "signal": "BUY",
+                  "position_size": 0.025
+                },
+                {
+                  "confidence": 75.0,
+                  "signal": "BUY",
+                  "position_size": 0.037500000000000006
+                },
+                {
+                  "confidence": 90.0,
+                  "signal": "STRONG_BUY",
+                  "position_size": 0.07200000000000002
+                }
+              ],
+              "position_sizes_valid": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "circuit_breakers",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "delta_client_available": true,
+              "circuit_breaker_available": true,
+              "circuit_breaker_state": "CLOSED",
+              "circuit_breaker_operational": true,
+              "circuit_breaker_test": "basic_check_complete",
+              "full_circuit_breaker_test": "requires_api_failure_simulation"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "risk_limit_enforcement",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "risk_limit_check_working": true,
+              "limits_check_result": {
+                "limits_ok": false,
+                "position_size_ok": false,
+                "portfolio_heat_ok": false,
+                "daily_loss_ok": true,
+                "drawdown_ok": true,
+                "consecutive_losses_ok": true,
+                "position_size": 1000.0,
+                "max_position_size": 0.1,
+                "portfolio_heat": 0.5,
+                "max_portfolio_heat": 0.3,
+                "daily_loss_pct": 0.0,
+                "max_daily_loss": 0.05,
+                "current_drawdown": 0.0,
+                "max_drawdown": 0.15,
+                "consecutive_losses": 0,
+                "max_consecutive_losses": 5
+              },
+              "limits_check_keys": [
+                "limits_ok",
+                "position_size_ok",
+                "portfolio_heat_ok",
+                "daily_loss_ok",
+                "drawdown_ok",
+                "consecutive_losses_ok",
+                "position_size",
+                "max_position_size",
+                "portfolio_heat",
+                "max_portfolio_heat"
+              ],
+              "max_position_size_configured": true,
+              "max_position_size": 0.1
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "portfolio_risk_metrics",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "risk_manager_available": true,
+              "portfolio_methods_available": {
+                "calculate_portfolio_risk": true
+              },
+              "portfolio_risk_calculation_available": true,
+              "portfolio_risk_calculated": true,
+              "portfolio_risk_keys": [
+                "portfolio_value",
+                "available_balance",
+                "total_exposure",
+                "portfolio_heat",
+                "max_portfolio_heat",
+                "daily_loss_pct",
+                "max_daily_loss",
+                "current_drawdown",
+                "max_drawdown",
+                "consecutive_losses"
+              ],
+              "portfolio_risk_test": "basic_check_complete"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "signal generation",
+        "status": "PASS",
+        "duration_ms": 827.736,
+        "total_tests": 6,
+        "passed": 6,
+        "failed": 0,
+        "warnings": 0,
+        "issues": [],
+        "solutions": [],
+        "results": [
+          {
+            "name": "signal_generation",
+            "status": "PASS",
+            "duration_ms": 253.664,
+            "details": {
+              "signal_generated": true,
+              "signal": "STRONG_BUY",
+              "symbol": "BTCUSD",
+              "signal_valid": true,
+              "signal_type": "STRONG_BUY"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "signal_validation",
+            "status": "PASS",
+            "duration_ms": 179.55599999999998,
+            "details": {
+              "all_required_fields_present": true,
+              "signal_format_valid": true,
+              "optional_fields_present": [
+                "reasoning_chain",
+                "model_predictions",
+                "timestamp"
+              ]
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "signal_confidence",
+            "status": "PASS",
+            "duration_ms": 173.85,
+            "details": {
+              "confidence_valid": true,
+              "confidence_value": 0.4030879509166658,
+              "confidence_threshold": 0.65,
+              "above_threshold": false,
+              "below_threshold": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "signal_metadata",
+            "status": "PASS",
+            "duration_ms": 219.15699999999998,
+            "details": {
+              "has_timestamp": true,
+              "timestamp": "2026-01-01T10:11:08.111188",
+              "symbol": "BTCUSD",
+              "symbol_matches": true,
+              "has_reasoning_chain": true,
+              "has_chain_id": true,
+              "chain_id": "ab24ddf0-5409-4c0e-8eb8-4857813cf862",
+              "reasoning_steps_count": 6,
+              "complete_reasoning_chain": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "signal_broadcasting",
+            "status": "PASS",
+            "duration_ms": 1.509,
+            "details": {
+              "websocket_client_available": true,
+              "websocket_connected": true,
+              "can_broadcast": true,
+              "event_bus_available": true,
+              "event_publishing_mechanism": "available",
+              "backend_websocket_subscribed": true,
+              "signal_reception_ready": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "signal_persistence",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "redis_available": true,
+              "event_bus_available": true,
+              "redis_streams_configured": true,
+              "redis_connected": true,
+              "signal_persistence_mechanism": "available"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "agent functionality",
+        "status": "WARNING",
+        "duration_ms": 9772.261999999999,
+        "total_tests": 12,
+        "passed": 10,
+        "failed": 0,
+        "warnings": 2,
+        "issues": [
+          "Agent shows as down in backend health check",
+          "Agent reports as unavailable"
+        ],
+        "solutions": [],
+        "results": [
+          {
+            "name": "agent_initialization",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "all_components_initialized": true,
+              "component_count": 7,
+              "current_state": "AgentState.OBSERVING",
+              "registered_models": 6,
+              "model_names": [
+                "xgboost_classifier_BTCUSD_15m",
+                "xgboost_classifier_BTCUSD_1h",
+                "xgboost_classifier_BTCUSD_4h",
+                "xgboost_regressor_BTCUSD_15m",
+                "xgboost_regressor_BTCUSD_1h"
+              ]
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_state_machine",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "current_state": "AgentState.OBSERVING",
+              "transition_count": 9,
+              "state_machine_operational": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_decision_making",
+            "status": "PASS",
+            "duration_ms": 748.001,
+            "details": {
+              "decision_generated": true,
+              "decision_keys": [
+                "signal",
+                "confidence",
+                "position_size",
+                "reasoning_chain",
+                "model_predictions",
+                "feature_quality",
+                "timestamp"
+              ],
+              "signal": "STRONG_BUY",
+              "confidence": 0.4030879509166658,
+              "has_reasoning_chain": true,
+              "signal_valid": true,
+              "confidence_valid": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_signal_generation",
+            "status": "PASS",
+            "duration_ms": 649.157,
+            "details": {
+              "signal_generated": true,
+              "signal": "STRONG_BUY",
+              "confidence": 0.4030879509166658,
+              "signal_strength": "strong"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_model_integration",
+            "status": "PASS",
+            "duration_ms": 1774.88,
+            "details": {
+              "model_count": 6,
+              "models_available": true,
+              "model_names": [
+                "xgboost_classifier_BTCUSD_15m",
+                "xgboost_classifier_BTCUSD_1h",
+                "xgboost_classifier_BTCUSD_4h",
+                "xgboost_regressor_BTCUSD_15m",
+                "xgboost_regressor_BTCUSD_1h",
+                "xgboost_regressor_BTCUSD_4h"
+              ],
+              "predictions_available": true,
+              "prediction_count": 6
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_feature_computation",
+            "status": "PASS",
+            "duration_ms": 26.509999999999998,
+            "details": {
+              "features_computed": 3,
+              "requested_features": 3,
+              "feature_computation_working": true,
+              "valid_features": 3
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_reasoning_chain",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "reasoning_chain_generated": true,
+              "reasoning_steps": 6,
+              "complete_reasoning_chain": true,
+              "step_names": [
+                "Situational Assessment",
+                "Historical Context Retrieval",
+                "Model Consensus Analysis",
+                "Risk Assessment",
+                "Decision Synthesis",
+                "Confidence Calibration"
+              ],
+              "final_confidence": 0.49699999999999994,
+              "has_confidence": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_risk_management",
+            "status": "PASS",
+            "duration_ms": 1.011,
+            "details": {
+              "risk_manager_available": true,
+              "available_risk_methods": [
+                "calculate_position_size",
+                "check_risk_limits",
+                "assess_risk"
+              ],
+              "risk_management_functional": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_backend_communication",
+            "status": "WARNING",
+            "duration_ms": 2044.807,
+            "details": {
+              "backend_health_ok": true,
+              "agent_status_in_backend": "down",
+              "agent_available": false
+            },
+            "issues": [
+              "Agent shows as down in backend health check"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_health_status",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "status_report_generated": true,
+              "status_keys": [
+                "success",
+                "data"
+              ],
+              "agent_available": false,
+              "agent_state": null,
+              "has_health_info": false
+            },
+            "issues": [
+              "Agent reports as unavailable"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_trading_logic",
+            "status": "PASS",
+            "duration_ms": 217.494,
+            "details": {
+              "trading_mode": "paper",
+              "default_symbol": "BTCUSD",
+              "confidence_threshold": 0.65,
+              "prediction_handler_works": true,
+              "has_prediction_data": true,
+              "prediction_signal": "STRONG_BUY",
+              "prediction_confidence": 0.4030879509166658,
+              "delta_client_available": true,
+              "has_api_credentials": "urZSbq5b6MmkOyZ8B2XzPgpT0gus7N"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_event_publishing",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "event_publishing_test": "basic_check",
+              "can_emit_events": true,
+              "event_publishing_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      }
+    ],
+    "integration": [
+      {
+        "suite_name": "agent communication",
+        "status": "WARNING",
+        "duration_ms": 3176.8010000000004,
+        "total_tests": 11,
+        "passed": 7,
+        "failed": 0,
+        "warnings": 4,
+        "issues": [
+          "WebSocket ping failed: received 1011 (internal error); then sent 1011 (internal error)",
+          "Message send failed: received 1011 (internal error); then sent 1011 (internal error)",
+          "Prediction request returned status 401 (authentication required)",
+          "Only 1/3 command types tested successfully",
+          "Failed: predict (status 401 - authentication required), get_status (status 401 - authentication required)",
+          "Reconnection method not found"
+        ],
+        "solutions": [
+          "Ensure API_KEY is set in environment variables and backend authentication is configured",
+          "Check backend endpoints and agent availability",
+          "Reconnection may be handled automatically by websockets library"
+        ],
+        "results": [
+          {
+            "name": "backend_agent_websocket",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {},
+            "issues": [
+              "WebSocket ping failed: received 1011 (internal error); then sent 1011 (internal error)",
+              "Message send failed: received 1011 (internal error); then sent 1011 (internal error)"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "redis_fallback",
+            "status": "PASS",
+            "duration_ms": 5.0569999999999995,
+            "details": {
+              "redis_connected": true,
+              "command_queue_name": "agent_commands",
+              "redis_fallback_available": true,
+              "redis_key_value_working": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "command_response_roundtrip",
+            "status": "WARNING",
+            "duration_ms": 8.141,
+            "details": {},
+            "issues": [
+              "Prediction request returned status 401 (authentication required)"
+            ],
+            "solutions": [
+              "Ensure API_KEY is set in environment variables and backend authentication is configured"
+            ],
+            "error": null
+          },
+          {
+            "name": "command_types",
+            "status": "WARNING",
+            "duration_ms": 2046.6039999999998,
+            "details": {
+              "health_status": 200,
+              "command_types_tested": [
+                "health"
+              ],
+              "command_types_failed": [
+                "predict (status 401 - authentication required)",
+                "get_status (status 401 - authentication required)"
+              ],
+              "success_rate": "1/3"
+            },
+            "issues": [
+              "Only 1/3 command types tested successfully",
+              "Failed: predict (status 401 - authentication required), get_status (status 401 - authentication required)"
+            ],
+            "solutions": [
+              "Check backend endpoints and agent availability"
+            ],
+            "error": null
+          },
+          {
+            "name": "timeout_handling",
+            "status": "PASS",
+            "duration_ms": 1006.8870000000001,
+            "details": {
+              "timeout_detected": true,
+              "timeout_handling": "working",
+              "agent_timeout_test": "requires_mocking"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_backend_websocket",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "websocket_connected": true,
+              "ping_successful": true,
+              "agent_websocket_client_available": true,
+              "agent_websocket_connected": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_event_publishing",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "event_bus_available": true,
+              "websocket_client_available": true,
+              "websocket_connected": true,
+              "can_publish_via_websocket": true,
+              "redis_available": true,
+              "can_publish_via_redis": true,
+              "event_publishing_mechanism": "available"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "dual_publishing",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "websocket_available": true,
+              "websocket_connected": true,
+              "redis_available": true,
+              "dual_publishing_available": true,
+              "both_channels_ready": true,
+              "event_bus_available": true,
+              "event_bus_dual_publishing": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "frontend_backend_websocket",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "websocket_available": true,
+              "can_subscribe": true,
+              "subscription_sent": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "message_subscription",
+            "status": "PASS",
+            "duration_ms": 110.112,
+            "details": {
+              "subscription_sent": true,
+              "subscription_processed": true,
+              "unsubscription_sent": true,
+              "subscription_mechanism_working": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "reconnection_logic",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "websocket_client_available": true,
+              "reconnection_method_available": false,
+              "reconnection_test": "basic_check_complete",
+              "full_reconnection_test": "requires_connection_interruption_simulation"
+            },
+            "issues": [
+              "Reconnection method not found"
+            ],
+            "solutions": [
+              "Reconnection may be handled automatically by websockets library"
+            ],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "data freshness",
+        "status": "PASS",
+        "duration_ms": 204.17,
+        "total_tests": 6,
+        "passed": 6,
+        "failed": 0,
+        "warnings": 0,
+        "issues": [],
+        "solutions": [],
+        "results": [
+          {
+            "name": "timestamp_validation",
+            "status": "PASS",
+            "duration_ms": 81.747,
+            "details": {
+              "timestamp_format": "ISO 8601",
+              "test_timestamp": "2026-01-01T10:11:17.068853+00:00",
+              "timestamp_parsable": true,
+              "parsed_timestamp": "2026-01-01T10:11:17.068853+00:00",
+              "age_calculation_working": true,
+              "age_seconds": 0.082
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "freshness_calculation",
+            "status": "PASS",
+            "duration_ms": 112.52199999999999,
+            "details": {
+              "age_calculation": "112.52ms",
+              "age_calculation_working": true,
+              "freshness_check_working": true,
+              "test_age_seconds": 5.0,
+              "threshold_seconds": 10,
+              "is_fresh": true,
+              "stale_detection_working": true,
+              "stale_age_seconds": 15.0,
+              "is_stale": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "agent_state_updates",
+            "status": "PASS",
+            "duration_ms": 0.71,
+            "details": {
+              "current_state": "AgentState.OBSERVING",
+              "state_machine_available": true,
+              "state_update_mechanism": "available",
+              "expected_update_interval": "30s",
+              "subscribed_to_agent_state": true,
+              "state_update_monitoring": "ready"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "health_status_updates",
+            "status": "PASS",
+            "duration_ms": 9.190999999999999,
+            "details": {
+              "health_endpoint_available": true,
+              "health_response_has_timestamp": true,
+              "timestamp": "2026-01-01T10:11:13.597070",
+              "expected_update_interval": "60s"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "stale_data_detection",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "freshness_thresholds": {
+                "market_tick": 10,
+                "agent_state": 30,
+                "health_status": 60
+              },
+              "stale_detection_tests": [
+                {
+                  "age": 5,
+                  "threshold": 10,
+                  "detected_stale": false,
+                  "expected": "fresh",
+                  "correct": true
+                },
+                {
+                  "age": 15,
+                  "threshold": 10,
+                  "detected_stale": true,
+                  "expected": "stale",
+                  "correct": true
+                },
+                {
+                  "age": 25,
+                  "threshold": 30,
+                  "detected_stale": false,
+                  "expected": "fresh",
+                  "correct": true
+                },
+                {
+                  "age": 35,
+                  "threshold": 30,
+                  "detected_stale": true,
+                  "expected": "stale",
+                  "correct": true
+                }
+              ],
+              "stale_detection_working": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "websocket_message_freshness",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "subscribed_to_channels": true,
+              "message_received": true,
+              "message_type": "portfolio_update",
+              "message_has_timestamp": true,
+              "message_age_seconds": 9.59,
+              "message_fresh": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "portfolio management",
+        "status": "WARNING",
+        "duration_ms": 2047.924,
+        "total_tests": 5,
+        "passed": 2,
+        "failed": 0,
+        "warnings": 3,
+        "issues": [
+          "Portfolio endpoint returned status 401",
+          "Positions endpoint returned status 401",
+          "Performance endpoint returned status 401"
+        ],
+        "solutions": [
+          "Portfolio endpoint may not be implemented or requires authentication",
+          "Performance endpoint may not be implemented"
+        ],
+        "results": [
+          {
+            "name": "portfolio_state",
+            "status": "WARNING",
+            "duration_ms": 4.283,
+            "details": {
+              "agent_initial_balance": 10000.0,
+              "portfolio_tracking_available": true
+            },
+            "issues": [
+              "Portfolio endpoint returned status 401"
+            ],
+            "solutions": [
+              "Portfolio endpoint may not be implemented or requires authentication"
+            ],
+            "error": null
+          },
+          {
+            "name": "position_tracking",
+            "status": "WARNING",
+            "duration_ms": 3.885,
+            "details": {
+              "risk_manager_tracks_position": false
+            },
+            "issues": [
+              "Positions endpoint returned status 401"
+            ],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "performance_metrics",
+            "status": "WARNING",
+            "duration_ms": 2039.756,
+            "details": {
+              "learning_system_available": true,
+              "performance_tracking_mechanism": "available"
+            },
+            "issues": [
+              "Performance endpoint returned status 401"
+            ],
+            "solutions": [
+              "Performance endpoint may not be implemented"
+            ],
+            "error": null
+          },
+          {
+            "name": "portfolio_rebalancing",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "max_portfolio_heat_configured": true,
+              "max_portfolio_heat": 0.3,
+              "rebalancing_trigger_available": true,
+              "rebalancing_test": "basic_check_complete",
+              "full_rebalancing_test": "requires_multiple_positions"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "trade_execution_updates",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "trade_execution_handler_available": true,
+              "trade_execution_works": true,
+              "trade_data_available": true,
+              "trade_id_generated": true,
+              "trade_id": "trade_1767233479.116777",
+              "position_tracking_after_trade": false
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "learning system",
+        "status": "WARNING",
+        "duration_ms": 0.0,
+        "total_tests": 5,
+        "passed": 1,
+        "failed": 0,
+        "warnings": 4,
+        "issues": [
+          "Performance tracking methods not found",
+          "Adaptation methods not found",
+          "Memory store not available",
+          "Performance aggregation methods not found"
+        ],
+        "solutions": [
+          "Check learning system implementation",
+          "Adaptation may be implemented differently or not yet available",
+          "Memory store may be optional or not configured",
+          "Performance aggregation may be implemented differently"
+        ],
+        "results": [
+          {
+            "name": "performance_tracking",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "learning_system_available": true,
+              "available_tracking_methods": {}
+            },
+            "issues": [
+              "Performance tracking methods not found"
+            ],
+            "solutions": [
+              "Check learning system implementation"
+            ],
+            "error": null
+          },
+          {
+            "name": "adaptation",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "available_adaptation_methods": {}
+            },
+            "issues": [
+              "Adaptation methods not found"
+            ],
+            "solutions": [
+              "Adaptation may be implemented differently or not yet available"
+            ],
+            "error": null
+          },
+          {
+            "name": "memory_storage",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "memory_store_available": false
+            },
+            "issues": [
+              "Memory store not available"
+            ],
+            "solutions": [
+              "Memory store may be optional or not configured"
+            ],
+            "error": null
+          },
+          {
+            "name": "learning_from_outcomes",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "available_outcome_methods": {
+                "record_trade_outcome": true
+              },
+              "outcome_learning_available": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "model_performance_aggregation",
+            "status": "WARNING",
+            "duration_ms": 0.0,
+            "details": {
+              "available_aggregation_methods": {},
+              "model_registry_available": true,
+              "model_performance_tracking": "available"
+            },
+            "issues": [
+              "Performance aggregation methods not found"
+            ],
+            "solutions": [
+              "Performance aggregation may be implemented differently"
+            ],
+            "error": null
+          }
+        ]
+      },
+      {
+        "suite_name": "frontend functionality",
+        "status": "PASS",
+        "duration_ms": 2143.911,
+        "total_tests": 6,
+        "passed": 6,
+        "failed": 0,
+        "warnings": 0,
+        "issues": [],
+        "solutions": [],
+        "results": [
+          {
+            "name": "frontend_accessible",
+            "status": "PASS",
+            "duration_ms": 74.37,
+            "details": {
+              "frontend_url": "http://localhost:3006",
+              "status_code": 200,
+              "frontend_accessible": true,
+              "content_type": "text/html; charset=utf-8",
+              "is_html_response": true
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "frontend_api_integration",
+            "status": "PASS",
+            "duration_ms": 6.829,
+            "details": {
+              "backend_health_accessible": true,
+              "backend_health_status": "unhealthy",
+              "api_integration_test": "health_endpoint_checked"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "frontend_websocket_connection",
+            "status": "PASS",
+            "duration_ms": 0.0,
+            "details": {
+              "websocket_connected": true,
+              "ping_successful": true,
+              "subscription_response": "market_tick"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "frontend_health_endpoint",
+            "status": "PASS",
+            "duration_ms": 1078.507,
+            "details": {
+              "health_endpoint_found": "http://localhost:3006/_next/static/chunks/webpack.js",
+              "health_status": 200
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "frontend_cors_headers",
+            "status": "PASS",
+            "duration_ms": 340.899,
+            "details": {
+              "cors_headers": {
+                "Access-Control-Allow-Origin": null,
+                "Access-Control-Allow-Methods": null,
+                "Access-Control-Allow-Headers": null
+              },
+              "cors_test_note": "CORS is typically configured on backend API"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          },
+          {
+            "name": "frontend_error_handling",
+            "status": "PASS",
+            "duration_ms": 643.306,
+            "details": {
+              "invalid_endpoint_status": 404,
+              "invalid_endpoint_handled": true,
+              "long_url_status": 404,
+              "long_url_handled": true,
+              "invalid_method_status": 200,
+              "invalid_method_handled": true,
+              "large_payload_status": 200,
+              "large_payload_handled": true,
+              "special_chars_status": 404,
+              "special_chars_handled": true,
+              "error_handling_score": "5/5"
+            },
+            "issues": [],
+            "solutions": [],
+            "error": null
+          }
+        ]
+      }
+    ]
+  },
+  "all_issues": [
+    {
+      "group": "infrastructure",
+      "suite": "database operations",
+      "test": "database_connection",
+      "issue": "Database URL not configured",
+      "solution": "Verify database is running and connection string is correct"
+    },
+    {
+      "group": "infrastructure",
+      "suite": "delta exchange connection",
+      "test": "rate_limiting",
+      "issue": "Rate limiting test requires special setup",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "infrastructure",
+      "suite": "delta exchange connection",
+      "test": "error_handling",
+      "issue": "Error handling test requires failure simulation",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "infrastructure",
+      "suite": "agent loading",
+      "test": "service_health_check",
+      "issue": "Backend service may not be available",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "infrastructure",
+      "suite": "agent loading",
+      "test": "database_connection",
+      "issue": "Database URL not configured",
+      "solution": "Verify database is running and connection string is correct"
+    },
+    {
+      "group": "infrastructure",
+      "suite": "agent loading",
+      "test": "vector_memory_store",
+      "issue": "Vector memory store not available",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "core-services",
+      "suite": "feature computation",
+      "test": "feature_server",
+      "issue": "Feature server health check failed: Cannot connect to host 0.0.0.0:8001 ssl:default [The format of the specified network name is invalid]",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "core-services",
+      "suite": "ml model communication",
+      "test": "model_inference",
+      "issue": "Model inference test requires feature data",
+      "solution": "Check model files exist and are valid"
+    },
+    {
+      "group": "core-services",
+      "suite": "websocket communication",
+      "test": "connection_management",
+      "issue": "Agent WebSocket ping failed: received 1011 (internal error); then sent 1011 (internal error)",
+      "solution": "Verify WebSocket server is running and port is correct"
+    },
+    {
+      "group": "agent-logic",
+      "suite": "agent functionality",
+      "test": "agent_backend_communication",
+      "issue": "Agent shows as down in backend health check",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "agent-logic",
+      "suite": "agent functionality",
+      "test": "agent_health_status",
+      "issue": "Agent reports as unavailable",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "agent communication",
+      "test": "backend_agent_websocket",
+      "issue": "WebSocket ping failed: received 1011 (internal error); then sent 1011 (internal error)",
+      "solution": "Verify WebSocket server is running and port is correct"
+    },
+    {
+      "group": "integration",
+      "suite": "agent communication",
+      "test": "backend_agent_websocket",
+      "issue": "Message send failed: received 1011 (internal error); then sent 1011 (internal error)",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "agent communication",
+      "test": "command_response_roundtrip",
+      "issue": "Prediction request returned status 401 (authentication required)",
+      "solution": "Verify API keys and credentials are correct"
+    },
+    {
+      "group": "integration",
+      "suite": "agent communication",
+      "test": "command_types",
+      "issue": "Only 1/3 command types tested successfully",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "agent communication",
+      "test": "command_types",
+      "issue": "Failed: predict (status 401 - authentication required), get_status (status 401 - authentication required)",
+      "solution": "Verify API keys and credentials are correct"
+    },
+    {
+      "group": "integration",
+      "suite": "agent communication",
+      "test": "reconnection_logic",
+      "issue": "Reconnection method not found",
+      "solution": "Check service is running and URL is correct"
+    },
+    {
+      "group": "integration",
+      "suite": "portfolio management",
+      "test": "portfolio_state",
+      "issue": "Portfolio endpoint returned status 401",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "portfolio management",
+      "test": "position_tracking",
+      "issue": "Positions endpoint returned status 401",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "portfolio management",
+      "test": "performance_metrics",
+      "issue": "Performance endpoint returned status 401",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "learning system",
+      "test": "performance_tracking",
+      "issue": "Performance tracking methods not found",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "learning system",
+      "test": "adaptation",
+      "issue": "Adaptation methods not found",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "learning system",
+      "test": "memory_storage",
+      "issue": "Memory store not available",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    },
+    {
+      "group": "integration",
+      "suite": "learning system",
+      "test": "model_performance_aggregation",
+      "issue": "Performance aggregation methods not found",
+      "solution": "Review logs and documentation for troubleshooting steps"
+    }
+  ],
+  "all_solutions": [
+    "Check backend endpoints and agent availability",
+    "Implement rate limiting test with multiple rapid requests",
+    "Performance endpoint may not be implemented",
+    "Vector memory store may be optional or not configured",
+    "Adaptation may be implemented differently or not yet available",
+    "Ensure API_KEY is set in environment variables and backend authentication is configured",
+    "Check learning system implementation",
+    "Memory store may be optional or not configured",
+    "Set DATABASE_URL in environment or config (Database is optional)",
+    "Performance aggregation may be implemented differently",
+    "Ensure backend is running on http://localhost:8000",
+    "Reconnection may be handled automatically by websockets library",
+    "Portfolio endpoint may not be implemented or requires authentication"
+  ],
+  "recommendations": [
+    "Some services failed to start or are not ready. Check service logs and configuration",
+    "Review 23 warnings to identify potential issues",
+    "System health score is below 80%. Review failing tests and warnings"
+  ]
+}

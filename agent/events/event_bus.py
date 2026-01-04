@@ -12,7 +12,7 @@ import structlog
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError, ConnectionError
 
-from agent.core.redis import get_redis
+from agent.core.redis_config import get_redis
 from agent.events.schemas import BaseEvent, EventType
 from agent.events.utils import serialize_event, deserialize_event
 

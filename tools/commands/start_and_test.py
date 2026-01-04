@@ -1527,6 +1527,11 @@ Examples:
         default=True,
         help="Continue running even on test failures (for debugging)"
     )
+    parser.add_argument(
+        "--websocket-monitor",
+        action="store_true",
+        help="Enable WebSocket connection monitoring and performance metrics"
+    )
     
     args = parser.parse_args()
     

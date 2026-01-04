@@ -11,7 +11,7 @@ import uuid
 from typing import Dict, Any, Optional
 
 from backend.core.redis import enqueue_command, get_response, get_redis
-from agent.core.redis import get_redis as agent_get_redis
+from agent.core.redis_config import get_redis as agent_get_redis
 
 
 @pytest.mark.asyncio

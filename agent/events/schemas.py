@@ -74,15 +74,9 @@ class BaseEvent(BaseModel):
 # Market Data Events
 
 class MarketTickEvent(BaseEvent):
-    """Real-time market price tick event."""
+    """Real-time market price tick event with rich market data."""
 
     event_type: EventType = EventType.MARKET_TICK
-
-    class Payload(BaseModel):
-        symbol: str
-        price: float
-        volume: float
-        timestamp: datetime
 
 
 class PriceFluctuationEvent(BaseEvent):
