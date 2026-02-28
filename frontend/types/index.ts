@@ -50,6 +50,10 @@ export interface ReasoningStep {
   description: string
   confidence: number
   evidence?: string[]
+  // Optional metadata fields
+  data_freshness_seconds?: number
+  similarity_score?: number
+  feature_quality_score?: number
 }
 
 export interface ReasoningChain {
@@ -138,3 +142,38 @@ export interface ModelWeightChange {
   new_weight: number
 }
 
+// Position Impact Analysis
+export interface PositionImpact {
+  positionId: string
+  symbol: string
+  pnlChange: number
+  pnlPercent: number
+  riskLevel: 'low' | 'medium' | 'high' | 'critical'
+  liquidationRisk: boolean
+  currentValue: number
+  entryValue: number
+}
+
+// Enhanced Ticker Data with Position Impact
+export interface EnhancedTickerData {
+  symbol: string
+  price: number
+  volume: number
+  timestamp: string | Date
+  change_24h?: number
+  change_24h_pct?: number
+  high_24h?: number
+  low_24h?: number
+  open_24h?: number
+  close_24h?: number
+  turnover_usd?: number
+  oi?: number
+  spot_price?: number
+  mark_price?: number
+  bid_price?: number
+  ask_price?: number
+  bid_size?: number
+  ask_size?: number
+  // Enhanced fields for position impact
+  positionImpacts?: PositionImpact[]
+}

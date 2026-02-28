@@ -143,12 +143,16 @@ def validate_pickle_file(file_path: Path) -> Tuple[bool, str, Dict]:
                 "array_dtype": str(obj.dtype)
             }
         
-        # Check if it's an XGBoost model
+        # Check if it's an XGBoost model (Booster or scikit-learn wrapper)
         try:
-            from xgboost import XGBClassifier
-            is_xgboost = isinstance(obj, XGBClassifier)
+            from xgboost import XGBClassifier, XGBRegressor, Booster
+            is_xgboost = isinstance(obj, (XGBClassifier, XGBRegressor, Booster))
         except ImportError:
-            is_xgboost = False
+            # Fallback check for common XGBoost patterns
+            obj_type = str(type(obj))
+            is_xgboost = ('xgboost' in obj_type.lower() or
+                         'XGB' in obj_type or
+                         'Booster' in obj_type)
         
         if is_xgboost:
             # Validate model has required methods
@@ -158,22 +162,31 @@ def validate_pickle_file(file_path: Path) -> Tuple[bool, str, Dict]:
                     "error": "Missing predict method",
                     "object_type": type(obj).__name__
                 }
-            
-            if not hasattr(obj, 'predict_proba'):
-                return False, "XGBoost model missing 'predict_proba' method", {
+
+            # Only require predict_proba for classifiers, not regressors
+            obj_type_name = type(obj).__name__
+            is_regressor = 'regressor' in obj_type_name.lower() or 'Regressor' in obj_type_name
+
+            if not is_regressor and not hasattr(obj, 'predict_proba'):
+                return False, "XGBoost classifier missing 'predict_proba' method", {
                     **file_info,
-                    "error": "Missing predict_proba method",
+                    "error": "Missing predict_proba method (required for classifiers)",
                     "object_type": type(obj).__name__
                 }
             
             # Test prediction with dummy data
             try:
-                dummy_X = np.random.rand(1, 49)  # 49 features
+                dummy_X = np.random.rand(1, 50)  # 50 features
                 prediction = obj.predict(dummy_X)
-                proba = obj.predict_proba(dummy_X)
                 file_info["prediction_test"] = "passed"
                 file_info["prediction_shape"] = str(prediction.shape)
-                file_info["proba_shape"] = str(proba.shape)
+
+                # Only test predict_proba for classifiers
+                if not is_regressor:
+                    proba = obj.predict_proba(dummy_X)
+                    file_info["proba_shape"] = str(proba.shape)
+                else:
+                    file_info["proba_shape"] = "N/A (regressor)"
             except Exception as pred_e:
                 return False, f"Model prediction test failed: {pred_e}", {
                     **file_info,

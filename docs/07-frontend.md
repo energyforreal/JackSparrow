@@ -336,6 +336,69 @@ interface HealthMonitorProps {
 
 ---
 
+### RealTimePrice Component
+
+**File**: `app/components/RealTimePrice.tsx`
+
+**Purpose**: Display real-time price data with change indicators and position impact analysis.
+
+**Props**:
+```typescript
+interface RealTimePriceProps {
+  symbol?: string
+  className?: string
+  positions?: Position[]
+  showPositionImpact?: boolean
+}
+```
+
+**Features**:
+- Real-time price display with currency formatting
+- Momentary price change indicators with trend icons
+- 24-hour statistics (change, volume, high/low)
+- WebSocket/WebSocket fallback for data updates
+- Connection status indicators
+- **Position Impact Preview** (New Feature):
+  - Real-time P&L impact calculation for open positions
+  - Risk level assessment (low/medium/high/critical)
+  - Liquidation risk detection with warnings
+  - Portfolio summary with aggregated impact
+  - Visual indicators with color-coded risk levels
+
+**Position Impact Risk Levels**:
+- **Low**: <2% position impact (gray indicator)
+- **Medium**: 2-5% position impact (yellow indicator)
+- **High**: 5-10% position impact (orange indicator)
+- **Critical**: >10% position impact (red indicator) ⚠️
+
+**Visual Feedback**:
+- Green badges for profitable impacts
+- Red badges for losses
+- Risk level badges with appropriate colors
+- AlertTriangle icons for liquidation risk
+- Tooltips showing detailed impact breakdown
+
+**Integration**:
+- Uses `usePositionImpact` hook for real-time calculations
+- Integrates with `useWebSocket` for live price updates
+- Displays alongside existing price change indicators
+- Responsive design for mobile and desktop
+
+**Example Usage**:
+```typescript
+// Basic usage
+<RealTimePrice symbol="BTCUSD" />
+
+// With position impact analysis
+<RealTimePrice
+  symbol="BTCUSD"
+  positions={portfolio.positions}
+  showPositionImpact={true}
+/>
+```
+
+---
+
 ### ReasoningChainView Component
 
 **File**: `app/components/ReasoningChainView.tsx`
@@ -665,65 +728,81 @@ export const apiClient = new ApiClient(API_BASE_URL);
 
 ### Real-Time Updates
 
-The frontend uses WebSocket for real-time updates:
+The frontend uses WebSocket for real-time updates with a simplified, unified message format:
 
-### WebSocket Message Types
+### Simplified WebSocket Message Format
 
-The frontend handles the following WebSocket message types:
+The WebSocket communication has been simplified from 10+ message types to 3 core types:
 
-1. **`agent_state`**: Agent state transitions
+1. **`data_update`**: Unified data updates
+   - **Resource: `signal`**: Trading decision updates (replaces `signal_update`, `reasoning_chain_update`)
+     - Includes signal, confidence, reasoning chain, model consensus
+     - Updates signal indicator and trading decision components
+   - **Resource: `portfolio`**: Portfolio state changes (replaces `portfolio_update`)
+     - Updates portfolio summary and positions
+   - **Resource: `trade`**: Trade execution notifications (replaces `trade_executed`)
+     - Updates recent trades list
+     - Triggers portfolio refresh
+   - **Resource: `market`**: Real-time price updates (replaces `market_tick`)
+     - Includes symbol, price, volume, timestamp
+     - Updates real-time price display
+   - **Resource: `model`**: ML model prediction updates (replaces `model_prediction_update`)
+     - Includes model consensus and individual model reasoning
+     - Updates model reasoning view component
+
+2. **`agent_update`**: Agent state transitions (replaces `agent_state`)
    - Updates agent status display
    - Includes state, reason, and timestamp
 
-2. **`signal_update`**: Trading decision updates
-   - Includes signal, confidence, reasoning chain, model consensus
-   - Updates signal indicator and trading decision components
+3. **`system_update`**: System updates
+   - **Resource: `health`**: System health status (replaces `health_update`)
+     - Updates health monitor component
+   - **Resource: `time`**: Time synchronization (replaces `time_sync`)
+     - Periodic server time sync
 
-3. **`reasoning_chain_update`**: Reasoning chain updates (separate from signal)
-   - Includes full 6-step reasoning chain
-   - Updates reasoning chain viewer component
+### Message Envelope Format
 
-4. **`model_prediction_update`**: ML model prediction updates
-   - Includes model consensus and individual model reasoning
-   - Updates model reasoning view component
+All messages use a unified envelope format:
 
-5. **`market_tick`**: Real-time price updates
-   - Includes symbol, price, volume, timestamp
-   - Updates real-time price display
-
-6. **`trade_executed`**: Trade execution notifications
-   - Updates recent trades list
-   - Triggers portfolio refresh
-
-7. **`portfolio_update`**: Portfolio state changes
-   - Updates portfolio summary and positions
-
-8. **`health_update`**: System health status
-   - Updates health monitor component
+```typescript
+{
+  type: "data_update" | "agent_update" | "system_update",
+  resource?: "signal" | "portfolio" | "trade" | "market" | "model" | "agent" | "health" | "time",
+  data: any,
+  timestamp: string,
+  source: string,
+  sequence?: number
+}
+```
 
 ### Message Handling Flow
 
 1. **Connection**: Establish WebSocket connection on mount
-2. **Subscription**: Subscribe to relevant channels
-3. **Message Handling**: Update local state based on message types
-4. **Reconnection**: Automatic reconnection with exponential backoff
-5. **Queue Management**: Queue messages during disconnection
+2. **Subscription**: Subscribe to 3 core channels (`data_update`, `agent_update`, `system_update`)
+3. **Message Normalization**: Frontend automatically normalizes legacy message types
+4. **Message Handling**: Update local state based on message type and resource
+5. **Reconnection**: Automatic reconnection with exponential backoff
+6. **Queue Management**: Queue messages during disconnection
 
 ### State Updates Flow
 
 ```
-WebSocket Message → Message Handler → State Update → Component Re-render
+WebSocket Message → Normalize Format → Message Handler → State Update → Component Re-render
 ```
 
-**Message Types Handled**:
-- `agent_state`: Update agent state
-- `signal_update`: Update trading signal and decision
-- `reasoning_chain_update`: Update reasoning chain display
-- `model_prediction_update`: Update model predictions and consensus
-- `market_tick`: Update real-time price display
-- `trade_executed`: Add to recent trades
-- `portfolio_update`: Update portfolio data
-- `health_update`: Update health status
+**Simplified Message Handling**:
+- `data_update` with `resource: "signal"`: Update trading signal and decision
+- `data_update` with `resource: "portfolio"`: Update portfolio data
+- `data_update` with `resource: "trade"`: Add to recent trades
+- `data_update` with `resource: "market"`: Update real-time price display
+- `data_update` with `resource: "model"`: Update model predictions and consensus
+- `agent_update`: Update agent state
+- `system_update` with `resource: "health"`: Update health status
+- `system_update` with `resource: "time"`: Time synchronization
+
+### Backward Compatibility
+
+The frontend automatically handles legacy message types (`signal_update`, `portfolio_update`, etc.) for backward compatibility during the transition period. Legacy types are normalized to the new format automatically.
 
 ---
 

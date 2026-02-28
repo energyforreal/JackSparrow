@@ -14,6 +14,7 @@ import uuid
 from pydantic import BaseModel
 
 from agent.models.mcp_model_node import MCPModelNode, MCPModelRequest, MCPModelPrediction
+from agent.models.advanced_consensus import AdvancedConsensusEngine, ConsensusConfig, ModelPrediction as ConsensusModelPrediction
 from agent.events.event_bus import event_bus
 from agent.events.schemas import (
     ModelPredictionRequestEvent,
@@ -36,6 +37,14 @@ class MCPModelResponse(BaseModel):
     timestamp: datetime
 
 
+class NoModelsRegisteredError(Exception):
+    """Raised when no ML models are registered in the model registry."""
+
+
+class NoHealthyModelPredictionsError(Exception):
+    """Raised when no acceptable model predictions are available for consensus."""
+
+
 class MCPModelRegistry:
     """MCP Model Registry managing all model nodes."""
     
@@ -47,6 +56,9 @@ class MCPModelRegistry:
         # Health tracking
         self._prediction_latencies: Dict[str, List[float]] = {}  # Track prediction latencies per model
         self._prediction_errors: Dict[str, int] = {}  # Track error counts per model
+        # Advanced consensus engine
+        self.consensus_engine = AdvancedConsensusEngine(ConsensusConfig())
+        self._outcome_history: Dict[str, float] = {}  # Store outcomes for learning
         self._prediction_successes: Dict[str, int] = {}  # Track success counts per model
         self._pending_models: Dict[str, MCPModelNode] = {}
         self._max_latency_history: int = 100  # Keep last 100 latencies per model
@@ -155,14 +167,13 @@ class MCPModelRegistry:
         """Get predictions from all healthy models."""
         
         if not self.models:
-            return MCPModelResponse(
+            logger.error(
+                "model_registry_no_models_registered",
                 request_id=request.request_id,
-                predictions=[],
-                consensus_prediction=0.0,
-                consensus_confidence=0.0,
-                healthy_models=0,
-                total_models=0,
-                timestamp=datetime.utcnow()
+                message="No ML models are registered in MCPModelRegistry. Cannot generate predictions."
+            )
+            raise NoModelsRegisteredError(
+                "No ML models are registered. Model discovery may have failed or loaded zero models."
             )
         
         # Get predictions from all models in parallel with timeout per model
@@ -310,8 +321,10 @@ class MCPModelRegistry:
                 message="Model health status before prediction attempts"
             )
         
-        # Filter predictions by health status with fallback logic
-        # Priority: healthy > unknown (if model loaded) > degraded (with reduced weight)
+        # Filter predictions by health status with strict requirements
+        # Priority: healthy > unknown (if model loaded) > degraded (with reduced weight).
+        # If no acceptable predictions remain, treat as a hard error instead of
+        # fabricating a zero-confidence consensus.
         healthy_predictions = [
             pred for pred in predictions
             if pred.health_status == "healthy"
@@ -333,7 +346,7 @@ class MCPModelRegistry:
                 )
                 healthy_predictions = unknown_predictions
         
-        # Last resort fallback: Use degraded predictions with reduced weight
+        # Last resort: Use degraded predictions with reduced weight
         if not healthy_predictions:
             degraded_predictions = [
                 pred for pred in predictions
@@ -348,13 +361,14 @@ class MCPModelRegistry:
                 )
                 healthy_predictions = degraded_predictions
         
-        # Log filtering results
+        # If no acceptable predictions remain, raise an explicit error so callers
+        # can stop before attempting to generate a trading decision.
         if predictions and not healthy_predictions:
             filtered_out = [
                 {
                     "model_name": pred.model_name,
                     "health_status": pred.health_status,
-                    "reason": f"health_status='{pred.health_status}' not acceptable"
+                    "reason": f"health_status='{pred.health_status}' not acceptable",
                 }
                 for pred in predictions
             ]
@@ -364,104 +378,99 @@ class MCPModelRegistry:
                 total_predictions=len(predictions),
                 healthy_predictions=len(healthy_predictions),
                 filtered_predictions=filtered_out,
-                message="All predictions filtered out - no acceptable predictions available"
+                message="All predictions filtered out - no acceptable predictions available",
             )
-        
-        # Calculate consensus using weighted average by both model performance and confidence
-        # Apply weight reduction for non-healthy predictions
-        # Note: Both classifier and regressor outputs are normalized to [-1, 1] range in XGBoostNode,
-        # so they can be treated uniformly in the consensus calculation
-        if healthy_predictions:
-            # Weighted average: combines model performance weight (from historical accuracy/profit)
-            # with prediction confidence to get final weight for each prediction
-            # This works for both classifiers (probability-based) and regressors (direct prediction)
-            total_weight = 0.0
-            weighted_sum = 0.0
-            confidence_sum = 0.0
-            
-            # Log individual predictions for debugging
-            prediction_details = []
-            
+            raise NoHealthyModelPredictionsError(
+                "All model predictions were filtered out due to unacceptable health status."
+            )
+
+        if not healthy_predictions:
+            # No predictions at all (e.g., every model failed fast). Treat this as
+            # a hard error rather than fabricating a neutral consensus.
+            logger.error(
+                "model_predictions_none_available",
+                request_id=request.request_id,
+                total_models=len(self.models),
+                message="No model predictions are available for consensus calculation.",
+            )
+            raise NoHealthyModelPredictionsError(
+                "No model predictions are available for consensus calculation."
+            )
+
+        # Calculate advanced consensus using sophisticated algorithms
+        try:
+            # Convert MCP predictions to consensus engine format
+            consensus_predictions = []
             for pred in healthy_predictions:
-                # Get model weight (based on historical performance metrics)
-                # Default to equal weight if not set
-                model_weight = self.model_weights.get(
-                    pred.model_name, 
-                    1.0 / len(healthy_predictions)
+                consensus_pred = ConsensusModelPrediction(
+                    model_name=pred.model_name,
+                    prediction=pred.prediction,
+                    confidence=pred.confidence,
+                    timestamp=datetime.utcnow(),
+                    model_type=self.models[pred.model_name].model_type
+                    if pred.model_name in self.models
+                    else "unknown",
+                    feature_importance=getattr(pred, "feature_importance", None),
+                    metadata={
+                        "health_status": pred.health_status,
+                        "computation_time_ms": getattr(pred, "computation_time_ms", 0),
+                        "model_version": getattr(pred, "model_version", "unknown"),
+                    },
                 )
-                
-                # Apply health status weight multiplier
-                # Healthy predictions get full weight, unknown get 0.8x, degraded get 0.5x
-                health_weight_multiplier = {
-                    "healthy": 1.0,
-                    "unknown": 0.8,
-                    "degraded": 0.5
-                }.get(pred.health_status, 0.5)
-                
-                # Combined weight = performance_weight * prediction_confidence * health_weight
-                # This ensures models with better historical performance AND higher
-                # confidence in current prediction AND healthy status get more weight
-                combined_weight = model_weight * pred.confidence * health_weight_multiplier
-                
-                weighted_sum += pred.prediction * combined_weight
-                total_weight += combined_weight
-                confidence_sum += pred.confidence
-                
-                # Track for logging
-                prediction_details.append({
-                    "model": pred.model_name,
-                    "prediction": pred.prediction,
-                    "confidence": pred.confidence,
-                    "model_weight": model_weight,
-                    "combined_weight": combined_weight
-                })
-            
-            if total_weight > 0:
-                consensus_prediction = weighted_sum / total_weight
-                # Average confidence across all predictions
-                consensus_confidence = confidence_sum / len(healthy_predictions)
-            else:
-                # If total_weight is 0, it means all predictions have 0 confidence
-                # Fall back to simple average of predictions
-                if len(healthy_predictions) > 0:
-                    consensus_prediction = sum(pred.prediction for pred in healthy_predictions) / len(healthy_predictions)
-                    consensus_confidence = confidence_sum / len(healthy_predictions) if confidence_sum > 0 else 0.0
-                else:
-                    consensus_prediction = 0.0
-                    consensus_confidence = 0.0
-            
-            # Log consensus calculation details for debugging
-            logger.debug(
-                "consensus_calculation",
-                healthy_predictions_count=len(healthy_predictions),
-                total_models=len(self.models),
-                prediction_details=prediction_details,
-                total_weight=total_weight,
-                weighted_sum=weighted_sum,
-                consensus_prediction=consensus_prediction,
-                consensus_confidence=consensus_confidence
+                consensus_predictions.append(consensus_pred)
+
+            # Extract market context for regime detection
+            market_context = request.context if hasattr(request, "context") else {}
+            current_price = market_context.get("current_price", 50000.0)
+            market_context.update(
+                {
+                    "volatility": market_context.get("volatility", 0.02),
+                    "trend_strength": market_context.get("trend_strength", 0.5),
+                    "volume_ratio": market_context.get("volume_ratio", 1.0),
+                }
             )
-        else:
-            consensus_prediction = 0.0
-            consensus_confidence = 0.0
-            
-            # Log detailed information about why consensus failed
-            prediction_statuses = {}
-            for pred in predictions:
-                status = pred.health_status
-                if status not in prediction_statuses:
-                    prediction_statuses[status] = []
-                prediction_statuses[status].append(pred.model_name)
-            
-            logger.warning(
-                "consensus_calculation_no_acceptable_predictions",
-                total_predictions=len(predictions),
-                total_models=len(self.models),
-                prediction_statuses=prediction_statuses,
-                message="No acceptable predictions available for consensus calculation. "
-                       "All predictions were filtered out or failed."
+
+            # Calculate advanced consensus
+            consensus_result = await self.consensus_engine.calculate_consensus(
+                predictions=consensus_predictions,
+                market_context=market_context,
+                consensus_method="adaptive",
             )
-        
+
+            consensus_prediction = consensus_result.final_prediction
+            consensus_confidence = consensus_result.confidence
+
+            # Log advanced consensus details
+            logger.info(
+                "advanced_consensus_calculated",
+                request_id=request.request_id,
+                method=consensus_result.consensus_method,
+                final_prediction=round(consensus_prediction, 4),
+                confidence=round(consensus_confidence, 4),
+                model_weights={
+                    k: round(v, 3) for k, v in consensus_result.model_weights.items()
+                },
+                reasoning=consensus_result.reasoning,
+                risk_level=consensus_result.risk_assessment.get("risk_level", "unknown"),
+            )
+
+        except Exception as e:
+            logger.error(
+                "advanced_consensus_failed",
+                request_id=request.request_id,
+                error=str(e),
+                message="Falling back to simple consensus based on available model predictions.",
+            )
+
+            # Fallback to simple average that is still based on actual model
+            # predictions (never fabricating a zero-confidence decision).
+            consensus_prediction = sum(
+                pred.prediction for pred in healthy_predictions
+            ) / len(healthy_predictions)
+            consensus_confidence = sum(
+                pred.confidence for pred in healthy_predictions
+            ) / len(healthy_predictions)
+
         return MCPModelResponse(
             request_id=request.request_id,
             predictions=predictions,
@@ -469,9 +478,68 @@ class MCPModelRegistry:
             consensus_confidence=consensus_confidence,
             healthy_models=len(healthy_predictions),
             total_models=len(self.models),
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
-    
+
+    async def record_prediction_outcome(self, request_id: str, actual_outcome: float,
+                                      market_context: Optional[Dict[str, Any]] = None):
+        """
+        Record the actual outcome of a prediction for learning.
+
+        Args:
+            request_id: The request ID from the original prediction
+            actual_outcome: The actual market outcome (price change, P&L, etc.)
+            market_context: Market context at the time of outcome
+        """
+        if request_id in self._outcome_history:
+            logger.warning("outcome_already_recorded", request_id=request_id)
+            return
+
+        # Store outcome for potential future use
+        self._outcome_history[request_id] = {
+            "outcome": actual_outcome,
+            "timestamp": datetime.utcnow(),
+            "market_context": market_context or {}
+        }
+
+        # If we have the original predictions, use them for learning
+        if request_id in self._pending_predictions:
+            predictions = self._pending_predictions[request_id]
+
+            # Convert to consensus engine format and record outcome
+            consensus_predictions = []
+            for pred in predictions:
+                consensus_pred = ConsensusModelPrediction(
+                    model_name=pred.model_name,
+                    prediction=pred.prediction,
+                    confidence=pred.confidence,
+                    timestamp=getattr(pred, 'timestamp', datetime.utcnow()),
+                    model_type=self.models[pred.model_name].model_type if pred.model_name in self.models else "unknown"
+                )
+                consensus_predictions.append(consensus_pred)
+
+            # Record outcome for learning
+            await self.consensus_engine.record_outcome(
+                predictions=consensus_predictions,
+                actual_outcome=actual_outcome,
+                market_context=market_context or {}
+            )
+
+            # Clean up pending predictions after some time
+            if len(self._pending_predictions) > 1000:  # Keep last 1000 for memory management
+                # Remove oldest entries
+                sorted_requests = sorted(self._pending_predictions.keys(),
+                                       key=lambda x: self._outcome_history.get(x, {}).get("timestamp", datetime.min))
+                to_remove = sorted_requests[:-1000]
+                for req_id in to_remove:
+                    self._pending_predictions.pop(req_id, None)
+
+            logger.info("prediction_outcome_recorded",
+                       request_id=request_id,
+                       actual_outcome=round(actual_outcome, 4),
+                       models_used=len(consensus_predictions),
+                       market_context_keys=list(market_context.keys()) if market_context else [])
+
     async def _get_prediction_safe(
         self,
         model: MCPModelNode,

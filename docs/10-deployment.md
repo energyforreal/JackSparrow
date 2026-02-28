@@ -442,15 +442,76 @@ docker compose ps
 docker compose logs -f
 ```
 
+#### Pre-deploy checklist (recommended)
+
+Before running `docker compose up` (or the deployment scripts) on a new host:
+
+1. Prepare host directories and configuration:
+   - Create `logs/backend`, `logs/agent`, `logs/frontend`, and `agent/model_storage/`.
+   - Copy `.env.example` to `.env` and configure all required values.
+   - For paper trading, set `PAPER_TRADING_MODE=true` and `TRADING_MODE=paper`.
+2. Run the Docker diagnostic script from the project root:
+   ```bash
+   python scripts/docker_diagnostic.py
+   ```
+   - Fix any `FAIL`/`WARN` items it reports (missing env vars, unsafe trading mode, missing logs directories, missing models) before deploying.
+
 ### Service Architecture
 
 | Service   | Image/Build                     | Port | Resource Limits | Notes |
 |-----------|---------------------------------|------|-----------------|-------|
 | postgres  | `timescale/timescaledb:2.13.1-pg15` | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
 | redis     | `redis:7.2-alpine`              | 6379 | 1 CPU, 512MB RAM | Append-only mode, persistent volume |
-| agent     | `agent/Dockerfile`              | 8001 | 4 CPU, 4GB RAM | Multi-stage build, ML-optimized |
+| agent     | `agent/Dockerfile`              | 8002 | 4 CPU, 4GB RAM | Multi-stage build, ML-optimized, embeds Feature Server on 8002 |
 | backend   | `backend/Dockerfile`            | 8000 | 2 CPU, 2GB RAM | Multi-stage build, non-root user |
 | frontend  | `frontend/Dockerfile`           | 3000 | 1 CPU, 1GB RAM | Multi-stage build, production-ready |
+
+### Docker Environment Overrides
+
+All application containers load the root `.env` via `env_file: - .env` and then override a few settings for container networking:
+
+- **Database & Redis**
+  - `DATABASE_URL=postgresql://...@postgres:5432/trading_agent`
+  - `REDIS_URL=redis://redis:6379/0`
+- **Feature Server**
+  - Local default: `FEATURE_SERVER_URL=http://localhost:8002`
+  - Docker override: `FEATURE_SERVER_URL=http://agent:8002`
+  - Agent container exposes its embedded Feature Server on internal port `8002` and maps it to host `${FEATURE_SERVER_PORT:-8002}:8002`
+- **Agent ↔ Backend WebSocket**
+  - Local: `BACKEND_WS_URL=ws://localhost:8000/ws/agent`
+  - Docker (agent env): `BACKEND_WS_URL=ws://backend:8000/ws/agent`
+- **CORS Origins**
+  - Base: `http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001`
+  - Docker extends with `http://frontend:3000` so the frontend container can call the backend by service name.
+
+> **Note**  
+> Keep using `localhost` URLs in `.env` for local development. Docker Compose automatically replaces hostnames with service names (e.g. `postgres`, `redis`, `agent`, `backend`) through the `environment:` blocks in `docker-compose.yml`.
+
+#### Trading modes in Docker
+
+- The same root `.env` file controls trading modes for both local and Docker deployments via `PAPER_TRADING_MODE` and `TRADING_MODE`.
+- For **paper trading on a Docker host**, prefer the explicitly safe configuration:
+  - `PAPER_TRADING_MODE=true`
+  - `TRADING_MODE=paper`
+- If you set `TRADING_MODE=live` or disable paper mode (`PAPER_TRADING_MODE=false`), both the Python startup validator and `scripts/docker_diagnostic.py` will treat this as a potential **live trading** configuration.
+  - Only use this on an approved live-trading machine.
+  - Always double-check the `.env` file and run `python scripts/docker_diagnostic.py` before deploying or restarting the stack.
+
+### Frontend URLs (Docker vs Local)
+
+The browser always connects from your host, even when the frontend runs in a container. For a standard `docker compose up` on the same machine:
+
+- Set in `.env` (and/or pass via Docker build args):
+  - `NEXT_PUBLIC_API_URL=http://localhost:8000`
+  - `NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws`
+- Rebuild the frontend if you change these:
+
+```bash
+docker compose build frontend --no-cache
+docker compose up -d frontend
+```
+
+If you place the stack behind a reverse proxy or different hostname, update these env vars accordingly so the built frontend points to the correct public URL.
 
 ### Key Features
 
@@ -461,6 +522,18 @@ docker compose logs -f
 - Health checks for automatic container management
 - Restart policies (`unless-stopped`) for automatic recovery
 - Log rotation (10MB max size, 3 files retention)
+
+#### Restart behaviour & crash loops
+
+- All core services in `docker-compose.yml` (`postgres`, `redis`, `agent`, `backend`, `frontend`) use `restart: unless-stopped` so they automatically recover from transient failures and host reboots.
+- Health checks combined with `depends_on: condition: service_healthy` ensure that:
+  - `agent` only starts after `postgres` and `redis` are healthy.
+  - `backend` only starts after `postgres`, `redis`, and `agent` are healthy.
+  - `frontend` only starts after `backend` is healthy.
+- When configuration is invalid (for example, a bad `DATABASE_URL`), containers may repeatedly restart until the misconfiguration is fixed; in those cases you should:
+  - Inspect logs with `docker compose logs <service>` to identify the configuration error.
+  - Fix the offending environment variables (usually in `.env`).
+  - Run `docker compose up -d` again once the configuration has been corrected, rather than trying to “heal” the stack by repeated restarts.
 
 **Volume Management:**
 - `./agent/model_storage` → `/app/agent/model_storage` (bind-mounted for agent model access)
@@ -518,6 +591,14 @@ docker compose logs -f [service]  # Follow logs for specific service
 docker compose logs --tail=100    # Last 100 lines from all services
 ```
 
+For longer-term history and structured JSON logs, the recommended locations on the host are:
+
+- `logs/backend/` – backend service logs (FastAPI, health checks, WebSocket bridge)
+- `logs/agent/` – agent service logs (MCP orchestrator, model discovery, trading decisions)
+- `logs/frontend/` – frontend server logs
+
+Each container writes to `/logs` internally, which is bind-mounted to these host directories by `docker-compose.yml`. When diagnosing issues, use `docker compose logs` for a quick snapshot and the files under `logs/` for full-session investigations.
+
 **Execute commands in containers:**
 ```bash
 # Run database migrations
@@ -542,6 +623,20 @@ docker compose down -v
 docker compose stop backend
 ```
 
+**Clean up orphaned containers:**
+
+If you remove or rename services in `docker-compose.yml` (for example, the legacy `agent-api` service), Docker may report orphaned containers:
+
+```text
+Found orphan containers ([jacksparrow-agent-api]) for this project.
+```
+
+To clean these up safely without touching current services:
+
+```bash
+docker compose up -d --remove-orphans
+```
+
 ### Troubleshooting
 
 See [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#troubleshooting) for comprehensive troubleshooting steps.
@@ -551,6 +646,28 @@ See [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#troubleshooting) for comprehe
 - **Volume permissions**: Fix with `sudo chown -R $USER:$USER logs/ models/`
 - **Database connection**: Verify `DATABASE_URL` uses service name `postgres`, not `localhost`
 - **Health checks failing**: Check logs with `docker compose logs [service]`
+
+### Model prerequisites and degraded behaviour (Docker)
+
+- Before starting the stack, ensure that **at least one valid model artefact** exists under `agent/model_storage/` on the host (for example, in `agent/model_storage/xgboost/`).
+- You can use the inference smoke test and Docker diagnostic script to confirm models are discoverable and loadable:
+  ```bash
+  # Validate models from the host environment
+  python scripts/test_model_inference.py --model-dir agent/model_storage
+
+  # Run Docker-focused diagnostics (env, dirs, models, CORS)
+  python scripts/docker_diagnostic.py
+  ```
+- When the agent starts in Docker:
+  - Successful discovery and registration of models will appear in the agent logs (`logs/agent/`) as `model_discovery_*` and `model_discovery_complete` events.
+  - If no models are found or all fail validation, the backend health endpoint (`/api/v1/health`) reports `model_nodes` as `UNKNOWN` or `degraded`, and the UI will show a degraded model status.
+- Recovery from degraded model state typically involves:
+  1. Copying or fixing model artefacts under `agent/model_storage/...` on the host.
+  2. Re-running `python scripts/test_model_inference.py` until it passes.
+  3. Restarting only the agent container:
+     ```bash
+     docker compose restart agent
+     ```
 
 ### Production Deployment
 
@@ -601,6 +718,44 @@ The CI/CD pipeline includes a validation job that runs before tests:
 | `DEPLOY_PATH` | Absolute path on the server that contains the repository |
 
 The workflow already uses the built-in `GITHUB_TOKEN` for GHCR authentication; no additional registry secret is needed. Ensure the remote server has Docker/Compose installed and that the repository at `DEPLOY_PATH` contains the latest `docker-compose.yml`.
+
+### Using versioned images for single-node rollouts
+
+The CI/CD pipeline builds and tags Docker images for `backend`, `agent`, and `frontend` as:
+
+- `ghcr.io/<owner>/jacksparrow-<service>:<commit-sha>`
+- `ghcr.io/<owner>/jacksparrow-<service>:latest`
+
+For a single production/staging server:
+
+1. **Normal rollout (follow latest from CI)**  
+   Keep the default image references in `docker-compose.yml`. On the server, the CI `deploy` job already performs:
+   ```bash
+   docker compose pull
+   docker compose up -d --pull always --build
+   ```
+   This pulls the latest images and restarts services in place.
+
+2. **Pinned rollout with easy rollback**  
+   Optionally maintain a local override file (for example, `docker-compose.override.images.yml`) that pins specific SHAs:
+   ```yaml
+   services:
+     backend:
+       image: ghcr.io/<owner>/jacksparrow-backend:<commit-sha>
+     agent:
+       image: ghcr.io/<owner>/jacksparrow-agent:<commit-sha>
+     frontend:
+       image: ghcr.io/<owner>/jacksparrow-frontend:<commit-sha>
+   ```
+   Bring the stack up with both files:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.override.images.yml up -d
+   ```
+   To **roll back**, change the tags in the override file to a previously known-good `<commit-sha>`, then run:
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.override.images.yml up -d
+   ```
+   This keeps rollback as a simple tag edit plus `up -d` on a single node, without requiring a full blue/green infrastructure.
 
 ---
 
@@ -725,7 +880,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `LOG_FORWARDING_ENABLED` | Toggle remote log forwarding | No | false |
 | `LOG_FORWARDING_ENDPOINT` | Remote logging endpoint | No | - |
 | `LOG_INCLUDE_STACKTRACE` | Include stack traces in production logs | No | false |
-| `FEATURE_SERVER_URL` | MCP Feature Server URL | No | http://localhost:8001 |
+| `FEATURE_SERVER_URL` | MCP Feature Server URL | No | http://localhost:8002 |
 
 ### Agent Environment Variables
 
@@ -949,7 +1104,7 @@ The system performs comprehensive health checks after service startup:
 
 **Services Checked**:
 - **Backend**: HTTP GET to `http://localhost:8000/api/v1/health`
-- **Feature Server**: HTTP GET to `http://localhost:8001/health`
+- **Feature Server**: HTTP GET to `http://localhost:8002/health`
 - **Frontend**: HTTP GET to configured frontend port (default: 3000)
 
 **Success Criteria**:

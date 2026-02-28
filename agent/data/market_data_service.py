@@ -53,6 +53,11 @@ class MarketDataService:
         # New: Track last major price change for fluctuation threshold
         self._last_major_price: Dict[str, float] = {}
         self._price_fluctuation_threshold_pct = settings.price_fluctuation_threshold_pct
+        # Cache for 24h stats fetched from REST API (fallback when WebSocket doesn't provide them)
+        self._24h_stats_cache: Dict[str, Dict[str, Any]] = {}
+        self._24h_stats_cache_ttl = 60  # Cache 24h stats for 60 seconds
+        self._24h_stats_last_fetch: Dict[str, datetime] = {}
+        self._24h_stats_fetch_task: Optional[asyncio.Task] = None
     
     async def initialize(self):
         """Initialize market data service."""
@@ -70,6 +75,11 @@ class MarketDataService:
                 # Continue without WebSocket - will fall back to REST API
         else:
             logger.info("websocket_disabled", message="WebSocket streaming is disabled, using REST API polling only")
+        
+        # Start background task to periodically fetch 24h stats from REST API
+        # This ensures we have 24h high/low even if WebSocket doesn't provide them
+        if self._24h_stats_fetch_task is None or self._24h_stats_fetch_task.done():
+            self._24h_stats_fetch_task = asyncio.create_task(self._periodic_24h_stats_fetch())
 
     async def _connect_websocket(self) -> None:
         """Connect to Delta Exchange WebSocket."""
@@ -133,6 +143,13 @@ class MarketDataService:
         # Disconnect WebSocket if enabled
         if self._websocket_enabled:
             await self.websocket_client.disconnect()
+        # Cancel 24h stats fetch task
+        if self._24h_stats_fetch_task and not self._24h_stats_fetch_task.done():
+            self._24h_stats_fetch_task.cancel()
+            try:
+                await self._24h_stats_fetch_task
+            except asyncio.CancelledError:
+                pass
     
     async def start_market_data_stream(self, symbols: List[str], interval: str = "15m"):
         """Start streaming market data for symbols.
@@ -183,6 +200,8 @@ class MarketDataService:
         """Main streaming loop - optimized for WebSocket or REST API fallback."""
         consecutive_errors = 0
         max_consecutive_errors = 10
+        websocket_reconnect_attempts = 0
+        max_websocket_reconnect_attempts = 5
 
         # Determine polling interval based on WebSocket availability
         # When WebSocket is connected, use fallback polling interval since we get real-time updates
@@ -198,6 +217,30 @@ class MarketDataService:
 
         while self.streaming_running:
             try:
+                # Check WebSocket connection health and reconnect if needed
+                if self._websocket_enabled and not self._websocket_connected and websocket_reconnect_attempts < max_websocket_reconnect_attempts:
+                    logger.info(
+                        "market_data_attempting_websocket_reconnect",
+                        attempt=websocket_reconnect_attempts + 1,
+                        max_attempts=max_websocket_reconnect_attempts
+                    )
+                    try:
+                        await self._connect_websocket()
+                        if self._websocket_connected:
+                            # Re-subscribe to symbols
+                            await self.websocket_client.subscribe_ticker(self.streaming_symbols)
+                            logger.info("market_data_websocket_reconnected_and_subscribed", symbols=self.streaming_symbols)
+                            websocket_reconnect_attempts = 0  # Reset on success
+                        else:
+                            websocket_reconnect_attempts += 1
+                    except Exception as e:
+                        logger.warning(
+                            "market_data_websocket_reconnect_failed",
+                            attempt=websocket_reconnect_attempts + 1,
+                            error=str(e)
+                        )
+                        websocket_reconnect_attempts += 1
+
                 for symbol in self.streaming_symbols:
                     # Only poll tickers via REST API if WebSocket is not available or enabled
                     if not (self._websocket_enabled and self._websocket_connected):
@@ -209,6 +252,7 @@ class MarketDataService:
 
                 # Reset error count on successful iteration
                 consecutive_errors = 0
+                websocket_reconnect_attempts = min(websocket_reconnect_attempts, 0)  # Don't let it go negative
 
                 # Use appropriate polling interval
                 await asyncio.sleep(poll_interval)
@@ -478,28 +522,37 @@ class MarketDataService:
     async def _check_and_emit_candle(self, symbol: str, interval: str):
         """Check for new candle and emit candle closed event."""
         try:
-            market_data = await self.get_market_data(symbol, interval, limit=2)
+            # Request more historical data to ensure we get completed candles
+            market_data = await self.get_market_data(symbol, interval, limit=10)
             if not market_data or not market_data.get("candles"):
                 return
-            
+
             candles = market_data["candles"]
-            if len(candles) < 2:
+            if len(candles) < 1:
                 return
-            
-            latest_candle = candles[-1]
+
+            # Get the most recent completed candle
+            # If we have multiple candles, use the second-to-last (completed)
+            # If we only have one, it's the current forming candle - don't emit yet
+            if len(candles) < 2:
+                # Only one candle - it's still forming, don't emit
+                return
+
+            # Use the second-to-last candle as it's definitely completed
+            completed_candle = candles[-2] if len(candles) >= 2 else candles[-1]
             last_candle_key = f"{symbol}:{interval}"
             last_candle = self._last_candle_cache.get(last_candle_key)
-            
-            # Check if this is a new candle
+
+            # Check if this is a new completed candle
             if last_candle:
-                if latest_candle.get("timestamp") == last_candle.get("timestamp"):
-                    return  # Same candle, not closed yet
-            
-            # Emit candle closed event
-            await self._on_candle_close(symbol, interval, latest_candle)
-            
-            self._last_candle_cache[last_candle_key] = latest_candle
-            
+                if completed_candle.get("timestamp") == last_candle.get("timestamp"):
+                    return  # Same candle already processed
+
+            # Emit candle closed event for the completed candle
+            await self._on_candle_close(symbol, interval, completed_candle)
+
+            self._last_candle_cache[last_candle_key] = completed_candle
+
         except Exception as e:
             logger.error(
                 "market_data_candle_check_error",
@@ -552,6 +605,19 @@ class MarketDataService:
                 payload["low_24h"] = float(ticker_data["low"])
             if "close" in ticker_data:
                 payload["close_24h"] = float(ticker_data["close"])
+            
+            # Fallback: If WebSocket didn't provide 24h high/low, use cached REST API data
+            if "high_24h" not in payload or "low_24h" not in payload:
+                cached_stats = self._24h_stats_cache.get(symbol)
+                if cached_stats:
+                    if "high_24h" not in payload and "high_24h" in cached_stats:
+                        payload["high_24h"] = cached_stats["high_24h"]
+                    if "low_24h" not in payload and "low_24h" in cached_stats:
+                        payload["low_24h"] = cached_stats["low_24h"]
+                    if "open_24h" not in payload and "open_24h" in cached_stats:
+                        payload["open_24h"] = cached_stats["open_24h"]
+                    if "change_24h_pct" not in payload and "change_24h_pct" in cached_stats:
+                        payload["change_24h_pct"] = cached_stats["change_24h_pct"]
             if "turnover_usd" in ticker_data:
                 payload["turnover_usd"] = float(ticker_data["turnover_usd"])
             if "oi" in ticker_data:
@@ -907,6 +973,73 @@ class MarketDataService:
                 exc_info=True
             )
             return None
+    
+    async def _periodic_24h_stats_fetch(self):
+        """Periodically fetch 24h stats from REST API for active symbols.
+        
+        This ensures we have 24h high/low even if WebSocket doesn't provide them.
+        Runs every 60 seconds.
+        """
+        while True:
+            try:
+                await asyncio.sleep(60)  # Wait 60 seconds between fetches
+                
+                # Fetch stats for all active streaming symbols
+                symbols_to_fetch = list(set(self.streaming_symbols))
+                if not symbols_to_fetch:
+                    # If no streaming symbols, fetch for default symbol
+                    symbols_to_fetch = ["BTCUSD"]
+                
+                for symbol in symbols_to_fetch:
+                    try:
+                        # Check if cache is still valid
+                        last_fetch = self._24h_stats_last_fetch.get(symbol)
+                        if last_fetch:
+                            time_since_fetch = (datetime.now(timezone.utc) - last_fetch).total_seconds()
+                            if time_since_fetch < self._24h_stats_cache_ttl:
+                                continue  # Cache still valid, skip
+                        
+                        # Fetch ticker data from REST API
+                        ticker = await self.get_ticker(symbol)
+                        if ticker:
+                            # Extract 24h stats
+                            stats = {
+                                "high_24h": ticker.get("high", 0),
+                                "low_24h": ticker.get("low", 0),
+                                "open_24h": ticker.get("open", 0),
+                                "change_24h_pct": ticker.get("change_24h", 0),
+                            }
+                            
+                            # Update cache
+                            self._24h_stats_cache[symbol] = stats
+                            self._24h_stats_last_fetch[symbol] = datetime.now(timezone.utc)
+                            
+                            logger.debug(
+                                "market_data_24h_stats_fetched",
+                                symbol=symbol,
+                                high_24h=stats.get("high_24h"),
+                                low_24h=stats.get("low_24h")
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "market_data_24h_stats_fetch_error",
+                            symbol=symbol,
+                            error=str(e)
+                        )
+                        # Continue with other symbols
+                        continue
+                        
+            except asyncio.CancelledError:
+                logger.info("market_data_24h_stats_fetch_cancelled")
+                break
+            except Exception as e:
+                logger.error(
+                    "market_data_24h_stats_fetch_loop_error",
+                    error=str(e),
+                    exc_info=True
+                )
+                # Continue loop even on error
+                await asyncio.sleep(60)
     
     async def get_health_status(self) -> Dict[str, Any]:
         """Get health status."""

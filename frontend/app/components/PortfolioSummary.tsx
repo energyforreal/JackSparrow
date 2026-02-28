@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { Portfolio } from '@/types'
 import { cn } from '@/lib/utils'
-import { LoadingSpinner, LoadingSkeleton } from './LoadingSpinner'
+import { LoadingSkeleton } from './LoadingSpinner'
 
 interface PortfolioSummaryProps {
   portfolio?: Portfolio

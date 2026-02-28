@@ -27,6 +27,11 @@ except Exception:
 
 from agent.core.config import settings
 from agent.core.logging_utils import log_error_with_context
+from agent.core.communication_logger import (
+    log_websocket_message,
+    log_event_broadcast,
+    extract_correlation_id
+)
 
 logger = structlog.get_logger()
 
@@ -179,6 +184,17 @@ class AgentWebSocketClient:
             async for message in self._websocket:
                 try:
                     data = json.loads(message)
+
+                    # Log inbound message from backend
+                    correlation_id = extract_correlation_id(data)
+                    log_websocket_message(
+                        direction="inbound",
+                        message_type=data.get("type", "unknown"),
+                        correlation_id=correlation_id,
+                        target="backend",
+                        payload=data
+                    )
+
                     msg_type = data.get("type")
                     if msg_type == "ping":
                         await self._send_pong()
@@ -235,6 +251,14 @@ class AgentWebSocketClient:
             return False
 
         try:
+            # Log outbound event to backend
+            correlation_id = extract_correlation_id(event)
+            log_event_broadcast(
+                event_type=event.get("event_type", event.get("type", "unknown")),
+                payload=event,
+                correlation_id=correlation_id
+            )
+
             payload = json.dumps(event, default=str)
             await self._websocket.send(payload)
             return True

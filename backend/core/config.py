@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     
     # Feature Server
     feature_server_url: str = Field(
-        default="http://localhost:8001",
+        default="http://localhost:8002",
         env="FEATURE_SERVER_URL",
         description="MCP Feature Server URL"
     )
@@ -136,6 +136,28 @@ class Settings(BaseSettings):
         default=False,
         env="LOG_INCLUDE_STACKTRACE",
         description="Include stack traces in logs"
+    )
+
+    # Communication Logging
+    enable_communication_logging: bool = Field(
+        default=True,
+        env="ENABLE_COMMUNICATION_LOGGING",
+        description="Enable detailed communication logging between services"
+    )
+    log_websocket_payloads: bool = Field(
+        default=True,
+        env="LOG_WEBSOCKET_PAYLOADS",
+        description="Log WebSocket message payloads"
+    )
+    max_log_payload_size: int = Field(
+        default=10240,  # 10KB
+        env="MAX_LOG_PAYLOAD_SIZE",
+        description="Maximum size of payloads to log (bytes)"
+    )
+    communication_sensitive_fields: List[str] = Field(
+        default=["password", "token", "api_key", "secret", "private_key"],
+        env="COMMUNICATION_SENSITIVE_FIELDS",
+        description="Fields to sanitize in communication logs"
     )
     
     # Backend Configuration

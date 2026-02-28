@@ -67,6 +67,39 @@ MIN_CONFIDENCE_THRESHOLD=0.65
 
 The `MODEL_DIR` environment variable points to the directory where models are stored. The model discovery system automatically scans this directory and its subdirectories to find and register all available models.
 
+### ML Models in Docker
+
+When running under Docker, the agent container mounts the host `agent/model_storage/` directory and uses it as the model discovery root:
+
+- **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service)
+- **Agent MODEL_DIR**: inside the container, `MODEL_DIR=/app/agent/model_storage`
+
+This means:
+
+- Models you place on the host in:
+  - `agent/model_storage/xgboost/*.pkl`
+  - `agent/model_storage/lightgbm/*.pkl`
+  - `agent/model_storage/random_forest/*.pkl`
+  - `agent/model_storage/lstm/*.h5`
+  - `agent/model_storage/transformer/*.{onnx,pt,pth}`
+  - `agent/model_storage/custom/*`
+  are discovered by the Dockerized agent without rebuilding images.
+- Updating or adding models only requires:
+  1. Copying artefacts into `agent/model_storage/` on the host
+  2. Restarting the `agent` container (`docker compose restart agent`)
+
+**Verification steps before `docker compose up`:**
+
+1. Ensure your trained models are present under `agent/model_storage/` on the host.
+2. Run:
+
+   ```bash
+   python scripts/validate_docker_config.py
+   ```
+
+   and confirm it reports at least one model file discovered under `agent/model_storage`.
+3. After the stack is running, check the agent logs for a `model_discovery_complete` entry with a `discovered_count > 0`, and confirm the backend health view reports active model nodes.
+
 ### XGBoost Dependency Requirements
 
 - Runtime environments must install `xgboost==2.0.2` (see `agent/requirements.txt`) so that `XGBClassifier` and `XGBRegressor` remain available for deserializing the trained models.
@@ -199,6 +232,52 @@ The project includes a comprehensive price prediction training script (`scripts/
 - **Use Case**: Direct signal classification without price magnitude
 
 **Consensus Calculation**: Both model types output normalized values in [-1, 1] range, allowing them to be combined in weighted consensus calculations.
+
+## Current Model Support (2025-01-27)
+
+### Supported Model Types
+
+The system now supports **5 different ML model types** through the complete MCP Model Protocol implementation:
+
+#### 1. XGBoost Models ✅ **FULLY IMPLEMENTED**
+- **Classifiers**: Predict trading signals directly (buy/sell/hold) with `predict_proba()` method
+- **Regressors**: Predict absolute future prices with `predict()` method
+- **Auto-detection**: XGBoostNode automatically detects classifier vs regressor types
+- **Normalization**: All outputs normalized to [-1, 1] range for consensus
+
+#### 2. LightGBM Models ✅ **FULLY IMPLEMENTED**
+- **Complete Implementation**: Full LightGBM Booster support with proper loading
+- **SHAP Explanations**: Feature importance extraction for interpretability
+- **Same Interface**: Compatible with MCP Model Protocol
+- **Performance**: Alternative gradient boosting with potentially better speed
+
+#### 3. Random Forest Models ✅ **FULLY IMPLEMENTED**
+- **Scikit-learn Integration**: Full RandomForestClassifier/RandomForestRegressor support
+- **Feature Importance**: Built-in feature importance extraction
+- **Ensemble Method**: Bagging-based ensemble learning
+- **Robust**: Good resistance to overfitting
+
+#### 4. LSTM Models ✅ **FULLY IMPLEMENTED**
+- **TensorFlow/Keras Support**: Complete neural network implementation
+- **Sequence Processing**: Handles temporal dependencies in price data
+- **Configurable Architecture**: Supports various LSTM configurations
+- **GPU Acceleration**: Leverages TensorFlow's GPU capabilities
+
+#### 5. Transformer Models ✅ **FULLY IMPLEMENTED**
+- **Multi-format Support**: ONNX and PyTorch implementations
+- **Attention Mechanisms**: Captures complex relationships in market data
+- **Scalable Architecture**: Handles variable input sequences
+- **Modern AI**: State-of-the-art transformer architectures
+
+### Implementation Status
+
+All model types are **production-ready** with:
+- ✅ Complete MCP Model Node implementations
+- ✅ Proper error handling and health monitoring
+- ✅ SHAP explanations and feature importance
+- ✅ Confidence scoring and normalization
+- ✅ Parallel inference support
+- ✅ Comprehensive validation
 
 ### Delta Exchange API Limitations
 

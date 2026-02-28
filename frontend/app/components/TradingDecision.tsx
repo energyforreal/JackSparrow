@@ -59,7 +59,6 @@ const formatDate = (date: Date | string) => {
 export function TradingDecision({
   signal,
   recentTrade,
-  paperTradingMode,
 }: TradingDecisionProps) {
   const hasSignal = signal && signal.signal
   const hasRecentTrade = recentTrade !== null && recentTrade !== undefined

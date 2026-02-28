@@ -1,0 +1,149 @@
+"""
+Paper Trade Logger - Dedicated log file for paper trades and P&L audit.
+
+Writes each paper trade and position close to a rotating log file for
+audit trail and P&L identification. Uses LOGS_ROOT when set (e.g. in Docker)
+so logs persist under the mounted volume.
+"""
+
+import os
+from pathlib import Path
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional
+import structlog
+import logging
+from logging.handlers import RotatingFileHandler
+
+logger = structlog.get_logger()
+
+# Use LOGS_ROOT when set (Docker: /logs), else project-relative logs/paper_trades
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_LOGS_ROOT = Path(os.environ.get("LOGS_ROOT", str(_PROJECT_ROOT / "logs")))
+DEFAULT_LOG_DIR = _LOGS_ROOT / "paper_trades"
+DEFAULT_LOG_FILE = "paper_trades.log"
+MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+BACKUP_COUNT = 5
+
+
+class PaperTradeLogger:
+    """Logs paper trades to a dedicated rotating file for P&L audit."""
+
+    def __init__(self, log_dir: Optional[Path] = None, log_file: str = DEFAULT_LOG_FILE):
+        """Initialize paper trade logger.
+
+        Args:
+            log_dir: Directory for log files (default: logs/paper_trades)
+            log_file: Log file name
+        """
+        self.log_dir = Path(log_dir) if log_dir else DEFAULT_LOG_DIR
+        self.log_file = log_file
+        self._handler: Optional[RotatingFileHandler] = None
+        self._py_logger: Optional[logging.Logger] = None
+
+    def _ensure_logger(self) -> logging.Logger:
+        """Ensure file handler and logger are set up."""
+        if self._py_logger is not None:
+            return self._py_logger
+
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = self.log_dir / self.log_file
+
+        self._handler = RotatingFileHandler(
+            log_path,
+            maxBytes=MAX_BYTES,
+            backupCount=BACKUP_COUNT,
+            encoding="utf-8",
+        )
+        self._handler.setFormatter(
+            logging.Formatter("%(message)s")
+        )
+
+        self._py_logger = logging.getLogger("paper_trades")
+        self._py_logger.setLevel(logging.INFO)
+        self._py_logger.addHandler(self._handler)
+        self._py_logger.propagate = False
+
+        return self._py_logger
+
+    def log_trade(
+        self,
+        trade_id: str,
+        symbol: str,
+        side: str,
+        quantity: float,
+        fill_price: float,
+        order_id: Optional[str] = None,
+        position_id: Optional[str] = None,
+        reasoning_chain_id: Optional[str] = None,
+    ) -> None:
+        """Log a paper trade execution.
+
+        Args:
+            trade_id: Unique trade identifier
+            symbol: Trading symbol
+            side: BUY or SELL
+            quantity: Trade quantity
+            fill_price: Execution price
+            order_id: Optional order ID
+            position_id: Optional position ID
+            reasoning_chain_id: Optional reasoning chain ID
+        """
+        try:
+            py_logger = self._ensure_logger()
+            ts = datetime.now(timezone.utc).isoformat()
+            line = (
+                f"TRADE|{ts}|{trade_id}|{symbol}|{side}|{quantity}|{fill_price}|"
+                f"order_id={order_id or ''}|position_id={position_id or ''}|"
+                f"reasoning_chain_id={reasoning_chain_id or ''}\n"
+            )
+            py_logger.info(line.strip())
+        except Exception as e:
+            logger.warning(
+                "paper_trade_logger_write_failed",
+                error=str(e),
+                trade_id=trade_id,
+                symbol=symbol,
+            )
+
+    def log_position_close(
+        self,
+        position_id: str,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        exit_price: float,
+        quantity: float,
+        pnl: float,
+        exit_reason: str,
+    ) -> None:
+        """Log a position close for P&L tracking.
+
+        Args:
+            position_id: Position identifier
+            symbol: Trading symbol
+            side: BUY or SELL
+            entry_price: Entry price
+            exit_price: Exit price
+            quantity: Position quantity
+            pnl: Realized P&L
+            exit_reason: Reason for exit (stop_loss, take_profit, signal_reversal)
+        """
+        try:
+            py_logger = self._ensure_logger()
+            ts = datetime.now(timezone.utc).isoformat()
+            line = (
+                f"CLOSE|{ts}|{position_id}|{symbol}|{side}|{entry_price}|{exit_price}|"
+                f"{quantity}|{pnl}|{exit_reason}\n"
+            )
+            py_logger.info(line.strip())
+        except Exception as e:
+            logger.warning(
+                "paper_trade_logger_close_failed",
+                error=str(e),
+                position_id=position_id,
+                symbol=symbol,
+            )
+
+
+# Global instance
+paper_trade_logger = PaperTradeLogger()

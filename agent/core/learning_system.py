@@ -1,194 +1,449 @@
-"""Learning system for agent adaptation."""
+"""
+Learning System - Adaptive learning from trading outcomes.
 
-from typing import Dict, Any, List
-from datetime import datetime
+Tracks model performance, updates weights, and adapts strategy parameters
+based on historical trading results.
+"""
+
+from typing import Dict, List, Any, Optional
+from datetime import datetime, timedelta
 import structlog
-
-from agent.learning.performance_tracker import PerformanceTracker
-from agent.learning.model_weight_adjuster import ModelWeightAdjuster
-from agent.learning.confidence_calibrator import ConfidenceCalibrator
-from agent.learning.strategy_adapter import StrategyAdapter
-from agent.events.event_bus import event_bus
-from agent.events.schemas import (
-    OrderFillEvent,
-    PositionClosedEvent,
-    ModelWeightUpdateEvent,
-    StrategyAdaptationEvent,
-    LearningCompleteEvent,
-    EventType
-)
-from agent.models.mcp_model_registry import MCPModelRegistry
+import statistics
 
 logger = structlog.get_logger()
 
 
+class TradeOutcome:
+    """Represents the outcome of a completed trade."""
+
+    def __init__(self, trade_id: str, symbol: str, entry_price: float, exit_price: float,
+                 entry_time: datetime, exit_time: datetime, position_size: float,
+                 predicted_signal: str, actual_pnl: float, holding_period_hours: float):
+        self.trade_id = trade_id
+        self.symbol = symbol
+        self.entry_price = entry_price
+        self.exit_price = exit_price
+        self.entry_time = entry_time
+        self.exit_time = exit_time
+        self.position_size = position_size
+        self.predicted_signal = predicted_signal
+        self.actual_pnl = actual_pnl
+        self.holding_period_hours = holding_period_hours
+        self.pnl_percentage = (actual_pnl / (entry_price * position_size)) * 100
+
+    def was_profitable(self) -> bool:
+        """Return True if trade was profitable."""
+        return self.actual_pnl > 0
+
+    def get_sharpe_contribution(self) -> float:
+        """Calculate contribution to Sharpe ratio."""
+        # Risk-adjusted return: return / volatility (simplified)
+        if self.holding_period_hours > 0:
+            return self.pnl_percentage / (self.holding_period_hours ** 0.5)
+        return 0.0
+
+
+class ModelPerformanceTracker:
+    """Tracks individual model performance metrics."""
+
+    def __init__(self):
+        self.model_stats: Dict[str, Dict[str, Any]] = {}
+        self.recent_trades: List[TradeOutcome] = []
+        self.max_history_days = 30
+
+    def record_trade_outcome(self, model_name: str, outcome: TradeOutcome):
+        """Record trade outcome for a specific model."""
+        if model_name not in self.model_stats:
+            self.model_stats[model_name] = {
+                "total_trades": 0,
+                "profitable_trades": 0,
+                "total_pnl": 0.0,
+                "win_rate": 0.0,
+                "avg_pnl": 0.0,
+                "sharpe_ratio": 0.0,
+                "recent_performance": [],
+                "last_updated": datetime.utcnow()
+            }
+
+        stats = self.model_stats[model_name]
+        stats["total_trades"] += 1
+        stats["total_pnl"] += outcome.actual_pnl
+
+        if outcome.was_profitable():
+            stats["profitable_trades"] += 1
+
+        # Calculate win rate
+        stats["win_rate"] = stats["profitable_trades"] / stats["total_trades"]
+
+        # Calculate average P&L
+        stats["avg_pnl"] = stats["total_pnl"] / stats["total_trades"]
+
+        # Add to recent performance (keep last 50 trades)
+        stats["recent_performance"].append({
+            "pnl": outcome.actual_pnl,
+            "timestamp": outcome.exit_time,
+            "profitable": outcome.was_profitable()
+        })
+
+        if len(stats["recent_performance"]) > 50:
+            stats["recent_performance"] = stats["recent_performance"][-50:]
+
+        # Calculate Sharpe-like ratio from recent performance
+        if len(stats["recent_performance"]) >= 10:
+            recent_returns = [p["pnl"] for p in stats["recent_performance"]]
+            if recent_returns:
+                mean_return = statistics.mean(recent_returns)
+                std_return = statistics.stdev(recent_returns) if len(recent_returns) > 1 else 1.0
+                stats["sharpe_ratio"] = mean_return / std_return if std_return > 0 else 0.0
+
+        stats["last_updated"] = datetime.utcnow()
+
+        # Keep global recent trades for cross-model analysis
+        self.recent_trades.append(outcome)
+        if len(self.recent_trades) > 100:
+            self.recent_trades = self.recent_trades[-100:]
+
+        # Clean old trades
+        cutoff_date = datetime.utcnow() - timedelta(days=self.max_history_days)
+        self.recent_trades = [t for t in self.recent_trades if t.exit_time > cutoff_date]
+
+        logger.info("model_performance_updated",
+                   model_name=model_name,
+                   total_trades=stats["total_trades"],
+                   win_rate=stats["win_rate"],
+                   avg_pnl=stats["avg_pnl"],
+                   sharpe_ratio=stats["sharpe_ratio"])
+
+    def get_model_weight(self, model_name: str, base_weight: float = 0.5) -> float:
+        """Calculate dynamic weight for a model based on performance."""
+        if model_name not in self.model_stats:
+            return base_weight
+
+        stats = self.model_stats[model_name]
+
+        # Weight calculation based on multiple factors:
+        # 1. Win rate (0.4 weight)
+        # 2. Sharpe ratio (0.3 weight)
+        # 3. Recent performance (0.3 weight)
+
+        win_rate_score = min(1.0, stats["win_rate"] * 2.0)  # Boost win rate influence
+        sharpe_score = max(0.0, min(1.0, stats["sharpe_ratio"] * 0.5 + 0.5))  # Normalize Sharpe
+
+        # Recent performance (last 10 trades win rate)
+        recent_trades = stats["recent_performance"][-10:]
+        if recent_trades:
+            recent_win_rate = sum(1 for t in recent_trades if t["profitable"]) / len(recent_trades)
+            recent_score = recent_win_rate
+        else:
+            recent_score = 0.5
+
+        # Weighted combination
+        final_weight = (win_rate_score * 0.4 + sharpe_score * 0.3 + recent_score * 0.3)
+
+        # Ensure reasonable bounds
+        final_weight = max(0.1, min(1.0, final_weight))
+
+        logger.debug("model_weight_calculated",
+                    model_name=model_name,
+                    win_rate_score=win_rate_score,
+                    sharpe_score=sharpe_score,
+                    recent_score=recent_score,
+                    final_weight=final_weight)
+
+        return final_weight
+
+    def get_performance_summary(self, model_name: str) -> Dict[str, Any]:
+        """Get performance summary for a model."""
+        if model_name not in self.model_stats:
+            return {"error": "Model not found"}
+
+        return self.model_stats[model_name].copy()
+
+    def get_all_model_weights(self, base_weights: Dict[str, float]) -> Dict[str, float]:
+        """Calculate weights for all models."""
+        weights = {}
+        total_weight = 0.0
+
+        for model_name, base_weight in base_weights.items():
+            dynamic_weight = self.get_model_weight(model_name, base_weight)
+            weights[model_name] = dynamic_weight
+            total_weight += dynamic_weight
+
+        # Normalize to sum to 1.0
+        if total_weight > 0:
+            weights = {name: weight / total_weight for name, weight in weights.items()}
+
+        return weights
+
+
 class LearningSystem:
-    """Learning system for agent adaptation."""
-    
-    def __init__(self, model_registry: MCPModelRegistry = None):
-        """Initialize learning system."""
-        self.performance_tracker = PerformanceTracker()
-        self.weight_adjuster = ModelWeightAdjuster(self.performance_tracker)
-        self.confidence_calibrator = ConfidenceCalibrator(self.performance_tracker)
-        self.strategy_adapter = StrategyAdapter(self.performance_tracker)
-        self.model_registry = model_registry
-    
+    """Adaptive learning system for the trading agent."""
+
+    def __init__(self):
+        self.performance_tracker = ModelPerformanceTracker()
+        self.confidence_calibration = ConfidenceCalibrator()
+        self.strategy_adapter = StrategyAdapter()
+        self._initialized = False
+
     async def initialize(self):
-        """Initialize learning system and register event handlers."""
-        event_bus.subscribe(EventType.ORDER_FILL, self._handle_order_fill)
-        event_bus.subscribe(EventType.POSITION_CLOSED, self._handle_position_closed)
-    
+        """Initialize learning system."""
+        self._initialized = True
+        logger.info("learning_system_initialized")
+
     async def shutdown(self):
         """Shutdown learning system."""
-        pass
-    
-    async def _handle_order_fill(self, event: OrderFillEvent):
-        """Handle order fill event for learning.
-        
-        Args:
-            event: Order fill event
-        """
-        # Learning happens when position closes, not on fill
-        pass
-    
-    async def _handle_position_closed(self, event: PositionClosedEvent):
-        """Handle position closed event and trigger learning.
-        
-        Args:
-            event: Position closed event
-        """
-        try:
-            payload = event.payload
-            position_id = payload.get("position_id")
-            symbol = payload.get("symbol")
-            entry_price = payload.get("entry_price")
-            exit_price = payload.get("exit_price")
-            pnl = payload.get("pnl")
-            
-            # Record trade outcome (simplified - would need to track which models contributed)
-            # For now, record for all models
-            if self.model_registry:
-                model_names = list(self.model_registry.models.keys())
-                for model_name in model_names:
-                    # Calculate actual outcome direction
-                    actual_outcome = 1.0 if pnl > 0 else -1.0
-                    self.record_trade_outcome(
-                        model_name=model_name,
-                        prediction=0.0,  # Would need to track original prediction
-                        actual_outcome=actual_outcome,
-                        profit=pnl
-                    )
-            
-            # Update model weights
-            if self.model_registry:
-                model_names = list(self.model_registry.models.keys())
-                updated_weights = self.get_updated_weights(model_names)
-                
-                for model_name, new_weight in updated_weights.items():
-                    old_weight = self.model_registry.model_weights.get(model_name, 1.0)
-                    if abs(new_weight - old_weight) > 0.01:  # Significant change
-                        self.model_registry.update_model_weight(model_name, new_weight)
-                        
-                        # Emit weight update event
-                        weight_event = ModelWeightUpdateEvent(
-                            source="learning_system",
-                            payload={
-                                "model_name": model_name,
-                                "old_weight": old_weight,
-                                "new_weight": new_weight,
-                                "reason": f"Performance-based adjustment after trade {position_id}",
-                                "timestamp": datetime.utcnow()
-                            }
-                        )
-                        await event_bus.publish(weight_event)
-            
-            # Adapt strategy parameters
-            adapted_params = self.get_adapted_strategy_params()
-            if adapted_params:
-                for param_name, new_value in adapted_params.items():
-                    # Emit strategy adaptation event
-                    adaptation_event = StrategyAdaptationEvent(
-                        source="learning_system",
-                        payload={
-                            "parameter_name": param_name,
-                            "old_value": None,  # Would track old value
-                            "new_value": new_value,
-                            "reason": f"Strategy adaptation after trade {position_id}",
-                            "timestamp": datetime.utcnow()
-                        }
-                    )
-                    await event_bus.publish(adaptation_event)
-            
-            # Emit learning complete event
-            learning_event = LearningCompleteEvent(
-                source="learning_system",
-                correlation_id=event.event_id,
-                payload={
-                    "trade_id": position_id,
-                    "performance_metrics": {
-                        "pnl": pnl,
-                        "return_pct": (pnl / entry_price) * 100 if entry_price > 0 else 0.0
-                    },
-                    "model_updates": [
-                        {
-                            "model_name": name,
-                            "new_weight": weight
-                        }
-                        for name, weight in updated_weights.items()
-                    ] if self.model_registry else [],
-                    "timestamp": datetime.utcnow()
-                }
-            )
-            await event_bus.publish(learning_event)
-            
-            logger.info(
-                "learning_complete",
-                position_id=position_id,
-                pnl=pnl,
-                event_id=learning_event.event_id
-            )
-            
-        except Exception as e:
-            logger.error(
-                "learning_system_position_closed_error",
-                event_id=event.event_id,
-                error=str(e),
-                exc_info=True
-            )
-    
-    def record_trade_outcome(
-        self,
-        model_name: str,
-        prediction: float,
-        actual_outcome: float,
-        profit: float
-    ):
-        """Record trade outcome for learning."""
-        self.performance_tracker.record_prediction(
-            model_name=model_name,
-            prediction=prediction,
-            actual_outcome=actual_outcome,
-            profit=profit
-        )
-    
-    def get_updated_weights(self, model_names: List[str]) -> Dict[str, float]:
-        """Get updated model weights based on performance."""
-        return self.weight_adjuster.calculate_weights(model_names)
-    
-    def calibrate_confidence(
-        self,
-        raw_confidence: float,
-        model_name: str,
-        signal_strength: float
-    ) -> float:
-        """Calibrate confidence based on historical performance."""
-        return self.confidence_calibrator.calibrate_confidence(
-            raw_confidence=raw_confidence,
-            model_name=model_name,
-            signal_strength=signal_strength
-        )
-    
-    def get_adapted_strategy_params(self) -> Dict[str, Any]:
-        """Get adapted strategy parameters."""
-        return self.strategy_adapter.adapt_parameters()
+        logger.info("learning_system_shutdown")
 
+    async def record_trade_outcome(self, trade_outcome: TradeOutcome,
+                                  model_predictions: List[Dict[str, Any]]) -> None:
+        """
+        Record trade outcome and update learning models.
+
+        Args:
+            trade_outcome: The completed trade outcome
+            model_predictions: List of model predictions that led to the trade
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # Record outcome for each model that participated
+        participating_models = set()
+        for prediction in model_predictions:
+            model_name = prediction.get("model_name")
+            if model_name:
+                participating_models.add(model_name)
+                self.performance_tracker.record_trade_outcome(model_name, trade_outcome)
+
+        # Update confidence calibration
+        await self.confidence_calibration.update_calibration(trade_outcome, model_predictions)
+
+        # Adapt strategy parameters
+        await self.strategy_adapter.adapt_strategy(trade_outcome, participating_models)
+
+        logger.info("trade_outcome_recorded",
+                   trade_id=trade_outcome.trade_id,
+                   pnl=trade_outcome.actual_pnl,
+                   models_used=len(participating_models),
+                   was_profitable=trade_outcome.was_profitable())
+
+    async def get_updated_model_weights(self, current_weights: Dict[str, float]) -> Dict[str, float]:
+        """Get updated model weights based on learning."""
+        return self.performance_tracker.get_all_model_weights(current_weights)
+
+    async def get_learning_insights(self) -> Dict[str, Any]:
+        """Get current learning insights and recommendations."""
+        insights = {
+            "performance_summary": {},
+            "confidence_calibration": await self.confidence_calibration.get_calibration_status(),
+            "strategy_adaptations": await self.strategy_adapter.get_adaptation_status(),
+            "recommendations": []
+        }
+
+        # Add performance insights for each model
+        for model_name in self.performance_tracker.model_stats.keys():
+            insights["performance_summary"][model_name] = \
+                self.performance_tracker.get_performance_summary(model_name)
+
+        # Generate recommendations
+        recommendations = []
+
+        # Check for underperforming models
+        for model_name, stats in self.performance_tracker.model_stats.items():
+            if stats["total_trades"] > 10 and stats["win_rate"] < 0.4:
+                recommendations.append({
+                    "type": "model_performance",
+                    "severity": "high",
+                    "message": f"Model {model_name} has low win rate ({stats['win_rate']:.2f}). Consider retraining.",
+                    "model": model_name,
+                    "win_rate": stats["win_rate"]
+                })
+
+        # Check for overfitting signals
+        for model_name, stats in self.performance_tracker.model_stats.items():
+            if stats["total_trades"] > 20:
+                recent_trades = stats["recent_performance"][-10:]
+                if recent_trades:
+                    recent_win_rate = sum(1 for t in recent_trades if t["profitable"]) / len(recent_trades)
+                    overall_win_rate = stats["win_rate"]
+
+                    if recent_win_rate < overall_win_rate * 0.7:
+                        recommendations.append({
+                            "type": "overfitting_warning",
+                            "severity": "medium",
+                            "message": f"Model {model_name} recent performance ({recent_win_rate:.2f}) significantly worse than overall ({overall_win_rate:.2f}).",
+                            "model": model_name,
+                            "recent_win_rate": recent_win_rate,
+                            "overall_win_rate": overall_win_rate
+                        })
+
+        insights["recommendations"] = recommendations
+
+        return insights
+
+    async def get_health_status(self) -> Dict[str, Any]:
+        """Get learning system health status."""
+        return {
+            "status": "healthy" if self._initialized else "unhealthy",
+            "initialized": self._initialized,
+            "models_tracked": len(self.performance_tracker.model_stats),
+            "recent_trades": len(self.performance_tracker.recent_trades),
+            "total_trades_learned": sum(stats["total_trades"]
+                                      for stats in self.performance_tracker.model_stats.values())
+        }
+
+
+class ConfidenceCalibrator:
+    """Calibrates prediction confidence based on historical accuracy."""
+
+    def __init__(self):
+        self.confidence_history: Dict[str, List[Dict[str, Any]]] = {}
+        self.calibration_factors: Dict[str, float] = {}
+
+    async def update_calibration(self, trade_outcome: TradeOutcome,
+                               model_predictions: List[Dict[str, Any]]) -> None:
+        """Update confidence calibration based on trade outcome."""
+        for prediction in model_predictions:
+            model_name = prediction.get("model_name")
+            confidence = prediction.get("confidence", 0.5)
+            predicted_correctly = self._did_model_predict_correctly(prediction, trade_outcome)
+
+            if model_name not in self.confidence_history:
+                self.confidence_history[model_name] = []
+
+            self.confidence_history[model_name].append({
+                "confidence": confidence,
+                "correct": predicted_correctly,
+                "timestamp": datetime.utcnow()
+            })
+
+            # Keep only recent history
+            if len(self.confidence_history[model_name]) > 100:
+                self.confidence_history[model_name] = self.confidence_history[model_name][-100:]
+
+            # Update calibration factor
+            await self._update_calibration_factor(model_name)
+
+    def _did_model_predict_correctly(self, prediction: Dict[str, Any],
+                                   trade_outcome: TradeOutcome) -> bool:
+        """Determine if model's prediction was directionally correct."""
+        predicted_signal = prediction.get("prediction", 0.0)
+        actual_pnl = trade_outcome.actual_pnl
+
+        # Simple directional accuracy: positive prediction should lead to positive P&L
+        predicted_positive = predicted_signal > 0.1  # Strong bullish
+        predicted_negative = predicted_signal < -0.1  # Strong bearish
+
+        actual_positive = actual_pnl > 0
+        actual_negative = actual_pnl < 0
+
+        if predicted_positive and actual_positive:
+            return True
+        elif predicted_negative and actual_negative:
+            return True
+        elif abs(predicted_signal) < 0.1 and abs(actual_pnl) < 100:  # HOLD signal, small P&L
+            return True
+
+        return False
+
+    async def _update_calibration_factor(self, model_name: str) -> None:
+        """Update confidence calibration factor for a model."""
+        history = self.confidence_history.get(model_name, [])
+        if len(history) < 10:
+            return
+
+        # Calculate calibration: average confidence when correct vs when wrong
+        correct_predictions = [h for h in history if h["correct"]]
+        wrong_predictions = [h for h in history if not h["correct"]]
+
+        if correct_predictions and wrong_predictions:
+            avg_conf_correct = statistics.mean(h["confidence"] for h in correct_predictions)
+            avg_conf_wrong = statistics.mean(h["confidence"] for h in wrong_predictions)
+
+            # Calibration factor: how much to adjust confidence
+            # If model is overconfident when wrong, reduce confidence
+            calibration_factor = avg_conf_correct / max(avg_conf_wrong, 0.1)
+            calibration_factor = max(0.5, min(2.0, calibration_factor))  # Reasonable bounds
+
+            self.calibration_factors[model_name] = calibration_factor
+
+    def calibrate_confidence(self, model_name: str, raw_confidence: float) -> float:
+        """Apply confidence calibration to raw confidence score."""
+        calibration_factor = self.calibration_factors.get(model_name, 1.0)
+        calibrated = raw_confidence * calibration_factor
+        return max(0.0, min(1.0, calibrated))
+
+    async def get_calibration_status(self) -> Dict[str, Any]:
+        """Get confidence calibration status."""
+        return {
+            "calibration_factors": self.calibration_factors.copy(),
+            "models_calibrated": len(self.calibration_factors),
+            "calibration_history_size": sum(len(history)
+                                          for history in self.confidence_history.values())
+        }
+
+
+class StrategyAdapter:
+    """Adapts trading strategy parameters based on performance."""
+
+    def __init__(self):
+        self.strategy_params = {
+            "max_position_size": 0.1,  # 10% of portfolio
+            "min_confidence_threshold": 0.6,
+            "volatility_multiplier": 1.0,
+            "holding_period_limit": 24  # hours
+        }
+        self.performance_history: List[Dict[str, Any]] = []
+
+    async def adapt_strategy(self, trade_outcome: TradeOutcome,
+                           participating_models: set) -> None:
+        """Adapt strategy parameters based on trade outcome."""
+        self.performance_history.append({
+            "outcome": trade_outcome,
+            "models": list(participating_models),
+            "timestamp": datetime.utcnow()
+        })
+
+        # Keep recent history
+        if len(self.performance_history) > 50:
+            self.performance_history = self.performance_history[-50:]
+
+        # Analyze recent performance and adapt parameters
+        recent_trades = self.performance_history[-10:]
+        if len(recent_trades) >= 5:
+            win_rate = sum(1 for t in recent_trades if t["outcome"].was_profitable()) / len(recent_trades)
+
+            # Adapt based on win rate
+            if win_rate > 0.7:
+                # Good performance - can be more aggressive
+                self.strategy_params["max_position_size"] = min(0.15, self.strategy_params["max_position_size"] * 1.1)
+                self.strategy_params["min_confidence_threshold"] = max(0.5, self.strategy_params["min_confidence_threshold"] * 0.95)
+            elif win_rate < 0.4:
+                # Poor performance - be more conservative
+                self.strategy_params["max_position_size"] = max(0.05, self.strategy_params["max_position_size"] * 0.9)
+                self.strategy_params["min_confidence_threshold"] = min(0.8, self.strategy_params["min_confidence_threshold"] * 1.05)
+
+            logger.info("strategy_parameters_adapted",
+                       win_rate=win_rate,
+                       max_position_size=self.strategy_params["max_position_size"],
+                       min_confidence_threshold=self.strategy_params["min_confidence_threshold"])
+
+    async def get_adaptation_status(self) -> Dict[str, Any]:
+        """Get strategy adaptation status."""
+        return {
+            "current_parameters": self.strategy_params.copy(),
+            "performance_history_size": len(self.performance_history),
+            "recent_win_rate": self._calculate_recent_win_rate()
+        }
+
+    def _calculate_recent_win_rate(self) -> float:
+        """Calculate win rate from recent trades."""
+        recent_trades = self.performance_history[-10:]
+        if not recent_trades:
+            return 0.0
+
+        profitable_trades = sum(1 for t in recent_trades if t["outcome"].was_profitable())
+        return profitable_trades / len(recent_trades)
+
+    def get_strategy_parameters(self) -> Dict[str, Any]:
+        """Get current strategy parameters."""
+        return self.strategy_params.copy()

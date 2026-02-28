@@ -78,7 +78,7 @@ export function RecentTrades({ trades }: RecentTradesProps) {
               {trades.slice(0, 10).map((trade) => (
                 <TableRow key={trade.trade_id}>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(trade.executed_at)}
+                    {formatDate(trade.executed_at ?? trade.timestamp)}
                   </TableCell>
                   <TableCell>
                     <Badge
@@ -93,10 +93,10 @@ export function RecentTrades({ trades }: RecentTradesProps) {
                       ? parseFloat(trade.quantity).toLocaleString()
                       : trade.quantity.toLocaleString()}
                   </TableCell>
-                  <TableCell>{formatPrice(trade.price)}</TableCell>
+                  <TableCell>{formatPrice(trade.price ?? trade.fill_price)}</TableCell>
                   <TableCell>
-                    <Badge variant={getStatusVariant(trade.status)}>
-                      {trade.status}
+                    <Badge variant={getStatusVariant(trade.status ?? 'EXECUTED')}>
+                      {trade.status ?? 'EXECUTED'}
                     </Badge>
                   </TableCell>
                 </TableRow>

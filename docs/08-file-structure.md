@@ -71,10 +71,11 @@ JackSparrow/
 │   │   ├── __init__.py
 │   │   ├── intelligent_agent.py       # Main agent class
 │   │   ├── reasoning_engine.py        # MCP Reasoning Engine
-│   │   ├── mcp_orchestrator.py         # MCP Orchestrator
-│   │   ├── learning_system.py          # Learning module
+│   │   ├── mcp_orchestrator.py         # MCP Orchestrator (NEW - complete implementation)
+│   │   ├── learning_system.py          # Learning module (TODO - needs implementation)
 │   │   ├── state_machine.py            # Agent state machine (see [Logic & Reasoning Documentation](05-logic-reasoning.md#enhanced-agent-state-machine))
-│   │   └── context_manager.py         # Context management
+│   │   ├── context_manager.py         # Context management (TODO - needs implementation)
+│   │   └── execution.py                # Trade execution engine (TODO - needs implementation)
 │   ├── models/
 │   │   ├── __init__.py
 │   │   ├── mcp_model_node.py          # Base MCP model node interface
@@ -242,9 +243,9 @@ Each directory has a clear, single responsibility:
 - **backend/**: API and service layer
 - **agent/**: AI agent core logic
 - **frontend/**: User interface
-- **tests/**: Test code organized by type
+- **tests/**: Test code organized by type, plus `tests/functionality/reports/` for **generated** test reports (not kept in version control)
 - **scripts/**: Utility and setup scripts
-- **docs/**: Documentation files
+- **docs/**: Documentation files (including archived reports under `docs/archive/`)
 
 ### Module Boundaries
 

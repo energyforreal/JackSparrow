@@ -136,6 +136,15 @@ class Settings(BaseSettings):
         env="MODEL_AUTO_REGISTER",
         description="Auto-register discovered models"
     )
+    allow_feature_fallback_predictions: bool = Field(
+        default=False,
+        env="ALLOW_FEATURE_FALLBACK_PREDICTIONS",
+        description=(
+            "DEPRECATED: Previously allowed feature-based fallback predictions when no ML "
+            "models were available. This setting is now ignored and feature-based fallbacks "
+            "are disabled so that all trading decisions require real ML model predictions."
+        ),
+    )
     
     # Agent Configuration
     agent_start_mode: str = Field(
@@ -229,6 +238,28 @@ class Settings(BaseSettings):
         env="LOG_INCLUDE_STACKTRACE",
         description="Include stack traces in logs"
     )
+
+    # Communication Logging
+    enable_communication_logging: bool = Field(
+        default=True,
+        env="ENABLE_COMMUNICATION_LOGGING",
+        description="Enable detailed communication logging between services"
+    )
+    log_websocket_payloads: bool = Field(
+        default=True,
+        env="LOG_WEBSOCKET_PAYLOADS",
+        description="Log WebSocket message payloads"
+    )
+    max_log_payload_size: int = Field(
+        default=10240,  # 10KB
+        env="MAX_LOG_PAYLOAD_SIZE",
+        description="Maximum size of payloads to log (bytes)"
+    )
+    communication_sensitive_fields: List[str] = Field(
+        default=["password", "token", "api_key", "secret", "private_key"],
+        env="COMMUNICATION_SENSITIVE_FIELDS",
+        description="Fields to sanitize in communication logs"
+    )
     
     # Feature Server
     feature_server_port: int = Field(
@@ -267,7 +298,7 @@ class Settings(BaseSettings):
     )
     backend_websocket_url: str = Field(
         default="ws://localhost:8000/ws/agent",
-        env="BACKEND_WS_URL",
+        alias="BACKEND_WS_URL",
         description="Backend WebSocket URL for agent event client"
     )
     

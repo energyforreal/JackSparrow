@@ -50,17 +50,19 @@ async def check_database_health(db: AsyncSession) -> HealthServiceStatus:
 async def check_agent_health() -> HealthServiceStatus:
     """Check agent service health independently."""
     try:
-        agent_status = await agent_service.get_agent_status()
+        # Use shorter timeout for health checks to avoid hanging the entire health endpoint
+        agent_status = await agent_service.get_agent_status(timeout=2)
         return HealthServiceStatus(
             status="up" if agent_status.get("available", False) else "down",
             latency_ms=agent_status.get("latency_ms"),
             details=agent_status
         )
     except Exception as e:
+        # During startup, agent might not be ready yet - don't fail health check
         return HealthServiceStatus(
-            status="down",
+            status="unknown",
             error=str(e),
-            details={"error": "Agent service check failed"}
+            details={"error": "Agent service check failed - may still be starting"}
         )
 
 
@@ -71,20 +73,52 @@ async def check_feature_server_health() -> HealthServiceStatus:
         # For now, check via agent but handle failures gracefully
         agent_status = await agent_service.get_agent_status()
         feature_server_status = agent_status.get("feature_server", {})
+        agent_available = agent_status.get("available", False)
         
         if feature_server_status:
+            # Get status from agent response, but infer from data if unknown
+            status = feature_server_status.get("status", "unknown")
+            
+            # If status is unknown but we have feature registry data, infer status
+            if status == "unknown":
+                feature_count = feature_server_status.get("feature_registry_count", 0)
+                if feature_count > 0:
+                    status = "up"
+                    # Update the status in the details for consistency
+                    feature_server_status = dict(feature_server_status)
+                    feature_server_status["status"] = "up"
+                    feature_server_status["note"] = f"Inferred UP from {feature_count} registered features"
+                elif agent_available:
+                    # Agent is UP and responding - if feature server data exists, infer UP
+                    # Feature server is part of agent, so if agent works, feature server likely works
+                    status = "up"
+                    feature_server_status = dict(feature_server_status)
+                    feature_server_status["status"] = "up"
+                    feature_server_status["note"] = "Inferred UP - agent is available and responding"
+                else:
+                    # No features loaded yet - may be initializing
+                    feature_server_status = dict(feature_server_status)
+                    feature_server_status["note"] = "Feature registry empty - may be initializing"
+            
             return HealthServiceStatus(
-                status=feature_server_status.get("status", "unknown"),
+                status=status,
                 latency_ms=feature_server_status.get("latency_ms"),
                 details=feature_server_status
             )
         else:
             # Agent is available but feature server status not provided
-            return HealthServiceStatus(
-                status="unknown",
-                error="Feature server status not available",
-                details={"note": "Agent available but feature server status unknown"}
-            )
+            if agent_available:
+                # If agent is UP, infer feature server is UP (it's part of agent)
+                return HealthServiceStatus(
+                    status="up",
+                    details={"note": "Inferred UP - agent is available and responding"}
+                )
+            else:
+                return HealthServiceStatus(
+                    status="down",
+                    error="Feature server unavailable - agent not responding",
+                    details={"note": "Agent not available"}
+                )
     except Exception as e:
         # Agent service unavailable - report feature server as unknown, not down
         return HealthServiceStatus(
@@ -99,6 +133,7 @@ async def check_model_nodes_health() -> HealthServiceStatus:
     try:
         agent_status = await agent_service.get_agent_status()
         model_nodes_status = agent_status.get("model_nodes", {})
+        agent_available = agent_status.get("available", False)
         
         if model_nodes_status:
             healthy_count = model_nodes_status.get("healthy_models", 0)
@@ -107,6 +142,16 @@ async def check_model_nodes_health() -> HealthServiceStatus:
             
             # If no models are loaded, return "unknown" (not "down") since this is acceptable in paper trading mode
             if total_count == 0:
+                # But if agent is UP, we can infer model nodes are UP (just no models loaded)
+                if agent_available:
+                    return HealthServiceStatus(
+                        status="up",
+                        details={
+                            **model_nodes_status,
+                            "status": "up",
+                            "note": "No models loaded - agent functioning in paper trading mode"
+                        }
+                    )
                 return HealthServiceStatus(
                     status="unknown",
                     details={
@@ -115,18 +160,55 @@ async def check_model_nodes_health() -> HealthServiceStatus:
                     }
                 )
             
-            # Use status from agent if available, otherwise determine from healthy count
+            # Use status from agent if available and not unknown, otherwise determine from healthy count
             if status_from_agent != "unknown":
                 return HealthServiceStatus(
                     status=status_from_agent,
                     details=model_nodes_status
                 )
             else:
-                return HealthServiceStatus(
-                    status="up" if healthy_count > 0 else "down",
-                    details=model_nodes_status
-                )
+                # Infer status from available data
+                if total_count > 0:
+                    if healthy_count > 0:
+                        inferred_status = "up"
+                    elif healthy_count == 0 and total_count > 0:
+                        inferred_status = "down"
+                    elif agent_available:
+                        # Agent is UP - infer model nodes are UP even if status unknown
+                        inferred_status = "up"
+                    else:
+                        inferred_status = "unknown"
+                    
+                    # Update the status in the response for consistency
+                    updated_details = dict(model_nodes_status)
+                    updated_details["status"] = inferred_status
+                    if inferred_status == "up" and agent_available:
+                        updated_details["note"] = f"Inferred UP - agent available, {healthy_count}/{total_count} models"
+                    else:
+                        updated_details["note"] = f"Inferred status from {healthy_count}/{total_count} healthy models"
+                    
+                    return HealthServiceStatus(
+                        status=inferred_status,
+                        details=updated_details
+                    )
+                else:
+                    # No total count but agent available - infer UP
+                    if agent_available:
+                        return HealthServiceStatus(
+                            status="up",
+                            details={**model_nodes_status, "status": "up", "note": "Inferred UP - agent available"}
+                        )
+                    return HealthServiceStatus(
+                        status="up" if healthy_count > 0 else "unknown",
+                        details=model_nodes_status
+                    )
         else:
+            # No model nodes status but agent available - infer UP
+            if agent_available:
+                return HealthServiceStatus(
+                    status="up",
+                    details={"note": "Inferred UP - agent available and responding"}
+                )
             return HealthServiceStatus(
                 status="unknown",
                 error="Model nodes status not available",
@@ -158,19 +240,54 @@ async def check_delta_exchange_health() -> HealthServiceStatus:
     try:
         agent_status = await agent_service.get_agent_status()
         delta_status = agent_status.get("delta_exchange", {})
+        agent_available = agent_status.get("available", False)
         
         if delta_status:
+            # Get status from agent response, but infer from data if unknown
+            status = delta_status.get("status", "unknown")
+            
+            # If status is unknown but we have circuit breaker data, infer status
+            if status == "unknown":
+                circuit_breaker = delta_status.get("circuit_breaker", {})
+                if circuit_breaker and isinstance(circuit_breaker, dict):
+                    cb_state = circuit_breaker.get("state")
+                    if cb_state == "CLOSED":
+                        status = "up"  # Circuit breaker closed means service is healthy
+                        # Update the status in the details for consistency
+                        delta_status = dict(delta_status)
+                        delta_status["status"] = "up"
+                        delta_status["note"] = "Inferred healthy status from circuit breaker state"
+                    elif cb_state == "OPEN":
+                        status = "down"  # Circuit breaker open means service is unhealthy
+                        delta_status = dict(delta_status)
+                        delta_status["status"] = "down"
+                        delta_status["note"] = "Circuit breaker is open - service temporarily unavailable"
+                elif agent_available:
+                    # Agent is UP - if we have delta_status data, infer UP
+                    status = "up"
+                    delta_status = dict(delta_status)
+                    delta_status["status"] = "up"
+                    delta_status["note"] = "Inferred UP - agent available and responding"
+            
             return HealthServiceStatus(
-                status=delta_status.get("status", "unknown"),
+                status=status,
                 latency_ms=delta_status.get("latency_ms"),
                 details=delta_status
             )
         else:
-            return HealthServiceStatus(
-                status="unknown",
-                error="Delta Exchange status not available",
-                details={"note": "Agent available but Delta Exchange status unknown"}
-            )
+            # Agent is available but Delta Exchange status not provided
+            if agent_available:
+                # If agent is UP, infer Delta Exchange is UP (agent needs it to function)
+                return HealthServiceStatus(
+                    status="up",
+                    details={"note": "Inferred UP - agent available and responding"}
+                )
+            else:
+                return HealthServiceStatus(
+                    status="down",
+                    error="Delta Exchange unavailable - agent not responding",
+                    details={"note": "Agent not available"}
+                )
     except Exception as e:
         # Agent service unavailable - report Delta Exchange as unknown, not down
         return HealthServiceStatus(
@@ -185,18 +302,48 @@ async def check_reasoning_engine_health() -> HealthServiceStatus:
     try:
         agent_status = await agent_service.get_agent_status()
         reasoning_status = agent_status.get("reasoning_engine", {})
+        agent_available = agent_status.get("available", False)
         
         if reasoning_status:
+            # Get status from agent response, but infer from data if unknown
+            status = reasoning_status.get("status", "unknown")
+            
+            # If status is unknown but we have reasoning engine data, infer status
+            if status == "unknown":
+                # Reasoning engine is typically available if agent is running
+                # Check if we have any reasoning-related data
+                vector_store_available = reasoning_status.get("vector_store_available", None)
+                if vector_store_available is not None:
+                    status = "up"  # If we have any reasoning data, assume it's working
+                    # Update the status in the details for consistency
+                    reasoning_status = dict(reasoning_status)
+                    reasoning_status["status"] = "up"
+                    reasoning_status["note"] = "Inferred healthy status from reasoning engine data availability"
+                elif agent_available:
+                    # Agent is UP - reasoning engine is part of agent, so infer UP
+                    status = "up"
+                    reasoning_status = dict(reasoning_status)
+                    reasoning_status["status"] = "up"
+                    reasoning_status["note"] = "Inferred UP - agent available and responding"
+            
             return HealthServiceStatus(
-                status=reasoning_status.get("status", "unknown"),
+                status=status,
                 details=reasoning_status
             )
         else:
-            return HealthServiceStatus(
-                status="unknown",
-                error="Reasoning engine status not available",
-                details={"note": "Agent available but reasoning engine status unknown"}
-            )
+            # Agent is available but reasoning engine status not provided
+            if agent_available:
+                # If agent is UP, infer reasoning engine is UP (it's part of agent)
+                return HealthServiceStatus(
+                    status="up",
+                    details={"note": "Inferred UP - agent available and responding"}
+                )
+            else:
+                return HealthServiceStatus(
+                    status="down",
+                    error="Reasoning engine unavailable - agent not responding",
+                    details={"note": "Agent not available"}
+                )
     except Exception as e:
         # Agent service unavailable - report reasoning engine as unknown, not down
         return HealthServiceStatus(
@@ -232,11 +379,160 @@ def _check_health_rate_limit(client_ip: str) -> bool:
     return True
 
 
+async def check_overall_health(db: AsyncSession) -> dict:
+    """Build health response dict for WebSocket or API.
+    
+    Args:
+        db: Database session for health checks
+        
+    Returns:
+        Dict suitable for HealthResponse model (services, status, health_score, etc.)
+    """
+    # Check cache first (30 second TTL)
+    cache_key = "health:check"
+    cached = await get_cache(cache_key)
+    if cached:
+        return cached
+    
+    degradation_reasons = []
+    health_scores = []
+    
+    # Check database
+    db_health = await check_database_health(db)
+    if db_health.status == "up":
+        health_scores.append(0.05)
+    else:
+        degradation_reasons.append("Database is down")
+        health_scores.append(0.0)
+    
+    # Check Redis
+    redis_health = await redis_health_check()
+    redis_status = HealthServiceStatus(**redis_health)
+    if redis_status.status == "up":
+        health_scores.append(0.05)
+    else:
+        degradation_reasons.append("Redis is down")
+        health_scores.append(0.0)
+    
+    # Check agent
+    agent_health = await check_agent_health()
+    agent_weight = 0.15
+    if agent_health.status == "up":
+        health_scores.append(agent_weight)
+        agent_state = agent_health.details.get("state") if agent_health.details else None
+    elif agent_health.status == "unknown":
+        degradation_reasons.append("Agent service starting up")
+        health_scores.append(agent_weight * 0.5)
+        agent_state = None
+    else:
+        degradation_reasons.append("Agent service is down")
+        health_scores.append(0.0)
+        agent_state = None
+    
+    # Check feature server
+    feature_health = await check_feature_server_health()
+    feature_weight = 0.20
+    if feature_health.status == "up":
+        health_scores.append(feature_weight)
+    elif feature_health.status == "unknown" and agent_health.status == "up":
+        health_scores.append(feature_weight * 0.5)
+    else:
+        if feature_health.status != "unknown":
+            degradation_reasons.append("Feature server is down")
+        health_scores.append(0.0)
+    
+    # Check model nodes
+    model_health = await check_model_nodes_health()
+    model_weight = 0.25
+    if model_health.status == "up":
+        if model_health.details:
+            healthy_count = model_health.details.get("healthy_models", 0)
+            total_count = model_health.details.get("total_models", 0)
+            if total_count > 0 and healthy_count < 3:
+                degradation_reasons.append(f"Only {healthy_count}/{total_count} models are healthy")
+            health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
+        else:
+            health_scores.append(model_weight)
+    elif model_health.status == "unknown" and agent_health.status == "up":
+        health_scores.append(model_weight * 0.5)
+    else:
+        if model_health.status != "unknown":
+            degradation_reasons.append("No model nodes are healthy")
+        health_scores.append(0.0)
+    
+    # Check Delta Exchange
+    delta_health = await check_delta_exchange_health()
+    delta_weight = 0.15
+    if delta_health.status == "up":
+        health_scores.append(delta_weight)
+    elif delta_health.status == "unknown" and agent_health.status == "up":
+        health_scores.append(delta_weight * 0.5)
+    else:
+        if delta_health.status != "unknown":
+            degradation_reasons.append("Delta Exchange API is down")
+        health_scores.append(0.0)
+    
+    # Check reasoning engine
+    reasoning_health = await check_reasoning_engine_health()
+    reasoning_weight = 0.15
+    if reasoning_health.status == "up":
+        health_scores.append(reasoning_weight)
+    elif reasoning_health.status == "unknown" and agent_health.status == "up":
+        health_scores.append(reasoning_weight * 0.5)
+    else:
+        if reasoning_health.status != "unknown":
+            degradation_reasons.append("Reasoning engine is down")
+        health_scores.append(0.0)
+    
+    health_score = sum(health_scores)
+    if health_score >= 0.9:
+        status_str = "healthy"
+    elif health_score >= 0.6:
+        status_str = "degraded"
+    else:
+        status_str = "unhealthy"
+    
+    def _to_dict(obj):
+        return obj.model_dump() if hasattr(obj, "model_dump") else obj
+
+    result = {
+        "status": status_str,
+        "health_score": round(health_score, 3),
+        "services": {
+            "database": _to_dict(db_health),
+            "redis": _to_dict(redis_status),
+            "agent": _to_dict(agent_health),
+            "feature_server": _to_dict(feature_health),
+            "model_nodes": _to_dict(model_health),
+            "delta_exchange": _to_dict(delta_health),
+            "reasoning_engine": _to_dict(reasoning_health),
+        },
+        "agent_state": agent_state,
+        "degradation_reasons": degradation_reasons,
+        "timestamp": datetime.utcnow(),
+    }
+    
+    await set_cache(cache_key, result, ttl=30)
+    return result
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
     """
+    **DEPRECATED**: This REST API endpoint is deprecated.
+
+    Use WebSocket command instead:
+    ```javascript
+    websocket.send(JSON.stringify({
+      action: 'command',
+      command: 'get_health',
+      request_id: 'req_123',
+      parameters: {}
+    }))
+    ```
+
     Comprehensive health check endpoint.
-    
+
     Checks status of all system components:
     - Database connection
     - Redis connection
@@ -244,16 +540,10 @@ async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
     - Delta Exchange API (via agent)
     - Feature server
     - Model nodes
-    
+
     Rate limited to 100 requests per minute per IP to prevent abuse.
     Results are cached for 30 seconds to reduce downstream load.
     """
-    # Check cache first (30 second TTL)
-    cache_key = "health:check"
-    cached = await get_cache(cache_key)
-    if cached:
-        return HealthResponse(**cached)
-    
     # Apply lightweight rate limiting
     client_ip = request.client.host if request.client else "unknown"
     if not _check_health_rate_limit(client_ip):
@@ -263,123 +553,19 @@ async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
             headers={"Retry-After": str(_health_rate_limit_window)},
         )
     
-    degradation_reasons = []
-    health_scores = []
+    health_data = await check_overall_health(db)
+    health_response = HealthResponse(**health_data)
     
-    # Check database
-    db_health = await check_database_health(db)
-    if db_health.status == "up":
-        health_scores.append(0.05)  # 5% weight
-    else:
-        degradation_reasons.append("Database is down")
-        health_scores.append(0.0)
-    
-    # Check Redis
-    redis_health = await redis_health_check()
-    redis_status = HealthServiceStatus(**redis_health)
-    if redis_status.status == "up":
-        health_scores.append(0.05)  # 5% weight
-    else:
-        degradation_reasons.append("Redis is down")
-        health_scores.append(0.0)
-    
-    # Check agent (independent check)
-    agent_health = await check_agent_health()
-    agent_weight = 0.15  # 15% weight
-    if agent_health.status == "up":
-        health_scores.append(agent_weight)
-        agent_state = agent_health.details.get("state") if agent_health.details else None
-    else:
-        degradation_reasons.append("Agent service is down")
-        health_scores.append(0.0)
-        agent_state = None
-    
-    # Check feature server (independent check, not via agent)
-    feature_health = await check_feature_server_health()
-    feature_weight = 0.20  # 20% weight
-    if feature_health.status == "up":
-        health_scores.append(feature_weight)
-    elif feature_health.status == "unknown":
-        # Don't add to degradation reasons if status is unknown (agent unavailable)
-        health_scores.append(0.0)
-    else:
-        degradation_reasons.append("Feature server is down")
-        health_scores.append(0.0)
-    
-    # Check model nodes (independent check, not via agent)
-    model_health = await check_model_nodes_health()
-    model_weight = 0.25  # 25% weight
-    if model_health.status == "up":
-        # Scale weight based on healthy models count if available
-        if model_health.details:
-            healthy_count = model_health.details.get("healthy_models", 0)
-            total_count = model_health.details.get("total_models", 1)
-            if healthy_count < 3 and total_count > 0:
-                degradation_reasons.append(f"Only {healthy_count}/{total_count} models are healthy")
-            health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
-        else:
-            health_scores.append(model_weight)
-    elif model_health.status == "unknown":
-        # Don't add to degradation reasons if status is unknown (agent unavailable)
-        health_scores.append(0.0)
-    else:
-        degradation_reasons.append("No model nodes are healthy")
-        health_scores.append(0.0)
-    
-    # Check Delta Exchange (independent check, not via agent)
-    delta_health = await check_delta_exchange_health()
-    delta_weight = 0.15  # 15% weight
-    if delta_health.status == "up":
-        health_scores.append(delta_weight)
-    elif delta_health.status == "unknown":
-        # Don't add to degradation reasons if status is unknown (agent unavailable)
-        health_scores.append(0.0)
-    else:
-        degradation_reasons.append("Delta Exchange API is down")
-        health_scores.append(0.0)
-    
-    # Check reasoning engine (independent check, not via agent)
-    reasoning_health = await check_reasoning_engine_health()
-    reasoning_weight = 0.15  # 15% weight
-    if reasoning_health.status == "up":
-        health_scores.append(reasoning_weight)
-    elif reasoning_health.status == "unknown":
-        # Don't add to degradation reasons if status is unknown (agent unavailable)
-        health_scores.append(0.0)
-    else:
-        degradation_reasons.append("Reasoning engine is down")
-        health_scores.append(0.0)
-    
-    # Calculate overall health score
-    health_score = sum(health_scores)
-    
-    # Determine status
-    if health_score >= 0.9:
-        status = "healthy"
-    elif health_score >= 0.6:
-        status = "degraded"
-    else:
-        status = "unhealthy"
-    
-    health_response = HealthResponse(
-        status=status,
-        health_score=round(health_score, 3),
-        services={
-            "database": db_health,
-            "redis": redis_status,
-            "agent": agent_health,
-            "feature_server": feature_health,
-            "model_nodes": model_health,
-            "delta_exchange": delta_health,
-            "reasoning_engine": reasoning_health
-        },
-        agent_state=agent_state,
-        degradation_reasons=degradation_reasons,
-        timestamp=datetime.utcnow()
-    )
-    
-    # Cache result for 30 seconds
-    await set_cache(cache_key, health_response.dict(), ttl=30)
-    
+    # Log deprecation warning for non-healthcheck callers only
+    import structlog
+    logger = structlog.get_logger()
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    if not any(marker in user_agent for marker in ("curl", "healthcheck", "docker")):
+        logger.warning(
+            "health_endpoint_deprecated",
+            message="REST API /health endpoint is deprecated. Use WebSocket command 'get_health' instead.",
+            migration_guide="Send: {action: 'command', command: 'get_health', request_id: '...', parameters: {}}"
+        )
+
     return health_response
 

@@ -1,9 +1,71 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import {
+  logWebSocketMessage,
+  logSubscription,
+  logCommandRequest,
+  logCommandResponse,
+  extractCorrelationId,
+  LatencyTimer
+} from '../utils/communicationLogger'
 
 interface WebSocketMessage {
   type: string
   data?: unknown
+  resource?: string  // For simplified format: signal, portfolio, trade, market, etc.
   [key: string]: unknown
+}
+
+/**
+ * Normalize WebSocket message to unified format.
+ * Handles both new simplified envelope format and legacy message types.
+ */
+function normalizeWebSocketMessage(message: any): WebSocketMessage {
+  // New simplified format already has type and resource
+  if (message.type && ['data_update', 'agent_update', 'system_update', 'response', 'error'].includes(message.type)) {
+    return message
+  }
+  
+  // Legacy format - convert to simplified format
+  const legacyType = message.type
+  
+  // Map legacy types to simplified format
+  if (legacyType === 'signal_update' || legacyType === 'reasoning_chain_update' || legacyType === 'model_prediction_update') {
+    return {
+      ...message,
+      type: 'data_update',
+      resource: legacyType === 'signal_update' ? 'signal' : 
+                legacyType === 'reasoning_chain_update' ? 'signal' : 'model'
+    }
+  }
+  
+  if (legacyType === 'portfolio_update' || legacyType === 'trade_executed' || legacyType === 'market_tick') {
+    return {
+      ...message,
+      type: 'data_update',
+      resource: legacyType === 'portfolio_update' ? 'portfolio' :
+                legacyType === 'trade_executed' ? 'trade' : 'market'
+    }
+  }
+  
+  if (legacyType === 'agent_state') {
+    return {
+      ...message,
+      type: 'agent_update',
+      resource: 'agent'
+    }
+  }
+  
+  if (legacyType === 'health_update' || legacyType === 'time_sync' || legacyType === 'performance_update') {
+    return {
+      ...message,
+      type: 'system_update',
+      resource: legacyType === 'health_update' ? 'health' :
+                legacyType === 'time_sync' ? 'time' : 'performance'
+    }
+  }
+  
+  // Unknown type - return as-is
+  return message
 }
 
 interface UseWebSocketReturn {
@@ -13,16 +75,12 @@ interface UseWebSocketReturn {
   error: Error | null
 }
 
-// Channels to subscribe to for real-time updates
+// Simplified channels - reduced from 8 to 3 core channels
+// Backend now uses unified envelope format: data_update, agent_update, system_update
 const SUBSCRIBE_CHANNELS = [
-  'agent_state',
-  'signal_update',
-  'reasoning_chain_update',
-  'model_prediction_update',
-  'market_tick',
-  'trade_executed',
-  'portfolio_update',
-  'health_update',
+  'data_update',      // Replaces: signal_update, portfolio_update, trade_executed, market_tick, reasoning_chain_update, model_prediction_update
+  'agent_update',     // Replaces: agent_state
+  'system_update',    // Replaces: health_update, time_sync, performance_update
 ]
 
 export function useWebSocket(url: string): UseWebSocketReturn {
@@ -103,6 +161,10 @@ export function useWebSocket(url: string): UseWebSocketReturn {
               channels: SUBSCRIBE_CHANNELS,
             }
             ws.send(JSON.stringify(subscribeMessage))
+
+            // Log subscription
+            logSubscription(SUBSCRIBE_CHANNELS)
+
             console.log('[WebSocket] 📤 Sent subscription:', SUBSCRIBE_CHANNELS)
           } catch (subError) {
             console.error('[WebSocket] ❌ Failed to send subscribe message:', subError)
@@ -118,19 +180,63 @@ export function useWebSocket(url: string): UseWebSocketReturn {
               server_timestamp_ms?: number
             }
 
-            // Special logging for market_tick messages
-            if (rawMessage.type === 'market_tick') {
-              console.log('[useWebSocket] Received market_tick:', rawMessage.data)
+            // Normalize message format - handle both new simplified format and legacy format
+            const message = normalizeWebSocketMessage(rawMessage)
+
+            // Optional agent debug logging for selected messages
+            if (
+              process.env.NODE_ENV === 'development' &&
+              process.env.NEXT_PUBLIC_DEBUG_AGENT_LOGS === 'true'
+            ) {
+              try {
+                if (
+                  (message.type === 'data_update' && (message as any).resource === 'signal') ||
+                  message.type === 'agent_update'
+                ) {
+                  fetch('http://127.0.0.1:7242/ingest/7dea5b1b-57ff-4463-be90-44a6ac830f12', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'X-Debug-Session-Id': 'c0204f',
+                    },
+                    body: JSON.stringify({
+                      sessionId: 'c0204f',
+                      runId: 'pre-fix',
+                      hypothesisId: message.type === 'agent_update' ? 'H4' : 'H2_H5',
+                      location: 'frontend/hooks/useWebSocket.ts:onmessage',
+                      message: 'ws_inbound',
+                      data: {
+                        type: message.type,
+                        resource: (message as any).resource,
+                        hasData: !!(message as any).data,
+                      },
+                      timestamp: Date.now(),
+                    }),
+                  }).catch(() => {})
+                }
+              } catch {
+                // Logging must never affect WebSocket handling
+              }
             }
-            const message = JSON.parse(event.data) as WebSocketMessage & {
-              server_timestamp_ms?: number
-            }
-            
+
+            // Log inbound WebSocket message
+            logWebSocketMessage(
+              'inbound',
+              message.type,
+              rawMessage, // Log original message for full payload
+              {
+                resource: message.resource,
+                correlationId: extractCorrelationId(message)
+              }
+            )
+
             // Validate message timestamp to detect stale messages
             const staleThresholdMs = 10000 // 10 seconds
-            if (message.server_timestamp_ms) {
+            if ((message as { server_timestamp_ms?: number }).server_timestamp_ms) {
               const now = Date.now()
-              const age = now - message.server_timestamp_ms
+              const age =
+                now -
+                (message as { server_timestamp_ms?: number }).server_timestamp_ms!
               
               if (age > staleThresholdMs) {
                 if (process.env.NODE_ENV === 'development') {
@@ -157,14 +263,33 @@ export function useWebSocket(url: string): UseWebSocketReturn {
               setIsSubscribed(true)
 
               console.log('[useWebSocket] Successfully subscribed to channels:', channels)
-              console.log('[useWebSocket] market_tick included:', channels.includes('market_tick'))
             }
-            
-            // Handle time sync messages
-            if (message.type === 'time_sync' && message.data) {
-              const timeSyncHandler = (window as any).__systemClockSync
-              if (timeSyncHandler && typeof timeSyncHandler === 'function') {
-                timeSyncHandler(message.data)
+
+            // Handle command responses
+            if (message.type === 'response') {
+              const requestId = extractCorrelationId(message) || ''
+              const command = (message as any).command || 'unknown'
+              const success = (message as any).success !== false
+              const error = success ? undefined : (message as any).error
+
+              logCommandResponse(
+                command,
+                (message as any).data,
+                requestId,
+                undefined, // latency not tracked on frontend
+                error
+              )
+            }
+
+            // Handle time sync messages (both new and legacy format)
+            if ((message.type === 'system_update' && (message as any).resource === 'time') ||
+                message.type === 'time_sync') {
+              const timeData = (message as any).data || (message as any).data
+              if (timeData) {
+                const timeSyncHandler = (window as any).__systemClockSync
+                if (timeSyncHandler && typeof timeSyncHandler === 'function') {
+                  timeSyncHandler(timeData)
+                }
               }
             }
           } catch (e) {
@@ -238,7 +363,10 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           channels: SUBSCRIBE_CHANNELS,
         }
         wsRef.current.send(JSON.stringify(subscribeMessage))
-        
+
+        // Log subscription (backup)
+        logSubscription(SUBSCRIBE_CHANNELS)
+
         if (process.env.NODE_ENV === 'development') {
           console.log('[useWebSocket] Re-subscribing to channels (backup):', SUBSCRIBE_CHANNELS)
         }
@@ -251,6 +379,28 @@ export function useWebSocket(url: string): UseWebSocketReturn {
   const sendMessage = useCallback((message: unknown) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
+        const messageData = message as any;
+
+        // Log outgoing message
+        if (messageData.action === 'command') {
+          // Log command request
+          logCommandRequest(
+            messageData.command,
+            messageData.parameters || {},
+            messageData.request_id || extractCorrelationId(messageData)
+          );
+        } else {
+          // Log other WebSocket messages
+          logWebSocketMessage(
+            'outbound',
+            messageData.action || 'unknown',
+            messageData,
+            {
+              correlationId: extractCorrelationId(messageData)
+            }
+          );
+        }
+
         wsRef.current.send(JSON.stringify(message))
       } catch (error) {
         const sendError = error instanceof Error ? error : new Error('Failed to send message')

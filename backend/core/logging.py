@@ -199,26 +199,23 @@ def log_error_with_context(
         request_id: Request ID for request tracking (optional)
         **kwargs: Additional context fields
     """
-    logger = structlog.get_logger()
-    
+    # Use stdlib logger to avoid structlog config conflicts (e.g. from communication_logger)
+    _log = logging.getLogger("backend.errors")
     error_type = type(error).__name__ if error else "UnknownError"
-    
-    log_kwargs = {
+    extra = {
         "service": "backend",
-        "message": message,
         "component": component or kwargs.get("component"),
         "request_id": request_id or kwargs.get("request_id"),
-        **kwargs
+        "error_type": error_type,
+        **{k: v for k, v in kwargs.items() if k not in ("exc_info", "stack_info")},
     }
-    
     if error:
-        log_kwargs.update({
-            "error_type": error_type,
-            "error_message": str(error),
-            "exc_info": True,
-        })
-    
-    logger.error(message, **log_kwargs)
+        extra["error_message"] = str(error)
+    _log.error(
+        message,
+        exc_info=error is not None,
+        extra=extra,
+    )
 
 
 def get_session_id() -> Optional[str]:

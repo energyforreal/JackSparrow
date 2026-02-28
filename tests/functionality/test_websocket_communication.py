@@ -106,7 +106,7 @@ class WebSocketCommunicationTestSuite(TestSuiteBase):
                 self.add_result(result)
                 return
             
-            # All expected message types
+            # All expected message types (including subscription responses)
             message_types = [
                 "agent_state",
                 "signal_update",
@@ -115,7 +115,9 @@ class WebSocketCommunicationTestSuite(TestSuiteBase):
                 "market_tick",
                 "trade_executed",
                 "portfolio_update",
-                "health_update"
+                "health_update",
+                "subscribed",  # Subscription confirmation message
+                "unsubscribed"  # Unsubscription confirmation message
             ]
             
             result.details["expected_message_types"] = message_types

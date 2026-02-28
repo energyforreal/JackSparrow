@@ -16,6 +16,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import concurrent.futures
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -36,6 +37,33 @@ class Colors:
     BLUE = "\033[94m"
     RESET = "\033[0m"
     BOLD = "\033[1m"
+
+
+def get_safe_symbol(symbol: str, fallback: str) -> str:
+    """Return symbol if platform supports Unicode, otherwise fallback.
+    
+    This function checks if the current stdout encoding can handle the Unicode symbol.
+    On Windows, it uses the actual stdout encoding (often cp1252) to test compatibility.
+    """
+    if platform.system() == "Windows":
+        try:
+            # Get the actual stdout encoding, defaulting to utf-8 if unavailable
+            encoding = sys.stdout.encoding or sys.getdefaultencoding() or "utf-8"
+            
+            # Try to encode the symbol using the actual encoding
+            # This will fail if the encoding doesn't support the character
+            symbol.encode(encoding)
+            return symbol
+        except (UnicodeEncodeError, AttributeError, TypeError):
+            # If encoding fails, return the ASCII fallback
+            return fallback
+    else:
+        # On non-Windows systems, try UTF-8 encoding
+        try:
+            symbol.encode("utf-8")
+            return symbol
+        except (UnicodeEncodeError, AttributeError):
+            return fallback
 
 
 class PrerequisiteValidator:
@@ -60,7 +88,7 @@ class PrerequisiteValidator:
             )
             return False
         
-        success_symbol = "OK" if self.is_windows else "✓"
+        success_symbol = get_safe_symbol("✓", "OK")
         print(f"{Colors.GREEN}{success_symbol}{Colors.RESET} Python {version.major}.{version.minor}.{version.micro}")
         return True
     
@@ -106,21 +134,45 @@ class PrerequisiteValidator:
             )
             
             if node_result.returncode == 0:
-                node_version_str = node_result.stdout.strip().lstrip("v")
+                node_version_str = node_result.stdout.strip().lstrip("v").strip()
+                
+                # Parse version string - handle formats like "22.17.0", "v22.17.0", "22.17", etc.
+                version_parts = node_version_str.split(".")
+                if not version_parts or not version_parts[0]:
+                    warning_symbol = get_safe_symbol("⚠", "!")
+                    print(f"{Colors.YELLOW}{warning_symbol}{Colors.RESET} Node.js version format unexpected: {node_version_str}")
+                    return True  # Don't fail, just warn
+                
                 try:
-                    major_version = int(node_version_str.split(".")[0])
+                    # Try to parse major version number
+                    major_version_str = version_parts[0].strip()
+                    # Remove any non-numeric characters (e.g., "22" from "v22" or "22.17.0")
+                    major_version_str = ''.join(filter(str.isdigit, major_version_str))
+                    
+                    if not major_version_str:
+                        warning_symbol = get_safe_symbol("⚠", "!")
+                        print(f"{Colors.YELLOW}{warning_symbol}{Colors.RESET} Node.js version format unexpected: {node_version_str}")
+                        return True  # Don't fail, just warn
+                    
+                    major_version = int(major_version_str)
                     if major_version < 18:
                         self.errors.append(
                             f"Node.js version {node_version_str} detected. "
                             f"Node.js 18+ is required."
                         )
                         return False
-                    print(f"{Colors.GREEN}✓{Colors.RESET} Node.js {node_version_str}")
-                except ValueError:
+                    
+                    # Success - version is valid and >= 18
+                    success_symbol = "OK" if self.is_windows else "✓"
+                    print(f"{Colors.GREEN}{success_symbol}{Colors.RESET} Node.js {node_version_str}")
+                except (ValueError, IndexError) as e:
+                    # If parsing fails, warn but don't fail (might be a valid version we can't parse)
                     warning_symbol = "!" if self.is_windows else "⚠"
-                    print(f"{Colors.YELLOW}{warning_symbol}{Colors.RESET} Node.js version format unexpected: {node_version_str}")
+                    print(f"{Colors.YELLOW}{warning_symbol}{Colors.RESET} Node.js version format unexpected: {node_version_str} (parsing error: {e})")
+                    # Don't return False - allow startup to continue
+                    return True
             else:
-                warning_symbol = "!" if self.is_windows else "⚠"
+                warning_symbol = get_safe_symbol("⚠", "!")
                 print(f"{Colors.YELLOW}{warning_symbol}{Colors.RESET} Could not determine Node.js version")
             
             return True
@@ -202,7 +254,7 @@ class PrerequisiteValidator:
             port = 5432
         
         if self.check_port_accessible(host, port):
-            success_symbol = "OK" if self.is_windows else "✓"
+            success_symbol = get_safe_symbol("✓", "OK")
             print(f"{Colors.GREEN}{success_symbol}{Colors.RESET} PostgreSQL accessible at {host}:{port}")
             # Check database schema if connection successful
             self.check_database_schema(database_url)
@@ -235,6 +287,15 @@ class PrerequisiteValidator:
             "model_performance",
         ]
         
+        def _get_table_names_with_timeout(engine, timeout_seconds: float = 10.0):
+            """Get table names with timeout to prevent hanging."""
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(lambda: inspect(engine).get_table_names())
+                try:
+                    return future.result(timeout=timeout_seconds)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(f"Database schema inspection timed out after {timeout_seconds} seconds")
+
         try:
             # Normalize database URL for SQLAlchemy
             if "+" in database_url and "://" in database_url:
@@ -243,13 +304,13 @@ class PrerequisiteValidator:
             elif not database_url.startswith(("postgresql://", "postgres://")):
                 # Skip if URL format is invalid
                 return True
-            
+
             engine = create_engine(database_url, connect_args={"connect_timeout": 5})
-            inspector = inspect(engine)
-            
-            existing_tables = inspector.get_table_names()
+
+            # Use timeout wrapper for schema inspection
+            existing_tables = _get_table_names_with_timeout(engine, timeout_seconds=10.0)
             missing_tables = [table for table in required_tables if table not in existing_tables]
-            
+
             if missing_tables:
                 self.warnings.append(
                     f"Database tables missing: {', '.join(missing_tables)}. "
@@ -260,7 +321,11 @@ class PrerequisiteValidator:
                 success_symbol = "OK" if self.is_windows else "✓"
                 print(f"{Colors.GREEN}{success_symbol}{Colors.RESET} Database schema validated (all tables exist)")
                 return True
-                
+
+        except TimeoutError as e:
+            # Timeout is a more serious issue than general exception
+            self.errors.append(f"Database schema check timed out: {str(e)}")
+            return False
         except Exception as e:
             # Don't fail prerequisite check if schema check fails
             # Just warn about it
@@ -305,7 +370,7 @@ class PrerequisiteValidator:
             port = 6379
         
         if self.check_port_accessible(host, port):
-            success_symbol = "OK" if self.is_windows else "✓"
+            success_symbol = get_safe_symbol("✓", "OK")
             print(f"{Colors.GREEN}{success_symbol}{Colors.RESET} Redis accessible at {host}:{port}")
             return True
         else:
@@ -420,14 +485,14 @@ class PrerequisiteValidator:
             print(f"{Colors.BOLD}For detailed setup instructions, see docs/11-build-guide.md{Colors.RESET}\n")
         
         if self.warnings:
-            warning_symbol = "!" if self.is_windows else "⚠"
+            warning_symbol = get_safe_symbol("⚠", "!")
             print(f"{Colors.YELLOW}{Colors.BOLD}{warning_symbol}  WARNINGS:{Colors.RESET}\n")
             for warning in self.warnings:
                 print(f"  {Colors.YELLOW}{warning_symbol}{Colors.RESET} {warning}")
             print()
         
         if not self.errors:
-            success_symbol = "OK" if self.is_windows else "✅"
+            success_symbol = get_safe_symbol("✅", "OK")
             print(f"{Colors.GREEN}{Colors.BOLD}{success_symbol} All prerequisites validated successfully!{Colors.RESET}\n")
 
 

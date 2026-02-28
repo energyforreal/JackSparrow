@@ -37,9 +37,10 @@ class FeatureEventHandler:
             symbol = payload.get("symbol")
             features = payload.get("features", {})
             quality_score = payload.get("quality_score", 0.0)
+            current_price = payload.get("current_price")
             
             # Update context with features
-            self.context_manager.update_context({
+            await self.context_manager.update_state({
                 "features": features
             })
             
@@ -52,7 +53,8 @@ class FeatureEventHandler:
                     "features": features,
                     "context": {
                         "feature_quality_score": quality_score,
-                        "symbol": symbol
+                        "symbol": symbol,
+                        "current_price": current_price
                     },
                     "require_explanation": True
                 }

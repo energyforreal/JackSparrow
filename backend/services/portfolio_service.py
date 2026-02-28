@@ -349,6 +349,100 @@ class PortfolioService:
                 # Transaction will be rolled back automatically on exception
                 return None
 
+    async def get_pnl_summary(
+        self,
+        db: AsyncSession,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        symbol: Optional[str] = None,
+        limit: int = 500,
+    ) -> Dict[str, Any]:
+        """Get P&L summary for closed paper trades.
+
+        Returns closed positions with realized P&L for audit and profit/loss identification.
+
+        Args:
+            db: Database session
+            from_date: Start of date range (inclusive)
+            to_date: End of date range (inclusive)
+            symbol: Optional symbol filter
+            limit: Maximum number of closed positions to return
+
+        Returns:
+            Dict with closed_trades list and summary (total_pnl, winning_count, losing_count)
+        """
+        try:
+            query = select(Position).where(
+                cast(Position.status, String) == PositionStatus.CLOSED.value
+            )
+
+            if from_date:
+                query = query.where(Position.closed_at >= from_date)
+            if to_date:
+                query = query.where(Position.closed_at <= to_date)
+            if symbol:
+                query = query.where(Position.symbol == symbol)
+
+            query = query.order_by(desc(Position.closed_at)).limit(limit)
+            result = await db.execute(query)
+            closed_positions = result.scalars().all()
+
+            closed_trades = []
+            total_pnl = Decimal("0")
+            winning_count = 0
+            losing_count = 0
+
+            for pos in closed_positions:
+                pnl = float(pos.unrealized_pnl or 0)  # Realized PnL stored in unrealized_pnl when closed
+                total_pnl += Decimal(str(pnl))
+                if pnl > 0:
+                    winning_count += 1
+                elif pnl < 0:
+                    losing_count += 1
+
+                closed_trades.append({
+                    "position_id": pos.position_id,
+                    "symbol": pos.symbol,
+                    "side": pos.side.value,
+                    "quantity": float(pos.quantity),
+                    "entry_price": float(pos.entry_price),
+                    "exit_price": float(pos.current_price or pos.entry_price),
+                    "pnl": pnl,
+                    "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,
+                })
+
+            return {
+                "closed_trades": closed_trades,
+                "summary": {
+                    "total_pnl": float(total_pnl),
+                    "total_trades": len(closed_trades),
+                    "winning_trades": winning_count,
+                    "losing_trades": losing_count,
+                    "win_rate": winning_count / len(closed_trades) if closed_trades else 0,
+                },
+                "from_date": from_date.isoformat() if from_date else None,
+                "to_date": to_date.isoformat() if to_date else None,
+            }
+        except Exception as e:
+            logger.error(
+                "portfolio_service_get_pnl_summary_failed",
+                error=str(e),
+                exc_info=True,
+            )
+            return {
+                "closed_trades": [],
+                "summary": {
+                    "total_pnl": 0,
+                    "total_trades": 0,
+                    "winning_trades": 0,
+                    "losing_trades": 0,
+                    "win_rate": 0,
+                },
+                "from_date": None,
+                "to_date": None,
+                "error": str(e),
+            }
+
 
 # Global portfolio service instance
 portfolio_service = PortfolioService()

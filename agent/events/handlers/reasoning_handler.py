@@ -38,7 +38,7 @@ class ReasoningEventHandler:
             final_confidence = payload.get("final_confidence", 0.0)
             
             # Update context with reasoning chain
-            self.context_manager.update_context({
+            await self.context_manager.update_state({
                 "decision": {
                     "reasoning_chain": reasoning_chain,
                     "confidence": final_confidence,
@@ -76,7 +76,7 @@ class ReasoningEventHandler:
             position_size = payload.get("position_size", 0.0)
             
             # Update context with decision
-            self.context_manager.update_context({
+            await self.context_manager.update_state({
                 "decision": {
                     "signal": signal,
                     "confidence": confidence,

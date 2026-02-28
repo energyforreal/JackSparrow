@@ -15,8 +15,13 @@ dist/
 build/
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 *.log
+
+# Ad-hoc outputs
+direct_output.txt
+*_report.json
 
 # Node.js
 node_modules/
@@ -60,6 +65,12 @@ logs/
 models/*.pkl
 !models/training_summary.csv
 
+# Allow ML models in agent/model_storage for Docker deployment
+!agent/model_storage/**/*.pkl
+!agent/model_storage/**/*.h5
+!agent/model_storage/**/*.onnx
+!agent/model_storage/**/*.joblib
+
 # Temporary files
 tmp/
 temp/
@@ -74,4 +85,7 @@ agent/model_storage/custom/*
 !agent/model_storage/custom/.gitkeep
 *.pyc
 frontend/public/logo.png
+tests/functionality/reports/
+redis-tmp/
+agent_logs_temp.txt
 

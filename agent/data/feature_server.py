@@ -156,7 +156,8 @@ class MCPFeatureServer:
                     "symbol": request_event.payload.get("symbol"),
                     "features": features_dict,
                     "quality_score": response.quality_score,
-                    "timestamp": response.timestamp
+                    "timestamp": response.timestamp,
+                    "current_price": request_event.payload.get("current_price")
                 }
             )
             
@@ -242,7 +243,7 @@ class MCPFeatureServer:
                 logger.error(
                     "feature_server_compute_failed",
                     feature_name=feature_name,
-                    symbol=symbol,
+                    symbol=request.symbol,
                     error=str(e),
                     exc_info=True
                 )

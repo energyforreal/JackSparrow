@@ -308,10 +308,11 @@ async def get_response(request_id: str, timeout: int = 30) -> Optional[Dict[str,
     try:
         client = await get_redis()
         key = f"response:{request_id}"
-        
+
         result = await client.get(key)
         if result:
-            return json.loads(result)
+            response = json.loads(result)
+            return response
         return None
     except Exception as e:
         logger.error(

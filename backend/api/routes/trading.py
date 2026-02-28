@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -37,10 +37,22 @@ logger = structlog.get_logger()
 @router.post("/predict", response_model=PredictResponse)
 async def predict(request: PredictRequest):
     """
+    **DEPRECATED**: This REST API endpoint is deprecated.
+
+    Use WebSocket command instead:
+    ```javascript
+    websocket.send(JSON.stringify({
+      action: 'command',
+      command: 'predict',
+      request_id: 'req_123',
+      parameters: { symbol: 'BTCUSD' }
+    }))
+    ```
+
     Request AI prediction for current market conditions.
-    
+
     Returns trading signal with reasoning chain and model predictions.
-    
+
     **Request Body:**
     ```json
     {
@@ -51,7 +63,7 @@ async def predict(request: PredictRequest):
       }
     }
     ```
-    
+
     **Example Response:**
     ```json
     {
@@ -121,6 +133,24 @@ async def predict(request: PredictRequest):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Invalid response format from agent service"
+            )
+
+        # If the agent responded with an explicit error payload (e.g. no models
+        # available, no predictions), surface this as an error to the client
+        # instead of fabricating a neutral HOLD decision.
+        if decision_data.get("error_code") or decision_data.get("error"):
+            error_code = decision_data.get("error_code", "AGENT_ERROR")
+            error_msg = decision_data.get("error") or f"Agent error: {error_code}"
+            logger.error(
+                "predict_agent_decision_error_payload",
+                symbol=request.symbol,
+                error_code=error_code,
+                error=error_msg,
+                decision_data=decision_data,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Agent cannot produce ML-backed prediction: {error_msg}",
             )
         
         logger.debug(
@@ -250,13 +280,20 @@ async def predict(request: PredictRequest):
                 timestamp=timestamp
             )
             
+            logger.warning(
+                "predict_endpoint_deprecated",
+                symbol=request.symbol,
+                message="REST API /predict endpoint is deprecated. Use WebSocket command 'predict' instead.",
+                migration_guide="Send: {action: 'command', command: 'predict', request_id: '...', parameters: {symbol: '...'}}"
+            )
+
             logger.info(
                 "predict_success",
                 symbol=request.symbol,
                 signal=signal,
                 confidence=confidence
             )
-            
+
             return predict_response
             
         except Exception as transform_error:
@@ -295,10 +332,27 @@ async def execute_trade(
     db: AsyncSession = Depends(get_db)
 ):
     """
+    **DEPRECATED**: This REST API endpoint is deprecated.
+
+    Use WebSocket command instead:
+    ```javascript
+    websocket.send(JSON.stringify({
+      action: 'command',
+      command: 'execute_trade',
+      request_id: 'req_123',
+      parameters: {
+        symbol: 'BTCUSD',
+        side: 'buy',
+        quantity: 0.1,
+        order_type: 'MARKET'
+      }
+    }))
+    ```
+
     Execute a trade order.
-    
+
     Places order via Delta Exchange API through the agent service.
-    
+
     **Request Body:**
     ```json
     {
@@ -309,7 +363,7 @@ async def execute_trade(
       "price": null
     }
     ```
-    
+
     **Example Response:**
     ```json
     {
@@ -366,6 +420,15 @@ async def execute_trade(
         
         response_payload = TradeResponse(**trade_result)
         
+        logger.warning(
+            "execute_trade_endpoint_deprecated",
+            symbol=request.symbol,
+            side=request.side,
+            quantity=float(request.quantity),
+            message="REST API /trade/execute endpoint is deprecated. Use WebSocket command 'execute_trade' instead.",
+            migration_guide="Send: {action: 'command', command: 'execute_trade', request_id: '...', parameters: {...}}"
+        )
+
         if telegram_notifier.enabled:
             asyncio.create_task(
                 telegram_notifier.notify_trade_execution(
@@ -377,7 +440,7 @@ async def execute_trade(
                     result=trade_result,
                 )
             )
-        
+
         return response_payload
         
     except HTTPException:

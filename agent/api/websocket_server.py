@@ -33,6 +33,12 @@ except Exception:  # pragma: no cover - import guarded for environments without 
 from agent.core.config import settings
 from agent.core.logging_utils import log_error_with_context
 from agent.core.intelligent_agent import IntelligentAgent
+from agent.core.communication_logger import (
+    log_websocket_message,
+    log_backend_command,
+    generate_correlation_id,
+    extract_correlation_id
+)
 
 logger = structlog.get_logger()
 
@@ -228,6 +234,17 @@ class AgentWebSocketServer:
     async def _handle_message(self, ctx: _ClientContext, msg: Dict[str, Any]) -> None:
         """Route a decoded JSON message to the appropriate handler."""
 
+        # Log inbound message from backend
+        correlation_id = extract_correlation_id(msg)
+        log_websocket_message(
+            direction="inbound",
+            message_type=msg.get("type", "unknown"),
+            resource=msg.get("command"),
+            correlation_id=correlation_id,
+            target="backend",
+            payload=msg
+        )
+
         msg_type = msg.get("type")
         request_id = msg.get("request_id") or str(uuid.uuid4())
 
@@ -260,18 +277,30 @@ class AgentWebSocketServer:
             command=command,
         )
 
-        # Reuse existing command processing logic on the agent
+        # Log command request
+        log_backend_command(
+            direction="inbound",
+            command=command,
+            correlation_id=request_id,
+            payload=parameters
+        )
+
+        start_time = datetime.utcnow()
+
+        # Handle command directly (similar to _process_command but return response instead of sending it)
         try:
-            internal_command = {
-                "request_id": request_id,
-                "command": command,
-                "parameters": parameters,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-            # `_process_command` already returns a response dict in the
-            # same shape the backend expects from the Redis path.
-            response = await self._agent._process_command(internal_command)  # type: ignore[attr-defined]
+            response = await self._handle_command_request(command, parameters)
+
+            # Calculate latency
+            latency_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+            # Add latency to response for logging
+            response["_latency_ms"] = latency_ms
+
         except Exception as exc:
+            # Calculate latency for error case
+            latency_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+
             log_error_with_context(
                 "agent_websocket_command_error",
                 error=exc,
@@ -279,10 +308,49 @@ class AgentWebSocketServer:
                 request_id=request_id,
                 command=command,
             )
+
+            # Log failed command
+            log_backend_command(
+                direction="outbound",
+                command=command,
+                correlation_id=request_id,
+                payload={"error": str(exc)},
+                latency_ms=latency_ms,
+                error=str(exc)
+            )
+
             await self._send_error(ctx, request_id, f"Command failed: {exc}")
             return
 
         await self._send_response(ctx, request_id, response)
+
+    async def _handle_command_request(self, command: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle command request and return response dictionary.
+
+        Similar to agent's _process_command but returns response instead of sending it.
+        """
+        try:
+            # Handle command directly
+            if command == "predict":
+                response = await self._agent._handle_predict(parameters)
+            elif command == "execute_trade":
+                response = await self._agent._handle_execute_trade(parameters)
+            elif command == "get_status":
+                response = await self._agent._handle_get_status()
+            elif command == "control":
+                response = await self._agent._handle_control(parameters)
+            elif command == "register_models":
+                response = await self._agent._handle_register_models(parameters)
+            else:
+                response = {"success": False, "error": f"Unknown command: {command}"}
+
+            return response
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     # ------------------------------------------------------------------
     # Outgoing messages
@@ -303,6 +371,9 @@ class AgentWebSocketServer:
     async def _send_response(self, ctx: _ClientContext, request_id: str, response: Dict[str, Any]) -> None:
         """Send a structured response back to the backend client."""
 
+        # Extract latency if present (added during command processing)
+        latency_ms = response.pop("_latency_ms", None)
+
         message = {
             "type": "response",
             "request_id": request_id,
@@ -310,6 +381,17 @@ class AgentWebSocketServer:
             "data": response.get("data", response),
             "timestamp": datetime.utcnow().isoformat(),
         }
+
+        # Log outbound response to backend
+        command = response.get("command") or "unknown"
+        log_backend_command(
+            direction="outbound",
+            command=command,
+            correlation_id=request_id,
+            payload=message,
+            latency_ms=latency_ms
+        )
+
         await self._send_json(ctx, message)
 
     async def _send_error(self, ctx: _ClientContext, request_id: Optional[str], error_message: str) -> None:
@@ -322,6 +404,16 @@ class AgentWebSocketServer:
             "error": error_message,
             "timestamp": datetime.utcnow().isoformat(),
         }
+
+        # Log outbound error response
+        log_websocket_message(
+            direction="outbound",
+            message_type="error",
+            correlation_id=request_id,
+            target="backend",
+            payload=message
+        )
+
         await self._send_json(ctx, message)
 
     async def _send_pong(self, ctx: _ClientContext, request_id: Optional[str]) -> None:
@@ -332,6 +424,16 @@ class AgentWebSocketServer:
             "request_id": request_id,
             "timestamp": datetime.utcnow().isoformat(),
         }
+
+        # Log outbound pong response
+        log_websocket_message(
+            direction="outbound",
+            message_type="pong",
+            correlation_id=request_id,
+            target="backend",
+            payload=message
+        )
+
         await self._send_json(ctx, message)
 
     # ------------------------------------------------------------------
@@ -375,6 +477,44 @@ async def get_websocket_server(agent: IntelligentAgent) -> AgentWebSocketServer:
     if _server_instance is None:
         host = getattr(settings, "agent_websocket_host", "0.0.0.0")
         port = getattr(settings, "agent_websocket_port", 8002)
+
+        # Check if the default port is available, if not try alternative ports
+        import socket
+        def check_port_accessible(hostname: str, port: int) -> bool:
+            """Check if a TCP port is accessible."""
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1.0)
+                result = sock.connect_ex((hostname, port))
+                sock.close()
+                return result == 0
+            except Exception:
+                return False
+
+        # If default port is in use, try alternative ports
+        if check_port_accessible(host, port):
+            logger.warning(
+                "agent_websocket_port_in_use",
+                port=port,
+                message="Default WebSocket port is in use, trying alternative ports"
+            )
+            # Try ports 8003-8010
+            for alt_port in range(8003, 8010):
+                if not check_port_accessible(host, alt_port):
+                    port = alt_port
+                    logger.info(
+                        "agent_websocket_alternative_port_found",
+                        original_port=getattr(settings, "agent_websocket_port", 8002),
+                        new_port=port
+                    )
+                    break
+            else:
+                logger.error(
+                    "agent_websocket_no_ports_available",
+                    message="No available ports found for WebSocket server, server will not start"
+                )
+                return None
+
         _server_instance = AgentWebSocketServer(agent, host=host, port=port)
 
     return _server_instance

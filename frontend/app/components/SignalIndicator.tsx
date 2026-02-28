@@ -3,13 +3,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ConfidenceProgress } from './ConfidenceProgress'
-import { Signal, SignalType } from '@/types'
+import { ModelConsensus, Signal, SignalType } from '@/types'
 import { cn } from '@/lib/utils'
 import { normalizeConfidenceToPercent, formatConfidence } from '@/utils/formatters'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 
 interface SignalIndicatorProps {
   signal?: Signal
+  modelData?: {
+    model_consensus?: ModelConsensus[]
+  } | null
 }
 
 const getSignalBadgeClasses = (signal: SignalType) => {
@@ -29,7 +33,7 @@ const getSignalBadgeClasses = (signal: SignalType) => {
   }
 }
 
-export function SignalIndicator({ signal }: SignalIndicatorProps) {
+export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
   if (!signal) {
     return (
       <Card>
@@ -47,6 +51,11 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
   }
 
   const overallConfidence = normalizeConfidenceToPercent(signal.confidence)
+  const modelConsensus = signal.model_consensus && signal.model_consensus.length > 0
+    ? signal.model_consensus
+    : modelData?.model_consensus && modelData.model_consensus.length > 0
+      ? modelData.model_consensus
+      : []
 
   return (
     <Card>
@@ -59,7 +68,7 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
             className={cn('px-4 py-2 text-base', getSignalBadgeClasses(signal.signal))}
             aria-label={`Trading signal: ${signal.signal}`}
           >
-            {signal.signal.replace('_', ' ')}
+            {signal.signal ? signal.signal.toString().replace('_', ' ') : 'Unknown'}
           </Badge>
           <div className="flex-1">
             <div className="flex justify-between text-sm mb-1">
@@ -74,6 +83,56 @@ export function SignalIndicator({ signal }: SignalIndicatorProps) {
             />
           </div>
         </div>
+
+        {modelConsensus.length > 0 && (
+          <div className="pt-2 border-t">
+            <Accordion type="single" collapsible defaultValue="models">
+              <AccordionItem value="models">
+                <AccordionTrigger className="text-sm font-medium text-left">
+                  Individual Models ({modelConsensus.length})
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="space-y-3 mt-1">
+                    {modelConsensus.map((model) => {
+                      const percent = normalizeConfidenceToPercent(model.confidence)
+                      return (
+                        <div
+                          key={model.model_name}
+                          className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium truncate">
+                              {model.model_name}
+                            </div>
+                            <div className="mt-1 flex items-center gap-3">
+                              <Badge
+                                className={cn(
+                                  'px-2 py-0.5 text-xs',
+                                  getSignalBadgeClasses(model.signal)
+                                )}
+                              >
+                                {model.signal.replace('_', ' ')}
+                              </Badge>
+                              <div className="flex items-center gap-2 flex-1">
+                                <ConfidenceProgress
+                                  value={percent}
+                                  className="h-1.5"
+                                />
+                                <span className="text-xs text-muted-foreground tabular-nums">
+                                  {formatConfidence(percent)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </div>
+        )}
 
         {signal.agent_decision_reasoning && (
           <div className="pt-2 border-t">

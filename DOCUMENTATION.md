@@ -71,10 +71,11 @@ This document serves as the central index for all project documentation. Navigat
 7. **[Frontend Documentation](docs/07-frontend.md)**
    - Next.js application structure
    - Component architecture
-   - WebSocket integration
+   - WebSocket integration (simplified format)
    - State management patterns
    - Real-time update mechanisms
    - UI component specifications
+   - **[WebSocket Simplification Guide](docs/WEBSOCKET_SIMPLIFICATION.md)** - Simplified WebSocket communication format
 
 8. **[File Structure Documentation](docs/08-file-structure.md)**
    - Complete project directory structure
@@ -179,6 +180,10 @@ This document serves as the central index for all project documentation. Navigat
    - Implementation priorities
    - Testing checklists
    - Rollback procedures
+
+20. **Archived time-stamped reports (`docs/archive/`)**
+    - Historical audit outputs and log-analysis snapshots
+    - Kept for reference only; can be regenerated or pruned as needed
 
 ---
 

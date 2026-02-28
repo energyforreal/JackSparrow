@@ -1,90 +1,71 @@
 #!/bin/bash
-# Run system audit
+# Run comprehensive system audit
 
 set -e
 
-echo "Running system audit..."
+echo "Running comprehensive system audit..."
 echo ""
 
-# Create audit log directory
-mkdir -p logs/audit
-AUDIT_LOG="logs/audit/audit_$(date +%Y%m%d_%H%M%S).log"
+# Check if Python is available
+if ! command -v python3 &> /dev/null && ! command -v python &> /dev/null; then
+    echo "❌ Python not found. Cannot run comprehensive audit."
+    exit 1
+fi
 
-# Initialize audit log
-echo "Audit started at $(date)" > $AUDIT_LOG
-echo "================================" >> $AUDIT_LOG
-echo "" >> $AUDIT_LOG
+# Use python3 if available, otherwise python
+PYTHON_CMD="python3"
+if ! command -v python3 &> /dev/null; then
+    PYTHON_CMD="python"
+fi
 
-# Check Python formatting
-echo "Checking Python code formatting..."
-if [ -d backend ]; then
-    cd backend
-    if command -v black &> /dev/null; then
-        if black --check . >> ../$AUDIT_LOG 2>&1; then
-            echo "  ✓ Backend formatting OK"
+# Check if comprehensive audit script exists
+if [ ! -f "scripts/comprehensive_audit.py" ]; then
+    echo "❌ Comprehensive audit script not found at scripts/comprehensive_audit.py"
+    echo "Falling back to basic audit..."
+    echo ""
+
+    # Fallback to basic audit (original functionality)
+    mkdir -p logs/audit
+    AUDIT_LOG="logs/audit/audit_$(date +%Y%m%d_%H%M%S).log"
+
+    echo "Audit started at $(date)" > $AUDIT_LOG
+    echo "================================" >> $AUDIT_LOG
+    echo "" >> $AUDIT_LOG
+
+    echo "Checking Python code formatting..."
+    if [ -d backend ]; then
+        cd backend
+        if command -v black &> /dev/null; then
+            if black --check . >> ../$AUDIT_LOG 2>&1; then
+                echo "  ✓ Backend formatting OK"
+            else
+                echo "  ⚠ Backend formatting issues found"
+            fi
         else
-            echo "  ⚠ Backend formatting issues found"
+            echo "  ⚠ black not installed, skipping format check"
         fi
-    else
-        echo "  ⚠ black not installed, skipping format check"
-        echo "black not installed" >> ../$AUDIT_LOG
+        cd ..
     fi
-    cd ..
-else
-    echo "  ⚠ Backend directory not found"
-    echo "Backend directory not found" >> $AUDIT_LOG
+
+    echo "Basic audit complete. Results saved to $AUDIT_LOG"
+    exit 0
 fi
 
-if [ -d agent ]; then
-    cd agent
-    if command -v black &> /dev/null; then
-        if black --check . >> ../$AUDIT_LOG 2>&1; then
-            echo "  ✓ Agent formatting OK"
-        else
-            echo "  ⚠ Agent formatting issues found"
-        fi
-    else
-        echo "  ⚠ black not installed, skipping format check"
-        echo "black not installed" >> ../$AUDIT_LOG
-    fi
-    cd ..
-else
-    echo "  ⚠ Agent directory not found"
-    echo "Agent directory not found" >> $AUDIT_LOG
+# Run comprehensive audit
+echo "Executing comprehensive audit script..."
+echo ""
+
+# Parse command line arguments and pass them to the Python script
+AUDIT_ARGS=""
+if [ "$1" = "--verbose" ] || [ "$1" = "-v" ]; then
+    AUDIT_ARGS="$AUDIT_ARGS --verbose"
+fi
+if [ "$1" = "--quick" ] || [ "$1" = "-q" ]; then
+    AUDIT_ARGS="$AUDIT_ARGS --quick"
 fi
 
-# Check health
-echo "Checking service health..."
-if command -v curl &> /dev/null; then
-    if curl -s -f http://localhost:8000/api/v1/health >> $AUDIT_LOG 2>&1; then
-        echo "  ✓ Backend health check passed"
-    else
-        echo "  ⚠ Backend health check failed"
-    fi
-else
-    echo "  ⚠ curl not installed, skipping health check"
-    echo "curl not installed" >> $AUDIT_LOG
-fi
-
-# Check logs for errors
-echo "Checking logs for errors..."
-if [ -d logs ] && [ "$(find logs -name '*.log' -type f 2>/dev/null | wc -l)" -gt 0 ]; then
-    ERROR_COUNT=$(grep -r "ERROR\|WARN" logs/*.log 2>/dev/null | wc -l || echo "0")
-    if [ "$ERROR_COUNT" -gt 0 ]; then
-        echo "  ⚠ Found $ERROR_COUNT error/warning lines in logs"
-        grep -r "ERROR\|WARN" logs/*.log 2>/dev/null | head -20 >> $AUDIT_LOG 2>&1 || true
-    else
-        echo "  ✓ No errors found in logs"
-        echo "No errors found in logs" >> $AUDIT_LOG
-    fi
-else
-    echo "  ⚠ No log files found"
-    echo "No log files found" >> $AUDIT_LOG
-fi
-
-echo "" >> $AUDIT_LOG
-echo "Audit completed at $(date)" >> $AUDIT_LOG
+$PYTHON_CMD scripts/comprehensive_audit.py $AUDIT_ARGS
 
 echo ""
-echo "Audit complete. Results saved to $AUDIT_LOG"
+echo "Comprehensive audit complete!"
 

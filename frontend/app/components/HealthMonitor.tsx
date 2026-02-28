@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { HealthStatus } from '@/types'
 import { CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 interface HealthMonitorProps {
   health?: HealthStatus

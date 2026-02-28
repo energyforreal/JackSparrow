@@ -2,28 +2,49 @@
 
 Common issues and solutions for the JackSparrow Trading Agent system.
 
+> **Note**: All log paths in this guide (for example `logs/backend.log` or `logs/agent.log`) refer to **runtime log files** under the `logs/` directory. These files are generated and rotated per run and are intentionally ignored by git—they will not appear in the repository.
+
 ## Unicode Encoding Issues
 
 ### Problem: UnicodeEncodeError on Windows
 
 **Symptoms:**
 - `UnicodeEncodeError: 'charmap' codec can't encode character`
-- Scripts fail with encoding errors
+- Scripts fail with encoding errors when displaying Unicode symbols (⚠, ✓, ✗, etc.)
 - Unicode characters don't display correctly
 
 **Solution:**
-1. Ensure scripts use UTF-8 encoding:
+The startup scripts now use a robust Unicode-safe approach:
+
+1. **Automatic Symbol Fallback**: All scripts use the `get_safe_symbol()` function which:
+   - Detects the actual stdout encoding (often `cp1252` on Windows)
+   - Tests if Unicode symbols can be encoded
+   - Automatically falls back to ASCII equivalents (`!` instead of `⚠`, `OK` instead of `✓`, `X` instead of `✗`)
+   - Works transparently without user intervention
+
+2. **Enhanced Print Function**: The `_flushed_print()` function handles encoding errors gracefully:
+   - Catches `UnicodeEncodeError` exceptions
+   - Automatically retries with error handling (`errors='replace'`)
+   - Falls back to ASCII-only output if needed
+
+3. **Implementation Details**:
    ```python
-   sys.stdout.reconfigure(encoding='utf-8')
+   # Example usage in scripts:
+   warning_symbol = get_safe_symbol("⚠", "!")
+   print(f"{Colors.YELLOW}{warning_symbol} Warning message{Colors.RESET}")
    ```
 
-2. Use ASCII-safe symbols on Windows:
-   - Scripts automatically detect Windows and use `[OK]`, `[WARN]`, `[FAIL]` instead of Unicode symbols
-
-3. Verify encoding configuration:
+4. **Verify encoding configuration**:
    ```bash
    python tools/commands/test-encoding.py
    ```
+
+**Fixed Scripts:**
+- `tools/commands/start_parallel.py` - Main startup script with comprehensive Unicode handling
+- `tools/commands/validate-prerequisites.py` - Prerequisite validation with safe symbols
+- `tools/commands/utils.py` - Shared utilities with Unicode-safe functions
+
+**Note**: On Windows, you may see ASCII symbols (`OK`, `!`, `X`) instead of Unicode symbols (`✓`, `⚠`, `✗`). This is intentional and ensures scripts work reliably across all Windows configurations.
 
 ### Problem: Unicode in Log Files
 
@@ -123,6 +144,24 @@ grep "model_discovery" logs/agent.log
 
 2. Warnings are non-blocking - models still work
 
+## Prerequisite Validation Issues
+
+### Problem: Node.js Version Format Warning
+
+**Symptoms:**
+- Warning: "Node.js version format unexpected: 22.17.0"
+- Version parsing fails for valid Node.js versions
+- Prerequisite check shows warnings for correctly installed Node.js
+
+**Solution:**
+The `validate-prerequisites.py` script now includes improved version parsing:
+- Handles all standard Node.js version formats (e.g., `22.17.0`, `v22.17.0`, `22.17`)
+- Extracts major version number correctly
+- Only warns if version format is truly unexpected
+- Validates that Node.js 18+ is installed
+
+**Fixed**: The script now correctly parses Node.js version `22.17.0` and higher without warnings.
+
 ## Service Startup Issues
 
 ### Problem: Services Won't Start
@@ -131,6 +170,7 @@ grep "model_discovery" logs/agent.log
 - Port already in use
 - Import errors
 - Configuration errors
+- Unicode encoding errors during startup
 
 **Solution:**
 1. Check port availability:
@@ -163,6 +203,57 @@ grep "model_discovery" logs/agent.log
    ```bash
    curl http://localhost:8000/api/v1/health
    ```
+
+## Docker-Specific Runbooks
+
+### Problem: A container is repeatedly restarting (crash loop) in Docker
+
+**Symptoms:**
+- `docker compose ps` shows a service constantly restarting
+- `STATUS` column shows `Restarting (1)` or similar
+
+**Solution:**
+1. Inspect the service logs:
+   ```bash
+   docker compose logs --tail=100 backend   # or agent / frontend / postgres / redis
+   ```
+2. Look for configuration errors (bad `DATABASE_URL`, invalid API keys, missing environment variables).
+3. If the error is configuration-related:
+   - Fix the values in the root `.env` file.
+   - Re-run `python scripts/docker_diagnostic.py` to confirm the new configuration is valid.
+   - Restart the stack:
+     ```bash
+     docker compose up -d
+     ```
+
+### Problem: Agent running in Docker but no signals are visible in the UI
+
+**Symptoms:**
+- Frontend loads, but no trading signals or reasoning chains appear.
+- Backend `/api/v1/health` shows `model_nodes: UNKNOWN` or `degraded`.
+
+**Solution:**
+1. Confirm models exist on the host:
+   ```bash
+   ls agent/model_storage
+   ```
+2. Run the model check from the host:
+   ```bash
+   python scripts/docker_diagnostic.py
+   ```
+   - Fix any warnings about missing model files or `MODEL_DIR`.
+3. Inspect agent logs for model discovery and prediction pipeline:
+   ```bash
+   docker compose logs --tail=200 agent
+   ```
+   - Look for `model_discovery` entries and any `model_discovery_failed` or `model_nodes_discovery_result` events.
+4. If necessary, copy valid model artefacts into `agent/model_storage/...` and restart only the agent:
+   ```bash
+   docker compose restart agent
+   ```
+5. Refresh the frontend and confirm that:
+   - Backend `/api/v1/health` reports healthy `model_nodes`.
+   - WebSocket data freshness indicators show recent updates.
 
 ## Test Failures
 

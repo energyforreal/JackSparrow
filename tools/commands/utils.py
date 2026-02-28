@@ -42,15 +42,30 @@ print = _flushed_print  # type: ignore
 
 
 def get_safe_symbol(symbol: str, fallback: str) -> str:
-    """Return symbol if platform supports Unicode, otherwise fallback."""
+    """Return symbol if platform supports Unicode, otherwise fallback.
+    
+    This function checks if the current stdout encoding can handle the Unicode symbol.
+    On Windows, it uses the actual stdout encoding (often cp1252) to test compatibility.
+    """
     if platform.system() == "Windows":
         try:
-            # Try to encode the symbol to check if it's supported
-            symbol.encode(sys.stdout.encoding or "utf-8")
+            # Get the actual stdout encoding, defaulting to utf-8 if unavailable
+            encoding = sys.stdout.encoding or sys.getdefaultencoding() or "utf-8"
+            
+            # Try to encode the symbol using the actual encoding
+            # This will fail if the encoding doesn't support the character
+            symbol.encode(encoding)
+            return symbol
+        except (UnicodeEncodeError, AttributeError, TypeError):
+            # If encoding fails, return the ASCII fallback
+            return fallback
+    else:
+        # On non-Windows systems, try UTF-8 encoding
+        try:
+            symbol.encode("utf-8")
             return symbol
         except (UnicodeEncodeError, AttributeError):
             return fallback
-    return symbol
 
 
 def load_root_env(project_root: Path):
@@ -225,7 +240,7 @@ def print_prerequisite_error(issues: List[str]):
         issues: List of prerequisite issues found
     """
     # Use ASCII-safe characters for Windows compatibility
-    error_symbol = "X" if platform.system() == "Windows" else "✗"
+    error_symbol = get_safe_symbol("✗", "X")
     print(f"\n{Colors.ERROR}{error_symbol} Prerequisites Check Failed{Colors.RESET}\n")
     print("The following required services are not running:")
     bullet = "-" if platform.system() == "Windows" else "•"
@@ -308,7 +323,7 @@ def run_validation_script(script_path: Path, script_name: str, project_root: Pat
 
         # Show result clearly
         if result.returncode != 0:
-            error_symbol = "X" if platform.system() == "Windows" else "✗"
+            error_symbol = get_safe_symbol("✗", "X")
             print(f"{Colors.ERROR}{error_symbol} {script_name} failed with exit code {result.returncode}{Colors.RESET}")
             sys.stdout.flush()
 

@@ -1,11 +1,29 @@
 """
 Pydantic response models for API endpoints.
+
+All Decimal fields are automatically serialized as float in JSON responses
+for consistency between HTTP API and WebSocket endpoints.
 """
 
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 from decimal import Decimal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
+
+
+class DecimalSerializerMixin:
+    """Mixin to serialize Decimal fields as float in JSON responses.
+
+    This ensures Decimal types are consistently serialized as float
+    across both HTTP API and WebSocket endpoints.
+    """
+
+    @field_serializer('*', mode='wrap', when_used='json', check_fields=False)
+    def serialize_decimal(self, value, handler, _info):
+        """Convert Decimal to float during JSON serialization."""
+        if isinstance(value, Decimal):
+            return float(value)
+        return handler(value)
 
 
 class HealthServiceStatus(BaseModel):
@@ -170,6 +188,19 @@ class ReasoningStep(BaseModel):
         le=1.0,
         example=0.8
     )
+    # Optional metadata fields
+    data_freshness_seconds: Optional[int] = Field(
+        None,
+        description="Seconds since market data was last updated"
+    )
+    similarity_score: Optional[float] = Field(
+        None,
+        description="Similarity score for historical context retrieval (0.0 to 1.0)"
+    )
+    feature_quality_score: Optional[float] = Field(
+        None,
+        description="Feature quality score for situational assessment (0.0 to 1.0)"
+    )
 
 
 class ReasoningChain(BaseModel):
@@ -202,7 +233,7 @@ class ReasoningChain(BaseModel):
     )
 
 
-class PredictResponse(BaseModel):
+class PredictResponse(DecimalSerializerMixin, BaseModel):
     """Prediction response."""
     
     model_config = ConfigDict(protected_namespaces=())
@@ -250,9 +281,10 @@ class PredictResponse(BaseModel):
     )
 
 
-class TradeResponse(BaseModel):
+class TradeResponse(DecimalSerializerMixin, BaseModel):
     """Trade execution response."""
-    
+    model_config = ConfigDict(from_attributes=True)
+
     trade_id: str = Field(
         ...,
         description="Unique trade ID",
@@ -294,9 +326,10 @@ class TradeResponse(BaseModel):
     )
 
 
-class PositionResponse(BaseModel):
+class PositionResponse(DecimalSerializerMixin, BaseModel):
     """Position response."""
-    
+    model_config = ConfigDict(from_attributes=True)
+
     position_id: str = Field(
         ...,
         description="Unique position ID",
@@ -353,7 +386,7 @@ class PositionResponse(BaseModel):
     )
 
 
-class PortfolioSummaryResponse(BaseModel):
+class PortfolioSummaryResponse(DecimalSerializerMixin, BaseModel):
     """Portfolio summary response."""
     
     total_value: Decimal = Field(
@@ -387,7 +420,7 @@ class PortfolioSummaryResponse(BaseModel):
     )
 
 
-class MarketDataResponse(BaseModel):
+class MarketDataResponse(DecimalSerializerMixin, BaseModel):
     """Market data response."""
     
     symbol: str = Field(
@@ -425,8 +458,8 @@ class AgentStatusResponse(BaseModel):
         description="Agent state",
         example="MONITORING"
     )
-    last_update: datetime = Field(
-        ...,
+    last_update: Optional[datetime] = Field(
+        default=None,
         description="Last update timestamp"
     )
     active_symbols: List[str] = Field(

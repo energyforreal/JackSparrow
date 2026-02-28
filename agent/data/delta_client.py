@@ -686,11 +686,13 @@ class DeltaExchangeWebSocketClient:
 
     async def _connect_websocket(self, url: str) -> None:
         """Internal method to establish WebSocket connection."""
+        # Use a slightly more tolerant ping configuration to reduce spurious
+        # keepalive timeouts while still detecting real disconnects.
         self.websocket = await websockets.connect(
             url,
-            ping_interval=20.0,  # Send ping every 20 seconds
-            ping_timeout=10.0,
-            close_timeout=5.0
+            ping_interval=30.0,  # Send ping every 30 seconds
+            ping_timeout=30.0,   # Allow up to 30 seconds for pong
+            close_timeout=5.0,
         )
 
     async def disconnect(self) -> None:

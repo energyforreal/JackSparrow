@@ -5,7 +5,7 @@ import { ConfidenceProgress } from './ConfidenceProgress'
 import { Badge } from '@/components/ui/badge'
 import { ModelConsensus, ModelReasoning, SignalType } from '@/types'
 import { cn } from '@/lib/utils'
-import { normalizeConfidenceToPercent, formatConfidence } from '@/utils/formatters'
+import { formatConfidence } from '@/utils/formatters'
 
 interface ModelReasoningViewProps {
   modelConsensus?: ModelConsensus[]
@@ -33,7 +33,6 @@ const getSignalBadgeClasses = (signal: SignalType) => {
 
 export function ModelReasoningView({
   modelConsensus,
-  individualModelReasoning,
 }: ModelReasoningViewProps) {
   const hasConsensus = modelConsensus && modelConsensus.length > 0
 

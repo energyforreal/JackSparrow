@@ -273,7 +273,7 @@ class EnvValidator:
         
         url_vars = {
             "DELTA_EXCHANGE_BASE_URL": ["https://api.india.delta.exchange"],
-            "FEATURE_SERVER_URL": ["http://localhost:8001"],
+            "FEATURE_SERVER_URL": ["http://localhost:8002"],
             "QDRANT_URL": None,  # Optional
         }
         

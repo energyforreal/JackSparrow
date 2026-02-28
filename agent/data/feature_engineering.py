@@ -763,15 +763,15 @@ class FeatureEngineering:
         validation_results = {
             "valid": True,
             "feature_count": len(feature_list),
-            "expected_count": 49,
+            "expected_count": 50,
             "missing_features": [],
             "errors": []
         }
         
-        if len(feature_list) != 49:
+        if len(feature_list) != 50:
             validation_results["valid"] = False
             validation_results["errors"].append(
-                f"Feature count mismatch: got {len(feature_list)}, expected 49"
+                f"Feature count mismatch: got {len(feature_list)}, expected 50"
             )
         
         # Check that all features can be computed (basic check)

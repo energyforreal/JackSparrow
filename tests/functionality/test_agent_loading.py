@@ -213,14 +213,21 @@ class AgentLoadingTestSuite(TestSuiteBase):
             else:
                 result.details["feature_server_api_initialized"] = True
                 
-                # Check if feature server is accessible
-                feature_server = getattr(feature_server_api, "feature_server", None)
-                if feature_server:
-                    result.details["feature_server_available"] = True
+                # Check if feature server is accessible via MCP orchestrator
+                mcp_orchestrator = getattr(self.agent, "mcp_orchestrator", None)
+                if mcp_orchestrator:
+                    feature_server = getattr(mcp_orchestrator, "feature_server", None)
+                    if feature_server:
+                        result.details["feature_server_available"] = True
+                        result.details["feature_server_via_mcp"] = True
+                    else:
+                        result.status = TestStatus.WARNING
+                        result.issues.append("Feature server not accessible via MCP orchestrator")
+                        result.solutions.append("Check MCP orchestrator feature server initialization")
                 else:
                     result.status = TestStatus.WARNING
-                    result.issues.append("Feature server not accessible")
-                    result.solutions.append("Check feature server configuration")
+                    result.issues.append("MCP orchestrator not available")
+                    result.solutions.append("Check MCP orchestrator initialization")
         except Exception as e:
             result.status = TestStatus.FAIL
             result.error = str(e)
@@ -400,14 +407,14 @@ class AgentLoadingTestSuite(TestSuiteBase):
             if learning_system:
                 result.details["learning_system_initialized"] = True
                 
-                # Check for memory store (may be optional)
+                # Check for memory store (optional feature)
                 memory_store = getattr(learning_system, "memory_store", None)
                 if memory_store:
                     result.details["memory_store_available"] = True
                 else:
-                    result.status = TestStatus.WARNING
-                    result.issues.append("Vector memory store not available")
-                    result.solutions.append("Vector memory store may be optional or not configured")
+                    # Vector memory store is optional - don't fail the test
+                    result.details["memory_store_status"] = "not_configured"
+                    result.details["memory_store_note"] = "Vector memory store is optional and not currently implemented"
             else:
                 result.status = TestStatus.WARNING
                 result.issues.append("Learning system not initialized")

@@ -12,7 +12,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Dot,
 } from 'recharts'
 
 interface PerformanceChartProps {

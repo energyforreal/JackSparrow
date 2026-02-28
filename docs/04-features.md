@@ -518,6 +518,32 @@ The example illustrates how raw market context, historical success rate, and mod
 - ✅ Performance tracking
 - ✅ Alerting system
 - ✅ Dashboard visualization
+- ✅ Position impact preview (risk assessment for open positions)
+
+#### Position Impact Preview
+
+**Description**: Real-time risk assessment showing how price movements affect existing positions and total portfolio value.
+
+**Capabilities**:
+- **P&L Impact Calculation**: Shows dollar and percentage changes for each position
+- **Risk Level Assessment**: Categorizes impact as low/medium/high/critical based on percentage change
+- **Liquidation Risk Detection**: Alerts when stop-loss levels are approached
+- **Portfolio Summary**: Aggregated impact across all positions
+- **Visual Indicators**: Color-coded badges and icons for quick risk assessment
+
+**Risk Levels**:
+- **Low**: <2% position impact
+- **Medium**: 2-5% position impact
+- **High**: 5-10% position impact
+- **Critical**: >10% position impact ⚠️
+
+**Visual Feedback**:
+- Green indicators for profitable impacts
+- Red indicators for losses
+- Risk level badges with appropriate colors
+- Warning icons for liquidation risk
+
+**Integration**: Seamlessly integrated into the RealTimePrice component, showing position impact alongside price change indicators.
 
 ### Technical Features
 - ✅ MCP protocol integration

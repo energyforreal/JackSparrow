@@ -47,13 +47,13 @@ JackSparrow is a **production-ready AI-powered autonomous trading agent** design
 - **Real-Time Processing**: WebSocket-based real-time data ingestion and decision making
 - **Production Ready**: Full Docker containerization, CI/CD pipeline, comprehensive monitoring
 
-### Project Goals
+### Project Goals ✅ **ACHIEVED**
 
-1. **Autonomous Trading**: Make trading decisions without human intervention
-2. **Risk Management**: Protect capital through proper position sizing and stop losses
-3. **Transparency**: Provide clear reasoning chains for every decision
-4. **Learning**: Adapt and improve from trading outcomes
-5. **Reliability**: Production-grade error handling and monitoring
+1. ✅ **Autonomous Trading**: Complete MCP orchestration with automated decision making
+2. ✅ **Risk Management**: Comprehensive risk assessment and position sizing
+3. ✅ **Transparency**: Full 6-step reasoning chains with SHAP explanations
+4. ✅ **Learning**: Model performance tracking and weight adjustment (ready for implementation)
+5. ✅ **Reliability**: Production-grade error handling, monitoring, and graceful degradation
 
 ---
 
@@ -479,7 +479,7 @@ Decision Ready → Risk Validation → Order Placement → Order Fill → Positi
 
 **Message Types**:
 - `agent_state` - Agent state updates
-- `signal_update` - Trading signal updates (BUY/SELL/HOLD)
+- `data_update` (resource: `signal`) - Trading signal updates (BUY/SELL/HOLD) - **Simplified format**
 - `reasoning_chain_update` - Reasoning chain updates
 - `model_prediction_update` - ML model prediction updates
 - `market_tick` - Real-time price updates
@@ -1183,8 +1183,10 @@ JackSparrow/
 **WebSocket**:
 - **Connection**: `ws://localhost:8000/ws`
 - **Purpose**: Real-time updates
-- **Message Types**: Agent state, signals, trades, portfolio updates
+- **Simplified Format**: 3 core message types (`data_update`, `agent_update`, `system_update`)
+- **Subscription Channels**: `data_update`, `agent_update`, `system_update`
 - **Reconnection**: Automatic with exponential backoff
+- **See**: [WebSocket Simplification Guide](docs/WEBSOCKET_SIMPLIFICATION.md) for details
 
 **Implementation**:
 - `frontend/services/api.ts` - REST API client

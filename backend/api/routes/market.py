@@ -89,6 +89,18 @@ async def get_ticker(
         )
 
 
+@router.get("/market/ticker/{symbol}")
+async def get_ticker_by_symbol(symbol: str):
+    """
+    Get current ticker information using path parameter.
+
+    This is a convenience wrapper around the query-parameter-based
+    `get_ticker` endpoint, for clients that call
+    `/api/v1/market/ticker/{symbol}`.
+    """
+    return await get_ticker(symbol=symbol)
+
+
 @router.get("/market/orderbook")
 async def get_orderbook(
     symbol: str = Query(..., description="Trading symbol"),

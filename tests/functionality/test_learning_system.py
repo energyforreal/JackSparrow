@@ -42,10 +42,12 @@ class LearningSystemTestSuite(TestSuiteBase):
             learning_system = getattr(self.agent, "learning_system", None)
             if learning_system is None:
                 result.status = TestStatus.WARNING
-                result.issues.append("Learning system not available")
-                result.solutions.append("Check learning system initialization")
+                result.issues.append("Learning system not available (optional feature)")
+                result.solutions.append("Learning system is optional - basic trading functionality works without it")
+                result.details["learning_system_status"] = "not_implemented"
             else:
                 result.details["learning_system_available"] = True
+                result.details["learning_system_status"] = "available"
                 
                 # Check for performance tracking methods
                 tracking_methods = {
@@ -56,14 +58,20 @@ class LearningSystemTestSuite(TestSuiteBase):
                 }
                 
                 result.details["available_tracking_methods"] = {k: v for k, v in tracking_methods.items() if v}
-                
+
                 if any(tracking_methods.values()):
                     result.details["performance_tracking_available"] = True
-                    
-                    # Test performance tracking if method available
-                    if tracking_methods.get("track_performance"):
-                        try:
-                            # Create test performance data
+                    result.details["learning_system_status"] = "functional"
+                else:
+                    result.status = TestStatus.WARNING
+                    result.issues.append("Learning system methods not implemented (optional feature)")
+                    result.solutions.append("Learning system is optional - basic trading functionality works without performance tracking")
+                    result.details["learning_system_status"] = "partial_implementation"
+
+                # Test performance tracking if method available
+                if tracking_methods.get("track_performance"):
+                    try:
+                        # Create test performance data
                             test_performance = {
                                 "model_name": "test_model",
                                 "prediction": "BUY",

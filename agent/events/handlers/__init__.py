@@ -8,12 +8,14 @@ from agent.events.handlers.market_data_handler import MarketDataEventHandler, ma
 from agent.events.handlers.feature_handler import FeatureEventHandler, feature_handler
 from agent.events.handlers.model_handler import ModelEventHandler, model_handler
 from agent.events.handlers.reasoning_handler import ReasoningEventHandler, reasoning_handler
+from agent.events.handlers.trading_handler import TradingEventHandler
 
 __all__ = [
     "MarketDataEventHandler",
     "FeatureEventHandler",
     "ModelEventHandler",
     "ReasoningEventHandler",
+    "TradingEventHandler",
     "market_data_handler",
     "feature_handler",
     "model_handler",

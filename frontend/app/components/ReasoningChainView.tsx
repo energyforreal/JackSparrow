@@ -9,8 +9,20 @@ import {
 } from '@/components/ui/accordion'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { Badge } from '@/components/ui/badge'
-import { ReasoningChain, ReasoningStep } from '@/types'
-import { normalizeConfidenceToPercent, formatConfidence } from '@/utils/formatters'
+import {
+  ModelConsensus,
+  ModelReasoning,
+  ReasoningChain,
+  ReasoningStep,
+} from '@/types'
+import {
+  normalizeConfidenceToPercent,
+  formatConfidence,
+  getDataFreshnessColor,
+  formatDateTime,
+} from '@/utils/formatters'
+import { LoadingSkeleton } from './LoadingSpinner'
+import { ModelReasoningView } from './ModelReasoningView'
 
 interface ReasoningChainViewProps {
   // Array of reasoning steps as sent over WebSocket.
@@ -18,13 +30,52 @@ interface ReasoningChainViewProps {
   // Optional full chain metadata (typically from HTTP /predict).
   chainMeta?: ReasoningChain
   overallConfidence?: number
+  // Loading state for reasoning chain generation
+  isLoading?: boolean
+  // Model reasoning data for integration
+  modelConsensus?: ModelConsensus[]
+  individualModelReasoning?: ModelReasoning[]
 }
 
 export function ReasoningChainView({
   reasoningChain,
   chainMeta,
   overallConfidence,
+  isLoading = false,
+  modelConsensus,
+  individualModelReasoning,
 }: ReasoningChainViewProps) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent Reasoning Chain</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <LoadingSkeleton className="h-4 w-32" />
+            <LoadingSkeleton className="h-4 w-24" />
+          </div>
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5, 6].map((stepNum) => (
+              <div key={stepNum} className="border rounded-lg p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <LoadingSkeleton className="h-5 w-48" />
+                  <LoadingSkeleton className="h-4 w-16" />
+                </div>
+                <LoadingSkeleton className="h-4 w-full" />
+                <LoadingSkeleton className="h-4 w-3/4" />
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-center">
+            <LoadingSkeleton className="h-8 w-48" />
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (!reasoningChain || reasoningChain.length === 0) {
     return (
       <Card>
@@ -83,13 +134,95 @@ export function ReasoningChainView({
     6: 'Confidence Calibration',
   }
 
-  const STEP_SUMMARIES: Record<number, string> = {
-    1: 'Understands current market regime, volatility, and any anomalies.',
-    2: 'Finds similar past situations and learns from their outcomes.',
-    3: 'Aggregates predictions from all active ML models into a consensus.',
-    4: 'Evaluates portfolio heat, drawdown, volatility and other risk factors.',
-    5: 'Combines signals, history and risk into a concrete trading decision.',
-    6: 'Adjusts confidence based on historical calibration for this regime.',
+  // Generate confidence tooltip text for each step
+  const getConfidenceTooltip = (step: ReasoningStep): string => {
+    const confidencePercent = normalizeConfidenceToPercent(step.confidence)
+
+    switch (step.step_number) {
+      case 1:
+        return `Situational Assessment confidence (${confidencePercent.toFixed(1)}%) based on market data quality and feature completeness. Higher scores indicate better data reliability.`
+      case 2:
+        return `Historical Context confidence (${confidencePercent.toFixed(1)}%) based on similarity to past market situations. Higher scores indicate stronger historical precedents.`
+      case 3:
+        return `Model Consensus confidence (${confidencePercent.toFixed(1)}%) represents average confidence across all ML models. Higher scores indicate more reliable predictions.`
+      case 4:
+        return `Risk Assessment confidence (${confidencePercent.toFixed(1)}%) based on completeness of risk data (volatility, portfolio, metrics). Higher scores indicate more comprehensive risk evaluation.`
+      case 5:
+        return `Decision Synthesis confidence (${confidencePercent.toFixed(1)}%) based on model prediction strength and consistency. Higher scores indicate clearer trading signals.`
+      case 6:
+        return `Confidence Calibration (${confidencePercent.toFixed(1)}%) is the final calibrated confidence after considering step consistency and historical performance.`
+      default:
+        return `Step confidence: ${confidencePercent.toFixed(1)}%`
+    }
+  }
+
+  // Generate dynamic summaries based on actual step data
+  const generateStepSummary = (step: ReasoningStep): string => {
+    const baseSummaries: Record<number, string> = {
+      1: 'Analyzes current market conditions and data quality.',
+      2: 'Searches for similar historical market situations.',
+      3: 'Aggregates predictions from multiple ML models.',
+      4: 'Assesses trading risks and portfolio exposure.',
+      5: 'Synthesizes all inputs into a trading decision.',
+      6: 'Calibrates final confidence based on step consistency.',
+    }
+
+    let summary = baseSummaries[step.step_number] || 'Processing step analysis.'
+
+    // Add dynamic elements based on evidence and metadata
+    if (step.evidence && step.evidence.length > 0) {
+      switch (step.step_number) {
+        case 1: // Situational Assessment
+          if (step.feature_quality_score !== undefined) {
+            summary += ` Data quality: ${(step.feature_quality_score * 100).toFixed(0)}%.`
+          }
+          break
+        case 2: // Historical Context
+          const similarContexts = step.evidence.find(e => e.includes('similar historical contexts'))
+          if (similarContexts) {
+            const match = similarContexts.match(/Found (\d+)/)
+            if (match) {
+              summary += ` Found ${match[1]} relevant cases.`
+            }
+          }
+          if (step.similarity_score !== undefined) {
+            summary += ` Avg similarity: ${(step.similarity_score * 100).toFixed(0)}%.`
+          }
+          break
+        case 3: // Model Consensus
+          const consensusMatch = step.evidence.find(e => e.includes('models, avg confidence'))
+          if (consensusMatch) {
+            const match = consensusMatch.match(/(\d+) models/)
+            if (match) {
+              summary += ` Using ${match[1]} model predictions.`
+            }
+          }
+          break
+        case 4: // Risk Assessment
+          const riskLevel = step.description.match(/Risk level: (\w+)/)?.[1]
+          if (riskLevel) {
+            summary += ` Current risk: ${riskLevel}.`
+          }
+          break
+        case 5: // Decision Synthesis
+          if (step.description && !step.description.includes('HOLD')) {
+            summary += ` Recommends: ${step.description.split(' - ')[0]}.`
+          }
+          break
+      }
+    }
+
+    // Add confidence level indicator
+    const confidencePercent = normalizeConfidenceToPercent(step.confidence)
+    if (confidencePercent >= 75) {
+      summary += ' (High confidence)'
+    } else if (confidencePercent >= 50) {
+      summary += ' (Medium confidence)'
+    } else {
+      summary += ' (Low confidence)'
+    }
+
+    return summary
   }
 
   const conclusionText =
@@ -108,6 +241,14 @@ export function ReasoningChainView({
                 Confidence: {formatConfidence(finalConfidencePercent)}
               </Badge>
             )}
+            {chainMeta?.timestamp && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Generated:</span>
+                <span className={getDataFreshnessColor(chainMeta.timestamp)}>
+                  {formatDateTime(chainMeta.timestamp)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -120,9 +261,7 @@ export function ReasoningChainView({
           {sortedSteps.map((step) => {
             const stepConfidence = normalizeConfidenceToPercent(step.confidence)
             const title = STEP_TITLES[step.step_number] ?? step.step_name
-            const summary =
-              STEP_SUMMARIES[step.step_number] ??
-              'Detailed reasoning for this step is shown below.'
+            const summary = generateStepSummary(step)
 
             return (
               <AccordionItem
@@ -140,10 +279,18 @@ export function ReasoningChainView({
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">
+                      <span
+                        className="text-xs text-muted-foreground cursor-help"
+                        title={getConfidenceTooltip(step)}
+                      >
                         {formatConfidence(stepConfidence)}
                       </span>
-                      <ConfidenceProgress value={stepConfidence} className="w-20 h-2" />
+                      <div
+                        className="w-20 h-2 cursor-help"
+                        title={getConfidenceTooltip(step)}
+                      >
+                        <ConfidenceProgress value={stepConfidence} />
+                      </div>
                     </div>
                   </div>
                 </AccordionTrigger>
@@ -200,6 +347,32 @@ export function ReasoningChainView({
             </CardContent>
           </Card>
         </div>
+
+        {/* Model Reasoning Section - Integrated */}
+        {(modelConsensus || individualModelReasoning) && (
+          <div className="mt-4">
+            <Accordion type="single" collapsible defaultValue="">
+              <AccordionItem value="model-reasoning">
+                <AccordionTrigger className="text-left">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <span>Model Reasoning Details</span>
+                    <Badge variant="outline" className="text-xs">
+                      {Array.isArray(modelConsensus) ? modelConsensus.length : 0} Models
+                    </Badge>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="pt-2">
+                    <ModelReasoningView
+                      modelConsensus={modelConsensus}
+                      individualModelReasoning={individualModelReasoning}
+                    />
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </div>
+        )}
 
         <Card className="mt-4 bg-accent/50 border-accent">
           <CardHeader className="py-3">

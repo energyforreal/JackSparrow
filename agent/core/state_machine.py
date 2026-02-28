@@ -131,7 +131,7 @@ class AgentStateMachine:
                 f"Position closed - {exit_reason}"
             )
             # Update context to clear position
-            self.context_manager.update_context({
+            await self.context_manager.update_state({
                 "position": None,
                 "position_opened": False
             })
@@ -152,7 +152,7 @@ class AgentStateMachine:
         self.state_entry_time = datetime.utcnow()
         
         # Update context
-        self.context_manager.update_context({"state": new_state})
+        await self.context_manager.update_state({"state": new_state})
         self.context_manager.add_state_transition(from_state, new_state, reason)
         
         # Emit state transition event

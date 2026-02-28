@@ -468,7 +468,8 @@ Emergency stop - immediately halt all trading.
 
 **Frontend Client Endpoint**: `ws://localhost:8000/ws`
 - Used by frontend for real-time updates
-- Handles: `agent_state`, `signal_update`, `trade_executed`, `portfolio_update`, `health_update`, `reasoning_chain_update`, `model_prediction_update`, `market_tick`
+- **Simplified Format**: Uses 3 core message types (`data_update`, `agent_update`, `system_update`)
+- **See**: [WebSocket Simplification Guide](WEBSOCKET_SIMPLIFICATION.md) for complete details
 
 **Agent Event Endpoint**: `ws://localhost:8000/ws/agent`
 - Used by agent to send events directly to backend
@@ -477,26 +478,46 @@ Emergency stop - immediately halt all trading.
 
 **Authentication**: Token-based (optional for development)
 
+### Simplified Message Format
+
+All WebSocket messages use a unified envelope format:
+
+```json
+{
+  "type": "data_update" | "agent_update" | "system_update",
+  "resource": "signal" | "portfolio" | "trade" | "market" | "model" | "agent" | "health" | "time",
+  "data": { ... },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "sequence": 12345,
+  "source": "agent" | "system",
+  "server_timestamp_ms": 1706356800123
+}
+```
+
 ### Message Types
 
 #### Server → Client Messages
 
-**Agent State Update**:
+**Agent State Update** (`agent_update`):
 ```json
 {
-  "type": "agent_state",
+  "type": "agent_update",
+  "resource": "agent",
   "data": {
     "state": "ANALYZING",
     "message": "Processing new market data",
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "agent"
 }
 ```
 
-**Trade Executed**:
+**Trade Executed** (`data_update` with `resource: "trade"`):
 ```json
 {
-  "type": "trade_executed",
+  "type": "data_update",
+  "resource": "trade",
   "data": {
     "order_id": "order_abc123",
     "symbol": "BTCUSD",
@@ -504,44 +525,53 @@ Emergency stop - immediately halt all trading.
     "price": 50000.0,
     "quantity": 0.05,
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "system"
 }
 ```
 
-**Portfolio Update**:
+**Portfolio Update** (`data_update` with `resource: "portfolio"`):
 ```json
 {
-  "type": "portfolio_update",
+  "type": "data_update",
+  "resource": "portfolio",
   "data": {
     "total_value": 100500.0,
     "unrealized_pnl": 500.0,
     "cash": 95000.0,
     "positions_value": 5000.0,
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "system"
 }
 ```
 
-**Health Status Change**:
+**Health Status Change** (`system_update` with `resource: "health"`):
 ```json
 {
-  "type": "health_status",
+  "type": "system_update",
+  "resource": "health",
   "data": {
     "status": "degraded",
     "health_score": 0.72,
     "reason": "Delta Exchange API latency high",
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "system"
 }
 ```
 
-**Signal Update** (Trading Decision):
+**Signal Update** (`data_update` with `resource: "signal"`):
 ```json
 {
-  "type": "signal_update",
+  "type": "data_update",
+  "resource": "signal",
   "data": {
     "signal": "BUY",
-    "confidence": 75.0,
+    "confidence": 0.75,
     "symbol": "BTCUSD",
     "model_consensus": [...],
     "reasoning_chain": [...],
@@ -552,10 +582,11 @@ Emergency stop - immediately halt all trading.
 }
 ```
 
-**Reasoning Chain Update**:
+**Reasoning Chain Update** (`data_update` with `resource: "signal"`):
 ```json
 {
-  "type": "reasoning_chain_update",
+  "type": "data_update",
+  "resource": "signal",
   "data": {
     "symbol": "BTCUSD",
     "reasoning_chain": [
@@ -566,26 +597,29 @@ Emergency stop - immediately halt all trading.
       }
     ],
     "conclusion": "Final decision reasoning...",
-    "final_confidence": 75.0,
+    "final_confidence": 0.75,
     "chain_id": "chain_123",
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "agent"
 }
 ```
 
-**Model Prediction Update**:
+**Model Prediction Update** (`data_update` with `resource: "model"`):
 ```json
 {
-  "type": "model_prediction_update",
+  "type": "data_update",
+  "resource": "model",
   "data": {
     "symbol": "BTCUSD",
     "consensus_signal": 0.75,
-    "consensus_confidence": 82.5,
+    "consensus_confidence": 0.825,
     "model_consensus": [
       {
         "model_name": "xgboost_v1",
         "signal": "BUY",
-        "confidence": 85.0,
+        "confidence": 0.85,
         "prediction": 0.8
       }
     ],
@@ -593,7 +627,7 @@ Emergency stop - immediately halt all trading.
       {
         "model_name": "xgboost_v1",
         "reasoning": "RSI indicates oversold...",
-        "confidence": 85.0,
+        "confidence": 0.85,
         "prediction": 0.8
       }
     ],
@@ -611,9 +645,13 @@ Emergency stop - immediately halt all trading.
     "price": 50000.0,
     "volume": 1234.56,
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "agent"
 }
 ```
+
+**Note**: All legacy message types have been unified under the simplified format. See [WebSocket Simplification Guide](WEBSOCKET_SIMPLIFICATION.md) for complete details.
 
 #### Client → Server Messages
 
@@ -753,14 +791,14 @@ All WebSocket messages broadcast via `websocket_manager.broadcast()` automatical
 
 All event handlers in `agent_event_subscriber.py` add `timestamp` fields to their message data:
 
-- `market_tick`: Includes timestamp from market data event
-- `signal_update`: Includes timestamp from decision ready event
-- `reasoning_chain_update`: Includes timestamp from reasoning complete event
-- `model_prediction_update`: Includes timestamp from model prediction event
-- `portfolio_update`: Includes current UTC timestamp
-- `agent_state`: Includes timestamp from state transition or periodic sync
-- `trade_executed`: Includes execution timestamp
-- `health_update`: Includes health check timestamp
+- `data_update` (resource: `market`): Includes timestamp from market data event
+- `data_update` (resource: `signal`): Includes timestamp from decision ready event
+- `data_update` (resource: `model`): Includes timestamp from model prediction event
+- `data_update` (resource: `portfolio`): Includes current UTC timestamp
+- `data_update` (resource: `trade`): Includes execution timestamp
+- `agent_update`: Includes timestamp from state transition or periodic sync
+- `system_update` (resource: `health`): Includes health check timestamp
+- `system_update` (resource: `time`): Includes server time synchronization
 
 #### Periodic Update Frequencies
 
@@ -1031,7 +1069,7 @@ logger = structlog.get_logger()
 
 # Log with context
 logger.info(
-    "trade_executed",
+    "data_update",  // Simplified format - replaces trade_executed, portfolio_update, signal_update, etc.
     trade_id="trade_123",
     symbol="BTCUSD",
     side="buy",

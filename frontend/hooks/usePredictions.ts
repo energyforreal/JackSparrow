@@ -1,52 +1,59 @@
-import { useState, useEffect } from 'react'
-import { useWebSocket } from './useWebSocket'
-import { Prediction } from '@/types'
+import { useEffect, useState } from 'react'
+import { useTradingData } from './useTradingData'
+import type { Signal } from '@/types'
 
-// Get WebSocket URL from environment variable
-const WS_URL =
-  process.env.NEXT_PUBLIC_WS_URL ||
-  (process.env.NODE_ENV === 'development' ? 'ws://localhost:8000/ws' : '')
-
+/**
+ * @deprecated Use useTradingData() and its `signal` field directly instead.
+ *
+ * This wrapper exists for backward compatibility and simply exposes the
+ * unified `Signal` from useTradingData as `prediction`.
+ */
 export function usePredictions(symbol: string = 'BTCUSD') {
-  const { isConnected, lastMessage } = useWebSocket(WS_URL)
-  const [prediction, setPrediction] = useState<Prediction | null>(null)
+  const { signal, isConnected, error } = useTradingData()
+  const [prediction, setPrediction] = useState<Signal | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
+  const [localError, setLocalError] = useState<Error | null>(null)
 
-  // Listen for WebSocket signal_update messages
+  // Derive prediction from unified trading signal
   useEffect(() => {
-    if (lastMessage?.type === 'signal_update') {
-      const signalData = lastMessage.data as Prediction
-      if (signalData && signalData.symbol === symbol) {
-        setPrediction(signalData)
-        setError(null)
+    if (!signal) {
+      if (isConnected) {
         setLoading(false)
       }
+      setPrediction(null)
+      return
     }
-  }, [lastMessage, symbol])
 
-  // Set loading to false after connection is established and no data received yet
+    if (signal.symbol && signal.symbol !== symbol) {
+      setPrediction(null)
+      return
+    }
+
+    setPrediction(signal)
+    setLoading(false)
+    setLocalError(null)
+  }, [signal, symbol, isConnected])
+
+  // Mirror connection/error semantics from the original hook
   useEffect(() => {
-    if (isConnected && !prediction) {
-      setLoading(false)
+    if (!isConnected && !signal) {
+      setLocalError(
+        error ?? new Error('WebSocket not connected - unable to receive predictions')
+      )
+    } else {
+      setLocalError(error)
     }
-  }, [isConnected, prediction])
+  }, [isConnected, signal, error])
 
-  // Set error if WebSocket is not connected
-  useEffect(() => {
-    if (!isConnected && !prediction) {
-      setError(new Error('WebSocket not connected - unable to receive predictions'))
-    } else if (isConnected) {
-      setError(null)
-    }
-  }, [isConnected, prediction])
-
-  // Legacy function for backward compatibility (no-op since we only use WebSocket)
+  // Legacy function for backward compatibility (no-op)
   const fetchPrediction = async () => {
-    // WebSocket-only approach - no manual fetching needed
-    console.log('usePredictions: WebSocket-only mode - predictions arrive automatically')
+    if (process.env.NODE_ENV === 'development') {
+      console.log(
+        'usePredictions: Deprecated wrapper. Use useTradingData() and select `signal` instead.'
+      )
+    }
   }
 
-  return { prediction, loading, error, fetchPrediction, isConnected }
+  return { prediction, loading, error: localError, fetchPrediction, isConnected }
 }
 

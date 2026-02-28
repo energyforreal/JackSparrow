@@ -23,9 +23,15 @@ interface UseSystemClockReturn {
  * - WebSocket time sync support
  */
 export function useSystemClock(): UseSystemClockReturn {
-  // Initialize with epoch to prevent hydration mismatch (server/client time difference)
-  // Will be updated immediately after mount on client-side only
-  const [currentTime, setCurrentTime] = useState<Date>(() => new Date(0))
+  // Initialize with current time to prevent showing epoch date
+  // Will be synced with server after mount, but always show reasonable time
+  const [currentTime, setCurrentTime] = useState<Date>(() => {
+    // Use current time immediately to avoid showing epoch date
+    if (typeof window !== 'undefined') {
+      return new Date()
+    }
+    return new Date(0) // Fallback for SSR
+  })
   const [isSynced, setIsSynced] = useState(false)
   const [syncError, setSyncError] = useState<Error | null>(null)
   
@@ -62,7 +68,12 @@ export function useSystemClock(): UseSystemClockReturn {
       const err = error instanceof Error ? error : new Error('Unknown sync error')
       setSyncError(err)
       setIsSynced(false)
-      console.warn('Failed to sync system clock:', err)
+      // Even if sync fails, use client time as fallback
+      // Reset offset to 0 so we use pure client time
+      offsetRef.current = 0
+      lastSyncRef.current = Date.now()
+      setCurrentTime(new Date())
+      console.warn('Failed to sync system clock, using client time:', err)
     }
   }
 
@@ -90,15 +101,21 @@ export function useSystemClock(): UseSystemClockReturn {
 
   // Initial sync on mount (client-side only)
   useEffect(() => {
-    // Set initial time immediately on client mount to prevent hydration mismatch
-    setCurrentTime(new Date())
+    // Ensure we have a valid current time immediately
+    if (currentTime.getTime() === 0 || currentTime.getFullYear() < 2020) {
+      setCurrentTime(new Date())
+    }
     
-    // Then sync with server
-    syncWithServer()
+    // Then sync with server (non-blocking)
+    syncWithServer().catch(() => {
+      // Error already handled in syncWithServer
+    })
     
     // Periodic sync every 5 minutes
     syncIntervalRef.current = setInterval(() => {
-      syncWithServer()
+      syncWithServer().catch(() => {
+        // Error already handled in syncWithServer
+      })
     }, 5 * 60 * 1000) // 5 minutes
     
     return () => {
@@ -115,8 +132,14 @@ export function useSystemClock(): UseSystemClockReturn {
       const timeSinceSync = now - lastSyncRef.current
       
       // Apply offset and update time
+      // Always ensure we have a valid date (not epoch)
       const adjustedTime = new Date(now + offsetRef.current)
-      setCurrentTime(adjustedTime)
+      if (adjustedTime.getTime() > 0 && adjustedTime.getFullYear() >= 2020) {
+        setCurrentTime(adjustedTime)
+      } else {
+        // Fallback to current time if adjusted time is invalid
+        setCurrentTime(new Date())
+      }
     }, 1000) // Update every second
     
     return () => {

@@ -113,7 +113,13 @@ Service Emitters → Local Rotating Files → (optional) Forwarder → Central C
 - **Development**: Local `logs/` directory with daily rotation (`logs/backend/YYYY-MM-DD.log`).
 - **Production**: Centralized stack (e.g., Loki + Grafana, Elastic stack, Datadog) with TLS.
 
-### 4. Clearing Strategy
+### 4. Version Control & Generated Artefacts
+
+- **Logs are not version-controlled**: the `logs/` directory and individual `*.log` files are ignored via `.gitignore` and must never be committed.
+- **Run-scoped only**: log files are treated as per-run diagnostics that are cleared or rotated between sessions (see [Startup Clearing Procedure](#startup-clearing-procedure)).
+- **Diagnostic markdown reports**: time-stamped log-analysis or audit snapshots are kept under `docs/` (usually `docs/archive/`) as examples; they can be regenerated or pruned without affecting application behaviour.
+
+### 5. Clearing Strategy
 
 - On service startup, clear or archive previous log files:
   - Archive or delete previous log files (can be done via startup scripts or manually).

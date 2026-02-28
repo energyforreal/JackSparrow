@@ -10,8 +10,12 @@ from pydantic import BaseModel, ConfigDict
 import uuid
 
 from agent.data.feature_server import MCPFeatureServer, MCPFeatureResponse
-from agent.models.mcp_model_registry import MCPModelRegistry, MCPModelResponse
-from agent.memory.vector_store import VectorStore
+from agent.models.mcp_model_registry import (
+    MCPModelRegistry,
+    MCPModelResponse,
+    NoHealthyModelPredictionsError,
+)
+from agent.memory.vector_store import VectorMemoryStore
 from agent.events.event_bus import event_bus
 from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, DecisionReadyEvent, EventType
 import structlog
@@ -27,6 +31,10 @@ class ReasoningStep(BaseModel):
     evidence: List[str]
     confidence: float
     timestamp: datetime
+    # Optional metadata fields
+    data_freshness_seconds: Optional[int] = None
+    similarity_score: Optional[float] = None
+    feature_quality_score: Optional[float] = None
 
 
 class MCPReasoningChain(BaseModel):
@@ -56,7 +64,7 @@ class MCPReasoningEngine:
         self,
         feature_server: MCPFeatureServer,
         model_registry: MCPModelRegistry,
-        vector_store: Optional[VectorStore] = None
+        vector_store: Optional[VectorMemoryStore] = None
     ):
         """Initialize reasoning engine."""
         self.feature_server = feature_server
@@ -126,7 +134,7 @@ class MCPReasoningEngine:
                     "symbol": reasoning_chain.market_context.get("symbol", request_event.payload.get("symbol")),
                     "reasoning_chain": {
                         "chain_id": reasoning_chain.chain_id,
-                        "steps": [step.dict() for step in reasoning_chain.steps],
+                        "steps": [step.model_dump() for step in reasoning_chain.steps],
                         "conclusion": reasoning_chain.conclusion,
                         "market_context": reasoning_chain.market_context
                     },
@@ -160,6 +168,19 @@ class MCPReasoningEngine:
             reasoning_chain: Generated reasoning chain
         """
         try:
+            # Defensive check: ensure model_predictions are present before
+            # emitting any trading decision.
+            prediction_count = len(reasoning_chain.model_predictions or [])
+            if prediction_count == 0:
+                logger.error(
+                    "decision_ready_event_skipped_no_model_predictions",
+                    symbol=reasoning_chain.market_context.get(
+                        "symbol", request_event.payload.get("symbol")
+                    ),
+                    message="Skipping DecisionReadyEvent because reasoning_chain.model_predictions is empty.",
+                )
+                return
+
             # Extract signal from conclusion
             conclusion = reasoning_chain.conclusion
             if "STRONG_BUY" in conclusion:
@@ -188,7 +209,7 @@ class MCPReasoningEngine:
                     "position_size": position_size,
                     "reasoning_chain": {
                         "chain_id": reasoning_chain.chain_id,
-                        "steps": [step.dict() for step in reasoning_chain.steps],
+                        "steps": [step.model_dump() for step in reasoning_chain.steps],
                         "conclusion": reasoning_chain.conclusion,
                         "market_context": reasoning_chain.market_context,
                         "model_predictions": reasoning_chain.model_predictions
@@ -219,7 +240,20 @@ class MCPReasoningEngine:
     
     async def generate_reasoning(self, request: MCPReasoningRequest) -> MCPReasoningChain:
         """Generate 6-step reasoning chain."""
-        
+        model_predictions = request.market_context.get("model_predictions", [])
+
+        # Enforce that reasoning is only generated when real model predictions
+        # are present. This prevents pseudo-decisions based solely on features
+        # or other fallbacks.
+        if not model_predictions:
+            logger.error(
+                "reasoning_generate_no_model_predictions",
+                message="generate_reasoning called without model_predictions in market_context.",
+            )
+            raise NoHealthyModelPredictionsError(
+                "Cannot generate reasoning without model_predictions in market_context."
+            )
+
         chain_id = str(uuid.uuid4())
         timestamp = datetime.utcnow()
         steps: List[ReasoningStep] = []
@@ -244,13 +278,12 @@ class MCPReasoningEngine:
         step5 = await self._step5_decision_synthesis(request, steps)
         steps.append(step5)
         
-        # Step 6: Confidence Calibration
-        step6 = await self._step6_confidence_calibration(steps)
-        steps.append(step6)
-        
         # Extract model predictions and features
-        model_predictions = request.market_context.get("model_predictions", [])
         feature_context = request.market_context.get("features", {})
+
+        # Step 6: Confidence Calibration
+        step6 = await self._step6_confidence_calibration(steps, model_predictions)
+        steps.append(step6)
         
         return MCPReasoningChain(
             chain_id=chain_id,
@@ -265,54 +298,126 @@ class MCPReasoningEngine:
     
     async def _step1_situational_assessment(self, request: MCPReasoningRequest) -> ReasoningStep:
         """Step 1: Assess current market situation."""
-        
+
         context = request.market_context
         features = context.get("features", {})
-        
+
         # Assess market conditions
         evidence = []
         if features.get("rsi_14", 50) > 70:
             evidence.append("RSI indicates overbought conditions")
         elif features.get("rsi_14", 50) < 30:
             evidence.append("RSI indicates oversold conditions")
-        
+
         if features.get("volatility", 0) > 5:
             evidence.append("High volatility detected")
-        
+
+        # Use feature quality score as confidence when available; otherwise fall
+        # back to the qualitative feature_quality label, and finally to 0.0.
+        raw_quality = context.get("quality_score")
+        if isinstance(raw_quality, (int, float)):
+            quality_score = max(0.0, min(1.0, float(raw_quality)))
+        else:
+            # Older callers may only provide a qualitative feature_quality
+            # string such as "high", "medium", "low", or "degraded".
+            feature_quality = context.get("feature_quality")
+            if isinstance(feature_quality, str):
+                quality_mapping = {
+                    "high": 1.0,
+                    "medium": 0.7,
+                    "low": 0.4,
+                    "degraded": 0.1,
+                }
+                quality_score = quality_mapping.get(feature_quality.lower(), 0.0)
+            else:
+                quality_score = 0.0
+
+        confidence = quality_score
+
+        # Include quality score in evidence if available
+        if quality_score > 0:
+            evidence.append(f"Data quality: {quality_score:.2f}")
+        else:
+            evidence.append("Data quality score unavailable")
+
+        # Calculate data freshness from market data timestamps
+        data_freshness_seconds = None
+        market_timestamp = request.market_context.get("timestamp")
+        if market_timestamp:
+            try:
+                if isinstance(market_timestamp, str):
+                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
+                else:
+                    market_time = market_timestamp
+                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
+            except (ValueError, TypeError):
+                pass
+
         return ReasoningStep(
             step_number=1,
             step_name="Situational Assessment",
             description="Current market conditions analyzed",
             evidence=evidence or ["Market conditions stable"],
-            confidence=0.8,
-            timestamp=datetime.utcnow()
+            confidence=confidence,
+            timestamp=datetime.utcnow(),
+            data_freshness_seconds=data_freshness_seconds,
+            feature_quality_score=quality_score if quality_score > 0 else None
         )
     
     async def _step2_historical_context(self, request: MCPReasoningRequest, chain_id: str) -> ReasoningStep:
         """Step 2: Retrieve similar historical contexts."""
-        
+
+        from agent.memory.vector_store import DecisionContext
+
         evidence = []
-        
+        confidence = 0.0
+        similar_contexts = None  # Initialize to avoid UnboundLocalError
+        avg_similarity = 0.0
+
         if self.vector_store:
             try:
-                similar_contexts = await self.vector_store.search_similar(
-                    context=request.market_context,
+                # Create DecisionContext from market context for similarity search
+                query_context = DecisionContext(
+                    context_id=f"query-{chain_id}",
+                    symbol=request.symbol,
+                    timestamp=datetime.utcnow(),
+                    features=request.market_context.get("features", {}),
+                    market_context=request.market_context,
+                    decision={}  # Empty decision for query context
+                )
+
+                similar_contexts = await self.vector_store.find_similar_contexts(
+                    query_context=query_context,
                     limit=3
                 )
+
                 if similar_contexts:
+                    # Extract similarity scores
+                    similarity_scores = [score for _, score in similar_contexts]
+                    avg_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+
+                    # Use average similarity as confidence, clamped to [0, 1]
+                    confidence = max(0.0, min(1.0, avg_similarity))
+
                     evidence.append(f"Found {len(similar_contexts)} similar historical contexts")
+                    evidence.append(f"Average similarity: {avg_similarity:.2f}")
+                else:
+                    evidence.append("No similar historical contexts found")
+                    avg_similarity = 0.0
+
             except Exception as e:
                 evidence.append(f"Historical context search unavailable: {e}")
         else:
             evidence.append("Vector store not configured")
-        
+
         return ReasoningStep(
             step_number=2,
             step_name="Historical Context Retrieval",
             description="Similar historical situations retrieved",
-            evidence=evidence or ["No similar historical contexts found"],
-            confidence=0.7,
-            timestamp=datetime.utcnow()
+            evidence=evidence,
+            confidence=confidence,
+            timestamp=datetime.utcnow(),
+            similarity_score=avg_similarity if similar_contexts else None
         )
     
     async def _step3_model_consensus(self, request: MCPReasoningRequest) -> ReasoningStep:
@@ -328,7 +433,7 @@ class MCPReasoningEngine:
             
             for p in model_predictions:
                 prediction = p.get("prediction", 0.0)
-                confidence = p.get("confidence", 0.5)  # Default to 0.5 if missing
+                confidence = p.get("confidence", 0.0)  # Treat missing confidence as 0.0
                 # Ensure confidence is in valid range [0, 1]
                 confidence = max(0.0, min(1.0, confidence))
                 
@@ -339,9 +444,9 @@ class MCPReasoningEngine:
                 consensus = weighted_sum / total_weight
                 avg_confidence = total_weight / len(model_predictions)
             else:
-                # Fallback to simple average if all confidences are zero
+                # All confidences are zero – use simple average and reflect uncertainty in avg_confidence
                 consensus = sum(p.get("prediction", 0) for p in model_predictions) / len(model_predictions)
-                avg_confidence = 0.5
+                avg_confidence = 0.0
             
             evidence.append(f"Model consensus: {consensus:.2f} ({len(model_predictions)} models, avg confidence: {avg_confidence:.2f})")
             
@@ -354,48 +459,102 @@ class MCPReasoningEngine:
         else:
             evidence.append("No model predictions available")
             consensus = 0.0
-            avg_confidence = 0.5
-        
+            avg_confidence = 0.0
+
+        # Calculate data freshness from market data timestamps
+        data_freshness_seconds = None
+        market_timestamp = request.market_context.get("timestamp")
+        if market_timestamp:
+            try:
+                if isinstance(market_timestamp, str):
+                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
+                else:
+                    market_time = market_timestamp
+                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
+            except (ValueError, TypeError):
+                pass
+
         return ReasoningStep(
             step_number=3,
             step_name="Model Consensus Analysis",
             description="Multi-model predictions aggregated",
             evidence=evidence,
-            confidence=avg_confidence if model_predictions else 0.5,
-            timestamp=datetime.utcnow()
+            confidence=avg_confidence if model_predictions else 0.0,
+            timestamp=datetime.utcnow(),
+            data_freshness_seconds=data_freshness_seconds
         )
     
     async def _step4_risk_assessment(self, request: MCPReasoningRequest, previous_steps: List[ReasoningStep]) -> ReasoningStep:
         """Step 4: Assess trading risks."""
-        
+
         evidence = []
         risk_level = "medium"
-        
-        # Check volatility
+        confidence = 0.0
+
+        # Check volatility data availability (+0.2 if available)
         features = request.market_context.get("features", {})
-        volatility = features.get("volatility", 0)
-        
-        if volatility > 5:
-            evidence.append("High volatility - increased risk")
-            risk_level = "high"
-        elif volatility < 2:
-            evidence.append("Low volatility - reduced risk")
-            risk_level = "low"
-        
-        # Check position sizing
-        portfolio_value = request.market_context.get("portfolio_value", 10000)
-        available_balance = request.market_context.get("available_balance", 10000)
-        
-        if available_balance < portfolio_value * 0.1:
-            evidence.append("Limited available balance")
-        
+        volatility = features.get("volatility", None)
+
+        if volatility is not None:
+            confidence += 0.2
+            if volatility > 5:
+                evidence.append("High volatility - increased risk")
+                risk_level = "high"
+            elif volatility < 2:
+                evidence.append("Low volatility - reduced risk")
+                risk_level = "low"
+        else:
+            evidence.append("Volatility data unavailable")
+
+        # Check portfolio data availability (+0.2 if available)
+        portfolio_value = request.market_context.get("portfolio_value", None)
+        available_balance = request.market_context.get("available_balance", None)
+
+        if portfolio_value is not None and available_balance is not None:
+            confidence += 0.2
+            if available_balance < portfolio_value * 0.1:
+                evidence.append("Limited available balance")
+        else:
+            evidence.append("Portfolio data unavailable")
+
+        # Check risk metrics calculation (+0.2 if metrics can be calculated)
+        # This could include drawdown, Sharpe ratio, etc.
+        has_risk_metrics = (
+            request.market_context.get("max_drawdown_current") is not None or
+            request.market_context.get("sharpe_ratio_rolling") is not None or
+            request.market_context.get("portfolio_heat") is not None
+        )
+
+        if has_risk_metrics:
+            confidence += 0.2
+            evidence.append("Risk metrics available")
+        else:
+            evidence.append("Risk metrics unavailable")
+
+        # Ensure confidence doesn't exceed 1.0
+        confidence = min(1.0, confidence)
+
+        # Calculate data freshness from market data timestamps
+        data_freshness_seconds = None
+        market_timestamp = request.market_context.get("timestamp")
+        if market_timestamp:
+            try:
+                if isinstance(market_timestamp, str):
+                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
+                else:
+                    market_time = market_timestamp
+                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
+            except (ValueError, TypeError):
+                pass
+
         return ReasoningStep(
             step_number=4,
             step_name="Risk Assessment",
             description=f"Risk level: {risk_level}",
-            evidence=evidence or ["Risk assessment complete"],
-            confidence=0.8,
-            timestamp=datetime.utcnow()
+            evidence=evidence,
+            confidence=confidence,
+            timestamp=datetime.utcnow(),
+            data_freshness_seconds=data_freshness_seconds
         )
     
     async def _step5_decision_synthesis(self, request: MCPReasoningRequest, previous_steps: List[ReasoningStep]) -> ReasoningStep:
@@ -407,7 +566,7 @@ class MCPReasoningEngine:
             conclusion = "HOLD - Insufficient signal strength"
             evidence = ["No model predictions available"]
             consensus = 0.0
-            avg_confidence = 0.5
+            avg_confidence = 0.0
         else:
             # Separate classifier and regressor predictions
             # Regressors predict prices directly and are generally more reliable for price direction
@@ -490,7 +649,7 @@ class MCPReasoningEngine:
                     avg_confidence = total_weight / len(model_predictions)
                 else:
                     consensus = sum(p.get("prediction", 0) for p in model_predictions) / len(model_predictions)
-                    avg_confidence = 0.5
+                    avg_confidence = 0.0
                 evidence_detail = f"Combined consensus: {consensus:.2f} (fallback calculation)"
             
             if consensus > 0.7:
@@ -510,38 +669,98 @@ class MCPReasoningEngine:
                 f"Based on {len(previous_steps)} analysis steps",
                 f"Total models: {len(model_predictions)} ({len(classifier_predictions)} classifiers, {len(regressor_predictions)} regressors)"
             ]
-        
+
+        # Calculate data freshness from market data timestamps
+        data_freshness_seconds = None
+        market_timestamp = request.market_context.get("timestamp")
+        if market_timestamp:
+            try:
+                if isinstance(market_timestamp, str):
+                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
+                else:
+                    market_time = market_timestamp
+                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
+            except (ValueError, TypeError):
+                pass
+
         return ReasoningStep(
             step_number=5,
             step_name="Decision Synthesis",
             description=conclusion,
             evidence=evidence,
-            confidence=0.75,
-            timestamp=datetime.utcnow()
+            confidence=avg_confidence,
+            timestamp=datetime.utcnow(),
+            data_freshness_seconds=data_freshness_seconds
         )
     
-    async def _step6_confidence_calibration(self, steps: List[ReasoningStep]) -> ReasoningStep:
-        """Step 6: Calibrate final confidence."""
+    async def _step6_confidence_calibration(self, steps: List[ReasoningStep], model_predictions: List[Dict[str, Any]]) -> ReasoningStep:
+        """Step 6: Calibrate final confidence using weighted average and consistency adjustment."""
+
+        # Weighted average with step importance weights
+        # Steps 3 (model consensus) and 5 (decision synthesis) get higher weights
+        step_weights = {
+            1: 0.1,  # Situational assessment
+            2: 0.1,  # Historical context
+            3: 0.3,  # Model consensus (most important)
+            4: 0.1,  # Risk assessment
+            5: 0.3,  # Decision synthesis (most important)
+            6: 0.1   # Confidence calibration (meta-step)
+        }
+
+        weighted_sum = sum(
+            step.confidence * step_weights.get(step.step_number, 0.1)
+            for step in steps
+        )
+        total_weight = sum(step_weights.get(step.step_number, 0.1) for step in steps)
+        base_confidence = weighted_sum / total_weight if total_weight > 0 else 0.0
+
+        # Consistency adjustment (less aggressive)
+        if steps:
+            confidence_range = max(step.confidence for step in steps) - min(step.confidence for step in steps)
+            # Use consistency as a small adjustment factor, not a multiplier
+            consistency_adjustment = max(0.9, 1.0 - (confidence_range * 0.2))  # Max 10% penalty
+        else:
+            consistency_adjustment = 1.0
+
+        final_confidence = base_confidence * consistency_adjustment
         
-        # Calculate average confidence from all steps
-        avg_confidence = sum(step.confidence for step in steps) / len(steps) if steps else 0.5
+        # Detect fallback scenario for logging/diagnostics, but do not apply
+        # artificial confidence floors. Confidence reflects actual uncertainty.
+        is_fallback_scenario = not model_predictions or all(
+            p.get("confidence", 0) == 0 for p in model_predictions
+        )
         
-        # Adjust based on step consistency
-        confidence_scores = [step.confidence for step in steps]
-        consistency = 1.0 - (max(confidence_scores) - min(confidence_scores)) if confidence_scores else 0.0
-        
-        final_confidence = avg_confidence * consistency
-        
+        # Ensure final confidence is in valid range
+        final_confidence = max(0.0, min(1.0, final_confidence))
+
+        # Log confidence calculation for debugging
+        step_confidences = {step.step_number: step.confidence for step in steps}
+        logger.info(
+            "confidence_calibration_completed",
+            step_confidences=step_confidences,
+            base_confidence=base_confidence,
+            consistency_adjustment=consistency_adjustment,
+            final_confidence=final_confidence,
+            is_fallback_scenario=is_fallback_scenario,
+            model_predictions_count=len(model_predictions),
+            message="Confidence calibration step completed"
+        )
+
         return ReasoningStep(
             step_number=6,
             step_name="Confidence Calibration",
             description=f"Final confidence: {final_confidence:.2f}",
             evidence=[
-                f"Average step confidence: {avg_confidence:.2f}",
-                f"Consistency score: {consistency:.2f}"
+                f"Weighted base confidence: {base_confidence:.2f}",
+                f"Consistency adjustment: {consistency_adjustment:.2f}",
+                f"Final confidence: {final_confidence:.2f}",
+                f"Fallback scenario: {is_fallback_scenario}"
             ],
             confidence=final_confidence,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
+            data_freshness_seconds=None,  # Meta-step, no direct market data access
+            similarity_score=None,
+            feature_quality_score=None
         )
     
     async def get_health_status(self) -> Dict[str, Any]:

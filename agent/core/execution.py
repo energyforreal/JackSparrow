@@ -1,563 +1,856 @@
 """
-Execution module for trade execution.
+Execution Engine - Trade execution with order management.
 
-Handles trade execution via Delta Exchange API.
+Handles trade execution, order management, slippage control,
+and integration with trading venues.
 """
 
-from typing import Dict, Any, Optional
-from datetime import datetime
+from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime, timedelta, timezone
+import asyncio
 import uuid
 import structlog
 
-from agent.data.delta_client import DeltaExchangeClient
 from agent.events.event_bus import event_bus
-from agent.events.schemas import (
-    RiskApprovedEvent,
-    OrderSubmittedEvent,
-    OrderFillEvent,
-    ExecutionFailedEvent,
-    PositionClosedEvent,
-    EventType
-)
-from agent.core.context_manager import context_manager
+from agent.events.schemas import RiskApprovedEvent, OrderFillEvent, PositionClosedEvent, EventType
 from agent.core.config import settings
-from agent.core.logging_utils import log_error_with_context, log_warning_with_context, log_exception
 
 logger = structlog.get_logger()
 
 
-class ExecutionModule:
-    """Execution module for trade execution."""
-    
+class Order:
+    """Represents a trading order."""
+
+    def __init__(self, order_id: str, symbol: str, side: str, order_type: str,
+                 quantity: float, price: Optional[float] = None,
+                 stop_price: Optional[float] = None, time_in_force: str = "GTC"):
+        self.order_id = order_id
+        self.symbol = symbol
+        self.side = side  # 'buy' or 'sell'
+        self.order_type = order_type  # 'market', 'limit', 'stop', 'stop_limit'
+        self.quantity = quantity
+        self.price = price  # Limit price for limit orders
+        self.stop_price = stop_price  # Stop price for stop orders
+        self.time_in_force = time_in_force  # 'GTC', 'IOC', 'FOK'
+        self.status = "pending"  # 'pending', 'open', 'filled', 'cancelled', 'rejected'
+        self.filled_quantity = 0.0
+        self.average_fill_price = 0.0
+        self.created_time = datetime.utcnow()
+        self.updated_time = datetime.utcnow()
+        self.fills: List[Dict[str, Any]] = []
+
+    def is_complete(self) -> bool:
+        """Check if order is completely filled."""
+        return abs(self.filled_quantity - self.quantity) < 1e-8
+
+    def remaining_quantity(self) -> float:
+        """Get remaining quantity to fill."""
+        return self.quantity - self.filled_quantity
+
+    def update_fill(self, fill_quantity: float, fill_price: float, timestamp: Optional[datetime] = None):
+        """Update order with a fill."""
+        if timestamp is None:
+            timestamp = datetime.utcnow()
+
+        self.fills.append({
+            "quantity": fill_quantity,
+            "price": fill_price,
+            "timestamp": timestamp
+        })
+
+        # Update filled quantity and average price
+        total_value = self.average_fill_price * self.filled_quantity + fill_price * fill_quantity
+        self.filled_quantity += fill_quantity
+        self.average_fill_price = total_value / self.filled_quantity
+
+        self.updated_time = timestamp
+
+        if self.is_complete():
+            self.status = "filled"
+        else:
+            self.status = "partially_filled"
+
+    def cancel(self):
+        """Cancel the order."""
+        if self.status in ["pending", "open", "partially_filled"]:
+            self.status = "cancelled"
+            self.updated_time = datetime.utcnow()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "order_id": self.order_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "order_type": self.order_type,
+            "quantity": self.quantity,
+            "price": self.price,
+            "stop_price": self.stop_price,
+            "time_in_force": self.time_in_force,
+            "status": self.status,
+            "filled_quantity": self.filled_quantity,
+            "average_fill_price": self.average_fill_price,
+            "created_time": self.created_time.isoformat(),
+            "updated_time": self.updated_time.isoformat(),
+            "fills": self.fills
+        }
+
+
+class PositionManager:
+    """Manages trading positions."""
+
     def __init__(self):
-        """Initialize execution module."""
-        self.delta_client = DeltaExchangeClient()
-        self.context_manager = context_manager
-    
-    async def initialize(self):
-        """Initialize execution module and register event handlers."""
-        event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
-        event_bus.subscribe(EventType.DECISION_READY, self._handle_exit_decision)
-    
-    async def shutdown(self):
-        """Shutdown execution module."""
-        pass
-    
-    async def _handle_risk_approved(self, event: RiskApprovedEvent):
-        """Handle risk approved event and execute trade.
-        
+        self.positions: Dict[str, Dict[str, Any]] = {}  # symbol -> position details
+
+    def open_position(self, symbol: str, side: str, quantity: float,
+                     entry_price: float, order_id: str) -> Dict[str, Any]:
+        """Open a new position."""
+        position = {
+            "symbol": symbol,
+            "side": side,
+            "quantity": quantity,
+            "entry_price": entry_price,
+            "entry_time": datetime.utcnow(),
+            "current_price": entry_price,
+            "unrealized_pnl": 0.0,
+            "entry_order_id": order_id,
+            "exit_order_id": None,
+            "status": "open"
+        }
+
+        self.positions[symbol] = position
+
+        logger.info("position_opened",
+                   symbol=symbol,
+                   side=side,
+                   quantity=quantity,
+                   entry_price=entry_price)
+
+        return position.copy()
+
+    def update_position(self, symbol: str, current_price: float):
+        """Update position with current price."""
+        if symbol in self.positions:
+            position = self.positions[symbol]
+            position["current_price"] = current_price
+
+            # Calculate unrealized P&L
+            entry_value = position["entry_price"] * position["quantity"]
+            current_value = current_price * position["quantity"]
+
+            if position["side"] == "long":
+                position["unrealized_pnl"] = current_value - entry_value
+            else:  # short
+                position["unrealized_pnl"] = entry_value - current_value
+
+            position["updated_time"] = datetime.utcnow()
+
+    def close_position(self, symbol: str, exit_price: float,
+                      exit_order_id: str) -> Optional[Dict[str, Any]]:
+        """Close an existing position."""
+        if symbol not in self.positions:
+            return None
+
+        position = self.positions[symbol]
+
+        # Calculate realized P&L
+        entry_value = position["entry_price"] * position["quantity"]
+        exit_value = exit_price * position["quantity"]
+
+        if position["side"] == "long":
+            realized_pnl = exit_value - entry_value
+        else:  # short
+            realized_pnl = entry_value - exit_value
+
+        # Update position
+        position.update({
+            "exit_price": exit_price,
+            "exit_time": datetime.utcnow(),
+            "realized_pnl": realized_pnl,
+            "exit_order_id": exit_order_id,
+            "status": "closed"
+        })
+
+        logger.info("position_closed",
+                   symbol=symbol,
+                   realized_pnl=realized_pnl,
+                   exit_price=exit_price)
+
+        return position.copy()
+
+    def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get position details."""
+        return self.positions.get(symbol)
+
+    def get_all_positions(self) -> Dict[str, Any]:
+        """Get all open positions."""
+        return {symbol: pos for symbol, pos in self.positions.items()
+                if pos["status"] == "open"}
+
+    def get_position_summary(self) -> Dict[str, Any]:
+        """Get positions summary."""
+        open_positions = self.get_all_positions()
+
+        total_exposure = sum(pos["entry_price"] * pos["quantity"] for pos in open_positions.values())
+        total_unrealized_pnl = sum(pos["unrealized_pnl"] for pos in open_positions.values())
+
+        return {
+            "open_positions_count": len(open_positions),
+            "total_exposure": total_exposure,
+            "total_unrealized_pnl": total_unrealized_pnl,
+            "positions": open_positions
+        }
+
+
+class ExecutionResult:
+    """Result of a trade execution attempt."""
+
+    def __init__(self, success: bool, order_id: Optional[str] = None,
+                 error_message: Optional[str] = None):
+        self.success = success
+        self.order_id = order_id
+        self.error_message = error_message
+        self.execution_time = datetime.utcnow()
+        self.details: Dict[str, Any] = {}
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "success": self.success,
+            "order_id": self.order_id,
+            "error_message": self.error_message,
+            "execution_time": self.execution_time.isoformat(),
+            "details": self.details
+        }
+
+
+class ExecutionEngine:
+    """
+    Trade execution engine with order management and slippage control.
+
+    Handles order routing, position management, and execution monitoring.
+    """
+
+    def __init__(self):
+        self.order_manager = OrderManager()
+        self.position_manager = PositionManager()
+        self.execution_config = {
+            "max_slippage_percent": 0.5,  # Maximum allowed slippage
+            "min_order_size": 0.001,      # Minimum order size
+            "max_order_size": 1.0,        # Maximum order size as portfolio fraction
+            "default_time_in_force": "GTC",
+            "retry_attempts": 3,
+            "retry_delay_seconds": 1.0
+        }
+        self._initialized = False
+        self.delta_client = None  # Injected for paper/live trading
+
+        # Mock exchange integration (would be replaced with real exchange API)
+        self.exchange_connected = False
+
+    async def initialize(self, delta_client=None):
+        """Initialize execution engine.
+
         Args:
-            event: Risk approved event
+            delta_client: Optional DeltaExchangeClient for paper/live trading
         """
-        # EXECUTION: Entry logging with decision context
-        logger.info("EXECUTION: Entered execute_trade with decision=%s", event)
-        
-        # EXECUTION: Validate event is not None
-        if event is None:
-            logger.warning("EXECUTION: Skipping trade — decision is None")
-            return
-        
+        self.delta_client = delta_client
+        # Initialize mock exchange connection
+        await self._connect_exchange()
+        self._initialized = True
+
+        # Subscribe to RiskApprovedEvent for automatic trade execution
+        event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
+
+        logger.info("execution_engine_initialized",
+                   config=self.execution_config,
+                   exchange_connected=self.exchange_connected,
+                   paper_trading_mode=settings.paper_trading_mode)
+
+    async def shutdown(self):
+        """Shutdown execution engine."""
+        await self._disconnect_exchange()
+        self._initialized = False
+        logger.info("execution_engine_shutdown")
+
+    async def _connect_exchange(self):
+        """Connect to trading exchange (mock implementation)."""
+        try:
+            # Simulate connection delay
+            await asyncio.sleep(0.1)
+            self.exchange_connected = True
+            logger.info("exchange_connected")
+        except Exception as e:
+            logger.error("exchange_connection_failed", error=str(e))
+            self.exchange_connected = False
+
+    async def _disconnect_exchange(self):
+        """Disconnect from trading exchange."""
+        self.exchange_connected = False
+        logger.info("exchange_disconnected")
+
+    async def _handle_risk_approved(self, event: RiskApprovedEvent):
+        """Handle RiskApprovedEvent - execute trade and publish OrderFillEvent on success.
+
+        Args:
+            event: RiskApprovedEvent with symbol, side, quantity, price
+        """
         try:
             payload = event.payload
             symbol = payload.get("symbol")
-            side = payload.get("side")
-            quantity = payload.get("quantity")
-            price = payload.get("price")
-            
-            logger.info(
-                "execution_risk_approved_received",
-                symbol=symbol,
-                side=side,
-                quantity=quantity,
-                price=price,
-                paper_trading_mode=settings.paper_trading_mode,
-                event_id=event.event_id,
-                message="ExecutionModule received RiskApprovedEvent - starting trade execution"
-            )
-            
-            # Validate inputs
-            if not symbol:
-                logger.error(
-                    "execution_invalid_symbol",
-                    event_id=event.event_id,
-                    symbol=symbol,
-                    message="Symbol is missing or empty - cannot execute trade"
-                )
-                return
-            
-            if not side or side.upper() not in ["BUY", "SELL"]:
-                logger.error(
-                    "execution_invalid_side",
-                    event_id=event.event_id,
-                    side=side,
-                    message="Side is missing or invalid - cannot execute trade"
-                )
-                return
-            
-            if quantity is None or quantity <= 0:
-                logger.error(
-                    "execution_invalid_quantity",
-                    event_id=event.event_id,
+            side_raw = payload.get("side", "BUY").upper()
+            quantity = payload.get("quantity", 0)
+            price = payload.get("price", 0)
+
+            if not symbol or quantity <= 0:
+                logger.warning(
+                    "execution_risk_approved_invalid_payload",
                     symbol=symbol,
                     quantity=quantity,
-                    message="Quantity is missing, zero, or negative - cannot execute trade"
-                )
-                return
-            
-            if price is None or price <= 0:
-                logger.warning(
-                    "execution_invalid_price",
                     event_id=event.event_id,
-                    symbol=symbol,
-                    price=price,
-                    message="Price is missing or invalid - will attempt to fetch from market"
                 )
-                # Will try to fetch price from ticker below
-            
-            # EXECUTION: Check features are available before trade execution
-            context = self.context_manager.get_current_context()
-            if context.features is None or len(context.features) == 0:
-                logger.warning("EXECUTION: Features missing — aborting trade")
                 return
-            
-            # Execute trade
-            order_id = str(uuid.uuid4())
-            
-            # Emit order submitted event
-            submitted_event = OrderSubmittedEvent(
-                source="execution_module",
+
+            # Normalize side to lowercase for execute_trade
+            side = "buy" if side_raw == "BUY" else "sell"
+
+            # Compute stop loss and take profit from config
+            stop_loss = None
+            take_profit = None
+            if settings.stop_loss_percentage:
+                if side == "buy":
+                    stop_loss = price * (1 - settings.stop_loss_percentage)
+                else:
+                    stop_loss = price * (1 + settings.stop_loss_percentage)
+            if settings.take_profit_percentage:
+                if side == "buy":
+                    take_profit = price * (1 + settings.take_profit_percentage)
+                else:
+                    take_profit = price * (1 - settings.take_profit_percentage)
+
+            trade = {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "order_type": "market",
+                "price": price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+            }
+
+            result = await self.execute_trade(trade)
+
+            if not result.success:
+                logger.warning(
+                    "execution_risk_approved_trade_failed",
+                    symbol=symbol,
+                    side=side,
+                    error=result.error_message,
+                    event_id=event.event_id,
+                )
+                return
+
+            # Publish OrderFillEvent for backend persistence and WebSocket broadcast
+            fill_price = result.details.get("average_fill_price") or price
+            order_id = result.order_id or str(uuid.uuid4())[:8]
+            trade_id = f"trade_{order_id}_{datetime.now(timezone.utc).timestamp()}"
+
+            order_fill = OrderFillEvent(
+                source="execution_engine",
                 correlation_id=event.event_id,
                 payload={
                     "order_id": order_id,
+                    "trade_id": trade_id,
                     "symbol": symbol,
-                    "side": side,
+                    "side": side_raw,
                     "quantity": quantity,
-                    "price": price,
-                    "timestamp": datetime.utcnow()
-                }
+                    "fill_price": fill_price,
+                    "timestamp": datetime.now(timezone.utc),
+                },
             )
-            await event_bus.publish(submitted_event)
-            
-            # Verify paper trading mode before executing trades
-            if not settings.paper_trading_mode:
-                log_warning_with_context(
-                    "paper_trading_mode_disabled",
-                    component="execution_module",
-                    correlation_id=event.event_id,
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    message="PAPER_TRADING_MODE is False - real trades will be executed!"
-                )
-                # In production, you might want to add additional confirmation here
-            else:
-                logger.info(
-                    "paper_trading_mode_enabled",
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    message="Executing trade in paper trading mode - no real exchange API calls will be made"
-                )
-            
-            try:
-                # In paper trading mode, simulate trade execution without calling exchange API
-                if settings.paper_trading_mode:
-                    logger.debug(
-                        "executing_paper_trade",
-                        symbol=symbol,
-                        side=side,
-                        quantity=quantity,
-                        message="Simulating trade execution (paper trading mode)"
-                    )
-                    
-                    # Simulate order placement - get current market price for realistic simulation
-                    try:
-                        ticker = await self.delta_client.get_ticker(symbol)
-                        simulated_price = ticker.get("close") if ticker else price
-                    except Exception:
-                        # If ticker fetch fails, use provided price or a default
-                        simulated_price = price if price else 50000.0  # Fallback price
-                        log_warning_with_context(
-                            "paper_trade_ticker_fetch_failed",
-                            component="execution_module",
-                            correlation_id=event.event_id,
-                            symbol=symbol,
-                            order_id=order_id,
-                            message="Using fallback price for paper trade simulation"
-                        )
-                    
-                    # Simulate order result
-                    result = {
-                        "id": str(uuid.uuid4()),
-                        "symbol": symbol,
-                        "side": side,
-                        "quantity": quantity,
-                        "price": simulated_price,
-                        "status": "filled",
-                        "paper_trading": True
-                    }
-                else:
-                    # Real trading mode - place actual order via Delta Exchange
-                    logger.info(
-                        "executing_real_trade",
-                        symbol=symbol,
-                        side=side,
-                        quantity=quantity,
-                        message="Placing real order on exchange (PAPER_TRADING_MODE=False)"
-                    )
-                    
-                    result = await self.delta_client.place_order(
-                        symbol=symbol,
-                        side=side,
-                        quantity=quantity,
-                        order_type="MARKET",
-                        price=None
-                    )
-                
-                # Extract trade details from result
-                trade_id = result.get("id", str(uuid.uuid4()))
-                fill_price = result.get("price", price)  # Use price from result or requested price
-                
-                logger.info(
-                    "execution_trade_result",
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    requested_price=price,
-                    fill_price=fill_price,
-                    paper_trading_mode=settings.paper_trading_mode,
-                    trade_id=trade_id,
-                    order_id=order_id,
-                )
-                
-                # Validate fill_price before emitting event
-                if fill_price <= 0:
-                    logger.error(
-                        "execution_invalid_fill_price",
-                        order_id=order_id,
-                        trade_id=trade_id,
-                        symbol=symbol,
-                        fill_price=fill_price,
-                        requested_price=price,
-                        message="Fill price is invalid - cannot emit OrderFillEvent"
-                    )
-                    raise ValueError(f"Invalid fill price: {fill_price}")
-                
-                logger.info(
-                    "execution_emitting_order_fill",
-                    order_id=order_id,
+            await event_bus.publish(order_fill)
+
+            if settings.paper_trading_mode:
+                from agent.core.paper_trade_logger import paper_trade_logger
+                paper_trade_logger.log_trade(
                     trade_id=trade_id,
                     symbol=symbol,
-                    side=side,
+                    side=side_raw,
                     quantity=quantity,
                     fill_price=fill_price,
-                    message="Emitting OrderFillEvent - trade execution successful"
+                    order_id=order_id,
+                    reasoning_chain_id=payload.get("reasoning_chain_id"),
                 )
-                
-                # Emit order fill event
-                fill_event = OrderFillEvent(
-                    source="execution_module",
-                    correlation_id=event.event_id,
+
+            logger.info(
+                "execution_order_fill_published",
+                trade_id=trade_id,
+                symbol=symbol,
+                side=side_raw,
+                quantity=quantity,
+                fill_price=fill_price,
+                event_id=event.event_id,
+            )
+
+        except Exception as e:
+            logger.error(
+                "execution_handle_risk_approved_error",
+                event_id=event.event_id,
+                error=str(e),
+                exc_info=True,
+            )
+
+    async def execute_trade(self, trade: Dict[str, Any]) -> ExecutionResult:
+        """
+        Execute a trade with comprehensive order management.
+
+        Args:
+            trade: Trade specification with symbol, side, size, etc.
+
+        Returns:
+            ExecutionResult with success status and details
+        """
+        if not self._initialized:
+            return ExecutionResult(False, error_message="Execution engine not initialized")
+
+        if not self.exchange_connected:
+            return ExecutionResult(False, error_message="Exchange not connected")
+
+        try:
+            symbol = trade["symbol"]
+            side = trade["side"]  # 'buy' or 'sell'
+            quantity = trade["quantity"]
+            order_type = trade.get("order_type", "market")
+            price = trade.get("price")
+            stop_loss = trade.get("stop_loss")
+            take_profit = trade.get("take_profit")
+
+            # Validate trade parameters
+            validation_result = await self._validate_trade(trade)
+            if not validation_result["valid"]:
+                return ExecutionResult(False, error_message=validation_result["error"])
+
+            # Check if we need to close existing position first
+            existing_position = self.position_manager.get_position(symbol)
+            if existing_position and existing_position["side"] != ("long" if side == "buy" else "short"):
+                # Close opposite position first
+                await self.close_position(symbol, order_type="market")
+
+            # Execute the order
+            order_result = await self._place_order(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=order_type,
+                price=price
+            )
+
+            if not order_result["success"]:
+                return ExecutionResult(False, error_message=order_result["error"])
+
+            order_id = order_result["order_id"]
+
+            # If order was filled immediately, update position
+            if order_result["filled_immediately"]:
+                fill_price = order_result["average_fill_price"]
+                position = self.position_manager.open_position(
+                    symbol=symbol,
+                    side="long" if side == "buy" else "short",
+                    quantity=quantity,
+                    entry_price=fill_price,
+                    order_id=order_id
+                )
+
+                # Place stop loss and take profit orders if specified
+                if stop_loss:
+                    await self._place_stop_order(symbol, "sell" if side == "buy" else "buy",
+                                               quantity, stop_loss, "stop_loss")
+
+                if take_profit:
+                    await self._place_limit_order(symbol, "sell" if side == "buy" else "buy",
+                                                quantity, take_profit, "take_profit")
+
+            result = ExecutionResult(True, order_id=order_id)
+            result.details = {
+                "symbol": symbol,
+                "side": side,
+                "quantity": quantity,
+                "order_type": order_type,
+                "filled_immediately": order_result["filled_immediately"],
+                "average_fill_price": order_result.get("average_fill_price"),
+                "position_opened": order_result["filled_immediately"]
+            }
+
+            logger.info("trade_executed",
+                       symbol=symbol,
+                       side=side,
+                       quantity=quantity,
+                       order_id=order_id,
+                       filled_immediately=order_result["filled_immediately"])
+
+            return result
+
+        except Exception as e:
+            logger.error("trade_execution_failed",
+                        trade=trade,
+                        error=str(e))
+            return ExecutionResult(False, error_message=f"Execution failed: {str(e)}")
+
+    async def close_position(self, symbol: str, order_type: str = "market",
+                           price: Optional[float] = None) -> ExecutionResult:
+        """Close an existing position."""
+        position = self.position_manager.get_position(symbol)
+        if not position:
+            return ExecutionResult(False, error_message=f"No open position for {symbol}")
+
+        try:
+            # Determine close side (opposite of position side)
+            close_side = "sell" if position["side"] == "long" else "buy"
+
+            # Execute close order
+            order_result = await self._place_order(
+                symbol=symbol,
+                side=close_side,
+                quantity=position["quantity"],
+                order_type=order_type,
+                price=price
+            )
+
+            if order_result["success"] and order_result["filled_immediately"]:
+                exit_price = order_result["average_fill_price"]
+                closed_position = self.position_manager.close_position(
+                    symbol=symbol,
+                    exit_price=exit_price,
+                    exit_order_id=order_result["order_id"]
+                )
+
+                logger.info("position_closed_successfully",
+                           symbol=symbol,
+                           exit_price=exit_price,
+                           realized_pnl=closed_position["realized_pnl"])
+
+                # Publish PositionClosedEvent for backend persistence and paper trade log
+                position_id = f"pos_{closed_position.get('entry_order_id', order_result.get('order_id', ''))}"
+                pos_closed = PositionClosedEvent(
+                    source="execution_engine",
                     payload={
-                        "order_id": order_id,
-                        "trade_id": trade_id,
-                        "symbol": symbol,
-                        "side": side,
-                        "quantity": quantity,
-                        "fill_price": fill_price,
-                        "timestamp": datetime.utcnow()
-                    }
-                )
-                await event_bus.publish(fill_event)
-                
-                # EXECUTION: Order filled confirmation logging
-                logger.info(
-                    "EXECUTION: Order filled — id=%s qty=%s price=%s side=%s",
-                    order_id, quantity, fill_price, side
-                )
-                
-                logger.info(
-                    "execution_order_fill_event_published",
-                    order_id=order_id,
-                    trade_id=trade_id,
-                    symbol=symbol,
-                    fill_event_id=fill_event.event_id,
-                    message="OrderFillEvent published successfully"
-                )
-                
-                # Calculate stop loss and take profit levels
-                from agent.risk.risk_manager import RiskManager
-                risk_manager = RiskManager()
-                stop_loss_price = risk_manager.calculate_stop_loss(fill_price, side)
-                take_profit_price = risk_manager.calculate_take_profit(fill_price, side)
-                
-                # Generate position_id for tracking
-                position_id = str(uuid.uuid4())
-                
-                # Update context
-                self.context_manager.update_context({
-                    "trade": {
-                        "order_id": order_id,
-                        "trade_id": trade_id,
-                        "symbol": symbol,
-                        "side": side,
-                        "quantity": quantity,
-                        "price": fill_price
-                    },
-                    "position": {
                         "position_id": position_id,
                         "symbol": symbol,
-                        "side": side,
-                        "quantity": quantity,
-                        "entry_price": fill_price,
-                        "stop_loss": stop_loss_price,
-                        "take_profit": take_profit_price,
-                        "timestamp": datetime.utcnow().isoformat()
+                        "side": position["side"],
+                        "entry_price": position["entry_price"],
+                        "exit_price": exit_price,
+                        "quantity": position["quantity"],
+                        "pnl": closed_position["realized_pnl"],
+                        "exit_reason": "market_close",
+                        "timestamp": datetime.now(timezone.utc),
                     },
-                    "position_opened": True
-                })
-                
-                logger.info(
-                    "trade_executed",
-                    order_id=order_id,
-                    trade_id=trade_id,
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    fill_price=fill_price
                 )
-                
-            except Exception as e:
-                # Emit execution failed event
-                failed_event = ExecutionFailedEvent(
-                    source="execution_module",
-                    correlation_id=event.event_id,
-                    payload={
-                        "order_id": order_id,
-                        "symbol": symbol,
-                        "reason": "Order execution failed",
-                        "error": str(e),
-                        "timestamp": datetime.utcnow()
-                    }
-                )
-                await event_bus.publish(failed_event)
-                
-                log_error_with_context(
-                    "trade_execution_failed",
-                    error=e,
-                    component="execution_module",
-                    correlation_id=event.event_id,
-                    order_id=order_id,
-                    symbol=symbol,
-                    side=side,
-                    quantity=quantity,
-                    price=price
-                )
-                
+                await event_bus.publish(pos_closed)
+
+                if settings.paper_trading_mode:
+                    from agent.core.paper_trade_logger import paper_trade_logger
+                    paper_trade_logger.log_position_close(
+                        position_id=position_id,
+                        symbol=symbol,
+                        side=position["side"],
+                        entry_price=position["entry_price"],
+                        exit_price=exit_price,
+                        quantity=position["quantity"],
+                        pnl=closed_position["realized_pnl"],
+                        exit_reason="market_close",
+                    )
+
+            return ExecutionResult(True, order_id=order_result.get("order_id"))
+
         except Exception as e:
-            log_error_with_context(
-                "execution_module_risk_approved_error",
-                error=e,
-                component="execution_module",
-                correlation_id=event.event_id if hasattr(event, "event_id") else None,
-                event_type=event.event_type.value if hasattr(event, "event_type") else None
-            )
-    
-    async def _handle_exit_decision(self, event):
-        """Handle exit decision event to close position.
-        
-        Only processes exit decisions that originate from the risk manager
-        with an explicit exit_reason field. This prevents incorrectly closing
-        positions when the reasoning engine generates legitimate opposite signals.
-        
-        Args:
-            event: DecisionReadyEvent with exit_reason field indicating exit
+            logger.error("position_close_failed",
+                        symbol=symbol,
+                        error=str(e))
+            return ExecutionResult(False, error_message=f"Close failed: {str(e)}")
+
+    async def manage_position(self, position_symbol: str) -> Dict[str, Any]:
         """
-        from agent.events.schemas import DecisionReadyEvent
-        
-        # Only handle DecisionReadyEvent instances
-        if not isinstance(event, DecisionReadyEvent):
-            return
-        
-        payload = event.payload
-        
-        # Only process exit decisions that have an explicit exit_reason field
-        # This ensures we only process exits from the risk manager, not new
-        # trading signals from the reasoning engine.
-        # 
-        # The reasoning engine emits DECISION_READY events without exit_reason
-        # (these are new trading signals, not exits). The risk manager emits
-        # DECISION_READY events with exit_reason when stop loss/take profit
-        # conditions are met.
-        exit_reason = payload.get("exit_reason")
-        if not exit_reason:
-            # This is not an exit decision (no exit_reason field), ignore it
-            # This prevents incorrectly closing positions when the reasoning
-            # engine generates legitimate opposite signals (e.g., SELL when
-            # holding BUY position as a new trading signal, not an exit)
-            return
-        
-        # Verify source is risk_manager for additional safety
-        # Only the risk manager should emit exit decisions with exit_reason
-        if event.source != "risk_manager":
-            logger.warning(
-                "exit_decision_rejected_unexpected_source",
-                event_id=event.event_id,
-                source=event.source,
-                exit_reason=exit_reason,
-                message="Exit decision rejected: unexpected source (expected risk_manager)"
-            )
-            return
-        
-        # Verify we have a position to close
-        context = self.context_manager.get_current_context()
-        if not context.position:
-            logger.debug(
-                "exit_decision_ignored_no_position",
-                event_id=event.event_id,
-                exit_reason=exit_reason,
-                source=event.source,
-                message="Exit decision received but no active position to close"
-            )
-            return
-        
+        Manage an existing position (check stops, etc.).
+
+        Returns:
+            Management actions taken
+        """
+        position = self.position_manager.get_position(position_symbol)
+        if not position:
+            return {"action": "none", "reason": "No position found"}
+
+        actions_taken = []
+
+        # Check stop loss and take profit levels
+        # This would integrate with real-time price feeds
+        # For now, return status
+        current_price = position.get("current_price", position["entry_price"])
+
+        # Simulate stop loss check (would use real price feed)
+        stop_loss = position.get("stop_loss")
+        take_profit = position.get("take_profit")
+
+        if stop_loss:
+            should_stop = (position["side"] == "long" and current_price <= stop_loss) or \
+                         (position["side"] == "short" and current_price >= stop_loss)
+            if should_stop:
+                close_result = await self.close_position(position_symbol)
+                if close_result.success:
+                    actions_taken.append({
+                        "action": "stop_loss_triggered",
+                        "symbol": position_symbol,
+                        "exit_price": current_price
+                    })
+
+        if take_profit:
+            should_tp = (position["side"] == "long" and current_price >= take_profit) or \
+                       (position["side"] == "short" and current_price <= take_profit)
+            if should_tp:
+                close_result = await self.close_position(position_symbol)
+                if close_result.success:
+                    actions_taken.append({
+                        "action": "take_profit_triggered",
+                        "symbol": position_symbol,
+                        "exit_price": current_price
+                    })
+
+        return {
+            "symbol": position_symbol,
+            "actions_taken": actions_taken,
+            "position_status": position["status"]
+        }
+
+    async def _validate_trade(self, trade: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate trade parameters."""
+        symbol = trade.get("symbol")
+        side = trade.get("side")
+        quantity = trade.get("quantity")
+
+        if not symbol or not side or quantity is None:
+            return {"valid": False, "error": "Missing required trade parameters"}
+
+        if side not in ["buy", "sell"]:
+            return {"valid": False, "error": f"Invalid side: {side}"}
+
+        if quantity <= 0:
+            return {"valid": False, "error": f"Invalid quantity: {quantity}"}
+
+        if quantity < self.execution_config["min_order_size"]:
+            return {"valid": False, "error": f"Quantity below minimum: {quantity}"}
+
+        # Additional validation could include:
+        # - Account balance checks
+        # - Position limits
+        # - Symbol availability
+        # - Market hours
+
+        return {"valid": True}
+
+    async def _place_order(self, symbol: str, side: str, quantity: float,
+                          order_type: str, price: Optional[float] = None,
+                          stop_price: Optional[float] = None) -> Dict[str, Any]:
+        """Place an order with the exchange.
+
+        In paper trading mode: fetches current price from Delta ticker,
+        simulates fill without calling place_order. Fails if ticker price unavailable.
+        In live mode: calls delta_client.place_order().
+        """
         try:
-            symbol = payload.get("symbol") or context.position.get("symbol")
-            position_quantity = context.position.get("quantity", 0.0)
-            entry_price = context.position.get("entry_price", 0.0)
-            entry_timestamp_str = context.position.get("timestamp")
-            position_side = context.position.get("side")
-            
-            # Calculate exit side (opposite of entry)
-            exit_side = "SELL" if position_side == "BUY" else "BUY"
-            
-            # Get current price for exit
-            try:
-                ticker = await self.delta_client.get_ticker(symbol)
-                exit_price = ticker.get("close") if ticker else entry_price
-            except Exception:
-                exit_price = entry_price
-            
-            order_id = str(uuid.uuid4())
-            
-            # Execute exit trade
-            if settings.paper_trading_mode:
-                # Simulate exit trade
-                result = {
-                    "id": str(uuid.uuid4()),
-                    "symbol": symbol,
-                    "side": exit_side,
-                    "quantity": position_quantity,
-                    "price": exit_price,
-                    "status": "filled",
-                    "paper_trading": True
-                }
-            else:
-                # Real exit trade
-                result = await self.delta_client.place_order(
-                    symbol=symbol,
-                    side=exit_side,
-                    quantity=position_quantity,
-                    order_type="MARKET",
-                    price=None
-                )
-            
-            trade_id = result.get("id", str(uuid.uuid4()))
-            fill_price = result.get("price", exit_price)
-            
-            # Calculate PnL
-            # position_quantity is in dollars (USD value), need to convert to asset quantity
-            # Asset quantity = dollar quantity / entry_price
-            if entry_price > 0:
-                asset_quantity = position_quantity / entry_price
-            else:
-                asset_quantity = 0.0
-                logger.warning(
-                    "pnl_calculation_invalid_entry_price",
-                    symbol=symbol,
-                    entry_price=entry_price,
-                    message="Entry price is zero or invalid, PnL calculation may be incorrect"
-                )
-            
-            # Calculate PnL using asset quantity
-            if position_side == "BUY":
-                # Long position: profit when exit_price > entry_price
-                pnl = (fill_price - entry_price) * asset_quantity
-            else:
-                # Short position: profit when exit_price < entry_price
-                pnl = (entry_price - fill_price) * asset_quantity
-            
-            # Calculate duration
-            duration_seconds = 0.0
-            if entry_timestamp_str:
-                try:
-                    entry_timestamp = datetime.fromisoformat(entry_timestamp_str.replace('Z', '+00:00'))
-                    duration_seconds = (datetime.utcnow() - entry_timestamp.replace(tzinfo=None)).total_seconds()
-                except Exception:
-                    pass
-            
-            # Exit reason is already present in payload (from risk manager)
-            # This is guaranteed by the check at the start of the function
-            # Use the exit_reason from payload, which was already extracted above
-            
-            # Get position_id from context or generate one
-            position_id = context.position.get("position_id") if context.position else None
-            if not position_id:
-                # Try to find position_id from database using symbol and entry_price
-                # For now, generate a new one if not found
-                position_id = str(uuid.uuid4())
-                logger.warning(
-                    "position_id_not_found_in_context",
-                    symbol=symbol,
-                    entry_price=entry_price,
-                    message="Position ID not found in context, using generated ID"
-                )
-            
-            # Emit PositionClosedEvent
-            position_closed_event = PositionClosedEvent(
-                source="execution_module",
-                correlation_id=event.event_id,
-                payload={
-                    "position_id": position_id,
-                    "symbol": symbol,
-                    "entry_price": entry_price,
-                    "exit_price": fill_price,
-                    "pnl": pnl,
-                    "duration_seconds": duration_seconds,
-                    "exit_reason": exit_reason,
-                    "timestamp": datetime.utcnow()
-                }
-            )
-            await event_bus.publish(position_closed_event)
-            
-            # Clear position from context and set position_closed flag
-            self.context_manager.update_context({
-                "position": None,
-                "position_opened": False,
-                "position_closed": True
-            })
-            
-            logger.info(
-                "position_closed",
-                position_id=position_closed_event.payload["position_id"],
+            order_id = str(uuid.uuid4())[:8]
+
+            order = Order(
+                order_id=order_id,
                 symbol=symbol,
-                entry_price=entry_price,
-                exit_price=fill_price,
-                pnl=pnl,
-                exit_reason=exit_reason,
-                event_id=position_closed_event.event_id
+                side=side,
+                order_type=order_type,
+                quantity=quantity,
+                price=price
             )
-            
+
+            await asyncio.sleep(0.05)
+
+            if order_type == "market":
+                # Get fill price: paper mode uses ticker; live uses real order
+                if settings.paper_trading_mode:
+                    base_price = await self._get_fill_price_paper(symbol, price)
+                    # Simulate slippage
+                    slippage = base_price * (self.execution_config["max_slippage_percent"] / 100.0) * (0.5 if side == "buy" else -0.5)
+                    fill_price = base_price + slippage
+                    order.update_fill(quantity, fill_price)
+                    return {
+                        "success": True,
+                        "order_id": order_id,
+                        "filled_immediately": True,
+                        "average_fill_price": fill_price,
+                        "slippage_percent": abs(slippage / base_price) * 100 if base_price else 0,
+                    }
+                else:
+                    # Live trading
+                    if self.delta_client:
+                        result = await self.delta_client.place_order(
+                            symbol=symbol,
+                            side=side.upper(),
+                            quantity=quantity,
+                            order_type="MARKET",
+                        )
+                        if result.get("result") and result["result"].get("order", {}).get("average_fill_price"):
+                            fill_price = float(result["result"]["order"]["average_fill_price"])
+                        elif price is not None and price > 0:
+                            fill_price = price
+                        else:
+                            order_price = result.get("result", {}).get("order", {}).get("price")
+                            if order_price is not None:
+                                fill_price = float(order_price)
+                            else:
+                                raise ValueError(
+                                    "Live order returned no fill price and no price parameter provided"
+                                )
+                        order.update_fill(quantity, fill_price)
+                        return {
+                            "success": True,
+                            "order_id": order_id,
+                            "filled_immediately": True,
+                            "average_fill_price": fill_price,
+                    }
+                    else:
+                        return {"success": False, "error": "Delta client not configured for live trading"}
+
+            else:
+                self.order_manager.add_order(order)
+                return {
+                    "success": True,
+                    "order_id": order_id,
+                    "filled_immediately": False
+                }
+
         except Exception as e:
-            log_error_with_context(
-                "exit_trade_execution_failed",
-                error=e,
-                component="execution_module",
-                correlation_id=event.event_id if hasattr(event, "event_id") else None,
-                symbol=context.position.get("symbol") if context.position else None
-            )
+            logger.error("order_placement_failed",
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        error=str(e))
+            return {
+                "success": False,
+                "error": f"Order placement failed: {str(e)}"
+            }
+
+    async def _get_fill_price_paper(self, symbol: str, _price_hint: Optional[float] = None) -> float:
+        """Get current market price for paper trading from Delta ticker. Raises if unavailable."""
+        if not self.delta_client:
+            raise ValueError("Delta client not configured; cannot get fill price for paper trade")
+        ticker = await self.delta_client.get_ticker(symbol)
+        result = ticker.get("result") or ticker
+        if not isinstance(result, dict):
+            raise ValueError(f"Ticker returned invalid data for {symbol}")
+        close = result.get("close") or result.get("mark_price")
+        if close is None:
+            raise ValueError(f"Ticker has no close/mark_price for {symbol}")
+        return float(close)
+
+    async def _place_stop_order(self, symbol: str, side: str, quantity: float,
+                               stop_price: float, label: str) -> Optional[str]:
+        """Place a stop order."""
+        order_result = await self._place_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type="stop",
+            stop_price=stop_price
+        )
+
+        if order_result["success"]:
+            logger.debug("stop_order_placed",
+                        symbol=symbol,
+                        side=side,
+                        stop_price=stop_price,
+                        label=label)
+            return order_result["order_id"]
+
+        return None
+
+    async def _place_limit_order(self, symbol: str, side: str, quantity: float,
+                                limit_price: float, label: str) -> Optional[str]:
+        """Place a limit order."""
+        order_result = await self._place_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type="limit",
+            price=limit_price
+        )
+
+        if order_result["success"]:
+            logger.debug("limit_order_placed",
+                        symbol=symbol,
+                        side=side,
+                        limit_price=limit_price,
+                        label=label)
+            return order_result["order_id"]
+
+        return None
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """Cancel an open order."""
+        return self.order_manager.cancel_order(order_id)
+
+    async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
+        """Get status of an order."""
+        order = self.order_manager.get_order(order_id)
+        return order.to_dict() if order else None
+
+    async def get_portfolio_status(self) -> Dict[str, Any]:
+        """Get current portfolio status."""
+        return {
+            "positions": self.position_manager.get_all_positions(),
+            "summary": self.position_manager.get_position_summary(),
+            "open_orders": self.order_manager.get_open_orders()
+        }
+
+    async def get_health_status(self) -> Dict[str, Any]:
+        """Get execution engine health status."""
+        return {
+            "status": "healthy" if self._initialized else "unhealthy",
+            "initialized": self._initialized,
+            "exchange_connected": self.exchange_connected,
+            "open_positions": len(self.position_manager.get_all_positions()),
+            "open_orders": len(self.order_manager.get_open_orders()),
+            "execution_config": self.execution_config
+        }
 
 
-# Global execution module instance
-execution_module = ExecutionModule()
+class OrderManager:
+    """Manages trading orders."""
 
+    def __init__(self):
+        self.orders: Dict[str, Order] = {}
+
+    def add_order(self, order: Order):
+        """Add an order to management."""
+        self.orders[order.order_id] = order
+
+    def get_order(self, order_id: str) -> Optional[Order]:
+        """Get order by ID."""
+        return self.orders.get(order_id)
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an order."""
+        order = self.orders.get(order_id)
+        if order:
+            order.cancel()
+            return True
+        return False
+
+    def get_open_orders(self) -> Dict[str, Any]:
+        """Get all open orders."""
+        return {order_id: order.to_dict() for order_id, order in self.orders.items()
+                if order.status in ["pending", "open", "partially_filled"]}
+
+    def update_order_fill(self, order_id: str, fill_quantity: float, fill_price: float):
+        """Update order with a fill."""
+        order = self.orders.get(order_id)
+        if order:
+            order.update_fill(fill_quantity, fill_price)
+
+
+# Create global execution module instance
+execution_module = ExecutionEngine()

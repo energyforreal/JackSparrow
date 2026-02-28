@@ -15,7 +15,7 @@ import structlog
 from agent.core.config import settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-LOGS_ROOT = PROJECT_ROOT / "logs"
+LOGS_ROOT = Path(os.environ.get("LOGS_ROOT", str(PROJECT_ROOT / "logs")))
 LOG_FILE = LOGS_ROOT / "agent.log"
 ARCHIVE_DIR = LOGS_ROOT / "archive" / "agent"
 

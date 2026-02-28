@@ -345,10 +345,12 @@ class ModelDiscovery:
         for subdir in ["custom", "xgboost", "lightgbm", "random_forest", "lstm", "transformer"]:
             subdir_path = self.model_dir / subdir
             if subdir_path.exists():
-                # Find .pkl, .h5, .onnx files
+                # Find .pkl, .h5, .onnx, .pt, .pth files
                 model_files.extend(subdir_path.glob("*.pkl"))
                 model_files.extend(subdir_path.glob("*.h5"))
                 model_files.extend(subdir_path.glob("*.onnx"))
+                model_files.extend(subdir_path.glob("*.pt"))
+                model_files.extend(subdir_path.glob("*.pth"))
         
         return model_files
     
@@ -357,7 +359,7 @@ class ModelDiscovery:
         
         # Determine model type from path and metadata
         model_type = self._detect_model_type(model_path)
-        
+
         if model_type == "xgboost":
             from agent.models.xgboost_node import XGBoostNode
             return await XGBoostNode.load_from_file(model_path)
@@ -367,6 +369,12 @@ class ModelDiscovery:
         elif model_type == "random_forest":
             from agent.models.random_forest_node import RandomForestNode
             return await RandomForestNode.load_from_file(model_path)
+        elif model_type == "lstm":
+            from agent.models.lstm_node import LSTMNode
+            return await LSTMNode.load_from_file(model_path)
+        elif model_type == "transformer":
+            from agent.models.transformer_node import TransformerNode
+            return await TransformerNode.load_from_file(model_path)
         else:
             logger.warning(
                 "model_discovery_unknown_type",

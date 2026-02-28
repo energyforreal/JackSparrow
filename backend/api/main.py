@@ -29,6 +29,7 @@ from backend.core.redis import get_redis, close_redis
 from backend.api.routes import health, trading, portfolio, market, admin, system
 from backend.api.websocket.manager import websocket_manager
 from backend.services.agent_event_subscriber import agent_event_subscriber
+from backend.services.health_poller import health_poller
 
 
 def _configure_utf8_stdio() -> None:
@@ -126,12 +127,18 @@ async def lifespan(app: FastAPI):
         logger.info("backend_agent_event_subscriber_starting", service="backend")
         await agent_event_subscriber.start()
         logger.info("backend_agent_event_subscriber_started", service="backend")
+
+        # Start health poller for periodic updates
+        logger.info("backend_health_poller_starting", service="backend")
+        await health_poller.start()
+        logger.info("backend_health_poller_started", service="backend")
     except Exception as e:
         logger.warning(
-            "backend_agent_event_subscriber_init_warning",
+            "backend_services_init_warning",
             service="backend",
             error=str(e),
-            exc_info=True
+            exc_info=True,
+            message="Failed to initialize agent event subscriber and/or health poller"
         )
     
     logger.info("backend_started_successfully", service="backend")
@@ -162,15 +169,6 @@ async def lifespan(app: FastAPI):
             error=str(e),
             exc_info=True
         )
-
-    except Exception as e:
-        logger.error(
-            "backend_lifespan_unhandled_error",
-            service="backend",
-            error=str(e),
-            exc_info=True
-        )
-        raise
 
 
 # Create FastAPI app

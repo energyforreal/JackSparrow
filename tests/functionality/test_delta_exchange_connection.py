@@ -219,7 +219,7 @@ class DeltaExchangeConnectionTestSuite(TestSuiteBase):
         try:
             from agent.events.schemas import MarketTickEvent
             from agent.data.market_data_service import MarketDataService
-            from datetime import datetime, timezone
+            from datetime import timezone
 
             # Create a test MarketTickEvent with enhanced data
             test_payload = {

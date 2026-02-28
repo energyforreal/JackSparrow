@@ -186,7 +186,31 @@ For detailed orchestration documentation, see [MCP Layer Documentation - Orchest
 
 ### MCP Components
 
-#### 1. MCP Feature Protocol
+#### 1. MCP Orchestrator
+
+**Purpose**: Central coordinator for all MCP components providing unified AI agent functionality
+
+**Key Features**:
+- Unified prediction pipeline (Feature → Model → Reasoning)
+- Parallel model inference processing
+- Complete reasoning chain generation
+- Consensus calculation and decision synthesis
+- Event-driven architecture integration
+
+**Implementation**: `agent/core/mcp_orchestrator.py`
+
+**Architecture**:
+```python
+class MCPOrchestrator:
+    async def process_prediction_request(self, symbol, context):
+        # 1. Feature computation via MCP Feature Server
+        # 2. Parallel model inference via MCP Model Registry
+        # 3. Reasoning synthesis via MCP Reasoning Engine
+        # 4. Consensus and decision extraction
+        return complete_prediction_result
+```
+
+#### 2. MCP Feature Protocol
 
 **Purpose**: Standardized feature communication with versioning and quality tracking
 
@@ -213,7 +237,7 @@ class MCPFeature(BaseModel):
 
 For detailed Feature Protocol documentation, see [MCP Layer Documentation - Feature Protocol](02-mcp-layer.md#mcp-feature-protocol).
 
-#### 2. MCP Model Protocol
+#### 3. MCP Model Protocol
 
 **Purpose**: Standardized model prediction format with explanations
 
@@ -243,7 +267,7 @@ class MCPModelPrediction(BaseModel):
 
 For detailed Model Protocol documentation, see [MCP Layer Documentation - Model Protocol](02-mcp-layer.md#mcp-model-protocol).
 
-#### 3. MCP Reasoning Protocol
+#### 4. MCP Reasoning Protocol
 
 **Purpose**: Structured reasoning chains for decision transparency
 
@@ -438,29 +462,51 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - `reasoning_chain_update` - Reasoning chain updates (6-step reasoning process)
 - `model_prediction_update` - ML model prediction updates (consensus and individual models)
 - `market_tick` - Real-time price updates (BTCUSD and other symbols)
-- `trade_executed` - New trade notifications
-- `portfolio_update` - Portfolio value changes
-- `health_update` - Health status changes
+**Simplified Message Format** (as of 2026-02-01):
+The WebSocket communication uses a unified envelope format with 3 core message types:
 
-**Message Structure with Timestamps**:
-All WebSocket messages include timestamp fields for freshness calculation:
+- `data_update` - Unified data updates (replaces: `signal_update`, `portfolio_update`, `trade_executed`, `market_tick`, `reasoning_chain_update`, `model_prediction_update`)
+- `agent_update` - Agent state changes (replaces: `agent_state`)
+- `system_update` - System updates (replaces: `health_update`, `time_sync`, `performance_update`)
+
+**Unified Message Envelope Structure**:
+All WebSocket messages use a standardized envelope format:
 
 ```json
 {
-  "type": "message_type",
+  "type": "data_update" | "agent_update" | "system_update",
+  "resource": "signal" | "portfolio" | "trade" | "market" | "model" | "agent" | "health" | "time",
   "data": {
     "field1": "value1",
     "timestamp": "2025-01-27T12:00:00Z"
   },
-  "server_timestamp": "2025-01-27T12:00:00.123Z",
+  "timestamp": "2025-01-27T12:00:00.123Z",
+  "sequence": 12345,
+  "source": "agent" | "system",
   "server_timestamp_ms": 1706356800123
 }
 ```
 
+**Message Type Mapping**:
+- `data_update` with `resource: "signal"` → Trading signals and reasoning
+- `data_update` with `resource: "portfolio"` → Portfolio value changes
+- `data_update` with `resource: "trade"` → New trade notifications
+- `data_update` with `resource: "market"` → Market price updates
+- `data_update` with `resource: "model"` → Model predictions
+- `agent_update` with `resource: "agent"` → Agent state changes
+- `system_update` with `resource: "health"` → Health status changes
+- `system_update` with `resource: "time"` → Time synchronization
+
 **Timestamp Fields**:
-- `server_timestamp`: ISO 8601 formatted server time when message was broadcast
+- `timestamp`: ISO 8601 formatted message timestamp
 - `server_timestamp_ms`: Unix timestamp in milliseconds (for precise age calculation)
 - `data.timestamp`: Event-specific timestamp (when the event actually occurred)
+
+**Subscription Channels**:
+Simplified to 3 core channels:
+- `data_update` - All data updates (signal, portfolio, trade, market, model)
+- `agent_update` - Agent state changes
+- `system_update` - System updates (health, time, performance)
 
 **Periodic Update Frequencies**:
 - Agent State: Every 30 seconds (heartbeat mechanism)
@@ -470,10 +516,13 @@ All WebSocket messages include timestamp fields for freshness calculation:
 - Portfolio Updates: On market tick or trade execution
 
 **Client Actions**:
-- `subscribe` - Subscribe to channels
+- `subscribe` - Subscribe to channels (simplified: `["data_update", "agent_update", "system_update"]`)
 - `unsubscribe` - Unsubscribe from channels
 - `get_state` - Request current connection state
 - `get_agent_state` - Request current agent state on demand
+
+**Backward Compatibility**:
+The frontend automatically normalizes legacy message types (`signal_update`, `portfolio_update`, etc.) to the new format for smooth transition.
 
 #### Backend ↔ Agent
 

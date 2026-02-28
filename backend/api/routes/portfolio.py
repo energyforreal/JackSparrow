@@ -93,14 +93,26 @@ async def get_portfolio_summary(
     db: AsyncSession = Depends(get_db)
 ):
     """
+    **DEPRECATED**: This REST API endpoint is deprecated.
+
+    Use WebSocket command instead:
+    ```javascript
+    websocket.send(JSON.stringify({
+      action: 'command',
+      command: 'get_portfolio',
+      request_id: 'req_123',
+      parameters: {}
+    }))
+    ```
+
     Get portfolio summary.
-    
+
     Returns comprehensive portfolio information including:
     - Total portfolio value
     - Available balance
     - Total unrealized and realized PnL
     - Position count and details
-    
+
     **Example Response:**
     ```json
     {
@@ -162,9 +174,15 @@ async def get_portfolio_summary(
                     positions=[]
                 )
         
+        logger.warning(
+            "portfolio_summary_endpoint_deprecated",
+            message="REST API /portfolio/summary endpoint is deprecated. Use WebSocket command 'get_portfolio' instead.",
+            migration_guide="Send: {action: 'command', command: 'get_portfolio', request_id: '...', parameters: {}}"
+        )
+
         # Use shared serialization function to ensure identical format with WebSocket
         serialized_summary = portfolio_service.serialize_portfolio_summary(summary)
-        
+
         # Convert serialized summary to PortfolioSummaryResponse (Pydantic handles float to Decimal)
         return PortfolioSummaryResponse(**serialized_summary)
         
@@ -309,6 +327,40 @@ async def get_trades(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get trades: {str(e)}"
         )
+
+
+@router.get("/portfolio/pnl-summary")
+async def get_pnl_summary(
+    from_date: Optional[str] = Query(None, description="Start date (ISO format) for closed trades"),
+    to_date: Optional[str] = Query(None, description="End date (ISO format) for closed trades"),
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    limit: int = Query(500, ge=1, le=2000, description="Maximum number of closed trades"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get P&L summary for closed paper trades.
+
+    Returns closed positions with realized P&L for profit and loss identification.
+    Use from_date and to_date to filter by close date range.
+    """
+    try:
+        parsed_from = datetime.fromisoformat(from_date.replace("Z", "+00:00")) if from_date else None
+        parsed_to = datetime.fromisoformat(to_date.replace("Z", "+00:00")) if to_date else None
+        validated_symbol = validate_symbol(symbol) if symbol else None
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid date format: {e}. Use ISO format (e.g. 2025-01-01T00:00:00Z)"
+        )
+
+    result = await portfolio_service.get_pnl_summary(
+        db,
+        from_date=parsed_from,
+        to_date=parsed_to,
+        symbol=validated_symbol,
+        limit=limit,
+    )
+    return result
 
 
 @router.get("/portfolio/performance")

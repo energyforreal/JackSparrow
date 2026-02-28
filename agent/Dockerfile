@@ -74,7 +74,7 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
 # Switch to non-root user
 USER agent
 
-EXPOSE 8001
+# Agent doesn't expose HTTP port anymore - use agent-api service
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -m agent.healthcheck || exit 1

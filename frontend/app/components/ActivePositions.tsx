@@ -12,8 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Position } from '@/types'
 import { cn } from '@/lib/utils'
-import { LoadingSpinner, LoadingSkeleton } from './LoadingSpinner'
-import { formatDateTime } from '@/utils/formatters'
+import { LoadingSkeleton } from './LoadingSpinner'
 
 interface ActivePositionsProps {
   positions?: Position[]
@@ -52,10 +51,6 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
     const numPrice = typeof price === 'string' ? parseFloat(price) : price
     if (isNaN(numPrice)) return 'N/A'
     return `$${numPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  }
-
-  const formatDate = (date: Date | string) => {
-    return formatDateTime(date)
   }
 
   const getDuration = (openedAt: Date | string) => {

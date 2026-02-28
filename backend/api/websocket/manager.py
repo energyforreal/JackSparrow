@@ -5,7 +5,7 @@ Manages WebSocket connections and broadcasts real-time updates.
 """
 
 from fastapi import WebSocket, WebSocketDisconnect
-from typing import Dict, List, Set, Any
+from typing import Dict, List, Set, Any, Union
 import json
 import asyncio
 import uuid
@@ -17,6 +17,12 @@ import structlog
 from backend.core.redis import get_redis
 from backend.core.config import settings
 from backend.services.time_service import time_service
+from backend.core.websocket_messages import WebSocketEnvelope
+from backend.core.communication_logger import (
+    log_websocket_message,
+    generate_correlation_id,
+    extract_correlation_id
+)
 import redis.asyncio as aioredis
 
 logger = structlog.get_logger()
@@ -65,6 +71,10 @@ class WebSocketManager:
         self._redis_publisher = None
         self._redis_channel = "websocket:broadcast"
         self._instance_id = str(uuid.uuid4())[:8]  # Unique instance identifier
+        # Cached last-known state for fast snapshots to newly connected clients
+        self._last_signal: Optional[Dict[str, Any]] = None
+        self._last_market_by_symbol: Dict[str, Dict[str, Any]] = {}
+        self._last_agent_state: Optional[Dict[str, Any]] = None
     
     async def initialize(self):
         """Initialize Redis subscription for broadcasting."""
@@ -194,16 +204,28 @@ class WebSocketManager:
                 total_connections=len(self.active_connections)
             )
             
-            # Send initial agent state immediately
+            # Send initial agent state immediately (prefer cached state when available)
             try:
-                from backend.services.agent_service import agent_service
-                current_state = await agent_service.get_current_state()
-                if current_state:
-                    state_data = {
-                        "state": current_state.get("state", "UNKNOWN"),
-                        "timestamp": current_state.get("timestamp", datetime.now(timezone.utc)).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                        "reason": current_state.get("reason", "")
-                    }
+                state_data: Optional[Dict[str, Any]] = None
+
+                # Prefer state from recent broadcasts (agent_update or health sync)
+                if self._last_agent_state:
+                    state_data = dict(self._last_agent_state)
+                else:
+                    # Fallback: query agent status directly
+                    from backend.services.agent_service import agent_service
+                    current_state = await agent_service.get_current_state()
+                    if current_state:
+                        state_data = {
+                            "state": current_state.get("state", "UNKNOWN"),
+                            "timestamp": current_state.get("timestamp", datetime.now(timezone.utc)).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "reason": current_state.get("reason", "")
+                        }
+
+                if state_data:
+                    # Keep cache up to date
+                    self._last_agent_state = dict(state_data)
+
                     await self.send_personal_message(websocket, {
                         "type": "agent_state",
                         "data": state_data
@@ -217,6 +239,38 @@ class WebSocketManager:
                     "websocket_initial_agent_state_send_failed",
                     error=str(e),
                     message="Failed to send initial agent state, will be sent on next sync"
+                )
+
+            # Send cached snapshots for signal and market data so the client
+            # can immediately display the latest known state without waiting
+            # for the next live event from the agent.
+            try:
+                if self._last_signal:
+                    await self.send_personal_message(websocket, {
+                        "type": "data_update",
+                        "resource": "signal",
+                        "data": self._last_signal
+                    })
+
+                # Prefer BTCUSD market data if available, otherwise any symbol
+                market_snapshot: Optional[Dict[str, Any]] = None
+                if "BTCUSD" in self._last_market_by_symbol:
+                    market_snapshot = self._last_market_by_symbol["BTCUSD"]
+                elif self._last_market_by_symbol:
+                    # Take an arbitrary latest market snapshot
+                    market_snapshot = next(iter(self._last_market_by_symbol.values()))
+
+                if market_snapshot:
+                    await self.send_personal_message(websocket, {
+                        "type": "data_update",
+                        "resource": "market",
+                        "data": market_snapshot
+                    })
+            except Exception as e:
+                logger.debug(
+                    "websocket_initial_snapshot_send_failed",
+                    error=str(e),
+                    message="Failed to send initial data snapshots"
                 )
     
     async def disconnect(self, websocket: WebSocket, is_agent: bool = False):
@@ -294,6 +348,18 @@ class WebSocketManager:
         """Send message to specific WebSocket connection."""
         try:
             safe_message = _sanitize_for_json(message)
+
+            # Log outbound message to frontend
+            correlation_id = extract_correlation_id(message)
+            log_websocket_message(
+                direction="outbound",
+                message_type=message.get("type", "unknown"),
+                resource=message.get("resource"),
+                correlation_id=correlation_id,
+                target="frontend",
+                payload=safe_message
+            )
+
             await websocket.send_json(safe_message)
         except Exception as e:
             logger.error(
@@ -303,22 +369,68 @@ class WebSocketManager:
             )
             await self.disconnect(websocket)
     
-    async def broadcast(self, message: Dict[str, Any], channel: str = None):
-        """Broadcast message to all connected clients (optionally filtered by channel)."""
+    async def broadcast(self, message: Union[Dict[str, Any], WebSocketEnvelope], channel: str = None):
+        """Broadcast message to all connected clients (optionally filtered by channel).
+
+        Supports both legacy dict format and new WebSocketEnvelope format.
+        """
         # WS MANAGER: Validate message is not None
         if message is None:
             logger.warning("WS MANAGER: Ignoring empty broadcast")
             return
-        
-        # Add server timestamp to message
-        if "server_timestamp" not in message:
+
+        # Convert WebSocketEnvelope to dict if needed
+        if isinstance(message, WebSocketEnvelope):
+            message_dict = message.to_dict()
+        else:
+            message_dict = message
+
+        # Add server timestamp to message (for legacy compatibility)
+        if "server_timestamp" not in message_dict:
             time_info = time_service.get_time_info()
-            message["server_timestamp"] = time_info["server_time"]
-            message["server_timestamp_ms"] = time_info["timestamp_ms"]
-        
+            message_dict["server_timestamp"] = time_info["server_time"]
+            message_dict["server_timestamp_ms"] = time_info["timestamp_ms"]
+
+        # Update last-known state cache for snapshots to new clients
+        try:
+            msg_type = message_dict.get("type")
+            resource = message_dict.get("resource")
+            data = message_dict.get("data")
+
+            # WebSocketEnvelope may use enum values; normalize to strings when needed
+            msg_type_str = getattr(msg_type, "value", msg_type)
+            resource_str = getattr(resource, "value", resource)
+
+            if msg_type_str == "data_update":
+                if resource_str == "signal" and isinstance(data, dict):
+                    self._last_signal = dict(data)
+                elif resource_str == "market" and isinstance(data, dict):
+                    symbol = data.get("symbol")
+                    if symbol:
+                        self._last_market_by_symbol[symbol] = dict(data)
+            elif msg_type_str == "agent_update" and isinstance(data, dict):
+                self._last_agent_state = dict(data)
+        except Exception as e:
+            logger.debug(
+                "websocket_state_cache_update_failed",
+                error=str(e),
+                message="Failed to update WebSocket state cache from broadcast message"
+            )
+
         # Sanitize message for JSON serialization (for both Redis and direct WebSocket)
-        safe_message = _sanitize_for_json(message)
-        
+        safe_message = _sanitize_for_json(message_dict)
+
+        # Log outbound broadcast message to frontend clients
+        correlation_id = extract_correlation_id(message_dict)
+        log_websocket_message(
+            direction="outbound",
+            message_type=message_dict.get("type", "broadcast"),
+            resource=message_dict.get("resource"),
+            correlation_id=correlation_id,
+            target="frontend",
+            payload=safe_message
+        )
+
         # Add metadata to message for Redis pub/sub
         broadcast_message = {
             "instance_id": self._instance_id,
@@ -326,7 +438,7 @@ class WebSocketManager:
             "message": safe_message,
             "timestamp": time.time()
         }
-        
+
         # Publish to Redis for multi-instance broadcasting
         if self._redis_publisher:
             try:
@@ -341,7 +453,7 @@ class WebSocketManager:
                     error=str(e),
                     message="Falling back to local broadcast only"
                 )
-        
+
         # Also broadcast locally
         await self._broadcast_local(safe_message, channel)
     
@@ -365,6 +477,16 @@ class WebSocketManager:
                 
                 await websocket.send_json(message)
                 sent_count += 1
+            except WebSocketDisconnect as e:
+                # Expected case: client closed the connection (e.g., page navigation or component unmount).
+                # Treat as a normal disconnect, not an error.
+                logger.info(
+                    "websocket_client_disconnected",
+                    channel=channel,
+                    code=getattr(e, "code", None),
+                    reason=str(e),
+                )
+                disconnected.append(websocket)
             except Exception as e:
                 logger.error(
                     "websocket_broadcast_failed",
@@ -459,23 +581,233 @@ class WebSocketManager:
                 exc_info=True
             )
     
+    async def handle_command(self, websocket: WebSocket, command_data: Dict[str, Any]) -> None:
+        """Handle WebSocket command requests from frontend clients.
+
+        Processes commands that replace REST API endpoints with WebSocket request/response pattern.
+        """
+        command = command_data.get("command")
+        request_id = command_data.get("request_id", generate_correlation_id())
+        parameters = command_data.get("parameters", {})
+
+        try:
+            # Log command request
+            from backend.core.communication_logger import log_frontend_command
+            log_frontend_command(
+                direction="inbound",
+                command=command,
+                correlation_id=request_id,
+                payload=parameters
+            )
+
+            # Process command
+            response_data = await self._execute_command(command, parameters)
+            response_data["request_id"] = request_id
+            response_data["command"] = command
+
+            # Send response
+            await self.send_personal_message(websocket, response_data)
+
+        except Exception as e:
+            logger.error(
+                "websocket_command_execution_error",
+                command=command,
+                request_id=request_id,
+                error=str(e),
+                exc_info=True
+            )
+
+            # Send error response
+            error_response = {
+                "type": "response",
+                "request_id": request_id,
+                "command": command,
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            await self.send_personal_message(websocket, error_response)
+
+    async def _execute_command(self, command: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a command and return response data."""
+        if command == "predict":
+            # Get prediction from agent (replaces POST /api/v1/predict)
+            from backend.services.agent_service import agent_service
+            prediction_result = await agent_service.get_prediction(
+                symbol=parameters.get("symbol", "BTCUSD"),
+                context=parameters.get("context", {})
+            )
+
+            return {
+                "type": "response",
+                "success": prediction_result is not None,
+                "data": prediction_result,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        elif command == "execute_trade":
+            # Execute trade via agent (replaces POST /api/v1/trade/execute)
+            from backend.services.agent_service import agent_service
+            trade_result = await agent_service.execute_trade(
+                symbol=parameters.get("symbol"),
+                side=parameters.get("side"),
+                quantity=parameters.get("quantity"),
+                order_type=parameters.get("order_type", "MARKET"),
+                price=parameters.get("price"),
+                stop_loss=parameters.get("stop_loss"),
+                take_profit=parameters.get("take_profit")
+            )
+
+            return {
+                "type": "response",
+                "success": trade_result is not None,
+                "data": trade_result,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        elif command == "get_portfolio":
+            # Get portfolio summary (replaces GET /api/v1/portfolio/summary)
+            from backend.services.portfolio_service import portfolio_service
+            from backend.core.database import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as db:
+                try:
+                    portfolio_data = await portfolio_service.get_portfolio_summary(db)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+
+            return {
+                "type": "response",
+                "success": True,
+                "data": portfolio_data,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        elif command == "get_positions":
+            # Get positions (replaces GET /api/v1/portfolio/positions)
+            from backend.core.database import Position, PositionStatus, AsyncSessionLocal
+            from sqlalchemy import select, desc
+            from backend.api.models.responses import PositionResponse
+
+            async with AsyncSessionLocal() as db:
+                try:
+                    query = select(Position).where(Position.status == PositionStatus.OPEN)
+                    query = query.order_by(desc(Position.opened_at)).limit(100)
+
+                    result = await db.execute(query)
+                    positions = result.scalars().all()
+
+                    positions_data = [
+                        PositionResponse.model_validate(pos).model_dump(mode="json") for pos in positions
+                    ]
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+
+            return {
+                "type": "response",
+                "success": True,
+                "data": positions_data,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        elif command == "get_trades":
+            # Get trades (replaces GET /api/v1/portfolio/trades)
+            from backend.core.database import Trade, TradeStatus, AsyncSessionLocal
+            from sqlalchemy import select, desc
+            from backend.api.models.responses import TradeResponse
+
+            async with AsyncSessionLocal() as db:
+                try:
+                    query = select(Trade).order_by(desc(Trade.executed_at)).limit(100)
+
+                    result = await db.execute(query)
+                    trades = result.scalars().all()
+
+                    trades_data = [
+                        TradeResponse.model_validate(trade).model_dump(mode="json") for trade in trades
+                    ]
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+
+            return {
+                "type": "response",
+                "success": True,
+                "data": trades_data,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        elif command == "get_health":
+            # Get health status (replaces GET /api/v1/health)
+            from backend.api.routes.health import check_overall_health
+            from backend.core.database import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as db:
+                try:
+                    health_data = await check_overall_health(db)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+
+            return {
+                "type": "response",
+                "success": True,
+                "data": health_data,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        elif command == "get_agent_status":
+            # Get agent status (replaces GET /api/v1/admin/agent/status)
+            from backend.services.agent_service import agent_service
+            status_data = await agent_service.get_agent_status()
+
+            return {
+                "type": "response",
+                "success": status_data is not None,
+                "data": status_data,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        else:
+            raise ValueError(f"Unknown command: {command}")
+
     async def handle_client(self, websocket: WebSocket):
         """Handle WebSocket client messages."""
         try:
             while True:
                 # Receive message
                 data = await websocket.receive_json()
-                
+
+                # Log inbound message from frontend
+                correlation_id = extract_correlation_id(data)
+                log_websocket_message(
+                    direction="inbound",
+                    message_type=data.get("action", "unknown"),
+                    correlation_id=correlation_id,
+                    target="frontend",
+                    payload=data
+                )
+
                 action = data.get("action")
-                
+
                 if action == "subscribe":
                     channels = data.get("channels", [])
                     await self.subscribe(websocket, channels)
-                
+
                 elif action == "unsubscribe":
                     channels = data.get("channels", [])
                     await self.unsubscribe(websocket, channels)
-                
+
+                elif action == "command":
+                    # Handle command request (WebSocket equivalent of REST API calls)
+                    await self.handle_command(websocket, data)
+
                 elif action == "get_state":
                     # Send current WebSocket connection state
                     await self.send_personal_message(websocket, {
@@ -485,7 +817,7 @@ class WebSocketManager:
                             "subscribed_channels": list(self.subscriptions.get(websocket, set()))
                         }
                     })
-                
+
                 elif action == "get_agent_state":
                     # Send current agent state on demand
                     try:
@@ -519,13 +851,13 @@ class WebSocketManager:
                             "type": "error",
                             "message": f"Failed to get agent state: {str(e)}"
                         })
-                
+
                 else:
                     await self.send_personal_message(websocket, {
                         "type": "error",
                         "message": f"Unknown action: {action}"
                     })
-        
+
         except WebSocketDisconnect:
             await self.disconnect(websocket)
         except Exception as e:
@@ -538,7 +870,7 @@ class WebSocketManager:
     
     async def handle_agent_client(self, websocket: WebSocket):
         """Handle WebSocket messages from agent.
-        
+
         Agent sends events directly via WebSocket, which we then broadcast
         to frontend clients. This bypasses Redis Streams for lower latency.
         """
@@ -546,7 +878,18 @@ class WebSocketManager:
             while True:
                 # Receive message from agent
                 data = await websocket.receive_json()
-                
+
+                # Log inbound message from agent
+                correlation_id = extract_correlation_id(data)
+                log_websocket_message(
+                    direction="inbound",
+                    message_type=data.get("type", "unknown"),
+                    resource=data.get("event_type"),
+                    correlation_id=correlation_id,
+                    target="agent",
+                    payload=data
+                )
+
                 msg_type = data.get("type")
                 
                 if msg_type == "agent_event":
@@ -566,18 +909,22 @@ class WebSocketManager:
                     
                     # Also send pong/acknowledgment if needed
                     if data.get("request_ack"):
-                        await self.send_personal_message(websocket, {
+                        ack_message = {
                             "type": "ack",
                             "event_id": data.get("event_id"),
+                            "correlation_id": correlation_id or generate_correlation_id(),
                             "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
+                        }
+                        await self.send_personal_message(websocket, ack_message)
                 
                 elif msg_type == "ping":
                     # Respond to agent ping
-                    await self.send_personal_message(websocket, {
+                    pong_message = {
                         "type": "pong",
+                        "correlation_id": correlation_id or generate_correlation_id(),
                         "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
+                    }
+                    await self.send_personal_message(websocket, pong_message)
                 
                 else:
                     logger.warning(
@@ -605,12 +952,10 @@ class WebSocketManager:
                     continue
                 
                 time_info = time_service.get_time_info()
-                sync_message = {
-                    "type": "time_sync",
-                    "data": time_info
-                }
-                
-                await self.broadcast(sync_message, channel="time_sync")
+                # Use simplified message format for time sync
+                from backend.core.websocket_messages import create_time_sync
+                sync_message = create_time_sync(time_info)
+                await self.broadcast(sync_message, channel="system_update")
                 
         except asyncio.CancelledError:
             logger.info("websocket_time_sync_loop_cancelled")
@@ -694,8 +1039,8 @@ class WebSocketManager:
                         if model_health.status == "up":
                             if model_health.details:
                                 healthy_count = model_health.details.get("healthy_models", 0)
-                                total_count = model_health.details.get("total_models", 1)
-                                if healthy_count < 3 and total_count > 0:
+                                total_count = model_health.details.get("total_models", 0)
+                                if total_count > 0 and healthy_count < 3:
                                     degradation_reasons.append(f"Only {healthy_count}/{total_count} models are healthy")
                                 health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
                             else:
@@ -739,13 +1084,14 @@ class WebSocketManager:
                         else:
                             status = "unhealthy"
                         
-                        # Standardize health_score to 0-100 range for WebSocket (API returns 0.0-1.0)
-                        health_score_percent = round(health_score * 100, 1)
+                        # Keep health_score in 0.0-1.0 range (consistent with API)
+                        # Frontend will handle conversion to percentage for display
+                        health_score_normalized = max(0.0, min(1.0, health_score))
                         
                         health_data = {
                             "status": status,
-                            "health_score": health_score_percent,  # 0-100 range for WebSocket
-                            "score": health_score_percent,  # Alias for backward compatibility
+                            "health_score": health_score_normalized,  # 0.0-1.0 range
+                            "score": health_score_normalized,  # Alias for backward compatibility
                             "services": {
                                 "database": db_health.dict(),
                                 "redis": redis_health.dict(),
@@ -760,12 +1106,10 @@ class WebSocketManager:
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
                         
-                        health_message = {
-                            "type": "health_update",
-                            "data": health_data
-                        }
-                        
-                        await self.broadcast(health_message, channel="health")
+                        # Use simplified message format for health updates
+                        from backend.core.websocket_messages import create_health_update
+                        health_message = create_health_update(health_data)
+                        await self.broadcast(health_message, channel="system_update")
                         
                 except Exception as health_error:
                     logger.warning(
@@ -800,22 +1144,45 @@ class WebSocketManager:
                     if current_state:
                         state_data = {
                             "state": current_state.get("state", "UNKNOWN"),
-                            "timestamp": current_state.get("timestamp", datetime.now(timezone.utc)).isoformat() if isinstance(current_state.get("timestamp"), datetime) else current_state.get("timestamp", datetime.now(timezone.utc).isoformat()),
+                            "timestamp": current_state.get("timestamp", datetime.now(timezone.utc)).isoformat()
+                            if isinstance(current_state.get("timestamp"), datetime)
+                            else current_state.get("timestamp", datetime.now(timezone.utc).isoformat()),
                             "reason": current_state.get("reason", "")
                         }
-                        
-                        state_message = {
-                            "type": "agent_state",
-                            "data": state_data
-                        }
-                        
-                        await self.broadcast(state_message, channel="agent_state")
-                        
+
+                        # Keep cached agent state in sync with the latest broadcast
+                        self._last_agent_state = dict(state_data)
+
+                        # Use unified envelope format and the subscribed agent_update channel
+                        from backend.core.websocket_messages import create_agent_state_update
+
+                        state_message = create_agent_state_update(state_data)
+
+                        # Frontend subscribes to 'agent_update', so use that channel
+                        await self.broadcast(state_message, channel="agent_update")
+
                         logger.debug(
                             "websocket_agent_state_sync_broadcast",
                             state=state_data.get("state"),
                             connections=len(self.active_connections)
                         )
+
+                        # region agent log
+                        try:
+                            with open("debug-c0204f.log", "a", encoding="utf-8") as f:
+                                f.write(json.dumps({
+                                    "sessionId": "c0204f",
+                                    "runId": "pre-fix",
+                                    "hypothesisId": "H4",
+                                    "location": "backend/api/websocket/manager.py:_agent_state_sync_loop",
+                                    "message": "agent_state_broadcast",
+                                    "data": state_data,
+                                    "timestamp": int(time.time() * 1000)
+                                }) + "\n")
+                        except Exception:
+                            # Logging must never break websocket loop
+                            pass
+                        # endregion
                 except Exception as e:
                     logger.warning(
                         "websocket_agent_state_sync_error",

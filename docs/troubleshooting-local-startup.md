@@ -18,6 +18,8 @@ python tools/commands/error.sh
 # Windows PowerShell: .\tools\commands\error.ps1
 ```
 
+These commands read from the runtime `logs/` directory, which is **not** version-controlled. Logs are regenerated on each run and can be safely cleared between sessions without touching tracked files.
+
 ## Common Issues and Solutions
 
 ### 1. Configuration Errors

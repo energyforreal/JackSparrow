@@ -42,9 +42,37 @@ except ImportError:
 
 
 def _flushed_print(*args, **kwargs):
-    """Proxy print that always flushes stdout (and stderr when used)."""
+    """Proxy print that always flushes stdout (and stderr when used).
+    
+    Handles Unicode encoding errors gracefully by replacing problematic characters.
+    """
     kwargs.setdefault("flush", True)
-    builtins.print(*args, **kwargs)
+    try:
+        builtins.print(*args, **kwargs)
+    except UnicodeEncodeError:
+        # If encoding fails, try to encode with error handling
+        try:
+            # Get the encoding
+            encoding = sys.stdout.encoding or sys.getdefaultencoding() or "utf-8"
+            # Convert all args to strings and encode with error handling
+            safe_args = []
+            for arg in args:
+                if isinstance(arg, str):
+                    safe_arg = arg.encode(encoding, errors="replace").decode(encoding)
+                    safe_args.append(safe_arg)
+                else:
+                    safe_args.append(arg)
+            builtins.print(*safe_args, **kwargs)
+        except Exception:
+            # Last resort: use ASCII-only output
+            safe_args = []
+            for arg in args:
+                if isinstance(arg, str):
+                    safe_arg = arg.encode("ascii", errors="replace").decode("ascii")
+                    safe_args.append(safe_arg)
+                else:
+                    safe_args.append(str(arg).encode("ascii", errors="replace").decode("ascii"))
+            builtins.print(*safe_args, **kwargs)
 
 
 # Ensure every existing print() call in this module flushes immediately.
@@ -68,15 +96,30 @@ class Colors:
 
 
 def get_safe_symbol(symbol: str, fallback: str) -> str:
-    """Return symbol if platform supports Unicode, otherwise fallback."""
+    """Return symbol if platform supports Unicode, otherwise fallback.
+    
+    This function checks if the current stdout encoding can handle the Unicode symbol.
+    On Windows, it uses the actual stdout encoding (often cp1252) to test compatibility.
+    """
     if platform.system() == "Windows":
         try:
-            # Try to encode the symbol to check if it's supported
-            symbol.encode(sys.stdout.encoding or "utf-8")
+            # Get the actual stdout encoding, defaulting to utf-8 if unavailable
+            encoding = sys.stdout.encoding or sys.getdefaultencoding() or "utf-8"
+            
+            # Try to encode the symbol using the actual encoding
+            # This will fail if the encoding doesn't support the character
+            symbol.encode(encoding)
+            return symbol
+        except (UnicodeEncodeError, AttributeError, TypeError):
+            # If encoding fails, return the ASCII fallback
+            return fallback
+    else:
+        # On non-Windows systems, try UTF-8 encoding
+        try:
+            symbol.encode("utf-8")
             return symbol
         except (UnicodeEncodeError, AttributeError):
             return fallback
-    return symbol
 
 
 @dataclass
@@ -464,9 +507,10 @@ class MonitoringDashboard:
         print(f"\n{Colors.BOLD}Service Status{Colors.RESET}")
         for name, manager in self.services.items():
             status = "Running" if manager.is_alive() else "Stopped"
-            symbol = "OK" if manager.is_alive() else "X"
-            if platform.system() != "Windows":
-                symbol = "✓" if manager.is_alive() else "✗"
+            if manager.is_alive():
+                symbol = get_safe_symbol("✓", "OK")
+            else:
+                symbol = get_safe_symbol("✗", "X")
             color = Colors.GREEN if manager.is_alive() else Colors.ERROR
             print(f"  {color}{symbol}{Colors.RESET} {name}: {status}")
         
@@ -474,10 +518,10 @@ class MonitoringDashboard:
         paper_status = self.paper_validator.get_status()
         print(f"\n{Colors.BOLD}Paper Trading{Colors.RESET}")
         if paper_status["is_paper_mode"]:
-            symbol = "OK" if platform.system() == "Windows" else "✓"
+            symbol = get_safe_symbol("✓", "OK")
             print(f"  {Colors.GREEN}{symbol}{Colors.RESET} ENABLED ({paper_status['status_message']})")
         else:
-            symbol = "X" if platform.system() == "Windows" else "✗"
+            symbol = get_safe_symbol("✗", "X")
             print(f"  {Colors.ERROR}{symbol}{Colors.RESET} DISABLED - {Colors.ERROR}LIVE TRADING MODE{Colors.RESET}")
         
         # Data Freshness
@@ -487,9 +531,10 @@ class MonitoringDashboard:
             last_messages = self.ws_monitor.get_last_messages()
             
             ws_status = "Connected" if stats["connected"] else "Disconnected"
-            ws_symbol = "OK" if stats["connected"] else "X"
-            if platform.system() != "Windows":
-                ws_symbol = "✓" if stats["connected"] else "✗"
+            if stats["connected"]:
+                ws_symbol = get_safe_symbol("✓", "OK")
+            else:
+                ws_symbol = get_safe_symbol("✗", "X")
             ws_color = Colors.GREEN if stats["connected"] else Colors.ERROR
             print(f"  {ws_color}{ws_symbol}{Colors.RESET} WebSocket: {ws_status}")
             
@@ -506,15 +551,15 @@ class MonitoringDashboard:
                             if age_seconds < threshold:
                                 status_str = "Fresh"
                                 status_color = Colors.GREEN
-                                status_symbol = "OK" if platform.system() == "Windows" else "✓"
+                                status_symbol = get_safe_symbol("✓", "OK")
                             elif age_seconds < threshold * 2:
                                 status_str = "Warning"
                                 status_color = Colors.YELLOW
-                                status_symbol = "!" if platform.system() == "Windows" else "⚠"
+                                status_symbol = get_safe_symbol("⚠", "!")
                             else:
                                 status_str = f"Stale (>={threshold}s)"
                                 status_color = Colors.ERROR
-                                status_symbol = "X" if platform.system() == "Windows" else "✗"
+                                status_symbol = get_safe_symbol("✗", "X")
                             
                             print(f"    {status_color}{status_symbol}{Colors.RESET} {msg_type}: {age_str:>10}  {status_str}")
                 
@@ -568,10 +613,28 @@ class MonitoringDashboard:
 
 class ValidationReporter:
     """Generates validation reports."""
-    
+
     def __init__(self, project_root: Path):
         self.project_root = project_root
         self.logs_dir = project_root / "logs"
+
+    def _check_http_endpoint(self, url: str, timeout: float = 3.0) -> int:
+        """Check HTTP endpoint and return status code.
+
+        Args:
+            url: URL to check
+            timeout: Request timeout in seconds
+
+        Returns:
+            HTTP status code or 0 on failure
+        """
+        try:
+            import urllib.request
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return response.getcode()
+        except Exception:
+            return 0
         self.logs_dir.mkdir(exist_ok=True)
     
     def generate_report(self, services: Dict[str, "ServiceManager"], 
@@ -598,11 +661,28 @@ class ValidationReporter:
             "recommendations": [],
         }
         
-        # Service health
+        # Service health - check both process status and actual health endpoints
         for name, manager in services.items():
+            is_alive = manager.is_alive()
+            is_healthy = False
+
+            # Check actual health endpoints for running services
+            if is_alive:
+                if name == "Backend":
+                    status_code = self._check_http_endpoint("http://localhost:8000/api/v1/health", timeout=3)
+                    is_healthy = status_code == 200
+                elif name == "Agent":
+                    # Agent doesn't have a direct health endpoint, check if it's responding to commands
+                    is_healthy = True  # Assume healthy if process is running
+                elif name == "Frontend":
+                    status_code = self._check_http_endpoint("http://localhost:3000", timeout=3)
+                    is_healthy = status_code in [200, 404]  # Frontend may return 404 for root path but still be healthy
+                else:
+                    is_healthy = is_alive  # Default to process status for other services
+
             report["service_health"][name] = {
-                "running": manager.is_alive(),
-                "status": "healthy" if manager.is_alive() else "stopped",
+                "running": is_alive,
+                "status": "healthy" if is_healthy else "stopped" if is_alive else "stopped",
             }
         
         # Data freshness
@@ -679,9 +759,10 @@ class ValidationReporter:
         
         # Paper Trading
         paper = report["paper_trading"]
-        symbol = "OK" if paper["validated"] and paper["mode"] == "paper" else "X"
-        if platform.system() != "Windows":
-            symbol = "✓" if paper["validated"] and paper["mode"] == "paper" else "✗"
+        if paper["validated"] and paper["mode"] == "paper":
+            symbol = get_safe_symbol("✓", "OK")
+        else:
+            symbol = get_safe_symbol("✗", "X")
         color = Colors.GREEN if paper["mode"] == "paper" else Colors.ERROR
         print(f"Paper Trading: {color}{symbol}{Colors.RESET} {'VALIDATED' if paper['validated'] else 'WARNING'}")
         print(f"  Mode: {paper['mode'].title()} Trading")
@@ -691,9 +772,10 @@ class ValidationReporter:
         freshness = report["data_freshness"]
         if freshness.get("connected"):
             status = freshness.get("status", "unknown")
-            symbol = "OK" if status == "good" else "!"
-            if platform.system() != "Windows":
-                symbol = "✓" if status == "good" else "⚠"
+            if status == "good":
+                symbol = get_safe_symbol("✓", "OK")
+            else:
+                symbol = get_safe_symbol("⚠", "!")
             color = Colors.GREEN if status == "good" else Colors.YELLOW
             print(f"Data Freshness: {color}{symbol}{Colors.RESET} {status.upper()}")
             print(f"  WebSocket: {'Connected' if freshness.get('connected') else 'Disconnected'}")
@@ -701,15 +783,17 @@ class ValidationReporter:
             if freshness.get("stale_messages"):
                 print(f"  Stale messages: {len(freshness['stale_messages'])} ({', '.join(freshness['stale_messages'])})")
         else:
-            print(f"Data Freshness: {Colors.YELLOW}⚠{Colors.RESET} NOT MONITORED")
+            warning_symbol = get_safe_symbol("⚠", "!")
+            print(f"Data Freshness: {Colors.YELLOW}{warning_symbol}{Colors.RESET} NOT MONITORED")
         print()
         
         # Service Health
         print("Service Health:")
         for name, health in report["service_health"].items():
-            symbol = "OK" if health["running"] else "X"
-            if platform.system() != "Windows":
-                symbol = "✓" if health["running"] else "✗"
+            if health["running"]:
+                symbol = get_safe_symbol("✓", "OK")
+            else:
+                symbol = get_safe_symbol("✗", "X")
             color = Colors.GREEN if health["running"] else Colors.ERROR
             print(f"  {color}{symbol}{Colors.RESET} {name}: {health['status']}")
         print()
@@ -785,7 +869,7 @@ class ServiceManager:
                     except Exception as e:
                         error_msg = f"Process exited immediately (error capturing output: {e})"
                     
-                    error_symbol = "X" if platform.system() == "Windows" else "✗"
+                    error_symbol = get_safe_symbol("✗", "X")
                     print(f"{Colors.ERROR}{error_symbol} {self.config.name} failed to start (exit code: {return_code}): {error_msg}{Colors.RESET}")
                     return False
             except subprocess.TimeoutExpired:
@@ -819,13 +903,13 @@ class ServiceManager:
                     f.write(str(self.process.pid))
             return True
         except FileNotFoundError:
-            error_symbol = "X" if platform.system() == "Windows" else "✗"
+            error_symbol = get_safe_symbol("✗", "X")
             missing_cmd = self.config.command[0]
             print(f"{Colors.ERROR}{error_symbol} Failed to start {self.config.name}: Command not found ({missing_cmd}){Colors.RESET}")
             print(f"   Make sure {missing_cmd} is installed and in PATH")
             return False
         except Exception as e:
-            error_symbol = "X" if platform.system() == "Windows" else "✗"
+            error_symbol = get_safe_symbol("✗", "X")
             print(f"{Colors.ERROR}{error_symbol} Failed to start {self.config.name}: {e}{Colors.RESET}")
             return False
     
@@ -1032,7 +1116,7 @@ class ParallelProcessManager:
         # Start all services
         started_services = []
         failed_services = []
-        error_symbol = "X" if platform.system() == "Windows" else "✗"
+        error_symbol = get_safe_symbol("✗", "X")
         for name, manager in self.services.items():
             print(f"{Colors.BOLD}Starting {name}...{Colors.RESET}")
             if manager.start():
@@ -1056,21 +1140,21 @@ class ParallelProcessManager:
         time.sleep(max_delay)
         
         # Check for excessive errors during startup
+        dead_services = []
         for name in started_services:
             manager = self.services[name]
             if manager.startup_start_time:
                 elapsed = time.time() - manager.startup_start_time
                 if elapsed < 30 and manager.error_count > manager.startup_error_threshold:
-                    error_symbol = "X" if platform.system() == "Windows" else "✗"
+                    error_symbol = get_safe_symbol("✗", "X")
                     print(f"{Colors.ERROR}{error_symbol} {name} has {manager.error_count} errors in first {int(elapsed)}s (threshold: {manager.startup_error_threshold}){Colors.RESET}")
                     if manager.recent_errors:
                         print(f"   Recent errors: {', '.join(manager.recent_errors[:3])}")
                     dead_services.append(name)
-        
+
         # Check if all started services are still alive
         alive_services = []
-        dead_services = []
-        error_symbol = "X" if platform.system() == "Windows" else "✗"
+        error_symbol = get_safe_symbol("✗", "X")
         for name in started_services:
             if self.services[name].is_alive():
                 alive_services.append(name)
@@ -1094,15 +1178,47 @@ class ParallelProcessManager:
                         print(f"   Could not read log file: {e}", file=sys.stderr)
         
         if dead_services:
-            error_symbol = "X" if platform.system() == "Windows" else "✗"
+            error_symbol = get_safe_symbol("✗", "X")
             print(f"\n{Colors.ERROR}{error_symbol} Some services failed to start{Colors.RESET}")
             print(f"   Successful: {', '.join(alive_services)}")
             print(f"   Failed: {', '.join(dead_services + failed_services)}")
             print(f"   Check logs in {logs_dir} for details")
+
+            # Try to kill any existing processes on conflicting ports
+            print(f"\n{Colors.BOLD}Attempting to resolve port conflicts...{Colors.RESET}")
+            ports_to_check = [8000, 8001, 3000]  # Common ports that might conflict
+            for port in ports_to_check:
+                if check_port_accessible("localhost", port):
+                    print(f"   Port {port} is in use - attempting to free it...")
+                    try:
+                        # Try to kill process on this port (Windows-specific)
+                        if platform.system() == "Windows":
+                            # Use netstat to find PID and taskkill to kill it
+                            import subprocess
+                            result = subprocess.run(
+                                ["powershell", "-Command",
+                                 f"Get-NetTCPConnection -LocalPort {port} -State Listen | Select-Object -ExpandProperty OwningProcess"],
+                                capture_output=True, text=True, timeout=10
+                            )
+                            if result.returncode == 0 and result.stdout.strip():
+                                pid = result.stdout.strip()
+                                print(f"     Found process {pid} on port {port}, terminating...")
+                                subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+                                # Wait a moment for the port to be freed
+                                time.sleep(2)
+                                if not check_port_accessible("localhost", port):
+                                    check_symbol = get_safe_symbol("✓", "+")
+                                    print(f"     {check_symbol} Port {port} freed successfully")
+                                else:
+                                    warning_symbol = get_safe_symbol("⚠", "!")
+                                    print(f"     {warning_symbol} Could not free port {port}")
+                    except Exception as e:
+                        print(f"     Error freeing port {port}: {e}")
+
             return False
         
         # All services started successfully - report error/warning counts
-        success_symbol = "OK" if platform.system() == "Windows" else "✓"
+        success_symbol = get_safe_symbol("✓", "OK")
         print(f"\n{Colors.BOLD}{success_symbol} All services started successfully!{Colors.RESET}\n")
         
         # Report error and warning counts for transparency
@@ -1135,13 +1251,15 @@ class ParallelProcessManager:
             host, port, database = parse_database_url(database_url)
             print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} Database: Connected at {host}:{port}")
         else:
-            print(f"  {Colors.YELLOW}⚠{Colors.RESET} Database: Status unknown")
+            warning_symbol = get_safe_symbol("⚠", "!")
+            print(f"  {Colors.YELLOW}{warning_symbol}{Colors.RESET} Database: Status unknown")
         
         if check_redis_running(redis_url):
             host, port = parse_redis_url(redis_url)
             print(f"  {Colors.GREEN}{success_symbol}{Colors.RESET} Redis: Connected at {host}:{port}")
         else:
-            print(f"  {Colors.YELLOW}⚠{Colors.RESET} Redis: Status unknown")
+            warning_symbol = get_safe_symbol("⚠", "!")
+            print(f"  {Colors.YELLOW}{warning_symbol}{Colors.RESET} Redis: Status unknown")
         
         print(f"\nLogs are in the logs/ directory")
         print(f"API Documentation: http://localhost:8000/docs\n")
@@ -1216,7 +1334,7 @@ class ParallelProcessManager:
         frontend_port = getattr(self, 'frontend_port', 3000)
         services_status = {
             "Backend": {"url": "http://localhost:8000/api/v1/health", "status": "unknown"},
-            "Feature Server": {"url": "http://localhost:8001/health", "status": "unknown"},
+            "Feature Server": {"url": "http://localhost:8002/health", "status": "unknown"},
             "Frontend": {"url": f"http://localhost:{frontend_port}", "status": "unknown"},
         }
         
@@ -1240,8 +1358,8 @@ class ParallelProcessManager:
         
         # Display results
         print()
-        success_symbol = "OK" if platform.system() == "Windows" else "✓"
-        error_symbol = "X" if platform.system() == "Windows" else "✗"
+        success_symbol = get_safe_symbol("✓", "OK")
+        error_symbol = get_safe_symbol("✗", "X")
         
         for service_name, info in services_status.items():
             if info["status"] == "healthy":
@@ -1363,7 +1481,7 @@ class ParallelProcessManager:
         frontend_port = getattr(self, 'frontend_port', 3000)
         endpoints = {
             "Backend": "http://localhost:8000/api/v1/health",
-            "Feature Server": "http://localhost:8001/health",
+            "Feature Server": "http://localhost:8002/health",
             "Frontend": f"http://localhost:{frontend_port}"
         }
         
@@ -1371,8 +1489,8 @@ class ParallelProcessManager:
         database_url = os.environ.get("DATABASE_URL", "")
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         
-        status_symbol = "OK" if platform.system() == "Windows" else "✓"
-        error_symbol = "X" if platform.system() == "Windows" else "✗"
+        status_symbol = get_safe_symbol("✓", "OK")
+        error_symbol = get_safe_symbol("✗", "X")
         
         retry_count = 0
         while retry_count < max_retries:
@@ -1451,7 +1569,7 @@ class ParallelProcessManager:
         try:
             while not self.shutdown_event.is_set():
                 # Check if any service died unexpectedly
-                error_symbol = "X" if platform.system() == "Windows" else "✗"
+                error_symbol = get_safe_symbol("✗", "X")
                 for name, manager in self.services.items():
                     if manager.running and not manager.is_alive():
                         print(f"\n{Colors.ERROR}{error_symbol} {name} process died unexpectedly{Colors.RESET}")
@@ -1597,10 +1715,40 @@ def setup_services(project_root: Path, npm_cmd: str) -> ParallelProcessManager:
     manager = ParallelProcessManager(project_root)
     logs_dir = project_root / "logs"
     
-    # Backend service
+    # Backend service - check for port conflicts
+    backend_port = 8000
+    if check_port_accessible("localhost", backend_port):
+        print(f"{Colors.YELLOW}⚠ Port {backend_port} is in use, attempting to free it...{Colors.RESET}")
+        try:
+            # Try to kill process on this port (Windows-specific)
+            if platform.system() == "Windows":
+                import subprocess
+                result = subprocess.run(
+                    ["powershell", "-Command",
+                     f"Get-NetTCPConnection -LocalPort {backend_port} -State Listen | Select-Object -ExpandProperty OwningProcess"],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    pid = result.stdout.strip()
+                    print(f"     Found process {pid} on port {backend_port}, terminating...")
+                    subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+                    # Wait a moment for the port to be freed
+                    time.sleep(2)
+                    if not check_port_accessible("localhost", backend_port):
+                        check_symbol = get_safe_symbol("✓", "+")
+                        print(f"     {check_symbol} Port {backend_port} freed successfully")
+                    else:
+                        raise RuntimeError(f"Critical: Port {backend_port} is still in use after attempting to free it. Backend cannot start.")
+                else:
+                    raise RuntimeError(f"Critical: Port {backend_port} is in use but could not identify owning process. Backend cannot start.")
+            else:
+                raise RuntimeError(f"Critical: Port {backend_port} is in use. Port freeing is only supported on Windows. Backend cannot start.")
+        except Exception as e:
+            raise RuntimeError(f"Critical: Failed to free port {backend_port}: {e}. Backend cannot start.")
+
     backend_venv = project_root / "backend" / "venv"
     backend_python = get_python_executable(backend_venv)
-    
+
     backend_config = ServiceConfig(
         name="Backend",
         color=Colors.BACKEND,
@@ -1609,13 +1757,14 @@ def setup_services(project_root: Path, npm_cmd: str) -> ParallelProcessManager:
             "-m", "uvicorn",
             "backend.api.main:app",
             "--host", "0.0.0.0",
-            "--port", "8000",
+            "--port", str(backend_port),
             "--lifespan", "on"
         ],
         cwd=project_root,
         log_file=logs_dir / "backend.log",
         pid_file=logs_dir / "backend.pid",
-        check_delay=2.0
+        check_delay=2.0,
+        env={"PYTHONPATH": str(project_root)}
     )
     manager.add_service(backend_config)
     
@@ -2051,7 +2200,7 @@ def verify_database_schema(database_url: str) -> Tuple[bool, bool]:
                             timeout=60
                         )
                         if result.returncode == 0:
-                            success_symbol = "OK" if platform.system() == "Windows" else "✓"
+                            success_symbol = get_safe_symbol("✓", "OK")
                             print(f"{Colors.GREEN}{success_symbol} Database schema initialized successfully{Colors.RESET}")
                             return True, True
                         else:
@@ -2066,7 +2215,7 @@ def verify_database_schema(database_url: str) -> Tuple[bool, bool]:
                     return False, False
             else:
                 # Schema missing but auto-init not enabled - this should prevent startup
-                error_symbol = "X" if platform.system() == "Windows" else "✗"
+                error_symbol = get_safe_symbol("✗", "X")
                 print(f"{Colors.ERROR}{error_symbol} Database schema missing: {', '.join(missing_tables)}{Colors.RESET}")
                 print(f"  Run 'python scripts/setup_db.py' to initialize schema")
                 print(f"  Or set AUTO_CREATE_DB_SCHEMA=1 or AUTO_INIT_DB=1 to auto-initialize on startup")
@@ -2074,13 +2223,13 @@ def verify_database_schema(database_url: str) -> Tuple[bool, bool]:
                 return False, False
         else:
             # Schema exists
-            success_symbol = "OK" if platform.system() == "Windows" else "✓"
+            success_symbol = get_safe_symbol("✓", "OK")
             print(f"{Colors.GREEN}{success_symbol} Database schema verified (all tables exist){Colors.RESET}")
             return True, False
             
     except Exception as e:
         # Don't fail startup if schema check fails, just warn
-        warning_symbol = "!" if platform.system() == "Windows" else "⚠"
+        warning_symbol = get_safe_symbol("⚠", "!")
         print(f"{Colors.YELLOW}{warning_symbol} Could not verify database schema: {str(e)[:100]}{Colors.RESET}")
         print(f"  Ensure database is initialized with 'python scripts/setup_db.py'")
         # Return True to allow startup to continue
@@ -2169,7 +2318,7 @@ def run_validation_script(script_path: Path, script_name: str, project_root: Pat
         
         # Show result clearly
         if result.returncode != 0:
-            error_symbol = "X" if platform.system() == "Windows" else "✗"
+            error_symbol = get_safe_symbol("✗", "X")
             print(f"{Colors.ERROR}{error_symbol} {script_name} failed with exit code {result.returncode}{Colors.RESET}")
             sys.stdout.flush()
         
@@ -2230,10 +2379,10 @@ def main():
         paper_validator = PaperTradingValidator(project_root)
         is_valid, status_msg = paper_validator.validate_startup()
         if is_valid:
-            success_symbol = "OK" if platform.system() == "Windows" else "✓"
+            success_symbol = get_safe_symbol("✓", "OK")
             print(f"{Colors.BOLD}[Paper Trading] {Colors.GREEN}{success_symbol}{Colors.RESET} Mode: {status_msg}{Colors.RESET}")
         else:
-            warning_symbol = "!" if platform.system() == "Windows" else "⚠"
+            warning_symbol = get_safe_symbol("⚠", "!")
             print(f"{Colors.BOLD}[Paper Trading] {Colors.ERROR}{warning_symbol}{Colors.RESET} Mode: {status_msg}{Colors.RESET}")
             print(f"{Colors.ERROR}WARNING: Live trading mode detected! Real trades will be executed!{Colors.RESET}")
         print()

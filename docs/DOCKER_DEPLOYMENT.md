@@ -140,7 +140,8 @@ nano .env  # or use your preferred editor
 
 ```bash
 mkdir -p logs/backend logs/agent logs/frontend models
-touch kubera_pokisham.db
+# Optional legacy SQLite file (no longer used by the Docker stack):
+# touch kubera_pokisham.db
 ```
 
 ### 4. Build and Deploy
@@ -161,7 +162,7 @@ touch kubera_pokisham.db
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
-- **Agent Feature Server**: http://localhost:8001
+- **Agent Feature Server**: http://localhost:8002
 
 ---
 
@@ -206,7 +207,7 @@ API_KEY=your_api_key
 ```bash
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
-FEATURE_SERVER_PORT=8001
+FEATURE_SERVER_PORT=8002
 POSTGRES_PORT=5432
 REDIS_PORT=6379
 ```

@@ -7,6 +7,7 @@ frontend clients via WebSocket.
 
 import json
 import asyncio
+import time
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import structlog
@@ -17,6 +18,10 @@ from backend.core.redis import get_redis
 from backend.api.websocket.manager import websocket_manager
 from backend.core.logging import log_error_with_context
 from backend.services.trade_persistence_service import trade_persistence_service
+from backend.core.websocket_messages import (
+    create_signal_update, create_portfolio_update, create_trade_update,
+    create_market_update, create_agent_state_update, create_model_update
+)
 from decimal import Decimal
 
 logger = structlog.get_logger()
@@ -327,20 +332,49 @@ class AgentEventSubscriber:
                     )
         
         try:
-            if event_type == "decision_ready":
-                await self._handle_decision_ready(payload)
+            # Log event processing for debugging
+            logger.debug(
+                "agent_event_subscriber_processing_event",
+                service="backend",
+                event_type=event_type,
+                event_id=event_id or 'unknown',
+                payload_keys=list(payload.keys()) if isinstance(payload, dict) else 'non-dict'
+            )
+
+            # Consolidated event routing - reduced from 8 handlers to 3 core handlers
+            if event_type in ["decision_ready", "order_fill", "position_closed"]:
+                await self._handle_trading_event(event_type, payload)
             elif event_type == "state_transition":
-                await self._handle_state_transition(payload)
-            elif event_type == "order_fill":
-                await self._handle_order_fill(payload)
-            elif event_type == "position_closed":
-                await self._handle_position_closed(payload)
-            elif event_type == "model_prediction_complete":
-                await self._handle_model_prediction_complete(payload)
-            elif event_type == "reasoning_complete":
-                await self._handle_reasoning_complete(payload)
-            elif event_type == "market_tick":
-                await self._handle_market_tick(payload)
+                await self._handle_system_event(event_type, payload)
+            elif event_type in ["model_prediction_complete", "reasoning_complete", "market_tick"]:
+                await self._handle_data_event(event_type, payload)
+            else:
+                # Some low-level events are expected but intentionally ignored by the backend bridge.
+                # Log them at debug level to avoid noisy warnings while retaining observability.
+                known_ignored_events = {
+                    "candle_closed",
+                    "feature_request",
+                    "feature_computed",
+                    "model_prediction_request",
+                    "model_prediction",
+                    "reasoning_request",
+                }
+                if event_type in known_ignored_events:
+                    logger.debug(
+                        "agent_event_subscriber_ignored_event_type",
+                        service="backend",
+                        event_type=event_type,
+                        event_id=event_id or 'unknown',
+                        message="Ignoring low-level agent event type"
+                    )
+                else:
+                    logger.warning(
+                        "agent_event_subscriber_unknown_event_type",
+                        service="backend",
+                        event_type=event_type,
+                        event_id=event_id or 'unknown',
+                        message="Received unknown event type, ignoring"
+                    )
             # Add more event handlers as needed
 
         except Exception as e:
@@ -352,204 +386,13 @@ class AgentEventSubscriber:
                 event_id=event_id
             )
 
-    async def _handle_decision_ready(self, payload: Dict[str, Any]):
-        """Handle DecisionReadyEvent.
-        
-        Args:
-            payload: DecisionReadyEvent payload
-        """
-        try:
-            signal = payload.get("signal", "HOLD")
-            confidence = payload.get("confidence", 0.0)
-            symbol = payload.get("symbol", "BTCUSD")
-            reasoning_chain = payload.get("reasoning_chain", {})
-            
-            # Extract timestamp - check multiple possible locations
-            timestamp = payload.get("timestamp")
-            if not timestamp and reasoning_chain:
-                # Check if timestamp is in reasoning_chain
-                if isinstance(reasoning_chain, dict):
-                    timestamp = reasoning_chain.get("timestamp")
-                    if not timestamp:
-                        # Check in market_context
-                        market_context = reasoning_chain.get("market_context", {})
-                        if isinstance(market_context, dict):
-                            timestamp = market_context.get("timestamp")
-
-            # Convert confidence from 0-1 to 0-100 range if needed
-            if 0.0 <= confidence <= 1.0:
-                confidence = confidence * 100.0
-
-            # Extract reasoning chain steps
-            reasoning_steps = reasoning_chain.get("steps", [])
-            conclusion = reasoning_chain.get("conclusion", "")
-            
-            # Extract market context and model predictions from reasoning_chain
-            market_context = reasoning_chain.get("market_context", {})
-            model_predictions = reasoning_chain.get("model_predictions", [])
-
-            # Extract model consensus from market_context
-            model_consensus = market_context.get("model_consensus", [])
-            
-            # Extract individual model reasoning from model_predictions
-            individual_model_reasoning = []
-            if isinstance(model_predictions, list):
-                for pred in model_predictions:
-                    if isinstance(pred, dict):
-                        model_name = pred.get("model_name", "Unknown")
-                        reasoning = pred.get("reasoning", "")
-                        pred_confidence = pred.get("confidence", 0.0)
-                        
-                        # Convert confidence to 0-100 if needed
-                        if 0.0 <= pred_confidence <= 1.0:
-                            pred_confidence = pred_confidence * 100.0
-                        
-                        individual_model_reasoning.append({
-                            "model_name": model_name,
-                            "reasoning": reasoning,
-                            "confidence": pred_confidence
-                        })
-
-            # Handle timestamp - ensure it's properly formatted
-            formatted_timestamp = None
-            if timestamp:
-                if isinstance(timestamp, datetime):
-                    # Validate datetime is not epoch time or invalid
-                    if timestamp.year >= 2000:  # Reasonable minimum year
-                        formatted_timestamp = timestamp.isoformat() + "Z"  # Explicitly mark as UTC
-                elif isinstance(timestamp, str):
-                    # Validate string timestamp is not empty and not epoch time
-                    try:
-                        # Try to parse and validate
-                        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                        if parsed.year >= 2000:  # Reasonable minimum year
-                            # Ensure timezone is present
-                            if "Z" in timestamp or "+" in timestamp or "-" in timestamp[-6:]:
-                                formatted_timestamp = timestamp
-                            else:
-                                # Add Z to mark as UTC
-                                formatted_timestamp = timestamp + "Z"
-                    except (ValueError, AttributeError):
-                        # Invalid format, will use fallback
-                        pass
-            
-            # Fallback to current time if timestamp is missing or invalid
-            if not formatted_timestamp:
-                # Use time_service to ensure consistent format with 'Z' suffix
-                from backend.services.time_service import time_service
-                time_info = time_service.get_time_info()
-                formatted_timestamp = time_info["server_time"]
-
-            # Format signal data for frontend - validate and ensure consistent format
-            # Validate signal value
-            valid_signals = ["BUY", "SELL", "HOLD", "STRONG_BUY", "STRONG_SELL"]
-            if signal not in valid_signals:
-                logger.warning(
-                    "agent_event_subscriber_invalid_signal",
-                    service="backend",
-                    signal=signal,
-                    valid_signals=valid_signals,
-                    message="Invalid signal value, using HOLD as fallback"
-                )
-                signal = "HOLD"
-            
-            # Ensure confidence is in 0-100 range
-            if confidence < 0 or confidence > 100:
-                logger.warning(
-                    "agent_event_subscriber_invalid_confidence",
-                    service="backend",
-                    confidence=confidence,
-                    message="Confidence out of range, clamping to 0-100"
-                )
-                confidence = max(0, min(100, confidence))
-            
-            # Ensure timestamp is present
-            if not formatted_timestamp:
-                from backend.services.time_service import time_service
-                time_info = time_service.get_time_info()
-                formatted_timestamp = time_info["server_time"]
-                logger.debug(
-                    "agent_event_subscriber_signal_timestamp_fallback",
-                    service="backend",
-                    message="Using current time as timestamp fallback"
-                )
-            
-            signal_data = {
-                "signal": signal,
-                "confidence": confidence,  # Validated to 0-100 range
-                "symbol": symbol or "BTCUSD",  # Default symbol if missing
-                "model_consensus": model_consensus or [],
-                "reasoning_chain": reasoning_steps or [],  # Array of reasoning steps
-                "individual_model_reasoning": individual_model_reasoning or [],
-                "agent_decision_reasoning": conclusion or "",
-                "timestamp": formatted_timestamp  # ISO 8601 with Z suffix
-            }
-
-            # Broadcast via WebSocket
-            await websocket_manager.broadcast(
-                {"type": "signal_update", "data": signal_data},
-                channel="signal_update"
-            )
-
-            logger.info(
-                "agent_event_subscriber_decision_ready_broadcast",
-                service="backend",
-                signal=signal,
-                confidence=confidence,
-                symbol=symbol,
-                timestamp=formatted_timestamp
-            )
-
-        except Exception as e:
-            log_error_with_context(
-                "agent_event_subscriber_decision_ready_error",
-                error=e,
-                component="agent_event_subscriber"
-            )
-
-    async def _handle_state_transition(self, payload: Dict[str, Any]):
-        """Handle StateTransitionEvent.
-        
-        Args:
-            payload: StateTransitionEvent payload
-        """
-        try:
-            to_state = payload.get("to_state", "UNKNOWN")
-            reason = payload.get("reason", "")
-            timestamp = payload.get("timestamp")
-
-            # Format state data for frontend
-            state_data = {
-                "state": to_state,
-                "reason": reason,
-                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
-            }
-
-            # Broadcast via WebSocket
-            await websocket_manager.broadcast(
-                {"type": "agent_state", "data": state_data},
-                channel="agent_state"
-            )
-
-            logger.debug(
-                "agent_event_subscriber_state_transition_broadcast",
-                service="backend",
-                state=to_state,
-                reason=reason
-            )
-
-        except Exception as e:
-            log_error_with_context(
-                "agent_event_subscriber_state_transition_error",
-                error=e,
-                component="agent_event_subscriber"
-            )
+    # Consolidated Event Handlers - Reduced from 8 individual handlers to 3
 
     async def _handle_order_fill(self, payload: Dict[str, Any]):
-        """Handle OrderFillEvent.
+        """Handle OrderFillEvent - persist to DB and broadcast to frontend.
         
         Args:
-            payload: OrderFillEvent payload
+            payload: OrderFillEvent payload (order_id, trade_id, symbol, side, quantity, fill_price, timestamp)
         """
         try:
             order_id = payload.get("order_id", "")
@@ -710,6 +553,7 @@ class AgentEventSubscriber:
                 )
 
             # Format trade data for frontend - include position_id if available
+            ts_str = timestamp.isoformat() if isinstance(timestamp, datetime) else (timestamp or datetime.now(timezone.utc).isoformat())
             trade_data = {
                 "order_id": order_id,
                 "trade_id": trade_id,
@@ -717,7 +561,9 @@ class AgentEventSubscriber:
                 "side": side,
                 "quantity": quantity,
                 "price": fill_price,
-                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
+                "status": "EXECUTED",
+                "executed_at": ts_str,
+                "timestamp": ts_str,
             }
             
             # Add position_id if position was created successfully
@@ -739,11 +585,9 @@ class AgentEventSubscriber:
                     message="Position ID not available - position may not have been created"
                 )
 
-            # Broadcast via WebSocket
-            await websocket_manager.broadcast(
-                {"type": "trade_executed", "data": trade_data},
-                channel="trade_executed"
-            )
+            # Broadcast via WebSocket using simplified message format
+            trade_message = create_trade_update(trade_data)
+            await websocket_manager.broadcast(trade_message, channel="data_update")
 
             logger.debug(
                 "agent_event_subscriber_order_fill_broadcast",
@@ -846,11 +690,10 @@ class AgentEventSubscriber:
                 "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
             }
             
-            # Broadcast via WebSocket
-            await websocket_manager.broadcast(
-                {"type": "position_closed", "data": position_data},
-                channel="position_closed"
-            )
+            # Broadcast via WebSocket using simplified message format
+            # Use portfolio update since position closure affects portfolio
+            portfolio_message = create_portfolio_update({"position_closed": position_data})
+            await websocket_manager.broadcast(portfolio_message, channel="data_update")
             
             logger.debug(
                 "agent_event_subscriber_position_closed_broadcast",
@@ -937,26 +780,24 @@ class AgentEventSubscriber:
             else:
                 formatted_timestamp = time_service.get_time_info()["server_time"]
             
-            # Convert consensus confidence to 0-100 if needed
-            if 0.0 <= consensus_confidence <= 1.0:
-                consensus_confidence = consensus_confidence * 100.0
+            # Normalize consensus confidence to 0.0-1.0 range (NOT 0-100)
+            # Frontend will handle conversion to percentage for display
+            if consensus_confidence > 1.0:
+                consensus_confidence = consensus_confidence / 100.0
+            consensus_confidence = max(0.0, min(1.0, consensus_confidence))
             
-            # Broadcast model prediction update
-            await websocket_manager.broadcast(
-                {
-                    "type": "model_prediction_update",
-                    "data": {
-                        "symbol": symbol,
-                        "consensus_signal": consensus_signal,
-                        "consensus_confidence": consensus_confidence,
-                        "individual_model_reasoning": individual_reasoning,
-                        "model_consensus": model_consensus,
-                        "model_predictions": predictions,
-                        "timestamp": formatted_timestamp
-                    }
-                },
-                channel="model_predictions"
-            )
+            # Broadcast model prediction update using simplified message format
+            model_data = {
+                "symbol": symbol,
+                "consensus_signal": consensus_signal,
+                "consensus_confidence": consensus_confidence,
+                "individual_model_reasoning": individual_reasoning,
+                "model_consensus": model_consensus,
+                "model_predictions": predictions,
+                "timestamp": formatted_timestamp
+            }
+            model_message = create_model_update(model_data)
+            await websocket_manager.broadcast(model_message, channel="data_update")
 
             logger.info(
                 "agent_event_subscriber_model_prediction_complete_broadcast",
@@ -992,9 +833,11 @@ class AgentEventSubscriber:
             chain_id = reasoning_chain.get("chain_id", "") if isinstance(reasoning_chain, dict) else ""
             market_context = reasoning_chain.get("market_context", {}) if isinstance(reasoning_chain, dict) else {}
             
-            # Convert confidence to 0-100 if needed
-            if 0.0 <= final_confidence <= 1.0:
-                final_confidence = final_confidence * 100.0
+            # Normalize final confidence to 0.0-1.0 range (NOT 0-100)
+            # Frontend will handle conversion to percentage for display
+            if final_confidence > 1.0:
+                final_confidence = final_confidence / 100.0
+            final_confidence = max(0.0, min(1.0, final_confidence))
             
             # Handle timestamp formatting - ensure 'Z' suffix for UTC
             from backend.services.time_service import time_service
@@ -1018,22 +861,19 @@ class AgentEventSubscriber:
             else:
                 formatted_timestamp = time_service.get_time_info()["server_time"]
             
-            # Broadcast reasoning chain update
-            await websocket_manager.broadcast(
-                {
-                    "type": "reasoning_chain_update",
-                    "data": {
-                        "symbol": symbol,
-                        "reasoning_chain": reasoning_steps,
-                        "conclusion": conclusion,
-                        "final_confidence": final_confidence,
-                        "chain_id": chain_id,
-                        "market_context": market_context,
-                        "timestamp": formatted_timestamp
-                    }
-                },
-                channel="reasoning"
-            )
+            # Broadcast reasoning chain update using simplified format
+            reasoning_data = {
+                "symbol": symbol,
+                "reasoning_chain": reasoning_steps,
+                "conclusion": conclusion,
+                "final_confidence": final_confidence,
+                "chain_id": chain_id,
+                "market_context": market_context,
+                "timestamp": formatted_timestamp
+            }
+            # Reasoning is part of signal data, so use signal update
+            signal_message = create_signal_update(reasoning_data)
+            await websocket_manager.broadcast(signal_message, channel="data_update")
 
             logger.info(
                 "agent_event_subscriber_reasoning_complete_broadcast",
@@ -1085,11 +925,9 @@ class AgentEventSubscriber:
                 "ask_size": payload.get("ask_size"),
             }
 
-            # Broadcast via WebSocket
-            await websocket_manager.broadcast(
-                {"type": "market_tick", "data": ticker_data},
-                channel="market_tick"
-            )
+            # Broadcast via WebSocket using simplified message format
+            market_message = create_market_update(ticker_data)
+            await websocket_manager.broadcast(market_message, channel="data_update")
 
             logger.debug(
                 "agent_event_subscriber_market_tick_broadcast",
@@ -1201,11 +1039,9 @@ class AgentEventSubscriber:
                                 )
                                 return
                             
-                            # Broadcast via WebSocket
-                            await websocket_manager.broadcast(
-                                {"type": "portfolio_update", "data": portfolio_data},
-                                channel="portfolio"
-                            )
+                            # Broadcast via WebSocket using simplified format
+                            portfolio_message = create_portfolio_update(portfolio_data)
+                            await websocket_manager.broadcast(portfolio_message, channel="data_update")
                             
                             logger.debug(
                                 "agent_event_subscriber_portfolio_update_broadcast",
@@ -1236,6 +1072,346 @@ class AgentEventSubscriber:
                     error=e,
                     component="agent_event_subscriber"
                 )
+
+    # Consolidated Event Handlers - Reduced from 8 individual handlers to 3
+
+    async def _handle_trading_event(self, event_type: str, payload: Dict[str, Any]):
+        """Consolidated handler for all trading-related events.
+
+        Handles: decision_ready, order_fill, position_closed
+        """
+        try:
+            if event_type == "decision_ready":
+                await self._handle_decision_ready_consolidated(payload)
+            elif event_type == "order_fill":
+                await self._handle_order_fill(payload)
+            elif event_type == "position_closed":
+                await self._handle_position_closed_consolidated(payload)
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_trading_event_error",
+                error=e,
+                component="agent_event_subscriber",
+                event_type=event_type
+            )
+
+    async def _handle_system_event(self, event_type: str, payload: Dict[str, Any]):
+        """Consolidated handler for system-related events.
+
+        Handles: state_transition
+        """
+        try:
+            if event_type == "state_transition":
+                await self._handle_state_transition_consolidated(payload)
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_system_event_error",
+                error=e,
+                component="agent_event_subscriber",
+                event_type=event_type
+            )
+
+    async def _handle_data_event(self, event_type: str, payload: Dict[str, Any]):
+        """Consolidated handler for data-related events.
+
+        Handles: model_prediction_complete, reasoning_complete, market_tick
+        """
+        try:
+            if event_type == "model_prediction_complete":
+                await self._handle_model_prediction_consolidated(payload)
+            elif event_type == "reasoning_complete":
+                await self._handle_reasoning_complete_consolidated(payload)
+            elif event_type == "market_tick":
+                await self._handle_market_tick_consolidated(payload)
+        except Exception as e:
+            log_error_with_context(
+                "agent_event_subscriber_data_event_error",
+                error=e,
+                component="agent_event_subscriber",
+                event_type=event_type
+            )
+
+    # Individual handler implementations (consolidated logic)
+
+    async def _handle_decision_ready_consolidated(self, payload: Dict[str, Any]):
+        """Handle decision_ready events with simplified logic."""
+        signal = payload.get("signal", "HOLD")
+        confidence = payload.get("confidence", 0.0)
+        symbol = payload.get("symbol", "BTCUSD")
+        reasoning_chain = payload.get("reasoning_chain", {})
+
+        # Normalize confidence to 0.0-1.0 range
+        if confidence > 1.0:
+            confidence = confidence / 100.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        # Extract reasoning data
+        reasoning_steps = reasoning_chain.get("steps", []) if isinstance(reasoning_chain, dict) else []
+        conclusion = reasoning_chain.get("conclusion", "") if isinstance(reasoning_chain, dict) else ""
+        market_context = reasoning_chain.get("market_context", {}) if isinstance(reasoning_chain, dict) else {}
+
+        # Optionally enrich signal with per-model consensus when available in reasoning payload
+        individual_reasoning = []
+        model_consensus = []
+
+        try:
+            model_predictions = None
+
+            # Prefer explicit model_predictions from reasoning_chain payload
+            if isinstance(reasoning_chain, dict):
+                model_predictions = reasoning_chain.get("model_predictions")
+
+            # Fallback: look in embedded market_context if present
+            if model_predictions is None and isinstance(market_context, dict):
+                model_predictions = market_context.get("model_predictions")
+
+            if isinstance(model_predictions, list):
+                for pred in model_predictions:
+                    if isinstance(pred, dict):
+                        model_name = pred.get("model_name", "Unknown")
+                        reasoning = pred.get("reasoning", "")
+                        pred_confidence = pred.get("confidence", 0.0)
+                        prediction_value = pred.get("prediction", 0.0)
+                        signal_value = pred.get("signal", "HOLD")
+
+                        # Convert confidence to 0-100 if provided in 0.0-1.0 range
+                        if 0.0 <= pred_confidence <= 1.0:
+                            pred_confidence = pred_confidence * 100.0
+
+                        individual_reasoning.append({
+                            "model_name": model_name,
+                            "reasoning": reasoning,
+                            "confidence": pred_confidence,
+                            "prediction": prediction_value
+                        })
+
+                        model_consensus.append({
+                            "model_name": model_name,
+                            "signal": signal_value,
+                            "confidence": pred_confidence,
+                            "prediction": prediction_value
+                        })
+        except Exception:
+            # Per-model enrichment is best-effort only; never break decision broadcasts.
+            individual_reasoning = []
+            model_consensus = []
+
+        # Create signal data for WebSocket
+        signal_data = {
+            "signal": signal,
+            "confidence": confidence,
+            "symbol": symbol,
+            "reasoning_chain": reasoning_steps,
+            "conclusion": conclusion,
+            "individual_model_reasoning": individual_reasoning,
+            "model_consensus": model_consensus,
+            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        }
+
+        # Broadcast signal update
+        signal_message = create_signal_update(signal_data)
+        await websocket_manager.broadcast(signal_message, channel="data_update")
+
+        # region agent log
+        try:
+            with open("debug-c0204f.log", "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "sessionId": "c0204f",
+                    "runId": "pre-fix",
+                    "hypothesisId": "H1_H3",
+                    "location": "backend/services/agent_event_subscriber.py:_handle_decision_ready_consolidated",
+                    "message": "signal_broadcast",
+                    "data": {
+                        "symbol": symbol,
+                        "signal": signal,
+                        "confidence": confidence
+                    },
+                    "timestamp": int(time.time() * 1000)
+                }) + "\n")
+        except Exception:
+            # Logging must never break trading flow
+            pass
+        # endregion
+
+    async def _handle_order_fill_consolidated(self, payload: Dict[str, Any]):
+        """Handle order_fill events with simplified logic (fallback; prefer _handle_order_fill for persistence)."""
+        trade_id = payload.get("trade_id", "")
+        symbol = payload.get("symbol", "")
+        quantity = payload.get("quantity", 0)
+        price = payload.get("fill_price") or payload.get("price", 0)
+        side = payload.get("side", "")
+
+        # Create trade data (include executed_at and status for frontend)
+        ts = payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        trade_data = {
+            "trade_id": trade_id,
+            "symbol": symbol,
+            "quantity": quantity,
+            "price": price,
+            "side": side,
+            "status": "EXECUTED",
+            "executed_at": ts,
+            "timestamp": ts,
+        }
+
+        # Broadcast trade update
+        trade_message = create_trade_update(trade_data)
+        await websocket_manager.broadcast(trade_message, channel="data_update")
+
+        # Update portfolio after trade
+        await self._broadcast_portfolio_update()
+
+    async def _handle_position_closed_consolidated(self, payload: Dict[str, Any]):
+        """Handle position_closed events with simplified logic."""
+        position_id = payload.get("position_id", "")
+        symbol = payload.get("symbol", "")
+        pnl = payload.get("pnl", 0)
+
+        # Create position close data
+        position_data = {
+            "position_id": position_id,
+            "symbol": symbol,
+            "pnl": pnl,
+            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        }
+
+        # Broadcast portfolio update (position closure affects portfolio)
+        portfolio_message = create_portfolio_update({"position_closed": position_data})
+        await websocket_manager.broadcast(portfolio_message, channel="data_update")
+
+        # Update portfolio after position closure
+        await self._broadcast_portfolio_update()
+
+    async def _handle_state_transition_consolidated(self, payload: Dict[str, Any]):
+        """Handle state_transition events with simplified logic."""
+        # StateTransitionEvent payload uses 'to_state' for the new state.
+        # Fall back to 'state' for compatibility with any legacy publishers.
+        state = payload.get("to_state") or payload.get("state", "UNKNOWN")
+        reason = payload.get("reason", "")
+
+        # Create agent state data
+        state_data = {
+            "state": state,
+            "reason": reason,
+            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        }
+
+        # Broadcast agent state update
+        state_message = create_agent_state_update(state_data)
+        await websocket_manager.broadcast(state_message, channel="agent_update")
+
+    async def _handle_model_prediction_consolidated(self, payload: Dict[str, Any]):
+        """Handle model_prediction_complete events with simplified logic."""
+        symbol = payload.get("symbol", "BTCUSD")
+        predictions = payload.get("predictions", [])
+        consensus_signal = payload.get("consensus_signal")
+        consensus_confidence = payload.get("consensus_confidence", 0.0)
+
+        # Normalize confidence
+        if consensus_confidence > 1.0:
+            consensus_confidence = consensus_confidence / 100.0
+
+        # Build per-model consensus and reasoning structures for frontend display
+        individual_reasoning = []
+        model_consensus = []
+
+        if isinstance(predictions, list):
+            for pred in predictions:
+                if isinstance(pred, dict):
+                    model_name = pred.get("model_name", "Unknown")
+                    reasoning = pred.get("reasoning", "")
+                    pred_confidence = pred.get("confidence", 0.0)
+                    prediction_value = pred.get("prediction", 0.0)
+                    signal_value = pred.get("signal", "HOLD")
+
+                    # Convert confidence to 0-100 if provided in 0.0-1.0 range
+                    if 0.0 <= pred_confidence <= 1.0:
+                        pred_confidence = pred_confidence * 100.0
+
+                    individual_reasoning.append({
+                        "model_name": model_name,
+                        "reasoning": reasoning,
+                        "confidence": pred_confidence,
+                        "prediction": prediction_value
+                    })
+
+                    model_consensus.append({
+                        "model_name": model_name,
+                        "signal": signal_value,
+                        "confidence": pred_confidence,
+                        "prediction": prediction_value
+                    })
+
+        # Create model data
+        model_data = {
+            "symbol": symbol,
+            "consensus_signal": consensus_signal,
+            "consensus_confidence": consensus_confidence,
+            # Expose consensus confidence under the generic 'confidence' key
+            # so frontend signal components can consume it consistently.
+            "confidence": consensus_confidence,
+            "model_predictions": predictions,
+            "individual_model_reasoning": individual_reasoning,
+            "model_consensus": model_consensus,
+            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        }
+
+        # Broadcast model update
+        model_message = create_model_update(model_data)
+        await websocket_manager.broadcast(model_message, channel="data_update")
+
+    async def _handle_reasoning_complete_consolidated(self, payload: Dict[str, Any]):
+        """Handle reasoning_complete events with simplified logic."""
+        symbol = payload.get("symbol", "BTCUSD")
+        reasoning_chain = payload.get("reasoning_chain", {})
+        final_confidence = payload.get("final_confidence", 0.0)
+
+        # Normalize confidence
+        if final_confidence > 1.0:
+            final_confidence = final_confidence / 100.0
+
+        # Extract reasoning data
+        steps = reasoning_chain.get("steps", []) if isinstance(reasoning_chain, dict) else []
+        conclusion = reasoning_chain.get("conclusion", "") if isinstance(reasoning_chain, dict) else ""
+
+        # Create reasoning data
+        reasoning_data = {
+            "symbol": symbol,
+            "reasoning_chain": steps,
+            "conclusion": conclusion,
+            "final_confidence": final_confidence,
+            # Expose final confidence under generic 'confidence' key so the
+            # primary signal display always has a value to show.
+            "confidence": final_confidence,
+            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        }
+
+        # Broadcast reasoning update (part of signal data)
+        signal_message = create_signal_update(reasoning_data)
+        await websocket_manager.broadcast(signal_message, channel="data_update")
+
+    async def _handle_market_tick_consolidated(self, payload: Dict[str, Any]):
+        """Handle market_tick events with simplified logic."""
+        symbol = payload.get("symbol", "")
+        price = payload.get("price", 0)
+        volume = payload.get("volume")
+        change_24h_pct = payload.get("change_24h_pct")
+
+        # Create market data
+        market_data = {
+            "symbol": symbol,
+            "price": price,
+            "volume": volume,
+            "change_24h_pct": change_24h_pct,
+            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+        }
+
+        # Broadcast market update
+        market_message = create_market_update(market_data)
+        await websocket_manager.broadcast(market_message, channel="data_update")
+
+        # Update portfolio prices
+        await self._update_position_prices(symbol, float(price))
 
 
 # Global subscriber instance

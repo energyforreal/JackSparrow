@@ -40,7 +40,7 @@ class MarketDataEventHandler:
             volume = payload.get("volume")
             
             # Update context with latest price
-            self.context_manager.update_context({
+            await self.context_manager.update_state({
                 "market_data": {
                     "symbol": symbol,
                     "price": price,
@@ -76,7 +76,7 @@ class MarketDataEventHandler:
             interval = payload.get("interval")
             
             # Update context with candle data
-            self.context_manager.update_context({
+            await self.context_manager.update_state({
                 "market_data": {
                     "symbol": symbol,
                     "interval": interval,
@@ -96,6 +96,7 @@ class MarketDataEventHandler:
                 correlation_id=event.event_id,
                 payload={
                     "symbol": symbol,
+                    "current_price": payload.get("close"),
                     "feature_names": [
                         # Price-based (16 features)
                         'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',
@@ -162,7 +163,7 @@ class MarketDataEventHandler:
             threshold_pct = payload.get("threshold_pct")
 
             # Update context with fluctuation data
-            self.context_manager.update_context({
+            await self.context_manager.update_state({
                 "market_data": {
                     "symbol": symbol,
                     "price": payload.get("price"),
@@ -181,6 +182,7 @@ class MarketDataEventHandler:
                 correlation_id=event.event_id,
                 payload={
                     "symbol": symbol,
+                    "current_price": payload.get("price"),
                     "feature_names": [
                         # Price-based (16 features)
                         'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',

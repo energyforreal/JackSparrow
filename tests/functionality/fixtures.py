@@ -11,6 +11,10 @@ import websockets
 
 from tests.functionality.config import config
 from tests.functionality.utils import ServiceHealthChecker
+from tests.functionality.test_env_config import set_test_env_vars, get_test_env_vars
+
+# Set test environment variables at module level
+set_test_env_vars()
 
 
 def find_free_port(start_port: int = 8001, max_attempts: int = 10) -> int:
@@ -72,8 +76,11 @@ class SharedResources:
         """Get or create shared agent instance."""
         if self._agent is None:
             try:
+                # Set test environment variables first
+                set_test_env_vars()
+
                 from agent.core.intelligent_agent import IntelligentAgent
-                
+
                 # Check if default feature server port is in use and find alternative
                 default_port = 8001
                 if is_port_in_use(default_port):
@@ -82,7 +89,7 @@ class SharedResources:
                     # Also update config if it's accessible
                     if hasattr(config, 'feature_server_port'):
                         config.feature_server_port = free_port
-                
+
                 self._agent = IntelligentAgent()
                 await self._agent.initialize()
                 self._initialized_at = datetime.utcnow()

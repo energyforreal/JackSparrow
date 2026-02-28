@@ -12,25 +12,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 @dataclass
 class TestConfig:
     """Configuration for functionality tests."""
-    
+
     # Service URLs
-    backend_url: str = "http://localhost:8000"
-    agent_websocket_url: str = "ws://localhost:8002"
-    backend_websocket_url: str = "ws://localhost:8000/ws"
-    agent_event_websocket_url: str = "ws://localhost:8000/ws/agent"
-    frontend_url: str = "http://localhost:3000"
-    
+    backend_url: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+    agent_websocket_url: str = os.getenv("AGENT_WEBSOCKET_URL", "ws://localhost:8002")
+    backend_websocket_url: str = os.getenv("BACKEND_WEBSOCKET_URL", "ws://localhost:8000/ws")
+    agent_event_websocket_url: str = os.getenv("AGENT_EVENT_WEBSOCKET_URL", "ws://localhost:8000/ws/agent")
+    frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
     # Database
-    database_url: Optional[str] = None
-    redis_url: Optional[str] = None
-    
+    database_url: Optional[str] = os.getenv("DATABASE_URL")
+    redis_url: Optional[str] = os.getenv("REDIS_URL")
+
     # Delta Exchange
-    delta_exchange_base_url: Optional[str] = None
-    delta_exchange_api_key: Optional[str] = None
-    delta_exchange_api_secret: Optional[str] = None
-    
+    delta_exchange_base_url: Optional[str] = os.getenv("DELTA_EXCHANGE_BASE_URL")
+    delta_exchange_api_key: Optional[str] = os.getenv("DELTA_EXCHANGE_API_KEY")
+    delta_exchange_api_secret: Optional[str] = os.getenv("DELTA_EXCHANGE_API_SECRET")
+
     # Backend API Authentication
-    api_key: Optional[str] = None
+    api_key: Optional[str] = os.getenv("API_KEY")
     
     # Test execution
     max_workers: int = 4

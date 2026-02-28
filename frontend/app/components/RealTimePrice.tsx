@@ -1,99 +1,81 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { TrendingUp, TrendingDown, Minus, RefreshCw } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, AlertTriangle, TrendingDown as LossIcon, TrendingUp as ProfitIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWebSocket } from '@/hooks/useWebSocket'
-
-interface TickerData {
-  symbol: string
-  price: number
-  volume: number
-  timestamp: string | Date
-  change_24h?: number
-  change_24h_pct?: number
-  high_24h?: number
-  low_24h?: number
-  open_24h?: number
-  close_24h?: number
-  turnover_usd?: number
-  oi?: number
-  spot_price?: number
-  mark_price?: number
-  bid_price?: number
-  ask_price?: number
-  bid_size?: number
-  ask_size?: number
-}
+import { usePositionImpact } from '@/hooks/usePositionImpact'
+import { Position, EnhancedTickerData } from '@/types'
+import { formatCurrency } from '@/utils/formatters'
 
 interface RealTimePriceProps {
   symbol?: string
   className?: string
+  positions?: Position[]
+  showPositionImpact?: boolean
 }
 
-// Get WebSocket URL from environment variable
-const WS_URL = 
-  process.env.NEXT_PUBLIC_WS_URL || 
-  (process.env.NODE_ENV === 'development' ? 'ws://localhost:8000/ws' : '')
+// Get WebSocket URL from environment variable with Docker/remote-safe defaults
+const resolveWebSocketUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL
+  }
 
-export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePriceProps) {
+  if (process.env.NODE_ENV === 'development') {
+    return 'ws://localhost:8000/ws'
+  }
+
+  try {
+    if (process.env.NEXT_PUBLIC_API_URL) {
+      const api = new URL(process.env.NEXT_PUBLIC_API_URL)
+      const wsProtocol = api.protocol === 'https:' ? 'wss:' : 'ws:'
+      return `${wsProtocol}//${api.host}/ws`
+    }
+
+    if (typeof window !== 'undefined') {
+      const { protocol, host } = window.location
+      const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:'
+      const hostOnly = host.split(':')[0]
+      const port = '8000'
+      return `${wsProtocol}//${hostOnly}:${port}/ws`
+    }
+  } catch {
+    // Ignore and fall through
+  }
+
+  return ''
+}
+
+const WS_URL = resolveWebSocketUrl()
+
+export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], showPositionImpact = true }: RealTimePriceProps) {
   const { isConnected, lastMessage } = useWebSocket(WS_URL)
-  const [ticker, setTicker] = useState<TickerData | null>(null)
+  const [ticker, setTicker] = useState<EnhancedTickerData | null>(null)
   const [priceChange, setPriceChange] = useState<number>(0)
   const [isLoading, setIsLoading] = useState(true)
   const [lastPrice, setLastPrice] = useState<number | null>(null)
   const [previousPrice, setPreviousPrice] = useState<number | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<string>('connecting')
-  const [isRefreshing, setIsRefreshing] = useState(false)
-
-  // Manual refresh function
-  const refreshPrice = useCallback(async () => {
-    setIsRefreshing(true)
-    console.log('[RealTimePrice] 🔄 Manual refresh triggered')
-
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${apiUrl}/api/v1/market/ticker/${symbol}`)
-
-      if (response.ok) {
-        const data = await response.json()
-        console.log('[RealTimePrice] ✅ Manual refresh successful:', {
-          symbol: data.symbol,
-          price: data.price
-        })
-
-        setTicker(data)
-        setPreviousPrice(lastPrice) // Store current price before manual refresh
-        setLastPrice(data.price)
-        // Keep the price change visible - don't reset on manual refresh
-      } else {
-        console.error('[RealTimePrice] ❌ Manual refresh failed:', response.status)
-      }
-    } catch (error) {
-      console.error('[RealTimePrice] ❌ Manual refresh error:', error)
-    } finally {
-      setIsRefreshing(false)
-    }
-  }, [symbol])
 
   // Component mount diagnostics
   useEffect(() => {
-    console.log('[RealTimePrice] Component mounted, WebSocket status:', {
-      isConnected,
-      hasLastMessage: !!lastMessage,
-      url: WS_URL,
-      symbol
-    })
-    setConnectionStatus(isConnected ? 'connected' : 'connecting')
-
-    // Force a reconnection check if not connected
-    if (!isConnected) {
-      console.log('[RealTimePrice] WebSocket not connected, attempting to establish connection...')
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[RealTimePrice] Component mounted, WebSocket status:', {
+        isConnected,
+        hasLastMessage: !!lastMessage,
+        url: WS_URL,
+        symbol,
+      })
+      if (!isConnected) {
+        console.log(
+          '[RealTimePrice] WebSocket not connected, attempting to establish connection...'
+        )
+      }
     }
-  }, []) // Only run on mount
+    setConnectionStatus(isConnected ? 'connected' : 'connecting')
+  }, [isConnected, lastMessage, symbol])
 
   // Monitor WebSocket connection status
   useEffect(() => {
@@ -120,14 +102,15 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
 
   // Debug: Log incoming WebSocket messages
   useEffect(() => {
-    if (lastMessage) {
-        console.log('[RealTimePrice] 📨 Received WebSocket message:', {
-          type: lastMessage.type,
-          hasData: !!lastMessage.data,
-          symbol: (lastMessage.data as any)?.symbol,
-          price: (lastMessage.data as any)?.price,
-          timestamp: new Date().toISOString()
-        })
+    if (lastMessage && process.env.NODE_ENV === 'development') {
+      const data = lastMessage.data as Partial<EnhancedTickerData> | undefined
+      console.log('[RealTimePrice] 📨 Received WebSocket message:', {
+        type: lastMessage.type,
+        hasData: !!data,
+        symbol: data?.symbol,
+        price: data?.price,
+        timestamp: new Date().toISOString(),
+      })
     }
   }, [lastMessage])
 
@@ -142,24 +125,30 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
   // Initialize price change on first ticker data
   // This ensures momentary price change is calculated as soon as we have initial data
   useEffect(() => {
-    if (ticker && priceChange === 0 && lastPrice === null) {
+    if (ticker && lastPrice === null) {
       // Set both lastPrice and previousPrice to initialize change tracking
       // This way, the next price update will show a meaningful change
-      console.log('[RealTimePrice] 🎯 Initializing first price point for change tracking')
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[RealTimePrice] 🎯 Initializing first price point for change tracking')
+      }
       setLastPrice(ticker.price)
       setPreviousPrice(ticker.price)
+      setPriceChange(0)
     }
-  }, [ticker, priceChange, lastPrice])
+  }, [ticker, lastPrice])
 
-  // Handle WebSocket market tick updates - prioritize these over polling
+  // Handle WebSocket market tick updates - legacy market_tick and unified data_update + resource market
   useEffect(() => {
-    if (lastMessage?.type === 'market_tick') {
-      const tickData = lastMessage.data as TickerData
+    const isMarketTick =
+      lastMessage?.type === 'market_tick' ||
+      (lastMessage?.type === 'data_update' && (lastMessage as { resource?: string }).resource === 'market')
+    if (isMarketTick && lastMessage?.data) {
+      const tickData = lastMessage.data as EnhancedTickerData
       if (tickData.symbol === symbol) {
         const newPrice = tickData.price
         const oldPrice = lastPrice || ticker?.price
 
-        console.log('[RealTimePrice] Received market_tick:', {
+        console.log('[RealTimePrice] Received market update:', {
           symbol: tickData.symbol,
           newPrice,
           oldPrice,
@@ -197,64 +186,14 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
   const trend = priceChange > 0 ? 'up' : priceChange < 0 ? 'down' : 'neutral'
   const trend24h = (ticker?.change_24h_pct || 0) > 0 ? 'up' : (ticker?.change_24h_pct || 0) < 0 ? 'down' : 'neutral'
 
-  // Fallback polling when WebSocket is disconnected
+  // When WebSocket is disconnected, show offline state instead of falling back to REST polling
   useEffect(() => {
     if (!isConnected) {
-      console.log('[RealTimePrice] 🔄 WebSocket disconnected, starting polling fallback')
-
-      const pollPrices = async () => {
-        try {
-          const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-          const response = await fetch(`${apiUrl}/api/v1/market/ticker/${symbol}`)
-
-          if (response.ok) {
-            const data = await response.json()
-            console.log('[RealTimePrice] 📊 Polling update received:', {
-              symbol: data.symbol,
-              price: data.price,
-              timestamp: data.timestamp
-            })
-
-            // Update ticker data from polling
-            const oldPrice = lastPrice || ticker?.price
-            const newPrice = data.price
-            let change = priceChange // Preserve existing change by default
-            if (oldPrice && newPrice !== oldPrice) {
-              change = newPrice - oldPrice
-              console.log('[RealTimePrice] Polling price change detected:', { oldPrice, newPrice, change })
-            } else {
-              console.log('[RealTimePrice] No polling price change detected, preserving existing change:', priceChange)
-            }
-
-            setTicker(data)
-            setPreviousPrice(oldPrice || null) // Store the price before this update
-            setLastPrice(newPrice)
-            setPriceChange(change)
-            setConnectionStatus('polling')
-          } else {
-            console.warn('[RealTimePrice] Polling failed with status:', response.status)
-            setConnectionStatus('error')
-          }
-        } catch (error) {
-          console.error('[RealTimePrice] Polling error:', error)
-          setConnectionStatus('error')
-        }
-      }
-
-      // Poll every 5 seconds when WebSocket is disconnected
-      const interval = setInterval(pollPrices, 5000)
-
-      // Initial poll
-      pollPrices()
-
-      return () => {
-        console.log('[RealTimePrice] 🛑 Stopping polling fallback')
-        clearInterval(interval)
-      }
+      setConnectionStatus('disconnected')
     } else {
       setConnectionStatus('connected')
     }
-  }, [isConnected, symbol])
+  }, [isConnected])
 
   const formatPrice = (price: number | null | undefined) => {
     if (!price || price <= 0) return '$0.00'
@@ -274,22 +213,25 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
     return volume.toFixed(2)
   }
 
+  // Position Impact Analysis
+  const enhancedTicker: EnhancedTickerData | null = ticker
+
+  const { positionImpacts, summary } = usePositionImpact(positions, enhancedTicker)
+
+  // Position Impact Summary for Tooltip
+  const positionImpactTooltip = showPositionImpact && positionImpacts.length > 0 ? {
+    totalChange: formatCurrency(summary.totalPnlChange),
+    riskLevel: summary.riskiestLevel,
+    liquidationRisk: summary.hasLiquidationRisk,
+    positionCount: summary.positionCount
+  } : null
+
   return (
     <Card className={cn('relative overflow-hidden', className)} role="region" aria-label={`Real-time price for ${symbol}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg font-semibold">{symbol}</CardTitle>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={refreshPrice}
-              disabled={isRefreshing}
-              className="h-6 px-2 text-xs"
-              aria-label="Refresh price data"
-            >
-              <RefreshCw className={cn('h-3 w-3', isRefreshing && 'animate-spin')} />
-            </Button>
             <Badge
             variant={connectionStatus === 'connected' ? 'default' : 'secondary'}
             className={cn(
@@ -362,15 +304,15 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
               {priceChange !== 0 && priceChangePct !== null && (
                 <span
                   className={cn(
-                    'text-base font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all',
+                    'text-base font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg transition-all relative',
                     trend === 'up' && 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-950/30 border border-green-200 dark:border-green-900',
                     trend === 'down' && 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-950/30 border border-red-200 dark:border-red-900',
                     trend === 'neutral' && 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-950/30 border border-gray-200 dark:border-gray-900'
                   )}
-                  title={`Momentary change: ${priceChange > 0 ? '+' : ''}${formatPrice(Math.abs(priceChange))} (${priceChangePct > 0 ? '+' : ''}${priceChangePct.toFixed(2)}%)`}
+                  title={`Momentary change: ${priceChange > 0 ? '+' : ''}${formatPrice(Math.abs(priceChange))} (${priceChangePct > 0 ? '+' : ''}${priceChangePct.toFixed(2)}%)${positionImpactTooltip ? `\nPosition Impact: ${positionImpactTooltip.totalChange} (${positionImpactTooltip.positionCount} positions)` : ''}`}
                   role="status"
                   aria-live="polite"
-                  aria-label={`Price changed by ${priceChange > 0 ? '+' : ''}${priceChangePct.toFixed(2)}%`}
+                  aria-label={`Price changed by ${priceChange > 0 ? '+' : ''}${priceChangePct.toFixed(2)}%${positionImpactTooltip ? `. Portfolio impact: ${positionImpactTooltip.totalChange}` : ''}`}
                 >
                   {trend === 'up' && <TrendingUp className="h-5 w-5 flex-shrink-0" />}
                   {trend === 'down' && <TrendingDown className="h-5 w-5 flex-shrink-0" />}
@@ -380,6 +322,53 @@ export function RealTimePrice({ symbol = 'BTCUSD', className }: RealTimePricePro
                     {priceChangePct.toFixed(2)}%
                   </span>
                 </span>
+              )}
+
+              {/* Position Impact Preview */}
+              {showPositionImpact && positionImpacts.length > 0 && (
+                <div
+                  className={cn(
+                    'text-sm font-medium flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border',
+                    summary.totalPnlChange > 0 && 'text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-950/30 border-green-200 dark:border-green-900',
+                    summary.totalPnlChange < 0 && 'text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-950/30 border-red-200 dark:border-red-900',
+                    summary.totalPnlChange === 0 && 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-950/30 border-gray-200 dark:border-gray-900'
+                  )}
+                  title={`Portfolio Impact: ${formatCurrency(summary.totalPnlChange)} across ${summary.positionCount} positions. Risk Level: ${summary.riskiestLevel}${summary.hasLiquidationRisk ? ' ⚠️ Liquidation Risk' : ''}`}
+                  role="status"
+                  aria-label={`Portfolio impact: ${formatCurrency(summary.totalPnlChange)}, risk level ${summary.riskiestLevel}`}
+                >
+                  {summary.totalPnlChange > 0 ? (
+                    <ProfitIcon className="h-4 w-4 flex-shrink-0" />
+                  ) : summary.totalPnlChange < 0 ? (
+                    <LossIcon className="h-4 w-4 flex-shrink-0" />
+                  ) : (
+                    <Minus className="h-4 w-4 flex-shrink-0" />
+                  )}
+
+                  <span className="font-bold">
+                    {formatCurrency(summary.totalPnlChange)}
+                  </span>
+
+                  {/* Risk Level Indicator */}
+                  {summary.riskiestLevel !== 'low' && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'text-xs px-1.5 py-0.5 ml-1',
+                        summary.riskiestLevel === 'critical' && 'border-red-500 text-red-600 dark:text-red-400',
+                        summary.riskiestLevel === 'high' && 'border-orange-500 text-orange-600 dark:text-orange-400',
+                        summary.riskiestLevel === 'medium' && 'border-yellow-500 text-yellow-600 dark:text-yellow-400'
+                      )}
+                    >
+                      {summary.riskiestLevel.toUpperCase()}
+                    </Badge>
+                  )}
+
+                  {/* Liquidation Risk Warning */}
+                  {summary.hasLiquidationRisk && (
+                    <AlertTriangle className="h-4 w-4 flex-shrink-0 text-red-500 ml-1" />
+                  )}
+                </div>
               )}
             </div>
 
