@@ -59,6 +59,9 @@ This document serves as the central index for all project documentation. Navigat
 
 ### Implementation Documentation
 
+- **[Trading Agent Improvements Implementation](docs/trading-agent-improvements-implementation.md)** – Summary of improvements from the trading agent improvement report (WebSocket SL/TP, Kelly sizing, signal-reversal exit, trailing stop, learning feedback, etc.) with code references.
+- **[Data Exchange Implementation Notes](docs/data-exchange-implementation-notes.md)** – Data flow between frontend, backend, and agent; confidence/signal format conventions; event deduplication and position-closed handling.
+
 6. **[Backend Documentation](docs/06-backend.md)**
    - FastAPI application structure
    - REST API endpoints specification
@@ -129,8 +132,14 @@ This document serves as the central index for all project documentation. Navigat
     - Log transport and storage options
     - Observability integrations
     - Operational procedures and SLIs
+13. **[Docker Runtime Architecture](docs/docker-runtime-architecture.md)**
+    - Runtime behaviour of the dockerized stack
+    - Container roles and network topology
+    - Real-time communication and data flows
+    - Docker engine logs vs application logs
+    - Operator investigation recipes
 
-13. **[Debugging & Error Handling Guide](docs/13-debugging.md)**
+14. **[Debugging & Error Handling Guide](docs/13-debugging.md)**
     - Development-time debugging workflows
     - Enabling debug modes per service
     - Using structured logs for triage

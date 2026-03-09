@@ -143,9 +143,7 @@ The example illustrates how raw market context, historical success rate, and mod
 
 ### 4. Learning and Adaptation System
 
-> **Status**: Disabled for the current lightweight build. The architecture remains documented for future use, but the runtime intentionally skips all adaptive learning steps to keep compute requirements minimal.
-
-**Description**: (Paused) The agent previously learned from every trade outcome and continuously improved.
+**Trade-outcome feedback loop**: On PositionClosedEvent with model_predictions, state machine calls LearningSystem.record_trade_outcome(trade_outcome, model_predictions) and updates model_registry weights. API: record_trade_outcome(trade_outcome, model_predictions).
 
 **Learning Components**:
 
@@ -196,10 +194,7 @@ The example illustrates how raw market context, historical success rate, and mod
 **Risk Components**:
 
 **Position Sizing**:
-- Kelly Criterion for optimal sizing
-- Maximum position: 10% of portfolio per trade
-- Risk-adjusted sizing based on signal strength
-- Volatility-adjusted position sizes
+- Kelly in TradingHandler via RiskManager.calculate_position_size(); volatility required; ADX ranging filter; ATR-based SL/TP at entry when atr_14 available; signal expiry (max_signal_age_seconds).
 
 **Portfolio Heat Monitoring**:
 - Tracks % of capital at risk
@@ -347,14 +342,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Order rejection handling
 
 **Position Management**:
-- Real-time position tracking
-- Entry and exit price recording
-- Position duration monitoring
-- Unrealized PnL calculation
-- Position size management
-- Automatic stop loss and take profit monitoring
-- Exit condition evaluation on each market tick
-- Automatic position closure when exit conditions met
+- Timer-based and optional WebSocket-driven SL/TP (websocket_sl_tp_enabled, 200ms throttle); trailing stop; time-based exit (max_position_hold_hours); signal-reversal exit; slippage/spread and stale ticker check.
 
 **Trade Logging**:
 - Complete trade history

@@ -8,15 +8,15 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MCPModelRequest(BaseModel):
     """MCP Model Protocol request."""
     model_config = ConfigDict(protected_namespaces=())
-    request_id: str
+    request_id: str = ""
     features: List[float]
-    context: Dict[str, Any]
+    context: Dict[str, Any] = Field(default_factory=dict)
     require_explanation: bool = True
 
 
@@ -32,6 +32,7 @@ class MCPModelPrediction(BaseModel):
     feature_importance: Dict[str, float]
     computation_time_ms: float
     health_status: str
+    context: Optional[Dict[str, Any]] = None  # optional rich context (entry/exit/regime/drift)
 
 
 class MCPModelNode(ABC):

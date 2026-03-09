@@ -130,7 +130,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Weighted voting based on model performance
 - Performance-adjusted weights (Sharpe ratio based)
 - Confidence-weighted aggregation
-- Requires 60% weighted consensus for execution
+- Decision synthesis uses consensus value thresholds: BUY when consensus > 0.3, STRONG_BUY when > 0.7; SELL when < -0.3, STRONG_SELL when < -0.7 (normalized [-1, 1] scale). A separate confidence gate (min_confidence_threshold) applies before execution.
 - Handles model failures gracefully
 
 **Dynamic Weight Adjustment**:
@@ -143,9 +143,9 @@ The example illustrates how raw market context, historical success rate, and mod
 
 ### 4. Learning and Adaptation System
 
-> **Status**: Disabled for the current lightweight build. The architecture remains documented for future use, but the runtime intentionally skips all adaptive learning steps to keep compute requirements minimal.
+**Trade-outcome feedback loop** (implemented): On `PositionClosedEvent`, when the payload includes `model_predictions`, the state machine builds a `TradeOutcome`, calls `LearningSystem.record_trade_outcome(trade_outcome, model_predictions)`, then retrieves updated weights via `get_updated_model_weights(current_weights)` and applies them with `model_registry.update_weights_from_performance(updated_weights)`. This closes the loop from execution → learning → model weights.
 
-**Description**: (Paused) The agent previously learned from every trade outcome and continuously improved.
+**Description**: The agent learns from trade outcomes; the API is `record_trade_outcome(trade_outcome: TradeOutcome, model_predictions: List[Dict])`.
 
 **Learning Components**:
 
@@ -196,10 +196,12 @@ The example illustrates how raw market context, historical success rate, and mod
 **Risk Components**:
 
 **Position Sizing**:
-- Kelly Criterion for optimal sizing
-- Maximum position: 10% of portfolio per trade
-- Risk-adjusted sizing based on signal strength
-- Volatility-adjusted position sizes
+- Kelly Criterion wired in TradingHandler via RiskManager.calculate_position_size(); volatility from market context features is required (trade skipped if missing)
+- Maximum position: configurable `max_position_size` (e.g. 10% of portfolio per trade)
+- Risk-adjusted sizing based on signal strength and volatility regime
+- ADX ranging market filter: when `adx_14` is available and &lt; 20, BUY/SELL (mild) entries are blocked
+- ATR-based SL/TP at entry when `atr_14` is available (1.5× and 3× ATR distances); otherwise config-based percentages
+- Signal expiry: signals older than `max_signal_age_seconds` are rejected
 
 **Portfolio Heat Monitoring**:
 - Tracks % of capital at risk
@@ -352,9 +354,11 @@ The example illustrates how raw market context, historical success rate, and mod
 - Position duration monitoring
 - Unrealized PnL calculation
 - Position size management
-- Automatic stop loss and take profit monitoring
-- Exit condition evaluation on each market tick
-- Automatic position closure when exit conditions met
+- Automatic stop loss and take profit monitoring via (1) timer-based loop (`min_monitor_interval_seconds` when positions open, `position_monitor_interval_seconds` when none) and (2) optional WebSocket-driven path (`websocket_sl_tp_enabled`) with 200ms per-symbol throttle
+- Trailing stop (ratchet stop loss on favorable price moves using `trailing_stop_percentage`)
+- Time-based exit: positions held longer than `max_position_hold_hours` are force-closed
+- Signal-reversal exit: when the new signal contradicts the open position, position is closed before any new entry
+- Slippage and spread: paper fill uses correct direction (buy pays more, sell receives less) and optional `half_spread_pct`; stale ticker (e.g. >5s) raises and blocks fill
 
 **Trade Logging**:
 - Complete trade history
@@ -369,6 +373,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Retry logic with exponential backoff
 - Health monitoring
 - Error handling
+- Paper trading: fill price comes from Delta ticker; if ticker is unavailable, the trade is not executed (no synthetic fill).
 
 ---
 

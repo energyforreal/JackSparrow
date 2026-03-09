@@ -852,60 +852,30 @@ For detailed MCP Model Protocol documentation, see [MCP Layer Documentation - Mo
 
 ### Overview
 
-When the agent enters the `MONITORING_POSITION` state, it actively monitors open positions for exit conditions. This ensures proper risk management and profit-taking.
+When the agent enters the `MONITORING_POSITION` state, it monitors open positions for exit conditions. Two paths: timer-based loop and optional WebSocket-driven path when `websocket_sl_tp_enabled` is true.
 
 ### Monitoring Process
 
-1. **Market Tick Events**: The market data service emits `MarketTickEvent` for each significant price update (throttled to prevent excessive processing)
-
-2. **Exit Condition Checking**: The risk manager's `_handle_market_tick()` method:
-   - Verifies a position exists for the symbol
-   - Retrieves stored stop loss and take profit levels (calculated at entry)
-   - Compares current price against exit levels
-   - Determines if exit condition is met
-
-3. **Exit Decision**: When an exit condition is met:
-   - Risk manager emits a `DecisionReadyEvent` with exit signal
-   - Event includes exit reason (stop_loss, take_profit, signal_reversal)
-   - High confidence (1.0) is assigned to exit decisions
-
-4. **Exit Execution**: Execution module:
-   - Detects exit decision for existing position
-   - Executes opposite-side trade to close position
-   - Calculates PnL and position duration
-   - Emits `PositionClosedEvent` with complete trade details
-
-5. **State Transition**: State machine:
-   - Receives `PositionClosedEvent`
-   - Transitions from `MONITORING_POSITION` to `OBSERVING`
-   - Clears position from context
+1. **Position monitor loop**: Uses `min_monitor_interval_seconds` when positions open, `position_monitor_interval_seconds` when none. Checks time-based exit first, then updates price and calls `ExecutionEngine.manage_position(symbol)`.
+2. **WebSocket-driven path** (when `websocket_sl_tp_enabled`): MarketDataService ticker calls `ExecutionEngine.update_position_price_and_check(symbol, price)` with 200ms per-symbol throttle.
+3. **Trailing stop**: In `manage_position()`, stop loss ratcheted on favorable moves using `trailing_stop_percentage`.
+4. **Exit reasons**: stop_loss_hit, take_profit_hit, time_limit, signal_reversal, market_close.
+5. **Signal-reversal exit**: TradingHandler closes position when new signal contradicts open position.
+6. **State transition**: On PositionClosedEvent, learning system records outcome when model_predictions present.
 
 ### Exit Conditions
 
-**Stop Loss**:
-- For long positions (BUY): Triggered when price drops to or below stop loss level
-- For short positions (SELL): Triggered when price rises to or above stop loss level
-- Stop loss percentage is configurable via `STOP_LOSS_PERCENTAGE` setting
-
-**Take Profit**:
-- For long positions (BUY): Triggered when price rises to or above take profit level
-- For short positions (SELL): Triggered when price drops to or below take profit level
-- Take profit percentage is configurable via `TAKE_PROFIT_PERCENTAGE` setting
-
-**Signal Reversal**:
-- Exit can also be triggered by signal reversal (opposite signal when in position)
-- Handled through normal decision flow when reasoning engine generates opposite signal
+Stop Loss / Take Profit (config or ATR-based). Time limit: force-close after `max_position_hold_hours`. Signal Reversal: close with exit_reason='signal_reversal'.
 
 ### Position Context Storage
 
-When a position is opened, the following information is stored in context:
-- Symbol and side (BUY/SELL)
-- Entry price and quantity
-- Stop loss price (calculated)
-- Take profit price (calculated)
-- Entry timestamp
+Stored: symbol, side, entry price, quantity, stop loss, take profit, entry timestamp, model_predictions, reasoning_chain_id, predicted_signal (for learning on close).
 
-This information is used throughout the monitoring process to evaluate exit conditions.
+### Kelly Criterion and Adaptive Consensus
+
+- **Kelly sizing**: TradingHandler uses RiskManager.calculate_position_size(); volatility from features required.
+- **Adaptive consensus** (_step5): Volatility-based thresholds when vol present; fixed 0.70/0.30 when missing.
+- **Confidence calibration** (_step6): Model-avg floor only when reasoning_only_confidence > 0.1.
 
 ## Related Documentation
 

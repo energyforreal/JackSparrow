@@ -166,8 +166,8 @@ class RandomForestNode(MCPModelNode):
                 current_price = request.context.get('current_price')
                 if current_price is not None and current_price > 0:
                     return_pct = (prediction_raw - current_price) / current_price
-                    max_return_range = 0.10  # 10% return maps to ±1.0
-                    prediction_normalized = max(-1.0, min(1.0, return_pct / max_return_range))
+                    regressor_scale = 0.10  # tanh scale: ±10% → ~±0.76, avoids hard clamp
+                    prediction_normalized = float(np.tanh(return_pct / regressor_scale))
                 else:
                     # Fallback normalization
                     prediction_normalized = np.tanh((prediction_raw - 50000) / 10000)

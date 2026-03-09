@@ -84,12 +84,15 @@ class IntelligentAgent:
     def __init__(self):
         """Initialize intelligent agent."""
         self.session_id = SESSION_ID
-        self.state_machine = AgentStateMachine(context_manager=context_manager)
         self.context_manager = context_manager
         self.mcp_orchestrator = mcp_orchestrator
-        # Model registry will be set after MCP orchestrator initializes
-        self.model_registry = None
+        self.model_registry = None  # Set after MCP orchestrator initializes
         self.learning_system = LearningSystem()
+        self.state_machine = AgentStateMachine(
+            context_manager=context_manager,
+            learning_system=self.learning_system,
+            model_registry=None,
+        )
         self.risk_manager = RiskManager(config=settings)
         self.delta_client = DeltaExchangeClient()
         self.model_discovery = None  # Will be initialized after model_registry is set
@@ -182,12 +185,14 @@ class IntelligentAgent:
         # Set model registry after MCP orchestrator is initialized
         # Model discovery and initialization is handled by MCP orchestrator
         self.model_registry = self.mcp_orchestrator.model_registry
+        self.state_machine.model_registry = self.model_registry
         self.model_discovery = ModelDiscovery(self.model_registry)
         
         # Initialize all components with event handlers
         await self.state_machine.initialize()
         await self.risk_manager.initialize()
-        await execution_module.initialize(delta_client=self.delta_client)
+        await execution_module.initialize(delta_client=self.delta_client, risk_manager=self.risk_manager)
+        self.mcp_orchestrator.delta_client = self.delta_client  # For MTF trend_15m when enabled
         await self.learning_system.initialize()
         await self.market_data_service.initialize()
         
@@ -232,9 +237,11 @@ class IntelligentAgent:
         await reasoning_handler.register_handlers()
         # Trading handler bridges DecisionReadyEvent -> RiskApprovedEvent for paper trading
         from agent.events.handlers.trading_handler import TradingEventHandler
+        from agent.core.execution import execution_module as exec_module
         trading_handler = TradingEventHandler(
             risk_manager=self.risk_manager,
             delta_client=self.delta_client,
+            execution_module=exec_module,
         )
         await trading_handler.register_handlers()
         
@@ -352,7 +359,73 @@ class IntelligentAgent:
                 start_mode=self.start_mode,
                 message="Start mode disables automatic market data streaming",
             )
-    
+
+        # Start position monitoring loop: check stop/take profit for open positions
+        self._position_monitor_task = asyncio.create_task(self._position_monitor_loop())
+        logger.info(
+            "agent_position_monitor_started",
+            service="agent",
+            message="Position monitoring loop started for stop loss / take profit",
+        )
+
+    async def _position_monitor_loop(self) -> None:
+        """Background loop: update position prices and run manage_position for stop/take profit."""
+        while self.running:
+            try:
+                open_positions = execution_module.position_manager.get_all_positions()
+                interval_seconds = (
+                    getattr(settings, "min_monitor_interval_seconds", 2.0)
+                    if open_positions
+                    else getattr(settings, "position_monitor_interval_seconds", 15.0)
+                )
+                await asyncio.sleep(interval_seconds)
+                if not self.running:
+                    break
+                open_positions = execution_module.position_manager.get_all_positions()
+                if not open_positions:
+                    continue
+                max_hold_s = (getattr(settings, "max_position_hold_hours", 24) or 24) * 3600
+                now = datetime.now(timezone.utc)
+                for symbol in list(open_positions.keys()):
+                    if not self.running:
+                        break
+                    try:
+                        position = execution_module.position_manager.get_position(symbol)
+                        if position:
+                            entry_time = position.get("entry_time")
+                            if entry_time is not None:
+                                et = entry_time
+                                if getattr(et, "tzinfo", None) is None and hasattr(et, "replace"):
+                                    et = et.replace(tzinfo=timezone.utc)
+                                held_s = (now - et).total_seconds()
+                                if held_s > max_hold_s:
+                                    await execution_module.close_position(symbol, exit_reason="time_limit")
+                                    continue
+                        ticker = await self.delta_client.get_ticker(symbol)
+                        result = ticker.get("result") or ticker
+                        if isinstance(result, dict):
+                            close = result.get("close") or result.get("mark_price")
+                            if close is not None:
+                                current_price = float(close)
+                                execution_module.position_manager.update_position(symbol, current_price)
+                                await execution_module.manage_position(symbol)
+                    except Exception as e:
+                        logger.debug(
+                            "position_monitor_tick_error",
+                            symbol=symbol,
+                            error=str(e),
+                            service="agent",
+                        )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(
+                    "position_monitor_loop_error",
+                    error=str(e),
+                    service="agent",
+                    exc_info=True,
+                )
+
     async def shutdown(self):
         """Shutdown agent."""
         logger.info(
@@ -361,7 +434,16 @@ class IntelligentAgent:
             environment=settings.environment,
         )
         self.running = False
-        
+
+        # Cancel position monitoring loop
+        if getattr(self, "_position_monitor_task", None):
+            self._position_monitor_task.cancel()
+            try:
+                await self._position_monitor_task
+            except asyncio.CancelledError:
+                pass
+            self._position_monitor_task = None
+
         # Shutdown WebSocket server
         if hasattr(self, 'websocket_server') and self.websocket_server:
             try:

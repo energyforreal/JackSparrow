@@ -338,6 +338,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - **Protocol**: Internal risk assessment API
 - **Dependencies**: Portfolio state, Market data
 - **Output**: Risk-adjusted position sizes, stop losses
+- **Portfolio sync**: ExecutionEngine syncs portfolio with RiskManager on order fill and position close (add_position/remove_position) so risk limits reflect actual exposure.
 
 #### Learning System
 - **Responsibility**: Learn from trade outcomes and adapt
@@ -920,24 +921,19 @@ The startup and configuration validation system implements comprehensive error h
 2. Risk Manager → Validate risk limits
 3. Execution Engine → Place order via Delta Exchange
 4. Order Management → Track order status
-5. Position Manager → Update positions (with stop loss/take profit)
+5. Position Manager → Update positions (with stop loss/take profit); ExecutionEngine adds position to RiskManager portfolio
 6. State Machine → Transition to MONITORING_POSITION
 7. WebSocket → Broadcast trade execution
 8. Database → Store trade record
 ```
 
-**Exit Flow:**
-```
-1. Market Data Service → Emit MarketTickEvent on price updates
-2. Risk Manager → Check exit conditions (stop loss/take profit)
-3. Risk Manager → Emit exit DecisionReadyEvent when condition met
-4. Execution Engine → Execute exit trade (opposite side)
-5. Execution Engine → Emit PositionClosedEvent with PnL
-6. State Machine → Transition MONITORING_POSITION → OBSERVING
-7. Learning System → Record trade outcome for learning
-8. WebSocket → Broadcast position closed
-9. Database → Update trade record with exit details
-```
+**Exit Flow (implemented):**
+- **Dual path**: (1) **Timer-based**: Position monitor loop (`IntelligentAgent._position_monitor_loop`) runs at `position_monitor_interval_seconds` (e.g. 15s) when no positions, or `min_monitor_interval_seconds` (e.g. 2s) when positions are open. (2) **WebSocket-driven** (when `websocket_sl_tp_enabled`): MarketDataService WebSocket ticker triggers `ExecutionEngine.update_position_price_and_check(symbol, price)` per symbol with a 200ms throttle.
+- For each open position: update current price, apply **trailing stop** (ratchet stop_loss on favorable moves), check **time-based exit** (force-close after `max_position_hold_hours`), then compare price to stop loss / take profit; if hit, close with appropriate `exit_reason`.
+- **Signal-reversal exit**: TradingHandler checks open position before entry; if the new signal contradicts the position (e.g. long + SELL), it closes the position with `exit_reason='signal_reversal'` and returns.
+- ExecutionEngine.initialize() accepts optional `risk_manager`; on close it calls `risk_manager.portfolio.remove_position(symbol)`.
+- Exit reasons: `stop_loss_hit`, `take_profit_hit`, `market_close`, `signal_reversal`, `time_limit`.
+- State Machine → Transition MONITORING_POSITION → OBSERVING; WebSocket and database updated.
 
 ### Learning Flow
 

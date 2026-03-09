@@ -243,6 +243,8 @@ All API operations use WebSocket commands with a request/response pattern. Comma
 
 **Command:** `get_portfolio`
 
+**Note:** Response uses `serialize_portfolio_summary()` for consistent format (matches REST API and broadcasts). All numeric values are floats; timestamps are ISO 8601.
+
 **Request:**
 ```typescript
 {
@@ -613,10 +615,11 @@ Replaces: `signal_update`, `portfolio_update`, `trade_executed`, `market_tick`, 
   resource: "model",
   data: {
     symbol: string,
-    consensus_signal: number,
+    consensus_signal: SignalType,  // "STRONG_BUY" | "BUY" | "HOLD" | "SELL" | "STRONG_SELL" (mapped from numeric)
+    signal: SignalType,            // Same as consensus_signal for frontend consistency
     consensus_confidence: number,  // 0.0-1.0
-    individual_model_reasoning: ModelReasoningEntry[],
-    model_consensus: ModelConsensusEntry[],
+    individual_model_reasoning: ModelReasoningEntry[],  // confidence in 0.0-1.0
+    model_consensus: ModelConsensusEntry[],              // confidence in 0.0-1.0
     model_predictions: ModelPrediction[],
     timestamp: string
   },
@@ -624,6 +627,8 @@ Replaces: `signal_update`, `portfolio_update`, `trade_executed`, `market_tick`, 
   source: "agent"
 }
 ```
+
+**Note:** The backend maps numeric `consensus_signal` (-1 to +1) from the agent to discrete `SignalType` strings before broadcasting. Per-model confidence values are normalized to 0.0-1.0 range.
 
 #### agent_update (Agent State Changes)
 
@@ -708,10 +713,11 @@ Individual model predictions updated.
 {
   type: "model_prediction_update",
   data: {
-    consensus_signal?: number,
-    consensus_confidence?: number,
-    individual_model_reasoning: ModelReasoningEntry[],
-    model_consensus: ModelConsensusEntry[],
+    consensus_signal?: SignalType,  // String: "STRONG_BUY" | "BUY" | "HOLD" | "SELL" | "STRONG_SELL"
+    signal?: SignalType,
+    consensus_confidence?: number,  // 0.0-1.0
+    individual_model_reasoning: ModelReasoningEntry[],  // confidence in 0.0-1.0
+    model_consensus: ModelConsensusEntry[],              // confidence in 0.0-1.0
     model_predictions: ModelPrediction[],
     timestamp: string
   }
@@ -911,6 +917,7 @@ ws.onmessage = (event) => {
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1 | 2026-03-01 | Data exchange fixes: consensus_signal as string (SignalType), model confidence 0-1 range, get_portfolio serialization, position_closed full portfolio only |
 | 2.0 | 2026-02-01 | **BREAKING**: WebSocket-only architecture. REST API deprecated. |
 | 1.0 | 2026-02-01 | Initial release with Decimal standardization and confidence normalization |
 

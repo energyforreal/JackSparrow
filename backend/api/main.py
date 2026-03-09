@@ -62,6 +62,32 @@ async def _initialize_database_schema() -> None:
         await connection.run_sync(Base.metadata.create_all)
 
 
+async def _reset_paper_trade_state() -> None:
+    """Clear positions and trades in DB so paper trade starts fresh on each backend load."""
+    from backend.core.database import AsyncSessionLocal
+    from backend.core.database import Trade, Position
+    from sqlalchemy import delete
+
+    async with AsyncSessionLocal() as session:
+        try:
+            await session.execute(delete(Trade))
+            await session.execute(delete(Position))
+            await session.commit()
+            logger.info(
+                "paper_trade_state_reset",
+                service="backend",
+                message="Cleared positions and trades for fresh paper trading session",
+            )
+        except Exception as e:
+            await session.rollback()
+            logger.warning(
+                "paper_trade_state_reset_failed",
+                service="backend",
+                error=str(e),
+                message="Could not reset paper trade state",
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
@@ -79,6 +105,16 @@ async def lifespan(app: FastAPI):
                 service="backend",
                 auto_create=True
             )
+        if getattr(settings, "paper_trading_mode", True):
+            try:
+                await _reset_paper_trade_state()
+            except Exception as reset_err:
+                logger.warning(
+                    "paper_trade_reset_skipped",
+                    service="backend",
+                    error=str(reset_err),
+                    message="Paper trade state reset failed; continuing startup",
+                )
     except Exception as e:
         logger.error(
             "backend_database_connection_failed",
@@ -86,7 +122,7 @@ async def lifespan(app: FastAPI):
             error=str(e),
             exc_info=True
         )
-    
+
     # Initialize Redis
     try:
         redis_client = await get_redis()

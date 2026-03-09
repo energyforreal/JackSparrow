@@ -7,6 +7,7 @@ Implements 6-step reasoning chain for trading decisions.
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict
+import statistics
 import uuid
 
 from agent.data.feature_server import MCPFeatureServer, MCPFeatureResponse
@@ -18,6 +19,7 @@ from agent.models.mcp_model_registry import (
 from agent.memory.vector_store import VectorMemoryStore
 from agent.events.event_bus import event_bus
 from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, DecisionReadyEvent, EventType
+from agent.core.config import settings
 import structlog
 
 logger = structlog.get_logger()
@@ -111,6 +113,14 @@ class MCPReasoningEngine:
             # Emit decision ready event
             await self._emit_decision_ready_event(event, reasoning_chain)
             
+        except NoHealthyModelPredictionsError:
+            # Race: reasoning requested before model_predictions in context; skip gracefully
+            logger.debug(
+                "reasoning_request_skipped_no_predictions",
+                event_id=event.event_id,
+                symbol=payload.get("symbol"),
+                message="Skipping reasoning - no model_predictions in market_context (decision may already be emitted).",
+            )
         except Exception as e:
             logger.error(
                 "reasoning_request_event_handler_error",
@@ -240,7 +250,8 @@ class MCPReasoningEngine:
     
     async def generate_reasoning(self, request: MCPReasoningRequest) -> MCPReasoningChain:
         """Generate 6-step reasoning chain."""
-        model_predictions = request.market_context.get("model_predictions", [])
+        # Accept both "model_predictions" and "predictions" (model_handler sends "predictions")
+        model_predictions = request.market_context.get("model_predictions") or request.market_context.get("predictions") or []
 
         # Enforce that reasoning is only generated when real model predictions
         # are present. This prevents pseudo-decisions based solely on features
@@ -448,6 +459,17 @@ class MCPReasoningEngine:
                 consensus = sum(p.get("prediction", 0) for p in model_predictions) / len(model_predictions)
                 avg_confidence = 0.0
             
+            # Model disagreement filter: dampen consensus when predictions disagree strongly
+            predictions_vals = [p.get("prediction", 0) for p in model_predictions]
+            thresh = getattr(settings, "model_disagreement_threshold", 0.4)
+            if len(predictions_vals) > 1:
+                pred_stdev = statistics.stdev(predictions_vals)
+                if pred_stdev > thresh:
+                    evidence.append(
+                        f"High model disagreement (stdev={pred_stdev:.2f}) — signal suppressed"
+                    )
+                    consensus *= max(0.0, 1.0 - (pred_stdev - thresh))
+
             evidence.append(f"Model consensus: {consensus:.2f} ({len(model_predictions)} models, avg confidence: {avg_confidence:.2f})")
             
             if consensus > 0.5:
@@ -636,7 +658,7 @@ class MCPReasoningEngine:
                 avg_confidence = classifier_confidence
                 evidence_detail = f"Classifier consensus: {consensus:.2f} ({len(classifier_predictions)} models)"
             else:
-                # Fallback: simple average if type detection failed
+                # Fallback: model_type missing or not classifier/regressor – treat all as one group
                 total_weight = 0.0
                 weighted_sum = 0.0
                 for p in model_predictions:
@@ -649,16 +671,32 @@ class MCPReasoningEngine:
                     avg_confidence = total_weight / len(model_predictions)
                 else:
                     consensus = sum(p.get("prediction", 0) for p in model_predictions) / len(model_predictions)
-                    avg_confidence = 0.0
+                    # Use mean of confidences (default 0.5 when missing) so step 5 never forces 0
+                    avg_confidence = sum(
+                        max(0.0, min(1.0, p.get("confidence", 0.5)))
+                        for p in model_predictions
+                    ) / len(model_predictions) if model_predictions else 0.0
                 evidence_detail = f"Combined consensus: {consensus:.2f} (fallback calculation)"
             
-            if consensus > 0.7:
+            # Adaptive consensus thresholds by volatility (when vol available); else fixed
+            features = request.market_context.get("features", {})
+            vol = features.get("volatility")
+            if vol is not None:
+                if vol > 5:
+                    strong_thresh, mild_thresh = 0.75, 0.40
+                elif vol < 1.5:
+                    strong_thresh, mild_thresh = 0.60, 0.25
+                else:
+                    strong_thresh, mild_thresh = 0.70, 0.30
+            else:
+                strong_thresh, mild_thresh = 0.70, 0.30
+            if consensus > strong_thresh:
                 conclusion = "STRONG_BUY - High confidence bullish signal"
-            elif consensus > 0.3:
+            elif consensus > mild_thresh:
                 conclusion = "BUY - Moderate bullish signal"
-            elif consensus < -0.7:
+            elif consensus < -strong_thresh:
                 conclusion = "STRONG_SELL - High confidence bearish signal"
-            elif consensus < -0.3:
+            elif consensus < -mild_thresh:
                 conclusion = "SELL - Moderate bearish signal"
             else:
                 conclusion = "HOLD - Mixed signals, waiting for clearer direction"
@@ -694,7 +732,12 @@ class MCPReasoningEngine:
         )
     
     async def _step6_confidence_calibration(self, steps: List[ReasoningStep], model_predictions: List[Dict[str, Any]]) -> ReasoningStep:
-        """Step 6: Calibrate final confidence using weighted average and consistency adjustment."""
+        """Step 6: Calibrate final confidence using weighted average and consistency adjustment.
+
+        When learning is disabled, calibration uses only step confidences and a consistency
+        adjustment (no historical accuracy). If learning is enabled, historical calibration
+        could be integrated here (e.g. w * historical_accuracy + (1-w) * raw_confidence).
+        """
 
         # Weighted average with step importance weights
         # Steps 3 (model consensus) and 5 (decision synthesis) get higher weights
@@ -723,13 +766,23 @@ class MCPReasoningEngine:
             consistency_adjustment = 1.0
 
         final_confidence = base_confidence * consistency_adjustment
-        
-        # Detect fallback scenario for logging/diagnostics, but do not apply
-        # artificial confidence floors. Confidence reflects actual uncertainty.
+        reasoning_only_confidence = final_confidence
+
+        # Apply model_avg floor only when reasoning confidence is meaningfully positive
+        if model_predictions:
+            model_confidences = [max(0.0, min(1.0, float(p.get("confidence", 0)))) for p in model_predictions]
+            model_avg = sum(model_confidences) / len(model_confidences) if model_confidences else 0.0
+            if reasoning_only_confidence > 0.1 and model_avg > 0:
+                final_confidence = max(final_confidence, model_avg * 0.8)
+            # Unanimous HOLD: all models agree on neutral (confidence 0). Avoid showing 0% in UI.
+            if model_avg == 0 and model_confidences:
+                final_confidence = max(final_confidence, 0.5)
+
+        # Detect fallback scenario for logging/diagnostics
         is_fallback_scenario = not model_predictions or all(
             p.get("confidence", 0) == 0 for p in model_predictions
         )
-        
+
         # Ensure final confidence is in valid range
         final_confidence = max(0.0, min(1.0, final_confidence))
 

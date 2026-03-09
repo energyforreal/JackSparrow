@@ -133,13 +133,37 @@ class ModelDiscovery:
                     # Mark as attempted now if discovery is enabled
                     if settings.model_discovery_enabled:
                         discovery_attempted = True
-            
-            # Option 2: Discover models from MODEL_DIR
+
+            # Option 2: Prefer robust ensemble from xgboost (strict artifacts)
+            xgboost_dir = self.model_dir / "xgboost" if (self.model_dir / "xgboost").exists() else self.model_dir
+            strict_entry = xgboost_dir / "entry_meta.pkl"
+            if strict_entry.exists() and settings.model_discovery_enabled:
+                try:
+                    from agent.models.robust_ensemble_node import RobustEnsembleNode
+                    discovery_attempted = True
+                    node = RobustEnsembleNode.from_strict_artifacts(xgboost_dir)
+                    await node.initialize()
+                    if node.model_name not in loaded_model_names:
+                        self._handle_discovered_model(node, discovered_models)
+                        loaded_model_names.add(node.model_name)
+                        logger.info(
+                            "model_discovered",
+                            model_name=node.model_name,
+                            model_path=str(xgboost_dir),
+                            model_type="robust_ensemble"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "model_discovery_robust_ensemble_failed",
+                        path=str(xgboost_dir),
+                        error=str(e),
+                        message="Strict-artifact load failed, falling back to file scan"
+                    )
+
+            # Option 3: Discover models from MODEL_DIR
             if settings.model_discovery_enabled:
                 try:
                     model_dir_abs = self.model_dir.resolve()
-                    # Mark discovery as attempted when we check MODEL_DIR (even if it doesn't exist)
-                    # This indicates we attempted to discover models
                     discovery_attempted = True
                     if not self.model_dir.exists():
                         logger.warning(
@@ -329,29 +353,26 @@ class ModelDiscovery:
                 reason="model_auto_register disabled"
             )
     
+    _STRICT_ARTIFACTS = frozenset({
+        "entry_meta", "exit_model", "regime_model",
+        "entry_base", "exit_base", "entry_scaler", "exit_scaler",
+    })
+
     def _find_model_files(self) -> List[Path]:
-        """Find all model files in storage directory."""
-        
+        """Find all model files in storage directory. Excludes strict robust-ensemble artifacts in xgboost."""
         model_files = []
-        
-        # Search in root model directory
         if self.model_dir.exists():
-            # Find .pkl, .h5, .onnx files in root
             model_files.extend(self.model_dir.glob("*.pkl"))
             model_files.extend(self.model_dir.glob("*.h5"))
             model_files.extend(self.model_dir.glob("*.onnx"))
-        
-        # Search in subdirectories
         for subdir in ["custom", "xgboost", "lightgbm", "random_forest", "lstm", "transformer"]:
             subdir_path = self.model_dir / subdir
             if subdir_path.exists():
-                # Find .pkl, .h5, .onnx, .pt, .pth files
-                model_files.extend(subdir_path.glob("*.pkl"))
-                model_files.extend(subdir_path.glob("*.h5"))
-                model_files.extend(subdir_path.glob("*.onnx"))
-                model_files.extend(subdir_path.glob("*.pt"))
-                model_files.extend(subdir_path.glob("*.pth"))
-        
+                for ext in ("*.pkl", "*.h5", "*.onnx", "*.pt", "*.pth"):
+                    for p in subdir_path.glob(ext):
+                        if subdir == "xgboost" and p.stem in self._STRICT_ARTIFACTS:
+                            continue
+                        model_files.append(p)
         return model_files
     
     async def _load_model_from_path(self, model_path: Path) -> Optional[MCPModelNode]:

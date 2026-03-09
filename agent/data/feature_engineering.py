@@ -758,20 +758,19 @@ class FeatureEngineering:
         Returns:
             Dictionary with validation results
         """
-        # Import FEATURE_LIST from training script if available
-        # For now, we'll just check that all features can be computed
+        from agent.data.feature_list import EXPECTED_FEATURE_COUNT
         validation_results = {
             "valid": True,
             "feature_count": len(feature_list),
-            "expected_count": 50,
+            "expected_count": EXPECTED_FEATURE_COUNT,
             "missing_features": [],
             "errors": []
         }
         
-        if len(feature_list) != 50:
+        if len(feature_list) != EXPECTED_FEATURE_COUNT:
             validation_results["valid"] = False
             validation_results["errors"].append(
-                f"Feature count mismatch: got {len(feature_list)}, expected 50"
+                f"Feature count mismatch: got {len(feature_list)}, expected {EXPECTED_FEATURE_COUNT}"
             )
         
         # Check that all features can be computed (basic check)

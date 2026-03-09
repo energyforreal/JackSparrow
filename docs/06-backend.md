@@ -613,7 +613,8 @@ All WebSocket messages use a unified envelope format:
   "resource": "model",
   "data": {
     "symbol": "BTCUSD",
-    "consensus_signal": 0.75,
+    "consensus_signal": "BUY",
+    "signal": "BUY",
     "consensus_confidence": 0.825,
     "model_consensus": [
       {
@@ -635,6 +636,8 @@ All WebSocket messages use a unified envelope format:
   }
 }
 ```
+
+**Note:** `consensus_signal` is mapped from numeric (-1 to +1) to discrete string (STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL). Per-model `confidence` values are normalized to 0.0-1.0 range.
 
 **Market Tick Update**:
 ```json
@@ -696,6 +699,10 @@ All WebSocket messages use a unified envelope format:
   "timestamp": "2025-01-12T10:30:00Z"
 }
 ```
+
+**Event Deduplication:** The backend extracts `event_id` from the top level of the event (not from `payload`) for deduplication. Duplicate events (e.g., from Redis Streams and WebSocket) are skipped using Redis key `processed_event:{event_id}` with 5-minute TTL.
+
+**Position-Closed Handling:** When a position is closed, the backend broadcasts only the full portfolio update (not a partial `{position_closed: {...}}` message). This ensures the frontend never receives an incomplete portfolio that would cause UI flicker.
 
 **Ping**:
 ```json

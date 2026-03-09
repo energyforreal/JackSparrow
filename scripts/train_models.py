@@ -24,35 +24,10 @@ sys.path.insert(0, str(project_root))
 
 from agent.data.delta_client import DeltaExchangeClient, DeltaExchangeError
 from agent.data.feature_engineering import FeatureEngineering
+from agent.data.feature_list import FEATURE_LIST, EXPECTED_FEATURE_COUNT
 from agent.core.config import settings
 
 logger = structlog.get_logger()
-
-# Feature list (49 features)
-FEATURE_LIST = [
-    # Price-based (15 features)
-    'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',
-    'ema_12', 'ema_26', 'ema_50',
-    'close_sma_20_ratio', 'close_sma_50_ratio', 'close_sma_200_ratio',
-    'high_low_spread', 'close_open_ratio', 'body_size', 'upper_shadow', 'lower_shadow',
-    # Momentum (10 features)
-    'rsi_14', 'rsi_7', 'stochastic_k_14', 'stochastic_d_14',
-    'williams_r_14', 'cci_20', 'roc_10', 'roc_20',
-    'momentum_10', 'momentum_20',
-    # Trend (8 features)
-    'macd', 'macd_signal', 'macd_histogram',
-    'adx_14', 'aroon_up', 'aroon_down', 'aroon_oscillator',
-    'trend_strength',
-    # Volatility (8 features)
-    'bb_upper', 'bb_lower', 'bb_width', 'bb_position',
-    'atr_14', 'atr_20',
-    'volatility_10', 'volatility_20',
-    # Volume (6 features)
-    'volume_sma_20', 'volume_ratio', 'obv',
-    'volume_price_trend', 'accumulation_distribution', 'chaikin_oscillator',
-    # Returns (2 features)
-    'returns_1h', 'returns_24h'
-]
 
 
 class ModelTrainer:
@@ -257,6 +232,14 @@ class ModelTrainer:
         y_val = y_mapped[train_size:train_size+val_size]
         X_test = X[train_size+val_size:]
         y_test = y_mapped[train_size+val_size:]
+
+        # Balance class influence instead of dropping HOLD labels.
+        # This keeps neutral-market behavior in the classifier while limiting imbalance impact.
+        train_labels, train_counts = np.unique(y_train, return_counts=True)
+        class_weights = {}
+        for label, count in zip(train_labels, train_counts):
+            class_weights[int(label)] = len(y_train) / (len(train_labels) * max(int(count), 1))
+        sample_weight_train = np.array([class_weights[int(label)] for label in y_train], dtype=float)
         
         # Train model
         model = XGBClassifier(
@@ -272,6 +255,7 @@ class ModelTrainer:
         start_time = time.time()
         model.fit(
             X_train, y_train,
+            sample_weight=sample_weight_train,
             eval_set=[(X_val, y_val)],
             verbose=False
         )
@@ -306,6 +290,10 @@ class ModelTrainer:
     ) -> Path:
         """Save trained model to file.
         
+        Filename includes _classifier so stored artefacts are clearly typed; at runtime
+        model discovery infers classifier vs regressor from the loaded object (e.g. has
+        predict_proba), not from the filename.
+        
         Args:
             model: Trained XGBClassifier instance
             timeframe: Timeframe identifier (15m, 1h, 4h)
@@ -314,11 +302,12 @@ class ModelTrainer:
         Returns:
             Path to saved model file
         """
-        # Determine save location
+        # Determine save location (classifier/regressor suffix for clarity; discovery infers type from object)
+        name_suffix = "classifier"  # This script trains XGBClassifier only
         if timeframe == "15m":
-            model_path = self.models_dir / f"xgboost_{self.symbol}_{timeframe}.pkl"
+            model_path = self.models_dir / f"xgboost_{name_suffix}_{self.symbol}_{timeframe}.pkl"
         else:
-            model_path = self.storage_dir / f"xgboost_{self.symbol}_{timeframe}.pkl"
+            model_path = self.storage_dir / f"xgboost_{name_suffix}_{self.symbol}_{timeframe}.pkl"
         
         # CRITICAL: Save the model object, NOT feature names!
         logger.info("saving_model", model_path=str(model_path), model_type=type(model).__name__)
@@ -420,7 +409,7 @@ class ModelTrainer:
         y = self.create_labels(candles, forward_periods=1)
         
         # Remove rows with insufficient data (first few rows may have zero features)
-        valid_mask = (X.sum(axis=1) != 0) & (y != 0)  # Remove zero-feature rows and HOLD labels for training
+        valid_mask = (X.sum(axis=1) != 0)  # Keep HOLD labels; remove only rows with invalid/empty features
         X_clean = X[valid_mask].copy()
         y_clean = y[valid_mask].copy()
         

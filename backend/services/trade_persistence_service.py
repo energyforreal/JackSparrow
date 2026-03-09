@@ -195,7 +195,11 @@ class TradePersistenceService:
         exit_price: float,
         exit_reason: str,
         pnl: float,
-        closed_at: Optional[datetime] = None
+        closed_at: Optional[datetime] = None,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+        entry_price: Optional[float] = None,
+        quantity: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Close a position and record exit details.
         
@@ -213,11 +217,44 @@ class TradePersistenceService:
             try:
                 closed_at = closed_at or datetime.utcnow()
                 
-                # Find position
+                # Find position by explicit position_id first.
                 result = await session.execute(
                     select(Position).where(Position.position_id == position_id)
                 )
                 position = result.scalar_one_or_none()
+
+                # Fallback for cases where agent emits synthetic/non-DB position IDs.
+                if not position and symbol:
+                    side_enum = None
+                    if isinstance(side, str):
+                        side_upper = side.strip().upper()
+                        if side_upper in {"BUY", "LONG"}:
+                            side_enum = TradeSide.BUY
+                        elif side_upper in {"SELL", "SHORT"}:
+                            side_enum = TradeSide.SELL
+
+                    fallback_query = select(Position).where(
+                        Position.symbol == symbol,
+                        Position.status == PositionStatus.OPEN,
+                    )
+                    if side_enum is not None:
+                        fallback_query = fallback_query.where(Position.side == side_enum)
+                    fallback_query = fallback_query.order_by(Position.opened_at.desc()).limit(1)
+
+                    fallback_result = await session.execute(fallback_query)
+                    position = fallback_result.scalar_one_or_none()
+
+                    if position:
+                        logger.warning(
+                            "position_close_fallback_match_used",
+                            requested_position_id=position_id,
+                            resolved_position_id=position.position_id,
+                            symbol=symbol,
+                            side=side,
+                            entry_price_hint=entry_price,
+                            quantity_hint=quantity,
+                            message="Resolved close request using latest open position for symbol/side",
+                        )
                 
                 if not position:
                     logger.warning(

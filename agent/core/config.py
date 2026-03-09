@@ -191,6 +191,51 @@ class Settings(BaseSettings):
         env="TAKE_PROFIT_PERCENTAGE",
         description="Take profit percentage"
     )
+    max_signal_age_seconds: int = Field(
+        default=10,
+        env="MAX_SIGNAL_AGE_SECONDS",
+        description="Reject signals older than this (seconds)"
+    )
+    trailing_stop_percentage: float = Field(
+        default=0.015,
+        env="TRAILING_STOP_PERCENTAGE",
+        description="Trailing stop percentage for longs/shorts"
+    )
+    max_position_hold_hours: int = Field(
+        default=24,
+        env="MAX_POSITION_HOLD_HOURS",
+        description="Force-close positions after this many hours"
+    )
+    websocket_sl_tp_enabled: bool = Field(
+        default=True,
+        env="WEBSOCKET_SL_TP_ENABLED",
+        description="Use WebSocket ticks for SL/TP checks when positions open"
+    )
+    mtf_confirmation_enabled: bool = Field(
+        default=False,
+        env="MTF_CONFIRMATION_ENABLED",
+        description="Require higher-timeframe trend confirmation before entry"
+    )
+    model_disagreement_threshold: float = Field(
+        default=0.4,
+        env="MODEL_DISAGREEMENT_THRESHOLD",
+        description="Max inter-model prediction stdev before dampening consensus"
+    )
+    half_spread_pct: float = Field(
+        default=0.0002,
+        env="HALF_SPREAD_PCT",
+        description="Paper trading: simulated half bid-ask spread (0.02%)"
+    )
+    min_monitor_interval_seconds: float = Field(
+        default=2.0,
+        env="MIN_MONITOR_INTERVAL_SECONDS",
+        description="Position monitor interval when positions are open"
+    )
+    position_monitor_interval_seconds: float = Field(
+        default=15.0,
+        env="POSITION_MONITOR_INTERVAL_SECONDS",
+        description="Position monitor interval when no positions"
+    )
     max_daily_loss: float = Field(
         default=0.05,
         env="MAX_DAILY_LOSS",

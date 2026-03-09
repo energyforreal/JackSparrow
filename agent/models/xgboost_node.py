@@ -546,11 +546,10 @@ class XGBoostNode(MCPModelNode):
                     # Calculate relative return: (predicted_price - current_price) / current_price
                     return_pct = (prediction_raw - current_price) / current_price
                     
-                    # Normalize return percentage to [-1, 1] range
-                    # Use a reasonable return range: ±10% maps to ±1.0
-                    # Returns beyond ±10% are clamped to ±1.0
-                    max_return_range = 0.10  # 10% return maps to ±1.0
-                    prediction_normalized = max(-1.0, min(1.0, return_pct / max_return_range))
+                    # Normalize return to [-1, 1] via tanh to avoid hard clamp (BTC can move >10% in 4h)
+                    # Scale 0.10: ±10% → ~±0.76, ±20% → ~±0.96; preserves resolution for large moves
+                    regressor_scale = 0.10
+                    prediction_normalized = float(np.tanh(return_pct / regressor_scale))
                     
                     logger.debug(
                         "regressor_price_to_return_converted",

@@ -8,6 +8,7 @@ Supports event-driven streaming via event bus.
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta, timezone
 import asyncio
+import time
 import structlog
 
 from agent.data.delta_client import (
@@ -58,7 +59,8 @@ class MarketDataService:
         self._24h_stats_cache_ttl = 60  # Cache 24h stats for 60 seconds
         self._24h_stats_last_fetch: Dict[str, datetime] = {}
         self._24h_stats_fetch_task: Optional[asyncio.Task] = None
-    
+        self._last_sl_tp_check: Dict[str, float] = {}  # symbol -> time.time() for WebSocket SL/TP throttle
+
     async def initialize(self):
         """Initialize market data service."""
         # Set up WebSocket message handler for ticker updates if WebSocket is enabled
@@ -119,6 +121,18 @@ class MarketDataService:
 
             # Process the ticker data (same logic as before)
             await self._process_ticker_update(symbol, ticker_data)
+
+            # WebSocket-driven SL/TP: when enabled and position exists, trigger position check (throttled)
+            if getattr(settings, "websocket_sl_tp_enabled", True):
+                from agent.core.execution import execution_module
+                pos = execution_module.position_manager.get_position(symbol)
+                if pos and pos.get("status") == "open":
+                    now = time.time()
+                    if now - self._last_sl_tp_check.get(symbol, 0) >= 0.2:
+                        self._last_sl_tp_check[symbol] = now
+                        price = float(message.get("mark_price", 0) or message.get("close", 0))
+                        if price > 0:
+                            await execution_module.update_position_price_and_check(symbol, price)
 
         except Exception as e:
             logger.error(

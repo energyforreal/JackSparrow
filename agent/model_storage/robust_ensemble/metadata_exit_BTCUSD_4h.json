@@ -1,0 +1,9 @@
+{
+  "model_name": "exit_ensemble_BTCUSD_4h",
+  "model_type": "exit_stacking_ensemble",
+  "symbol": "BTCUSD",
+  "timeframe": "4h",
+  "trained_at": "2026-03-09T07:45:13.406468+00:00",
+  "version": "3.0.0",
+  "artifact_format": ".joblib"
+}

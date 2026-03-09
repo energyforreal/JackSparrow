@@ -8,6 +8,8 @@ and integration with trading venues.
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 import asyncio
+import random
+import time
 import uuid
 import structlog
 
@@ -103,19 +105,23 @@ class PositionManager:
         self.positions: Dict[str, Dict[str, Any]] = {}  # symbol -> position details
 
     def open_position(self, symbol: str, side: str, quantity: float,
-                     entry_price: float, order_id: str) -> Dict[str, Any]:
-        """Open a new position."""
+                     entry_price: float, order_id: str,
+                     stop_loss: Optional[float] = None,
+                     take_profit: Optional[float] = None) -> Dict[str, Any]:
+        """Open a new position. Optionally store stop_loss and take_profit for monitoring."""
         position = {
             "symbol": symbol,
             "side": side,
             "quantity": quantity,
             "entry_price": entry_price,
-            "entry_time": datetime.utcnow(),
+            "entry_time": datetime.now(timezone.utc),
             "current_price": entry_price,
             "unrealized_pnl": 0.0,
             "entry_order_id": order_id,
             "exit_order_id": None,
-            "status": "open"
+            "status": "open",
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
         }
 
         self.positions[symbol] = position
@@ -244,17 +250,20 @@ class ExecutionEngine:
         }
         self._initialized = False
         self.delta_client = None  # Injected for paper/live trading
+        self.risk_manager = None  # Injected for portfolio sync
 
         # Mock exchange integration (would be replaced with real exchange API)
         self.exchange_connected = False
 
-    async def initialize(self, delta_client=None):
+    async def initialize(self, delta_client=None, risk_manager=None):
         """Initialize execution engine.
 
         Args:
             delta_client: Optional DeltaExchangeClient for paper/live trading
+            risk_manager: Optional RiskManager for portfolio sync on fill/close
         """
         self.delta_client = delta_client
+        self.risk_manager = risk_manager
         # Initialize mock exchange connection
         await self._connect_exchange()
         self._initialized = True
@@ -311,22 +320,38 @@ class ExecutionEngine:
                 )
                 return
 
+            # Enforce one position per symbol: reject duplicate RiskApproved if we already have same-side position
+            existing = self.position_manager.get_position(symbol)
+            if existing and existing.get("status") == "open":
+                existing_side = existing.get("side", "")
+                want_long = side_raw == "BUY"
+                if (existing_side == "long" and want_long) or (existing_side == "short" and not want_long):
+                    logger.info(
+                        "execution_risk_approved_skipped_duplicate_position",
+                        symbol=symbol,
+                        side=side_raw,
+                        event_id=event.event_id,
+                        message="Already have open position for this symbol and side; skipping duplicate",
+                    )
+                    return
+
             # Normalize side to lowercase for execute_trade
             side = "buy" if side_raw == "BUY" else "sell"
 
-            # Compute stop loss and take profit from config
-            stop_loss = None
-            take_profit = None
-            if settings.stop_loss_percentage:
-                if side == "buy":
-                    stop_loss = price * (1 - settings.stop_loss_percentage)
-                else:
-                    stop_loss = price * (1 + settings.stop_loss_percentage)
-            if settings.take_profit_percentage:
-                if side == "buy":
-                    take_profit = price * (1 + settings.take_profit_percentage)
-                else:
-                    take_profit = price * (1 - settings.take_profit_percentage)
+            # Use payload stop_loss/take_profit when present (e.g. ATR-based), else config
+            stop_loss = payload.get("stop_loss")
+            take_profit = payload.get("take_profit")
+            if stop_loss is None or take_profit is None:
+                if settings.stop_loss_percentage:
+                    if side == "buy":
+                        stop_loss = price * (1 - settings.stop_loss_percentage)
+                    else:
+                        stop_loss = price * (1 + settings.stop_loss_percentage)
+                if settings.take_profit_percentage:
+                    if side == "buy":
+                        take_profit = price * (1 + settings.take_profit_percentage)
+                    else:
+                        take_profit = price * (1 - settings.take_profit_percentage)
 
             trade = {
                 "symbol": symbol,
@@ -350,8 +375,27 @@ class ExecutionEngine:
                 )
                 return
 
-            # Publish OrderFillEvent for backend persistence and WebSocket broadcast
             fill_price = result.details.get("average_fill_price") or price
+            # Enrich position with metadata for learning and sync RiskManager portfolio
+            pos = self.position_manager.get_position(symbol)
+            if pos:
+                pos["model_predictions"] = payload.get("model_predictions")
+                pos["reasoning_chain_id"] = payload.get("reasoning_chain_id")
+                pos["predicted_signal"] = payload.get("side", "")
+            if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
+                from agent.risk.risk_manager import Position as RMPosition
+                rm_pos = RMPosition(
+                    symbol=symbol,
+                    side="long" if side == "buy" else "short",
+                    size=quantity,
+                    entry_price=fill_price,
+                    entry_time=datetime.now(timezone.utc),
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                )
+                self.risk_manager.portfolio.add_position(rm_pos)
+
+            # Publish OrderFillEvent for backend persistence and WebSocket broadcast
             order_id = result.order_id or str(uuid.uuid4())[:8]
             trade_id = f"trade_{order_id}_{datetime.now(timezone.utc).timestamp()}"
 
@@ -435,6 +479,9 @@ class ExecutionEngine:
             if existing_position and existing_position["side"] != ("long" if side == "buy" else "short"):
                 # Close opposite position first
                 await self.close_position(symbol, order_type="market")
+                # In paper mode, allow a fresh ticker for the open leg so close and open use different fill prices
+                if settings.paper_trading_mode:
+                    await asyncio.sleep(0.05)
 
             # Execute the order
             order_result = await self._place_order(
@@ -458,7 +505,9 @@ class ExecutionEngine:
                     side="long" if side == "buy" else "short",
                     quantity=quantity,
                     entry_price=fill_price,
-                    order_id=order_id
+                    order_id=order_id,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
                 )
 
                 # Place stop loss and take profit orders if specified
@@ -497,11 +546,17 @@ class ExecutionEngine:
             return ExecutionResult(False, error_message=f"Execution failed: {str(e)}")
 
     async def close_position(self, symbol: str, order_type: str = "market",
-                           price: Optional[float] = None) -> ExecutionResult:
-        """Close an existing position."""
+                           price: Optional[float] = None,
+                           exit_reason: str = "market_close") -> ExecutionResult:
+        """Close an existing position. exit_reason: market_close, stop_loss_hit, take_profit_hit, signal_reversal, time_limit."""
         position = self.position_manager.get_position(symbol)
         if not position:
             return ExecutionResult(False, error_message=f"No open position for {symbol}")
+
+        model_predictions = position.get("model_predictions")
+        reasoning_chain_id = position.get("reasoning_chain_id")
+        predicted_signal = position.get("predicted_signal")
+        entry_time = position.get("entry_time")
 
         try:
             # Determine close side (opposite of position side)
@@ -524,6 +579,9 @@ class ExecutionEngine:
                     exit_order_id=order_result["order_id"]
                 )
 
+                if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
+                    self.risk_manager.portfolio.remove_position(symbol)
+
                 logger.info("position_closed_successfully",
                            symbol=symbol,
                            exit_price=exit_price,
@@ -531,19 +589,28 @@ class ExecutionEngine:
 
                 # Publish PositionClosedEvent for backend persistence and paper trade log
                 position_id = f"pos_{closed_position.get('entry_order_id', order_result.get('order_id', ''))}"
+                payload_data = {
+                    "position_id": position_id,
+                    "symbol": symbol,
+                    "side": position["side"],
+                    "entry_price": position["entry_price"],
+                    "exit_price": exit_price,
+                    "quantity": position["quantity"],
+                    "pnl": closed_position["realized_pnl"],
+                    "exit_reason": exit_reason,
+                    "timestamp": datetime.now(timezone.utc),
+                }
+                if model_predictions is not None:
+                    payload_data["model_predictions"] = model_predictions
+                if reasoning_chain_id is not None:
+                    payload_data["reasoning_chain_id"] = reasoning_chain_id
+                if predicted_signal is not None:
+                    payload_data["predicted_signal"] = predicted_signal
+                if entry_time is not None:
+                    payload_data["entry_time"] = entry_time
                 pos_closed = PositionClosedEvent(
                     source="execution_engine",
-                    payload={
-                        "position_id": position_id,
-                        "symbol": symbol,
-                        "side": position["side"],
-                        "entry_price": position["entry_price"],
-                        "exit_price": exit_price,
-                        "quantity": position["quantity"],
-                        "pnl": closed_position["realized_pnl"],
-                        "exit_reason": "market_close",
-                        "timestamp": datetime.now(timezone.utc),
-                    },
+                    payload=payload_data,
                 )
                 await event_bus.publish(pos_closed)
 
@@ -557,7 +624,7 @@ class ExecutionEngine:
                         exit_price=exit_price,
                         quantity=position["quantity"],
                         pnl=closed_position["realized_pnl"],
-                        exit_reason="market_close",
+                        exit_reason=exit_reason,
                     )
 
             return ExecutionResult(True, order_id=order_result.get("order_id"))
@@ -581,12 +648,24 @@ class ExecutionEngine:
 
         actions_taken = []
 
-        # Check stop loss and take profit levels
-        # This would integrate with real-time price feeds
-        # For now, return status
         current_price = position.get("current_price", position["entry_price"])
+        entry_price = position["entry_price"]
+        trail_pct = getattr(settings, "trailing_stop_percentage", 0.015) or 0.015
 
-        # Simulate stop loss check (would use real price feed)
+        # Trailing stop: ratchet stop_loss on favorable price moves
+        if position["side"] == "long" and current_price > entry_price:
+            new_trail_stop = current_price * (1 - trail_pct)
+            if new_trail_stop > (position.get("stop_loss") or 0):
+                position["stop_loss"] = new_trail_stop
+                logger.info("trailing_stop_updated", symbol=position_symbol, new_stop=new_trail_stop)
+        elif position["side"] == "short" and current_price < entry_price:
+            new_trail_stop = current_price * (1 + trail_pct)
+            current_sl = position.get("stop_loss")
+            if current_sl is None or new_trail_stop < current_sl:
+                position["stop_loss"] = new_trail_stop
+                logger.info("trailing_stop_updated", symbol=position_symbol, new_stop=new_trail_stop)
+
+        # Check stop loss and take profit levels
         stop_loss = position.get("stop_loss")
         take_profit = position.get("take_profit")
 
@@ -594,19 +673,20 @@ class ExecutionEngine:
             should_stop = (position["side"] == "long" and current_price <= stop_loss) or \
                          (position["side"] == "short" and current_price >= stop_loss)
             if should_stop:
-                close_result = await self.close_position(position_symbol)
+                close_result = await self.close_position(position_symbol, exit_reason="stop_loss_hit")
                 if close_result.success:
                     actions_taken.append({
                         "action": "stop_loss_triggered",
                         "symbol": position_symbol,
                         "exit_price": current_price
                     })
+                    return {"symbol": position_symbol, "actions_taken": actions_taken, "position_status": "closed"}
 
         if take_profit:
             should_tp = (position["side"] == "long" and current_price >= take_profit) or \
                        (position["side"] == "short" and current_price <= take_profit)
             if should_tp:
-                close_result = await self.close_position(position_symbol)
+                close_result = await self.close_position(position_symbol, exit_reason="take_profit_hit")
                 if close_result.success:
                     actions_taken.append({
                         "action": "take_profit_triggered",
@@ -619,6 +699,11 @@ class ExecutionEngine:
             "actions_taken": actions_taken,
             "position_status": position["status"]
         }
+
+    async def update_position_price_and_check(self, symbol: str, price: float) -> None:
+        """Update position price and run SL/TP check (for WebSocket-driven path)."""
+        self.position_manager.update_position(symbol, price)
+        await self.manage_position(symbol)
 
     async def _validate_trade(self, trade: Dict[str, Any]) -> Dict[str, Any]:
         """Validate trade parameters."""
@@ -673,16 +758,20 @@ class ExecutionEngine:
                 # Get fill price: paper mode uses ticker; live uses real order
                 if settings.paper_trading_mode:
                     base_price = await self._get_fill_price_paper(symbol, price)
-                    # Simulate slippage
-                    slippage = base_price * (self.execution_config["max_slippage_percent"] / 100.0) * (0.5 if side == "buy" else -0.5)
-                    fill_price = base_price + slippage
+                    max_pct = self.execution_config["max_slippage_percent"] / 100.0
+                    slippage_pct = random.uniform(0.1 * max_pct, max_pct)
+                    half_spread = getattr(settings, "half_spread_pct", 0.0002)
+                    if side == "buy":
+                        fill_price = base_price * (1 + half_spread + slippage_pct)
+                    else:
+                        fill_price = base_price * (1 - half_spread - slippage_pct)
                     order.update_fill(quantity, fill_price)
                     return {
                         "success": True,
                         "order_id": order_id,
                         "filled_immediately": True,
                         "average_fill_price": fill_price,
-                        "slippage_percent": abs(slippage / base_price) * 100 if base_price else 0,
+                        "slippage_percent": abs(fill_price - base_price) / base_price * 100 if base_price else 0,
                     }
                 else:
                     # Live trading
@@ -735,13 +824,19 @@ class ExecutionEngine:
             }
 
     async def _get_fill_price_paper(self, symbol: str, _price_hint: Optional[float] = None) -> float:
-        """Get current market price for paper trading from Delta ticker. Raises if unavailable."""
+        """Get current market price for paper trading from Delta ticker. Raises if unavailable or stale."""
         if not self.delta_client:
             raise ValueError("Delta client not configured; cannot get fill price for paper trade")
         ticker = await self.delta_client.get_ticker(symbol)
         result = ticker.get("result") or ticker
         if not isinstance(result, dict):
             raise ValueError(f"Ticker returned invalid data for {symbol}")
+        ticker_ts = result.get("timestamp")
+        if ticker_ts is None:
+            raise ValueError(f"Ticker for {symbol} has no timestamp; cannot validate freshness")
+        age_s = time.time() - float(ticker_ts)
+        if age_s > 5:
+            raise ValueError(f"Stale ticker for {symbol}, age={age_s:.1f}s")
         close = result.get("close") or result.get("mark_price")
         if close is None:
             raise ValueError(f"Ticker has no close/mark_price for {symbol}")

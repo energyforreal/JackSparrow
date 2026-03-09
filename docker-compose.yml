@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: timescale/timescaledb:2.13.1-pg15
+    image: timescale/timescaledb:2.25.1-pg15
     container_name: jacksparrow-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-jacksparrow}
@@ -144,6 +144,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-jacksparrow}:${POSTGRES_PASSWORD:-jacksparrow}@postgres:5432/${POSTGRES_DB:-trading_agent}
       REDIS_URL: redis://redis:6379/0
       FEATURE_SERVER_URL: http://agent:8002
+      AGENT_WS_URL: ws://agent:8002
+      USE_AGENT_WEBSOCKET: ${USE_AGENT_WEBSOCKET:-true}
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY:-changeme}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET:-changeme}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
@@ -234,4 +236,3 @@ volumes:
 networks:
   jacksparrow-network:
     driver: bridge
-

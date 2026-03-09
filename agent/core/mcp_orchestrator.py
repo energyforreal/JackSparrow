@@ -6,7 +6,7 @@ and MCP Reasoning Engine to provide unified AI agent functionality.
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import structlog
 
@@ -43,6 +43,7 @@ class MCPOrchestrator:
         self.model_registry: Optional[MCPModelRegistry] = None
         self.reasoning_engine: Optional[MCPReasoningEngine] = None
         self.vector_store: Optional[VectorMemoryStore] = None
+        self.delta_client = None  # Set by agent for 15m trend (MTF confirmation)
         self._initialized = False
     
     async def initialize(self):
@@ -267,6 +268,46 @@ class MCPOrchestrator:
                     derived_volatility = features_dict["volatility_20"]
                 if derived_volatility is not None:
                     features_dict["volatility"] = derived_volatility
+
+            # Multi-timeframe trend (15m) when enabled
+            if getattr(settings, "mtf_confirmation_enabled", False) and getattr(self, "delta_client", None):
+                try:
+                    end_ts = int(datetime.now(timezone.utc).timestamp())
+                    start_ts = end_ts - 21 * 15 * 60  # 21 candles of 15m
+                    resp = await self.delta_client.get_candles(
+                        symbol=symbol, resolution="15m", start=start_ts, end=end_ts
+                    )
+                    result = resp.get("result") if isinstance(resp, dict) else resp
+                    candles = []
+                    if isinstance(result, dict):
+                        candles = result.get("candles", []) or []
+                    elif isinstance(result, list):
+                        candles = result
+                    if len(candles) >= 21:
+                        closes = []
+                        for c in candles[-21:]:
+                            close = c.get("close") or c.get("c")
+                            if close is not None:
+                                closes.append(float(close))
+                        if len(closes) >= 9:
+                            def _ema(vals: List[float], n: int) -> float:
+                                if not vals:
+                                    return 0.0
+                                k = 2.0 / (n + 1)
+                                ema = vals[0]
+                                for v in vals[1:]:
+                                    ema = k * v + (1 - k) * ema
+                                return ema
+                            ema9 = _ema(closes[-9:], 9)
+                            ema21 = _ema(closes, 21)
+                            if ema9 > ema21:
+                                features_dict["trend_15m"] = 1
+                            elif ema9 < ema21:
+                                features_dict["trend_15m"] = -1
+                            else:
+                                features_dict["trend_15m"] = 0
+                except Exception as e:
+                    logger.debug("mcp_orchestrator_trend_15m_failed", symbol=symbol, error=str(e))
 
             market_context_for_reasoning: Dict[str, Any] = {
                 **(context or {}),
@@ -497,32 +538,9 @@ class MCPOrchestrator:
         return await self.reasoning_engine.generate_reasoning(request)
 
     def _get_required_features(self) -> List[str]:
-        """Get list of required features for ML models."""
-        # This should match the FEATURE_LIST from training scripts
-        return [
-            # Price-based (16 features)
-            'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',
-            'ema_12', 'ema_26', 'ema_50',
-            'close_sma_20_ratio', 'close_sma_50_ratio', 'close_sma_200_ratio',
-            'high_low_spread', 'close_open_ratio', 'body_size', 'upper_shadow', 'lower_shadow',
-            # Momentum (10 features)
-            'rsi_14', 'rsi_7', 'stochastic_k_14', 'stochastic_d_14',
-            'williams_r_14', 'cci_20', 'roc_10', 'roc_20',
-            'momentum_10', 'momentum_20',
-            # Trend (8 features)
-            'macd', 'macd_signal', 'macd_histogram',
-            'adx_14', 'aroon_up', 'aroon_down', 'aroon_oscillator',
-            'trend_strength',
-            # Volatility (8 features)
-            'bb_upper', 'bb_lower', 'bb_width', 'bb_position',
-            'atr_14', 'atr_20',
-            'volatility_10', 'volatility_20',
-            # Volume (6 features)
-            'volume_sma_20', 'volume_ratio', 'obv',
-            'volume_price_trend', 'accumulation_distribution', 'chaikin_oscillator',
-            # Returns (2 features)
-            'returns_1h', 'returns_24h'
-        ]
+        """Get list of required features for ML models (canonical list)."""
+        from agent.data.feature_list import get_feature_list
+        return get_feature_list()
         
     def _extract_decision_from_reasoning(self, reasoning_chain: MCPReasoningChain) -> Dict[str, Any]:
         """Extract trading decision from reasoning chain conclusion."""
@@ -829,13 +847,18 @@ class MCPOrchestrator:
 
             result = await self.process_prediction_request(symbol, context)
 
-            # Emit completion event
+            # Emit completion event (even on error, so subscribers can see error state)
             completion_event = ModelPredictionCompleteEvent(
                 source="mcp_orchestrator",
                 correlation_id=event.event_id,
                 payload=result
             )
             await event_bus.publish(completion_event)
+
+            # Do not broadcast error fallback as main trading signal – skip DecisionReadyEvent
+            # when result is an error response (synthetic HOLD 0%) so UI keeps last good signal.
+            if result.get("error") is not None:
+                return
 
             # When a full decision is available from process_prediction_request,
             # emit a DecisionReadyEvent directly so downstream consumers
@@ -976,6 +999,13 @@ class MCPOrchestrator:
                 timestamp=datetime.utcnow(),
             )
 
+        except NoHealthyModelPredictionsError:
+            logger.debug(
+                "mcp_orchestrator_reasoning_skipped_no_predictions",
+                event_id=event.event_id,
+                symbol=payload.get("symbol"),
+                message="Skipping reasoning - no model_predictions in context.",
+            )
         except Exception as e:
             logger.error("mcp_orchestrator_reasoning_request_failed",
                         event_id=event.event_id,

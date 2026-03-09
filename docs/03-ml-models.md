@@ -1039,52 +1039,16 @@ Custom models must:
 
 ## Model Performance Tracking
 
-### Performance Metrics
+### Performance Metrics (implementation: agent/core/learning_system.py)
 
-The system tracks model performance:
+The `ModelPerformanceTracker` tracks **trade outcomes** (per-model PnL and win/loss), not raw prediction-vs-outcome error. This avoids using a continuous error metric (e.g. MAE) for classifier predictions, which would mix normalized signal [-1, 1] with actual return and mis-rank models.
 
-```python
-class ModelPerformanceTracker:
-    """Track model performance over time."""
-    
-    def record_prediction_outcome(
-        self,
-        model_name: str,
-        prediction: MCPModelPrediction,
-        actual_outcome: float
-    ):
-        """Record prediction and actual outcome."""
-        error = abs(prediction.prediction - actual_outcome)
-        
-        performance_record = {
-            "model_name": model_name,
-            "prediction": prediction.prediction,
-            "actual": actual_outcome,
-            "error": error,
-            "confidence": prediction.confidence,
-            "timestamp": datetime.utcnow()
-        }
-        
-        self.records.append(performance_record)
-    
-    def calculate_performance_metrics(
-        self,
-        model_name: str,
-        window_size: int = 100
-    ) -> Dict:
-        """Calculate performance metrics."""
-        recent_records = self._get_recent_records(model_name, window_size)
-        
-        if not recent_records:
-            return None
-        
-        return {
-            "accuracy": self._calculate_accuracy(recent_records),
-            "mae": self._calculate_mae(recent_records),
-            "sharpe_ratio": self._calculate_sharpe(recent_records),
-            "win_rate": self._calculate_win_rate(recent_records)
-        }
-```
+**Implemented API:**
+- `record_trade_outcome(trade_outcome: TradeOutcome, model_predictions: List[Dict])` — records a closed trade for each participating model; triggered from the state machine on `PositionClosedEvent` when `model_predictions` are present in the payload.
+- Metrics maintained per model: `total_trades`, `profitable_trades`, `total_pnl`, `win_rate`, `avg_pnl`, `sharpe_ratio` (from recent returns), `recent_performance` (last 50 trades).
+- `get_model_weight(model_name, base_weight)` — returns a dynamic weight from win rate, Sharpe, and recent performance (used when learning is enabled).
+
+**If adding prediction-level outcome recording:** For classifiers, use directional accuracy (e.g. `sign(prediction) == sign(actual_return)`) or a classification metric (e.g. AUC), not `abs(prediction - actual_outcome)`, so correct direction is rewarded regardless of magnitude.
 
 ---
 

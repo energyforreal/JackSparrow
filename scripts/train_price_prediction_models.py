@@ -1189,6 +1189,13 @@ class PricePredictionTrainer:
         y_val = y_mapped[train_size:train_size+val_size]
         X_test = X[train_size+val_size:]
         y_test = y_mapped[train_size+val_size:]
+
+        # Balance class influence without discarding HOLD labels.
+        train_labels, train_counts = np.unique(y_train, return_counts=True)
+        class_weights = {}
+        for label, count in zip(train_labels, train_counts):
+            class_weights[int(label)] = len(y_train) / (len(train_labels) * max(int(count), 1))
+        sample_weight_train = np.array([class_weights[int(label)] for label in y_train], dtype=float)
         
         # Train model with appropriate parameters based on number of classes
         if num_classes == 2:
@@ -1216,6 +1223,7 @@ class PricePredictionTrainer:
         start_time = time.time()
         model.fit(
             X_train, y_train,
+            sample_weight=sample_weight_train,
             eval_set=[(X_val, y_val)],
             verbose=False
         )
@@ -1900,8 +1908,8 @@ class PricePredictionTrainer:
                 candles, forward_periods=1, buy_threshold=0.5, sell_threshold=-0.5
             )
             
-            # Remove rows with insufficient data and HOLD labels for training
-            valid_mask = (X.sum(axis=1) != 0) & (y_classification != 0)
+            # Keep HOLD labels; remove only rows with insufficient/empty features
+            valid_mask = (X.sum(axis=1) != 0)
             X_clean = X[valid_mask].copy()
             y_classification_clean = y_classification[valid_mask].copy()
             

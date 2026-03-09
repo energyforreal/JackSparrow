@@ -115,7 +115,7 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       // Handle simplified message format (with backward compatibility for legacy types)
       const messageType = message.type
       const resource = message.resource
-      const data = message.data || message.data  // Handle both formats
+      const data = message.data ?? message.payload ?? {}
       
       // Handle new simplified format
       if (messageType === 'data_update') {
@@ -139,6 +139,18 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
               ) {
                 mergedSignal.model_consensus = state.modelData.model_consensus
                 mergedSignal.individual_model_reasoning = state.modelData.individual_model_reasoning
+              }
+
+              // Prefer model consensus when decision confidence is 0 so main card shows real-time values
+              const effectiveConf = mergedSignal.confidence ?? 0
+              if ((effectiveConf === 0 || effectiveConf === undefined) && state.modelData) {
+                const modelConf = state.modelData.consensus_confidence ?? state.modelData.confidence
+                if (modelConf != null && modelConf > 0) {
+                  mergedSignal.confidence = modelConf
+                  if (state.modelData.consensus_signal != null) {
+                    mergedSignal.signal = state.modelData.consensus_signal
+                  }
+                }
               }
 
               return {
@@ -184,15 +196,29 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
               lastUpdate: now,
               dataSource: 'websocket'
             }
-          case 'model':
-            // Merge model data with signal if signal exists
+          case 'model': {
+            // Update model data; set or merge main signal so first meaningful update is from consensus
+            const hasConsensus = (data.consensus_confidence != null && data.consensus_confidence > 0) ||
+              (data.confidence != null && data.confidence > 0)
+            const currentConf = state.signal?.confidence ?? 0
+            const signalFromModel =
+              hasConsensus && (!state.signal || currentConf === 0)
+                ? {
+                    ...data,
+                    signal: data.consensus_signal ?? data.signal ?? state.signal?.signal ?? 'HOLD',
+                    confidence: data.consensus_confidence ?? data.confidence ?? 0,
+                  }
+                : state.signal
+                  ? { ...state.signal, ...data }
+                  : null
             return {
               ...state,
               modelData: data,
-              signal: state.signal ? { ...state.signal, ...data } : null,
+              signal: signalFromModel,
               lastUpdate: now,
               dataSource: 'websocket'
             }
+          }
           default:
             return state
         }

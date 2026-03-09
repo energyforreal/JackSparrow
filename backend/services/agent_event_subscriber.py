@@ -24,7 +24,30 @@ from backend.core.websocket_messages import (
 )
 from decimal import Decimal
 
+from backend.core.enums import SignalType
+
 logger = structlog.get_logger()
+
+
+def _map_consensus_signal_to_string(value: Any) -> str:
+    """Map numeric consensus_signal (-1 to +1) to discrete SignalType string.
+    
+    Frontend expects signal as string (STRONG_BUY, BUY, HOLD, etc.), not numeric.
+    """
+    if isinstance(value, str) and SignalType.is_valid(value):
+        return value
+    if not isinstance(value, (int, float)):
+        return "HOLD"
+    pred_value = float(value)
+    if abs(pred_value) < 0.2:
+        return "HOLD"
+    if pred_value > 0.6:
+        return "STRONG_BUY"
+    if pred_value > 0.2:
+        return "BUY"
+    if pred_value < -0.6:
+        return "STRONG_SELL"
+    return "SELL"
 
 
 class AgentEventSubscriber:
@@ -265,7 +288,7 @@ class AgentEventSubscriber:
                 return
 
             # Dispatch to appropriate handler
-            await self._handle_event(event_type, payload)
+            await self._handle_event(event_type, payload, event_dict)
 
             # Acknowledge message
             if self._redis_client:
@@ -290,15 +313,22 @@ class AgentEventSubscriber:
                 message_id=message_id
             )
 
-    async def _handle_event(self, event_type: str, payload: Dict[str, Any]):
+    async def _handle_event(self, event_type: str, payload: Dict[str, Any], event_dict: Optional[Dict[str, Any]] = None):
         """Handle different event types with deduplication.
         
         Args:
             event_type: Type of event
             payload: Event payload
+            event_dict: Full event dictionary (event_id/correlation_id at top level, not in payload)
         """
-        # Extract event ID for deduplication
-        event_id = payload.get("event_id") or payload.get("correlation_id")
+        # Extract event ID for deduplication - agent places event_id at top level, not in payload
+        event_dict = event_dict or {}
+        event_id = (
+            event_dict.get("event_id")
+            or event_dict.get("correlation_id")
+            or payload.get("event_id")
+            or payload.get("correlation_id")
+        )
         
         # Check if event was already processed (deduplication)
         if event_id:
@@ -358,6 +388,7 @@ class AgentEventSubscriber:
                     "model_prediction_request",
                     "model_prediction",
                     "reasoning_request",
+                    "price_fluctuation",
                 }
                 if event_type in known_ignored_events:
                     logger.debug(
@@ -507,15 +538,16 @@ class AgentEventSubscriber:
                 )
                 
                 position_id = persistence_result.get("position_id")
-                
+
                 if not position_id:
-                    logger.error(
+                    # Duplicate trade_id: create_trade_and_position skips creation and returns position_id None
+                    logger.warning(
                         "agent_event_subscriber_position_not_created",
                         service="backend",
                         trade_id=trade_id,
                         symbol=symbol,
                         persistence_result=persistence_result,
-                        message="Position ID is missing from persistence result - position may not have been created"
+                        message="Position ID missing (trade may already exist from duplicate event or prior run)"
                     )
                 else:
                     logger.info(
@@ -616,8 +648,10 @@ class AgentEventSubscriber:
         try:
             position_id = payload.get("position_id", "")
             symbol = payload.get("symbol", "")
+            side = payload.get("side", "")
             entry_price = payload.get("entry_price", 0.0)
             exit_price = payload.get("exit_price", 0.0)
+            quantity = payload.get("quantity", 0.0)
             pnl = payload.get("pnl", 0.0)
             exit_reason = payload.get("exit_reason", "unknown")
             timestamp = payload.get("timestamp")
@@ -638,7 +672,11 @@ class AgentEventSubscriber:
                     exit_price=exit_price,
                     exit_reason=exit_reason,
                     pnl=pnl,
-                    closed_at=timestamp
+                    closed_at=timestamp,
+                    symbol=symbol or None,
+                    side=side or None,
+                    entry_price=float(entry_price) if entry_price else None,
+                    quantity=float(quantity) if quantity else None,
                 )
                 
                 if close_result.get("success"):
@@ -679,31 +717,8 @@ class AgentEventSubscriber:
                     symbol=symbol
                 )
             
-            # Format position closed data for frontend
-            position_data = {
-                "position_id": position_id,
-                "symbol": symbol,
-                "entry_price": entry_price,
-                "exit_price": exit_price,
-                "pnl": pnl,
-                "exit_reason": exit_reason,
-                "timestamp": timestamp.isoformat() if isinstance(timestamp, datetime) else timestamp
-            }
-            
-            # Broadcast via WebSocket using simplified message format
-            # Use portfolio update since position closure affects portfolio
-            portfolio_message = create_portfolio_update({"position_closed": position_data})
-            await websocket_manager.broadcast(portfolio_message, channel="data_update")
-            
-            logger.debug(
-                "agent_event_subscriber_position_closed_broadcast",
-                service="backend",
-                position_id=position_id,
-                symbol=symbol,
-                pnl=pnl
-            )
-            
-            # Broadcast portfolio update after position closed
+            # Only broadcast full portfolio update - avoid partial update that would
+            # briefly replace portfolio with {position_closed: {...}} on frontend
             await self._broadcast_portfolio_update()
             
         except Exception as e:
@@ -739,9 +754,10 @@ class AgentEventSubscriber:
                         prediction_value = pred.get("prediction", 0.0)
                         signal_value = pred.get("signal", "HOLD")
                         
-                        # Convert confidence to 0-100 if needed
-                        if 0.0 <= pred_confidence <= 1.0:
-                            pred_confidence = pred_confidence * 100.0
+                        # Normalize to 0-1 range for frontend schema consistency
+                        if pred_confidence > 1.0:
+                            pred_confidence = pred_confidence / 100.0
+                        pred_confidence = max(0.0, min(1.0, pred_confidence))
                         
                         individual_reasoning.append({
                             "model_name": model_name,
@@ -786,10 +802,14 @@ class AgentEventSubscriber:
                 consensus_confidence = consensus_confidence / 100.0
             consensus_confidence = max(0.0, min(1.0, consensus_confidence))
             
+            # Map numeric consensus_signal to discrete string for frontend Signal type
+            signal_str = _map_consensus_signal_to_string(consensus_signal)
+            
             # Broadcast model prediction update using simplified message format
             model_data = {
                 "symbol": symbol,
-                "consensus_signal": consensus_signal,
+                "consensus_signal": signal_str,
+                "signal": signal_str,
                 "consensus_confidence": consensus_confidence,
                 "individual_model_reasoning": individual_reasoning,
                 "model_consensus": model_consensus,
@@ -1086,7 +1106,7 @@ class AgentEventSubscriber:
             elif event_type == "order_fill":
                 await self._handle_order_fill(payload)
             elif event_type == "position_closed":
-                await self._handle_position_closed_consolidated(payload)
+                await self._handle_position_closed(payload)
         except Exception as e:
             log_error_with_context(
                 "agent_event_subscriber_trading_event_error",
@@ -1174,9 +1194,10 @@ class AgentEventSubscriber:
                         prediction_value = pred.get("prediction", 0.0)
                         signal_value = pred.get("signal", "HOLD")
 
-                        # Convert confidence to 0-100 if provided in 0.0-1.0 range
-                        if 0.0 <= pred_confidence <= 1.0:
-                            pred_confidence = pred_confidence * 100.0
+                        # Normalize to 0-1 range for frontend schema consistency
+                        if pred_confidence > 1.0:
+                            pred_confidence = pred_confidence / 100.0
+                        pred_confidence = max(0.0, min(1.0, pred_confidence))
 
                         individual_reasoning.append({
                             "model_name": model_name,
@@ -1196,6 +1217,15 @@ class AgentEventSubscriber:
             individual_reasoning = []
             model_consensus = []
 
+        # If payload confidence is 0 but we have model consensus with non-zero confidences,
+        # use average of model confidences so UI never shows 0% when we have real data
+        if confidence < 0.01 and model_consensus:
+            model_confs = [c.get("confidence", 0) for c in model_consensus]
+            model_confs_01 = [c / 100.0 if c > 1.0 else c for c in model_confs]
+            avg_model = sum(model_confs_01) / len(model_confs_01) if model_confs_01 else 0.0
+            if avg_model > 0:
+                confidence = max(0.0, min(1.0, avg_model))
+
         # Create signal data for WebSocket
         signal_data = {
             "signal": signal,
@@ -1211,27 +1241,6 @@ class AgentEventSubscriber:
         # Broadcast signal update
         signal_message = create_signal_update(signal_data)
         await websocket_manager.broadcast(signal_message, channel="data_update")
-
-        # region agent log
-        try:
-            with open("debug-c0204f.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "sessionId": "c0204f",
-                    "runId": "pre-fix",
-                    "hypothesisId": "H1_H3",
-                    "location": "backend/services/agent_event_subscriber.py:_handle_decision_ready_consolidated",
-                    "message": "signal_broadcast",
-                    "data": {
-                        "symbol": symbol,
-                        "signal": signal,
-                        "confidence": confidence
-                    },
-                    "timestamp": int(time.time() * 1000)
-                }) + "\n")
-        except Exception:
-            # Logging must never break trading flow
-            pass
-        # endregion
 
     async def _handle_order_fill_consolidated(self, payload: Dict[str, Any]):
         """Handle order_fill events with simplified logic (fallback; prefer _handle_order_fill for persistence)."""
@@ -1263,23 +1272,8 @@ class AgentEventSubscriber:
 
     async def _handle_position_closed_consolidated(self, payload: Dict[str, Any]):
         """Handle position_closed events with simplified logic."""
-        position_id = payload.get("position_id", "")
-        symbol = payload.get("symbol", "")
-        pnl = payload.get("pnl", 0)
-
-        # Create position close data
-        position_data = {
-            "position_id": position_id,
-            "symbol": symbol,
-            "pnl": pnl,
-            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
-        }
-
-        # Broadcast portfolio update (position closure affects portfolio)
-        portfolio_message = create_portfolio_update({"position_closed": position_data})
-        await websocket_manager.broadcast(portfolio_message, channel="data_update")
-
-        # Update portfolio after position closure
+        # Only broadcast full portfolio update - avoid partial update that would
+        # briefly replace portfolio with {position_closed: {...}} on frontend
         await self._broadcast_portfolio_update()
 
     async def _handle_state_transition_consolidated(self, payload: Dict[str, Any]):
@@ -1311,6 +1305,9 @@ class AgentEventSubscriber:
         if consensus_confidence > 1.0:
             consensus_confidence = consensus_confidence / 100.0
 
+        # Map numeric consensus_signal to discrete string for frontend Signal type
+        signal_str = _map_consensus_signal_to_string(payload.get("consensus_signal"))
+
         # Build per-model consensus and reasoning structures for frontend display
         individual_reasoning = []
         model_consensus = []
@@ -1324,9 +1321,10 @@ class AgentEventSubscriber:
                     prediction_value = pred.get("prediction", 0.0)
                     signal_value = pred.get("signal", "HOLD")
 
-                    # Convert confidence to 0-100 if provided in 0.0-1.0 range
-                    if 0.0 <= pred_confidence <= 1.0:
-                        pred_confidence = pred_confidence * 100.0
+                    # Normalize to 0-1 range for frontend schema consistency
+                    if pred_confidence > 1.0:
+                        pred_confidence = pred_confidence / 100.0
+                    pred_confidence = max(0.0, min(1.0, pred_confidence))
 
                     individual_reasoning.append({
                         "model_name": model_name,
@@ -1345,7 +1343,8 @@ class AgentEventSubscriber:
         # Create model data
         model_data = {
             "symbol": symbol,
-            "consensus_signal": consensus_signal,
+            "consensus_signal": signal_str,
+            "signal": signal_str,
             "consensus_confidence": consensus_confidence,
             # Expose consensus confidence under the generic 'confidence' key
             # so frontend signal components can consume it consistently.

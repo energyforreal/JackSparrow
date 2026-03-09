@@ -13,6 +13,7 @@ import structlog
 import json
 import hashlib
 
+from agent.data.feature_list import FEATURE_LIST, EXPECTED_FEATURE_COUNT
 try:
     from sklearn.metrics.pairwise import cosine_similarity
     SKLEARN_AVAILABLE = True
@@ -69,8 +70,18 @@ class DecisionContext:
 
     def compute_embedding(self) -> np.ndarray:
         """Compute vector embedding from features and context."""
-        # Create feature vector
-        feature_values = list(self.features.values())
+        # Create feature vector using canonical FEATURE_LIST order.
+        # Missing features are filled with 0.0 to keep a fixed length.
+        feature_values: List[float] = []
+        for name in FEATURE_LIST:
+            value = self.features.get(name, 0.0)
+            try:
+                feature_values.append(float(value))
+            except (TypeError, ValueError):
+                feature_values.append(0.0)
+
+        # If extra ad-hoc features are present, ignore them so embeddings
+        # remain aligned with the canonical schema.
         feature_vector = np.array(feature_values, dtype=np.float32)
 
         # Add market context factors
@@ -227,6 +238,19 @@ class VectorMemoryStore:
             for context in self.contexts:
                 if context.embedding is not None:
                     context_embedding = context.embedding.reshape(1, -1)
+
+                    # Skip contexts whose embedding dimension doesn't match the query.
+                    # This can happen if older contexts were stored before FEATURE_LIST
+                    # was standardized or after schema changes.
+                    if context_embedding.shape[1] != query_embedding.shape[1]:
+                        logger.warning(
+                            "vector_memory_embedding_dim_mismatch",
+                            query_context_id=query_context.context_id,
+                            context_id=context.context_id,
+                            query_dim=int(query_embedding.shape[1]),
+                            context_dim=int(context_embedding.shape[1]),
+                        )
+                        continue
 
                     if SKLEARN_AVAILABLE:
                         similarity = cosine_similarity(query_embedding, context_embedding)[0][0]

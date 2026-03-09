@@ -330,6 +330,29 @@ class ContextManager:
                 # Update startup time for this session
                 self.current_state.startup_time = datetime.utcnow()
 
+                # Paper mode: start with fresh portfolio/positions/trades each load
+                try:
+                    from agent.core.config import settings as agent_settings
+                except Exception:
+                    agent_settings = None
+                if agent_settings and getattr(agent_settings, "paper_trading_mode", True):
+                    initial = getattr(agent_settings, "initial_balance", 10000.0)
+                    self.current_state.portfolio_value = float(initial)
+                    self.current_state.cash_balance = float(initial)
+                    self.current_state.positions = {}
+                    self.current_state.open_orders = {}
+                    self.current_state.total_trades = 0
+                    self.current_state.profitable_trades = 0
+                    self.current_state.total_pnl = 0.0
+                    self.current_state.daily_pnl = 0.0
+                    self.current_state.daily_loss_limit_hit = False
+                    logger.info(
+                        "agent_state_loaded_paper_reset",
+                        file=str(self.state_file),
+                        initial_balance=initial,
+                        message="Paper trading: portfolio/positions/trades reset for new session",
+                    )
+
                 logger.info("agent_state_loaded",
                            file=str(self.state_file),
                            portfolio_value=self.current_state.portfolio_value,

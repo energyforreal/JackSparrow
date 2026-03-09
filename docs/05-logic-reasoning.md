@@ -474,7 +474,7 @@ Favorable risk/reward ratio with low risk factors
 
 **If not in position**:
 - Evaluate entry conditions
-- Check signal strength threshold (>=60% consensus)
+- Check signal strength threshold (consensus value > 0.3 for BUY, < -0.3 for SELL; see Decision Synthesis thresholds)
 - Verify risk limits
 - Calculate position size
 
@@ -525,9 +525,11 @@ and low risk factors. Market regime supports continuation of uptrend.
 
 ### Step 6: Confidence Calibration
 
-**Purpose**: Adjust confidence based on historical accuracy.
+**Purpose**: Produce a final confidence value for the decision.
 
-**Process**:
+**Current implementation (learning disabled):** Calibration uses a weighted average of step confidences (steps 3 and 5 weighted higher) and a consistency adjustment (max 10% penalty when step confidences disagree). A model-confidence floor is applied so unanimous HOLD does not show 0%. Historical accuracy is not used when learning is disabled.
+
+**Process** (when learning is enabled in future):
 1. Get raw confidence from synthesis step
 2. Look up historical accuracy for this confidence level
 3. Adjust confidence based on historical performance
@@ -599,13 +601,17 @@ This table provides a quick health check when auditing individual decisions—if
 
 ## Decision Framework
 
-### Signal Classification
+### Signal Classification (implementation thresholds)
 
-- **STRONG_BUY**: 80%+ model agreement, high confidence (>0.8)
-- **BUY**: 60-80% agreement, medium confidence (0.6-0.8)
-- **HOLD**: <60% agreement or conflicting signals
-- **SELL**: 60-80% agreement for short, medium confidence
-- **STRONG_SELL**: 80%+ agreement for short, high confidence
+The reasoning engine maps consensus value (normalized [-1, 1]) to decisions as follows:
+
+- **STRONG_BUY**: consensus > 0.7
+- **BUY**: consensus > 0.3
+- **HOLD**: -0.3 ≤ consensus ≤ 0.3 (mixed or neutral)
+- **SELL**: consensus < -0.3
+- **STRONG_SELL**: consensus < -0.7
+
+A separate confidence gate (min_confidence_threshold) is applied by the trading handler before execution.
 
 ### Risk-Adjusted Execution
 
@@ -807,11 +813,15 @@ def calculate_consensus(predictions):
     }
 ```
 
-### Consensus Thresholds
+### Consensus Thresholds (code reference: reasoning_engine Step 5)
 
-- **Requirement**: 60% weighted consensus for execution
-- **Strong Signal**: 80%+ consensus
-- **Hold**: <60% consensus or conflicting signals
+- **BUY**: consensus value > 0.3
+- **STRONG_BUY**: consensus value > 0.7
+- **HOLD**: -0.3 ≤ consensus ≤ 0.3
+- **SELL**: consensus value < -0.3
+- **STRONG_SELL**: consensus value < -0.7
+
+Execution also requires confidence ≥ min_confidence_threshold (separate from consensus value).
 
 ---
 
@@ -853,60 +863,52 @@ For detailed MCP Model Protocol documentation, see [MCP Layer Documentation - Mo
 
 ### Overview
 
-When the agent enters the `MONITORING_POSITION` state, it actively monitors open positions for exit conditions. This ensures proper risk management and profit-taking.
+When the agent enters the `MONITORING_POSITION` state, it monitors open positions for exit conditions. Exits are performed by the **Execution Engine**; there are two paths: a **timer-based** loop and an optional **WebSocket-driven** path when `websocket_sl_tp_enabled` is true.
 
 ### Monitoring Process
 
-1. **Market Tick Events**: The market data service emits `MarketTickEvent` for each significant price update (throttled to prevent excessive processing)
+1. **Position monitor loop** (`IntelligentAgent._position_monitor_loop`): Uses `min_monitor_interval_seconds` (e.g. 2s) when positions are open, and `position_monitor_interval_seconds` (e.g. 15s) when none. Per open position it checks **time-based exit** first (force-close after `max_position_hold_hours`), then fetches current price, updates position, and calls `ExecutionEngine.manage_position(symbol)`.
 
-2. **Exit Condition Checking**: The risk manager's `_handle_market_tick()` method:
-   - Verifies a position exists for the symbol
-   - Retrieves stored stop loss and take profit levels (calculated at entry)
-   - Compares current price against exit levels
-   - Determines if exit condition is met
+2. **WebSocket-driven path** (when `websocket_sl_tp_enabled`): MarketDataService WebSocket ticker, after processing the tick, calls `ExecutionEngine.update_position_price_and_check(symbol, price)` with a 200ms per-symbol throttle when a position exists. This allows faster SL/TP reaction on price moves.
 
-3. **Exit Decision**: When an exit condition is met:
-   - Risk manager emits a `DecisionReadyEvent` with exit signal
-   - Event includes exit reason (stop_loss, take_profit, signal_reversal)
-   - High confidence (1.0) is assigned to exit decisions
+3. **Trailing stop**: In `manage_position()`, before SL/TP checks, the stop loss is ratcheted on favorable price moves (longs: stop moves up when price rises; shorts: stop moves down when price falls) using `trailing_stop_percentage`.
 
-4. **Exit Execution**: Execution module:
-   - Detects exit decision for existing position
-   - Executes opposite-side trade to close position
-   - Calculates PnL and position duration
-   - Emits `PositionClosedEvent` with complete trade details
+4. **Exit condition check** (`ExecutionEngine.manage_position()`): Compares current price to (possibly updated) stop loss and take profit; if breached, calls `close_position()` with `exit_reason` (`stop_loss_hit`, `take_profit_hit`, `time_limit`, `signal_reversal`, or `market_close`).
 
-5. **State Transition**: State machine:
-   - Receives `PositionClosedEvent`
-   - Transitions from `MONITORING_POSITION` to `OBSERVING`
-   - Clears position from context
+5. **Signal-reversal exit**: At the start of `TradingHandler.handle_decision_ready_for_trading`, if there is an open position and the new signal contradicts it (e.g. long + SELL/STRONG_SELL), the handler closes the position with `exit_reason='signal_reversal'` and returns without entering a new trade.
+
+6. **State transition**: On `PositionClosedEvent`, state machine transitions to OBSERVING; learning system records outcome and updates model weights when `model_predictions` are present.
 
 ### Exit Conditions
 
-**Stop Loss**:
-- For long positions (BUY): Triggered when price drops to or below stop loss level
-- For short positions (SELL): Triggered when price rises to or above stop loss level
-- Stop loss percentage is configurable via `STOP_LOSS_PERCENTAGE` setting
+**Stop Loss**: Long: price ≤ stop; Short: price ≥ stop. Configurable via `STOP_LOSS_PERCENTAGE` or ATR-based at entry.
 
-**Take Profit**:
-- For long positions (BUY): Triggered when price rises to or above take profit level
-- For short positions (SELL): Triggered when price drops to or below take profit level
-- Take profit percentage is configurable via `TAKE_PROFIT_PERCENTAGE` setting
+**Take Profit**: Long: price ≥ target; Short: price ≤ target. Configurable via `TAKE_PROFIT_PERCENTAGE` or ATR-based at entry.
 
-**Signal Reversal**:
-- Exit can also be triggered by signal reversal (opposite signal when in position)
-- Handled through normal decision flow when reasoning engine generates opposite signal
+**Time limit**: Positions held longer than `max_position_hold_hours` are force-closed with `exit_reason='time_limit'`.
+
+**Signal Reversal**: When the new decision signal is opposite to the open position, the position is closed with `exit_reason='signal_reversal'`.
 
 ### Position Context Storage
 
 When a position is opened, the following information is stored in context:
 - Symbol and side (BUY/SELL)
 - Entry price and quantity
-- Stop loss price (calculated)
-- Take profit price (calculated)
+- Stop loss price (calculated or ATR-based)
+- Take profit price (calculated or ATR-based)
 - Entry timestamp
+- model_predictions, reasoning_chain_id, predicted_signal (for learning on close)
 
-This information is used throughout the monitoring process to evaluate exit conditions.
+This information is used throughout the monitoring process to evaluate exit conditions and for the trade-outcome feedback loop.
+
+### Kelly Criterion and Risk
+
+Position sizing is computed in **TradingHandler** using **RiskManager.calculate_position_size()**. The reasoning engine emits the signal; the trading handler maps signal to strength, reads **volatility** from `market_context.features` (required—if missing, the trade is skipped), derives a volatility regime, and calls the risk manager. Resulting size is clamped to `max_position_size`.
+
+### Adaptive Consensus and Confidence
+
+- **Adaptive consensus thresholds** (`_step5_decision_synthesis`): When volatility is present in market context features, strong/mild thresholds vary (e.g. high vol: 0.75/0.40; low vol: 0.60/0.25; else 0.70/0.30). When volatility is missing, fixed 0.70/0.30 are used.
+- **Confidence calibration** (`_step6_confidence_calibration`): The model-average floor is applied only when `reasoning_only_confidence > 0.1`, using `max(final_confidence, model_avg * 0.8)`.
 
 ## Related Documentation
 

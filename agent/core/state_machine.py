@@ -7,7 +7,7 @@ Event-driven state transitions.
 
 from enum import Enum
 from typing import Optional, Callable, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import structlog
 
 from agent.events.event_bus import event_bus
@@ -23,6 +23,7 @@ from agent.events.schemas import (
     DecisionReadyEvent,
     EventType,
 )
+from agent.core.learning_system import TradeOutcome
 
 logger = structlog.get_logger()
 
@@ -60,7 +61,7 @@ class StateTransition:
 class AgentStateMachine:
     """Agent state machine manager."""
     
-    def __init__(self, context_manager):
+    def __init__(self, context_manager, learning_system=None, model_registry=None):
         """Initialize state machine."""
         self.current_state = AgentState.INITIALIZING
         self.previous_state: Optional[AgentState] = None
@@ -68,7 +69,9 @@ class AgentStateMachine:
         self.transitions: Dict[AgentState, List[StateTransition]] = {}
         self.state_handlers: Dict[AgentState, Callable] = {}
         self.context_manager = context_manager
-        
+        self.learning_system = learning_system
+        self.model_registry = model_registry
+
         # Initialize transitions
         self._initialize_transitions()
     
@@ -123,9 +126,10 @@ class AgentStateMachine:
         await self._transition_to(AgentState.EMERGENCY_STOP, f"Emergency stop: {event.payload.get('reason')}")
     
     async def _handle_position_closed(self, event: PositionClosedEvent):
-        """Handle position closed event - transition MONITORING_POSITION -> OBSERVING."""
+        """Handle position closed event - transition MONITORING_POSITION -> OBSERVING and record outcome for learning."""
+        payload = event.payload
         if self.current_state == AgentState.MONITORING_POSITION:
-            exit_reason = event.payload.get("exit_reason", "unknown")
+            exit_reason = payload.get("exit_reason", "unknown")
             await self._transition_to(
                 AgentState.OBSERVING,
                 f"Position closed - {exit_reason}"
@@ -135,6 +139,54 @@ class AgentStateMachine:
                 "position": None,
                 "position_opened": False
             })
+
+        # Trade outcome feedback loop: record outcome and update model weights
+        model_predictions = payload.get("model_predictions")
+        if model_predictions is not None and len(model_predictions) > 0 and self.learning_system and self.model_registry:
+            try:
+                entry_time = payload.get("entry_time")
+                exit_time = payload.get("timestamp")
+                now = datetime.now(timezone.utc)
+                et = entry_time
+                xt = exit_time
+                if et is not None and getattr(et, "tzinfo", None) is None and hasattr(et, "replace"):
+                    et = et.replace(tzinfo=timezone.utc)
+                if xt is not None and getattr(xt, "tzinfo", None) is None and hasattr(xt, "replace"):
+                    xt = xt.replace(tzinfo=timezone.utc)
+                if et is not None and xt is not None:
+                    holding_hours = (xt - et).total_seconds() / 3600.0
+                else:
+                    holding_hours = 0.0
+                trade_outcome = TradeOutcome(
+                    trade_id=payload.get("position_id", ""),
+                    symbol=payload.get("symbol", ""),
+                    entry_price=float(payload.get("entry_price", 0)),
+                    exit_price=float(payload.get("exit_price", 0)),
+                    entry_time=et or now,
+                    exit_time=xt or now,
+                    position_size=float(payload.get("quantity", 0)),
+                    predicted_signal=payload.get("predicted_signal", ""),
+                    actual_pnl=float(payload.get("pnl", 0)),
+                    holding_period_hours=holding_hours,
+                )
+                await self.learning_system.record_trade_outcome(trade_outcome, model_predictions)
+                model_names = list(self.model_registry.models.keys()) if self.model_registry.models else []
+                n = max(1, len(model_names))
+                current_weights = {
+                    m: self.model_registry.model_weights.get(m, 1.0 / n)
+                    for m in model_names
+                }
+                if not current_weights and model_names:
+                    current_weights = {m: 1.0 / len(model_names) for m in model_names}
+                updated_weights = await self.learning_system.get_updated_model_weights(current_weights)
+                if updated_weights:
+                    self.model_registry.update_weights_from_performance(updated_weights)
+            except Exception as e:
+                logger.warning(
+                    "position_closed_learning_failed",
+                    error=str(e),
+                    exc_info=True,
+                )
     
     async def _transition_to(self, new_state: AgentState, reason: str):
         """Transition to new state and emit event.

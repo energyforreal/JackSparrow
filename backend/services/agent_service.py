@@ -38,8 +38,8 @@ class AgentService:
         """Initialize agent service."""
         self.command_queue = settings.agent_command_queue
         self.websocket_url = settings.agent_websocket_url
-        # Temporarily disable WebSocket to force Redis queue communication
-        self.use_websocket = False  # settings.use_agent_websocket
+        # Prefer WebSocket command path when enabled; Redis remains fallback.
+        self.use_websocket = settings.use_agent_websocket
         self._websocket: Optional[WebSocketClientProtocol] = None
         self._websocket_connected = False
         self._pending_responses: Dict[str, asyncio.Future] = {}
@@ -607,4 +607,3 @@ class AgentService:
 
 # Global agent service instance
 agent_service = AgentService()
-

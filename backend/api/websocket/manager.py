@@ -669,6 +669,7 @@ class WebSocketManager:
             # Get portfolio summary (replaces GET /api/v1/portfolio/summary)
             from backend.services.portfolio_service import portfolio_service
             from backend.core.database import AsyncSessionLocal
+            from backend.core.config import settings
 
             async with AsyncSessionLocal() as db:
                 try:
@@ -677,6 +678,33 @@ class WebSocketManager:
                 except Exception:
                     await db.rollback()
                     raise
+
+            # Use serialize_portfolio_summary for consistent format (matches REST API and broadcasts)
+            if portfolio_data:
+                try:
+                    portfolio_data = portfolio_service.serialize_portfolio_summary(portfolio_data)
+                except ValueError:
+                    initial_balance = float(getattr(settings, 'initial_balance', 10000.0))
+                    portfolio_data = {
+                        "total_value": initial_balance,
+                        "available_balance": initial_balance,
+                        "open_positions": 0,
+                        "total_unrealized_pnl": 0,
+                        "total_realized_pnl": 0,
+                        "positions": [],
+                        "timestamp": time_service.get_time_info()["server_time"],
+                    }
+            else:
+                initial_balance = float(getattr(settings, 'initial_balance', 10000.0))
+                portfolio_data = {
+                    "total_value": initial_balance,
+                    "available_balance": initial_balance,
+                    "open_positions": 0,
+                    "total_unrealized_pnl": 0,
+                    "total_realized_pnl": 0,
+                    "positions": [],
+                    "timestamp": time_service.get_time_info()["server_time"],
+                }
 
             return {
                 "type": "response",
@@ -905,7 +933,7 @@ class WebSocketManager:
                     
                     # Route event to appropriate handler (same as Redis Stream subscriber)
                     from backend.services.agent_event_subscriber import agent_event_subscriber
-                    await agent_event_subscriber._handle_event(event_type, payload)
+                    await agent_event_subscriber._handle_event(event_type, payload, event_dict=data)
                     
                     # Also send pong/acknowledgment if needed
                     if data.get("request_ack"):
@@ -1203,4 +1231,3 @@ class WebSocketManager:
 
 # Global WebSocket manager instance
 websocket_manager = WebSocketManager()
-

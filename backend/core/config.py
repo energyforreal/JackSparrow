@@ -7,7 +7,8 @@ Handles environment variable loading, validation, and default values.
 from pathlib import Path
 from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator
+import os
+from pydantic import Field, field_validator, model_validator
 
 ROOT_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
@@ -188,7 +189,22 @@ class Settings(BaseSettings):
         env="INITIAL_BALANCE",
         description="Initial balance for paper trading (in USD)"
     )
-    
+    paper_trading_mode: bool = Field(
+        default=True,
+        env="PAPER_TRADING_MODE",
+        description="When True, paper trading (no real orders); when False, live trading. Also set by TRADING_MODE=paper|live."
+    )
+
+    @model_validator(mode="after")
+    def sync_paper_trading_with_trading_mode(self):
+        """Align paper_trading_mode with TRADING_MODE env if set."""
+        trading_mode = os.environ.get("TRADING_MODE", "").strip().lower()
+        if trading_mode == "paper":
+            object.__setattr__(self, "paper_trading_mode", True)
+        elif trading_mode == "live":
+            object.__setattr__(self, "paper_trading_mode", False)
+        return self
+
     # Risk Management Settings (must match agent config)
     stop_loss_percentage: float = Field(
         default=0.02,
