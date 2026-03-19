@@ -86,8 +86,8 @@ services:
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY:-changeme}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET:-changeme}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
-      # Discover only BTCUSD v4 models by default
-      MODEL_DIR: /app/agent/model_storage/jacksparrow_v4_BTCUSD
+      # Discover BTCUSD v5 models by default
+      MODEL_DIR: /app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}
       AGENT_SYMBOL: ${AGENT_SYMBOL:-BTCUSD}

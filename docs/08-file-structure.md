@@ -842,18 +842,18 @@ pydantic==2.5.0
 
 JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**:
 
-- Contains all trained model files (current production uses v4 `.joblib` + `.json` artefacts)
+- Contains all trained model files (current production uses v5 `.joblib` + `.json` artefacts for BTCUSD)
 - Referenced via `MODEL_DIR` environment variable (points to directory)
-- Example: `MODEL_DIR=./agent/model_storage/jacksparrow_v4_BTCUSD`
+- Example: `MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19`
 - Used by model discovery system to automatically find and register models
-- Current v4 discovery is metadata-driven and reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
+- Current BTCUSD discovery is metadata-driven and reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
 
 ### Model Directory Structure
 
 **Model Storage** (`agent/model_storage/`):
 ```
 agent/model_storage/
-└── jacksparrow_v4_BTCUSD/
+└── jacksparrow_v5_BTCUSD_2026-03-19/
     ├── metadata_BTCUSD_15m.json
     ├── metadata_BTCUSD_30m.json
     ├── metadata_BTCUSD_1h.json
@@ -868,7 +868,7 @@ agent/model_storage/
 ```
 
 **Currently Integrated Models** (as of latest integration - see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)):
-- **5 v4 BTCUSD timeframe ensembles**: 15m, 30m, 1h, 2h, 4h
+- **5 v5 BTCUSD timeframe ensembles**: 15m, 30m, 1h, 2h, 4h
 - Each timeframe has entry + exit models and dedicated scalers/features metadata
 - All models are automatically discovered and registered on agent startup
 
@@ -876,10 +876,10 @@ agent/model_storage/
 
 Models in `agent/model_storage/` are automatically discovered on agent startup:
 - Reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
-- Loads v4 artefacts via `V4EnsembleNode`
+- Loads BTCUSD artefacts via `V4EnsembleNode`
 - Registers models with MCP Model Registry
 - Models become available for predictions immediately
-- Current production path is `agent/model_storage/jacksparrow_v4_BTCUSD/`
+- Current production path is `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

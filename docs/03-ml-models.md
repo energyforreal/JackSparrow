@@ -35,13 +35,13 @@ JackSparrow stores all trained ML models in the **`agent/model_storage/` directo
 | `agent/model_storage/` | All trained ML models | `MODEL_DIR` (points to directory) | Automatic model discovery and registration |
 
 **Current Model Types**:
-- **v4 BTCUSD entry/exit ensembles** are stored in `agent/model_storage/jacksparrow_v4_BTCUSD/`
+- **v5 BTCUSD entry/exit ensembles** are stored in `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
 - Each timeframe includes entry/exit models, scalers, features JSON, and metadata JSON
-- The system discovers and registers models from v4 metadata files in `MODEL_DIR`
+- The system discovers and registers models from BTCUSD metadata files in `MODEL_DIR`
 
 ### Currently Integrated Models
 
-As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **5 v4 BTCUSD models** by timeframe:
+As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **5 v5 BTCUSD models** by timeframe:
 
 - `jacksparrow_BTCUSD_15m`
 - `jacksparrow_BTCUSD_30m`
@@ -61,7 +61,7 @@ Each model is loaded from `metadata_BTCUSD_<timeframe>.json` and references:
 The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:
 
 ```bash
-MODEL_DIR=./agent/model_storage/jacksparrow_v4_BTCUSD
+MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 MIN_CONFIDENCE_THRESHOLD=0.65
@@ -71,10 +71,10 @@ The `MODEL_DIR` environment variable must point to the directory containing `met
 
 ### ML Models in Docker
 
-When running under Docker, the agent container mounts the host `agent/model_storage/` directory and uses the v4 subdirectory as the model discovery root:
+When running under Docker, the agent container mounts the host `agent/model_storage/` directory and uses the v5 BTCUSD subdirectory as the model discovery root:
 
 - **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service)
-- **Agent MODEL_DIR**: inside the container, `MODEL_DIR=/app/agent/model_storage/jacksparrow_v4_BTCUSD`
+- **Agent MODEL_DIR**: inside the container, `MODEL_DIR=/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19`
 
 This means:
 
@@ -86,7 +86,7 @@ This means:
 
 **Verification steps before `docker compose up`:**
 
-1. Ensure your trained models are present under `agent/model_storage/jacksparrow_v4_BTCUSD/` on the host.
+1. Ensure your trained models are present under `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` on the host.
 2. Run:
 
    ```bash

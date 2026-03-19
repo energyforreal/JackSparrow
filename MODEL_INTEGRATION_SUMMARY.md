@@ -1,10 +1,10 @@
-# Model Integration Summary (v4 BTCUSD)
+# Model Integration Summary (v5 BTCUSD)
 
 ## Overview
 
-The project is integrated with **v4 BTCUSD entry/exit ensemble models** stored in:
+The project is integrated with **v5 BTCUSD entry/exit ensemble models (expanded ~122-feature schema)** stored in:
 
-- `agent/model_storage/jacksparrow_v4_BTCUSD/`
+- `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
 
 The runtime uses metadata-driven model discovery and registers one model node per
 timeframe in the MCP model registry.
@@ -33,12 +33,12 @@ Each timeframe is represented by:
 Use the following environment configuration:
 
 ```bash
-MODEL_DIR=./agent/model_storage/jacksparrow_v4_BTCUSD
+MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 ```
 
-In v4-only mode:
+In v4-only mode (now pointing at the v5 BTCUSD metadata folder):
 
 - discovery reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`,
 - discovery is non-recursive,
@@ -57,7 +57,7 @@ In v4-only mode:
 ## Verification Checklist
 
 1. Confirm metadata files exist:
-   - `agent/model_storage/jacksparrow_v4_BTCUSD/metadata_BTCUSD_*.json`
+   - `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/metadata_BTCUSD_*.json`
 2. Confirm discovery logs show loaded v4 models.
 3. Confirm health payload reports non-zero `model_registry.total_models`.
 4. Confirm prediction payload contains:
