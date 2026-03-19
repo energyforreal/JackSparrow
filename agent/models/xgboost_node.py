@@ -15,8 +15,10 @@ import numpy as np
 import structlog
 from xgboost import XGBClassifier
 
-from agent.models.mcp_model_node import MCPModelNode, MCPModelRequest, MCPModelPrediction
 from agent.core.config import settings
+from agent.core.exceptions import FeatureCountError
+from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
+from feature_store.feature_registry import EXPECTED_FEATURE_COUNT, FEATURE_LIST
 
 logger = structlog.get_logger()
 
@@ -376,48 +378,26 @@ class XGBoostNode(MCPModelNode):
             
             # Validate feature count matches model expectations
             # XGBoost models trained with FEATURE_LIST expect 50 features
-            expected_feature_count = 50
-            if feature_count != expected_feature_count:
-                # Log missing features for debugging
-                expected_features = [
-                    'sma_10', 'sma_20', 'sma_50', 'sma_100', 'sma_200',
-                    'ema_12', 'ema_26', 'ema_50',
-                    'close_sma_20_ratio', 'close_sma_50_ratio', 'close_sma_200_ratio',
-                    'high_low_spread', 'close_open_ratio', 'body_size', 'upper_shadow', 'lower_shadow',
-                    'rsi_14', 'rsi_7', 'stochastic_k_14', 'stochastic_d_14',
-                    'williams_r_14', 'cci_20', 'roc_10', 'roc_20',
-                    'momentum_10', 'momentum_20',
-                    'macd', 'macd_signal', 'macd_histogram',
-                    'adx_14', 'aroon_up', 'aroon_down', 'aroon_oscillator',
-                    'trend_strength',
-                    'bb_upper', 'bb_lower', 'bb_width', 'bb_position',
-                    'atr_14', 'atr_20',
-                    'volatility_10', 'volatility_20',
-                    'volume_sma_20', 'volume_ratio', 'obv',
-                    'volume_price_trend', 'accumulation_distribution', 'chaikin_oscillator',
-                    'returns_1h', 'returns_24h'
-                ]
-                received_features = list(request.features.keys())
-                missing_features = [f for f in expected_features if f not in received_features]
-                
+            if feature_count != EXPECTED_FEATURE_COUNT:
                 error_msg = (
                     f"Feature count mismatch: received {feature_count} features, "
-                    f"but model expects {expected_feature_count} features. "
+                    f"but model expects {EXPECTED_FEATURE_COUNT} features. "
                     f"Model: {self.model_name}. "
-                    f"This indicates a mismatch between feature computation and model training. "
-                    f"Please ensure all {expected_feature_count} features are computed and passed to the model. "
-                    f"Missing features: {missing_features[:10]}{'...' if len(missing_features) > 10 else ''}"
+                    f"Expected features: {FEATURE_LIST}"
                 )
                 logger.error(
                     "xgboost_feature_count_mismatch",
                     model_name=self.model_name,
                     received_count=feature_count,
-                    expected_count=expected_feature_count,
-                    missing_features=missing_features,
-                    received_features=received_features[:10],  # Log first 10 for debugging
-                    message=error_msg
+                    expected_count=EXPECTED_FEATURE_COUNT,
+                    expected_features=FEATURE_LIST,
+                    message=error_msg,
                 )
-                raise ValueError(error_msg)
+                raise FeatureCountError(
+                    f"Expected {EXPECTED_FEATURE_COUNT} features, got {feature_count}",
+                    expected_count=EXPECTED_FEATURE_COUNT,
+                    actual_count=feature_count,
+                )
             
             # Detect model output type and get prediction
             # Try to use predict_proba() first (for probability outputs)

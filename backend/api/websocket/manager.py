@@ -1073,6 +1073,16 @@ class WebSocketManager:
                                 health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
                             else:
                                 health_scores.append(model_weight)
+                        elif model_health.status == "degraded":
+                            # Models loaded but 0 healthy (e.g. no predictions yet) - partial score, softer message
+                            if model_health.details:
+                                total_count = model_health.details.get("total_models", 0)
+                                health_scores.append(model_weight * 0.5 if total_count > 0 else 0.0)
+                                if total_count > 0:
+                                    degradation_reasons.append(f"Model nodes degraded (0/{total_count} healthy; run predictions to refresh)")
+                            else:
+                                health_scores.append(0.0)
+                                degradation_reasons.append("Model nodes degraded")
                         elif model_health.status != "unknown":
                             degradation_reasons.append("No model nodes are healthy")
                             health_scores.append(0.0)

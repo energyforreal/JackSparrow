@@ -10,19 +10,21 @@ alwaysApply: false
 
 ## Model File Organization
 
-- **All models**: Stored in `agent/model_storage/` directory (discovered automatically)
-- **XGBoost models**: `agent/model_storage/xgboost/` (regressor and classifier models trained in Google Colab)
-- User-uploaded models: `agent/model_storage/custom/`
-- Model-specific directories: `agent/model_storage/xgboost/`, `agent/model_storage/lstm/`, etc.
+- **Current production models**: Stored in `agent/model_storage/jacksparrow_v4_BTCUSD/`
+- **Discovery contract (v4-only)**: `MODEL_DIR` must point to directory that contains `metadata_BTCUSD_*.json`
+- **Artefact set per timeframe**: entry/exit model `.joblib`, entry/exit scaler `.joblib`, `features_*.json`, `metadata_*.json`
+- Legacy model directories (`xgboost/`, `lstm/`, `custom/`) may exist historically but are not the primary v4 path
 
 ## Environment Variables
 
-- `MODEL_PATH`: Points to specific model file (optional, e.g., `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl`)
-- `MODEL_DIR`: Points to directory for model discovery (e.g., `./agent/model_storage`)
+- `MODEL_DIR`: Points to v4 metadata directory (recommended: `./agent/model_storage/jacksparrow_v4_BTCUSD`)
+- `MODEL_DISCOVERY_ENABLED`: Enable metadata-based discovery
+- `MODEL_AUTO_REGISTER`: Auto-register discovered models in MCP registry
 
 ## Model Implementation
 
 All models must implement `MCPModelNode` interface:
+
 - Predictions normalized to -1.0 to +1.0 range
 - Human-readable reasoning/explanations
 - Confidence scores
@@ -31,6 +33,7 @@ All models must implement `MCPModelNode` interface:
 ## Model Metadata
 
 **Required Fields**:
+
 - `model_name`: Unique identifier
 - `model_type`: Model type (xgboost, lstm, transformer, etc.)
 - `version`: Semantic version (MAJOR.MINOR.PATCH)

@@ -27,6 +27,27 @@ class MarketDataEventHandler:
     def __init__(self):
         """Initialize market data event handler."""
         self.context_manager = context_manager
+
+    @staticmethod
+    def _get_runtime_feature_names() -> list[str]:
+        """
+        Resolve feature names for real-time pipeline requests.
+
+        Prefer model-required features from the initialized orchestrator (v4 metadata
+        order). Fall back to canonical feature list only if model requirements are
+        unavailable (for example, early startup before model discovery completes).
+        """
+        try:
+            from agent.core.mcp_orchestrator import mcp_orchestrator
+
+            if mcp_orchestrator and mcp_orchestrator.model_registry:
+                required = mcp_orchestrator.model_registry.get_required_feature_names()
+                if required:
+                    return list(required)
+        except Exception:
+            # Fall through to canonical list.
+            pass
+        return get_feature_list()
     
     async def handle_market_tick(self, event: MarketTickEvent):
         """Handle market tick event.
@@ -90,14 +111,15 @@ class MarketDataEventHandler:
                 }
             })
             
-            # Trigger feature computation - Request all features from canonical list
+            # Trigger feature computation using model-required feature names first.
+            runtime_feature_names = self._get_runtime_feature_names()
             feature_request = FeatureRequestEvent(
                 source="market_data_handler",
                 correlation_id=event.event_id,
                 payload={
                     "symbol": symbol,
                     "current_price": payload.get("close"),
-                    "feature_names": get_feature_list(),
+                    "feature_names": runtime_feature_names,
                     "timestamp": payload.get("timestamp"),
                     "version": "latest"
                 }
@@ -109,6 +131,7 @@ class MarketDataEventHandler:
                 "candle_closed_handled",
                 symbol=symbol,
                 interval=interval,
+                feature_count=len(runtime_feature_names),
                 candle_timestamp=payload.get("timestamp"),
                 close_price=payload.get("close"),
                 message="Candle closed - triggering decision generation pipeline (features -> models -> reasoning -> decision)",
@@ -152,14 +175,15 @@ class MarketDataEventHandler:
                 }
             })
 
-            # Trigger feature computation - Request all features from canonical list
+            # Trigger feature computation using model-required feature names first.
+            runtime_feature_names = self._get_runtime_feature_names()
             feature_request = FeatureRequestEvent(
                 source="market_data_handler",
                 correlation_id=event.event_id,
                 payload={
                     "symbol": symbol,
                     "current_price": payload.get("price"),
-                    "feature_names": get_feature_list(),
+                    "feature_names": runtime_feature_names,
                     "timestamp": payload.get("timestamp"),
                     "version": "latest"
                 }
@@ -172,6 +196,7 @@ class MarketDataEventHandler:
                 symbol=symbol,
                 change_pct=f"{change_pct:.2f}%",
                 threshold_pct=f"{threshold_pct:.2f}%",
+                feature_count=len(runtime_feature_names),
                 price=payload.get("price"),
                 message="Major price fluctuation detected - triggering ML pipeline (features -> models -> reasoning -> decision)",
                 event_id=event.event_id,

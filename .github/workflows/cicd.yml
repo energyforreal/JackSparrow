@@ -190,6 +190,16 @@ jobs:
           sleep 30  # Wait for services to start
         continue-on-error: true
 
+      - name: Run model-service integration tests
+        run: |
+          cd $GITHUB_WORKSPACE
+          python -m pytest tests/integration/test_model_service_integration.py -v --tb=short
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jacksparrow_test
+          REDIS_URL: redis://localhost:6379
+          DELTA_EXCHANGE_API_KEY: test-key
+          DELTA_EXCHANGE_API_SECRET: test-secret
+
       - name: Run functionality tests
         run: |
           python tools/commands/start_and_test.py --no-startup --test-mode grouped

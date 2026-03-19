@@ -5,6 +5,7 @@ Handles prediction requests and trade execution.
 """
 
 import asyncio
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Any, Optional
@@ -24,9 +25,12 @@ from backend.api.models.responses import (
     ModelConsensusEntry,
     ModelReasoningEntry,
 )
-from backend.core.database import get_db
+from backend.core.database import get_db, PredictionAudit
+from backend.core.config import settings
+from backend.core.redis import get_prediction_cache, set_prediction_cache
 from backend.notifications import telegram_notifier
 from backend.services.agent_service import agent_service
+from backend.services.model_service import model_service
 from backend.services.market_service import market_service
 from backend.api.middleware.auth import require_auth
 
@@ -35,7 +39,7 @@ logger = structlog.get_logger()
 
 
 @router.post("/predict", response_model=PredictResponse)
-async def predict(request: PredictRequest):
+async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
     """
     **DEPRECATED**: This REST API endpoint is deprecated.
 
@@ -88,13 +92,39 @@ async def predict(request: PredictRequest):
             symbol=request.symbol,
             has_context=bool(request.context)
         )
-        
-        # Request prediction from agent
-        response = await agent_service.get_prediction(
-            symbol=request.symbol,
-            context=request.context or {}
-        )
-        
+
+        context = request.context or {}
+        response: Optional[Dict[str, Any]] = None
+        used_fallback = False
+
+        from_cache = False
+        # Optional: serve from prediction cache
+        if settings.prediction_cache_ttl > 0:
+            cached = await get_prediction_cache(request.symbol)
+            if cached and isinstance(cached, dict) and cached.get("success", True):
+                response = cached
+                from_cache = True
+                logger.debug("predict_cache_hit", symbol=request.symbol)
+
+        # Primary: model-serving endpoint; fallback: agent command
+        if not response:
+            response = await model_service.get_prediction(
+                symbol=request.symbol,
+                context=context,
+            )
+        if not response:
+            used_fallback = True
+            response = await agent_service.get_prediction(
+                symbol=request.symbol,
+                context=context,
+            )
+            if response:
+                logger.info(
+                    "predict_fallback_agent",
+                    symbol=request.symbol,
+                    message="Model service unavailable; used agent command path",
+                )
+
         if not response:
             logger.error(
                 "predict_agent_no_response",
@@ -267,6 +297,12 @@ async def predict(request: PredictRequest):
                         error=str(model_error),
                     )
             
+            # Inference metadata for frontend (model-service vs agent fallback)
+            inference_source = decision_data.get("source")
+            inference_mode = "primary" if inference_source == "model_service" else ("fallback" if inference_source == "agent" else None)
+            if inference_source and not inference_mode:
+                inference_mode = "degraded"
+
             # Create PredictResponse
             predict_response = PredictResponse(
                 signal=signal,
@@ -277,7 +313,10 @@ async def predict(request: PredictRequest):
                 model_consensus=model_consensus,
                 individual_model_reasoning=individual_model_reasoning,
                 market_context=market_context,
-                timestamp=timestamp
+                timestamp=timestamp,
+                inference_latency_ms=decision_data.get("inference_latency_ms") or decision_data.get("computation_time_ms"),
+                inference_source=inference_source,
+                inference_mode=inference_mode,
             )
             
             logger.warning(
@@ -293,6 +332,35 @@ async def predict(request: PredictRequest):
                 signal=signal,
                 confidence=confidence
             )
+
+            # Cache raw response for subsequent requests (when not from cache)
+            if not from_cache and response and settings.prediction_cache_ttl > 0:
+                await set_prediction_cache(
+                    request.symbol, response, ttl=settings.prediction_cache_ttl
+                )
+
+            # Persist prediction audit (request_id, model version, confidence, latency, source)
+            try:
+                request_id = str(uuid.uuid4())
+                latency_ms = decision_data.get("inference_latency_ms") or decision_data.get("computation_time_ms")
+                source = decision_data.get("source", "agent")
+                audit = PredictionAudit(
+                    request_id=request_id,
+                    model_version=None,
+                    symbol=request.symbol,
+                    confidence=Decimal(str(confidence)),
+                    latency_ms=Decimal(str(latency_ms)) if latency_ms is not None else None,
+                    source=source,
+                    outcome_reference=None,
+                )
+                db.add(audit)
+            except Exception as audit_err:
+                logger.warning(
+                    "predict_audit_failed",
+                    symbol=request.symbol,
+                    error=str(audit_err),
+                )
+                await db.rollback()
 
             return predict_response
             

@@ -87,6 +87,10 @@ export interface ModelReasoning {
   confidence: number
 }
 
+/** Inference path: model_service (primary) or agent (fallback); degraded when model service unreachable but agent used. */
+export type InferenceSource = 'model_service' | 'agent'
+export type InferenceMode = 'primary' | 'fallback' | 'degraded'
+
 export interface Signal {
   signal: SignalType
   // Confidence is stored as percentage (0-100) for display,
@@ -102,6 +106,11 @@ export interface Signal {
   agent_decision_reasoning?: string
   symbol?: string
   timestamp?: string | Date
+  // Model-serving metadata (when available from API/WS)
+  inference_latency_ms?: number
+  inference_source?: InferenceSource
+  inference_mode?: InferenceMode
+  model_version?: string
 }
 
 export interface HealthStatus {
@@ -111,6 +120,8 @@ export interface HealthStatus {
   degradation_reasons?: string[]
   status?: string
   agent_state?: string
+  /** When false, paper trading is disabled (e.g. models unhealthy). */
+  trading_ready?: boolean
   timestamp?: string | Date
 }
 

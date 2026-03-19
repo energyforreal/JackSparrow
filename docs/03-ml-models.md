@@ -35,54 +35,50 @@ JackSparrow stores all trained ML models in the **`agent/model_storage/` directo
 | `agent/model_storage/` | All trained ML models | `MODEL_DIR` (points to directory) | Automatic model discovery and registration |
 
 **Current Model Types**:
-- **XGBoost models** are stored in `agent/model_storage/xgboost/` directory
-- Models include both regressor and classifier variants trained in Google Colab
-- The system automatically discovers and registers all models in the storage directory
+- **v4 BTCUSD entry/exit ensembles** are stored in `agent/model_storage/jacksparrow_v4_BTCUSD/`
+- Each timeframe includes entry/exit models, scalers, features JSON, and metadata JSON
+- The system discovers and registers models from v4 metadata files in `MODEL_DIR`
 
 ### Currently Integrated Models
 
-As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **6 XGBoost models** for BTCUSD trading:
+As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **5 v4 BTCUSD models** by timeframe:
 
-**Classifier Models** (3 models - predict trading signals directly):
-- `xgboost_classifier_BTCUSD_15m.pkl` - 15-minute timeframe classifier
-- `xgboost_classifier_BTCUSD_1h.pkl` - 1-hour timeframe classifier
-- `xgboost_classifier_BTCUSD_4h.pkl` - 4-hour timeframe classifier
+- `jacksparrow_BTCUSD_15m`
+- `jacksparrow_BTCUSD_30m`
+- `jacksparrow_BTCUSD_1h`
+- `jacksparrow_BTCUSD_2h`
+- `jacksparrow_BTCUSD_4h`
 
-**Regressor Models** (3 models - predict absolute future prices):
-- `xgboost_regressor_BTCUSD_15m.pkl` - 15-minute timeframe regressor
-- `xgboost_regressor_BTCUSD_1h.pkl` - 1-hour timeframe regressor
-- `xgboost_regressor_BTCUSD_4h.pkl` - 4-hour timeframe regressor
-
-All models are stored in `agent/model_storage/xgboost/` and are automatically discovered and registered on agent startup. For detailed integration information, see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md).
+Each model is loaded from `metadata_BTCUSD_<timeframe>.json` and references:
+- `entry_model_BTCUSD_<timeframe>.joblib`
+- `exit_model_BTCUSD_<timeframe>.joblib`
+- `entry_scaler_BTCUSD_<timeframe>.joblib`
+- `exit_scaler_BTCUSD_<timeframe>.joblib`
+- `features_BTCUSD_<timeframe>.json`
 
 ### Environment Configuration
 
 The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:
 
-```
-MODEL_DIR=./agent/model_storage
+```bash
+MODEL_DIR=./agent/model_storage/jacksparrow_v4_BTCUSD
 MODEL_DISCOVERY_ENABLED=true
+MODEL_AUTO_REGISTER=true
 MIN_CONFIDENCE_THRESHOLD=0.65
 ```
 
-The `MODEL_DIR` environment variable points to the directory where models are stored. The model discovery system automatically scans this directory and its subdirectories to find and register all available models.
+The `MODEL_DIR` environment variable must point to the directory containing `metadata_BTCUSD_*.json`. In v4-only mode, discovery is metadata-driven and non-recursive.
 
 ### ML Models in Docker
 
-When running under Docker, the agent container mounts the host `agent/model_storage/` directory and uses it as the model discovery root:
+When running under Docker, the agent container mounts the host `agent/model_storage/` directory and uses the v4 subdirectory as the model discovery root:
 
 - **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service)
-- **Agent MODEL_DIR**: inside the container, `MODEL_DIR=/app/agent/model_storage`
+- **Agent MODEL_DIR**: inside the container, `MODEL_DIR=/app/agent/model_storage/jacksparrow_v4_BTCUSD`
 
 This means:
 
-- Models you place on the host in:
-  - `agent/model_storage/xgboost/*.pkl`
-  - `agent/model_storage/lightgbm/*.pkl`
-  - `agent/model_storage/random_forest/*.pkl`
-  - `agent/model_storage/lstm/*.h5`
-  - `agent/model_storage/transformer/*.{onnx,pt,pth}`
-  - `agent/model_storage/custom/*`
+- Models you place on the host in `agent/model_storage/jacksparrow_v4_BTCUSD/`
   are discovered by the Dockerized agent without rebuilding images.
 - Updating or adding models only requires:
   1. Copying artefacts into `agent/model_storage/` on the host
@@ -90,7 +86,7 @@ This means:
 
 **Verification steps before `docker compose up`:**
 
-1. Ensure your trained models are present under `agent/model_storage/` on the host.
+1. Ensure your trained models are present under `agent/model_storage/jacksparrow_v4_BTCUSD/` on the host.
 2. Run:
 
    ```bash

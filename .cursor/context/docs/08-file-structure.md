@@ -728,25 +728,26 @@ models/
 **Upload Directory** (`agent/model_storage/`):
 ```
 agent/model_storage/
-├── custom/              # User-uploaded models (discovered automatically)
-│   ├── *.pkl           # Pickle models (XGBoost, LightGBM, scikit-learn)
-│   ├── *.h5            # TensorFlow/Keras models
-│   ├── *.onnx          # ONNX models
-│   └── metadata.json   # Model metadata
-├── xgboost/            # XGBoost models (uploaded)
-├── lstm/               # LSTM models (uploaded)
-└── transformer/        # Transformer models (uploaded)
+└── jacksparrow_v4_BTCUSD/
+    ├── metadata_BTCUSD_15m.json
+    ├── metadata_BTCUSD_30m.json
+    ├── metadata_BTCUSD_1h.json
+    ├── metadata_BTCUSD_2h.json
+    ├── metadata_BTCUSD_4h.json
+    ├── entry_model_BTCUSD_<tf>.joblib
+    ├── exit_model_BTCUSD_<tf>.joblib
+    ├── entry_scaler_BTCUSD_<tf>.joblib
+    ├── exit_scaler_BTCUSD_<tf>.joblib
+    └── features_BTCUSD_<tf>.json
 ```
 
 ### Model Discovery
 
 Models in `agent/model_storage/` are automatically discovered on agent startup:
-- Scans directories specified by `MODEL_DIR`
-- Detects model type from file extension and metadata
+- Reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
+- Loads v4 artefacts through `V4EnsembleNode`
 - Registers models with MCP Model Registry
 - Models become available for predictions immediately
-
-**Production models** in `models/` are loaded directly via `MODEL_PATH` and do not require discovery.
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

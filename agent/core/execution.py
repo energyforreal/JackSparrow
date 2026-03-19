@@ -16,6 +16,7 @@ import structlog
 from agent.events.event_bus import event_bus
 from agent.events.schemas import RiskApprovedEvent, OrderFillEvent, PositionClosedEvent, EventType
 from agent.core.config import settings
+from agent.core.context_manager import context_manager
 
 logger = structlog.get_logger()
 
@@ -571,7 +572,7 @@ class ExecutionEngine:
                 price=price
             )
 
-            if order_result["success"] and order_result["filled_immediately"]:
+            if order_result["success"] and order_result.get("filled_immediately", False):
                 exit_price = order_result["average_fill_price"]
                 closed_position = self.position_manager.close_position(
                     symbol=symbol,
@@ -627,7 +628,14 @@ class ExecutionEngine:
                         exit_reason=exit_reason,
                     )
 
-            return ExecutionResult(True, order_id=order_result.get("order_id"))
+                return ExecutionResult(True, order_id=order_result.get("order_id"))
+
+            # Close order failed or not filled - report failure so callers do not assume position closed
+            return ExecutionResult(
+                False,
+                error_message=order_result.get("error", "Close order did not fill"),
+                order_id=order_result.get("order_id"),
+            )
 
         except Exception as e:
             logger.error("position_close_failed",
@@ -834,13 +842,45 @@ class ExecutionEngine:
         ticker_ts = result.get("timestamp")
         if ticker_ts is None:
             raise ValueError(f"Ticker for {symbol} has no timestamp; cannot validate freshness")
+        max_age_s = float(getattr(settings, "paper_ticker_max_age_seconds", 10.0) or 10.0)
         age_s = time.time() - float(ticker_ts)
-        if age_s > 5:
-            raise ValueError(f"Stale ticker for {symbol}, age={age_s:.1f}s")
+        if age_s > max_age_s:
+            if getattr(settings, "paper_fill_price_fallback_enabled", True):
+                context_price = self._get_context_price(symbol)
+                if context_price is not None and context_price > 0:
+                    logger.warning(
+                        "paper_fill_price_fallback_used",
+                        symbol=symbol,
+                        ticker_age_s=round(age_s, 3),
+                        max_age_s=max_age_s,
+                        fallback_price=context_price,
+                    )
+                    return context_price
+            raise ValueError(
+                f"Stale ticker for {symbol}, age={age_s:.1f}s (max={max_age_s:.1f}s)"
+            )
         close = result.get("close") or result.get("mark_price")
         if close is None:
             raise ValueError(f"Ticker has no close/mark_price for {symbol}")
         return float(close)
+
+    def _get_context_price(self, symbol: str) -> Optional[float]:
+        """Best-effort fallback to latest in-memory market price."""
+        try:
+            state = context_manager.get_state()
+            if state and hasattr(state, "config") and isinstance(state.config, dict):
+                md = state.config.get("market_data", {})
+                if isinstance(md, dict):
+                    price = md.get("price")
+                    if price is not None:
+                        return float(price)
+            if state and hasattr(state, "market_data") and isinstance(state.market_data, dict):
+                price = state.market_data.get("price")
+                if price is not None:
+                    return float(price)
+        except Exception:
+            return None
+        return None
 
     async def _place_stop_order(self, symbol: str, side: str, quantity: float,
                                stop_price: float, label: str) -> Optional[str]:

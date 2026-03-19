@@ -82,7 +82,17 @@ case "$MODE" in
         check_health "backend" 20 || true
         check_health "agent" 30 || true
         check_health "frontend" 20 || true
-        
+
+        # Optional: verify backend health payload includes model_serving (v4 integration)
+        if command -v curl &>/dev/null; then
+          BACKEND_URL="${BACKEND_URL:-http://localhost:8000}"
+          if curl -sf "${BACKEND_URL}/health" | grep -q "model_serving"; then
+            echo -e "${GREEN}✓ Backend health includes model_serving${NC}"
+          else
+            echo -e "${YELLOW}⚠ Backend health may not include model_serving (optional)${NC}"
+          fi
+        fi
+
         echo ""
         echo -e "${GREEN}========================================${NC}"
         echo -e "${GREEN}Deployment completed!${NC}"

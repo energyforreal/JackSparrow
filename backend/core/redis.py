@@ -285,6 +285,14 @@ async def dequeue_response(timeout: int = 5, queue_name: Optional[str] = None) -
     """Dequeue response from agent response queue."""
     try:
         client = await get_redis()
+        if client is None:
+            logger.warning(
+                "redis_unavailable_for_dequeue",
+                queue=queue_name or settings.agent_response_queue,
+                timeout=timeout,
+                service="backend",
+            )
+            return None
         queue = queue_name or settings.agent_response_queue
         
         result = await client.brpop(queue, timeout=timeout)
@@ -307,6 +315,14 @@ async def get_response(request_id: str, timeout: int = 30) -> Optional[Dict[str,
     """Get response by request ID from cache."""
     try:
         client = await get_redis()
+        if client is None:
+            logger.warning(
+                "redis_unavailable_for_get_response",
+                request_id=request_id,
+                timeout=timeout,
+                service="backend",
+            )
+            return None
         key = f"response:{request_id}"
 
         result = await client.get(key)
@@ -328,6 +344,14 @@ async def cache_response(request_id: str, response: Dict[str, Any], ttl: int = 3
     """Cache response with TTL."""
     try:
         client = await get_redis()
+        if client is None:
+            logger.warning(
+                "redis_unavailable_for_cache_response",
+                request_id=request_id,
+                ttl=ttl,
+                service="backend",
+            )
+            return
         key = f"response:{request_id}"
         
         await client.setex(key, ttl, json.dumps(response, default=_json_default_encoder))
@@ -465,4 +489,29 @@ async def get_cache_stats() -> Dict[str, Any]:
             exc_info=True
         )
         return {"hits": 0, "misses": 0, "sets": 0, "hit_rate": 0.0}
+
+
+# Prediction cache and model-health heartbeat (separate from portfolio caches)
+PREDICTION_CACHE_PREFIX = "prediction:"
+MODEL_HEALTH_KEY = "model_serving:health"
+
+
+async def get_prediction_cache(symbol: str) -> Optional[Any]:
+    """Get cached prediction for symbol. Key: prediction:{symbol}."""
+    return await get_cache(f"{PREDICTION_CACHE_PREFIX}{symbol}")
+
+
+async def set_prediction_cache(symbol: str, value: Any, ttl: int = 60) -> bool:
+    """Set prediction cache for symbol. TTL from settings.prediction_cache_ttl."""
+    return await set_cache(f"{PREDICTION_CACHE_PREFIX}{symbol}", value, ttl=ttl)
+
+
+async def set_model_health_heartbeat(value: Any, ttl: int = 30) -> bool:
+    """Write model-serving health heartbeat. Key: model_serving:health."""
+    return await set_cache(MODEL_HEALTH_KEY, value, ttl=ttl)
+
+
+async def get_model_health_heartbeat() -> Optional[Any]:
+    """Read model-serving health from Redis (set by health checks or poller)."""
+    return await get_cache(MODEL_HEALTH_KEY)
 

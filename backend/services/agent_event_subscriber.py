@@ -8,14 +8,15 @@ frontend clients via WebSocket.
 import json
 import asyncio
 import time
+import random
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import structlog
 from redis.asyncio import Redis
-from redis.exceptions import ResponseError
+from redis.exceptions import ResponseError, BusyLoadingError, ConnectionError, TimeoutError
 
 from backend.core.redis import get_redis
-from backend.api.websocket.manager import websocket_manager
+from backend.api.websocket.unified_manager import unified_websocket_manager
 from backend.core.logging import log_error_with_context
 from backend.services.trade_persistence_service import trade_persistence_service
 from backend.core.websocket_messages import (
@@ -70,8 +71,15 @@ class AgentEventSubscriber:
         self.running = False
         self._consuming_task: Optional[asyncio.Task] = None
         self._redis_client: Optional[Redis] = None
+        self._consume_retry_count: int = 0
         self._portfolio_update_lock = asyncio.Lock()  # Lock for portfolio updates to prevent race conditions
         self._processed_events: set = set()  # Track processed event IDs for deduplication
+
+    def _next_retry_delay(self) -> float:
+        """Exponential backoff with jitter for stream consume retries."""
+        self._consume_retry_count += 1
+        base = min(8.0, 0.5 * (2 ** min(self._consume_retry_count, 5)))
+        return base + random.uniform(0.0, 0.4)
 
     async def initialize(self):
         """Initialize Redis consumer group."""
@@ -177,7 +185,11 @@ class AgentEventSubscriber:
         while self.running:
             try:
                 if self._redis_client is None:
-                    await asyncio.sleep(1)
+                    self._redis_client = await get_redis()
+                    if self._redis_client is None:
+                        await asyncio.sleep(1)
+                        continue
+                    self._consume_retry_count = 0
                     continue
 
                 # Read pending messages first (in case of reconnection)
@@ -223,6 +235,8 @@ class AgentEventSubscriber:
                 for stream_name, stream_messages in messages:
                     for message_id, message_data in stream_messages:
                         await self._process_message(message_id, message_data)
+                # Successful poll cycle - reset retry backoff.
+                self._consume_retry_count = 0
 
             except asyncio.CancelledError:
                 logger.info(
@@ -230,15 +244,38 @@ class AgentEventSubscriber:
                     service="backend"
                 )
                 raise
+            except BusyLoadingError as e:
+                delay = self._next_retry_delay()
+                logger.warning(
+                    "agent_event_subscriber_redis_busy_loading",
+                    service="backend",
+                    stream=self.stream_name,
+                    retry_delay_s=round(delay, 2),
+                    error=str(e),
+                    message="Redis is loading dataset in memory; waiting before retry",
+                )
+                await asyncio.sleep(delay)
+            except (ConnectionError, TimeoutError) as e:
+                delay = self._next_retry_delay()
+                logger.warning(
+                    "agent_event_subscriber_redis_connection_retry",
+                    service="backend",
+                    stream=self.stream_name,
+                    retry_delay_s=round(delay, 2),
+                    error=str(e),
+                    message="Redis connection issue while consuming stream; reconnecting",
+                )
+                self._redis_client = await get_redis()
+                await asyncio.sleep(delay)
             except Exception as e:
+                delay = self._next_retry_delay()
                 log_error_with_context(
                     "agent_event_subscriber_consume_loop_error",
                     error=e,
                     component="agent_event_subscriber",
                     stream=self.stream_name
                 )
-                # Wait before retrying
-                await asyncio.sleep(1)
+                await asyncio.sleep(delay)
 
     async def _process_message(self, message_id: str, message_data: Dict[str, bytes]):
         """Process a single message from the stream.
@@ -619,7 +656,7 @@ class AgentEventSubscriber:
 
             # Broadcast via WebSocket using simplified message format
             trade_message = create_trade_update(trade_data)
-            await websocket_manager.broadcast(trade_message, channel="data_update")
+            await unified_websocket_manager.broadcast(trade_message, channel="data_update")
 
             logger.debug(
                 "agent_event_subscriber_order_fill_broadcast",
@@ -817,7 +854,7 @@ class AgentEventSubscriber:
                 "timestamp": formatted_timestamp
             }
             model_message = create_model_update(model_data)
-            await websocket_manager.broadcast(model_message, channel="data_update")
+            await unified_websocket_manager.broadcast(model_message, channel="data_update")
 
             logger.info(
                 "agent_event_subscriber_model_prediction_complete_broadcast",
@@ -893,7 +930,7 @@ class AgentEventSubscriber:
             }
             # Reasoning is part of signal data, so use signal update
             signal_message = create_signal_update(reasoning_data)
-            await websocket_manager.broadcast(signal_message, channel="data_update")
+            await unified_websocket_manager.broadcast(signal_message, channel="data_update")
 
             logger.info(
                 "agent_event_subscriber_reasoning_complete_broadcast",
@@ -947,7 +984,7 @@ class AgentEventSubscriber:
 
             # Broadcast via WebSocket using simplified message format
             market_message = create_market_update(ticker_data)
-            await websocket_manager.broadcast(market_message, channel="data_update")
+            await unified_websocket_manager.broadcast(market_message, channel="data_update")
 
             logger.debug(
                 "agent_event_subscriber_market_tick_broadcast",
@@ -1061,7 +1098,7 @@ class AgentEventSubscriber:
                             
                             # Broadcast via WebSocket using simplified format
                             portfolio_message = create_portfolio_update(portfolio_data)
-                            await websocket_manager.broadcast(portfolio_message, channel="data_update")
+                            await unified_websocket_manager.broadcast(portfolio_message, channel="data_update")
                             
                             logger.debug(
                                 "agent_event_subscriber_portfolio_update_broadcast",
@@ -1240,7 +1277,7 @@ class AgentEventSubscriber:
 
         # Broadcast signal update
         signal_message = create_signal_update(signal_data)
-        await websocket_manager.broadcast(signal_message, channel="data_update")
+        await unified_websocket_manager.broadcast(signal_message, channel="data_update")
 
     async def _handle_order_fill_consolidated(self, payload: Dict[str, Any]):
         """Handle order_fill events with simplified logic (fallback; prefer _handle_order_fill for persistence)."""
@@ -1265,7 +1302,7 @@ class AgentEventSubscriber:
 
         # Broadcast trade update
         trade_message = create_trade_update(trade_data)
-        await websocket_manager.broadcast(trade_message, channel="data_update")
+        await unified_websocket_manager.broadcast(trade_message, channel="data_update")
 
         # Update portfolio after trade
         await self._broadcast_portfolio_update()
@@ -1292,7 +1329,7 @@ class AgentEventSubscriber:
 
         # Broadcast agent state update
         state_message = create_agent_state_update(state_data)
-        await websocket_manager.broadcast(state_message, channel="agent_update")
+        await unified_websocket_manager.broadcast(state_message, channel="agent_update")
 
     async def _handle_model_prediction_consolidated(self, payload: Dict[str, Any]):
         """Handle model_prediction_complete events with simplified logic."""
@@ -1357,7 +1394,7 @@ class AgentEventSubscriber:
 
         # Broadcast model update
         model_message = create_model_update(model_data)
-        await websocket_manager.broadcast(model_message, channel="data_update")
+        await unified_websocket_manager.broadcast(model_message, channel="data_update")
 
     async def _handle_reasoning_complete_consolidated(self, payload: Dict[str, Any]):
         """Handle reasoning_complete events with simplified logic."""
@@ -1387,7 +1424,7 @@ class AgentEventSubscriber:
 
         # Broadcast reasoning update (part of signal data)
         signal_message = create_signal_update(reasoning_data)
-        await websocket_manager.broadcast(signal_message, channel="data_update")
+        await unified_websocket_manager.broadcast(signal_message, channel="data_update")
 
     async def _handle_market_tick_consolidated(self, payload: Dict[str, Any]):
         """Handle market_tick events with simplified logic."""
@@ -1407,7 +1444,7 @@ class AgentEventSubscriber:
 
         # Broadcast market update
         market_message = create_market_update(market_data)
-        await websocket_manager.broadcast(market_message, channel="data_update")
+        await unified_websocket_manager.broadcast(market_message, channel="data_update")
 
         # Update portfolio prices
         await self._update_position_prices(symbol, float(price))

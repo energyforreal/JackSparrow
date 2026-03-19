@@ -255,6 +255,23 @@ class FeatureServerAPI:
 
         logger.info("feature_server_api_stopped")
 
+    def _resolve_feature_server(self) -> Optional[MCPFeatureServer]:
+        """Resolve feature server instance with fallback to global orchestrator state."""
+        if self.feature_server is not None:
+            return self.feature_server
+
+        try:
+            # Late import avoids circular imports at module load time.
+            from agent.core.mcp_orchestrator import mcp_orchestrator
+
+            if mcp_orchestrator and getattr(mcp_orchestrator, "feature_server", None) is not None:
+                self.feature_server = mcp_orchestrator.feature_server
+        except Exception:
+            # Keep existing None and let callers return a graceful response.
+            pass
+
+        return self.feature_server
+
     async def _handle_features(self, request: web.Request) -> web.Response:
         """Handle POST /features requests."""
         try:
@@ -269,7 +286,18 @@ class FeatureServerAPI:
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
-        response: MCPFeatureResponse = await self.feature_server.get_features(
+        feature_server = self._resolve_feature_server()
+        if feature_server is None:
+            return web.json_response(
+                {
+                    "status": "degraded",
+                    "error": "Feature server is not initialized yet",
+                    "message": "Retry shortly; MCP orchestrator may still be starting",
+                },
+                status=503,
+            )
+
+        response: MCPFeatureResponse = await feature_server.get_features(
             feature_request
         )
         return web.json_response(response.model_dump(mode="json"))
@@ -277,7 +305,20 @@ class FeatureServerAPI:
     async def _handle_health(self, _: web.Request) -> web.Response:
         """Handle GET /health requests."""
         try:
-            status = await self.feature_server.get_health_status()
+            feature_server = self._resolve_feature_server()
+            if feature_server is None:
+                # Return a non-5xx degraded status so backend health can use fallback
+                # paths instead of marking model-serving hard down.
+                return web.json_response(
+                    {
+                        "status": "degraded",
+                        "service": "feature_server_api",
+                        "note": "Feature server not bound yet; orchestrator still initializing",
+                    },
+                    status=200,
+                )
+
+            status = await feature_server.get_health_status()
             status.setdefault("service", "feature_server_api")
             status.setdefault("status", "up")
             return web.json_response(status)

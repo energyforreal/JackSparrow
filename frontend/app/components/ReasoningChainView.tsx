@@ -25,16 +25,18 @@ import { LoadingSkeleton } from './LoadingSpinner'
 import { ModelReasoningView } from './ModelReasoningView'
 
 interface ReasoningChainViewProps {
-  // Array of reasoning steps as sent over WebSocket.
   reasoningChain?: ReasoningStep[]
-  // Optional full chain metadata (typically from HTTP /predict).
   chainMeta?: ReasoningChain
   overallConfidence?: number
-  // Loading state for reasoning chain generation
   isLoading?: boolean
-  // Model reasoning data for integration
   modelConsensus?: ModelConsensus[]
   individualModelReasoning?: ModelReasoning[]
+  /** Model version or ensemble descriptor */
+  modelVersion?: string
+  /** Inference latency in ms */
+  inferenceLatencyMs?: number
+  /** primary | fallback | degraded */
+  inferenceMode?: string
 }
 
 export function ReasoningChainView({
@@ -44,6 +46,9 @@ export function ReasoningChainView({
   isLoading = false,
   modelConsensus,
   individualModelReasoning,
+  modelVersion,
+  inferenceLatencyMs,
+  inferenceMode,
 }: ReasoningChainViewProps) {
   if (isLoading) {
     return (
@@ -233,9 +238,17 @@ export function ReasoningChainView({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle>Agent Reasoning Chain</CardTitle>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {(modelVersion != null || inferenceLatencyMs != null || inferenceMode) && (
+              <span className="text-xs text-muted-foreground">
+                {modelVersion && <span>{modelVersion}</span>}
+                {modelVersion && inferenceLatencyMs != null && ' · '}
+                {inferenceLatencyMs != null && <span>{Math.round(inferenceLatencyMs)}ms</span>}
+                {inferenceMode && (modelVersion != null || inferenceLatencyMs != null ? ' · ' : '') + inferenceMode}
+              </span>
+            )}
             {finalConfidencePercent > 0 && (
               <Badge variant="outline" className="text-sm">
                 Confidence: {formatConfidence(finalConfidencePercent)}
@@ -366,6 +379,8 @@ export function ReasoningChainView({
                     <ModelReasoningView
                       modelConsensus={modelConsensus}
                       individualModelReasoning={individualModelReasoning}
+                      modelVersion={modelVersion}
+                      inferenceLatencyMs={inferenceLatencyMs}
                     />
                   </div>
                 </AccordionContent>

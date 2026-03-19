@@ -13,6 +13,9 @@ interface SignalIndicatorProps {
   signal?: Signal
   modelData?: {
     model_consensus?: ModelConsensus[]
+    inference_latency_ms?: number
+    inference_source?: string
+    inference_mode?: string
   } | null
 }
 
@@ -56,11 +59,24 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
     : modelData?.model_consensus && modelData.model_consensus.length > 0
       ? modelData.model_consensus
       : []
+  const latencyMs = signal.inference_latency_ms ?? modelData?.inference_latency_ms
+  const inferenceMode = signal.inference_mode ?? modelData?.inference_mode
+  const inferenceSource = signal.inference_source ?? modelData?.inference_source
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>AI Signal</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>AI Signal</CardTitle>
+          {(inferenceMode === 'fallback' || inferenceMode === 'degraded' || inferenceSource) && (
+            <Badge variant="outline" className="text-xs font-normal">
+              {inferenceMode === 'fallback' && 'Agent fallback'}
+              {inferenceMode === 'degraded' && 'Degraded'}
+              {inferenceMode === 'primary' && inferenceSource === 'model_service' && 'Model service'}
+              {!inferenceMode && inferenceSource === 'agent' && 'Agent'}
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center gap-4">
@@ -70,6 +86,9 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
           >
             {signal.signal ? signal.signal.toString().replace('_', ' ') : 'Unknown'}
           </Badge>
+          {latencyMs != null && (
+            <span className="text-xs text-muted-foreground">Latency: {Math.round(latencyMs)}ms</span>
+          )}
           <div className="flex-1">
             <div className="flex justify-between text-sm mb-1">
               <span className="text-muted-foreground">Confidence</span>

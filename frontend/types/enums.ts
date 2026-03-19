@@ -97,7 +97,7 @@ export const isValidHealthStatus = (value: unknown): value is HealthStatusType =
 /**
  * Service status values.
  */
-export const SERVICE_STATUS_VALUES = ['up', 'down', 'degraded'] as const;
+export const SERVICE_STATUS_VALUES = ['up', 'down', 'degraded', 'unknown'] as const;
 export type ServiceStatusType = typeof SERVICE_STATUS_VALUES[number];
 
 export const isValidServiceStatus = (value: unknown): value is ServiceStatusType => {
@@ -106,16 +106,16 @@ export const isValidServiceStatus = (value: unknown): value is ServiceStatusType
 
 /**
  * Validate and normalize a signal type.
- * 
+ *
  * @param signal Raw signal value from backend
- * @returns Valid SignalType or HOLD if invalid
+ * @returns Valid SignalType or null if invalid
  */
-export function normalizeSignalType(signal: unknown): SignalType {
+export function normalizeSignalType(signal: unknown): SignalType | null {
   if (isValidSignal(signal)) {
     return signal;
   }
-  console.warn(`Invalid signal type: ${signal}, defaulting to HOLD`);
-  return 'HOLD';
+  console.warn(`Invalid signal type: ${signal}, treating as no signal`);
+  return null;
 }
 
 /**

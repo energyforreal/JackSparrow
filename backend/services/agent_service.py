@@ -411,9 +411,15 @@ class AgentService:
             agent_running = False
             try:
                 import socket
+                from urllib.parse import urlparse
+
+                parsed = urlparse(settings.agent_websocket_url)
+                agent_host = parsed.hostname or "localhost"
+                agent_port = parsed.port or 8002
+
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1.0)
-                result = sock.connect_ex(('localhost', 8002))
+                result = sock.connect_ex((agent_host, agent_port))
                 agent_running = result == 0
                 sock.close()
             except:
@@ -517,13 +523,23 @@ class AgentService:
                         if healthy_count > 0:
                             status = "up"
                         elif healthy_count == 0 and total_count > 0:
-                            status = "down"
+                            # 0 healthy models right after startup/prediction warmup
+                            # should be treated as degraded rather than hard down.
+                            status = "degraded"
                         else:
                             status = "unknown"
 
                         mn = dict(mn)
                         mn["status"] = status
-                        mn["note"] = f"Inferred status from {healthy_count}/{total_count} healthy models"
+                        if status == "degraded":
+                            mn["note"] = (
+                                f"Models loaded ({total_count}) but healthy count is 0/{total_count}; "
+                                "run predictions to refresh health."
+                            )
+                        else:
+                            mn["note"] = (
+                                f"Inferred status from {healthy_count}/{total_count} healthy models"
+                            )
                         inferred_detailed_health["model_nodes"] = mn
 
             # Infer delta exchange status

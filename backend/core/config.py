@@ -71,7 +71,8 @@ class Settings(BaseSettings):
         description="Redis queue for agent responses"
     )
     agent_websocket_url: str = Field(
-        default="ws://localhost:8002",
+        # Docker: use service name "agent" and AGENT_WS_PORT (8003). Local dev: set AGENT_WS_URL.
+        default="ws://agent:8003",
         env="AGENT_WS_URL",
         description="Agent WebSocket URL for backend client connections"
     )
@@ -86,6 +87,27 @@ class Settings(BaseSettings):
         default="http://localhost:8002",
         env="FEATURE_SERVER_URL",
         description="MCP Feature Server URL"
+    )
+
+    # Model serving (dedicated service or agent feature server predict endpoint)
+    model_serving_url: str = Field(
+        default="",
+        env="MODEL_SERVING_URL",
+        description="Model serving base URL (health, predict). If empty, uses FEATURE_SERVER_URL."
+    )
+
+    # Prediction cache TTL (seconds); 0 disables cache
+    prediction_cache_ttl: int = Field(
+        default=0,
+        env="PREDICTION_CACHE_TTL",
+        description="Redis TTL for prediction response cache (0 to disable)"
+    )
+
+    # Model health heartbeat TTL (seconds)
+    model_health_ttl: int = Field(
+        default=30,
+        env="MODEL_HEALTH_TTL",
+        description="Redis TTL for model-serving health heartbeat"
     )
     
     # Vector Database (Optional)

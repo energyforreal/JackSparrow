@@ -42,13 +42,63 @@ class ModelError(AgentException):
 
 class FeatureComputationError(AgentException):
     """Feature computation error."""
-    
-    def __init__(self, message: str, feature_name: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+
+    def __init__(
+        self,
+        message: str,
+        feature_name: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ):
         if details is None:
             details = {}
         if feature_name:
             details["feature_name"] = feature_name
-        super().__init__(message, error_code="FEATURE_COMPUTATION_ERROR", details=details)
+        super().__init__(
+            message, error_code="FEATURE_COMPUTATION_ERROR", details=details
+        )
+
+
+class FeatureAlignmentError(AgentException):
+    """Feature vector alignment error - feature_names missing or incomplete."""
+
+    def __init__(
+        self,
+        message: str,
+        model_name: Optional[str] = None,
+        expected_count: Optional[int] = None,
+        actual_count: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        if details is None:
+            details = {}
+        if model_name:
+            details["model_name"] = model_name
+        if expected_count is not None:
+            details["expected_feature_count"] = expected_count
+        if actual_count is not None:
+            details["actual_feature_count"] = actual_count
+        super().__init__(
+            message, error_code="FEATURE_ALIGNMENT_ERROR", details=details
+        )
+
+
+class FeatureCountError(AgentException):
+    """Feature count mismatch error."""
+
+    def __init__(
+        self,
+        message: str,
+        expected_count: Optional[int] = None,
+        actual_count: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        if details is None:
+            details = {}
+        if expected_count is not None:
+            details["expected_feature_count"] = expected_count
+        if actual_count is not None:
+            details["actual_feature_count"] = actual_count
+        super().__init__(message, error_code="FEATURE_COUNT_ERROR", details=details)
 
 
 class MarketDataError(AgentException):

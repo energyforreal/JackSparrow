@@ -11,6 +11,7 @@ import asyncio
 import time
 import structlog
 
+from agent.data.candle_store import CandleStore
 from agent.data.delta_client import (
     DeltaExchangeClient,
     DeltaExchangeWebSocketClient,
@@ -60,6 +61,12 @@ class MarketDataService:
         self._24h_stats_last_fetch: Dict[str, datetime] = {}
         self._24h_stats_fetch_task: Optional[asyncio.Task] = None
         self._last_sl_tp_check: Dict[str, float] = {}  # symbol -> time.time() for WebSocket SL/TP throttle
+        self._candle_store = CandleStore()
+        self._pipeline_direct_trigger: Optional[Any] = None
+
+    def set_pipeline_direct_trigger(self, callback: Any) -> None:
+        """Set callback for direct pipeline trigger when Redis is unavailable."""
+        self._pipeline_direct_trigger = callback
 
     async def initialize(self):
         """Initialize market data service."""
@@ -217,6 +224,10 @@ class MarketDataService:
         websocket_reconnect_attempts = 0
         max_websocket_reconnect_attempts = 5
 
+        candle_poll_interval_seconds = getattr(settings, "candle_poll_interval_seconds", 30) or 30
+        # Track when we last checked candles for each symbol.
+        last_candle_check_time_by_symbol: Dict[str, float] = {}
+
         # Determine polling interval based on WebSocket availability
         # When WebSocket is connected, use fallback polling interval since we get real-time updates
         poll_interval = settings.fast_poll_interval if not (self._websocket_enabled and self._websocket_connected) else settings.websocket_fallback_poll_interval
@@ -261,15 +272,20 @@ class MarketDataService:
                         # Continuously monitor tickers for price fluctuations (REST fallback)
                         await self._check_and_emit_ticker_with_fluctuation(symbol)
 
-                    # Keep candle monitoring for longer-term analysis (always via REST)
-                    await self._check_and_emit_candle(symbol, interval)
+                    # Keep candle monitoring via REST, but at a cadence independent from
+                    # the ticker polling loop (especially important when WebSocket is connected).
+                    now = time.time()
+                    last_candle_check = last_candle_check_time_by_symbol.get(symbol, 0.0)
+                    if now - last_candle_check >= candle_poll_interval_seconds:
+                        await self._check_and_emit_candle(symbol, interval)
+                        last_candle_check_time_by_symbol[symbol] = time.time()
 
                 # Reset error count on successful iteration
                 consecutive_errors = 0
                 websocket_reconnect_attempts = min(websocket_reconnect_attempts, 0)  # Don't let it go negative
 
                 # Use appropriate polling interval
-                await asyncio.sleep(poll_interval)
+                await asyncio.sleep(min(poll_interval, candle_poll_interval_seconds))
 
             except asyncio.CancelledError:
                 break
@@ -707,6 +723,25 @@ class MarketDataService:
                 # Use current UTC time
                 timestamp = datetime.now(timezone.utc)
             
+            # Persist candle for reproducible training and backtesting
+            try:
+                candle_for_store = {
+                    "open": float(candle_data.get("open", 0)),
+                    "high": float(candle_data.get("high", 0)),
+                    "low": float(candle_data.get("low", 0)),
+                    "close": float(candle_data.get("close", 0)),
+                    "volume": float(candle_data.get("volume", 0)),
+                    "timestamp": timestamp.timestamp() if hasattr(timestamp, "timestamp") else timestamp,
+                }
+                self._candle_store.append(symbol, interval, [candle_for_store])
+            except Exception as store_err:
+                logger.warning(
+                    "candle_store_persist_failed",
+                    symbol=symbol,
+                    interval=interval,
+                    error=str(store_err),
+                )
+
             event = CandleClosedEvent(
                 source="market_data_service",
                 payload={
@@ -720,16 +755,34 @@ class MarketDataService:
                     "timestamp": timestamp
                 }
             )
-            
-            await event_bus.publish(event)
-            
-            logger.info(
-                "candle_closed_event_emitted",
-                symbol=symbol,
-                interval=interval,
-                close=candle_data.get("close"),
-                event_id=event.event_id
-            )
+
+            published = await event_bus.publish(event)
+            if not published and self._pipeline_direct_trigger:
+                # Redis unavailable: trigger pipeline directly (polling fallback)
+                try:
+                    await self._pipeline_direct_trigger(symbol, {"interval": interval})
+                    logger.info(
+                        "candle_closed_pipeline_direct_trigger",
+                        symbol=symbol,
+                        interval=interval,
+                        message="Redis unavailable - triggered pipeline directly",
+                    )
+                except Exception as trigger_err:
+                    logger.error(
+                        "candle_closed_direct_trigger_failed",
+                        symbol=symbol,
+                        interval=interval,
+                        error=str(trigger_err),
+                        exc_info=True,
+                    )
+            elif published:
+                logger.info(
+                    "candle_closed_event_emitted",
+                    symbol=symbol,
+                    interval=interval,
+                    close=candle_data.get("close"),
+                    event_id=event.event_id
+                )
             
         except Exception as e:
             logger.error(

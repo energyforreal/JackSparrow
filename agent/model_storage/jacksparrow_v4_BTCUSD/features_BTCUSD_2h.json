@@ -1,0 +1,22 @@
+{
+  "features": [
+    "ema_9",
+    "ema_21",
+    "macd",
+    "macd_signal",
+    "atr_14",
+    "macd_hist",
+    "rsi_14",
+    "adx_14",
+    "vol_zscore",
+    "vol_ratio",
+    "bb_pct",
+    "roc_20",
+    "bb_width",
+    "roc_10",
+    "ema_cross",
+    "returns_1",
+    "atr_pct",
+    "volatility_20"
+  ]
+}

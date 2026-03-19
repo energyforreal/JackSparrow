@@ -1,0 +1,80 @@
+{
+  "model_name": "jacksparrow_BTCUSD_15m",
+  "version": "4.0.0",
+  "symbol": "BTCUSD",
+  "timeframe": "15m",
+  "trained_at": "2026-03-09T14:17:19.083486+00:00",
+  "dataset_sha256": "d9cdab578b5c7ffe",
+  "dataset_range": {
+    "from": "2025-11-25 10:00:00+00:00",
+    "to": "2026-03-09 13:45:00+00:00",
+    "candles": 10000
+  },
+  "features": [
+    "ema_9",
+    "ema_21",
+    "macd",
+    "macd_signal",
+    "atr_14",
+    "macd_hist",
+    "adx_14",
+    "rsi_14",
+    "vol_zscore",
+    "vol_ratio",
+    "bb_pct",
+    "bb_width",
+    "roc_20",
+    "roc_10",
+    "ema_cross",
+    "returns_1",
+    "atr_pct",
+    "volatility_20"
+  ],
+  "n_features": 18,
+  "signal_classes": {
+    "entry": {
+      "0": "SELL",
+      "1": "HOLD",
+      "2": "BUY"
+    },
+    "exit": {
+      "0": "HOLD",
+      "1": "EXIT"
+    }
+  },
+  "train_metrics": {
+    "entry_acc": 0.4692,
+    "entry_f1": 0.2536,
+    "exit_acc": 0.4189,
+    "exit_f1": 0.0707,
+    "n_train": 6960,
+    "n_test": 1492
+  },
+  "walkforward_mean": {
+    "accuracy": 0.5818,
+    "f1_macro": 0.2768,
+    "sharpe": -0.0366
+  },
+  "config": {
+    "entry_threshold": 0.003,
+    "entry_lookahead": 4,
+    "exit_lookahead": 6,
+    "exit_loss_pct": 0.015,
+    "exit_profit_pct": 0.03
+  },
+  "library_versions": {
+    "python": "3.12.12",
+    "xgboost": "3.2.0",
+    "sklearn": "1.6.1",
+    "numpy": "2.0.2",
+    "pandas": "2.2.2"
+  },
+  "artifacts": {
+    "entry_model": "entry_model_BTCUSD_15m.joblib",
+    "entry_scaler": "entry_scaler_BTCUSD_15m.joblib",
+    "exit_model": "exit_model_BTCUSD_15m.joblib",
+    "exit_scaler": "exit_scaler_BTCUSD_15m.joblib",
+    "features": "features_BTCUSD_15m.json",
+    "metadata": "metadata_BTCUSD_15m.json"
+  }
+}

@@ -32,6 +32,8 @@ services:
     # Development environment
     environment:
       - LOG_LEVEL=${AGENT_LOG_LEVEL:-DEBUG}
+      # Discover only BTCUSD v4 models in dev by default
+      - MODEL_DIR=/app/agent/model_storage/jacksparrow_v4_BTCUSD
     # Keep other settings from base docker-compose.yml
 
   frontend:

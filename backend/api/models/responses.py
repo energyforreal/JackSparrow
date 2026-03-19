@@ -78,6 +78,10 @@ class HealthResponse(BaseModel):
         default_factory=list,
         description="Reasons for degraded status"
     )
+    trading_ready: Optional[bool] = Field(
+        default=None,
+        description="True if paper trading can execute (models healthy); False in degraded mode"
+    )
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Health check timestamp"
@@ -278,6 +282,18 @@ class PredictResponse(DecimalSerializerMixin, BaseModel):
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Prediction timestamp"
+    )
+    inference_latency_ms: Optional[float] = Field(
+        default=None,
+        description="Inference latency in milliseconds (model-service or agent path)"
+    )
+    inference_source: Optional[str] = Field(
+        default=None,
+        description="Inference path: model_service (primary) or agent (fallback)"
+    )
+    inference_mode: Optional[str] = Field(
+        default=None,
+        description="Inference mode: primary, fallback, or degraded"
     )
 
 

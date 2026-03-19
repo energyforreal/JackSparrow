@@ -842,52 +842,44 @@ pydantic==2.5.0
 
 JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**:
 
-- Contains all trained model files (`.pkl`, `.h5`, `.onnx` files)
+- Contains all trained model files (current production uses v4 `.joblib` + `.json` artefacts)
 - Referenced via `MODEL_DIR` environment variable (points to directory)
-- Example: `MODEL_DIR=./agent/model_storage`
+- Example: `MODEL_DIR=./agent/model_storage/jacksparrow_v4_BTCUSD`
 - Used by model discovery system to automatically find and register models
-- Models are organized by type in subdirectories
+- Current v4 discovery is metadata-driven and reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
 
 ### Model Directory Structure
 
 **Model Storage** (`agent/model_storage/`):
 ```
 agent/model_storage/
-├── xgboost/            # XGBoost models (regressor and classifier)
-│   ├── xgboost_classifier_BTCUSD_15m.pkl   # 15-minute classifier
-│   ├── xgboost_classifier_BTCUSD_1h.pkl    # 1-hour classifier
-│   ├── xgboost_classifier_BTCUSD_4h.pkl    # 4-hour classifier
-│   ├── xgboost_regressor_BTCUSD_15m.pkl    # 15-minute regressor
-│   ├── xgboost_regressor_BTCUSD_1h.pkl    # 1-hour regressor
-│   └── xgboost_regressor_BTCUSD_4h.pkl    # 4-hour regressor
-├── lstm/               # LSTM models (if TensorFlow available)
-│   ├── lstm_regressor_BTCUSD_15m.h5
-│   ├── lstm_classifier_BTCUSD_15m.h5
-│   └── ...
-├── transformer/        # Transformer models
-│   └── ...
-├── custom/             # User-uploaded models (discovered automatically)
-│   ├── *.pkl           # Pickle models (XGBoost, LightGBM, scikit-learn)
-│   ├── *.h5            # TensorFlow/Keras models
-│   ├── *.onnx          # ONNX models
-│   └── metadata.json   # Model metadata
-└── price_prediction_training_summary.csv  # Training metrics
+└── jacksparrow_v4_BTCUSD/
+    ├── metadata_BTCUSD_15m.json
+    ├── metadata_BTCUSD_30m.json
+    ├── metadata_BTCUSD_1h.json
+    ├── metadata_BTCUSD_2h.json
+    ├── metadata_BTCUSD_4h.json
+    ├── entry_model_BTCUSD_<tf>.joblib
+    ├── exit_model_BTCUSD_<tf>.joblib
+    ├── entry_scaler_BTCUSD_<tf>.joblib
+    ├── exit_scaler_BTCUSD_<tf>.joblib
+    ├── features_BTCUSD_<tf>.json
+    └── README.md
 ```
 
 **Currently Integrated Models** (as of latest integration - see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)):
-- **6 XGBoost models** for BTCUSD trading:
-  - 3 classifier models (15m, 1h, 4h timeframes)
-  - 3 regressor models (15m, 1h, 4h timeframes)
+- **5 v4 BTCUSD timeframe ensembles**: 15m, 30m, 1h, 2h, 4h
+- Each timeframe has entry + exit models and dedicated scalers/features metadata
 - All models are automatically discovered and registered on agent startup
 
 ### Model Discovery
 
 Models in `agent/model_storage/` are automatically discovered on agent startup:
-- Scans directories specified by `MODEL_DIR` and all subdirectories
-- Detects model type from file extension and metadata
+- Reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
+- Loads v4 artefacts via `V4EnsembleNode`
 - Registers models with MCP Model Registry
 - Models become available for predictions immediately
-- Currently, 6 XGBoost models (3 classifiers + 3 regressors) are stored in `agent/model_storage/xgboost/` for BTCUSD trading across 15m, 1h, and 4h timeframes
+- Current production path is `agent/model_storage/jacksparrow_v4_BTCUSD/`
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

@@ -60,13 +60,16 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
   const servicesArray = Array.isArray(health.services)
     ? health.services
     : health.services && typeof health.services === 'object'
-    ? Object.entries(health.services).map(([name, service]) => ({
-        name,
-        status: service.status || 'unknown',
-        latency: service.latency_ms,
-        error: service.error,
-        details: service.details
-      }))
+    ? Object.entries(health.services).map(([name, service]) => {
+        const s = service && typeof service === 'object' ? service : {}
+        return {
+          name,
+          status: (s as { status?: string }).status || 'unknown',
+          latency: (s as { latency_ms?: number }).latency_ms,
+          error: (s as { error?: string }).error,
+          details: (s as { details?: unknown }).details
+        }
+      })
     : []
 
   // Health score is now standardized to 0-100 range in WebSocket messages
@@ -91,6 +94,12 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
           </div>
           <ConfidenceProgress value={healthScore} className="h-2" variant="health" />
         </div>
+
+        {typeof health.trading_ready === 'boolean' && (
+          <p className="text-sm text-muted-foreground">
+            Paper trading: {health.trading_ready ? 'Ready' : 'Unavailable (models not ready)'}
+          </p>
+        )}
 
         <div className="space-y-2">
           {servicesArray.map((service) => {
@@ -139,6 +148,18 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
             )
           })}
         </div>
+
+        {(() => {
+          const modelServing = servicesArray.find((s) => s.name === 'model_serving')
+          if (modelServing && modelServing.status !== 'up') {
+            return (
+              <p className="text-xs text-muted-foreground mt-2">
+                When model serving is unavailable, predictions use the agent fallback path. Signal card will show &quot;Agent fallback&quot; or &quot;Degraded&quot; when applicable.
+              </p>
+            )
+          }
+          return null
+        })()}
 
         {health.degradation_reasons &&
           Array.isArray(health.degradation_reasons) &&

@@ -44,6 +44,17 @@ export interface ModelData {
   model_consensus?: any[]
   model_predictions?: any[]
   timestamp?: string
+  /** Model version or ensemble descriptor */
+  model_version?: string
+  /** Inference latency in ms */
+  inference_latency_ms?: number
+  /** Names of models in ensemble */
+  ensemble_composition?: string[]
+  /** When consensus was produced (ISO string) */
+  consensus_source_timestamp?: string
+  /** primary (model_service) | fallback (agent) | degraded */
+  inference_mode?: 'primary' | 'fallback' | 'degraded'
+  inference_source?: 'model_service' | 'agent'
 }
 
 export type HealthData = HealthStatus
@@ -141,14 +152,38 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                 mergedSignal.individual_model_reasoning = state.modelData.individual_model_reasoning
               }
 
-              // Prefer model consensus when decision confidence is 0 so main card shows real-time values
+              // Prefer model consensus when decision confidence is 0 so main card shows
+              // real-time values, but only when the model data is recent. This prevents
+              // old consensus data from resurrecting as a pseudo-live signal.
               const effectiveConf = mergedSignal.confidence ?? 0
-              if ((effectiveConf === 0 || effectiveConf === undefined) && state.modelData) {
-                const modelConf = state.modelData.consensus_confidence ?? state.modelData.confidence
-                if (modelConf != null && modelConf > 0) {
-                  mergedSignal.confidence = modelConf
-                  if (state.modelData.consensus_signal != null) {
-                    mergedSignal.signal = state.modelData.consensus_signal
+              const modelData = state.modelData
+              if ((effectiveConf === 0 || effectiveConf === undefined) && modelData) {
+                let modelTimestamp: Date | null = null
+                const rawTs = modelData.timestamp as any
+                if (rawTs instanceof Date) {
+                  modelTimestamp = rawTs
+                } else if (typeof rawTs === 'string') {
+                  const parsed = new Date(rawTs)
+                  if (!Number.isNaN(parsed.getTime())) {
+                    modelTimestamp = parsed
+                  }
+                }
+
+                let isFresh = false
+                if (modelTimestamp) {
+                  const ageMs = Date.now() - modelTimestamp.getTime()
+                  // Treat model consensus older than 30 seconds as stale for fallback purposes.
+                  isFresh = ageMs <= 30_000
+                }
+
+                if (isFresh) {
+                  const modelConf = (modelData as any).consensus_confidence ?? (modelData as any).confidence
+                  if (modelConf != null && modelConf > 0) {
+                    mergedSignal.confidence = modelConf
+                    const consensusSignal = (modelData as any).consensus_signal
+                    if (consensusSignal != null) {
+                      mergedSignal.signal = consensusSignal
+                    }
                   }
                 }
               }
@@ -201,15 +236,22 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
             const hasConsensus = (data.consensus_confidence != null && data.consensus_confidence > 0) ||
               (data.confidence != null && data.confidence > 0)
             const currentConf = state.signal?.confidence ?? 0
+            const modelMeta = {
+              inference_latency_ms: data.inference_latency_ms,
+              inference_source: data.inference_source,
+              inference_mode: data.inference_mode,
+              model_version: data.model_version,
+            }
             const signalFromModel =
               hasConsensus && (!state.signal || currentConf === 0)
                 ? {
                     ...data,
                     signal: data.consensus_signal ?? data.signal ?? state.signal?.signal ?? 'HOLD',
                     confidence: data.consensus_confidence ?? data.confidence ?? 0,
+                    ...modelMeta,
                   }
                 : state.signal
-                  ? { ...state.signal, ...data }
+                  ? { ...state.signal, ...data, ...modelMeta }
                   : null
             return {
               ...state,
@@ -235,13 +277,22 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       
       if (messageType === 'system_update') {
         switch (resource) {
-          case 'health':
-            return {
-              ...state,
-              health: data,
-              lastUpdate: now,
-              dataSource: 'websocket'
+          case 'health': {
+            const healthPayload = data && typeof data === 'object' ? data : state.health
+            if (healthPayload && typeof healthPayload === 'object') {
+              const normalized = { ...healthPayload }
+              if (normalized.status === undefined && (normalized as any).overall_status !== undefined) {
+                normalized.status = (normalized as any).overall_status
+              }
+              return {
+                ...state,
+                health: normalized,
+                lastUpdate: now,
+                dataSource: 'websocket'
+              }
             }
+            return { ...state, lastUpdate: now, dataSource: 'websocket' }
+          }
           case 'time':
             // Time sync doesn't change data, just update timestamp
             return {
@@ -498,6 +549,16 @@ export function useTradingData() {
       dispatch({ type: 'SET_LOADING', payload: true })
 
       try {
+        // Fetch health first so HealthMonitor shows immediately (not after first WS push)
+        try {
+          const healthData = await apiClient.getHealth()
+          if (healthData && typeof healthData === 'object') {
+            dispatch({ type: 'UPDATE_HEALTH', payload: healthData as HealthData })
+          }
+        } catch {
+          // Health fetch optional; WS will push health on connect and periodically
+        }
+
         // Fetch portfolio data
         const portfolioData = await apiClient.getPortfolioSummary()
         dispatch({ type: 'UPDATE_PORTFOLIO', payload: portfolioData as Portfolio })

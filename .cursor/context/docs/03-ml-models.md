@@ -36,25 +36,26 @@ JackSparrow stores all trained ML models in the **`agent/model_storage/` directo
 | `agent/model_storage/` | All trained ML models | `MODEL_DIR` (points to directory) | Automatic model discovery and registration |
 
 **Current Model Types**:
-- **XGBoost models** are stored in `agent/model_storage/xgboost/` directory
-- Models include both regressor and classifier variants trained in Google Colab
-- The system automatically discovers and registers all models in the storage directory
+- **v4 BTCUSD entry/exit ensembles** are stored in `agent/model_storage/jacksparrow_v4_BTCUSD/`
+- Each timeframe includes entry/exit models, scalers, features JSON, and metadata JSON
+- The system discovers and registers models from v4 metadata files in `MODEL_DIR`
 
 ### Currently Integrated Models
 
-As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **6 XGBoost models** for BTCUSD trading:
+As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **5 v4 BTCUSD models** by timeframe:
 
-**Classifier Models** (3 models - predict trading signals directly):
-- `xgboost_classifier_BTCUSD_15m.pkl` - 15-minute timeframe classifier
-- `xgboost_classifier_BTCUSD_1h.pkl` - 1-hour timeframe classifier
-- `xgboost_classifier_BTCUSD_4h.pkl` - 4-hour timeframe classifier
+- `jacksparrow_BTCUSD_15m`
+- `jacksparrow_BTCUSD_30m`
+- `jacksparrow_BTCUSD_1h`
+- `jacksparrow_BTCUSD_2h`
+- `jacksparrow_BTCUSD_4h`
 
-**Regressor Models** (3 models - predict absolute future prices):
-- `xgboost_regressor_BTCUSD_15m.pkl` - 15-minute timeframe regressor
-- `xgboost_regressor_BTCUSD_1h.pkl` - 1-hour timeframe regressor
-- `xgboost_regressor_BTCUSD_4h.pkl` - 4-hour timeframe regressor
-
-All models are stored in `agent/model_storage/xgboost/` and are automatically discovered and registered on agent startup. For detailed integration information, see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md).
+Each model is loaded from `metadata_BTCUSD_<timeframe>.json` and references:
+- `entry_model_BTCUSD_<timeframe>.joblib`
+- `exit_model_BTCUSD_<timeframe>.joblib`
+- `entry_scaler_BTCUSD_<timeframe>.joblib`
+- `exit_scaler_BTCUSD_<timeframe>.joblib`
+- `features_BTCUSD_<timeframe>.json`
 
 ---
 
@@ -98,23 +99,15 @@ Model storage is configured via environment variables:
 
 **Root `.env`** (for production models):
 ```bash
-# Points to a specific model file in models/ directory
-MODEL_PATH=models/xgboost_BTCUSD_15m.pkl
+MODEL_DIR=./agent/model_storage/jacksparrow_v4_BTCUSD
+MODEL_DISCOVERY_ENABLED=true
+MODEL_AUTO_REGISTER=true
 MIN_CONFIDENCE_THRESHOLD=0.65
 ```
 
-**Agent `.env`** (for model discovery):
-```bash
-# Points to directory for automatic model discovery
-MODEL_DIR=./agent/model_storage
-MODEL_DISCOVERY_ENABLED=true
-MODEL_AUTO_REGISTER=true
-```
-
-**Important**: 
-- `MODEL_PATH` is used at runtime to load a specific production model from `models/`
-- `MODEL_DIR` is used by the model discovery system to find and register models from `agent/model_storage/`
-- Both can coexist: production models in `models/` are loaded via `MODEL_PATH`, while uploaded models in `agent/model_storage/` are discovered via `MODEL_DIR`
+**Important**:
+- `MODEL_DIR` should point to the v4 metadata directory
+- v4 discovery reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR` (non-recursive)
 
 ---
 

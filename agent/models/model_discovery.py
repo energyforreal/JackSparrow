@@ -51,230 +51,102 @@ class ModelDiscovery:
             model_dir=str(self.model_dir),
             discovery_enabled=settings.model_discovery_enabled,
             auto_register=settings.model_auto_register,
-            message="Starting model discovery process"
+            discovery_mode="v4_only",
+            message="Starting model discovery process (v4-only mode)"
         )
         
         try:
-            # Option 1: Load production model from MODEL_PATH
-            if self.model_path:
-                model_file = Path(self.model_path)
-                logger.debug(
-                    "model_discovery_checking_path",
-                    model_path=str(model_file),
-                    exists=model_file.exists(),
-                    absolute_path=str(model_file.resolve()) if model_file.exists() else None
+            # V4-only discovery: load BTCUSD ensembles from metadata_BTCUSD_*.json
+            # under MODEL_DIR (typically agent/model_storage/jacksparrow_v4_BTCUSD).
+            if not settings.model_discovery_enabled:
+                logger.info(
+                    "model_discovery_disabled_v4_only",
+                    model_dir=str(self.model_dir),
+                    discovery_mode="v4_only",
+                    message="Model discovery is disabled via settings; skipping v4 discovery",
                 )
-                if model_file.exists():
+            else:
+                model_dir_abs = self.model_dir.resolve()
+                if not self.model_dir.exists():
                     discovery_attempted = True
-                    try:
-                        logger.info(
-                            "model_discovery_loading",
-                            model_path=str(model_file)
-                        )
-                        model_node = await self._load_model_from_path(model_file)
-                        if model_node:
-                            # Check for duplicate model name
-                            if model_node.model_name in loaded_model_names:
-                                logger.warning(
-                                    "model_discovery_duplicate_skipped",
-                                    model_name=model_node.model_name,
-                                    model_path=str(model_file),
-                                    reason="Model with same name already loaded from MODEL_PATH (preferring MODEL_PATH over MODEL_DIR)"
-                                )
-                            else:
-                                self._handle_discovered_model(model_node, discovered_models)
-                                loaded_model_names.add(model_node.model_name)
-                                logger.info(
-                                    "model_discovered",
-                                    model_name=model_node.model_name,
-                                    model_path=str(model_file),
-                                    model_type=model_node.model_type
-                                )
-                        else:
-                            failed_models.append(str(model_file))
-                            failed_reasons.append(f"{model_file}: unsupported model type or loader returned None")
-                            logger.warning(
-                                "model_discovery_load_returned_none",
-                                model_file=str(model_file),
-                                message="Model loader returned None - model type may not be supported"
-                            )
-                    except Exception as e:
-                        failed_models.append(str(model_file))
-                        error_type = type(e).__name__
-                        failed_reasons.append(f"{model_file}: {error_type} - {str(e)}")
-                        
-                        # Special handling for corrupted/unpickling errors
-                        if error_type == "UnpicklingError" or "pickle" in str(e).lower() or "unpickling" in str(e).lower():
-                            logger.error(
-                                "model_discovery_corrupted_file",
-                                model_file=str(model_file),
-                                error=str(e),
-                                error_type=error_type,
-                                exc_info=True,
-                                message="Model file appears to be corrupted or incompatible. Skipping this model and continuing discovery."
-                            )
-                        else:
-                            logger.error(
-                                "model_discovery_load_failed",
-                                model_file=str(model_file),
-                                error=str(e),
-                                error_type=error_type,
-                                exc_info=True,
-                                message="Model discovery will continue with other models"
-                            )
+                    logger.warning(
+                        "model_dir_not_found_v4_only",
+                        model_dir=str(self.model_dir),
+                        absolute_path=str(model_dir_abs),
+                        discovery_mode="v4_only",
+                        message=(
+                            "MODEL_DIR does not exist, skipping v4 metadata discovery. "
+                            "Set MODEL_DIR to the v4 folder (for example "
+                            "./agent/model_storage/jacksparrow_v4_BTCUSD)."
+                        ),
+                    )
                 else:
-                    logger.warning(
-                        "model_path_not_found",
-                        model_path=str(model_file),
-                        absolute_path=str(model_file.resolve()),
-                        message="MODEL_PATH specified but file does not exist"
-                    )
-                    # If MODEL_PATH doesn't exist but discovery is enabled, we will attempt MODEL_DIR discovery
-                    # Mark as attempted now if discovery is enabled
-                    if settings.model_discovery_enabled:
-                        discovery_attempted = True
-
-            # Option 2: Prefer robust ensemble from xgboost (strict artifacts)
-            xgboost_dir = self.model_dir / "xgboost" if (self.model_dir / "xgboost").exists() else self.model_dir
-            strict_entry = xgboost_dir / "entry_meta.pkl"
-            if strict_entry.exists() and settings.model_discovery_enabled:
-                try:
-                    from agent.models.robust_ensemble_node import RobustEnsembleNode
+                    v4_metadata_files = sorted(self.model_dir.glob("metadata_BTCUSD_*.json"))
                     discovery_attempted = True
-                    node = RobustEnsembleNode.from_strict_artifacts(xgboost_dir)
-                    await node.initialize()
-                    if node.model_name not in loaded_model_names:
-                        self._handle_discovered_model(node, discovered_models)
-                        loaded_model_names.add(node.model_name)
+                    logger.info(
+                        "model_discovery_v4_scan",
+                        model_dir=str(self.model_dir),
+                        absolute_path=str(model_dir_abs),
+                        discovery_mode="v4_only",
+                        files_found=len(v4_metadata_files),
+                        file_list=[str(p) for p in v4_metadata_files[:10]],
+                    )
+
+                    if not v4_metadata_files:
                         logger.info(
-                            "model_discovered",
-                            model_name=node.model_name,
-                            model_path=str(xgboost_dir),
-                            model_type="robust_ensemble"
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "model_discovery_robust_ensemble_failed",
-                        path=str(xgboost_dir),
-                        error=str(e),
-                        message="Strict-artifact load failed, falling back to file scan"
-                    )
-
-            # Option 3: Discover models from MODEL_DIR
-            if settings.model_discovery_enabled:
-                try:
-                    model_dir_abs = self.model_dir.resolve()
-                    discovery_attempted = True
-                    if not self.model_dir.exists():
-                        logger.warning(
-                            "model_dir_not_found",
+                            "model_discovery_v4_no_metadata_files",
                             model_dir=str(self.model_dir),
                             absolute_path=str(model_dir_abs),
-                            message="MODEL_DIR does not exist, skipping discovery",
-                            discovery_attempted=True
+                            discovery_mode="v4_only",
+                            message=(
+                                "No metadata_BTCUSD_*.json files found in MODEL_DIR for v4 discovery. "
+                                "Check MODEL_DIR points to the folder containing v4 metadata files "
+                                "(for example ./agent/model_storage/jacksparrow_v4_BTCUSD)."
+                            ),
                         )
                     else:
-                        model_files = self._find_model_files()
-                        logger.info(
-                            "model_discovery_scanning",
-                            model_dir=str(self.model_dir),
-                            absolute_path=str(model_dir_abs),
-                            files_found=len(model_files),
-                            file_list=[str(f) for f in model_files[:10]]  # Log first 10 files
-                        )
-                        
-                        if not model_files:
-                            logger.info(
-                                "model_discovery_no_files",
-                                model_dir=str(self.model_dir),
-                                absolute_path=str(model_dir_abs),
-                                discovery_attempted=True,
-                                message="No model files found in MODEL_DIR. Discovery was attempted but directory is empty or contains no .pkl/.h5/.onnx files."
-                            )
-                        
-                        for model_file in model_files:
+                        from agent.models.v4_ensemble_node import V4EnsembleNode
+
+                        for meta_path in v4_metadata_files:
                             try:
-                                logger.debug(
-                                    "model_discovery_loading_file",
-                                    model_file=str(model_file),
-                                    absolute_path=str(model_file.resolve())
-                                )
-                                
-                                # Extract model name from file to check for duplicates BEFORE loading
-                                # This avoids loading duplicate models unnecessarily
-                                potential_model_name = model_file.stem
-                                if potential_model_name in loaded_model_names:
-                                    logger.debug(
-                                        "model_discovery_duplicate_skipped_early",
-                                        model_name=potential_model_name,
-                                        model_path=str(model_file),
-                                        reason="Model with same name already loaded - skipping to avoid duplicate load"
+                                node = V4EnsembleNode.from_metadata(meta_path)
+                                await node.initialize()
+                                if node.model_name in loaded_model_names:
+                                    logger.warning(
+                                        "model_discovery_duplicate_skipped",
+                                        model_name=node.model_name,
+                                        model_path=str(meta_path),
+                                        reason="v4 ensemble with same name already loaded",
+                                        discovery_mode="v4_only",
                                     )
                                     continue
-                                
-                                model_node = await self._load_model_from_path(model_file)
-                                if model_node:
-                                    # Check for duplicate model name (double-check after loading)
-                                    if model_node.model_name in loaded_model_names:
-                                        logger.warning(
-                                            "model_discovery_duplicate_skipped",
-                                            model_name=model_node.model_name,
-                                            model_path=str(model_file),
-                                            reason="Model with same name already loaded (duplicate detected)"
-                                        )
-                                    else:
-                                        self._handle_discovered_model(model_node, discovered_models)
-                                        loaded_model_names.add(model_node.model_name)
-                                        logger.info(
-                                            "model_discovered",
-                                            model_name=model_node.model_name,
-                                            model_path=str(model_file),
-                                            model_type=model_node.model_type
-                                        )
-                                else:
-                                    failed_models.append(str(model_file))
-                                    failed_reasons.append(f"{model_file}: unsupported model type or loader returned None")
-                                    logger.warning(
-                                        "model_discovery_load_returned_none",
-                                        model_file=str(model_file),
-                                        message="Model loader returned None - model type may not be supported"
-                                    )
+                                self._handle_discovered_model(node, discovered_models)
+                                loaded_model_names.add(node.model_name)
+                                logger.info(
+                                    "model_discovered",
+                                    model_name=node.model_name,
+                                    model_path=str(meta_path),
+                                    model_type=node.model_type,
+                                    discovery_mode="v4_only",
+                                )
                             except Exception as e:
-                                failed_models.append(str(model_file))
+                                failed_models.append(str(meta_path))
                                 error_type = type(e).__name__
-                                failed_reasons.append(f"{model_file}: {error_type} - {str(e)}")
-                                
-                                # Special handling for corrupted/unpickling errors
-                                if error_type == "UnpicklingError" or "pickle" in str(e).lower() or "unpickling" in str(e).lower():
-                                    logger.error(
-                                        "model_discovery_corrupted_file",
-                                        model_file=str(model_file),
-                                        error=str(e),
-                                        error_type=error_type,
-                                        exc_info=True,
-                                        message="Model file appears to be corrupted or incompatible. Skipping this model and continuing discovery."
-                                    )
-                                else:
-                                    logger.error(
-                                        "model_discovery_load_failed",
-                                        model_file=str(model_file),
-                                        error=str(e),
-                                        error_type=error_type,
-                                        exc_info=True,
-                                        message="Continuing with other models"
-                                    )
-                except Exception as e:
-                    logger.error(
-                        "model_discovery_scan_failed",
-                        model_dir=str(self.model_dir),
-                        error=str(e),
-                        exc_info=True,
-                        message="Model discovery scan failed, but agent will continue"
-                    )
+                                failed_reasons.append(f"{meta_path}: {error_type} - {str(e)}")
+                                logger.error(
+                                    "model_discovery_v4_metadata_failed",
+                                    model_file=str(meta_path),
+                                    error=str(e),
+                                    error_type=error_type,
+                                    discovery_mode="v4_only",
+                                    exc_info=True,
+                                    message="Failed to load v4 ensemble from metadata; continuing with other v4 metadata files",
+                                )
         except Exception as e:
             logger.critical(
                 "model_discovery_critical_error",
                 error=str(e),
+                discovery_mode="v4_only",
                 exc_info=True,
                 message="Critical error in model discovery, but agent will continue"
             )
@@ -296,6 +168,7 @@ class ModelDiscovery:
                 discovered_count=successful_count,
                 failed_count=failed_count,
                 total_attempted=total_attempted,
+                discovery_mode="v4_only",
                 discovery_attempted=discovery_attempted,
                 models=discovered_models,
                 failed_files=failed_models[:5] if failed_models else [],  # Log first 5 failed files
@@ -318,6 +191,7 @@ class ModelDiscovery:
                 failed_count=failed_count,
                 total_attempted=total_attempted,
                 discovery_attempted=discovery_attempted,
+                discovery_mode="v4_only",
                 discovery_enabled=settings.model_discovery_enabled,
                 failed_files=failed_models[:5] if failed_models else [],  # Log first 5 failed files
                 model_path=self.model_path,

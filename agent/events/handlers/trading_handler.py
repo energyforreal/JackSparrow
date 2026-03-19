@@ -76,6 +76,25 @@ class TradingEventHandler:
         ratio = reward / risk
         return ratio >= MIN_RISK_REWARD_RATIO
 
+    def _log_entry_rejected(
+        self,
+        reason: str,
+        *,
+        symbol: str,
+        signal: Optional[str],
+        event_id: str,
+        **context: Any,
+    ) -> None:
+        """Emit standardized reject logs for trade-entry diagnostics."""
+        logger.info(
+            "trading_entry_rejected",
+            reason=reason,
+            symbol=symbol,
+            signal=signal,
+            event_id=event_id,
+            **context,
+        )
+
     async def handle_decision_ready_for_trading(self, event: DecisionReadyEvent):
         """Handle decision ready event - validate risk and publish RiskApprovedEvent if approved.
 
@@ -94,8 +113,8 @@ class TradingEventHandler:
 
             # Skip HOLD - no trade to execute
             if signal == "HOLD" or not signal:
-                logger.debug(
-                    "trading_handler_skipping_hold",
+                self._log_entry_rejected(
+                    "hold_signal",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
@@ -116,7 +135,14 @@ class TradingEventHandler:
                         ts_sec = dt.timestamp() if hasattr(dt, "timestamp") else 0
                     age = time.time() - ts_sec
                     if age > getattr(settings, "max_signal_age_seconds", 10):
-                        logger.warning("signal_expired", age=age, symbol=symbol, event_id=event.event_id)
+                        self._log_entry_rejected(
+                            "stale_signal",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            age_seconds=round(age, 3),
+                            max_signal_age_seconds=getattr(settings, "max_signal_age_seconds", 10),
+                        )
                         return
                 except Exception:
                     pass
@@ -157,13 +183,13 @@ class TradingEventHandler:
 
             # Check confidence threshold
             if confidence < settings.min_confidence_threshold:
-                logger.info(
-                    "trading_handler_confidence_below_threshold",
+                self._log_entry_rejected(
+                    "low_confidence",
                     symbol=symbol,
                     signal=signal,
+                    event_id=event.event_id,
                     confidence=confidence,
                     threshold=settings.min_confidence_threshold,
-                    event_id=event.event_id,
                 )
                 return
 
@@ -174,22 +200,22 @@ class TradingEventHandler:
             )
             entry_price = await self._get_current_price(symbol, state)
             if entry_price is None or entry_price <= 0:
-                logger.warning(
-                    "trading_handler_no_price_available",
+                self._log_entry_rejected(
+                    "no_price",
                     symbol=symbol,
+                    signal=signal,
                     event_id=event.event_id,
-                    message="Skipping trade: no valid market price available",
                 )
                 return
 
             features = (payload.get("reasoning_chain") or {}).get("market_context", {}).get("features", {})
             vol = features.get("volatility")
             if vol is None:
-                logger.warning(
-                    "trading_handler_missing_volatility",
+                self._log_entry_rejected(
+                    "missing_volatility",
                     symbol=symbol,
+                    signal=signal,
                     event_id=event.event_id,
-                    message="Volatility required for Kelly sizing; skipping trade",
                 )
                 return
             strength_map = {"STRONG_BUY": 0.9, "BUY": 0.65, "STRONG_SELL": 0.9, "SELL": 0.65}
@@ -217,23 +243,25 @@ class TradingEventHandler:
             )
 
             if not validation.get("approved", False):
-                logger.info(
-                    "trading_handler_risk_rejected",
+                self._log_entry_rejected(
+                    "risk_rejected",
                     symbol=symbol,
-                    side=side,
-                    reason=validation.get("reason", "Unknown"),
+                    signal=signal,
                     event_id=event.event_id,
+                    side=side,
+                    risk_reason=validation.get("reason", "Unknown"),
                 )
                 return
 
             # Deduplicate: one RiskApproved per (symbol, side) per time window
             if self._should_skip_debounce(symbol, side):
-                logger.info(
-                    "trading_handler_debounce_skip",
+                self._log_entry_rejected(
+                    "debounce",
                     symbol=symbol,
-                    side=side,
+                    signal=signal,
                     event_id=event.event_id,
-                    message="Skipping duplicate RiskApproved within signal window",
+                    side=side,
+                    debounce_seconds=TRADE_SIGNAL_DEBOUNCE_SECONDS,
                 )
                 return
 
@@ -255,14 +283,14 @@ class TradingEventHandler:
                 stop_pct = settings.stop_loss_percentage
                 take_pct = settings.take_profit_percentage
                 if not self._check_entry_profit_potential(entry_price, side, stop_pct, take_pct):
-                    logger.info(
-                        "trading_handler_profit_gate_rejected",
+                    self._log_entry_rejected(
+                        "profit_gate",
                         symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
                         side=side,
                         entry_price=entry_price,
                         min_ratio=MIN_RISK_REWARD_RATIO,
-                        event_id=event.event_id,
-                        message="Skipping trade: risk/reward below minimum",
                     )
                     return
 
@@ -271,33 +299,33 @@ class TradingEventHandler:
                 trend_15m = features.get("trend_15m")
                 if trend_15m is not None:
                     if signal in ("BUY", "STRONG_BUY") and trend_15m < 0:
-                        logger.info(
-                            "mtf_filter_blocked",
+                        self._log_entry_rejected(
+                            "mtf_filter",
                             symbol=symbol,
                             signal=signal,
-                            trend_15m=trend_15m,
                             event_id=event.event_id,
+                            trend_15m=trend_15m,
                         )
                         return
                     if signal in ("SELL", "STRONG_SELL") and trend_15m > 0:
-                        logger.info(
-                            "mtf_filter_blocked",
+                        self._log_entry_rejected(
+                            "mtf_filter",
                             symbol=symbol,
                             signal=signal,
-                            trend_15m=trend_15m,
                             event_id=event.event_id,
+                            trend_15m=trend_15m,
                         )
                         return
 
             # ADX ranging market filter: block mild BUY/SELL in low trend strength
             adx = features.get("adx_14")
             if adx is not None and adx < 20 and signal in ("BUY", "SELL"):
-                logger.info(
-                    "entry_blocked_ranging_market",
-                    adx=adx,
-                    signal=signal,
+                self._log_entry_rejected(
+                    "adx_ranging_filter",
                     symbol=symbol,
+                    signal=signal,
                     event_id=event.event_id,
+                    adx=adx,
                 )
                 return
 

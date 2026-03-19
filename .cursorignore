@@ -11,10 +11,12 @@
 *.pth
 *.ckpt
 *.safetensors
-agent/model_storage/**/*.pkl
-agent/model_storage/**/*.h5
-agent/model_storage/**/*.onnx
-agent/model_storage/**/*.joblib
+
+# Allow ML models under agent/model_storage for Docker deployment (mirror .gitignore)
+!agent/model_storage/**/*.pkl
+!agent/model_storage/**/*.h5
+!agent/model_storage/**/*.onnx
+!agent/model_storage/**/*.joblib
 
 # Build artifacts
 __pycache__/

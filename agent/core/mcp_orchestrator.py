@@ -43,6 +43,7 @@ class MCPOrchestrator:
         self.model_registry: Optional[MCPModelRegistry] = None
         self.reasoning_engine: Optional[MCPReasoningEngine] = None
         self.vector_store: Optional[VectorMemoryStore] = None
+        self._required_feature_names_cache: List[str] = []
         self.delta_client = None  # Set by agent for 15m trend (MTF confirmation)
         self._initialized = False
     
@@ -67,17 +68,49 @@ class MCPOrchestrator:
             logger.info("mcp_orchestrator_models_discovered",
                        model_count=len(discovered_models),
                        registry_models=len(self.model_registry.models))
+            self._required_feature_names_cache = (
+                self.model_registry.get_required_feature_names()
+                if self.model_registry
+                else []
+            )
+            logger.info(
+                "mcp_orchestrator_required_features_cached",
+                feature_count=len(self._required_feature_names_cache),
+                source="model_registry" if self._required_feature_names_cache else "fallback_pending",
+            )
 
-            # Enforce that at least one ML model is available before continuing.
+            # Enforce that at least one ML model is available before continuing
+            # when strict mode is enabled. In non-strict (best-effort) mode the agent will
+            # continue in monitoring mode without ML predictions.
+            # Default to best-effort (False) so v4-only deployments do not crash-loop
+            # when metadata/artifacts are temporarily unavailable.
+            require_models = getattr(settings, "require_models_on_startup", False)
             if not self.model_registry.models:
-                logger.critical(
-                    "mcp_orchestrator_no_models_loaded",
-                    discovered_count=len(discovered_models),
-                    message="No ML models were loaded during initialization. Agent cannot run without models.",
-                )
-                raise RuntimeError(
-                    "MCP Orchestrator initialization failed: no ML models loaded."
-                )
+                if require_models:
+                    logger.critical(
+                        "mcp_orchestrator_no_models_loaded",
+                        discovered_count=len(discovered_models),
+                        discovery_mode="v4_only",
+                        message=(
+                            "No ML models were loaded during initialization in v4-only mode and "
+                            "require_models_on_startup=True. Agent cannot run without v4 models."
+                        ),
+                    )
+                    raise RuntimeError(
+                        "MCP Orchestrator initialization failed: no v4 ML models loaded."
+                    )
+                else:
+                    logger.warning(
+                        "mcp_orchestrator_no_models_loaded_monitoring_mode",
+                        discovered_count=len(discovered_models),
+                         discovery_mode="v4_only",
+                        message=(
+                            "No v4 ML models were loaded during initialization in v4-only mode and "
+                            "require_models_on_startup=False. "
+                            "Agent will continue in monitoring mode without ML predictions until "
+                            "v4 metadata/artifacts are available."
+                        ),
+                    )
 
             logger.info("mcp_orchestrator_model_registry_initialized")
 
@@ -309,23 +342,15 @@ class MCPOrchestrator:
                 except Exception as e:
                     logger.debug("mcp_orchestrator_trend_15m_failed", symbol=symbol, error=str(e))
 
+            model_predictions_payload: List[Dict[str, Any]] = [
+                self._serialize_model_prediction(pred)
+                for pred in model_response.predictions
+            ]
+
             market_context_for_reasoning: Dict[str, Any] = {
                 **(context or {}),
                 "features": features_dict,
-                "model_predictions": [
-                    {
-                        "model_name": pred.model_name,
-                        "model_version": pred.model_version,
-                        "prediction": pred.prediction,
-                        "confidence": pred.confidence,
-                        "reasoning": pred.reasoning,
-                        "features_used": getattr(pred, "features_used", []),
-                        "feature_importance": getattr(pred, "feature_importance", {}),
-                        "health_status": getattr(pred, "health_status", "healthy"),
-                        "model_type": getattr(pred, "model_type", "unknown"),
-                    }
-                    for pred in model_response.predictions
-                ],
+                "model_predictions": model_predictions_payload,
                 "consensus_signal": model_response.consensus_prediction,
                 "consensus_confidence": model_response.consensus_confidence,
                 # Keep both the qualitative and quantitative quality scores so
@@ -354,20 +379,7 @@ class MCPOrchestrator:
                     "count": len(feature_response.features)
                 },
                 "models": {
-                    "predictions": [
-                        {
-                            "model_name": pred.model_name,
-                            "model_version": pred.model_version,
-                            "prediction": pred.prediction,
-                            "confidence": pred.confidence,
-                            "reasoning": pred.reasoning,
-                            "features_used": pred.features_used,
-                            "feature_importance": pred.feature_importance,
-                            "computation_time_ms": pred.computation_time_ms,
-                            "health_status": pred.health_status
-                        }
-                        for pred in model_response.predictions
-                    ],
+                    "predictions": model_predictions_payload,
                     "consensus_prediction": model_response.consensus_prediction,
                     "consensus_confidence": model_response.consensus_confidence,
                     "healthy_models": model_response.healthy_models,
@@ -376,20 +388,7 @@ class MCPOrchestrator:
                 # Expose model_predictions and market_context at the top level
                 # so HTTP and event consumers can access them directly without
                 # re-deriving from nested structures.
-                "model_predictions": [
-                    {
-                        "model_name": pred.model_name,
-                        "model_version": pred.model_version,
-                        "prediction": pred.prediction,
-                        "confidence": pred.confidence,
-                        "reasoning": pred.reasoning,
-                        "features_used": pred.features_used,
-                        "feature_importance": pred.feature_importance,
-                        "computation_time_ms": pred.computation_time_ms,
-                        "health_status": pred.health_status,
-                    }
-                    for pred in model_response.predictions
-                ],
+                "model_predictions": model_predictions_payload,
                 "market_context": market_context_for_reasoning,
                 "reasoning": {
                     "chain_id": reasoning_chain.chain_id,
@@ -539,7 +538,20 @@ class MCPOrchestrator:
 
     def _get_required_features(self) -> List[str]:
         """Get list of required features for ML models (canonical list)."""
+        # Prefer feature names required by registered models (v4 metadata order) so
+        # feature server and model input align; fall back to cached values, then canonical.
+        names = self.model_registry.get_required_feature_names() if self.model_registry else []
+        if names:
+            self._required_feature_names_cache = list(names)
+            return list(names)
+        if self._required_feature_names_cache:
+            return list(self._required_feature_names_cache)
         from agent.data.feature_list import get_feature_list
+        logger.warning(
+            "mcp_orchestrator_required_features_fallback_canonical",
+            feature_count=len(get_feature_list()),
+            message="Model-specific feature requirements unavailable, falling back to canonical feature list.",
+        )
         return get_feature_list()
         
     def _extract_decision_from_reasoning(self, reasoning_chain: MCPReasoningChain) -> Dict[str, Any]:
@@ -691,6 +703,23 @@ class MCPOrchestrator:
             )
 
         return normalized
+
+    @staticmethod
+    def _serialize_model_prediction(pred: Any) -> Dict[str, Any]:
+        """Serialize model prediction while preserving model-level context."""
+        return {
+            "model_name": pred.model_name,
+            "model_version": pred.model_version,
+            "prediction": pred.prediction,
+            "confidence": pred.confidence,
+            "reasoning": pred.reasoning,
+            "features_used": getattr(pred, "features_used", []),
+            "feature_importance": getattr(pred, "feature_importance", {}),
+            "computation_time_ms": getattr(pred, "computation_time_ms", 0.0),
+            "health_status": getattr(pred, "health_status", "healthy"),
+            "model_type": getattr(pred, "model_type", "unknown"),
+            "context": getattr(pred, "context", None),
+        }
 
     def _build_decision_context_for_storage(
         self,

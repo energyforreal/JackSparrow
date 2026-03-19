@@ -71,3 +71,46 @@ def drift_checker_from_schema(
         return lambda _: []
     names = feature_names or list(stats.keys())
     return lambda vec: check_drift(vec, names, stats, threshold_sigma)
+
+
+# Pattern feature prefixes for activation rate monitoring
+PATTERN_FEATURE_PREFIXES = ("cdl_", "chp_", "sr_", "tl_", "bo_")
+
+
+def get_pattern_feature_activation_rates(
+    feature_vectors: List[List[float]],
+    feature_names: List[str],
+) -> Dict[str, float]:
+    """
+    Compute activation rate (fraction of 1s) for binary pattern features
+    across a batch of feature vectors. Used to track live distribution
+    vs training baseline.
+    """
+    if not feature_vectors:
+        return {}
+    n = len(feature_vectors)
+    sums: Dict[str, float] = {}
+    for vec in feature_vectors:
+        for name, val in zip(feature_names, vec):
+            if any(name.startswith(p) for p in PATTERN_FEATURE_PREFIXES):
+                sums[name] = sums.get(name, 0) + (1.0 if float(val) > 0.5 else 0.0)
+    return {k: v / n for k, v in sums.items()}
+
+
+def check_pattern_activation_drift(
+    live_rates: Dict[str, float],
+    training_rates: Dict[str, float],
+    threshold: float = 0.15,
+) -> List[str]:
+    """
+    Return pattern features whose live activation rate diverges from training
+    by more than threshold (absolute difference).
+    """
+    drifted = []
+    for name, live_val in live_rates.items():
+        train_val = training_rates.get(name)
+        if train_val is None:
+            continue
+        if abs(live_val - train_val) > threshold:
+            drifted.append(name)
+    return drifted

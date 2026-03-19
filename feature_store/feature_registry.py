@@ -36,6 +36,41 @@ FEATURE_LIST: List[str] = [
 
 EXPECTED_FEATURE_COUNT: int = len(FEATURE_LIST)
 
+# Candlestick pattern features (~40)
+CANDLESTICK_FEATURES: List[str] = [
+    "cdl_doji", "cdl_long_legged_doji", "cdl_dragonfly_doji", "cdl_gravestone_doji",
+    "cdl_hammer", "cdl_inv_hammer", "cdl_hanging_man", "cdl_shooting_star",
+    "cdl_bull_marubozu", "cdl_bear_marubozu", "cdl_spinning_top",
+    "cdl_bull_engulfing", "cdl_bear_engulfing", "cdl_bull_harami", "cdl_bear_harami",
+    "cdl_piercing", "cdl_dark_cloud", "cdl_tweezer_top", "cdl_tweezer_bottom",
+    "cdl_bull_kicker", "cdl_bear_kicker",
+    "cdl_morning_star", "cdl_evening_star", "cdl_three_white_soldiers",
+    "cdl_three_black_crows", "cdl_three_inside_up", "cdl_three_inside_down",
+    "cdl_abandoned_baby_bull", "cdl_abandoned_baby_bear",
+    "cdl_bull_score", "cdl_bear_score", "cdl_net_score", "cdl_reversal_signal",
+    "cdl_indecision_score", "cdl_body_ratio", "cdl_upper_wick_ratio",
+    "cdl_lower_wick_ratio", "cdl_consecutive_bull", "cdl_consecutive_bear",
+]
+
+# Chart pattern features (~32)
+CHART_PATTERN_FEATURES: List[str] = [
+    "sr_support_dist_pct", "sr_resistance_dist_pct",
+    "sr_at_support", "sr_at_resistance",
+    "sr_support_strength", "sr_resistance_strength", "sr_range_position",
+    "tl_uptrend_detected", "tl_downtrend_detected", "tl_trend_slope",
+    "tl_dist_to_trendline", "tl_near_trendline", "tl_breakout_up", "tl_breakout_down",
+    "chp_bull_flag", "chp_bear_flag", "chp_bull_flag_strength", "chp_bear_flag_strength",
+    "chp_asc_triangle", "chp_desc_triangle", "chp_sym_triangle", "chp_triangle_apex_dist",
+    "chp_double_top", "chp_double_bottom", "chp_double_top_dist", "chp_double_bottom_dist",
+    "chp_hs_detected", "chp_ihs_detected",
+    "bo_at_high", "bo_at_low", "bo_volume_confirmation", "bo_breakout_score",
+]
+
+# Expanded feature list (canonical + candlestick + chart patterns, ~122 total)
+EXPANDED_FEATURE_LIST: List[str] = (
+    FEATURE_LIST + CANDLESTICK_FEATURES + CHART_PATTERN_FEATURES
+)
+
 FEATURE_VERSION = "1.0"
 
 

@@ -73,9 +73,11 @@ class MCPModelRegistry:
     
     async def initialize(self):
         """Initialize model registry."""
-        # Models will be registered via model discovery
-        # Register event handler
-        event_bus.subscribe(EventType.MODEL_PREDICTION_REQUEST, self._handle_prediction_request_event)
+        # Models will be registered via model discovery.
+        # Do NOT subscribe to MODEL_PREDICTION_REQUEST here: the orchestrator is the single
+        # authoritative handler for prediction requests and calls the registry internally.
+        # Duplicate subscription caused DecisionReadyEvent from a second path without
+        # market_context.features (e.g. volatility), leading to trading handler skipping trades.
     
     async def shutdown(self):
         """Shutdown all models."""
@@ -123,7 +125,22 @@ class MCPModelRegistry:
     def list_models(self) -> List[str]:
         """List names of all registered models."""
         return list(self.models.keys())
-    
+
+    def get_required_feature_names(self) -> List[str]:
+        """Return union of feature names required by all registered models (e.g. v4 metadata order).
+        Used so the orchestrator requests exactly the features models need, preserving order per model.
+        """
+        seen: set = set()
+        out: List[str] = []
+        for model in self.models.values():
+            info = model.get_model_info()
+            names = info.get("features_required") or info.get("feature_list") or []
+            for name in names:
+                if name and name not in seen:
+                    seen.add(name)
+                    out.append(name)
+        return out if out else []
+
     def unregister_model(self, model_name: str):
         """Unregister model node."""
         if model_name in self.models:
@@ -847,9 +864,10 @@ class MCPModelRegistry:
         
         # Determine overall status
         # If no models are loaded, return "unknown" (acceptable in paper trading mode)
-        # If all models are healthy, return "healthy"
-        # If some models are unhealthy, return "degraded"
-        # If all models are unhealthy (but models exist), return "unhealthy"
+        # If all models are healthy, return "up"
+        # If some models are healthy, return "degraded"
+        # If no models are healthy but models exist, return "degraded" (not "down") so UI shows warning
+        # - 0 healthy often means "no predictions run yet" rather than total failure
         if len(self.models) == 0:
             registry_health = "unknown"
             status = "unknown"
@@ -860,9 +878,9 @@ class MCPModelRegistry:
             registry_health = "degraded"
             status = "degraded"
         else:
-            # All models exist but none are healthy
-            registry_health = "unhealthy"
-            status = "down"
+            # All models exist but none counted healthy (e.g. no predictions yet or health check pending)
+            registry_health = "degraded"
+            status = "degraded"
         
         # Update discovery summary to reflect actual registry state if there's a discrepancy
         # This ensures the discovery summary is accurate

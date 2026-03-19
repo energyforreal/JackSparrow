@@ -19,6 +19,11 @@ from agent.events.schemas import FeatureRequestEvent, FeatureComputedEvent, Even
 
 logger = structlog.get_logger()
 
+# Pattern features need sufficient candle history (chart patterns use 60-bar lookback)
+MIN_CANDLES_FOR_PATTERNS = 100
+CANDLES_FOR_PATTERNS = 200
+PATTERN_FEATURE_PREFIXES = ("cdl_", "chp_", "sr_", "tl_", "bo_")
+
 
 class FeatureQuality(str, Enum):
     """Feature quality enumeration."""
@@ -186,10 +191,14 @@ class MCPFeatureServer:
         
         features: List[MCPFeature] = []
         
-        # Get market data
+        # Get market data - use 200 candles when pattern features requested
+        has_pattern_features = any(
+            name.startswith(PATTERN_FEATURE_PREFIXES) for name in request.feature_names
+        )
+        limit = CANDLES_FOR_PATTERNS if has_pattern_features else 100
         market_data = await self.market_data_service.get_market_data(
             symbol=request.symbol,
-            limit=100
+            limit=limit
         )
         
         if not market_data or not market_data.get("candles"):
@@ -202,10 +211,34 @@ class MCPFeatureServer:
                 request_id=request_id
             )
         
+        candles = market_data.get("candles", []) if market_data else []
+        candle_count = len(candles)
+
         # Compute each feature
         for feature_name in request.feature_names:
             start_time = time.time()
-            
+
+            # Candle count guard for pattern features
+            if any(feature_name.startswith(p) for p in PATTERN_FEATURE_PREFIXES):
+                if candle_count < MIN_CANDLES_FOR_PATTERNS:
+                    logger.warning(
+                        "feature_server_insufficient_candles_for_patterns",
+                        feature_name=feature_name,
+                        candle_count=candle_count,
+                        min_required=MIN_CANDLES_FOR_PATTERNS,
+                        message="Pattern features set to 0 due to insufficient candles",
+                    )
+                    features.append(MCPFeature(
+                        name=feature_name,
+                        version=self.feature_registry.get(feature_name, "1.0.0"),
+                        value=0.0,
+                        timestamp=timestamp,
+                        quality=FeatureQuality.DEGRADED,
+                        metadata={"reason": "insufficient_candles"},
+                        computation_time_ms=0.0
+                    ))
+                    continue
+
             try:
                 # Compute feature
                 feature_value = await self._compute_feature(

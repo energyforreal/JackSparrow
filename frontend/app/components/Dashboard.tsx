@@ -185,6 +185,9 @@ export function Dashboard() {
                 isLoading={isLoading}
                 modelConsensus={signal?.model_consensus}
                 individualModelReasoning={signal?.individual_model_reasoning}
+                modelVersion={signal?.model_version ?? modelData?.model_version}
+                inferenceLatencyMs={signal?.inference_latency_ms ?? modelData?.inference_latency_ms}
+                inferenceMode={signal?.inference_mode ?? modelData?.inference_mode}
               />
             </ErrorBoundary>
           </TabsContent>

@@ -226,6 +226,16 @@ class Settings(BaseSettings):
         env="HALF_SPREAD_PCT",
         description="Paper trading: simulated half bid-ask spread (0.02%)"
     )
+    paper_ticker_max_age_seconds: float = Field(
+        default=10.0,
+        env="PAPER_TICKER_MAX_AGE_SECONDS",
+        description="Maximum ticker age for paper-trade fills before stale handling"
+    )
+    paper_fill_price_fallback_enabled: bool = Field(
+        default=True,
+        env="PAPER_FILL_PRICE_FALLBACK_ENABLED",
+        description="Allow fallback to latest context market price when ticker is stale"
+    )
     min_monitor_interval_seconds: float = Field(
         default=2.0,
         env="MIN_MONITOR_INTERVAL_SECONDS",
@@ -419,6 +429,26 @@ class Settings(BaseSettings):
         default=60.0,
         env="WEBSOCKET_FALLBACK_POLL_INTERVAL",
         description="REST API polling interval when WebSocket is unavailable (seconds)"
+    )
+
+    # Candle monitoring cadence (REST calls) - can be different from ticker polling cadence.
+    candle_poll_interval_seconds: int = Field(
+        default=30,
+        env="CANDLE_POLL_INTERVAL_SECONDS",
+        description="How often to check for completed candles while streaming (seconds)"
+    )
+    # Signal staleness configuration
+    signal_staleness_minutes: int = Field(
+        default=10,
+        env="SIGNAL_STALENESS_MINUTES",
+        description="Minutes since last DecisionReadyEvent after which agent should proactively trigger a new prediction"
+    )
+
+    # Market data recovery configuration
+    agent_no_candle_restart_minutes: int = Field(
+        default=10,
+        env="AGENT_NO_CANDLE_RESTART_MINUTES",
+        description="Minutes without candle closes before attempting a market data stream restart"
     )
 
     @field_validator("trading_mode", mode="before")

@@ -173,7 +173,7 @@ Write-Host ""
 Write-ColorOutput "Service URLs:" "Green"
 $frontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3000" }
 $backendPort = if ($env:BACKEND_PORT) { $env:BACKEND_PORT } else { "8000" }
-$agentPort = if ($env:FEATURE_SERVER_PORT) { $env:FEATURE_SERVER_PORT } else { "8001" }
+$agentPort = if ($env:FEATURE_SERVER_PORT) { $env:FEATURE_SERVER_PORT } else { "8002" }
 
 Write-Host "  Frontend:    http://localhost:$frontendPort"
 Write-Host "  Backend API: http://localhost:$backendPort"

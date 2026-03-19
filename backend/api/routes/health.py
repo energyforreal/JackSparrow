@@ -13,9 +13,11 @@ from collections import defaultdict
 from typing import Dict, Tuple
 
 from backend.core.database import get_db
-from backend.core.redis import redis_health_check, get_cache, set_cache
+from backend.core.redis import redis_health_check, get_cache, set_cache, set_model_health_heartbeat, get_model_health_heartbeat
+from backend.core.config import settings
 from backend.api.models.responses import HealthResponse, HealthServiceStatus
 from backend.services.agent_service import agent_service
+from backend.services.model_service import model_service
 
 # Health check endpoints are intentionally public (no authentication required)
 # This allows monitoring systems and load balancers to check service health
@@ -161,18 +163,26 @@ async def check_model_nodes_health() -> HealthServiceStatus:
                 )
             
             # Use status from agent if available and not unknown, otherwise determine from healthy count
+            # Normalize "down" to "degraded" when agent is up and models are loaded (0 healthy can mean "no predictions yet")
             if status_from_agent != "unknown":
-                return HealthServiceStatus(
-                    status=status_from_agent,
-                    details=model_nodes_status
-                )
+                display_status = status_from_agent
+                details_out = dict(model_nodes_status)
+                if status_from_agent == "down" and agent_available and total_count > 0 and healthy_count == 0:
+                    display_status = "degraded"
+                    details_out["status"] = "degraded"
+                    details_out["note"] = (
+                        details_out.get("note")
+                        or f"Models loaded ({total_count}); run predictions to refresh healthy count (0/{total_count})"
+                    )
+                return HealthServiceStatus(status=display_status, details=details_out)
             else:
                 # Infer status from available data
                 if total_count > 0:
                     if healthy_count > 0:
                         inferred_status = "up"
                     elif healthy_count == 0 and total_count > 0:
-                        inferred_status = "down"
+                        # Show degraded (warning) not down when agent is available - 0 healthy may mean no predictions yet
+                        inferred_status = "degraded" if agent_available else "down"
                     elif agent_available:
                         # Agent is UP - infer model nodes are UP even if status unknown
                         inferred_status = "up"
@@ -184,6 +194,10 @@ async def check_model_nodes_health() -> HealthServiceStatus:
                     updated_details["status"] = inferred_status
                     if inferred_status == "up" and agent_available:
                         updated_details["note"] = f"Inferred UP - agent available, {healthy_count}/{total_count} models"
+                    elif inferred_status == "degraded":
+                        updated_details["note"] = (
+                            f"Models loaded ({total_count}); healthy count 0/{total_count} (run predictions to refresh)"
+                        )
                     else:
                         updated_details["note"] = f"Inferred status from {healthy_count}/{total_count} healthy models"
                     
@@ -294,6 +308,35 @@ async def check_delta_exchange_health() -> HealthServiceStatus:
             status="unknown",
             error=f"Cannot check Delta Exchange: {str(e)}",
             details={"note": "Agent service unavailable, cannot verify Delta Exchange"}
+        )
+
+
+async def check_model_serving_health() -> HealthServiceStatus:
+    """Check model-serving endpoint health (direct HTTP)."""
+    try:
+        health = await model_service.get_health()
+        status_str = health.get("status", "down")
+        latency_ms = health.get("latency_ms")
+        error = health.get("error")
+        details = health.get("details") or {}
+        # Optionally write heartbeat to Redis for other consumers
+        ttl = getattr(settings, "model_health_ttl", 30)
+        if ttl > 0:
+            await set_model_health_heartbeat(
+                {"status": status_str, "latency_ms": latency_ms, "details": details},
+                ttl=ttl,
+            )
+        return HealthServiceStatus(
+            status=status_str,
+            latency_ms=latency_ms,
+            error=error,
+            details=details,
+        )
+    except Exception as e:
+        return HealthServiceStatus(
+            status="down",
+            error=str(e),
+            details={"note": "Model serving check failed"},
         )
 
 
@@ -441,7 +484,10 @@ async def check_overall_health(db: AsyncSession) -> dict:
             degradation_reasons.append("Feature server is down")
         health_scores.append(0.0)
     
-    # Check model nodes
+    # Check model serving (direct HTTP predict endpoint; failure does not reduce score — agent fallback)
+    model_serving_health = await check_model_serving_health()
+
+    # Check model nodes (via agent)
     model_health = await check_model_nodes_health()
     model_weight = 0.25
     if model_health.status == "up":
@@ -457,7 +503,13 @@ async def check_overall_health(db: AsyncSession) -> dict:
         health_scores.append(model_weight * 0.5)
     else:
         if model_health.status != "unknown":
-            degradation_reasons.append("No model nodes are healthy")
+            is_paper_mode = str(getattr(settings, "trading_mode", "paper")).lower() == "paper"
+            if is_paper_mode:
+                degradation_reasons.append(
+                    "Model nodes are degraded; paper mode remains available via agent fallback."
+                )
+            else:
+                degradation_reasons.append("No model nodes are healthy")
         health_scores.append(0.0)
     
     # Check Delta Exchange
@@ -495,6 +547,22 @@ async def check_overall_health(db: AsyncSession) -> dict:
     def _to_dict(obj):
         return obj.model_dump() if hasattr(obj, "model_dump") else obj
 
+    # Trading readiness:
+    # - In paper mode, system can operate via agent fallback even when model health is degraded.
+    # - In live mode, keep stricter requirement on model availability.
+    model_status = getattr(model_health, "status", "unknown")
+    details = getattr(model_health, "details", None) or {}
+    healthy_models = details.get("healthy_models", 0)
+    total_models = details.get("total_models", 0)
+    is_paper_mode = str(getattr(settings, "trading_mode", "paper")).lower() == "paper"
+    if is_paper_mode:
+        trading_ready = agent_health.status in {"up", "unknown"}
+    else:
+        trading_ready = (
+            model_status == "up"
+            and (total_models == 0 or (healthy_models is not None and healthy_models > 0))
+        )
+
     result = {
         "status": status_str,
         "health_score": round(health_score, 3),
@@ -503,12 +571,14 @@ async def check_overall_health(db: AsyncSession) -> dict:
             "redis": _to_dict(redis_status),
             "agent": _to_dict(agent_health),
             "feature_server": _to_dict(feature_health),
+            "model_serving": _to_dict(model_serving_health),
             "model_nodes": _to_dict(model_health),
             "delta_exchange": _to_dict(delta_health),
             "reasoning_engine": _to_dict(reasoning_health),
         },
         "agent_state": agent_state,
         "degradation_reasons": degradation_reasons,
+        "trading_ready": trading_ready,
         "timestamp": datetime.utcnow(),
     }
     

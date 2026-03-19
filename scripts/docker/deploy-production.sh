@@ -167,6 +167,16 @@ check_health "backend" 30 || echo -e "${YELLOW}Warning: Backend health check fai
 check_health "agent" 40 || echo -e "${YELLOW}Warning: Agent health check failed${NC}"
 check_health "frontend" 30 || echo -e "${YELLOW}Warning: Frontend health check failed${NC}"
 
+# Optional: verify backend health includes model_serving (v4 integration)
+if command -v curl &>/dev/null; then
+  BACKEND_URL="${BACKEND_URL:-http://localhost:8000}"
+  if curl -sf "${BACKEND_URL}/health" | grep -q "model_serving"; then
+    echo -e "${GREEN}✓ Backend health includes model_serving${NC}"
+  else
+    echo -e "${YELLOW}⚠ Backend health may not include model_serving (optional)${NC}"
+  fi
+fi
+
 # Step 7: Display service status
 echo ""
 echo -e "${GREEN}========================================${NC}"

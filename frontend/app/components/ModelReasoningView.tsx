@@ -9,9 +9,11 @@ import { formatConfidence } from '@/utils/formatters'
 
 interface ModelReasoningViewProps {
   modelConsensus?: ModelConsensus[]
-  // Individual model reasoning is still accepted for future use,
-  // but intentionally not rendered to keep the UI focused.
   individualModelReasoning?: ModelReasoning[]
+  /** Model version or ensemble descriptor (e.g. v4) */
+  modelVersion?: string
+  /** Inference latency in ms */
+  inferenceLatencyMs?: number
 }
 
 const getSignalBadgeClasses = (signal: SignalType) => {
@@ -33,6 +35,8 @@ const getSignalBadgeClasses = (signal: SignalType) => {
 
 export function ModelReasoningView({
   modelConsensus,
+  modelVersion,
+  inferenceLatencyMs,
 }: ModelReasoningViewProps) {
   const hasConsensus = modelConsensus && modelConsensus.length > 0
 
@@ -76,7 +80,16 @@ export function ModelReasoningView({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Model Reasoning</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>Model Reasoning</CardTitle>
+          {(modelVersion != null || inferenceLatencyMs != null) && (
+            <span className="text-xs text-muted-foreground">
+              {modelVersion && <span>{modelVersion}</span>}
+              {modelVersion && inferenceLatencyMs != null && ' · '}
+              {inferenceLatencyMs != null && <span>{Math.round(inferenceLatencyMs)}ms</span>}
+            </span>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>

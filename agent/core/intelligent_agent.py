@@ -78,6 +78,31 @@ from agent.events.handlers import (
 )
 
 
+async def _safe_shutdown_component(name: str, component: Any) -> None:
+    """Safely shut down an optional component.
+
+    Ensures that shutdown is idempotent and never raises if the component
+    was only partially initialized or missing.
+    """
+    if component is None:
+        return
+
+    shutdown = getattr(component, "shutdown", None)
+    if shutdown is None or not asyncio.iscoroutinefunction(shutdown):
+        return
+
+    try:
+        await shutdown()
+    except Exception as e:  # pragma: no cover - defensive logging path
+        logger.warning(
+            "agent_component_shutdown_error",
+            service="agent",
+            component=name,
+            error=str(e),
+            exc_info=True,
+        )
+
+
 class IntelligentAgent:
     """Main intelligent agent class."""
     
@@ -97,11 +122,8 @@ class IntelligentAgent:
         self.delta_client = DeltaExchangeClient()
         self.model_discovery = None  # Will be initialized after model_registry is set
         self.market_data_service = MarketDataService()
-        self.feature_server_api = FeatureServerAPI(
-            feature_server=self.mcp_orchestrator.feature_server,
-            host=settings.feature_server_host,
-            port=settings.feature_server_port,
-        )
+        # FeatureServerAPI is bound to the initialized MCP Feature Server in initialize().
+        self.feature_server_api: FeatureServerAPI | None = None
         self.running = False
         self.command_queue = settings.agent_command_queue
         self.default_symbol = settings.trading_symbol or settings.agent_symbol
@@ -178,9 +200,16 @@ class IntelligentAgent:
         # Initialize event bus
         await event_bus.initialize()
         
-        # Initialize MCP orchestrator
-        await self.mcp_orchestrator.initialize()
-        await self.feature_server_api.start()
+        # Initialize MCP orchestrator once and bind HTTP feature bridge to its feature server.
+        if not getattr(self.mcp_orchestrator, "_initialized", False):
+            await self.mcp_orchestrator.initialize()
+        if self.mcp_orchestrator.feature_server is not None:
+            self.feature_server_api = FeatureServerAPI(
+                feature_server=self.mcp_orchestrator.feature_server,
+                host=settings.feature_server_host,
+                port=settings.feature_server_port,
+            )
+            await self.feature_server_api.start()
 
         # Set model registry after MCP orchestrator is initialized
         # Model discovery and initialization is handled by MCP orchestrator
@@ -195,6 +224,12 @@ class IntelligentAgent:
         self.mcp_orchestrator.delta_client = self.delta_client  # For MTF trend_15m when enabled
         await self.learning_system.initialize()
         await self.market_data_service.initialize()
+
+        # Register Redis fallback: when Redis is unavailable, trigger pipeline directly
+        async def _direct_pipeline_trigger(symbol: str, context: dict) -> None:
+            await self.mcp_orchestrator.process_prediction_request(symbol, context)
+
+        self.market_data_service.set_pipeline_direct_trigger(_direct_pipeline_trigger)
         
         # Initialize model weights from performance metrics if available
         try:
@@ -360,13 +395,8 @@ class IntelligentAgent:
                 message="Start mode disables automatic market data streaming",
             )
 
-        # Start position monitoring loop: check stop/take profit for open positions
-        self._position_monitor_task = asyncio.create_task(self._position_monitor_loop())
-        logger.info(
-            "agent_position_monitor_started",
-            service="agent",
-            message="Position monitoring loop started for stop loss / take profit",
-        )
+        # Position monitoring loop is started in start() after self.running = True
+        # so the loop does not exit immediately (while self.running).
 
     async def _position_monitor_loop(self) -> None:
         """Background loop: update position prices and run manage_position for stop/take profit."""
@@ -466,15 +496,31 @@ class IntelligentAgent:
                     error=str(e)
                 )
         
-        # Shutdown all components
-        await self.market_data_service.shutdown()
-        await self.learning_system.shutdown()
-        await execution_module.shutdown()
-        await self.risk_manager.shutdown()
-        await self.model_registry.shutdown()
-        await self.feature_server_api.shutdown()
-        await self.mcp_orchestrator.shutdown()
-        await event_bus.shutdown()
+        # Shutdown all components (null-safe and idempotent)
+        await _safe_shutdown_component(
+            "market_data_service", getattr(self, "market_data_service", None)
+        )
+        await _safe_shutdown_component(
+            "learning_system", getattr(self, "learning_system", None)
+        )
+        await _safe_shutdown_component("execution_module", execution_module)
+        await _safe_shutdown_component(
+            "risk_manager", getattr(self, "risk_manager", None)
+        )
+        # model_registry may not be initialized if MCP orchestrator startup failed.
+        # Use the orchestrator-owned registry when available so that shutdown
+        # remains consistent and null-safe.
+        registry = getattr(self.mcp_orchestrator, "model_registry", None)
+        if registry is None:
+            registry = getattr(self, "model_registry", None)
+        await _safe_shutdown_component("model_registry", registry)
+        await _safe_shutdown_component(
+            "feature_server_api", getattr(self, "feature_server_api", None)
+        )
+        await _safe_shutdown_component(
+            "mcp_orchestrator", getattr(self, "mcp_orchestrator", None)
+        )
+        await _safe_shutdown_component("event_bus", event_bus)
         
         logger.info(
             "agent_shut_down",
@@ -573,6 +619,14 @@ class IntelligentAgent:
         logger.info("agent_start_method_called")
         self.running = True
         logger.info("agent_running_set_to_true")
+
+        # Start position monitoring loop only after self.running is True so the loop runs
+        self._position_monitor_task = asyncio.create_task(self._position_monitor_loop())
+        logger.info(
+            "agent_position_monitor_started",
+            service="agent",
+            message="Position monitoring loop started for stop loss / take profit",
+        )
 
         # Start command handler (for backward compatibility)
         logger.info("agent_creating_command_task")
@@ -872,9 +926,9 @@ class IntelligentAgent:
                     note=note,
                 )
             elif healthy_models == 0 and total_models > 0:
-                # Models loaded but all unhealthy
-                model_status = "down"
-                note = f"{total_models} model(s) loaded but all are unhealthy."
+                # Models loaded but 0 healthy (may mean no predictions yet) - use degraded so UI shows warning not error
+                model_status = "degraded"
+                note = f"{total_models} model(s) loaded; 0 healthy (run predictions to refresh)."
             else:
                 # Models loaded and at least some are healthy
                 # If discovery_attempted is false but we have models, it's a data inconsistency - don't log warning
@@ -955,7 +1009,7 @@ class IntelligentAgent:
                 if healthy_count > 0:
                     detailed_health["model_nodes"]["status"] = "up"
                 elif healthy_count == 0 and total_count > 0:
-                    detailed_health["model_nodes"]["status"] = "down"
+                    detailed_health["model_nodes"]["status"] = "degraded"
                 detailed_health["model_nodes"]["note"] = f"Inferred status from {healthy_count}/{total_count} healthy models"
 
         if detailed_health["delta_exchange"].get("status") == "unknown":
@@ -1037,19 +1091,35 @@ class IntelligentAgent:
     async def _periodic_monitoring(self):
         """Periodic monitoring task to log agent status and decision generation metrics."""
         import time
+        from datetime import datetime, timezone
+        from collections import deque
         
         last_decision_time = None
         last_candle_time = None
+        last_stream_restart_attempt = 0.0
+        last_staleness_trigger_at: datetime | None = None
+        decisions_last_hour_times = deque()
+        candles_last_hour_times = deque()
+        metrics_window_seconds = 3600  # 1 hour rolling window
         
         # Subscribe to decision ready events to track last decision time
         async def track_decision(event):
             nonlocal last_decision_time
             last_decision_time = time.time()
+            now = last_decision_time
+            decisions_last_hour_times.append(now)
+            # Keep the deque bounded to the rolling window
+            while decisions_last_hour_times and decisions_last_hour_times[0] < now - metrics_window_seconds:
+                decisions_last_hour_times.popleft()
         
         # Subscribe to candle closed events to track last candle time
         async def track_candle(event):
             nonlocal last_candle_time
             last_candle_time = time.time()
+            now = last_candle_time
+            candles_last_hour_times.append(now)
+            while candles_last_hour_times and candles_last_hour_times[0] < now - metrics_window_seconds:
+                candles_last_hour_times.popleft()
         
         from agent.events.schemas import DecisionReadyEvent, CandleClosedEvent
         event_bus.subscribe(EventType.DECISION_READY, track_decision)
@@ -1069,6 +1139,19 @@ class IntelligentAgent:
                 if last_candle_time:
                     time_since_last_candle = time.time() - last_candle_time
 
+                # How long we wait for candle closes before attempting a stream recovery.
+                no_candle_restart_minutes = getattr(settings, "agent_no_candle_restart_minutes", 10) or 10
+                no_candle_restart_seconds = max(60, no_candle_restart_minutes * 60)
+
+                # Rolling metrics for the last hour
+                now = time.time()
+                while decisions_last_hour_times and decisions_last_hour_times[0] < now - metrics_window_seconds:
+                    decisions_last_hour_times.popleft()
+                while candles_last_hour_times and candles_last_hour_times[0] < now - metrics_window_seconds:
+                    candles_last_hour_times.popleft()
+                decisions_last_hour = len(decisions_last_hour_times)
+                candles_last_hour = len(candles_last_hour_times)
+
                 # Check market data service health
                 market_data_healthy = self._check_market_data_health()
                 websocket_connected = getattr(self.market_data_service, '_websocket_connected', False)
@@ -1083,6 +1166,13 @@ class IntelligentAgent:
                     market_data_healthy=market_data_healthy,
                     websocket_connected=websocket_connected,
                     streaming_running=streaming_running,
+                    decisions_last_hour=decisions_last_hour,
+                    candle_closes_last_hour=candles_last_hour,
+                    last_staleness_trigger_at=(
+                        last_staleness_trigger_at.isoformat()
+                        if last_staleness_trigger_at is not None
+                        else None
+                    ),
                     message="Agent periodic status check - decision generation monitoring"
                 )
 
@@ -1096,24 +1186,66 @@ class IntelligentAgent:
                         message="No decisions generated in last 30 minutes - check candle close events and decision pipeline"
                     )
 
-                # Log warning if no candle close events in last 20 minutes
-                if time_since_last_candle and time_since_last_candle > 1200:
+                # Log warning and attempt recovery if no candle close events in configured window.
+                if time_since_last_candle and time_since_last_candle > no_candle_restart_seconds:
                     logger.warning(
                         "agent_no_candle_closes",
                         service="agent",
                         state=current_state,
                         time_since_last_candle_minutes=int(time_since_last_candle / 60),
+                        no_candle_restart_minutes=no_candle_restart_minutes,
                         websocket_connected=websocket_connected,
                         streaming_running=streaming_running,
-                        message="No candle close events detected in last 20 minutes - check market data service"
+                        message=(
+                            f"No candle close events detected in last {no_candle_restart_minutes} minutes "
+                            f"- attempting market data recovery"
+                        )
                     )
 
-                    # Try to restart market data streaming if it's not running
-                    if self.start_mode == "MONITORING" and not streaming_running:
+                    # If we're in monitoring mode, restart the stream as a recovery action.
+                    if self.start_mode == "MONITORING":
+                        now = time.time()
+                        # Avoid restart spam if this loop runs frequently while the stream is failing.
+                        if now - last_stream_restart_attempt >= 60:
+                            last_stream_restart_attempt = now
+                            logger.info(
+                                "agent_attempting_market_data_restart",
+                                service="agent",
+                                message="Attempting to restart market data streaming due to missing candle closes",
+                            )
+                            try:
+                                await self.market_data_service.start_market_data_stream(
+                                    symbols=[self.default_symbol],
+                                    interval=self.primary_interval
+                                )
+                                logger.info(
+                                    "agent_market_data_stream_restarted",
+                                    service="agent",
+                                    symbols=[self.default_symbol],
+                                    interval=self.primary_interval,
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    "agent_market_data_stream_restart_failed",
+                                    service="agent",
+                                    error=str(e),
+                                    error_type=type(e).__name__,
+                                    message="Failed to restart market data streaming",
+                                    exc_info=True
+                                )
+
+                # Proactively restart if the stream is down, regardless of the candle timer.
+                # This addresses cases where the stream crashes but the last candle timestamp
+                # is still recent.
+                if self.start_mode == "MONITORING" and not streaming_running:
+                    now = time.time()
+                    # Avoid restart spam if the stream keeps failing immediately.
+                    if now - last_stream_restart_attempt >= 60:
+                        last_stream_restart_attempt = now
                         logger.info(
                             "agent_attempting_market_data_restart",
                             service="agent",
-                            message="Attempting to restart market data streaming due to no recent candle events"
+                            message="Attempting to restart market data streaming because stream is not running"
                         )
                         try:
                             await self.market_data_service.start_market_data_stream(
@@ -1135,6 +1267,52 @@ class IntelligentAgent:
                                 message="Failed to restart market data streaming",
                                 exc_info=True
                             )
+
+                # Proactively trigger a fresh prediction when signals have been
+                # stale for longer than the configured staleness window. This
+                # prevents the UI from appearing permanently \"stuck\" during
+                # extended low-volatility periods.
+                try:
+                    stale_minutes_cfg = getattr(settings, "signal_staleness_minutes", 10) or 10
+                    stale_seconds = max(60, stale_minutes_cfg * 60)
+                    if time_since_last_decision and time_since_last_decision > stale_seconds:
+                        logger.info(
+                            "agent_triggering_stale_signal_refresh",
+                            service="agent",
+                            state=current_state,
+                            symbol=self.default_symbol,
+                            time_since_last_decision_seconds=time_since_last_decision,
+                            staleness_threshold_seconds=stale_seconds,
+                            message=(
+                                "No decisions generated recently; emitting "
+                                "ModelPredictionRequestEvent for fresh signal"
+                            ),
+                        )
+                        last_staleness_trigger_at = datetime.now(timezone.utc)
+                        from agent.events.schemas import ModelPredictionRequestEvent
+
+                        prediction_event = ModelPredictionRequestEvent(
+                            source="intelligent_agent",
+                            payload={
+                                "symbol": self.default_symbol,
+                                "features": {},
+                                "context": {
+                                    "symbol": self.default_symbol,
+                                    "trigger": "staleness_watchdog",
+                                    "requested_at": datetime.now(timezone.utc),
+                                },
+                                "require_explanation": True,
+                            },
+                        )
+                        await event_bus.publish(prediction_event)
+                except Exception as trigger_error:
+                    logger.warning(
+                        "agent_stale_signal_refresh_failed",
+                        service="agent",
+                        error=str(trigger_error),
+                        error_type=type(trigger_error).__name__,
+                        message="Failed to trigger stale-signal refresh; will retry on next monitoring cycle",
+                    )
                     
             except asyncio.CancelledError:
                 break

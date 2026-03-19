@@ -205,6 +205,7 @@ class ModelPerformance(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     model_name = Column(String(100), nullable=False, index=True)
+    model_registry_id = Column(Integer, nullable=True, index=True)  # FK to model_registry.id when set
     timestamp = Column(TIMESTAMPTZ, nullable=False, index=True)
     prediction_accuracy = Column(DECIMAL(5, 4), nullable=True)
     profit_contribution = Column(DECIMAL(18, 8), nullable=True)
@@ -213,6 +214,58 @@ class ModelPerformance(Base):
     correct_predictions = Column(Integer, default=0)
     metadata_json = Column("metadata", JSONB, nullable=True)
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+
+
+class ModelRegistry(Base):
+    """Model registry: name, version, checksum, artifact path, status."""
+    __tablename__ = "model_registry"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, index=True)
+    version = Column(String(64), nullable=False, index=True)
+    checksum = Column(String(128), nullable=True)
+    artifact_path = Column(String(512), nullable=True)
+    status = Column(String(32), nullable=False, default="registered", index=True)  # registered, active, deprecated
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    updated_at = Column(TIMESTAMPTZ, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        Index("idx_model_registry_name_version", "name", "version", unique=True),
+    )
+
+
+class ModelDeployment(Base):
+    """Active deployment history for models."""
+    __tablename__ = "model_deployments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    model_registry_id = Column(Integer, nullable=False, index=True)  # FK to model_registry.id
+    deployed_at = Column(TIMESTAMPTZ, nullable=False, index=True)
+    environment = Column(String(64), nullable=True)  # dev, staging, production
+    status = Column(String(32), nullable=False, default="active", index=True)  # active, superseded
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+
+
+class PredictionAudit(Base):
+    """Audit log for prediction requests: request_id, model version, confidence, latency, outcome reference."""
+    __tablename__ = "prediction_audit"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String(255), nullable=False, index=True)
+    model_version = Column(String(64), nullable=True, index=True)  # or ensemble descriptor
+    symbol = Column(String(50), nullable=False, index=True)
+    confidence = Column(DECIMAL(5, 4), nullable=True)
+    latency_ms = Column(DECIMAL(12, 2), nullable=True)
+    source = Column(String(32), nullable=True, index=True)  # model_service, agent
+    outcome_reference = Column(String(255), nullable=True)  # e.g. decision_id or trade_id for later linkage
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    
+    __table_args__ = (
+        Index("idx_prediction_audit_symbol_created", "symbol", "created_at"),
+    )
 
 
 # Database dependency for FastAPI

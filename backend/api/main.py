@@ -27,7 +27,7 @@ logger = structlog.get_logger()
 from backend.core.database import engine, Base
 from backend.core.redis import get_redis, close_redis
 from backend.api.routes import health, trading, portfolio, market, admin, system
-from backend.api.websocket.manager import websocket_manager
+from backend.api.websocket.unified_manager import unified_websocket_manager
 from backend.services.agent_event_subscriber import agent_event_subscriber
 from backend.services.health_poller import health_poller
 
@@ -143,9 +143,9 @@ async def lifespan(app: FastAPI):
             exc_info=True
         )
     
-    # Initialize WebSocket manager
+    # Initialize unified WebSocket manager (single contract, legacy envelope compatible)
     try:
-        await websocket_manager.initialize()
+        await unified_websocket_manager.initialize()
         logger.info("backend_websocket_manager_initialized", service="backend")
     except Exception as e:
         logger.warning(
@@ -155,26 +155,31 @@ async def lifespan(app: FastAPI):
             exc_info=True
         )
     
-    # Initialize and start agent event subscriber
+    # Initialize and start agent event subscriber (separate block so failure does not block poller)
     logger.info("backend_starting_agent_event_subscriber", service="backend")
     try:
-        logger.info("backend_agent_event_subscriber_initializing", service="backend")
         await agent_event_subscriber.initialize()
-        logger.info("backend_agent_event_subscriber_starting", service="backend")
         await agent_event_subscriber.start()
         logger.info("backend_agent_event_subscriber_started", service="backend")
+    except Exception as e:
+        logger.warning(
+            "backend_agent_event_subscriber_init_warning",
+            service="backend",
+            error=str(e),
+            exc_info=True,
+            message="Agent event subscriber failed; WebSocket broadcasts may be incomplete",
+        )
 
-        # Start health poller for periodic updates
-        logger.info("backend_health_poller_starting", service="backend")
+    # Start health poller in separate block so it runs even if subscriber failed
+    try:
         await health_poller.start()
         logger.info("backend_health_poller_started", service="backend")
     except Exception as e:
         logger.warning(
-            "backend_services_init_warning",
+            "backend_health_poller_init_warning",
             service="backend",
             error=str(e),
-            exc_info=True,
-            message="Failed to initialize agent event subscriber and/or health poller"
+            message="Health poller failed to start",
         )
     
     logger.info("backend_started_successfully", service="backend")
@@ -196,7 +201,7 @@ async def lifespan(app: FastAPI):
             )
         
         await close_redis()
-        await websocket_manager.cleanup()
+        await unified_websocket_manager.cleanup()
         logger.info("backend_shut_down", service="backend")
     except Exception as e:
         logger.error(
@@ -258,13 +263,13 @@ app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(system.router, prefix="/api/v1", tags=["system"])
 
 
-# WebSocket endpoint for frontend clients
+# WebSocket endpoint for frontend clients (unified manager, legacy envelope)
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates to frontend clients."""
-    await websocket_manager.connect(websocket, is_agent=False)
+    await unified_websocket_manager.connect(websocket, is_agent=False)
     try:
-        await websocket_manager.handle_client(websocket)
+        await unified_websocket_manager.handle_client(websocket)
     except Exception as e:
         logger.error(
             "websocket_endpoint_error",
@@ -272,16 +277,16 @@ async def websocket_endpoint(websocket: WebSocket):
             exc_info=True
         )
     finally:
-        await websocket_manager.disconnect(websocket, is_agent=False)
+        await unified_websocket_manager.disconnect(websocket, is_agent=False)
 
 
 # WebSocket endpoint for agent connections
 @app.websocket("/ws/agent")
 async def agent_websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for agent to send events directly."""
-    await websocket_manager.connect(websocket, is_agent=True)
+    await unified_websocket_manager.connect(websocket, is_agent=True)
     try:
-        await websocket_manager.handle_agent_client(websocket)
+        await unified_websocket_manager.handle_agent_client(websocket)
     except Exception as e:
         logger.error(
             "agent_websocket_endpoint_error",
@@ -289,7 +294,7 @@ async def agent_websocket_endpoint(websocket: WebSocket):
             exc_info=True
         )
     finally:
-        await websocket_manager.disconnect(websocket, is_agent=True)
+        await unified_websocket_manager.disconnect(websocket, is_agent=True)
 
 
 # Root endpoint
