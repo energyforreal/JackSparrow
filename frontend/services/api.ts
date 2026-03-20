@@ -39,7 +39,16 @@ interface WebSocketLastMessage {
 // Global WebSocket connection reference
 // This will be set by the component using the API service
 let websocketSender: WebSocketSender | null = null
-let lastMessage: WebSocketLastMessage | null = null
+
+interface PendingCommandRequest {
+  command: string
+  requestId: string
+  resolve: (data: unknown) => void
+  reject: (error: Error) => void
+  timeoutId: ReturnType<typeof setTimeout>
+}
+
+const pendingCommandRequests: Map<string, PendingCommandRequest> = new Map()
 
 /**
  * Set the WebSocket sender function and message reference
@@ -47,19 +56,41 @@ let lastMessage: WebSocketLastMessage | null = null
  */
 export function setWebSocketConnection(
   sender: WebSocketSender,
-  messageRef: { current: WebSocketLastMessage | null }
+  _messageRef: { current: WebSocketLastMessage | null }
 ): void {
   websocketSender = sender
-  // Create a getter/setter for lastMessage
-  Object.defineProperty(window, '__apiLastMessage', {
-    get: () => messageRef.current,
-    set: (value: WebSocketLastMessage | null) => {
-      messageRef.current = value
-      lastMessage = value
-    },
-    configurable: true
-  })
-  lastMessage = messageRef.current
+}
+
+/**
+ * Resolve/reject any in-flight WebSocket command promise.
+ * Called by the WebSocket hook whenever a `type: "response"` message arrives.
+ */
+export function handleWebSocketResponse(message: any): void {
+  if (!message || message.type !== 'response') return
+
+  const requestId: string | undefined = message.request_id || message.correlation_id
+  if (!requestId) return
+
+  const pending = pendingCommandRequests.get(requestId)
+  if (!pending) return
+
+  // Clear timer + remove from registry first to avoid double resolution.
+  clearTimeout(pending.timeoutId)
+  pendingCommandRequests.delete(requestId)
+
+  logCommandResponse(
+    pending.command,
+    message.data,
+    requestId,
+    undefined,
+    message.success ? undefined : message.error
+  )
+
+  if (message.success) {
+    pending.resolve(message.data)
+  } else {
+    pending.reject(new Error(message.error || 'Command failed'))
+  }
 }
 
 /**
@@ -89,48 +120,20 @@ async function sendCommand(
 
   websocketSender(commandMessage)
 
-  // Wait for response with timeout
-  const startTime = Date.now()
-
   return new Promise((resolve, reject) => {
-    const checkResponse = () => {
-      const currentMessage = (window as any).__apiLastMessage || lastMessage
+    const timeoutId = setTimeout(() => {
+      pendingCommandRequests.delete(requestId)
+      logCommandResponse(command, null, requestId, undefined, `Timeout after ${timeout}ms`)
+      reject(new Error(`Command '${command}' timed out after ${timeout}ms`))
+    }, timeout)
 
-      if (currentMessage &&
-          currentMessage.type === 'response' &&
-          currentMessage.request_id === requestId) {
-
-        const latency = Date.now() - startTime
-
-        // Log command response
-        logCommandResponse(
-          command,
-          currentMessage.data,
-          requestId,
-          latency,
-          currentMessage.error
-        )
-
-        if (currentMessage.success) {
-          resolve(currentMessage.data)
-        } else {
-          reject(new Error(currentMessage.error || 'Command failed'))
-        }
-        return
-      }
-
-      // Check timeout
-      if (Date.now() - startTime > timeout) {
-        logCommandResponse(command, null, requestId, Date.now() - startTime, 'Timeout')
-        reject(new Error(`Command '${command}' timed out after ${timeout}ms`))
-        return
-      }
-
-      // Continue checking
-      setTimeout(checkResponse, 50)
-    }
-
-    checkResponse()
+    pendingCommandRequests.set(requestId, {
+      command,
+      requestId,
+      resolve,
+      reject,
+      timeoutId,
+    })
   })
 }
 
@@ -557,6 +560,56 @@ class WebSocketApiClient {
     }>
   }
 
+  async getTicker(symbol: string = 'BTCUSD'): Promise<{
+    symbol: string
+    price: number
+    volume: number
+    timestamp: string | Date
+    change_24h?: number
+    change_24h_pct?: number
+    high_24h?: number
+    low_24h?: number
+  }> {
+    return sendCommand('get_ticker', { symbol }) as Promise<{
+      symbol: string
+      price: number
+      volume: number
+      timestamp: string | Date
+      change_24h?: number
+      change_24h_pct?: number
+      high_24h?: number
+      low_24h?: number
+    }>
+  }
+
+  async getPerformance(days: number = 30): Promise<{
+    total_return?: number
+    total_return_pct?: number
+    win_rate?: number
+    total_trades?: number
+    winning_trades?: number
+    losing_trades?: number
+    average_win?: number
+    average_loss?: number
+    profit_factor?: number
+    sharpe_ratio?: number
+    [key: string]: unknown
+  }> {
+    return sendCommand('get_performance', { days }) as Promise<{
+      total_return?: number
+      total_return_pct?: number
+      win_rate?: number
+      total_trades?: number
+      winning_trades?: number
+      losing_trades?: number
+      average_win?: number
+      average_loss?: number
+      profit_factor?: number
+      sharpe_ratio?: number
+      [key: string]: unknown
+    }>
+  }
+
   async getPortfolioSummary(): Promise<{
     total_value: number
     available_balance: number
@@ -604,13 +657,11 @@ class WebSocketApiClient {
     timestamp_ms: number
     timezone: string
   }> {
-    // System time is sent via WebSocket broadcasts, not commands
-    // Return current time as fallback
-    return {
-      server_time: new Date().toISOString(),
-      timestamp_ms: Date.now(),
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-    }
+    return sendCommand('get_system_time') as Promise<{
+      server_time: string
+      timestamp_ms: number
+      timezone: string
+    }>
   }
 }
 

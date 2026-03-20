@@ -9,6 +9,7 @@ Can be run independently or integrated into startup process.
 import os
 import sys
 import time
+import json
 import socket
 import platform
 from pathlib import Path
@@ -77,6 +78,9 @@ class HealthChecker:
         """
         self.backend_url = backend_url.rstrip("/")
         self.frontend_url = frontend_url.rstrip("/")
+        parsed_backend = urlparse(self.backend_url)
+        ws_scheme = "wss" if parsed_backend.scheme == "https" else "ws"
+        self.websocket_url = f"{ws_scheme}://{parsed_backend.netloc}/ws"
         self.timeout = timeout
         self.errors: List[str] = []
         self.warnings: List[str] = []
@@ -312,33 +316,49 @@ class HealthChecker:
     def check_agent_status(self) -> Dict[str, Any]:
         """Query agent status endpoint for detailed info."""
         status: Dict[str, Any] = {"available": False}
-        agent_url = f"{self.backend_url}/api/v1/agent/status"
-        
-        if not (HTTPX_AVAILABLE or REQUESTS_AVAILABLE):
-            self.warnings.append(
-                "Cannot check agent status: install httpx or requests (pip install httpx)"
-            )
-            status["error"] = "No HTTP client available"
-            return status
-        
+
         try:
-            if HTTPX_AVAILABLE:
-                with httpx.Client(timeout=self.timeout) as client:  # type: ignore[name-defined]
-                    response = client.get(agent_url)
-            else:
-                response = requests.get(agent_url, timeout=self.timeout)  # type: ignore[name-defined]
-            
-            status["status_code"] = response.status_code
-            if response.status_code == 200:
-                data = response.json()
+            import asyncio
+            import uuid
+            import websockets
+
+            start_time = time.time()
+
+            async def _ws_request():
+                request_id = str(uuid.uuid4())
+                async with websockets.connect(self.websocket_url) as ws:
+                    await ws.send(json.dumps({
+                        "action": "command",
+                        "command": "get_agent_status",
+                        "request_id": request_id,
+                        "parameters": {},
+                    }))
+
+                    while True:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=self.timeout)
+                        data = json.loads(raw)
+                        if data.get("type") == "response" and data.get("request_id") == request_id:
+                            return data
+
+            response_message = asyncio.run(_ws_request())
+            response_time_ms = (time.time() - start_time) * 1000
+
+            if response_message and response_message.get("success") is True:
+                data = response_message.get("data", {}) or {}
                 status.update(data)
                 status["available"] = True
+                status["response_time_ms"] = round(response_time_ms, 2)
             else:
-                status["error"] = f"HTTP {response.status_code}"
+                status["error"] = "WS get_agent_status failed"
+                status["response_time_ms"] = round(response_time_ms, 2)
+
+        except ImportError as exc:
+            status["error"] = f"websockets not available: {exc}"
+            self.warnings.append(status["error"])
         except Exception as exc:
             status["error"] = str(exc)
             self.warnings.append(f"Agent status check failed: {exc}")
-        
+
         return status
     
     def check_all(self, wait_for_services: bool = True, max_wait: int = 30) -> bool:

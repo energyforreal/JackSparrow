@@ -395,6 +395,13 @@ class IntelligentAgent:
                 message="Start mode disables automatic market data streaming",
             )
 
+        # Fire-and-forget warmup to avoid the UI staying in model_nodes DEGRADED
+        # until the first successful prediction runs.
+        try:
+            asyncio.create_task(self._model_nodes_health_warmup())
+        except Exception:
+            pass
+
         # Position monitoring loop is started in start() after self.running = True
         # so the loop does not exit immediately (while self.running).
 
@@ -561,6 +568,69 @@ class IntelligentAgent:
                 message="Could not check market data service health"
             )
             return False
+
+    async def _model_nodes_health_warmup(self) -> None:
+        """Trigger a quick prediction so model_nodes health becomes non-DEGRADED.
+
+        The UI marks `model_nodes` as DEGRADED when models exist but the model
+        registry has recorded 0 healthy predictions yet. After startup, we
+        run a single warmup prediction to populate model health.
+        """
+        try:
+            registry = getattr(self, "model_registry", None)
+            if not registry or not getattr(registry, "models", None):
+                logger.info(
+                    "model_nodes_warmup_skipped",
+                    service="agent",
+                    reason="no_registered_models",
+                )
+                return
+
+            wait_deadline_s = getattr(settings, "model_health_warmup_wait_seconds", 45) or 45
+            started_at = time.time()
+            while (time.time() - started_at) < wait_deadline_s:
+                if self._check_market_data_health():
+                    break
+                await asyncio.sleep(2.0)
+
+            warmup_attempts = getattr(settings, "model_health_warmup_attempts", 2) or 2
+            for attempt in range(warmup_attempts):
+                warmup_context = {
+                    "symbol": self.default_symbol,
+                    "trigger": "model_health_warmup",
+                    "requested_at": datetime.now(timezone.utc),
+                }
+
+                result = await self.mcp_orchestrator.process_prediction_request(
+                    self.default_symbol,
+                    warmup_context,
+                )
+
+                models = result.get("models", {}) if isinstance(result, dict) else {}
+                healthy_models = int(models.get("healthy_models", 0) or 0)
+                total_models = int(models.get("total_models", 0) or 0)
+
+                logger.info(
+                    "model_nodes_warmup_result",
+                    service="agent",
+                    attempt=attempt + 1,
+                    total_models=total_models,
+                    healthy_models=healthy_models,
+                )
+
+                if total_models > 0 and healthy_models > 0:
+                    return
+
+                await asyncio.sleep(5.0)
+
+        except Exception as e:
+            logger.warning(
+                "model_nodes_warmup_failed",
+                service="agent",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
 
     async def _apply_start_mode(self) -> None:
         """Apply configured start mode to the state machine."""
@@ -820,7 +890,7 @@ class IntelligentAgent:
                 # Add timeout to prevent hanging health checks
                 health = await asyncio.wait_for(
                     self.mcp_orchestrator.get_health_status(),
-                    timeout=2.0  # 2 second timeout for health checks
+                    timeout=4.0  # Allow additional time for MCP component checks
                 )
             except asyncio.TimeoutError:
                 logger.warning("mcp_orchestrator_health_timeout", message="Health check timed out, using fallback")

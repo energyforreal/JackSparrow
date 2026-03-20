@@ -1,6 +1,4 @@
 'use client'
-
-import { useState } from 'react'
 import { AgentStatus } from './AgentStatus'
 import { PortfolioSummary } from './PortfolioSummary'
 import { Header } from './Header'
@@ -32,14 +30,12 @@ export function Dashboard() {
     isConnected,
     lastUpdate,
     isLoading,
-    error
+    error,
+    performanceData
   } = useTradingData()
 
   // Extract positions from portfolio - much simpler now!
   const positions = portfolio?.positions || []
-
-  // Simple state for UI-specific data (performance chart, etc.)
-  const [performanceData] = useState<Array<{ date: string; value: number }>>([])
 
   return (
     <div className="min-h-screen bg-background">

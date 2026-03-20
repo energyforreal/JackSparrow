@@ -205,38 +205,49 @@ class EnhancedSystemMonitor:
         """Check agent health and status."""
         try:
             start_time = time.time()
-            if HTTPX_AVAILABLE:
-                import httpx
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.get(f"{self.backend_url}/api/v1/agent/status")
-                    response_time = (time.time() - start_time) * 1000
+            import asyncio
+            import uuid
 
-                    if response.status_code == 200:
-                        data = response.json()
-                        state = data.get("state", "unknown")
-                        health_score = data.get("health_score", 0.0)
+            import websockets
 
-                        status = "up" if health_score >= 0.8 else "degraded" if health_score >= 0.5 else "down"
+            async def _ws_request():
+                request_id = str(uuid.uuid4())
+                async with websockets.connect(self.websocket_url) as ws:
+                    await ws.send(json.dumps({
+                        "action": "command",
+                        "command": "get_agent_status",
+                        "request_id": request_id,
+                        "parameters": {}
+                    }))
 
-                        return {
-                            "status": status,
-                            "response_time_ms": round(response_time, 2),
-                            "state": state,
-                            "health_score": health_score,
-                            "model_count": data.get("model_count", 0)
-                        }
-            elif REQUESTS_AVAILABLE:
-                import requests
-                response = requests.get(f"{self.backend_url}/api/v1/agent/status", timeout=10.0)
-                response_time = (time.time() - start_time) * 1000
+                    while True:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                        data = json.loads(raw)
+                        if data.get("type") == "response" and data.get("request_id") == request_id:
+                            return data
 
-                if response.status_code == 200:
-                    data = response.json()
-                    return {
-                        "status": "up",
-                        "response_time_ms": round(response_time, 2),
-                        "data": data
-                    }
+            response_message = asyncio.run(_ws_request())
+            response_time = (time.time() - start_time) * 1000
+
+            if response_message and response_message.get("success") is True:
+                data = response_message.get("data", {})
+                state = data.get("state", "unknown")
+                available = data.get("available", True)
+                health_status = data.get("health_status", "unknown")
+
+                if not available or health_status in ("down", "unhealthy", "DEGRADED"):
+                    status = "down"
+                elif health_status in ("degraded", "warning") or state in ("DEGRADED",):
+                    status = "degraded"
+                else:
+                    status = "up"
+
+                return {
+                    "status": status,
+                    "response_time_ms": round(response_time, 2),
+                    "state": state,
+                    "model_count": data.get("model_count", 0),
+                }
         except Exception as e:
             return {"status": "down", "error": str(e)}
 
@@ -318,31 +329,61 @@ class EnhancedSystemMonitor:
     def _check_market_data(self) -> Dict:
         """Check market data ingestion status."""
         try:
-            if HTTPX_AVAILABLE:
-                import httpx
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.get(f"{self.backend_url}/api/v1/market/ticker")
-                    if response.status_code == 200:
-                        data = response.json()
-                        last_update = data.get("last_update")
-                        if last_update:
-                            # Check if data is fresh (within last 5 minutes)
-                            last_update_time = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
-                            age_seconds = (datetime.now() - last_update_time.replace(tzinfo=None)).total_seconds()
+            import asyncio
+            import uuid
 
-                            if age_seconds < 300:  # 5 minutes
-                                return {
-                                    "status": "up",
-                                    "last_update": last_update,
-                                    "age_seconds": int(age_seconds)
-                                }
-                            else:
-                                return {
-                                    "status": "degraded",
-                                    "last_update": last_update,
-                                    "age_seconds": int(age_seconds),
-                                    "error": "Stale market data"
-                                }
+            import websockets
+
+            async def _ws_request():
+                request_id = str(uuid.uuid4())
+                async with websockets.connect(self.websocket_url) as ws:
+                    await ws.send(json.dumps({
+                        "action": "command",
+                        "command": "get_ticker",
+                        "request_id": request_id,
+                        "parameters": {"symbol": "BTCUSD"}
+                    }))
+
+                    while True:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                        data = json.loads(raw)
+                        if data.get("type") == "response" and data.get("request_id") == request_id:
+                            return data
+
+            response_message = asyncio.run(_ws_request())
+            if response_message and response_message.get("success") is True:
+                ticker = response_message.get("data", {}) or {}
+                last_update = ticker.get("timestamp")
+
+                if last_update:
+                    last_update_dt = None
+                    if isinstance(last_update, str):
+                        try:
+                            last_update_dt = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                        except Exception:
+                            last_update_dt = None
+                    elif isinstance(last_update, (int, float)):
+                        # Heuristic: epoch ms vs seconds
+                        epoch = last_update / 1000 if last_update > 1e12 else last_update
+                        try:
+                            last_update_dt = datetime.fromtimestamp(epoch)
+                        except Exception:
+                            last_update_dt = None
+
+                    if last_update_dt:
+                        age_seconds = (datetime.now() - last_update_dt.replace(tzinfo=None)).total_seconds()
+                        if age_seconds < 300:
+                            return {
+                                "status": "up",
+                                "last_update": str(last_update),
+                                "age_seconds": int(age_seconds),
+                            }
+                        return {
+                            "status": "degraded",
+                            "last_update": str(last_update),
+                            "age_seconds": int(age_seconds),
+                            "error": "Stale market data",
+                        }
         except Exception as e:
             return {"status": "down", "error": str(e)}
 

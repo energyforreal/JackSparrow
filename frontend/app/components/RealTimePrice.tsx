@@ -9,6 +9,7 @@ import { useWebSocket } from '@/hooks/useWebSocket'
 import { usePositionImpact } from '@/hooks/usePositionImpact'
 import { Position, EnhancedTickerData } from '@/types'
 import { formatCurrency } from '@/utils/formatters'
+import { apiClient } from '@/services/api'
 
 interface RealTimePriceProps {
   symbol?: string
@@ -114,13 +115,36 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
     }
   }, [lastMessage])
 
-  // WebSocket-only approach - no initial REST API fetch
-  // Wait for market_tick WebSocket messages to populate ticker data
+  // Cold-start: fetch the latest ticker over WebSocket commands once connected.
   useEffect(() => {
-    if (isConnected && !ticker) {
-      setIsLoading(false) // Stop loading if connected but no data yet
+    let cancelled = false
+
+    const initTicker = async () => {
+      if (!isConnected || ticker) return
+
+      setIsLoading(true)
+      try {
+        const latest = await apiClient.getTicker(symbol)
+        if (cancelled) return
+        if (latest) {
+          setTicker(latest as EnhancedTickerData)
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('[RealTimePrice] Failed to fetch initial ticker via WS command:', error)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      }
     }
-  }, [isConnected, ticker])
+
+    initTicker().catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [isConnected, ticker, symbol])
 
   // Initialize price change on first ticker data
   // This ensures momentary price change is calculated as soon as we have initial data
@@ -175,7 +199,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
         // The change will persist until a new significant change occurs
       }
     }
-  }, [lastMessage, symbol, lastPrice, ticker?.price])
+  }, [lastMessage, symbol, lastPrice, ticker?.price, priceChange])
 
   // Calculate price change percentage (for real-time change)
   const priceChangePct = ticker && previousPrice && priceChange !== 0 && previousPrice > 0

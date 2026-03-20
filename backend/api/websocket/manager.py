@@ -1012,8 +1012,9 @@ class WebSocketManager:
                         check_feature_server_health,
                         check_model_nodes_health,
                         check_delta_exchange_health,
-                        check_reasoning_engine_health
+                        check_reasoning_engine_health,
                     )
+                    from backend.services.agent_service import agent_service
                     from backend.core.database import AsyncSessionLocal
                     from backend.api.models.responses import HealthServiceStatus
                     from datetime import datetime
@@ -1039,8 +1040,9 @@ class WebSocketManager:
                             degradation_reasons.append("Redis is down")
                             health_scores.append(0.0)
                         
-                        # Check agent
-                        agent_health = await check_agent_health()
+                        # Check agent (fetch status once and share with dependent checks)
+                        agent_status = await agent_service.get_agent_status(timeout=10)
+                        agent_health = await check_agent_health(agent_status)
                         agent_weight = 0.15
                         if agent_health.status == "up":
                             health_scores.append(agent_weight)
@@ -1051,7 +1053,7 @@ class WebSocketManager:
                             agent_state = None
                         
                         # Check feature server
-                        feature_health = await check_feature_server_health()
+                        feature_health = await check_feature_server_health(agent_status)
                         feature_weight = 0.20
                         if feature_health.status == "up":
                             health_scores.append(feature_weight)
@@ -1062,7 +1064,7 @@ class WebSocketManager:
                             health_scores.append(0.0)
                         
                         # Check model nodes
-                        model_health = await check_model_nodes_health()
+                        model_health = await check_model_nodes_health(agent_status)
                         model_weight = 0.25
                         if model_health.status == "up":
                             if model_health.details:
@@ -1090,7 +1092,7 @@ class WebSocketManager:
                             health_scores.append(0.0)
                         
                         # Check Delta Exchange
-                        delta_health = await check_delta_exchange_health()
+                        delta_health = await check_delta_exchange_health(agent_status)
                         delta_weight = 0.15
                         if delta_health.status == "up":
                             health_scores.append(delta_weight)
@@ -1101,7 +1103,7 @@ class WebSocketManager:
                             health_scores.append(0.0)
                         
                         # Check reasoning engine
-                        reasoning_health = await check_reasoning_engine_health()
+                        reasoning_health = await check_reasoning_engine_health(agent_status)
                         reasoning_weight = 0.15
                         if reasoning_health.status == "up":
                             health_scores.append(reasoning_weight)

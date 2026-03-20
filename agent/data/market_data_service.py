@@ -305,11 +305,12 @@ class MarketDataService:
             except DeltaExchangeError as e:
                 # Delta Exchange API error
                 consecutive_errors += 1
-                logger.error(
+                # Downgrade noisy transient Delta API failures to warnings and avoid
+                # attaching full tracebacks (signal is in the circuit breaker + health score).
+                logger.warning(
                     "market_data_stream_delta_exchange_error",
                     error=str(e),
                     consecutive_errors=consecutive_errors,
-                    exc_info=True
                 )
                 # Exponential backoff for API errors
                 sleep_time = min(5 * (2 ** min(consecutive_errors, 4)), 60)
@@ -932,13 +933,12 @@ class MarketDataService:
             return None
         except DeltaExchangeError as e:
             # Delta Exchange API error - log and return None
-            logger.error(
+            logger.warning(
                 "market_data_service_delta_exchange_error",
                 symbol=symbol,
                 interval=interval,
                 limit=limit,
                 error=str(e),
-                exc_info=True
             )
             return None
         except Exception as e:
@@ -996,11 +996,10 @@ class MarketDataService:
             return None
         except DeltaExchangeError as e:
             # Delta Exchange API error - log and return None
-            logger.error(
+            logger.warning(
                 "market_data_service_ticker_delta_exchange_error",
                 symbol=symbol,
                 error=str(e),
-                exc_info=True
             )
             return None
         except Exception as e:

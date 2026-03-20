@@ -520,28 +520,49 @@ class ComprehensiveMonitor:
         component.last_check = datetime.now()
 
         try:
-            if HTTPX_AVAILABLE:
-                import httpx
-                with httpx.Client(timeout=self.config.timeout) as client:
-                    start_time = time.time()
-                    response = client.get(f"{self.config.backend_url}/api/v1/agent/status")
-                    response_time = (time.time() - start_time) * 1000
+            import asyncio
+            import uuid
 
-                    if response.status_code == 200:
-                        component.status = "up"
-                        component.response_time_ms = response_time
-                        component.error = None
-                    else:
-                        component.status = "down"
-                        component.error = f"HTTP {response.status_code}"
-            else:
-                # Fallback: check feature server port
-                if self._check_port("localhost", 8001, timeout=2.0):
-                    component.status = "up"
-                    component.error = None
-                else:
+            import websockets
+
+            start_time = time.time()
+
+            async def _ws_request():
+                request_id = str(uuid.uuid4())
+                async with websockets.connect(self.config.websocket_url) as ws:
+                    await ws.send(json.dumps({
+                        "action": "command",
+                        "command": "get_agent_status",
+                        "request_id": request_id,
+                        "parameters": {}
+                    }))
+
+                    while True:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=self.config.timeout)
+                        data = json.loads(raw)
+                        if data.get("type") == "response" and data.get("request_id") == request_id:
+                            return data
+
+            response_message = asyncio.run(_ws_request())
+            response_time = (time.time() - start_time) * 1000
+
+            if response_message and response_message.get("success") is True:
+                data = response_message.get("data", {}) or {}
+                available = data.get("available", True)
+                health_status = data.get("health_status", "unknown")
+
+                if not available or health_status in ("down", "unhealthy"):
                     component.status = "down"
-                    component.error = "Feature server port not accessible"
+                elif health_status in ("degraded", "warning"):
+                    component.status = "degraded"
+                else:
+                    component.status = "up"
+
+                component.response_time_ms = response_time
+                component.error = None
+            else:
+                component.status = "down"
+                component.error = "WS get_agent_status failed"
 
         except Exception as e:
             component.status = "down"

@@ -26,7 +26,7 @@ SESSION_ID = configure_logging()
 logger = structlog.get_logger()
 from backend.core.database import engine, Base
 from backend.core.redis import get_redis, close_redis
-from backend.api.routes import health, trading, portfolio, market, admin, system
+from backend.api.routes import health, trading
 from backend.api.websocket.unified_manager import unified_websocket_manager
 from backend.services.agent_event_subscriber import agent_event_subscriber
 from backend.services.health_poller import health_poller
@@ -257,10 +257,6 @@ async def add_request_id(request: Request, call_next):
 # Include routers
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(trading.router, prefix="/api/v1", tags=["trading"])
-app.include_router(portfolio.router, prefix="/api/v1", tags=["portfolio"])
-app.include_router(market.router, prefix="/api/v1", tags=["market"])
-app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
-app.include_router(system.router, prefix="/api/v1", tags=["system"])
 
 
 # WebSocket endpoint for frontend clients (unified manager, legacy envelope)

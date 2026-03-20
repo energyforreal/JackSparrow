@@ -72,6 +72,7 @@ export interface TradingDataState {
   marketData: Record<string, MarketData>
   modelData: ModelData | null
   health: HealthData | null
+  performanceData: Array<{ date: string; value: number }>
 
   // Status
   agentState: string
@@ -96,6 +97,7 @@ type TradingDataAction =
   | { type: 'UPDATE_MODEL_DATA'; payload: ModelData }
   | { type: 'UPDATE_HEALTH'; payload: HealthData }
   | { type: 'UPDATE_AGENT_STATE'; payload: string }
+  | { type: 'SET_PERFORMANCE_DATA'; payload: Array<{ date: string; value: number }> }
   | { type: 'SET_CONNECTED'; payload: boolean }
   | { type: 'SET_LAST_UPDATE'; payload: Date }
   | { type: 'SET_DATA_SOURCE'; payload: 'websocket' | 'api' | 'none' }
@@ -108,6 +110,7 @@ const initialState: TradingDataState = {
   marketData: {},
   modelData: null,
   health: null,
+  performanceData: [],
   agentState: 'UNKNOWN',
   isConnected: false,
   lastUpdate: null,
@@ -406,6 +409,14 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         dataSource: 'api'
       }
 
+    case 'SET_PERFORMANCE_DATA':
+      return {
+        ...state,
+        performanceData: action.payload,
+        lastUpdate: new Date(),
+        dataSource: 'api'
+      }
+
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload }
 
@@ -572,6 +583,26 @@ export function useTradingData() {
           })
         }
 
+        // Fetch performance metrics (used to render the PerformanceChart)
+        try {
+          const performanceMetrics = await apiClient.getPerformance()
+          if (performanceMetrics && typeof performanceMetrics === 'object') {
+            const totalReturn =
+              typeof (performanceMetrics as any).total_return === 'number'
+                ? (performanceMetrics as any).total_return
+                : typeof (performanceMetrics as any).total_return_pct === 'number'
+                  ? (performanceMetrics as any).total_return_pct
+                  : 0
+
+            dispatch({
+              type: 'SET_PERFORMANCE_DATA',
+              payload: [{ date: new Date().toISOString(), value: totalReturn }],
+            })
+          }
+        } catch {
+          // Performance is optional; chart can stay empty.
+        }
+
         // Fetch agent status
         const agentStatus = await apiClient.getAgentStatus()
         if (agentStatus?.state) {
@@ -629,6 +660,7 @@ export function useTradingData() {
     marketData: state.marketData,
     modelData: state.modelData,
     health: state.health,
+    performanceData: state.performanceData,
 
     // Status
     agentState: state.agentState,

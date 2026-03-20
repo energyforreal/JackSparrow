@@ -77,6 +77,9 @@ class FeatureServerAPI:
             [
                 web.post("/features", self._handle_features),
                 web.get("/health", self._handle_health),
+                # Expose model and feature discovery endpoints for backend/UX
+                web.get("/api/v1/models", self._handle_models),
+                web.get("/api/v1/features", self._handle_feature_list),
             ]
         )
         self._runner: Optional[web.AppRunner] = None
@@ -330,6 +333,89 @@ class FeatureServerAPI:
             )
             return web.json_response(
                 {"status": "down", "error": str(exc)}, status=503
+            )
+
+    async def _handle_models(self, _: web.Request) -> web.Response:
+        """Handle GET /api/v1/models requests.
+
+        Returns a lightweight list of models registered in the MCP model registry.
+        Shape matches what backend ModelService expects:
+            {"models": [{"name": ..., "type": ..., "status": "loaded"}, ...], "count": N}
+        """
+        try:
+            # Late import to avoid circulars; mirrors pattern used elsewhere.
+            from agent.core.mcp_orchestrator import mcp_orchestrator
+        except Exception:
+            mcp_orchestrator = None  # type: ignore[assignment]
+
+        orchestrator = mcp_orchestrator  # type: ignore[name-defined]
+
+        if orchestrator is None or getattr(orchestrator, "model_registry", None) is None:
+            return web.json_response(
+                {"error": "Model registry not available"}, status=503
+            )
+
+        try:
+            models_info = []
+            for name, model in orchestrator.model_registry.models.items():
+                models_info.append(
+                    {
+                        "name": name,
+                        "type": getattr(model, "model_type", "unknown"),
+                        "status": "loaded",
+                    }
+                )
+
+            return web.json_response(
+                {"models": models_info, "count": len(models_info)}
+            )
+        except Exception as exc:
+            logger.error(
+                "feature_server_api_list_models_failed",
+                error=str(exc),
+                exc_info=True,
+            )
+            return web.json_response(
+                {"error": f"Failed to list models: {exc}"}, status=500
+            )
+
+    async def _handle_feature_list(self, _: web.Request) -> web.Response:
+        """Handle GET /api/v1/features requests.
+
+        Returns a simple list of features exposed by the MCP Feature Server.
+        Shape is similar to the FastAPI feature server implementation.
+        """
+        feature_server = self._resolve_feature_server()
+        if feature_server is None:
+            return web.json_response(
+                {"error": "Feature server not available"}, status=503
+            )
+
+        try:
+            features_info = []
+            # feature_registry is a mapping name -> version in the orchestrator-backed server
+            for name, version in getattr(
+                feature_server, "feature_registry", {}
+            ).items():
+                features_info.append(
+                    {
+                        "name": name,
+                        "version": version,
+                        "status": "available",
+                    }
+                )
+
+            return web.json_response(
+                {"features": features_info, "count": len(features_info)}
+            )
+        except Exception as exc:
+            logger.error(
+                "feature_server_api_list_features_failed",
+                error=str(exc),
+                exc_info=True,
+            )
+            return web.json_response(
+                {"error": f"Failed to list features: {exc}"}, status=500
             )
 
     @staticmethod

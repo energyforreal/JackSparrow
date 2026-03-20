@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import time
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from backend.core.database import get_db
 from backend.core.redis import redis_health_check, get_cache, set_cache, set_model_health_heartbeat, get_model_health_heartbeat
@@ -49,31 +49,45 @@ async def check_database_health(db: AsyncSession) -> HealthServiceStatus:
         )
 
 
-async def check_agent_health() -> HealthServiceStatus:
-    """Check agent service health independently."""
+async def check_agent_health(agent_status: Optional[Dict[str, Any]] = None) -> HealthServiceStatus:
+    """Check agent service health independently.
+
+    Args:
+        agent_status: Optional pre-fetched agent status dict. When provided,
+            avoids an additional round-trip to the agent service.
+    """
     try:
-        # Use shorter timeout for health checks to avoid hanging the entire health endpoint
-        agent_status = await agent_service.get_agent_status(timeout=2)
+        # Use a slightly longer timeout here to accommodate downstream MCP checks
+        if agent_status is None:
+            agent_status = await agent_service.get_agent_status(timeout=10)
+
         return HealthServiceStatus(
             status="up" if agent_status.get("available", False) else "down",
             latency_ms=agent_status.get("latency_ms"),
-            details=agent_status
+            details=agent_status,
         )
     except Exception as e:
         # During startup, agent might not be ready yet - don't fail health check
         return HealthServiceStatus(
             status="unknown",
             error=str(e),
-            details={"error": "Agent service check failed - may still be starting"}
+            details={"error": "Agent service check failed - may still be starting"},
         )
 
 
-async def check_feature_server_health() -> HealthServiceStatus:
-    """Check feature server health independently (not via agent)."""
+async def check_feature_server_health(
+    agent_status: Optional[Dict[str, Any]] = None,
+) -> HealthServiceStatus:
+    """Check feature server health independently (not via agent).
+
+    Args:
+        agent_status: Optional pre-fetched agent status dict.
+    """
     try:
         # Try to check feature server directly if possible
         # For now, check via agent but handle failures gracefully
-        agent_status = await agent_service.get_agent_status()
+        if agent_status is None:
+            agent_status = await agent_service.get_agent_status(timeout=10)
         feature_server_status = agent_status.get("feature_server", {})
         agent_available = agent_status.get("available", False)
         
@@ -130,10 +144,17 @@ async def check_feature_server_health() -> HealthServiceStatus:
         )
 
 
-async def check_model_nodes_health() -> HealthServiceStatus:
-    """Check model nodes health independently (not via agent)."""
+async def check_model_nodes_health(
+    agent_status: Optional[Dict[str, Any]] = None,
+) -> HealthServiceStatus:
+    """Check model nodes health independently (not via agent).
+
+    Args:
+        agent_status: Optional pre-fetched agent status dict.
+    """
     try:
-        agent_status = await agent_service.get_agent_status()
+        if agent_status is None:
+            agent_status = await agent_service.get_agent_status(timeout=10)
         model_nodes_status = agent_status.get("model_nodes", {})
         agent_available = agent_status.get("available", False)
         
@@ -249,10 +270,17 @@ async def check_model_nodes_health() -> HealthServiceStatus:
         )
 
 
-async def check_delta_exchange_health() -> HealthServiceStatus:
-    """Check Delta Exchange API health independently (not via agent)."""
+async def check_delta_exchange_health(
+    agent_status: Optional[Dict[str, Any]] = None,
+) -> HealthServiceStatus:
+    """Check Delta Exchange API health independently (not via agent).
+
+    Args:
+        agent_status: Optional pre-fetched agent status dict.
+    """
     try:
-        agent_status = await agent_service.get_agent_status()
+        if agent_status is None:
+            agent_status = await agent_service.get_agent_status(timeout=10)
         delta_status = agent_status.get("delta_exchange", {})
         agent_available = agent_status.get("available", False)
         
@@ -340,10 +368,17 @@ async def check_model_serving_health() -> HealthServiceStatus:
         )
 
 
-async def check_reasoning_engine_health() -> HealthServiceStatus:
-    """Check reasoning engine health independently (not via agent)."""
+async def check_reasoning_engine_health(
+    agent_status: Optional[Dict[str, Any]] = None,
+) -> HealthServiceStatus:
+    """Check reasoning engine health independently (not via agent).
+
+    Args:
+        agent_status: Optional pre-fetched agent status dict.
+    """
     try:
-        agent_status = await agent_service.get_agent_status()
+        if agent_status is None:
+            agent_status = await agent_service.get_agent_status(timeout=10)
         reasoning_status = agent_status.get("reasoning_engine", {})
         agent_available = agent_status.get("available", False)
         
@@ -457,8 +492,28 @@ async def check_overall_health(db: AsyncSession) -> dict:
         degradation_reasons.append("Redis is down")
         health_scores.append(0.0)
     
-    # Check agent
-    agent_health = await check_agent_health()
+    # Check agent (fetch status once and share with dependent checks)
+    raw_agent_status: Optional[Dict[str, Any]] = None
+    try:
+        raw_agent_status = await agent_service.get_agent_status(timeout=10)
+    except Exception:
+        # Use a placeholder dict so dependent checks don't trigger
+        # additional agent round-trips (which can cascade into timeouts).
+        raw_agent_status = {
+            "available": False,
+            "state": "DEGRADED",
+            "health_status": "timeout",
+            "message": "Agent not responding to health commands (timeout)",
+            "latency_ms": None,
+            "active_symbols": [],
+            "model_count": 0,
+            "feature_server": {},
+            "model_nodes": {},
+            "delta_exchange": {},
+            "reasoning_engine": {},
+        }
+
+    agent_health = await check_agent_health(raw_agent_status)
     agent_weight = 0.15
     if agent_health.status == "up":
         health_scores.append(agent_weight)
@@ -473,7 +528,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
         agent_state = None
     
     # Check feature server
-    feature_health = await check_feature_server_health()
+    feature_health = await check_feature_server_health(raw_agent_status)
     feature_weight = 0.20
     if feature_health.status == "up":
         health_scores.append(feature_weight)
@@ -488,7 +543,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
     model_serving_health = await check_model_serving_health()
 
     # Check model nodes (via agent)
-    model_health = await check_model_nodes_health()
+    model_health = await check_model_nodes_health(raw_agent_status)
     model_weight = 0.25
     if model_health.status == "up":
         if model_health.details:
@@ -513,7 +568,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
         health_scores.append(0.0)
     
     # Check Delta Exchange
-    delta_health = await check_delta_exchange_health()
+    delta_health = await check_delta_exchange_health(raw_agent_status)
     delta_weight = 0.15
     if delta_health.status == "up":
         health_scores.append(delta_weight)
@@ -525,7 +580,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
         health_scores.append(0.0)
     
     # Check reasoning engine
-    reasoning_health = await check_reasoning_engine_health()
+    reasoning_health = await check_reasoning_engine_health(raw_agent_status)
     reasoning_weight = 0.15
     if reasoning_health.status == "up":
         health_scores.append(reasoning_weight)

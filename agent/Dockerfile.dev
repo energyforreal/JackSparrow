@@ -61,6 +61,9 @@ COPY --from=builder --chown=agent:agent /root/.local /home/agent/.local
 # Copy dev watcher script (will be overridden by volume mount, but ensures it exists)
 COPY --chown=agent:agent agent/scripts/dev_watcher.py /app/agent/scripts/dev_watcher.py
 
+# Copy shared feature_store package used by agent (for unified feature engine)
+COPY --chown=agent:agent feature_store /app/feature_store
+
 # Note: Source code will be mounted as volume in docker-compose.dev.yml
 # No COPY of source code here - this enables hot-reload
 

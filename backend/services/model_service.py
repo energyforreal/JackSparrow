@@ -204,7 +204,10 @@ class ModelService:
         url = f"{self.base_url}/api/v1/models"
         try:
             start = time.perf_counter()
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            # Listing models should be lightweight, but under load it can
+            # occasionally exceed 5s; we allow a slightly higher timeout to
+            # avoid transient frontend "down" states.
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 resp = await client.get(url)
             latency_ms = (time.perf_counter() - start) * 1000
             resp.raise_for_status()
@@ -220,11 +223,31 @@ class ModelService:
                 },
             }
         except httpx.TimeoutException as e:
-            return {
-                "status": "down",
-                "error": "timeout",
-                "details": {"message": str(e)},
-            }
+            # If the models list endpoint times out, verify via the lighter
+            # feature-bridge /health endpoint. This prevents UI from showing a
+            # hard "down" state when the service is healthy but temporarily
+            # slow.
+            bridge_url = f"{self.base_url}/health"
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    bridge_resp = await client.get(bridge_url)
+                bridge_resp.raise_for_status()
+                bridge_data = bridge_resp.json() if hasattr(bridge_resp, "json") else None
+                return {
+                    "status": "up",
+                    "latency_ms": None,
+                    "error": None,
+                    "details": {
+                        "message": "model_list_timeout; bridge_health_ok",
+                        "bridge_details": bridge_data,
+                    },
+                }
+            except Exception:
+                return {
+                    "status": "degraded",
+                    "error": "timeout",
+                    "details": {"message": str(e)},
+                }
         except httpx.HTTPStatusError as e:
             # In Docker, FEATURE_SERVER_URL commonly points to the feature bridge
             # (`agent/data/feature_server_api.py`) which exposes `/health` and

@@ -64,6 +64,9 @@ COPY --from=builder --chown=agent:agent /root/.local /home/agent/.local
 # Copy application code - maintain agent directory structure  
 COPY --chown=agent:agent agent /app/agent
 
+# Copy shared feature_store package used by agent (for unified feature engine)
+COPY --chown=agent:agent feature_store /app/feature_store
+
 # Add build metadata labels
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \

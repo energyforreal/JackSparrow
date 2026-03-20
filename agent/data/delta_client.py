@@ -113,11 +113,59 @@ class DeltaExchangeClient:
         self.circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60)
         self.timeout = 30.0
         self.recv_window = 60000
-        if not self.api_key or not self.api_secret:
-            raise ValueError("Delta Exchange API credentials are required.")
+        
+        self._credentials_valid = not (
+            self._is_placeholder_credential(self.api_key)
+            or self._is_placeholder_credential(self.api_secret)
+        )
+        if not self._credentials_valid:
+            # If credentials are placeholders (e.g. env defaults like `changeme`),
+            # don't hammer the API with retries that will never recover.
+            logger.warning(
+                "delta_exchange_credentials_placeholder_detected",
+                api_key_prefix=(self.api_key or "")[:6]
+                + ("..." if len(self.api_key or "") > 6 else ""),
+                message="Delta Exchange credentials appear to be placeholders; pausing auth-backed requests.",
+                component="delta_client",
+            )
+            self.circuit_breaker.state = CircuitBreakerState.OPEN
+            self.circuit_breaker.failure_count = self.circuit_breaker.failure_threshold
+            self.circuit_breaker.last_failure_time = time.time()
+        
+        # Used to de-duplicate repeated transient error logs (timeouts, rate limits, etc.).
+        self._transient_log_state: Dict[str, float] = {}
         
         # Validate system time synchronization on initialization
         self._validate_time_sync()
+
+    @staticmethod
+    def _is_placeholder_credential(value: Optional[str]) -> bool:
+        """Return True if the credential value looks like a placeholder/misconfiguration."""
+        if value is None:
+            return True
+        v = value.strip().lower()
+        if not v:
+            return True
+        placeholders = {
+            "changeme",
+            "change_me",
+            "your_api_key",
+            "your_api_secret",
+            "dev-api-key",
+            "dev-api-secret",
+            "test",
+            "placeholder",
+        }
+        return v in placeholders
+
+    def _should_sample_log(self, key: str, interval_seconds: float) -> bool:
+        """Return True if enough time has passed since the last log for `key`."""
+        now = time.time()
+        last = self._transient_log_state.get(key, 0.0)
+        if (now - last) >= interval_seconds:
+            self._transient_log_state[key] = now
+            return True
+        return False
     
     async def _make_request(
         self,
@@ -157,19 +205,30 @@ class DeltaExchangeClient:
                 
                 try:
                     if method == "GET":
-                        response = await client.get(url, headers=headers, params=params)
+                        # Build URL with an explicit query-string so the request encoding
+                        # matches exactly what we used for signature generation.
+                        query_string = self._build_query_string(params) if params else ""
+                        response = await client.get(f"{url}{query_string}", headers=headers)
                     elif method == "POST":
                         response = await client.post(url, headers=headers, json=data)
                     else:
                         raise ValueError(f"Unsupported method: {method}")
                 except httpx.HTTPError as exc:
-                    log_error_with_context(
+                    exc_name = type(exc).__name__
+                    is_timeout = "Timeout" in exc_name or "timed out" in str(exc).lower()
+                    sample_key = f"delta_exchange_http_error:{exc_name}:{clean_endpoint}"
+                    if is_timeout and not self._should_sample_log(sample_key, interval_seconds=60):
+                        # De-duplicate noisy timeout logs.
+                        raise DeltaExchangeError(f"HTTP timeout error: {exc}") from exc
+
+                    log_fn = log_warning_with_context if is_timeout else log_error_with_context
+                    log_fn(
                         "delta_exchange_http_error",
                         error=exc,
                         component="delta_client",
                         method=method,
                         endpoint=clean_endpoint,
-                        base_url=self.base_url
+                        base_url=self.base_url,
                     )
                     raise DeltaExchangeError(f"HTTP client error: {exc}") from exc
                 except Exception as exc:
@@ -190,28 +249,45 @@ class DeltaExchangeClient:
                     is_expired_signature = "expired_signature" in error_text.lower()
                     
                     if is_expired_signature and attempt < max_auth_retries:
-                        # Wait a small amount before retry to ensure fresh timestamp
-                        await asyncio.sleep(0.2)
+                        # Important: signatures use whole-second timestamps.
+                        # If we retry within the same second, the signature stays identical
+                        # and won't recover. Wait until at least the next second boundary.
+                        timestamp_used_str = headers.get("timestamp") or ""
+                        try:
+                            timestamp_used = int(timestamp_used_str)
+                        except Exception:
+                            timestamp_used = int(time.time())
+                        next_second = timestamp_used + 1
+                        sleep_for = max(0.01, next_second - time.time())
+                        await asyncio.sleep(sleep_for)
                         logger.info(
                             "delta_exchange_auth_retry",
                             attempt=attempt + 1,
                             max_retries=max_auth_retries,
                             endpoint=clean_endpoint,
-                            reason="expired_signature"
+                            reason="expired_signature",
+                            timestamp_used=timestamp_used,
+                            sleep_seconds=round(sleep_for, 3),
+                            local_time=int(time.time()),
                         )
                         # Retry with fresh timestamp
                         return await _request(attempt + 1)
                     
-                    log_error_with_context(
-                        "delta_exchange_auth_error",
-                        component="delta_client",
-                        method=method,
-                        endpoint=clean_endpoint,
-                        status_code=response.status_code,
-                        error_message=error_text,
-                        attempt=attempt + 1,
-                        message="Authentication failed - check API credentials and signature format"
-                    )
+                    sample_key = f"delta_exchange_auth_error:{response.status_code}:{clean_endpoint}"
+                    should_log = self._should_sample_log(sample_key, interval_seconds=120)
+                    if should_log:
+                        log_warning_with_context(
+                            "delta_exchange_auth_error",
+                            component="delta_client",
+                            method=method,
+                            endpoint=clean_endpoint,
+                            status_code=response.status_code,
+                            error_message=error_text,
+                            attempt=attempt + 1,
+                            timestamp=headers.get("timestamp"),
+                            local_time=int(time.time()),
+                            message="Authentication failed - check API credentials and signature format"
+                        )
                     
                     # Log signature details for debugging (without exposing secret)
                     logger.debug(
@@ -231,14 +307,19 @@ class DeltaExchangeClient:
                 
                 if response.status_code >= 400:
                     error_text = response.text
-                    log_error_with_context(
-                        "delta_exchange_api_error",
-                        component="delta_client",
-                        method=method,
-                        endpoint=clean_endpoint,
-                        status_code=response.status_code,
-                        error_message=error_text
-                    )
+                    transient_status = response.status_code in {429, 500, 502, 503, 504}
+                    sample_key = f"delta_exchange_api_error:{response.status_code}:{clean_endpoint}"
+                    should_log = self._should_sample_log(sample_key, interval_seconds=120) if transient_status else True
+                    if should_log:
+                        log_fn = log_warning_with_context if transient_status else log_error_with_context
+                        log_fn(
+                            "delta_exchange_api_error",
+                            component="delta_client",
+                            method=method,
+                            endpoint=clean_endpoint,
+                            status_code=response.status_code,
+                            error_message=error_text,
+                        )
                     raise DeltaExchangeError(
                         f"Delta Exchange error {response.status_code}: {error_text}"
                     )
@@ -247,6 +328,13 @@ class DeltaExchangeClient:
         
         # Use a wrapper function for the circuit breaker
         async def _request_wrapper():
+            if not self._credentials_valid:
+                # Short-circuit immediately on placeholder credentials.
+                # Raise as CircuitBreakerOpenError so callers treat it as a pause
+                # without hammering the API with repeated auth retries.
+                raise CircuitBreakerOpenError(
+                    "Delta Exchange credentials appear to be placeholders; request execution paused."
+                )
             return await _request(0)
         
         return await self.circuit_breaker.call(_request_wrapper)
@@ -632,6 +720,10 @@ class DeltaExchangeWebSocketClient:
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = base_url or settings.websocket_url
+        self._credentials_valid = not (
+            DeltaExchangeClient._is_placeholder_credential(self.api_key)
+            or DeltaExchangeClient._is_placeholder_credential(self.api_secret)
+        )
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.connected = False
         self.subscribed_symbols: Set[str] = set()
@@ -648,6 +740,14 @@ class DeltaExchangeWebSocketClient:
     async def connect(self) -> None:
         """Establish WebSocket connection with authentication."""
         try:
+            if not self._credentials_valid:
+                logger.warning(
+                    "delta_websocket_credentials_placeholder_detected",
+                    message="Skipping Delta Exchange WebSocket connect due to placeholder credentials.",
+                    component="delta_websocket_client",
+                )
+                return
+
             # Generate authentication headers for WebSocket
             timestamp = str(int(time.time() * 1000))
             method = "GET"

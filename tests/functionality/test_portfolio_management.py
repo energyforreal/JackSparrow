@@ -2,9 +2,15 @@
 
 from typing import Dict, Any, List
 from datetime import datetime
+import asyncio
+import json
+import uuid
+
+import websockets
 
 from tests.functionality.utils import TestSuiteBase, TestResult, TestStatus
-from tests.functionality.fixtures import get_shared_agent, get_shared_backend
+from tests.functionality.fixtures import get_shared_agent
+from tests.functionality.config import config
 
 
 class PortfolioManagementTestSuite(TestSuiteBase):
@@ -13,17 +19,31 @@ class PortfolioManagementTestSuite(TestSuiteBase):
     def __init__(self, test_name: str = "portfolio_management"):
         super().__init__(test_name)
         self.agent = None
-        self.backend_client = None
+        self.backend_ws_url = config.backend_websocket_url
+
+    async def _ws_command(self, command: str, parameters: Dict[str, Any] | None = None, timeout_s: float = 10.0) -> Dict[str, Any]:
+        """Send a WebSocket command to backend and wait for its response."""
+        req_id = str(uuid.uuid4())
+        payload = {
+            "action": "command",
+            "command": command,
+            "request_id": req_id,
+            "parameters": parameters or {},
+        }
+
+        async with websockets.connect(self.backend_ws_url) as ws:
+            await ws.send(json.dumps(payload))
+
+            while True:
+                raw = await asyncio.wait_for(ws.recv(), timeout=timeout_s)
+                msg = json.loads(raw)
+                if msg.get("type") == "response" and msg.get("request_id") == req_id:
+                    return msg
     
     async def setup(self):
         """Setup shared resources."""
         try:
             self.agent = await get_shared_agent()
-        except Exception:
-            pass
-        
-        try:
-            self.backend_client = await get_shared_backend()
         except Exception:
             pass
     
@@ -41,54 +61,28 @@ class PortfolioManagementTestSuite(TestSuiteBase):
         start_time = datetime.utcnow()
         
         try:
-            if self.backend_client:
-                # Test portfolio endpoint if available
-                try:
-                    async with self.backend_client.get("/api/v1/portfolio/summary") as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            result.details["portfolio_endpoint_available"] = True
-                            
-                            # Check portfolio state fields
-                            if isinstance(data, dict):
-                                portfolio_fields = ["balance", "equity", "positions", "total_value"]
-                                present_fields = [field for field in portfolio_fields if field in data]
-                                result.details["portfolio_fields_present"] = present_fields
-                                result.details["portfolio_state_available"] = len(present_fields) > 0
-                                
-                                # Check for positions
-                                positions = data.get("positions", [])
-                                result.details["position_count"] = len(positions) if isinstance(positions, list) else 0
-                                
-                                # Check for balance/equity
-                                balance = data.get("balance")
-                                equity = data.get("equity")
-                                total_value = data.get("total_value")
-                                
-                                if balance is not None:
-                                    result.details["has_balance"] = True
-                                    result.details["balance"] = balance
-                                
-                                if equity is not None:
-                                    result.details["has_equity"] = True
-                                    result.details["equity"] = equity
-                                
-                                if total_value is not None:
-                                    result.details["has_total_value"] = True
-                                    result.details["total_value"] = total_value
-                        else:
-                            result.status = TestStatus.WARNING
-                            result.issues.append(f"Portfolio endpoint returned status {resp.status}")
-                            result.solutions.append("Portfolio endpoint may not be implemented or requires authentication")
-                except Exception as e:
-                    result.status = TestStatus.WARNING
-                    result.error = str(e)
-                    result.issues.append(f"Portfolio state test failed: {e}")
-                    result.solutions.append("Check backend portfolio endpoint implementation")
+            msg = await self._ws_command("get_portfolio")
+            if msg.get("success") is True:
+                data = msg.get("data", {})
+                result.details["portfolio_endpoint_available"] = True
+
+                if isinstance(data, dict):
+                    portfolio_fields = ["available_balance", "positions", "total_value"]
+                    present_fields = [field for field in portfolio_fields if field in data]
+                    result.details["portfolio_fields_present"] = present_fields
+                    result.details["portfolio_state_available"] = len(present_fields) > 0
+
+                    positions = data.get("positions", [])
+                    result.details["position_count"] = len(positions) if isinstance(positions, list) else 0
+
+                    total_value = data.get("total_value")
+                    if total_value is not None:
+                        result.details["has_total_value"] = True
+                        result.details["total_value"] = total_value
             else:
                 result.status = TestStatus.WARNING
-                result.issues.append("Backend client not available")
-                result.solutions.append("Ensure backend is running")
+                result.issues.append("get_portfolio WS command failed")
+                result.details["ws_response"] = msg
             
             # Check agent for portfolio tracking
             if self.agent:
@@ -111,36 +105,29 @@ class PortfolioManagementTestSuite(TestSuiteBase):
         start_time = datetime.utcnow()
         
         try:
-            if self.backend_client:
-                # Test positions endpoint
-                try:
-                    async with self.backend_client.get("/api/v1/portfolio/positions") as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            result.details["positions_endpoint_available"] = True
-                            
-                            if isinstance(data, (list, dict)):
-                                positions = data if isinstance(data, list) else data.get("positions", [])
-                                result.details["position_count"] = len(positions)
-                                
-                                # Validate position structure
-                                if positions:
-                                    first_position = positions[0]
-                                    if isinstance(first_position, dict):
-                                        position_fields = ["symbol", "quantity", "entry_price", "side"]
-                                        present_fields = [field for field in position_fields if field in first_position]
-                                        result.details["position_fields_present"] = present_fields
-                                        result.details["position_structure_valid"] = len(present_fields) >= 2
-                        else:
-                            result.status = TestStatus.WARNING
-                            result.issues.append(f"Positions endpoint returned status {resp.status}")
-                except Exception as e:
-                    result.status = TestStatus.WARNING
-                    result.error = str(e)
-                    result.issues.append(f"Position tracking test failed: {e}")
+            msg = await self._ws_command("get_positions")
+            if msg.get("success") is True:
+                data = msg.get("data", [])
+                result.details["positions_endpoint_available"] = True
+
+                if isinstance(data, list):
+                    positions = data
+                else:
+                    positions = data.get("positions", []) if isinstance(data, dict) else []
+
+                result.details["position_count"] = len(positions)
+
+                if positions:
+                    first_position = positions[0]
+                    if isinstance(first_position, dict):
+                        position_fields = ["symbol", "quantity", "entry_price", "side"]
+                        present_fields = [field for field in position_fields if field in first_position]
+                        result.details["position_fields_present"] = present_fields
+                        result.details["position_structure_valid"] = len(present_fields) >= 2
             else:
                 result.status = TestStatus.WARNING
-                result.issues.append("Backend client not available")
+                result.issues.append("get_positions WS command failed")
+                result.details["ws_response"] = msg
             
             # Check risk manager for position tracking
             if self.agent:
@@ -166,47 +153,30 @@ class PortfolioManagementTestSuite(TestSuiteBase):
         start_time = datetime.utcnow()
         
         try:
-            if self.backend_client:
-                # Test performance/metrics endpoint
-                try:
-                    async with self.backend_client.get("/api/v1/portfolio/performance") as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            result.details["performance_endpoint_available"] = True
-                            
-                            if isinstance(data, dict):
-                                # Check for common performance metrics
-                                metrics_fields = ["pnl", "returns", "sharpe_ratio", "win_rate", "total_trades"]
-                                present_fields = [field for field in metrics_fields if field in data]
-                                result.details["metrics_fields_present"] = present_fields
-                                result.details["performance_metrics_available"] = len(present_fields) > 0
-                                
-                                # Validate metric values
-                                if "pnl" in data:
-                                    pnl = data["pnl"]
-                                    result.details["has_pnl"] = True
-                                    result.details["pnl"] = pnl
-                                
-                                if "returns" in data:
-                                    returns = data["returns"]
-                                    result.details["has_returns"] = True
-                                    result.details["returns"] = returns
-                                
-                                if "sharpe_ratio" in data:
-                                    sharpe = data["sharpe_ratio"]
-                                    result.details["has_sharpe_ratio"] = True
-                                    result.details["sharpe_ratio"] = sharpe
-                        else:
-                            result.status = TestStatus.WARNING
-                            result.issues.append(f"Performance endpoint returned status {resp.status}")
-                            result.solutions.append("Performance endpoint may not be implemented")
-                except Exception as e:
-                    result.status = TestStatus.WARNING
-                    result.error = str(e)
-                    result.issues.append(f"Performance metrics test failed: {e}")
+            msg = await self._ws_command("get_performance", {"days": 30})
+            if msg.get("success") is True:
+                data = msg.get("data", {}) or {}
+                result.details["performance_endpoint_available"] = True
+
+                if isinstance(data, dict):
+                    metrics_fields = [
+                        "total_return",
+                        "total_return_pct",
+                        "sharpe_ratio",
+                        "win_rate",
+                        "total_trades",
+                    ]
+                    present_fields = [field for field in metrics_fields if field in data]
+                    result.details["metrics_fields_present"] = present_fields
+                    result.details["performance_metrics_available"] = len(present_fields) > 0
+
+                    if "sharpe_ratio" in data:
+                        result.details["has_sharpe_ratio"] = True
+                        result.details["sharpe_ratio"] = data["sharpe_ratio"]
             else:
                 result.status = TestStatus.WARNING
-                result.issues.append("Backend client not available")
+                result.issues.append("get_performance WS command failed")
+                result.details["ws_response"] = msg
             
             # Check learning system for performance tracking
             if self.agent:

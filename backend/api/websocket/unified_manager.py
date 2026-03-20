@@ -579,11 +579,34 @@ class UnifiedWebSocketManager:
             from backend.core.database import Position, PositionStatus, AsyncSessionLocal
             from sqlalchemy import select, desc
             from backend.api.models.responses import PositionResponse
+            from backend.api.routes.portfolio import validate_symbol, validate_status
+
+            symbol = parameters.get("symbol")
+            status = parameters.get("status")
+            limit = int(parameters.get("limit", 100))
+            offset = int(parameters.get("offset", 0))
+
+            # Align with REST constraints: limit [1..1000], offset >= 0
+            if limit < 1 or limit > 1000:
+                limit = 100
+            if offset < 0:
+                offset = 0
+
+            validated_symbol = validate_symbol(symbol)
+            validated_status = validate_status(
+                status,
+                [s.value for s in PositionStatus],
+            )
+
             async with AsyncSessionLocal() as db:
                 try:
-                    query = select(Position).where(Position.status == PositionStatus.OPEN).order_by(
-                        desc(Position.opened_at)
-                    ).limit(100)
+                    query = select(Position)
+                    if validated_symbol:
+                        query = query.where(Position.symbol == validated_symbol)
+                    if validated_status:
+                        query = query.where(Position.status == validated_status)
+
+                    query = query.order_by(desc(Position.opened_at)).offset(offset).limit(limit)
                     result = await db.execute(query)
                     positions = result.scalars().all()
                     positions_data = [
@@ -600,12 +623,37 @@ class UnifiedWebSocketManager:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         if command == "get_trades":
-            from backend.core.database import Trade, AsyncSessionLocal
+            from backend.core.database import Trade, TradeStatus, AsyncSessionLocal
             from sqlalchemy import select, desc
             from backend.api.models.responses import TradeResponse
+            from backend.api.routes.portfolio import validate_symbol, validate_status
+
+            symbol = parameters.get("symbol")
+            status = parameters.get("status")
+            limit = int(parameters.get("limit", 100))
+            offset = int(parameters.get("offset", 0))
+
+            # Align with REST constraints: limit [1..1000], offset >= 0
+            if limit < 1 or limit > 1000:
+                limit = 100
+            if offset < 0:
+                offset = 0
+
+            validated_symbol = validate_symbol(symbol)
+            validated_status = validate_status(
+                status,
+                [s.value for s in TradeStatus],
+            )
+
             async with AsyncSessionLocal() as db:
                 try:
-                    query = select(Trade).order_by(desc(Trade.executed_at)).limit(100)
+                    query = select(Trade)
+                    if validated_symbol:
+                        query = query.where(Trade.symbol == validated_symbol)
+                    if validated_status:
+                        query = query.where(Trade.status == validated_status)
+
+                    query = query.order_by(desc(Trade.executed_at)).offset(offset).limit(limit)
                     result = await db.execute(query)
                     trades = result.scalars().all()
                     trades_data = [
@@ -619,6 +667,158 @@ class UnifiedWebSocketManager:
                 "type": "response",
                 "success": True,
                 "data": trades_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        if command == "get_ticker":
+            from backend.services.market_service import market_service
+
+            symbol = parameters.get("symbol", "BTCUSD")
+            ticker = await market_service.get_ticker(symbol=symbol)
+            formatted_ticker = None
+            if ticker:
+                # Align ticker field names with the frontend's WebSocket market payload.
+                # (The WS broadcast uses `high_24h`/`low_24h`/`change_24h_pct`, while the market_service
+                # returns `high`/`low`/`change_24h`.)
+                ts = ticker.get("timestamp")
+                if hasattr(ts, "isoformat"):
+                    ts = ts.isoformat()
+                formatted_ticker = {
+                    "symbol": ticker.get("symbol", symbol),
+                    "price": ticker.get("price", 0.0),
+                    "volume": ticker.get("volume", 0.0),
+                    "timestamp": ts,
+                    "change_24h_pct": ticker.get("change_24h"),
+                    "change_24h": ticker.get("change_24h"),
+                    "high_24h": ticker.get("high"),
+                    "low_24h": ticker.get("low"),
+                }
+            return {
+                "type": "response",
+                "success": formatted_ticker is not None,
+                "data": formatted_ticker,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        if command == "get_market_data":
+            from backend.services.market_service import market_service
+
+            symbol = parameters.get("symbol", "BTCUSD")
+            interval = parameters.get("interval", "1h")
+            limit = int(parameters.get("limit", 100))
+
+            if limit < 1 or limit > 1000:
+                limit = 100
+
+            market_data = await market_service.get_market_data(
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+            )
+            return {
+                "type": "response",
+                "success": market_data is not None,
+                "data": market_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        if command == "get_orderbook":
+            from backend.services.market_service import market_service
+
+            symbol = parameters.get("symbol", "BTCUSD")
+            depth = int(parameters.get("depth", 20))
+
+            if depth < 1 or depth > 100:
+                depth = 20
+
+            orderbook = await market_service.get_orderbook(symbol=symbol, depth=depth)
+            return {
+                "type": "response",
+                "success": orderbook is not None,
+                "data": orderbook,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        if command == "get_performance":
+            from backend.services.portfolio_service import portfolio_service
+            from backend.core.database import AsyncSessionLocal
+
+            days = int(parameters.get("days", parameters.get("period", 30)))
+            if days < 1 or days > 365:
+                days = 30
+
+            async with AsyncSessionLocal() as db:
+                try:
+                    performance = await portfolio_service.get_performance_metrics(db, days=days)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+
+            return {
+                "type": "response",
+                "success": performance is not None,
+                "data": performance,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        if command == "get_pnl_summary":
+            from backend.services.portfolio_service import portfolio_service
+            from backend.core.database import AsyncSessionLocal
+            from backend.api.routes.portfolio import validate_symbol
+
+            from_date = parameters.get("from_date")
+            to_date = parameters.get("to_date")
+            symbol = parameters.get("symbol")
+            limit = int(parameters.get("limit", 500))
+
+            if limit < 1 or limit > 2000:
+                limit = 500
+
+            parsed_from = (
+                datetime.fromisoformat(from_date.replace("Z", "+00:00")) if from_date else None
+            )
+            parsed_to = (
+                datetime.fromisoformat(to_date.replace("Z", "+00:00")) if to_date else None
+            )
+            validated_symbol = validate_symbol(symbol) if symbol else None
+
+            async with AsyncSessionLocal() as db:
+                try:
+                    result = await portfolio_service.get_pnl_summary(
+                        db,
+                        from_date=parsed_from,
+                        to_date=parsed_to,
+                        symbol=validated_symbol,
+                        limit=limit,
+                    )
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+
+            return {
+                "type": "response",
+                "success": True,
+                "data": result,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        if command == "control_agent":
+            from backend.services.agent_service import agent_service
+
+            action = parameters.get("action")
+            agent_parameters = parameters.get("parameters") or {}
+            if not action:
+                raise ValueError("control_agent requires 'action'")
+
+            result = await agent_service.control_agent(action=action, parameters=agent_parameters)
+            return {
+                "type": "response",
+                "success": result is not None,
+                "data": result,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        if command == "get_system_time":
+            time_info = time_service.get_time_info()
+            return {
+                "type": "response",
+                "success": True,
+                "data": time_info,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         if command == "get_health":

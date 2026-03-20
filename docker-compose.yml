@@ -56,10 +56,10 @@ services:
       resources:
         limits:
           cpus: '1'
-          memory: 512M
+          memory: 1G
         reservations:
           cpus: '0.5'
-          memory: 256M
+          memory: 512M
     logging:
       driver: "json-file"
       options:
@@ -109,7 +109,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
     restart: unless-stopped
     deploy:
       resources:
@@ -191,6 +191,8 @@ services:
       context: frontend
       dockerfile: Dockerfile
       args:
+        # These NEXT_PUBLIC_* values are embedded into the browser bundle (host-side),
+        # so they must be resolvable from the host browser.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
         NEXT_PUBLIC_BACKEND_API_KEY: ${API_KEY:-dev-api-key}

@@ -7,6 +7,7 @@ import {
   extractCorrelationId,
   LatencyTimer
 } from '../utils/communicationLogger'
+import { handleWebSocketResponse } from '@/services/api'
 
 interface WebSocketMessage {
   type: string
@@ -252,7 +253,11 @@ export function useWebSocket(url: string): UseWebSocketReturn {
                 // In production, you might want to reject stale messages
               }
             }
-            
+
+            // Resolve any in-flight API commands waiting for a `response`.
+            // (No-op for non-command-response messages.)
+            handleWebSocketResponse(message)
+
             setLastMessage(message)
             setError(null)
             

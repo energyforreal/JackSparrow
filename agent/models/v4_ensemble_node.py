@@ -206,8 +206,98 @@ class V4EnsembleNode(MCPModelNode):
 
             # Entry probabilities: 3-class [SELL, HOLD, BUY]
             entry_proba_raw = self._entry_model.predict_proba(X_entry)[0]  # type: ignore[attr-defined]
+            if entry_proba_raw is None:
+                t_ms = (time.perf_counter() - t0) * 1000.0
+                self._total_ms += t_ms
+                warning = f"v4 ensemble {self._timeframe}: entry model returned None probabilities"
+                logger.warning(
+                    "v4_entry_proba_unexpected_shape",
+                    model_name=self.model_name,
+                    timeframe=self._timeframe,
+                    proba_len=0,
+                    error=warning,
+                )
+                self._health_status = "degraded"
+                return MCPModelPrediction(
+                    model_name=self.model_name,
+                    model_version=self.model_version,
+                    prediction=0.0,
+                    confidence=0.0,
+                    reasoning=warning,
+                    features_used=applied_feature_names,
+                    feature_importance={},
+                    computation_time_ms=round(t_ms, 2),
+                    health_status="degraded",
+                )
+
+            # Some older model artifacts emit a 2-class distribution (SELL/BUY).
+            # Recover it into the expected 3-class [SELL, HOLD, BUY] format.
+            entry_len = len(entry_proba_raw)
+            if entry_len == 2:
+                sell = float(entry_proba_raw[0])
+                buy = float(entry_proba_raw[1])
+                entry_proba_raw = np.array([sell, 0.0, buy], dtype=np.float32)
+                logger.warning(
+                    "v4_entry_proba_recovered_2class",
+                    model_name=self.model_name,
+                    timeframe=self._timeframe,
+                    recovered_from_classes=2,
+                    final_classes=3,
+                )
+            elif entry_len != 3:
+                t_ms = (time.perf_counter() - t0) * 1000.0
+                self._total_ms += t_ms
+                warning = (
+                    f"v4 ensemble {self._timeframe}: entry model returned "
+                    f"{entry_len} classes (expected 3)"
+                )
+                logger.warning(
+                    "v4_entry_proba_unexpected_shape",
+                    model_name=self.model_name,
+                    timeframe=self._timeframe,
+                    proba_len=entry_len,
+                    error=warning,
+                )
+                self._health_status = "degraded"
+                return MCPModelPrediction(
+                    model_name=self.model_name,
+                    model_version=self.model_version,
+                    prediction=0.0,
+                    confidence=0.0,
+                    reasoning=warning,
+                    features_used=applied_feature_names,
+                    feature_importance={},
+                    computation_time_ms=round(t_ms, 2),
+                    health_status="degraded",
+                )
+
             # Exit probabilities: 2-class [HOLD, EXIT]
             exit_proba_raw = self._exit_model.predict_proba(X_exit)[0]  # type: ignore[attr-defined]
+            if exit_proba_raw is None or len(exit_proba_raw) < 2:
+                t_ms = (time.perf_counter() - t0) * 1000.0
+                self._total_ms += t_ms
+                warning = (
+                    f"v4 ensemble {self._timeframe}: exit model returned "
+                    f"{0 if exit_proba_raw is None else len(exit_proba_raw)} classes (expected 2)"
+                )
+                logger.warning(
+                    "v4_exit_proba_unexpected_shape",
+                    model_name=self.model_name,
+                    timeframe=self._timeframe,
+                    proba_len=0 if exit_proba_raw is None else len(exit_proba_raw),
+                )
+                self._health_status = "degraded"
+                return MCPModelPrediction(
+                    model_name=self.model_name,
+                    model_version=self.model_version,
+                    prediction=0.0,
+                    confidence=0.0,
+                    reasoning=warning,
+                    features_used=applied_feature_names,
+                    feature_importance={},
+                    computation_time_ms=round(t_ms, 2),
+                    health_status="degraded",
+                )
 
             entry_signal, entry_conf = _entry_signal(entry_proba_raw)
             exit_signal, exit_conf = _exit_signal(exit_proba_raw)

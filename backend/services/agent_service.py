@@ -45,41 +45,120 @@ class AgentService:
         self._pending_responses: Dict[str, asyncio.Future] = {}
         self._reconnect_task: Optional[asyncio.Task] = None
         self._initialization_attempted = False
+        # Prevent concurrent connect attempts and stale socket reuse.
+        self._ws_init_lock: asyncio.Lock = asyncio.Lock()
+        self._ws_close_lock: asyncio.Lock = asyncio.Lock()
+        self._ws_receive_task: Optional[asyncio.Task] = None
+        # WebSocket reconnect throttling to avoid tight retry loops.
+        self._last_ws_attempt: float = 0.0
+        self._ws_attempt_backoff_seconds: float = 5.0
         
         # Response mechanism uses Redis key-value store (response:{request_id})
         # Backend polls using get_response() which reads from key-value, not list queue
+
+        # Small TTL cache to avoid bursty get_agent_status fan-out during health sync.
+        self._agent_status_fetch_lock: asyncio.Lock = asyncio.Lock()
+        self._agent_status_cache: Optional[Dict[str, Any]] = None
+        self._agent_status_cache_updated_at: float = 0.0
+        self._agent_status_cache_ttl_seconds: float = 2.0
     
     async def _initialize_websocket(self):
         """Initialize WebSocket connection to agent."""
         if not websockets:
             return
+
+        async with self._ws_init_lock:
+            # If already connected, don't create a second socket.
+            if self._websocket_connected and self._websocket is not None:
+                return
         
-        try:
-            self._websocket = await websockets.connect(  # type: ignore[call-arg]
-                self.websocket_url,
-                ping_interval=30,
-                ping_timeout=10,
-            )
-            self._websocket_connected = True
-            
-            logger.info(
-                "agent_service_websocket_connected",
-                service="backend",
-                url=self.websocket_url
-            )
-            
-            # Start receiving messages
-            asyncio.create_task(self._websocket_receive_loop())
-            
-        except Exception as e:
-            logger.warning(
-                "agent_service_websocket_init_failed",
-                service="backend",
-                url=self.websocket_url,
-                error=str(e),
-                message="Falling back to Redis queue communication"
-            )
+            try:
+                # Use a more forgiving ping timeout: the agent may take longer to
+                # compute command responses (health/status can be multi-step).
+                self._websocket = await websockets.connect(  # type: ignore[call-arg]
+                    self.websocket_url,
+                    ping_interval=30,
+                    ping_timeout=30,
+                )
+                self._websocket_connected = True
+                
+                logger.info(
+                    "agent_service_websocket_connected",
+                    service="backend",
+                    url=self.websocket_url
+                )
+                
+                # Start receiving messages (only once per socket instance).
+                if self._ws_receive_task is None or self._ws_receive_task.done():
+                    self._ws_receive_task = asyncio.create_task(self._websocket_receive_loop())
+                
+            except Exception as e:
+                logger.warning(
+                    "agent_service_websocket_init_failed",
+                    service="backend",
+                    url=self.websocket_url,
+                    error=str(e),
+                    message="Falling back to Redis queue communication"
+                )
+                self._websocket_connected = False
+                await self._schedule_reconnect()
+
+    async def _teardown_websocket(self) -> None:
+        """Close the current agent WebSocket cleanly (best-effort)."""
+        if self._websocket is None:
             self._websocket_connected = False
+            return
+
+        async with self._ws_close_lock:
+            ws = self._websocket
+            self._websocket = None
+            self._websocket_connected = False
+            try:
+                # Ensure teardown never stalls command traffic; close handshake
+                # can hang when the peer is wedged or ping/pong is broken.
+                await asyncio.wait_for(ws.close(), timeout=3.0)
+            except Exception:
+                # Best-effort shutdown; receive loop will exit on its own.
+                pass
+            # The receive loop is best-effort; cancel to avoid holding stale refs.
+            if self._ws_receive_task is not None and not self._ws_receive_task.done():
+                self._ws_receive_task.cancel()
+            self._ws_receive_task = None
+
+    async def _schedule_reconnect(self, delay: float = 2.0) -> None:
+        """Schedule a background WebSocket reconnect loop."""
+        if not self.use_websocket:
+            return
+
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+
+        async def _reconnect_loop() -> None:
+            await asyncio.sleep(delay)
+            while True:
+                try:
+                    # Stop if WebSocket usage is disabled or we already connected.
+                    if not self.use_websocket:
+                        return
+                    if self._websocket_connected and self._websocket is not None:
+                        return
+                    # Throttle attempts a bit.
+                    now = time.time()
+                    if now - self._last_ws_attempt < self._ws_attempt_backoff_seconds:
+                        await asyncio.sleep(1.0)
+                        continue
+                    self._last_ws_attempt = now
+                    await self._initialize_websocket()
+                    if self._websocket_connected and self._websocket is not None:
+                        return
+                except asyncio.CancelledError:
+                    return
+                except Exception:
+                    # Best-effort reconnect: swallow and retry.
+                    pass
+                await asyncio.sleep(5.0)
+
+        self._reconnect_task = asyncio.create_task(_reconnect_loop())
     
     async def _websocket_receive_loop(self):
         """Receive messages from agent WebSocket."""
@@ -122,6 +201,12 @@ class AgentService:
                 "agent_service_websocket_disconnected",
                 service="backend"
             )
+            # Ensure any in-flight commands waiting on this socket fail fast.
+            for request_id, future in list(self._pending_responses.items()):
+                if not future.done():
+                    future.set_exception(Exception("WebSocket disconnected"))
+                self._pending_responses.pop(request_id, None)
+            await self._schedule_reconnect()
         except Exception as e:
             log_error_with_context(
                 "agent_service_websocket_receive_fatal",
@@ -130,6 +215,7 @@ class AgentService:
                 url=self.websocket_url
             )
             self._websocket_connected = False
+            await self._schedule_reconnect()
     
     async def _send_command(
         self,
@@ -155,19 +241,20 @@ class AgentService:
         # BACKEND -> AGENT: Entry logging
         logger.info("BACKEND -> AGENT: Sending command=%s", command)
         
-        # Lazy initialization of WebSocket connection
-        if self.use_websocket and websockets is not None and not self._initialization_attempted:
-            self._initialization_attempted = True
-            try:
-                await self._initialize_websocket()
-            except Exception as e:
-                logger.debug(
-                    "agent_service_websocket_lazy_init_failed",
-                    service="backend",
-                    error=str(e)
-                )
-        
-        request_id = str(uuid.uuid4())
+        # Attempt WebSocket initialization if disconnected.
+        if self.use_websocket and websockets is not None:
+            if not self._websocket_connected or self._websocket is None:
+                now = time.time()
+                if now - self._last_ws_attempt >= self._ws_attempt_backoff_seconds:
+                    self._last_ws_attempt = now
+                    try:
+                        await self._initialize_websocket()
+                    except Exception as e:
+                        logger.debug(
+                            "agent_service_websocket_lazy_init_failed",
+                            service="backend",
+                            error=str(e)
+                        )
         
         # Try WebSocket first if available
         logger.debug("BACKEND -> AGENT: Checking WebSocket availability: use_websocket=%s, connected=%s, websocket=%s",
@@ -226,6 +313,9 @@ class AgentService:
                         command=command,
                         timeout=timeout
                     )
+                    # Treat a timeout as an unhealthy socket and reconnect.
+                    await self._teardown_websocket()
+                    await self._schedule_reconnect()
                     # Fall through to Redis fallback
                 except Exception as e:
                     self._pending_responses.pop(request_id, None)
@@ -248,6 +338,9 @@ class AgentService:
                         command=command,
                         error=str(e)
                     )
+                    # Treat errors as unhealthy socket and reconnect.
+                    await self._teardown_websocket()
+                    await self._schedule_reconnect()
                     # Fall through to Redis fallback
             
             except Exception as e:
@@ -395,201 +488,188 @@ class AgentService:
         Args:
             timeout: Timeout in seconds for the command (default 5)
         """
+        now_ts = time.time()
+        if (
+            self._agent_status_cache is not None
+            and (now_ts - self._agent_status_cache_updated_at) <= self._agent_status_cache_ttl_seconds
+        ):
+            # Avoid bursty fan-out during health sync.
+            return dict(self._agent_status_cache)
 
-        start_time = time.time()
-        response = await self._send_command(
-            "get_status",
-            parameters={},
-            timeout=timeout
-        )
-        latency_ms = (time.time() - start_time) * 1000
-        
-        now = datetime.now(timezone.utc)
-        
-        if not response:
-            # Try to determine if agent is running by checking WebSocket server
-            agent_running = False
-            try:
-                import socket
-                from urllib.parse import urlparse
+        async with self._agent_status_fetch_lock:
+            # Re-check cache inside the lock (single-flight).
+            now_ts = time.time()
+            if (
+                self._agent_status_cache is not None
+                and (now_ts - self._agent_status_cache_updated_at) <= self._agent_status_cache_ttl_seconds
+            ):
+                return dict(self._agent_status_cache)
 
-                parsed = urlparse(settings.agent_websocket_url)
-                agent_host = parsed.hostname or "localhost"
-                agent_port = parsed.port or 8002
+            start_time = time.time()
+            response = await self._send_command(
+                "get_status",
+                parameters={},
+                timeout=timeout,
+            )
+            latency_ms = (time.time() - start_time) * 1000
+            now = datetime.now(timezone.utc)
 
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1.0)
-                result = sock.connect_ex((agent_host, agent_port))
-                agent_running = result == 0
-                sock.close()
-            except:
-                pass
-
-            if agent_running:
-                return {
-                    "available": False,
+            if not response:
+                status_response = {
+                    "available": True,
                     "state": "DEGRADED",
                     "last_update": now,
                     "active_symbols": [],
                     "model_count": 0,
                     "health_status": "timeout",
-                    "message": "Agent is running but not responding to commands (timeout)",
-                    "latency_ms": round(latency_ms, 2)
+                    "message": "Agent did not respond to status command in time (timeout)",
+                    "latency_ms": round(latency_ms, 2),
                 }
-            else:
-                return {
-                    "available": False,
-                    "state": "DOWN",
-                    "last_update": now,
-                    "active_symbols": [],
-                    "model_count": 0,
-                    "health_status": "unavailable",
-                    "message": "Agent service not running",
-                    "latency_ms": round(latency_ms, 2)
+                self._agent_status_cache = status_response
+                self._agent_status_cache_updated_at = time.time()
+                return dict(status_response)
+
+            # response is already the extracted data from WebSocket response
+            # (see _websocket_receive_loop: future.set_result(data.get("data", data)))
+            data = response if isinstance(response, dict) else {}
+
+            health = data.get("health", {})
+            detailed_health = data.get("detailed_health", {})
+
+            # Extract model registry info from health or detailed_health
+            model_registry = health.get("model_registry", {})
+            if not model_registry and detailed_health:
+                model_nodes = detailed_health.get("model_nodes", {})
+                model_registry = {
+                    "total_models": model_nodes.get("total_models", 0),
+                    "healthy_models": model_nodes.get("healthy_models", 0),
                 }
-        
-        # response is already the extracted data from WebSocket response
-        # (see _websocket_receive_loop: future.set_result(data.get("data", data)))
-        data = response if isinstance(response, dict) else {}
-        health = data.get("health", {})
-        detailed_health = data.get("detailed_health", {})
-        
-        # Extract model registry info from health or detailed_health
-        model_registry = health.get("model_registry", {})
-        if not model_registry and detailed_health:
-            model_nodes = detailed_health.get("model_nodes", {})
-            model_registry = {
-                "total_models": model_nodes.get("total_models", 0),
-                "healthy_models": model_nodes.get("healthy_models", 0)
+
+            available = data.get("available", True)
+
+            # Determine agent state - infer from available data if not explicitly provided
+            agent_state = data.get("state", "UNKNOWN")
+            if agent_state == "UNKNOWN" and available:
+                active_symbols = data.get("active_symbols", [])
+                model_count = model_registry.get("total_models", 0)
+                if active_symbols:
+                    agent_state = "OBSERVING"
+                elif model_count > 0:
+                    agent_state = "OBSERVING"
+                else:
+                    agent_state = "OBSERVING"
+
+            status_response = {
+                "available": available,
+                "state": agent_state,
+                "last_update": now,
+                "active_symbols": data.get("active_symbols", []),
+                "model_count": model_registry.get("total_models", 0),
+                "health_status": health.get("overall_status", "unknown"),
+                "message": data.get("message"),
+                "latency_ms": round(latency_ms, 2),
             }
-        
-        # Extract available flag from agent response (agent includes it in data)
-        # If not present, assume True since we got a successful response
-        available = data.get("available", True)
-        
-        # Determine agent state - infer from available data if not explicitly provided
-        agent_state = data.get("state", "UNKNOWN")
-        if agent_state == "UNKNOWN" and available:
-            # If agent is available but state is UNKNOWN, infer a reasonable state
-            # Check if agent has active symbols or models loaded
-            active_symbols = data.get("active_symbols", [])
-            model_count = model_registry.get("total_models", 0)
-            
-            if active_symbols:
-                # Agent has active symbols - likely monitoring
-                agent_state = "OBSERVING"
-            elif model_count > 0:
-                # Agent has models loaded - likely ready to observe
-                agent_state = "OBSERVING"
+
+            # Add detailed health information if available
+            if detailed_health:
+                inferred_detailed_health = dict(detailed_health)
+
+                # Infer feature server status
+                if "feature_server" in inferred_detailed_health:
+                    fs = inferred_detailed_health["feature_server"]
+                    if isinstance(fs, dict) and fs.get("status") == "unknown":
+                        feature_count = fs.get("feature_registry_count", 0)
+                        if feature_count > 0:
+                            fs = dict(fs)
+                            fs["status"] = "up"
+                            fs["note"] = (
+                                f"Inferred healthy status from {feature_count} registered features"
+                            )
+                            inferred_detailed_health["feature_server"] = fs
+
+                # Infer model nodes status
+                if "model_nodes" in inferred_detailed_health:
+                    mn = inferred_detailed_health["model_nodes"]
+                    if isinstance(mn, dict) and mn.get("status") == "unknown":
+                        healthy_count = mn.get("healthy_models", 0)
+                        total_count = mn.get("total_models", 0)
+                        if total_count > 0:
+                            if healthy_count > 0:
+                                status = "up"
+                            elif healthy_count == 0 and total_count > 0:
+                                status = "degraded"
+                            else:
+                                status = "unknown"
+
+                            mn = dict(mn)
+                            mn["status"] = status
+                            if status == "degraded":
+                                mn["note"] = (
+                                    f"Models loaded ({total_count}) but healthy count is 0/{total_count}; "
+                                    "run predictions to refresh health."
+                                )
+                            else:
+                                mn["note"] = (
+                                    f"Inferred status from {healthy_count}/{total_count} healthy models"
+                                )
+                            inferred_detailed_health["model_nodes"] = mn
+
+                # Infer delta exchange status
+                if "delta_exchange" in inferred_detailed_health:
+                    de = inferred_detailed_health["delta_exchange"]
+                    if isinstance(de, dict) and de.get("status") == "unknown":
+                        circuit_breaker = de.get("circuit_breaker", {})
+                        if isinstance(circuit_breaker, dict):
+                            cb_state = circuit_breaker.get("state")
+                            if cb_state == "CLOSED":
+                                de = dict(de)
+                                de["status"] = "up"
+                                de["note"] = "Inferred healthy status from circuit breaker state"
+                                inferred_detailed_health["delta_exchange"] = de
+                            elif cb_state == "OPEN":
+                                de = dict(de)
+                                de["status"] = "down"
+                                de["note"] = (
+                                    "Circuit breaker is open - service temporarily unavailable"
+                                )
+                                inferred_detailed_health["delta_exchange"] = de
+
+                # Infer reasoning engine status
+                if "reasoning_engine" in inferred_detailed_health:
+                    re = inferred_detailed_health["reasoning_engine"]
+                    if isinstance(re, dict) and re.get("status") == "unknown":
+                        vector_store_available = re.get("vector_store_available", None)
+                        if vector_store_available is not None:
+                            re = dict(re)
+                            re["status"] = "up"
+                            re["note"] = (
+                                "Inferred healthy status from reasoning engine data availability"
+                            )
+                            inferred_detailed_health["reasoning_engine"] = re
+
+                status_response.update(
+                    {
+                        "feature_server": inferred_detailed_health.get("feature_server", {}),
+                        "model_nodes": inferred_detailed_health.get("model_nodes", {}),
+                        "delta_exchange": inferred_detailed_health.get("delta_exchange", {}),
+                        "reasoning_engine": inferred_detailed_health.get("reasoning_engine", {}),
+                    }
+                )
             else:
-                # Agent is available but no clear activity - default to OBSERVING
-                agent_state = "OBSERVING"
-        
-        # Build response with detailed health information
-        status_response = {
-            "available": available,  # Use agent's reported availability
-            "state": agent_state,
-            "last_update": now,
-            "active_symbols": data.get("active_symbols", []),
-            "model_count": model_registry.get("total_models", 0),
-            "health_status": health.get("overall_status", "unknown"),
-            "message": data.get("message"),
-            "latency_ms": round(latency_ms, 2)
-        }
-        
-        # Add detailed health information if available
-        if detailed_health:
-            # Apply status inference to detailed health before adding to response
-            inferred_detailed_health = dict(detailed_health)
+                if health and isinstance(health, dict):
+                    mcp_components = health.get("mcp_orchestrator", {}).get("components", {})
+                    status_response.update(
+                        {
+                            "feature_server": mcp_components.get("feature_server", {}),
+                            "model_nodes": mcp_components.get("model_registry", {}),
+                            "delta_exchange": {},
+                            "reasoning_engine": mcp_components.get("reasoning_engine", {}),
+                        }
+                    )
 
-            # Infer feature server status
-            if "feature_server" in inferred_detailed_health:
-                fs = inferred_detailed_health["feature_server"]
-                if isinstance(fs, dict) and fs.get("status") == "unknown":
-                    feature_count = fs.get("feature_registry_count", 0)
-                    if feature_count > 0:
-                        fs = dict(fs)
-                        fs["status"] = "up"
-                        fs["note"] = f"Inferred healthy status from {feature_count} registered features"
-                        inferred_detailed_health["feature_server"] = fs
-
-            # Infer model nodes status
-            if "model_nodes" in inferred_detailed_health:
-                mn = inferred_detailed_health["model_nodes"]
-                if isinstance(mn, dict) and mn.get("status") == "unknown":
-                    healthy_count = mn.get("healthy_models", 0)
-                    total_count = mn.get("total_models", 0)
-                    if total_count > 0:
-                        if healthy_count > 0:
-                            status = "up"
-                        elif healthy_count == 0 and total_count > 0:
-                            # 0 healthy models right after startup/prediction warmup
-                            # should be treated as degraded rather than hard down.
-                            status = "degraded"
-                        else:
-                            status = "unknown"
-
-                        mn = dict(mn)
-                        mn["status"] = status
-                        if status == "degraded":
-                            mn["note"] = (
-                                f"Models loaded ({total_count}) but healthy count is 0/{total_count}; "
-                                "run predictions to refresh health."
-                            )
-                        else:
-                            mn["note"] = (
-                                f"Inferred status from {healthy_count}/{total_count} healthy models"
-                            )
-                        inferred_detailed_health["model_nodes"] = mn
-
-            # Infer delta exchange status
-            if "delta_exchange" in inferred_detailed_health:
-                de = inferred_detailed_health["delta_exchange"]
-                if isinstance(de, dict) and de.get("status") == "unknown":
-                    circuit_breaker = de.get("circuit_breaker", {})
-                    if isinstance(circuit_breaker, dict):
-                        cb_state = circuit_breaker.get("state")
-                        if cb_state == "CLOSED":
-                            de = dict(de)
-                            de["status"] = "up"
-                            de["note"] = "Inferred healthy status from circuit breaker state"
-                            inferred_detailed_health["delta_exchange"] = de
-                        elif cb_state == "OPEN":
-                            de = dict(de)
-                            de["status"] = "down"
-                            de["note"] = "Circuit breaker is open - service temporarily unavailable"
-                            inferred_detailed_health["delta_exchange"] = de
-
-            # Infer reasoning engine status
-            if "reasoning_engine" in inferred_detailed_health:
-                re = inferred_detailed_health["reasoning_engine"]
-                if isinstance(re, dict) and re.get("status") == "unknown":
-                    # Reasoning engine is typically available if agent is running
-                    vector_store_available = re.get("vector_store_available", None)
-                    if vector_store_available is not None:
-                        re = dict(re)
-                        re["status"] = "up"
-                        re["note"] = "Inferred healthy status from reasoning engine data availability"
-                        inferred_detailed_health["reasoning_engine"] = re
-
-            status_response.update({
-                "feature_server": inferred_detailed_health.get("feature_server", {}),
-                "model_nodes": inferred_detailed_health.get("model_nodes", {}),
-                "delta_exchange": inferred_detailed_health.get("delta_exchange", {}),
-                "reasoning_engine": inferred_detailed_health.get("reasoning_engine", {})
-            })
-        else:
-            # If no detailed health, try to infer from basic health data
-            if health and isinstance(health, dict):
-                mcp_components = health.get("mcp_orchestrator", {}).get("components", {})
-                status_response.update({
-                    "feature_server": mcp_components.get("feature_server", {}),
-                    "model_nodes": mcp_components.get("model_registry", {}),
-                    "delta_exchange": {},
-                    "reasoning_engine": mcp_components.get("reasoning_engine", {})
-                })
-
-        return status_response
+            self._agent_status_cache = status_response
+            self._agent_status_cache_updated_at = time.time()
+            return dict(status_response)
     
     async def control_agent(
         self,
