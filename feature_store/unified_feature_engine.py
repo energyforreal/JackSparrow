@@ -15,6 +15,7 @@ from feature_store.feature_registry import (
     CHART_PATTERN_FEATURES,
     EXPECTED_FEATURE_COUNT,
     FEATURE_LIST,
+    MTF_CONTEXT_FEATURES,
 )
 from feature_store.pattern_features.candlestick_patterns import CandlestickPatternEngine
 from feature_store.pattern_features.chart_patterns import ChartPatternEngine
@@ -43,6 +44,28 @@ def _ema_series(s: pd.Series, period: int) -> pd.Series:
     return s.ewm(span=period, adjust=False).mean()
 
 
+def _rsi_14_from_close(c: pd.Series) -> pd.Series:
+    """RSI(14) on close; matches rolling-mean variant used in compute_batch."""
+    delta = c.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = (-delta).where(delta < 0, 0.0)
+    avg_gain = gain.rolling(14, min_periods=1).mean()
+    avg_loss = loss.rolling(14, min_periods=1).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    return 100 - (100 / (1 + rs))
+
+
+def _ensure_timestamp_series(df: pd.DataFrame) -> pd.Series:
+    """Return UTC datetime series aligned to df rows (from timestamp or time)."""
+    if "timestamp" in df.columns:
+        ts = pd.to_datetime(df["timestamp"], utc=True)
+    elif "time" in df.columns:
+        ts = pd.to_datetime(df["time"], unit="s", utc=True)
+    else:
+        raise ValueError("DataFrame must have 'timestamp' or 'time' for MTF context")
+    return ts
+
+
 class UnifiedFeatureEngine:
     """
     Single source of truth for all feature computation.
@@ -51,11 +74,72 @@ class UnifiedFeatureEngine:
 
     SUPPORTED_FEATURES = list(FEATURE_LIST) + list(
         {f for f in V4_EXTRA_FEATURES if f not in FEATURE_LIST}
-    ) + list(CANDLESTICK_FEATURES)
+    ) + list(CANDLESTICK_FEATURES) + list(CHART_PATTERN_FEATURES) + list(MTF_CONTEXT_FEATURES)
 
     def __init__(self):
         self._cdl_engine = CandlestickPatternEngine()
         self._chp_engine = ChartPatternEngine()
+
+    def _mtf_context_from_primary(
+        self, df: pd.DataFrame, resolution_minutes: int
+    ) -> pd.DataFrame:
+        """
+        Multi-timeframe context on the primary bar index: resample OHLCV to 3m/15m,
+        compute RSI/EMA on resampled closes, forward-fill to primary timestamps.
+        mtf_1m_vol_ratio is a short-horizon volume spike proxy on the primary grid.
+        When resolution is not 5m, returns zeros (caller should skip MTF in training).
+        """
+        n = len(df)
+        zero = pd.DataFrame(
+            {name: np.zeros(n, dtype=float) for name in MTF_CONTEXT_FEATURES}
+        )
+        if resolution_minutes != 5:
+            return zero
+        try:
+            ts = _ensure_timestamp_series(df)
+        except ValueError:
+            return zero
+
+        work = pd.DataFrame(
+            {
+                "timestamp": ts,
+                "open": df["open"].astype(float),
+                "high": df["high"].astype(float),
+                "low": df["low"].astype(float),
+                "close": df["close"].astype(float),
+                "volume": df["volume"].astype(float),
+            }
+        )
+        work = work.set_index("timestamp").sort_index()
+        idx = work.index
+        out = pd.DataFrame(index=idx)
+        for rule, prefix in [("3min", "mtf_3m"), ("15min", "mtf_15m")]:
+            r = (
+                work.resample(rule, label="right", closed="right")
+                .agg(
+                    {
+                        "open": "first",
+                        "high": "max",
+                        "low": "min",
+                        "close": "last",
+                        "volume": "sum",
+                    }
+                )
+                .dropna(how="any")
+            )
+            c = r["close"].astype(float)
+            rsi = _rsi_14_from_close(c).reindex(idx, method="ffill")
+            ema12 = _ema_series(c, 12).reindex(idx, method="ffill")
+            out[f"{prefix}_rsi_14"] = rsi
+            out[f"{prefix}_ema_12"] = ema12
+
+        v = work["volume"].astype(float)
+        vm = v.rolling(3, min_periods=1).mean()
+        out["mtf_1m_vol_ratio"] = v / vm.replace(0, np.nan)
+
+        out = out.reindex(columns=list(MTF_CONTEXT_FEATURES))
+        out = out.fillna(0).replace([np.inf, -np.inf], 0)
+        return out.reset_index(drop=True)
 
     def compute_batch(
         self,
@@ -63,6 +147,7 @@ class UnifiedFeatureEngine:
         resolution_minutes: int = 15,
         fill_invalid: bool = True,
         include_pattern_features: bool = False,
+        include_mtf_context: bool = False,
     ) -> pd.DataFrame:
         """
         Compute canonical 50 features from OHLCV DataFrame.
@@ -200,6 +285,9 @@ class UnifiedFeatureEngine:
             cdl = self._cdl_engine.compute_all(df)
             chp = self._chp_engine.compute_all(df)
             result = pd.concat([result, cdl, chp], axis=1)
+        if include_mtf_context:
+            mtf = self._mtf_context_from_primary(df, resolution_minutes)
+            result = pd.concat([result, mtf], axis=1)
         if fill_invalid:
             result = result.fillna(0).replace([np.inf, -np.inf], 0)
         return result
@@ -226,6 +314,11 @@ class UnifiedFeatureEngine:
             df = pd.DataFrame(candles)
             chp = self._chp_engine.compute_all(df)
             return float(chp[feature_name].iloc[-1])
+
+        if feature_name in MTF_CONTEXT_FEATURES:
+            df = pd.DataFrame(candles)
+            mtf = self._mtf_context_from_primary(df, resolution_minutes)
+            return float(mtf[feature_name].iloc[-1])
 
         resolved = FEATURE_ALIASES.get(feature_name, feature_name)
         if resolved in FEATURE_LIST:

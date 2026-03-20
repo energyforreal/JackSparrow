@@ -782,11 +782,15 @@ Check logs for model discovery messages.
 
 ### 10.3 Train Models (Alternative to Upload)
 
-If you need to train new models or regenerate corrupted models, use the training script:
+If you need to train new models or regenerate corrupted models, use the authoritative Colab notebook path for production-style BTCUSD artefacts:
+
+- `notebooks/JackSparrow_Trading_Colab_v4.ipynb`
 
 **Prerequisites**: Ensure Delta Exchange API credentials are configured in `.env`
 
-**Run Training**:
+Use script-based training only for legacy or experimental workflows.
+
+**Legacy script path (optional)**:
 ```bash
 # From project root
 python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
@@ -802,6 +806,11 @@ python scripts/validate_models_before_deployment.py
 ```
 
 See [ML Models Documentation](03-ml-models.md#model-training) for detailed training guide.
+
+**Post-train parity checklist (required before deployment)**:
+1. Confirm `MODEL_DIR` points to the exact export folder that contains `metadata_BTCUSD_*.json`.
+2. Confirm `metadata_*` includes `features` and `features_required` matching `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in order and count.
+3. Run `pytest tests/unit/test_feature_parity.py -q`.
 
 ---
 

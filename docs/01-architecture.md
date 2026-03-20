@@ -177,7 +177,7 @@ MCP Orchestrator
 
 **Orchestration Flow**:
 1. Request arrives at MCP Orchestrator
-2. Feature Orchestrator requests features via Feature Protocol
+2. Feature Orchestrator requests features via Feature Protocol (using model-required feature names from registry metadata when available)
 3. Model Orchestrator requests predictions via Model Protocol
 4. Reasoning Orchestrator generates reasoning chain via Reasoning Protocol
 5. All components work together to produce final decision
@@ -409,6 +409,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - Caching for performance
 - Version management
 - Automatic quality assessment
+- Pattern-feature requests (`cdl_`, `chp_`, `sr_`, `tl_`, `bo_`) fetch deeper candle history (200) to support chart-pattern lookbacks
 
 **Implementation**: MCP Feature Server (`agent/data/feature_server.py`) implements the protocol and is accessed through the MCP Orchestrator.
 

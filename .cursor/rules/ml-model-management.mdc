@@ -40,6 +40,13 @@ All models must implement `MCPModelNode` interface:
 - `features_required`: List of required feature names
 - `description`: Model description
 
+## Training Authority and Parity Checklist
+
+- Prefer `notebooks/JackSparrow_Trading_Colab_v4.ipynb` for BTCUSD production-style training and exports.
+- Keep train-serve parity strict: `metadata_*.json` `features` and `features_required` must match `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in order and count.
+- Ensure runtime discovery points to the matching export directory via `MODEL_DIR`.
+- Run `tests/unit/test_feature_parity.py` after training and before promotion.
+
 ## Model Versioning
 
 - Use semantic versioning (MAJOR.MINOR.PATCH)

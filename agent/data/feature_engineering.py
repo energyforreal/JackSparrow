@@ -124,22 +124,29 @@ class FeatureEngineering:
         return methods.get(feature_name, "Unknown")
 
     def validate_feature_order(self, feature_list: List[str]) -> Dict[str, Any]:
-        """Validate that feature list matches expected order and count."""
-        from feature_store.feature_registry import EXPECTED_FEATURE_COUNT
+        """Validate feature list count for canonical and expanded schemas."""
+        from feature_store.feature_registry import (
+            EXPECTED_FEATURE_COUNT,
+            EXPANDED_FEATURE_LIST,
+        )
+
+        expanded_feature_count = len(EXPANDED_FEATURE_LIST)
 
         validation_results = {
             "valid": True,
             "feature_count": len(feature_list),
             "expected_count": EXPECTED_FEATURE_COUNT,
+            "expanded_expected_count": expanded_feature_count,
             "missing_features": [],
             "errors": [],
         }
 
-        if len(feature_list) != EXPECTED_FEATURE_COUNT:
+        if len(feature_list) not in (EXPECTED_FEATURE_COUNT, expanded_feature_count):
             validation_results["valid"] = False
             validation_results["errors"].append(
                 f"Feature count mismatch: got {len(feature_list)}, "
-                f"expected {EXPECTED_FEATURE_COUNT}"
+                f"expected {EXPECTED_FEATURE_COUNT} (canonical) or "
+                f"{expanded_feature_count} (expanded)"
             )
 
         return validation_results

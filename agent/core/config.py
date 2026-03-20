@@ -182,12 +182,12 @@ class Settings(BaseSettings):
         description="Maximum portfolio heat"
     )
     stop_loss_percentage: float = Field(
-        default=0.02,
+        default=0.0015,
         env="STOP_LOSS_PERCENTAGE",
         description="Stop loss percentage"
     )
     take_profit_percentage: float = Field(
-        default=0.05,
+        default=0.0020,
         env="TAKE_PROFIT_PERCENTAGE",
         description="Take profit percentage"
     )
@@ -217,7 +217,7 @@ class Settings(BaseSettings):
         description="Require higher-timeframe trend confirmation before entry"
     )
     model_disagreement_threshold: float = Field(
-        default=0.4,
+        default=0.6,
         env="MODEL_DISAGREEMENT_THRESHOLD",
         description="Max inter-model prediction stdev before dampening consensus"
     )
@@ -242,7 +242,7 @@ class Settings(BaseSettings):
         description="Position monitor interval when positions are open"
     )
     position_monitor_interval_seconds: float = Field(
-        default=15.0,
+        default=2.0,
         env="POSITION_MONITOR_INTERVAL_SECONDS",
         description="Position monitor interval when no positions"
     )
@@ -374,7 +374,7 @@ class Settings(BaseSettings):
         description="Trading symbol"
     )
     min_confidence_threshold: float = Field(
-        default=0.65,
+        default=0.52,
         env="MIN_CONFIDENCE_THRESHOLD",
         description="Minimum confidence threshold for trades"
     )
@@ -384,7 +384,7 @@ class Settings(BaseSettings):
         description="Update interval in seconds (legacy - used for candle-based operations)"
     )
     price_fluctuation_threshold_pct: float = Field(
-        default=0.5,
+        default=0.10,
         env="PRICE_FLUCTUATION_THRESHOLD_PCT",
         description="Percentage threshold for price fluctuations that trigger ML pipeline (e.g., 0.5 = 0.5%)"
     )
@@ -394,7 +394,7 @@ class Settings(BaseSettings):
         description="Fast polling interval in seconds for continuous ticker monitoring (controls API call frequency)"
     )
     timeframes: str = Field(
-        default="15m,1h,4h",
+        default="5m,15m",
         env="TIMEFRAMES",
         description="Comma-separated list of timeframes"
     )

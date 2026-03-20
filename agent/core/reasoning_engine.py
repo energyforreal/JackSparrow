@@ -461,14 +461,29 @@ class MCPReasoningEngine:
             
             # Model disagreement filter: dampen consensus when predictions disagree strongly
             predictions_vals = [p.get("prediction", 0) for p in model_predictions]
-            thresh = getattr(settings, "model_disagreement_threshold", 0.4)
+            thresh = getattr(settings, "model_disagreement_threshold", 0.6)
             if len(predictions_vals) > 1:
                 pred_stdev = statistics.stdev(predictions_vals)
                 if pred_stdev > thresh:
+                    # Scalping: reduce excessive consensus suppression when models disagree.
+                    # Keep at least 50% of the consensus rather than allowing near-zero collapse.
+                    damping_factor = max(0.5, 1.0 - 0.5 * (pred_stdev - thresh))
+                    consensus_before = consensus
                     evidence.append(
                         f"High model disagreement (stdev={pred_stdev:.2f}) — signal suppressed"
                     )
-                    consensus *= max(0.0, 1.0 - (pred_stdev - thresh))
+                    consensus *= damping_factor
+                    if getattr(settings, "diagnostics_enabled", True):
+                        logger.info(
+                            "model_consensus_dampened",
+                            symbol=request.symbol,
+                            pred_stdev=float(pred_stdev),
+                            threshold=float(thresh),
+                            damping_factor=float(damping_factor),
+                            consensus_before=float(consensus_before),
+                            consensus_after=float(consensus),
+                            models=len(predictions_vals),
+                        )
 
             evidence.append(f"Model consensus: {consensus:.2f} ({len(model_predictions)} models, avg confidence: {avg_confidence:.2f})")
             
@@ -589,6 +604,19 @@ class MCPReasoningEngine:
             evidence = ["No model predictions available"]
             consensus = 0.0
             avg_confidence = 0.0
+            if getattr(settings, "diagnostics_enabled", True):
+                logger.info(
+                    "reasoning_hold_exit",
+                    symbol=request.symbol,
+                    reason="no_model_predictions",
+                    consensus=float(consensus),
+                    strong_thresh=None,
+                    mild_thresh=None,
+                    vol=None,
+                    avg_confidence=float(avg_confidence),
+                    total_models=0,
+                    message="Step 5 produced HOLD due to missing model predictions.",
+                )
         else:
             # Separate classifier and regressor predictions
             # Regressors predict prices directly and are generally more reliable for price direction
@@ -683,23 +711,56 @@ class MCPReasoningEngine:
             vol = features.get("volatility")
             if vol is not None:
                 if vol > 5:
-                    strong_thresh, mild_thresh = 0.75, 0.40
+                    strong_thresh, mild_thresh = 0.45, 0.20
                 elif vol < 1.5:
-                    strong_thresh, mild_thresh = 0.60, 0.25
+                    strong_thresh, mild_thresh = 0.35, 0.15
                 else:
-                    strong_thresh, mild_thresh = 0.70, 0.30
+                    strong_thresh, mild_thresh = 0.40, 0.18
             else:
-                strong_thresh, mild_thresh = 0.70, 0.30
+                strong_thresh, mild_thresh = 0.40, 0.18
+
+            decision_code = "HOLD"
             if consensus > strong_thresh:
+                decision_code = "STRONG_BUY"
                 conclusion = "STRONG_BUY - High confidence bullish signal"
             elif consensus > mild_thresh:
+                decision_code = "BUY"
                 conclusion = "BUY - Moderate bullish signal"
             elif consensus < -strong_thresh:
+                decision_code = "STRONG_SELL"
                 conclusion = "STRONG_SELL - High confidence bearish signal"
             elif consensus < -mild_thresh:
+                decision_code = "SELL"
                 conclusion = "SELL - Moderate bearish signal"
             else:
                 conclusion = "HOLD - Mixed signals, waiting for clearer direction"
+
+            if getattr(settings, "diagnostics_enabled", True):
+                logger.info(
+                    "reasoning_stage5_decision",
+                    symbol=request.symbol,
+                    decision=decision_code,
+                    consensus=float(consensus),
+                    strong_thresh=float(strong_thresh),
+                    mild_thresh=float(mild_thresh),
+                    vol=float(vol) if vol is not None else None,
+                    avg_confidence=float(avg_confidence),
+                    total_models=len(model_predictions),
+                    classifiers=len(classifier_predictions),
+                    regressors=len(regressor_predictions),
+                )
+                if decision_code == "HOLD":
+                    logger.info(
+                        "reasoning_hold_exit",
+                        symbol=request.symbol,
+                        reason="consensus_in_hold_band",
+                        consensus=float(consensus),
+                        strong_thresh=float(strong_thresh),
+                        mild_thresh=float(mild_thresh),
+                        vol=float(vol) if vol is not None else None,
+                        avg_confidence=float(avg_confidence),
+                        total_models=len(model_predictions),
+                    )
             
             evidence = [
                 f"Final consensus: {consensus:.2f} (weighted avg confidence: {avg_confidence:.2f})",

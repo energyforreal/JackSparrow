@@ -37,6 +37,7 @@ This document serves as the central index for all project documentation. Navigat
    - Price prediction models with pagination and data reversal support
    - Currently integrated: 6 XGBoost models (3 classifiers + 3 regressors) for BTCUSD trading
    - **[ML Training Guide - Google Colab](docs/ml-training-google-colab.md)** - Comprehensive guide for training models in Google Colab
+   - **[Training and Feature Parity](docs/training-and-feature-parity.md)** - Authoritative notebook path, parity checklist, and HOLD-context guidance
    - **[Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md)** - Details on recent model integration
 
 4. **[Features Documentation](docs/04-features.md)**

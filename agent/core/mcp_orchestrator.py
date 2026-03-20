@@ -691,6 +691,7 @@ class MCPOrchestrator:
             confidence = pred.get("confidence", 0.0)
             prediction_value = pred.get("prediction", 0.0)
             signal = pred.get("signal") or self._derive_signal_from_prediction(prediction_value)
+            context = pred.get("context")
 
             normalized.append(
                 {
@@ -699,6 +700,9 @@ class MCPOrchestrator:
                     "confidence": confidence,
                     "prediction": prediction_value,
                     "signal": signal,
+                    # Preserve model-level distribution context (e.g. entry_proba)
+                    # for diagnostics and class-distribution analysis downstream.
+                    "context": context,
                 }
             )
 

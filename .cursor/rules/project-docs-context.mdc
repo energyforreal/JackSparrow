@@ -37,6 +37,7 @@ The `.cursor/context/docs` directory mirrors the entire `docs/` tree. Reference 
 - `.cursor/context/docs/docker-logs-analysis-report-20251123.md`
 - `.cursor/context/docs/docker-hot-reload.md`
 - `.cursor/context/docs/remediation-plan.md`
+- `.cursor/context/docs/training-and-feature-parity.md`
 
 **Important Reference Documents** (in project root):
 - `MAJOR_CHANGES.md` - Complete change log for architectural improvements (2025-01-27)

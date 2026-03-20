@@ -28,6 +28,22 @@ This document describes how ML models are managed, uploaded, discovered, and int
 
 JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**. Models are automatically discovered and registered on agent startup through the model discovery system.
 
+### Training Authority and Train-Serve Parity
+
+For BTCUSD production-style entry/exit ensembles, the authoritative training path is:
+
+- `notebooks/JackSparrow_Trading_Colab_v4.ipynb`
+
+This notebook uses `UnifiedFeatureEngine`, validates `EXPANDED_FEATURE_LIST` coverage, applies fee-aware TP/SL labeling, and exports timeframe artefacts as a versioned bundle (`entry_*`, `exit_*`, scaler files, `features_*.json`, `metadata_*.json`).
+
+Parity requirements before deployment:
+
+1. `MODEL_DIR` must point to the exact export directory containing `metadata_BTCUSD_*.json`.
+2. Metadata `features` and `features_required` must match `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in both order and length.
+3. Run feature parity tests (`tests/unit/test_feature_parity.py`) and review pattern-feature importances from the notebook report outputs.
+
+Legacy notebooks such as `notebooks/train_models_colab.ipynb` and `notebooks/train_xgboost_colab.ipynb` are still useful for experiments, but should not be treated as the primary production training authority unless their schema and labels are explicitly aligned with current live metadata.
+
 ### Model Storage Location
 
 | Location | Purpose | Environment Variable | Usage |

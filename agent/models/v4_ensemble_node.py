@@ -56,8 +56,12 @@ logger = structlog.get_logger()
 class V4Artifacts:
     """Resolved artefact paths for a single timeframe."""
 
-    entry_model_path: Path
+    entry_model_path: Optional[Path]
     entry_scaler_path: Optional[Path]
+    entry_long_model_path: Optional[Path]
+    entry_long_scaler_path: Optional[Path]
+    entry_short_model_path: Optional[Path]
+    entry_short_scaler_path: Optional[Path]
     exit_model_path: Path
     exit_scaler_path: Optional[Path]
     features_path: Optional[Path]
@@ -69,7 +73,9 @@ def _entry_signal(proba: np.ndarray) -> Tuple[float, float]:
         return 0.0, 0.0
     sell, hold, buy = float(proba[0]), float(proba[1]), float(proba[2])
     signal = buy - sell
-    confidence = max(sell, hold, buy)
+    # For execution gating we only care about directional conviction.
+    # HOLD-dominant models should not inflate confidence.
+    confidence = max(sell, buy)
     return signal, confidence
 
 
@@ -104,8 +110,12 @@ class V4EnsembleNode(MCPModelNode):
         # Lazy-loaded artefacts
         self._artifacts = artifacts
         self._entry_model: Optional[Any] = None
+        self._entry_long_model: Optional[Any] = None
+        self._entry_short_model: Optional[Any] = None
         self._exit_model: Optional[Any] = None
         self._entry_scaler: Optional[Any] = None
+        self._entry_long_scaler: Optional[Any] = None
+        self._entry_short_scaler: Optional[Any] = None
         self._exit_scaler: Optional[Any] = None
 
         # Health metrics
@@ -135,9 +145,16 @@ class V4EnsembleNode(MCPModelNode):
             rel = artifacts_cfg.get(name)
             return (base_dir / rel) if rel else None
 
+        entry_model_rel = artifacts_cfg.get("entry_model")
+        entry_long_rel = artifacts_cfg.get("entry_long_model")
+        entry_short_rel = artifacts_cfg.get("entry_short_model")
         artifacts = V4Artifacts(
-            entry_model_path=base_dir / artifacts_cfg["entry_model"],
+            entry_model_path=(base_dir / entry_model_rel) if entry_model_rel else None,
             entry_scaler_path=_opt("entry_scaler"),
+            entry_long_model_path=(base_dir / entry_long_rel) if entry_long_rel else None,
+            entry_long_scaler_path=_opt("entry_long_scaler"),
+            entry_short_model_path=(base_dir / entry_short_rel) if entry_short_rel else None,
+            entry_short_scaler_path=_opt("entry_short_scaler"),
             exit_model_path=base_dir / artifacts_cfg["exit_model"],
             exit_scaler_path=_opt("exit_scaler"),
             features_path=_opt("features"),
@@ -169,8 +186,12 @@ class V4EnsembleNode(MCPModelNode):
 
     async def initialize(self) -> None:
         """Lazy-load models and scalers on first use."""
-        if self._entry_model is None:
+        if self._artifacts.entry_model_path and self._entry_model is None:
             self._entry_model = _load(self._artifacts.entry_model_path)
+        if self._artifacts.entry_long_model_path and self._entry_long_model is None:
+            self._entry_long_model = _load(self._artifacts.entry_long_model_path)
+        if self._artifacts.entry_short_model_path and self._entry_short_model is None:
+            self._entry_short_model = _load(self._artifacts.entry_short_model_path)
         if self._exit_model is None:
             self._exit_model = _load(self._artifacts.exit_model_path)
         if self._artifacts.entry_scaler_path and self._entry_scaler is None:
@@ -178,6 +199,16 @@ class V4EnsembleNode(MCPModelNode):
                 self._entry_scaler = _load(self._artifacts.entry_scaler_path)
             except Exception:
                 self._entry_scaler = None
+        if self._artifacts.entry_long_scaler_path and self._entry_long_scaler is None:
+            try:
+                self._entry_long_scaler = _load(self._artifacts.entry_long_scaler_path)
+            except Exception:
+                self._entry_long_scaler = None
+        if self._artifacts.entry_short_scaler_path and self._entry_short_scaler is None:
+            try:
+                self._entry_short_scaler = _load(self._artifacts.entry_short_scaler_path)
+            except Exception:
+                self._entry_short_scaler = None
         if self._artifacts.exit_scaler_path and self._exit_scaler is None:
             try:
                 self._exit_scaler = _load(self._artifacts.exit_scaler_path)
@@ -198,78 +229,62 @@ class V4EnsembleNode(MCPModelNode):
 
             X_entry = np.array([features_vec], dtype=np.float32)
             X_exit = np.array([features_vec], dtype=np.float32)
-
-            if self._entry_scaler is not None:
-                X_entry = self._entry_scaler.transform(X_entry)
             if self._exit_scaler is not None:
                 X_exit = self._exit_scaler.transform(X_exit)
-
-            # Entry probabilities: 3-class [SELL, HOLD, BUY]
-            entry_proba_raw = self._entry_model.predict_proba(X_entry)[0]  # type: ignore[attr-defined]
-            if entry_proba_raw is None:
-                t_ms = (time.perf_counter() - t0) * 1000.0
-                self._total_ms += t_ms
-                warning = f"v4 ensemble {self._timeframe}: entry model returned None probabilities"
-                logger.warning(
-                    "v4_entry_proba_unexpected_shape",
-                    model_name=self.model_name,
-                    timeframe=self._timeframe,
-                    proba_len=0,
-                    error=warning,
-                )
-                self._health_status = "degraded"
-                return MCPModelPrediction(
-                    model_name=self.model_name,
-                    model_version=self.model_version,
-                    prediction=0.0,
-                    confidence=0.0,
-                    reasoning=warning,
-                    features_used=applied_feature_names,
-                    feature_importance={},
-                    computation_time_ms=round(t_ms, 2),
-                    health_status="degraded",
-                )
-
-            # Some older model artifacts emit a 2-class distribution (SELL/BUY).
-            # Recover it into the expected 3-class [SELL, HOLD, BUY] format.
-            entry_len = len(entry_proba_raw)
-            if entry_len == 2:
-                sell = float(entry_proba_raw[0])
-                buy = float(entry_proba_raw[1])
-                entry_proba_raw = np.array([sell, 0.0, buy], dtype=np.float32)
-                logger.warning(
-                    "v4_entry_proba_recovered_2class",
-                    model_name=self.model_name,
-                    timeframe=self._timeframe,
-                    recovered_from_classes=2,
-                    final_classes=3,
-                )
-            elif entry_len != 3:
-                t_ms = (time.perf_counter() - t0) * 1000.0
-                self._total_ms += t_ms
-                warning = (
-                    f"v4 ensemble {self._timeframe}: entry model returned "
-                    f"{entry_len} classes (expected 3)"
-                )
-                logger.warning(
-                    "v4_entry_proba_unexpected_shape",
-                    model_name=self.model_name,
-                    timeframe=self._timeframe,
-                    proba_len=entry_len,
-                    error=warning,
-                )
-                self._health_status = "degraded"
-                return MCPModelPrediction(
-                    model_name=self.model_name,
-                    model_version=self.model_version,
-                    prediction=0.0,
-                    confidence=0.0,
-                    reasoning=warning,
-                    features_used=applied_feature_names,
-                    feature_importance={},
-                    computation_time_ms=round(t_ms, 2),
-                    health_status="degraded",
-                )
+            # Entry probabilities:
+            # - New contract: binary long/short entry models
+            # - Legacy contract: single 3-class [SELL, HOLD, BUY] entry model
+            if self._entry_long_model is not None and self._entry_short_model is not None:
+                X_entry_long = np.array([features_vec], dtype=np.float32)
+                X_entry_short = np.array([features_vec], dtype=np.float32)
+                if self._entry_long_scaler is not None:
+                    X_entry_long = self._entry_long_scaler.transform(X_entry_long)
+                if self._entry_short_scaler is not None:
+                    X_entry_short = self._entry_short_scaler.transform(X_entry_short)
+                long_proba = self._entry_long_model.predict_proba(X_entry_long)[0]  # type: ignore[attr-defined]
+                short_proba = self._entry_short_model.predict_proba(X_entry_short)[0]  # type: ignore[attr-defined]
+                if long_proba is None or short_proba is None or len(long_proba) < 2 or len(short_proba) < 2:
+                    raise ValueError("binary entry models returned invalid probabilities")
+                buy = float(long_proba[1])
+                sell = float(short_proba[1])
+                hold = float(max(0.0, 1.0 - max(buy, sell)))
+                entry_proba_raw = np.array([sell, hold, buy], dtype=np.float32)
+            else:
+                if self._entry_scaler is not None:
+                    X_entry = self._entry_scaler.transform(X_entry)
+                entry_proba_raw = self._entry_model.predict_proba(X_entry)[0]  # type: ignore[attr-defined]
+                if entry_proba_raw is None:
+                    t_ms = (time.perf_counter() - t0) * 1000.0
+                    self._total_ms += t_ms
+                    warning = f"v4 ensemble {self._timeframe}: entry model returned None probabilities"
+                    logger.warning(
+                        "v4_entry_proba_unexpected_shape",
+                        model_name=self.model_name,
+                        timeframe=self._timeframe,
+                        proba_len=0,
+                        error=warning,
+                    )
+                    self._health_status = "degraded"
+                    return MCPModelPrediction(
+                        model_name=self.model_name,
+                        model_version=self.model_version,
+                        prediction=0.0,
+                        confidence=0.0,
+                        reasoning=warning,
+                        features_used=applied_feature_names,
+                        feature_importance={},
+                        computation_time_ms=round(t_ms, 2),
+                        health_status="degraded",
+                    )
+                entry_len = len(entry_proba_raw)
+                if entry_len == 2:
+                    sell = float(entry_proba_raw[0])
+                    buy = float(entry_proba_raw[1])
+                    entry_proba_raw = np.array([sell, 0.0, buy], dtype=np.float32)
+                elif entry_len != 3:
+                    raise ValueError(
+                        f"v4 ensemble {self._timeframe}: entry model returned {entry_len} classes (expected 2/3)"
+                    )
 
             # Exit probabilities: 2-class [HOLD, EXIT]
             exit_proba_raw = self._exit_model.predict_proba(X_exit)[0]  # type: ignore[attr-defined]

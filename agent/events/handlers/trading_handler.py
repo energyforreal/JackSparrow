@@ -18,7 +18,8 @@ from agent.core.config import settings
 logger = structlog.get_logger()
 
 # Debounce: one RiskApproved per (symbol, side) within this many seconds
-TRADE_SIGNAL_DEBOUNCE_SECONDS = 30
+# Scalping: allow more frequent entries.
+TRADE_SIGNAL_DEBOUNCE_SECONDS = 10
 # Minimum risk/reward ratio (reward/risk) to allow entry (e.g. 1.5 = take_profit distance >= 1.5 * stop_loss distance)
 MIN_RISK_REWARD_RATIO = 1.2
 
@@ -95,6 +96,60 @@ class TradingEventHandler:
             **context,
         )
 
+    def _summarize_model_entry_proba(
+        self, model_predictions: Any
+    ) -> Dict[str, Any]:
+        """
+        Summarize predicted class probabilities when model_predictions preserve
+        model context (e.g. v4 entry_proba in context).
+        """
+        if not isinstance(model_predictions, list) or not model_predictions:
+            return {}
+
+        sell_vals: list[float] = []
+        hold_vals: list[float] = []
+        buy_vals: list[float] = []
+        max_conf_vals: list[float] = []
+
+        for mp in model_predictions:
+            if not isinstance(mp, dict):
+                continue
+            ctx = mp.get("context") or {}
+            if not isinstance(ctx, dict):
+                continue
+            entry_proba = ctx.get("entry_proba") or {}
+            if not isinstance(entry_proba, dict):
+                continue
+            sell = entry_proba.get("sell")
+            hold = entry_proba.get("hold")
+            buy = entry_proba.get("buy")
+            if sell is None or hold is None or buy is None:
+                continue
+
+            try:
+                sell_f = float(sell)
+                hold_f = float(hold)
+                buy_f = float(buy)
+            except (TypeError, ValueError):
+                continue
+
+            sell_vals.append(sell_f)
+            hold_vals.append(hold_f)
+            buy_vals.append(buy_f)
+            max_conf_vals.append(max(sell_f, hold_f, buy_f))
+
+        if not sell_vals:
+            return {}
+
+        n = len(sell_vals)
+        return {
+            "entry_proba_models": n,
+            "entry_proba_sell_mean": sum(sell_vals) / n,
+            "entry_proba_hold_mean": sum(hold_vals) / n,
+            "entry_proba_buy_mean": sum(buy_vals) / n,
+            "entry_proba_max_conf_mean": sum(max_conf_vals) / n,
+        }
+
     async def handle_decision_ready_for_trading(self, event: DecisionReadyEvent):
         """Handle decision ready event - validate risk and publish RiskApprovedEvent if approved.
 
@@ -111,6 +166,12 @@ class TradingEventHandler:
             confidence = payload.get("confidence", 0.0)
             position_size = payload.get("position_size", 0.0)
 
+            now_utc = datetime.now(timezone.utc)
+            hour_bucket_utc = now_utc.strftime("%Y-%m-%dT%H:00Z")
+            model_predictions = (payload.get("reasoning_chain") or {}).get("model_predictions") or []
+            entry_proba_summary = self._summarize_model_entry_proba(model_predictions)
+            diagnostics_base: Dict[str, Any] = {"hour_bucket_utc": hour_bucket_utc, **entry_proba_summary}
+
             # Skip HOLD - no trade to execute
             if signal == "HOLD" or not signal:
                 self._log_entry_rejected(
@@ -118,6 +179,7 @@ class TradingEventHandler:
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
+                    **diagnostics_base,
                 )
                 return
 
@@ -142,6 +204,7 @@ class TradingEventHandler:
                             event_id=event.event_id,
                             age_seconds=round(age, 3),
                             max_signal_age_seconds=getattr(settings, "max_signal_age_seconds", 10),
+                            **diagnostics_base,
                         )
                         return
                 except Exception:
@@ -190,6 +253,7 @@ class TradingEventHandler:
                     event_id=event.event_id,
                     confidence=confidence,
                     threshold=settings.min_confidence_threshold,
+                    **diagnostics_base,
                 )
                 return
 
@@ -205,6 +269,7 @@ class TradingEventHandler:
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
+                    **diagnostics_base,
                 )
                 return
 
@@ -216,6 +281,7 @@ class TradingEventHandler:
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
+                    **diagnostics_base,
                 )
                 return
             strength_map = {"STRONG_BUY": 0.9, "BUY": 0.65, "STRONG_SELL": 0.9, "SELL": 0.65}
@@ -250,6 +316,7 @@ class TradingEventHandler:
                     event_id=event.event_id,
                     side=side,
                     risk_reason=validation.get("reason", "Unknown"),
+                    **diagnostics_base,
                 )
                 return
 
@@ -262,12 +329,15 @@ class TradingEventHandler:
                     event_id=event.event_id,
                     side=side,
                     debounce_seconds=TRADE_SIGNAL_DEBOUNCE_SECONDS,
+                    **diagnostics_base,
                 )
                 return
 
             # ATR-based SL/TP when available; else use config and profit gate
             atr = features.get("atr_14")
-            use_atr_sl_tp = atr is not None and atr > 0 and entry_price > 0
+            # Scalping alignment: training targets are fixed TP/SL percentages.
+            # Using ATR-based distances here would break TP/SL parity.
+            use_atr_sl_tp = False
             stop_loss_price = None
             take_profit_price = None
             if use_atr_sl_tp:
@@ -291,6 +361,7 @@ class TradingEventHandler:
                         side=side,
                         entry_price=entry_price,
                         min_ratio=MIN_RISK_REWARD_RATIO,
+                        **diagnostics_base,
                     )
                     return
 
@@ -305,6 +376,7 @@ class TradingEventHandler:
                             signal=signal,
                             event_id=event.event_id,
                             trend_15m=trend_15m,
+                            **diagnostics_base,
                         )
                         return
                     if signal in ("SELL", "STRONG_SELL") and trend_15m > 0:
@@ -314,18 +386,20 @@ class TradingEventHandler:
                             signal=signal,
                             event_id=event.event_id,
                             trend_15m=trend_15m,
+                            **diagnostics_base,
                         )
                         return
 
-            # ADX ranging market filter: block mild BUY/SELL in low trend strength
+            # ADX ranging market filter: block mild BUY/SELL in very low trend strength
             adx = features.get("adx_14")
-            if adx is not None and adx < 20 and signal in ("BUY", "SELL"):
+            if adx is not None and adx < 15 and signal in ("BUY", "SELL"):
                 self._log_entry_rejected(
                     "adx_ranging_filter",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
                     adx=adx,
+                    **diagnostics_base,
                 )
                 return
 
@@ -376,6 +450,7 @@ class TradingEventHandler:
                 quantity=quantity,
                 entry_price=entry_price,
                 event_id=event.event_id,
+                **diagnostics_base,
             )
 
         except Exception as e:

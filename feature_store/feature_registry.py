@@ -66,12 +66,25 @@ CHART_PATTERN_FEATURES: List[str] = [
     "bo_at_high", "bo_at_low", "bo_volume_confirmation", "bo_breakout_score",
 ]
 
-# Expanded feature list (canonical + candlestick + chart patterns, ~122 total)
+# Multi-timeframe context (derived from primary OHLCV via resample; 5m primary in production).
+# Appended after patterns for backward-compatible ordering of base blocks.
+MTF_CONTEXT_FEATURES: List[str] = [
+    "mtf_15m_rsi_14",
+    "mtf_15m_ema_12",
+    "mtf_3m_rsi_14",
+    "mtf_3m_ema_12",
+    "mtf_1m_vol_ratio",
+]
+
+# Expanded: canonical + candlestick + chart patterns + MTF context (~127)
 EXPANDED_FEATURE_LIST: List[str] = (
-    FEATURE_LIST + CANDLESTICK_FEATURES + CHART_PATTERN_FEATURES
+    FEATURE_LIST
+    + CANDLESTICK_FEATURES
+    + CHART_PATTERN_FEATURES
+    + MTF_CONTEXT_FEATURES
 )
 
-FEATURE_VERSION = "1.0"
+FEATURE_VERSION = "1.1"
 
 
 def get_feature_list() -> List[str]:
