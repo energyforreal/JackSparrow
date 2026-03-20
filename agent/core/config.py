@@ -182,14 +182,14 @@ class Settings(BaseSettings):
         description="Maximum portfolio heat"
     )
     stop_loss_percentage: float = Field(
-        default=0.002,
+        default=0.004,
         env="STOP_LOSS_PERCENTAGE",
-        description="Stop loss as fraction of price (e.g. 0.002 = 0.2%)"
+        description="Stop loss as fraction of price (e.g. 0.004 = 0.4%)"
     )
     take_profit_percentage: float = Field(
-        default=0.003,
+        default=0.006,
         env="TAKE_PROFIT_PERCENTAGE",
-        description="Take profit as fraction of price (e.g. 0.003 = 0.3%)"
+        description="Take profit as fraction of price (e.g. 0.006 = 0.6%)"
     )
     max_signal_age_seconds: int = Field(
         default=10,
@@ -235,7 +235,7 @@ class Settings(BaseSettings):
         description="Primary timeframe for entry confirmation",
     )
     mtf_filter_timeframe: str = Field(
-        default="3m",
+        default="none",
         env="MTF_FILTER_TIMEFRAME",
         description="Optional shorter TF filter; set empty, 'none', or '-' to disable",
     )
@@ -245,7 +245,7 @@ class Settings(BaseSettings):
         description="Comma-separated fallbacks if primary trend TF model is missing",
     )
     mtf_entry_fallback_timeframes: str = Field(
-        default="15m,3m,30m,1h",
+        default="15m,30m,1h",
         env="MTF_ENTRY_FALLBACK_TIMEFRAMES",
         description="Comma-separated fallbacks if primary entry TF model is missing",
     )
@@ -264,6 +264,41 @@ class Settings(BaseSettings):
         env="MTF_ENTRY_SIGNAL_THRESHOLD",
         description="Absolute entry_signal on entry TF to count as confirming BUY/SELL",
     )
+    mtf_use_entry_proba_gating: bool = Field(
+        default=True,
+        env="MTF_USE_ENTRY_PROBA_GATING",
+        description="Use entry_proba buy/sell thresholds for MTF gating when available",
+    )
+    mtf_trend_min_buy_prob: float = Field(
+        default=0.6,
+        env="MTF_TREND_MIN_BUY_PROB",
+        description="Minimum trend-TF BUY probability for bullish MTF bias",
+    )
+    mtf_trend_min_sell_prob: float = Field(
+        default=0.6,
+        env="MTF_TREND_MIN_SELL_PROB",
+        description="Minimum trend-TF SELL probability for bearish MTF bias",
+    )
+    mtf_entry_min_buy_prob: float = Field(
+        default=0.6,
+        env="MTF_ENTRY_MIN_BUY_PROB",
+        description="Minimum entry-TF BUY probability to confirm BUY decision",
+    )
+    mtf_entry_min_sell_prob: float = Field(
+        default=0.6,
+        env="MTF_ENTRY_MIN_SELL_PROB",
+        description="Minimum entry-TF SELL probability to confirm SELL decision",
+    )
+    mtf_strong_min_buy_prob: float = Field(
+        default=0.72,
+        env="MTF_STRONG_MIN_BUY_PROB",
+        description="Minimum BUY probability/confidence to emit STRONG_BUY",
+    )
+    mtf_strong_min_sell_prob: float = Field(
+        default=0.72,
+        env="MTF_STRONG_MIN_SELL_PROB",
+        description="Minimum SELL probability/confidence to emit STRONG_SELL",
+    )
     use_ml_exit_model: bool = Field(
         default=False,
         env="USE_ML_EXIT_MODEL",
@@ -278,6 +313,21 @@ class Settings(BaseSettings):
         default=0.92,
         env="BLOCK_BUY_NEAR_BB_UPPER_PCT",
         description="Block BUY when bb_position is above this (near upper band / resistance)",
+    )
+    sr_strength_filter_enabled: bool = Field(
+        default=True,
+        env="SR_STRENGTH_FILTER_ENABLED",
+        description="Apply SR support/resistance strength gates before entries",
+    )
+    block_buy_min_sr_resistance_strength: float = Field(
+        default=0.7,
+        env="BLOCK_BUY_MIN_SR_RESISTANCE_STRENGTH",
+        description="Block BUY when SR resistance strength exceeds this threshold",
+    )
+    block_sell_min_sr_support_strength: float = Field(
+        default=0.7,
+        env="BLOCK_SELL_MIN_SR_SUPPORT_STRENGTH",
+        description="Block SELL when SR support strength exceeds this threshold",
     )
     model_disagreement_threshold: float = Field(
         default=0.6,

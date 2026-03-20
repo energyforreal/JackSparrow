@@ -17,12 +17,15 @@ def test_parse_timeframe_from_model_name():
     assert parse_timeframe_from_model_name("no_suffix") is None
 
 
-def _pred(name: str, sig: float, conf: float) -> dict:
+def _pred(name: str, sig: float, conf: float, proba: dict | None = None) -> dict:
+    context = {"entry_signal": sig, "entry_confidence": conf}
+    if proba is not None:
+        context["entry_proba"] = proba
     return {
         "model_name": name,
         "prediction": sig,
         "confidence": conf,
-        "context": {"entry_signal": sig, "entry_confidence": conf},
+        "context": context,
     }
 
 
@@ -78,3 +81,75 @@ def test_synthesize_neutral_trend_hold():
     code, conclusion, _, _ = synthesize_mtf_trading_decision(preds, settings)
     assert code == "HOLD"
     assert "neutral" in conclusion.lower()
+
+
+def test_synthesize_mtf_buy_with_entry_proba_gating():
+    settings = SimpleNamespace(
+        mtf_decision_engine_enabled=True,
+        mtf_trend_timeframe="15m",
+        mtf_entry_timeframe="5m",
+        mtf_filter_timeframe="none",
+        mtf_trend_fallback_timeframes="",
+        mtf_entry_fallback_timeframes="",
+        mtf_entry_min_confidence=0.6,
+        mtf_use_entry_proba_gating=True,
+        mtf_trend_min_buy_prob=0.6,
+        mtf_trend_min_sell_prob=0.6,
+        mtf_entry_min_buy_prob=0.6,
+        mtf_entry_min_sell_prob=0.6,
+        mtf_strong_min_buy_prob=0.72,
+        mtf_strong_min_sell_prob=0.72,
+    )
+    preds = [
+        _pred("jack_BTC_15m", 0.1, 0.7, {"sell": 0.15, "hold": 0.2, "buy": 0.65}),
+        _pred("jack_BTC_5m", 0.2, 0.66, {"sell": 0.14, "hold": 0.2, "buy": 0.66}),
+    ]
+    code, _, conf, _ = synthesize_mtf_trading_decision(preds, settings)
+    assert code == "BUY"
+    assert conf == pytest.approx(0.66)
+
+
+def test_synthesize_mtf_proba_gating_blocks_low_entry_buy_prob():
+    settings = SimpleNamespace(
+        mtf_decision_engine_enabled=True,
+        mtf_trend_timeframe="15m",
+        mtf_entry_timeframe="5m",
+        mtf_filter_timeframe="none",
+        mtf_trend_fallback_timeframes="",
+        mtf_entry_fallback_timeframes="",
+        mtf_entry_min_confidence=0.6,
+        mtf_use_entry_proba_gating=True,
+        mtf_trend_min_buy_prob=0.6,
+        mtf_trend_min_sell_prob=0.6,
+        mtf_entry_min_buy_prob=0.6,
+        mtf_entry_min_sell_prob=0.6,
+    )
+    preds = [
+        _pred("jack_BTC_15m", 0.1, 0.7, {"sell": 0.1, "hold": 0.2, "buy": 0.7}),
+        _pred("jack_BTC_5m", 0.25, 0.7, {"sell": 0.2, "hold": 0.25, "buy": 0.55}),
+    ]
+    code, conclusion, _, _ = synthesize_mtf_trading_decision(preds, settings)
+    assert code == "HOLD"
+    assert "not confirming" in conclusion.lower()
+
+
+def test_synthesize_mtf_proba_fallback_to_signal_thresholds():
+    settings = SimpleNamespace(
+        mtf_decision_engine_enabled=True,
+        mtf_trend_timeframe="15m",
+        mtf_entry_timeframe="5m",
+        mtf_filter_timeframe="none",
+        mtf_trend_fallback_timeframes="",
+        mtf_entry_fallback_timeframes="",
+        mtf_entry_min_confidence=0.6,
+        mtf_trend_signal_threshold=0.1,
+        mtf_entry_signal_threshold=0.15,
+        mtf_use_entry_proba_gating=True,
+    )
+    preds = [
+        _pred("jack_BTC_15m", 0.22, 0.65),  # no entry_proba -> fallback branch
+        _pred("jack_BTC_5m", 0.27, 0.66),
+    ]
+    code, _, _, evidence = synthesize_mtf_trading_decision(preds, settings)
+    assert code == "BUY"
+    assert any("fallback" in line.lower() for line in evidence)

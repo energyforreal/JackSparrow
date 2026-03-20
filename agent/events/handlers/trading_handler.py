@@ -429,6 +429,76 @@ class TradingEventHandler:
                     except (TypeError, ValueError):
                         pass
 
+            if getattr(settings, "sr_strength_filter_enabled", True):
+                if signal in ("BUY", "STRONG_BUY"):
+                    sr_at_res = features.get("sr_at_resistance")
+                    if bool(sr_at_res):
+                        self._log_entry_rejected(
+                            "near_resistance_sr",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            sr_at_resistance=sr_at_res,
+                            **diagnostics_base,
+                        )
+                        return
+                    sr_res_strength = features.get("sr_resistance_strength")
+                    if sr_res_strength is not None:
+                        try:
+                            sr_f = float(sr_res_strength)
+                            sr_cap = float(
+                                getattr(
+                                    settings,
+                                    "block_buy_min_sr_resistance_strength",
+                                    0.7,
+                                )
+                            )
+                            if sr_f >= sr_cap:
+                                self._log_entry_rejected(
+                                    "near_resistance_sr_strength",
+                                    symbol=symbol,
+                                    signal=signal,
+                                    event_id=event.event_id,
+                                    sr_resistance_strength=sr_f,
+                                    threshold=sr_cap,
+                                    **diagnostics_base,
+                                )
+                                return
+                        except (TypeError, ValueError):
+                            pass
+                if signal in ("SELL", "STRONG_SELL"):
+                    sr_at_sup = features.get("sr_at_support")
+                    if bool(sr_at_sup):
+                        self._log_entry_rejected(
+                            "near_support_sr",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            sr_at_support=sr_at_sup,
+                            **diagnostics_base,
+                        )
+                        return
+                    sr_sup_strength = features.get("sr_support_strength")
+                    if sr_sup_strength is not None:
+                        try:
+                            sr_f = float(sr_sup_strength)
+                            sr_cap = float(
+                                getattr(settings, "block_sell_min_sr_support_strength", 0.7)
+                            )
+                            if sr_f >= sr_cap:
+                                self._log_entry_rejected(
+                                    "near_support_sr_strength",
+                                    symbol=symbol,
+                                    signal=signal,
+                                    event_id=event.event_id,
+                                    sr_support_strength=sr_f,
+                                    threshold=sr_cap,
+                                    **diagnostics_base,
+                                )
+                                return
+                        except (TypeError, ValueError):
+                            pass
+
             # Clear opposite-side debounce so reversal can trade
             opp_key = self._debounce_key(symbol, "SELL" if side == "BUY" else "BUY")
             self._last_risk_approved.pop(opp_key, None)

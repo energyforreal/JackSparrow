@@ -1,4 +1,4 @@
-"""One-shot patch: align JackSparrow_Trading_Colab_v4.ipynb with MTF runtime (no 1m, no ML exit, 0.3%/0.2% TP/SL)."""
+"""One-shot patch: align JackSparrow_Trading_Colab_v4.ipynb with MTF runtime."""
 from __future__ import annotations
 
 import json
@@ -26,11 +26,11 @@ def main() -> None:
         0,
         """# JackSparrow Trading Agent — Colab Training Lab (v5)
 
-**MTF-aligned stack (matches live agent defaults):** timeframes **`3m`, `5m`, `15m` only** — **no 1m** (noise / Sharpe drag). Roles: **15m trend**, **5m entry**, **3m optional filter** for the runtime MTF decision engine.
+**MTF-aligned stack (matches live agent defaults):** timeframes **`3m`, `5m`, `15m` only** — **no 1m** (noise / Sharpe drag). Runtime roles: **15m trend** and **5m entry** with probability-gated MTF decisions; **3m is optional filter only** when explicitly enabled.
 
-**Expanded ~127 features** (canonical + candlestick + chart patterns + **MTF context** on **5m primary**), **fee-aware TP/SL entry labeling** aligned with execution: **TP = 0.3%**, **SL = 0.2%** (see `TP_PCT` / `SL_PCT` below).
+**Expanded ~127 features** (canonical + candlestick + chart patterns + **MTF context** on **5m primary**), **fee-aware TP/SL entry labeling** aligned with execution: **TP = 0.6%**, **SL = 0.4%** (see `TP_PCT` / `SL_PCT` below).
 
-**Live exits:** the agent uses **rule-based exits** (TP/SL, trailing, max hold) with `USE_ML_EXIT_MODEL=false`. This notebook trains **entry (long + short) models only** — no exit classifier export (smaller ZIP, no imbalanced exit F1).
+**Live exits:** the agent uses **rule-based exits** (TP/SL, trailing, max hold) with `USE_ML_EXIT_MODEL=false`. This notebook trains **entry (long + short) models only** — no exit classifier export (smaller ZIP, no imbalanced exit F1). Execution-side SR/BB filters are applied in the trading handler, not in notebook training.
 
 **Trade-level check:** after export, optionally run the repo script `scripts/trade_simulator.py` on OHLCV CSV for PnL / drawdown sanity (separate from sklearn metrics).
 
@@ -63,7 +63,7 @@ Delta Exchange API  →  Candle Fetch  →  Feature Engineering
 @dataclass
 class Config:
     symbol:            str   = 'BTCUSD'
-    timeframes:        list  = field(default_factory=lambda: ['3m', '5m', '15m'])
+    timeframes:        list  = field(default_factory=lambda: ['5m', '15m'])
     total_candles:     int   = 10_000   # fallback if a TF is missing from CANDLE_TARGET
     n_folds:           int   = 5
     train_split:       float = 0.70
@@ -74,7 +74,6 @@ class Config:
 
     # Adaptive lookahead (candles ahead for entry / TP-SL label window)
     entry_lookahead_map: dict = field(default_factory=lambda: {
-        '3m': 10,
         '5m': 6,
         '15m': 4,
     })
@@ -82,7 +81,6 @@ class Config:
 
 # Per-timeframe history length (pagination uses ~2000-bar time windows via start/end).
 CANDLE_TARGET = {
-    '3m': 15_000,
     '5m': 12_000,
     '15m': 10_000,
 }
@@ -97,10 +95,10 @@ print('  CANDLE_TARGET             =', CANDLE_TARGET)
 
     # --- Cell 19: TP/SL defaults in labeling helpers ---
     cell19 = "".join(nb["cells"][19]["source"])
-    cell19 = cell19.replace("tp_pct: float = 0.0020,", "tp_pct: float = 0.0030,")
-    cell19 = cell19.replace("sl_pct: float = 0.0015,", "sl_pct: float = 0.0020,")
-    cell19 = cell19.replace("tp_pct: float = 0.0020,", "tp_pct: float = 0.0030,")  # second occurrence if duplicate
-    cell19 = cell19.replace("sl_pct: float = 0.0015,", "sl_pct: float = 0.0020,")
+    cell19 = cell19.replace("tp_pct: float = 0.0030,", "tp_pct: float = 0.0060,")
+    cell19 = cell19.replace("sl_pct: float = 0.0020,", "sl_pct: float = 0.0040,")
+    cell19 = cell19.replace("tp_pct: float = 0.0020,", "tp_pct: float = 0.0060,")
+    cell19 = cell19.replace("sl_pct: float = 0.0015,", "sl_pct: float = 0.0040,")
     nb["cells"][19]["source"] = [cell19]
     if "outputs" in nb["cells"][19]:
         nb["cells"][19]["outputs"] = []
@@ -110,7 +108,7 @@ print('  CANDLE_TARGET             =', CANDLE_TARGET)
         22,
         r"""# ── 4.1  Entry targets: binary LONG / SHORT ───────────────────────────────────
 def make_entry_labels(close: pd.Series, lookahead: int = 1,
-                      threshold: float = 0.003) -> pd.Series:
+                      threshold: float = 0.006) -> pd.Series:
     # Legacy helper (not used for primary training path — TP/SL labels below are authoritative).
     fwd = close.shift(-max(lookahead, 1)) / close - 1.0
     lbl = np.where(fwd > threshold, 2,
@@ -132,8 +130,8 @@ print('✅ Label functions defined (entry helpers; primary labels = fee-aware TP
 ENTRY_LONG_LABELS: Dict[str, pd.Series] = {}
 ENTRY_SHORT_LABELS: Dict[str, pd.Series] = {}
 
-# Align with agent defaults: 0.3% TP, 0.2% SL (fraction of price). Tune FEE_PCT to your tier.
-TP_PCT, SL_PCT, FEE_PCT = 0.0030, 0.0020, 0.0005
+# Align with agent defaults: 0.6% TP, 0.4% SL (fraction of price). Tune FEE_PCT to your tier.
+TP_PCT, SL_PCT, FEE_PCT = 0.0060, 0.0040, 0.0005
 ENTRY_MAX_BARS: Dict[str, int] = {}
 
 for tf in CFG.timeframes:
@@ -425,7 +423,7 @@ for tf in CFG.timeframes:
     print(f'  {tf:<6} {m["entry_long_acc"]:>10.4f} {m["entry_long_f1"]:>10.4f} {m["entry_short_acc"]:>10.4f} {m["entry_short_f1"]:>10.4f} {wf:>10.4f}')
 print()
 print(f'ZIP: {zip_path}')
-print('Optional: python scripts/trade_simulator.py --csv <ohlcv.csv> --tp 0.003 --sl 0.002')
+print('Optional: python scripts/trade_simulator.py --csv <ohlcv.csv> --tp 0.006 --sl 0.004')
 print('='*70)
 """,
     )

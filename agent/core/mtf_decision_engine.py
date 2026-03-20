@@ -52,11 +52,26 @@ def _entry_signal_and_confidence(pred: Dict[str, Any]) -> Tuple[float, float]:
     return float(sig), max(0.0, min(1.0, float(conf)))
 
 
+def _entry_proba(pred: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    """Read entry class probabilities from context when available."""
+    ctx = pred.get("context") if isinstance(pred.get("context"), dict) else {}
+    raw = ctx.get("entry_proba")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        sell = float(raw.get("sell"))
+        hold = float(raw.get("hold"))
+        buy = float(raw.get("buy"))
+    except (TypeError, ValueError):
+        return None
+    return {"sell": sell, "hold": hold, "buy": buy}
+
+
 def index_predictions_by_timeframe(
     model_predictions: List[Dict[str, Any]],
 ) -> Dict[str, Dict[str, float]]:
-    """Map timeframe -> {signal, confidence}."""
-    by_tf: Dict[str, Dict[str, float]] = {}
+    """Map timeframe -> prediction context used by MTF synthesis."""
+    by_tf: Dict[str, Dict[str, Any]] = {}
     for p in model_predictions:
         if not isinstance(p, dict):
             continue
@@ -65,14 +80,14 @@ def index_predictions_by_timeframe(
         if not tf:
             continue
         sig, conf = _entry_signal_and_confidence(p)
-        by_tf[tf] = {"signal": sig, "confidence": conf}
+        by_tf[tf] = {"signal": sig, "confidence": conf, "proba": _entry_proba(p)}
     return by_tf
 
 
 def _first_available(
-    by_tf: Dict[str, Dict[str, float]],
+    by_tf: Dict[str, Dict[str, Any]],
     order: List[str],
-) -> Tuple[Optional[Dict[str, float]], Optional[str]]:
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     for tf in order:
         if tf in by_tf:
             return by_tf[tf], tf
@@ -104,7 +119,7 @@ def synthesize_mtf_trading_decision(
     if not model_predictions:
         return None
 
-    by_tf = index_predictions_by_timeframe(model_predictions)
+    by_tf: Dict[str, Dict[str, Any]] = index_predictions_by_timeframe(model_predictions)
     if not by_tf:
         return None
 
@@ -140,27 +155,68 @@ def synthesize_mtf_trading_decision(
     t_thr = float(getattr(settings, "mtf_trend_signal_threshold", 0.1))
     e_thr = float(getattr(settings, "mtf_entry_signal_threshold", 0.15))
     min_conf = float(getattr(settings, "mtf_entry_min_confidence", 0.6))
+    use_proba = bool(getattr(settings, "mtf_use_entry_proba_gating", True))
+    trend_buy_min = float(getattr(settings, "mtf_trend_min_buy_prob", 0.6))
+    trend_sell_min = float(getattr(settings, "mtf_trend_min_sell_prob", 0.6))
+    entry_buy_min = float(getattr(settings, "mtf_entry_min_buy_prob", 0.6))
+    entry_sell_min = float(getattr(settings, "mtf_entry_min_sell_prob", 0.6))
+    strong_buy_min = float(getattr(settings, "mtf_strong_min_buy_prob", 0.72))
+    strong_sell_min = float(getattr(settings, "mtf_strong_min_sell_prob", 0.72))
 
     t_sig = trend["signal"]
     e_sig = entry["signal"]
     e_conf = entry["confidence"]
+    trend_proba = trend.get("proba")
+    entry_proba = entry.get("proba")
+    can_use_proba = bool(use_proba and trend_proba and entry_proba)
+    trend_buy = float(trend_proba["buy"]) if trend_proba else None
+    trend_sell = float(trend_proba["sell"]) if trend_proba else None
+    entry_buy = float(entry_proba["buy"]) if entry_proba else None
+    entry_sell = float(entry_proba["sell"]) if entry_proba else None
 
     evidence: List[str] = [
         f"MTF trend: tf={trend_tf} entry_signal={t_sig:+.3f}",
         f"MTF entry: tf={entry_tf} entry_signal={e_sig:+.3f} conf={e_conf:.2f} (min {min_conf:.2f})",
     ]
+    if can_use_proba:
+        evidence.extend(
+            [
+                f"MTF trend proba: buy={trend_buy:.2f} sell={trend_sell:.2f}",
+                f"MTF entry proba: buy={entry_buy:.2f} sell={entry_sell:.2f}",
+            ]
+        )
     if filt is not None and filt_tf:
         evidence.append(
             f"MTF filter: tf={filt_tf} entry_signal={filt['signal']:+.3f}"
         )
 
-    if t_sig > t_thr:
-        trend_dir = "bull"
-    elif t_sig < -t_thr:
-        trend_dir = "bear"
+    if can_use_proba:
+        if trend_buy >= trend_buy_min:
+            trend_dir = "bull"
+        elif trend_sell >= trend_sell_min:
+            trend_dir = "bear"
+        else:
+            evidence.append("MTF: trend proba below thresholds — HOLD")
+            return (
+                "HOLD",
+                "HOLD - MTF trend probabilities below threshold",
+                max(0.0, e_conf * 0.3),
+                evidence,
+            )
     else:
-        evidence.append("MTF: trend neutral — HOLD")
-        return ("HOLD", "HOLD - MTF trend timeframe neutral", max(0.0, e_conf * 0.3), evidence)
+        evidence.append("MTF: using signal-threshold fallback (entry_proba missing/disabled)")
+        if t_sig > t_thr:
+            trend_dir = "bull"
+        elif t_sig < -t_thr:
+            trend_dir = "bear"
+        else:
+            evidence.append("MTF: trend neutral — HOLD")
+            return (
+                "HOLD",
+                "HOLD - MTF trend timeframe neutral",
+                max(0.0, e_conf * 0.3),
+                evidence,
+            )
 
     # Optional shorter-TF veto: contradicts intended direction
     if filt is not None:
@@ -172,10 +228,22 @@ def synthesize_mtf_trading_decision(
             return ("HOLD", "HOLD - MTF filter conflicts with bearish entry", e_conf * 0.4, evidence)
 
     if trend_dir == "bull":
-        if e_sig <= e_thr or e_conf < min_conf:
-            evidence.append("MTF: entry TF not confirming bullish trend — HOLD")
-            return ("HOLD", "HOLD - MTF entry not confirming 15m+ trend (BUY)", 0.0, evidence)
-        if e_sig > 0.45 and e_conf >= 0.72:
+        if can_use_proba:
+            if entry_buy < entry_buy_min or e_conf < min_conf:
+                evidence.append("MTF: entry BUY probability/confidence below threshold — HOLD")
+                return (
+                    "HOLD",
+                    "HOLD - MTF entry not confirming trend (BUY)",
+                    0.0,
+                    evidence,
+                )
+        else:
+            if e_sig <= e_thr or e_conf < min_conf:
+                evidence.append("MTF: entry TF not confirming bullish trend — HOLD")
+                return ("HOLD", "HOLD - MTF entry not confirming 15m+ trend (BUY)", 0.0, evidence)
+        if (can_use_proba and entry_buy >= strong_buy_min and e_conf >= strong_buy_min) or (
+            (not can_use_proba) and e_sig > 0.45 and e_conf >= 0.72
+        ):
             return (
                 "STRONG_BUY",
                 f"STRONG_BUY - MTF aligned (trend {trend_tf} + entry {entry_tf})",
@@ -190,10 +258,22 @@ def synthesize_mtf_trading_decision(
         )
 
     # bear
-    if e_sig >= -e_thr or e_conf < min_conf:
-        evidence.append("MTF: entry TF not confirming bearish trend — HOLD")
-        return ("HOLD", "HOLD - MTF entry not confirming trend (SELL)", 0.0, evidence)
-    if e_sig < -0.45 and e_conf >= 0.72:
+    if can_use_proba:
+        if entry_sell < entry_sell_min or e_conf < min_conf:
+            evidence.append("MTF: entry SELL probability/confidence below threshold — HOLD")
+            return (
+                "HOLD",
+                "HOLD - MTF entry not confirming trend (SELL)",
+                0.0,
+                evidence,
+            )
+    else:
+        if e_sig >= -e_thr or e_conf < min_conf:
+            evidence.append("MTF: entry TF not confirming bearish trend — HOLD")
+            return ("HOLD", "HOLD - MTF entry not confirming trend (SELL)", 0.0, evidence)
+    if (can_use_proba and entry_sell >= strong_sell_min and e_conf >= strong_sell_min) or (
+        (not can_use_proba) and e_sig < -0.45 and e_conf >= 0.72
+    ):
         return (
             "STRONG_SELL",
             f"STRONG_SELL - MTF aligned (trend {trend_tf} + entry {entry_tf})",
