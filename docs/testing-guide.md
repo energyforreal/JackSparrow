@@ -31,12 +31,12 @@ python tools/commands/validate-fixes.py
 
 **Event Bus Deserialization Tests**
 ```bash
-pytest tests/unit/agent/test_event_bus_deserialization.py -v
+pytest tests/unit/trading_agent_tests/test_event_bus_deserialization.py -v
 ```
 
 **XGBoost Node Tests**
 ```bash
-pytest tests/unit/agent/test_xgboost_node.py -v
+pytest tests/unit/trading_agent_tests/test_xgboost_node.py -v
 ```
 
 **Unicode Encoding Tests**
@@ -46,7 +46,7 @@ pytest tests/unit/tools/test_unicode_encoding.py -v
 
 **Model Discovery Tests**
 ```bash
-pytest tests/unit/agent/test_model_discovery.py -v
+pytest tests/unit/trading_agent_tests/test_model_discovery.py -v
 ```
 
 #### Integration Tests

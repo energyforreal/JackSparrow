@@ -403,6 +403,32 @@ class TradingEventHandler:
                 )
                 return
 
+            # Feature gate: near upper Bollinger band = resistance — avoid chasing BUY
+            if getattr(settings, "feature_filter_enabled", True) and signal in (
+                "BUY",
+                "STRONG_BUY",
+            ):
+                bb_pos = features.get("bb_position")
+                if bb_pos is not None:
+                    try:
+                        bb_f = float(bb_pos)
+                        cap = float(
+                            getattr(settings, "block_buy_near_bb_upper_pct", 0.92)
+                        )
+                        if bb_f >= cap:
+                            self._log_entry_rejected(
+                                "near_resistance_bb",
+                                symbol=symbol,
+                                signal=signal,
+                                event_id=event.event_id,
+                                bb_position=bb_f,
+                                threshold=cap,
+                                **diagnostics_base,
+                            )
+                            return
+                    except (TypeError, ValueError):
+                        pass
+
             # Clear opposite-side debounce so reversal can trade
             opp_key = self._debounce_key(symbol, "SELL" if side == "BUY" else "BUY")
             self._last_risk_approved.pop(opp_key, None)

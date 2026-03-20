@@ -20,6 +20,7 @@ from agent.memory.vector_store import VectorMemoryStore
 from agent.events.event_bus import event_bus
 from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, DecisionReadyEvent, EventType
 from agent.core.config import settings
+from agent.core.mtf_decision_engine import synthesize_mtf_trading_decision
 import structlog
 
 logger = structlog.get_logger()
@@ -618,6 +619,46 @@ class MCPReasoningEngine:
                     message="Step 5 produced HOLD due to missing model predictions.",
                 )
         else:
+            # Multi-timeframe decision layer (trend + entry ± filter) when enabled
+            mtf_out = synthesize_mtf_trading_decision(model_predictions, settings)
+            if mtf_out is not None:
+                decision_code, conclusion, avg_confidence, mtf_evidence = mtf_out
+                if getattr(settings, "diagnostics_enabled", True):
+                    logger.info(
+                        "reasoning_stage5_mtf_decision",
+                        symbol=request.symbol,
+                        decision=decision_code,
+                        avg_confidence=float(avg_confidence),
+                    )
+                evidence = list(mtf_evidence) + [
+                    f"Decision code: {decision_code}",
+                    f"Based on {len(previous_steps)} analysis steps",
+                ]
+                data_freshness_seconds = None
+                market_timestamp = request.market_context.get("timestamp")
+                if market_timestamp:
+                    try:
+                        if isinstance(market_timestamp, str):
+                            market_time = datetime.fromisoformat(
+                                market_timestamp.replace("Z", "+00:00")
+                            )
+                        else:
+                            market_time = market_timestamp
+                        data_freshness_seconds = int(
+                            (datetime.utcnow() - market_time).total_seconds()
+                        )
+                    except (ValueError, TypeError):
+                        pass
+                return ReasoningStep(
+                    step_number=5,
+                    step_name="Decision Synthesis",
+                    description=conclusion,
+                    evidence=evidence,
+                    confidence=max(0.0, min(1.0, float(avg_confidence))),
+                    timestamp=datetime.utcnow(),
+                    data_freshness_seconds=data_freshness_seconds,
+                )
+
             # Separate classifier and regressor predictions
             # Regressors predict prices directly and are generally more reliable for price direction
             classifier_predictions = [

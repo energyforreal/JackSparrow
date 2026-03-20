@@ -111,10 +111,10 @@ class TestRunner:
         print(f"{Colors.BOLD}Running Fix-Related Tests{Colors.RESET}\n")
         
         tests = [
-            ("tests/unit/agent/test_event_bus_deserialization.py", "Event Bus Deserialization Tests"),
-            ("tests/unit/agent/test_xgboost_node.py", "XGBoost Node Tests"),
+            ("tests/unit/trading_agent_tests/test_event_bus_deserialization.py", "Event Bus Deserialization Tests"),
+            ("tests/unit/trading_agent_tests/test_xgboost_node.py", "XGBoost Node Tests"),
             ("tests/unit/tools/test_unicode_encoding.py", "Unicode Encoding Tests"),
-            ("tests/unit/agent/test_model_discovery.py", "Model Discovery Tests"),
+            ("tests/unit/trading_agent_tests/test_model_discovery.py", "Model Discovery Tests"),
             ("tests/integration/test_event_pipeline.py", "Event Pipeline Integration Tests"),
             ("tests/integration/test_model_loading.py", "Model Loading Integration Tests"),
             ("tests/integration/test_startup_scripts.py", "Startup Scripts Integration Tests"),

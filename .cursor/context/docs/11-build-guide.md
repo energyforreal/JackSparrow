@@ -666,7 +666,7 @@ pytest tests/unit/backend/ -v
 ```bash
 cd agent
 source venv/bin/activate
-pytest tests/unit/agent/ -v
+pytest tests/unit/trading_agent_tests/ -v
 ```
 
 ### 11.3 Frontend Tests

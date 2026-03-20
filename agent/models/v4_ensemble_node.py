@@ -41,6 +41,7 @@ except Exception:  # pragma: no cover - defensive fallback
         with open(path, "rb") as f:
             return pickle.load(f)
 
+from agent.core.config import settings
 from agent.core.exceptions import FeatureAlignmentError
 from agent.models.mcp_model_node import (
     MCPModelNode,
@@ -62,7 +63,7 @@ class V4Artifacts:
     entry_long_scaler_path: Optional[Path]
     entry_short_model_path: Optional[Path]
     entry_short_scaler_path: Optional[Path]
-    exit_model_path: Path
+    exit_model_path: Optional[Path]
     exit_scaler_path: Optional[Path]
     features_path: Optional[Path]
 
@@ -148,6 +149,7 @@ class V4EnsembleNode(MCPModelNode):
         entry_model_rel = artifacts_cfg.get("entry_model")
         entry_long_rel = artifacts_cfg.get("entry_long_model")
         entry_short_rel = artifacts_cfg.get("entry_short_model")
+        exit_model_rel = artifacts_cfg.get("exit_model")
         artifacts = V4Artifacts(
             entry_model_path=(base_dir / entry_model_rel) if entry_model_rel else None,
             entry_scaler_path=_opt("entry_scaler"),
@@ -155,7 +157,7 @@ class V4EnsembleNode(MCPModelNode):
             entry_long_scaler_path=_opt("entry_long_scaler"),
             entry_short_model_path=(base_dir / entry_short_rel) if entry_short_rel else None,
             entry_short_scaler_path=_opt("entry_short_scaler"),
-            exit_model_path=base_dir / artifacts_cfg["exit_model"],
+            exit_model_path=(base_dir / exit_model_rel) if exit_model_rel else None,
             exit_scaler_path=_opt("exit_scaler"),
             features_path=_opt("features"),
         )
@@ -192,7 +194,7 @@ class V4EnsembleNode(MCPModelNode):
             self._entry_long_model = _load(self._artifacts.entry_long_model_path)
         if self._artifacts.entry_short_model_path and self._entry_short_model is None:
             self._entry_short_model = _load(self._artifacts.entry_short_model_path)
-        if self._exit_model is None:
+        if self._artifacts.exit_model_path and self._exit_model is None:
             self._exit_model = _load(self._artifacts.exit_model_path)
         if self._artifacts.entry_scaler_path and self._entry_scaler is None:
             try:
@@ -229,7 +231,8 @@ class V4EnsembleNode(MCPModelNode):
 
             X_entry = np.array([features_vec], dtype=np.float32)
             X_exit = np.array([features_vec], dtype=np.float32)
-            if self._exit_scaler is not None:
+            use_ml_exit = getattr(settings, "use_ml_exit_model", False)
+            if use_ml_exit and self._exit_scaler is not None:
                 X_exit = self._exit_scaler.transform(X_exit)
             # Entry probabilities:
             # - New contract: binary long/short entry models
@@ -286,41 +289,53 @@ class V4EnsembleNode(MCPModelNode):
                         f"v4 ensemble {self._timeframe}: entry model returned {entry_len} classes (expected 2/3)"
                     )
 
-            # Exit probabilities: 2-class [HOLD, EXIT]
-            exit_proba_raw = self._exit_model.predict_proba(X_exit)[0]  # type: ignore[attr-defined]
-            if exit_proba_raw is None or len(exit_proba_raw) < 2:
-                t_ms = (time.perf_counter() - t0) * 1000.0
-                self._total_ms += t_ms
-                warning = (
-                    f"v4 ensemble {self._timeframe}: exit model returned "
-                    f"{0 if exit_proba_raw is None else len(exit_proba_raw)} classes (expected 2)"
-                )
-                logger.warning(
-                    "v4_exit_proba_unexpected_shape",
-                    model_name=self.model_name,
-                    timeframe=self._timeframe,
-                    proba_len=0 if exit_proba_raw is None else len(exit_proba_raw),
-                )
-                self._health_status = "degraded"
-                return MCPModelPrediction(
-                    model_name=self.model_name,
-                    model_version=self.model_version,
-                    prediction=0.0,
-                    confidence=0.0,
-                    reasoning=warning,
-                    features_used=applied_feature_names,
-                    feature_importance={},
-                    computation_time_ms=round(t_ms, 2),
-                    health_status="degraded",
-                )
+            # Exit: optional ML classifier (often miscalibrated); default off — use TP/SL/trailing/time in execution
+            if use_ml_exit and self._exit_model is not None:
+                exit_proba_raw = self._exit_model.predict_proba(X_exit)[0]  # type: ignore[attr-defined]
+                if exit_proba_raw is None or len(exit_proba_raw) < 2:
+                    t_ms = (time.perf_counter() - t0) * 1000.0
+                    self._total_ms += t_ms
+                    warning = (
+                        f"v4 ensemble {self._timeframe}: exit model returned "
+                        f"{0 if exit_proba_raw is None else len(exit_proba_raw)} classes (expected 2)"
+                    )
+                    logger.warning(
+                        "v4_exit_proba_unexpected_shape",
+                        model_name=self.model_name,
+                        timeframe=self._timeframe,
+                        proba_len=0 if exit_proba_raw is None else len(exit_proba_raw),
+                    )
+                    self._health_status = "degraded"
+                    return MCPModelPrediction(
+                        model_name=self.model_name,
+                        model_version=self.model_version,
+                        prediction=0.0,
+                        confidence=0.0,
+                        reasoning=warning,
+                        features_used=applied_feature_names,
+                        feature_importance={},
+                        computation_time_ms=round(t_ms, 2),
+                        health_status="degraded",
+                    )
+                exit_signal, exit_conf = _exit_signal(exit_proba_raw)
+                exit_hold = float(exit_proba_raw[0])
+                exit_exit = float(exit_proba_raw[1])
+            else:
+                exit_proba_raw = np.array([1.0, 0.0], dtype=np.float32)
+                exit_signal, exit_conf = 0.0, 1.0
+                exit_hold, exit_exit = 1.0, 0.0
 
             entry_signal, entry_conf = _entry_signal(entry_proba_raw)
-            exit_signal, exit_conf = _exit_signal(exit_proba_raw)
 
             reasoning = (
                 f"v4 ensemble {self._timeframe}: "
                 f"entry_signal={entry_signal:+.3f} (conf={entry_conf:.2f}), "
                 f"exit_signal={exit_signal:+.3f} (conf={exit_conf:.2f})"
+                + (
+                    " [ML exit disabled; use execution TP/SL/trailing]"
+                    if not use_ml_exit
+                    else ""
+                )
             )
 
             t_ms = (time.perf_counter() - t0) * 1000.0
@@ -340,8 +355,8 @@ class V4EnsembleNode(MCPModelNode):
                     "buy": float(entry_proba_raw[2]),
                 },
                 "exit_proba": {
-                    "hold": float(exit_proba_raw[0]),
-                    "exit": float(exit_proba_raw[1]),
+                    "hold": exit_hold,
+                    "exit": exit_exit,
                 },
                 "entry_signal": entry_signal,
                 "entry_confidence": entry_conf,

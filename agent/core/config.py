@@ -182,14 +182,14 @@ class Settings(BaseSettings):
         description="Maximum portfolio heat"
     )
     stop_loss_percentage: float = Field(
-        default=0.0015,
+        default=0.002,
         env="STOP_LOSS_PERCENTAGE",
-        description="Stop loss percentage"
+        description="Stop loss as fraction of price (e.g. 0.002 = 0.2%)"
     )
     take_profit_percentage: float = Field(
-        default=0.0020,
+        default=0.003,
         env="TAKE_PROFIT_PERCENTAGE",
-        description="Take profit percentage"
+        description="Take profit as fraction of price (e.g. 0.003 = 0.3%)"
     )
     max_signal_age_seconds: int = Field(
         default=10,
@@ -215,6 +215,69 @@ class Settings(BaseSettings):
         default=False,
         env="MTF_CONFIRMATION_ENABLED",
         description="Require higher-timeframe trend confirmation before entry"
+    )
+    mtf_decision_engine_enabled: bool = Field(
+        default=True,
+        env="MTF_DECISION_ENGINE_ENABLED",
+        description=(
+            "Use multi-timeframe model rules (trend TF + entry TF ± optional filter) "
+            "instead of averaging all models into one consensus"
+        ),
+    )
+    mtf_trend_timeframe: str = Field(
+        default="15m",
+        env="MTF_TREND_TIMEFRAME",
+        description="Primary timeframe for trend direction from model outputs",
+    )
+    mtf_entry_timeframe: str = Field(
+        default="5m",
+        env="MTF_ENTRY_TIMEFRAME",
+        description="Primary timeframe for entry confirmation",
+    )
+    mtf_filter_timeframe: str = Field(
+        default="3m",
+        env="MTF_FILTER_TIMEFRAME",
+        description="Optional shorter TF filter; set empty, 'none', or '-' to disable",
+    )
+    mtf_trend_fallback_timeframes: str = Field(
+        default="30m,1h,2h,4h",
+        env="MTF_TREND_FALLBACK_TIMEFRAMES",
+        description="Comma-separated fallbacks if primary trend TF model is missing",
+    )
+    mtf_entry_fallback_timeframes: str = Field(
+        default="15m,3m,30m,1h",
+        env="MTF_ENTRY_FALLBACK_TIMEFRAMES",
+        description="Comma-separated fallbacks if primary entry TF model is missing",
+    )
+    mtf_entry_min_confidence: float = Field(
+        default=0.6,
+        env="MTF_ENTRY_MIN_CONFIDENCE",
+        description="Minimum entry-TF confidence to confirm a trade with trend",
+    )
+    mtf_trend_signal_threshold: float = Field(
+        default=0.1,
+        env="MTF_TREND_SIGNAL_THRESHOLD",
+        description="Absolute entry_signal on trend TF to classify bull/bear (not neutral)",
+    )
+    mtf_entry_signal_threshold: float = Field(
+        default=0.15,
+        env="MTF_ENTRY_SIGNAL_THRESHOLD",
+        description="Absolute entry_signal on entry TF to count as confirming BUY/SELL",
+    )
+    use_ml_exit_model: bool = Field(
+        default=False,
+        env="USE_ML_EXIT_MODEL",
+        description="If False, skip exit classifier inference; rely on TP/SL/trailing/time exits",
+    )
+    feature_filter_enabled: bool = Field(
+        default=True,
+        env="FEATURE_FILTER_ENABLED",
+        description="Apply lightweight feature gates (e.g. BB upper) before entries",
+    )
+    block_buy_near_bb_upper_pct: float = Field(
+        default=0.92,
+        env="BLOCK_BUY_NEAR_BB_UPPER_PCT",
+        description="Block BUY when bb_position is above this (near upper band / resistance)",
     )
     model_disagreement_threshold: float = Field(
         default=0.6,
@@ -394,9 +457,9 @@ class Settings(BaseSettings):
         description="Fast polling interval in seconds for continuous ticker monitoring (controls API call frequency)"
     )
     timeframes: str = Field(
-        default="5m,15m",
+        default="3m,5m,15m",
         env="TIMEFRAMES",
-        description="Comma-separated list of timeframes"
+        description="Comma-separated list of timeframes (no 1m; 15m=trend, 5m=entry, 3m=optional filter)"
     )
 
     # WebSocket Configuration
@@ -533,7 +596,6 @@ class Settings(BaseSettings):
         if interval > 60:
             raise ValueError("FAST_POLL_INTERVAL cannot exceed 60 seconds (too slow for real-time)")
         return interval
-        raise ValueError("TIMEFRAMES must be a comma-separated string")
 
     @model_validator(mode="after")
     def sync_trading_flags(self) -> "Settings":

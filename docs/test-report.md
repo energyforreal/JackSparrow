@@ -28,13 +28,13 @@ All fixes were validated using `validate-fixes.py`:
 
 #### Event Bus Deserialization Tests
 - **Status**: ✅ **PASSED**
-- **File**: `tests/unit/agent/test_event_bus_deserialization.py`
+- **File**: `tests/unit/trading_agent_tests/test_event_bus_deserialization.py`
 - **Tests**: 11 test cases
 - **Coverage**: Event deserialization from Redis Streams with various formats
 
 #### XGBoost Node Tests
 - **Status**: ✅ **PASSED** (with XGBoost available)
-- **File**: `tests/unit/agent/test_xgboost_node.py`
+- **File**: `tests/unit/trading_agent_tests/test_xgboost_node.py`
 - **Tests**: 15+ test cases
 - **Coverage**: Model loading, compatibility warnings, corrupted file handling
 
@@ -46,7 +46,7 @@ All fixes were validated using `validate-fixes.py`:
 
 #### Model Discovery Tests
 - **Status**: ✅ **PASSED**
-- **File**: `tests/unit/agent/test_model_discovery.py`
+- **File**: `tests/unit/trading_agent_tests/test_model_discovery.py`
 - **Tests**: 12+ test cases
 - **Coverage**: Model discovery with corrupted files, error handling
 
@@ -190,10 +190,10 @@ python tools/commands/test-startup-sequence.py
 
 ### Test Files Created
 
-1. `tests/unit/agent/test_event_bus_deserialization.py`
-2. `tests/unit/agent/test_xgboost_node.py`
+1. `tests/unit/trading_agent_tests/test_event_bus_deserialization.py`
+2. `tests/unit/trading_agent_tests/test_xgboost_node.py`
 3. `tests/unit/tools/test_unicode_encoding.py`
-4. `tests/unit/agent/test_model_discovery.py`
+4. `tests/unit/trading_agent_tests/test_model_discovery.py`
 5. `tests/integration/test_event_pipeline.py`
 6. `tests/integration/test_model_loading.py`
 7. `tests/integration/test_startup_scripts.py`

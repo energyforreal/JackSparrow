@@ -789,7 +789,7 @@ pytest tests/integration/
 **Agent Tests**:
 ```bash
 cd agent
-pytest tests/unit/agent/
+pytest tests/unit/trading_agent_tests/
 ```
 
 **Frontend Tests**:
