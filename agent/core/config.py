@@ -190,14 +190,14 @@ class Settings(BaseSettings):
         description="Maximum portfolio heat"
     )
     stop_loss_percentage: float = Field(
-        default=0.004,
+        default=0.0025,
         env="STOP_LOSS_PERCENTAGE",
-        description="Stop loss as fraction of price (e.g. 0.004 = 0.4%)"
+        description="Stop loss as fraction of price (e.g. 0.0025 = 0.25%; scalping default)"
     )
     take_profit_percentage: float = Field(
-        default=0.006,
+        default=0.003,
         env="TAKE_PROFIT_PERCENTAGE",
-        description="Take profit as fraction of price (e.g. 0.006 = 0.6%)"
+        description="Take profit as fraction of price (e.g. 0.003 = 0.3%; scalping default)"
     )
     max_signal_age_seconds: int = Field(
         default=10,
@@ -391,6 +391,79 @@ class Settings(BaseSettings):
         description=(
             "In v4 ensemble with binary long/short heads: if |buy_prob-sell_prob| is below this, "
             "force neutral entry signal and reduce confidence. 0 disables (use MTF_MIN_CONFIDENCE_GAP when MTF is on)."
+        ),
+    )
+    mtf_trend_use_prob_diff: bool = Field(
+        default=True,
+        env="MTF_TREND_USE_PROB_DIFF",
+        description=(
+            "Classify trend TF direction from (buy-sell) vs (sell-buy) using mtf_trend_prob_diff_edge "
+            "instead of absolute buy/sell probability floors"
+        ),
+    )
+    mtf_trend_prob_diff_edge: float = Field(
+        default=0.05,
+        env="MTF_TREND_PROB_DIFF_EDGE",
+        description="Minimum signed prob gap on trend TF to call bull or bear bias",
+    )
+    mtf_entry_use_prob_diff: bool = Field(
+        default=True,
+        env="MTF_ENTRY_USE_PROB_DIFF",
+        description=(
+            "Require signed (entry_buy - entry_sell) or (entry_sell - entry_buy) to exceed "
+            "mtf_entry_prob_diff_edge instead of absolute entry buy/sell floors"
+        ),
+    )
+    mtf_entry_prob_diff_edge: float = Field(
+        default=0.08,
+        env="MTF_ENTRY_PROB_DIFF_EDGE",
+        description="Minimum signed long/short gap on entry TF to confirm a trade with trend",
+    )
+    mtf_strong_entry_prob_diff: float = Field(
+        default=0.15,
+        env="MTF_STRONG_ENTRY_PROB_DIFF",
+        description="Signed entry prob gap required for STRONG_BUY / STRONG_SELL when using prob-diff mode",
+    )
+    mtf_entry_min_max_prob_floor: float = Field(
+        default=0.0,
+        env="MTF_ENTRY_MIN_MAX_PROB_FLOOR",
+        description=(
+            "When > 0 with prob-diff entry gating, also require max(buy,sell) >= this (suppresses "
+            "tiny-probability edges). 0 disables."
+        ),
+    )
+    mtf_entry_strength_percentile_enabled: bool = Field(
+        default=False,
+        env="MTF_ENTRY_STRENGTH_PERCENTILE_ENABLED",
+        description=(
+            "When True, block BUY/SELL unless |buy-sell| on entry TF is at or above the rolling "
+            "percentile of prior bars (selective scalping)."
+        ),
+    )
+    mtf_entry_strength_percentile: int = Field(
+        default=80,
+        env="MTF_ENTRY_STRENGTH_PERCENTILE",
+        description="Percentile of prior |buy-sell| strengths that current strength must meet or exceed",
+    )
+    mtf_entry_strength_percentile_min_samples: int = Field(
+        default=30,
+        env="MTF_ENTRY_STRENGTH_PERCENTILE_MIN_SAMPLES",
+        description="Minimum history length before percentile gate applies",
+    )
+    entry_min_volatility_for_trade: float = Field(
+        default=0.0,
+        env="ENTRY_MIN_VOLATILITY_FOR_TRADE",
+        description=(
+            "When > 0, reject entries if features.volatility is below this (same units as feature pipeline). "
+            "0 disables."
+        ),
+    )
+    entry_min_atr_pct_of_price: float = Field(
+        default=0.0,
+        env="ENTRY_MIN_ATR_PCT_OF_PRICE",
+        description=(
+            "When > 0, reject entries if atr_14 / entry_price is below this fraction (dead market filter). "
+            "0 disables."
         ),
     )
     model_disagreement_threshold: float = Field(

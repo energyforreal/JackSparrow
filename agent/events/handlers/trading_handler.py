@@ -285,6 +285,42 @@ class TradingEventHandler:
                     **diagnostics_base,
                 )
                 return
+            min_vol = float(getattr(settings, "entry_min_volatility_for_trade", 0.0) or 0.0)
+            if min_vol > 0:
+                try:
+                    vol_f = float(vol)
+                except (TypeError, ValueError):
+                    vol_f = 0.0
+                if vol_f < min_vol:
+                    self._log_entry_rejected(
+                        "low_volatility",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        volatility=vol_f,
+                        min_volatility=min_vol,
+                        **diagnostics_base,
+                    )
+                    return
+            min_atr_pct = float(getattr(settings, "entry_min_atr_pct_of_price", 0.0) or 0.0)
+            if min_atr_pct > 0 and entry_price > 0:
+                atr_raw = features.get("atr_14")
+                if atr_raw is not None:
+                    try:
+                        atr_f = float(atr_raw)
+                        if atr_f / entry_price < min_atr_pct:
+                            self._log_entry_rejected(
+                                "low_atr",
+                                symbol=symbol,
+                                signal=signal,
+                                event_id=event.event_id,
+                                atr_pct=atr_f / entry_price,
+                                min_atr_pct=min_atr_pct,
+                                **diagnostics_base,
+                            )
+                            return
+                    except (TypeError, ValueError):
+                        pass
             strength_map = {"STRONG_BUY": 0.9, "BUY": 0.65, "STRONG_SELL": 0.9, "SELL": 0.65}
             regime = "high" if vol > 5 else "medium" if vol > 2.5 else "low"
             rr_ratio = (

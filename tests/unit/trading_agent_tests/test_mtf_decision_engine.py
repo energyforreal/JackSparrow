@@ -4,11 +4,19 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent.core.entry_edge_tracker import EntryEdgeTracker
 from agent.core.mtf_decision_engine import (
     index_predictions_by_timeframe,
     parse_timeframe_from_model_name,
     synthesize_mtf_trading_decision,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_edge_tracker():
+    EntryEdgeTracker.clear_for_tests()
+    yield
+    EntryEdgeTracker.clear_for_tests()
 
 
 def test_parse_timeframe_from_model_name():
@@ -109,7 +117,8 @@ def test_synthesize_mtf_buy_with_entry_proba_gating():
     assert conf == pytest.approx(0.66)
 
 
-def test_synthesize_mtf_proba_gating_blocks_low_entry_buy_prob():
+def test_synthesize_mtf_proba_gating_blocks_low_entry_long_edge():
+    """Prob-diff mode: small (buy-sell) on entry TF must not confirm a LONG."""
     settings = SimpleNamespace(
         mtf_decision_engine_enabled=True,
         mtf_trend_timeframe="15m",
@@ -119,6 +128,10 @@ def test_synthesize_mtf_proba_gating_blocks_low_entry_buy_prob():
         mtf_entry_fallback_timeframes="",
         mtf_entry_min_confidence=0.6,
         mtf_use_entry_proba_gating=True,
+        mtf_min_confidence_gap=0.0,
+        mtf_trend_use_prob_diff=True,
+        mtf_entry_use_prob_diff=True,
+        mtf_entry_prob_diff_edge=0.08,
         mtf_trend_min_buy_prob=0.6,
         mtf_trend_min_sell_prob=0.6,
         mtf_entry_min_buy_prob=0.6,
@@ -126,11 +139,11 @@ def test_synthesize_mtf_proba_gating_blocks_low_entry_buy_prob():
     )
     preds = [
         _pred("jack_BTC_15m", 0.1, 0.7, {"sell": 0.1, "hold": 0.2, "buy": 0.7}),
-        _pred("jack_BTC_5m", 0.25, 0.7, {"sell": 0.2, "hold": 0.25, "buy": 0.55}),
+        _pred("jack_BTC_5m", 0.25, 0.7, {"sell": 0.46, "hold": 0.04, "buy": 0.50}),
     ]
     code, conclusion, _, _ = synthesize_mtf_trading_decision(preds, settings)
     assert code == "HOLD"
-    assert "not confirming" in conclusion.lower()
+    assert "edge" in conclusion.lower()
 
 
 def test_synthesize_mtf_proba_gap_hold_when_entry_uncertain():
@@ -157,6 +170,37 @@ def test_synthesize_mtf_proba_gap_hold_when_entry_uncertain():
     code, conclusion, _, evidence = synthesize_mtf_trading_decision(preds, settings)
     assert code == "HOLD"
     assert "gap" in conclusion.lower()
+
+
+def test_synthesize_mtf_percentile_blocks_when_history_stronger():
+    """Rolling P80 gate rejects trades weaker than recent |buy-sell| history."""
+    sym = "BTCUSD"
+    for _ in range(40):
+        EntryEdgeTracker.observe(sym, 0.22)
+    settings = SimpleNamespace(
+        mtf_decision_engine_enabled=True,
+        mtf_trend_timeframe="15m",
+        mtf_entry_timeframe="5m",
+        mtf_filter_timeframe="none",
+        mtf_trend_fallback_timeframes="",
+        mtf_entry_fallback_timeframes="",
+        mtf_entry_min_confidence=0.5,
+        mtf_use_entry_proba_gating=True,
+        mtf_min_confidence_gap=0.0,
+        mtf_trend_use_prob_diff=True,
+        mtf_entry_use_prob_diff=True,
+        mtf_entry_prob_diff_edge=0.08,
+        mtf_entry_strength_percentile_enabled=True,
+        mtf_entry_strength_percentile=80,
+        mtf_entry_strength_percentile_min_samples=30,
+    )
+    preds = [
+        _pred("jack_BTC_15m", 0.1, 0.7, {"sell": 0.15, "hold": 0.1, "buy": 0.75}),
+        _pred("jack_BTC_5m", 0.2, 0.7, {"sell": 0.42, "hold": 0.03, "buy": 0.55}),
+    ]
+    code, conclusion, _, _ = synthesize_mtf_trading_decision(preds, settings, symbol=sym)
+    assert code == "HOLD"
+    assert "percentile" in conclusion.lower()
 
 
 def test_synthesize_mtf_proba_fallback_to_signal_thresholds():

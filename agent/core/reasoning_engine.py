@@ -623,7 +623,9 @@ class MCPReasoningEngine:
                 )
         else:
             # Multi-timeframe decision layer (trend + entry ± filter) when enabled
-            mtf_out = synthesize_mtf_trading_decision(model_predictions, settings)
+            mtf_out = synthesize_mtf_trading_decision(
+                model_predictions, settings, symbol=request.symbol
+            )
             if mtf_out is not None:
                 decision_code, conclusion, avg_confidence, mtf_evidence = mtf_out
                 if getattr(settings, "diagnostics_enabled", True):
