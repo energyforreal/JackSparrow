@@ -174,6 +174,26 @@ def synthesize_mtf_trading_decision(
     entry_buy = float(entry_proba["buy"]) if entry_proba else None
     entry_sell = float(entry_proba["sell"]) if entry_proba else None
 
+    gap_min = float(getattr(settings, "mtf_min_confidence_gap", 0.0) or 0.0)
+    if (
+        can_use_proba
+        and gap_min > 0
+        and entry_buy is not None
+        and entry_sell is not None
+        and abs(entry_buy - entry_sell) < gap_min
+    ):
+        evidence_pre: List[str] = [
+            f"MTF trend: tf={trend_tf} entry_signal={t_sig:+.3f}",
+            f"MTF entry: tf={entry_tf} entry_signal={e_sig:+.3f} conf={e_conf:.2f} (min {min_conf:.2f})",
+            f"MTF: entry |buy-sell|={abs(entry_buy - entry_sell):.3f} < {gap_min} — HOLD",
+        ]
+        return (
+            "HOLD",
+            "HOLD - MTF entry probability gap below minimum",
+            max(0.0, e_conf * 0.25),
+            evidence_pre,
+        )
+
     evidence: List[str] = [
         f"MTF trend: tf={trend_tf} entry_signal={t_sig:+.3f}",
         f"MTF entry: tf={entry_tf} entry_signal={e_sig:+.3f} conf={e_conf:.2f} (min {min_conf:.2f})",

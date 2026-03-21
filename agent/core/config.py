@@ -126,6 +126,14 @@ class Settings(BaseSettings):
         env="MODEL_DIR",
         description="Directory for model discovery"
     )
+    model_discovery_recursive: bool = Field(
+        default=True,
+        env="MODEL_DISCOVERY_RECURSIVE",
+        description=(
+            "When true, discover metadata_BTCUSD_*.json recursively under MODEL_DIR "
+            "(e.g. jacksparrow_v5_BTCUSD_*/ subfolders). When false, only the top-level MODEL_DIR."
+        ),
+    )
     model_discovery_enabled: bool = Field(
         default=True,
         env="MODEL_DISCOVERY_ENABLED",
@@ -328,6 +336,54 @@ class Settings(BaseSettings):
         default=0.7,
         env="BLOCK_SELL_MIN_SR_SUPPORT_STRENGTH",
         description="Block SELL when SR support strength exceeds this threshold",
+    )
+    entry_signal_filter_enabled: bool = Field(
+        default=True,
+        env="ENTRY_SIGNAL_FILTER_ENABLED",
+        description="Apply EntrySignalFilter (max trades/hour, breakout score) after SR/BB gates",
+    )
+    max_trades_per_hour: int = Field(
+        default=3,
+        env="MAX_TRADES_PER_HOUR",
+        description="Cap approved entries per symbol per rolling hour (0 = unlimited)",
+    )
+    entry_min_breakout_score: float = Field(
+        default=0.0,
+        env="ENTRY_MIN_BREAKOUT_SCORE",
+        description="Block BUY when bo_breakout_score is below this (0 = disabled)",
+    )
+    use_atr_scaled_sl_tp: bool = Field(
+        default=False,
+        env="USE_ATR_SCALED_SL_TP",
+        description=(
+            "When True, scale SL/TP distances using max(config pct, atr_14 * multiplier). "
+            "Requires atr_14 in market_context features."
+        ),
+    )
+    atr_sl_distance_mult: float = Field(
+        default=1.0,
+        env="ATR_SL_DISTANCE_MULT",
+        description="Stop distance lower bound: atr_14 * this factor (when ATR scaling on)",
+    )
+    atr_tp_distance_mult: float = Field(
+        default=1.5,
+        env="ATR_TP_DISTANCE_MULT",
+        description="Take-profit distance lower bound: atr_14 * this factor (when ATR scaling on)",
+    )
+    trailing_stop_activation_profit_pct: float = Field(
+        default=0.0,
+        env="TRAILING_STOP_ACTIVATION_PROFIT_PCT",
+        description=(
+            "Only ratchet trailing stop after unrealized profit exceeds this fraction (0 = always trail when in profit)"
+        ),
+    )
+    mtf_min_confidence_gap: float = Field(
+        default=0.0,
+        env="MTF_MIN_CONFIDENCE_GAP",
+        description=(
+            "Minimum |buy-sell| entry probability gap on entry TF when using proba gating; "
+            "0 disables (JackSparrow v6 optional filter)"
+        ),
     )
     model_disagreement_threshold: float = Field(
         default=0.6,

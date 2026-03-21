@@ -14,6 +14,7 @@ from agent.events.schemas import DecisionReadyEvent, RiskApprovedEvent, EventTyp
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
+from agent.core.signal_filter import EntrySignalFilter
 
 logger = structlog.get_logger()
 
@@ -333,23 +334,48 @@ class TradingEventHandler:
                 )
                 return
 
-            # ATR-based SL/TP when available; else use config and profit gate
+            # ATR-scaled SL/TP (optional): distance = max(config %, atr_14 * mult)
             atr = features.get("atr_14")
-            # Scalping alignment: training targets are fixed TP/SL percentages.
-            # Using ATR-based distances here would break TP/SL parity.
-            use_atr_sl_tp = False
+            use_atr_sl_tp = bool(getattr(settings, "use_atr_scaled_sl_tp", False))
             stop_loss_price = None
             take_profit_price = None
-            if use_atr_sl_tp:
-                sl_dist = 1.5 * atr
-                tp_dist = 3.0 * atr
-                if side == "BUY":
-                    stop_loss_price = entry_price - sl_dist
-                    take_profit_price = entry_price + tp_dist
-                else:
-                    stop_loss_price = entry_price + sl_dist
-                    take_profit_price = entry_price - tp_dist
-            else:
+            stop_pct = settings.stop_loss_percentage
+            take_pct = settings.take_profit_percentage
+            if use_atr_sl_tp and atr is not None:
+                try:
+                    atr_f = float(atr)
+                    sl_mult = float(getattr(settings, "atr_sl_distance_mult", 1.0))
+                    tp_mult = float(getattr(settings, "atr_tp_distance_mult", 1.5))
+                    sl_dist = max(entry_price * stop_pct, atr_f * sl_mult)
+                    tp_dist = max(entry_price * take_pct, atr_f * tp_mult)
+                    if side == "BUY":
+                        stop_loss_price = entry_price - sl_dist
+                        take_profit_price = entry_price + tp_dist
+                    else:
+                        stop_loss_price = entry_price + sl_dist
+                        take_profit_price = entry_price - tp_dist
+                except (TypeError, ValueError):
+                    use_atr_sl_tp = False
+            if use_atr_sl_tp and stop_loss_price is not None and take_profit_price is not None:
+                sl_pct_eff = abs(entry_price - stop_loss_price) / entry_price
+                tp_pct_eff = abs(take_profit_price - entry_price) / entry_price
+                if not self._check_entry_profit_potential(
+                    entry_price, side, sl_pct_eff, tp_pct_eff
+                ):
+                    self._log_entry_rejected(
+                        "profit_gate",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        side=side,
+                        entry_price=entry_price,
+                        min_ratio=MIN_RISK_REWARD_RATIO,
+                        **diagnostics_base,
+                    )
+                    return
+            elif not use_atr_sl_tp or stop_loss_price is None:
+                stop_loss_price = None
+                take_profit_price = None
                 stop_pct = settings.stop_loss_percentage
                 take_pct = settings.take_profit_percentage
                 if not self._check_entry_profit_potential(entry_price, side, stop_pct, take_pct):
@@ -499,6 +525,20 @@ class TradingEventHandler:
                         except (TypeError, ValueError):
                             pass
 
+            if getattr(settings, "entry_signal_filter_enabled", True):
+                filtered, filt_reason = self._entry_signal_filter.apply(signal, features)
+                if filtered == "HOLD" and signal != "HOLD":
+                    self._log_entry_rejected(
+                        "entry_signal_filter",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        filter_reason=filt_reason,
+                        **diagnostics_base,
+                    )
+                    return
+                signal = filtered
+
             # Clear opposite-side debounce so reversal can trade
             opp_key = self._debounce_key(symbol, "SELL" if side == "BUY" else "BUY")
             self._last_risk_approved.pop(opp_key, None)
@@ -538,6 +578,8 @@ class TradingEventHandler:
                 payload=risk_payload,
             )
             await event_bus.publish(risk_approved)
+            if getattr(settings, "entry_signal_filter_enabled", True):
+                self._entry_signal_filter.record_trade()
 
             logger.info(
                 "trading_handler_risk_approved_published",

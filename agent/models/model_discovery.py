@@ -81,13 +81,24 @@ class ModelDiscovery:
                         ),
                     )
                 else:
-                    v4_metadata_files = sorted(self.model_dir.glob("metadata_BTCUSD_*.json"))
+                    recursive = getattr(
+                        settings, "model_discovery_recursive", True
+                    )
+                    if recursive:
+                        v4_metadata_files = sorted(
+                            self.model_dir.rglob("metadata_BTCUSD_*.json")
+                        )
+                    else:
+                        v4_metadata_files = sorted(
+                            self.model_dir.glob("metadata_BTCUSD_*.json")
+                        )
                     discovery_attempted = True
                     logger.info(
                         "model_discovery_v4_scan",
                         model_dir=str(self.model_dir),
                         absolute_path=str(model_dir_abs),
                         discovery_mode="v4_only",
+                        recursive=recursive,
                         files_found=len(v4_metadata_files),
                         file_list=[str(p) for p in v4_metadata_files[:10]],
                     )
@@ -98,10 +109,12 @@ class ModelDiscovery:
                             model_dir=str(self.model_dir),
                             absolute_path=str(model_dir_abs),
                             discovery_mode="v4_only",
+                            recursive=recursive,
                             message=(
-                                "No metadata_BTCUSD_*.json files found in MODEL_DIR for v4 discovery. "
-                                "Check MODEL_DIR points to the folder containing v4 metadata files "
-                                "(for example ./agent/model_storage/jacksparrow_v4_BTCUSD)."
+                                "No metadata_BTCUSD_*.json files found under MODEL_DIR for v4 discovery. "
+                                "Set MODEL_DIR to the bundle folder, or enable "
+                                "MODEL_DISCOVERY_RECURSIVE=true to scan subfolders "
+                                "(for example ./agent/model_storage)."
                             ),
                         )
                     else:

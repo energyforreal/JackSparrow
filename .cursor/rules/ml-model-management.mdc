@@ -11,13 +11,14 @@ alwaysApply: false
 ## Model File Organization
 
 - **Current production models**: Stored in `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
-- **Discovery contract (v4-only)**: `MODEL_DIR` must point to directory that contains `metadata_BTCUSD_*.json`
+- **Discovery contract (v4-only)**: `metadata_BTCUSD_*.json` is discovered under `MODEL_DIR`; with `MODEL_DISCOVERY_RECURSIVE=true` (default), subfolders such as `jacksparrow_v5_BTCUSD_*/` are scanned so `MODEL_DIR` may be `./agent/model_storage`.
 - **Artefact set per timeframe**: entry/exit model `.joblib`, entry/exit scaler `.joblib`, `features_*.json`, `metadata_*.json`
 - Legacy model directories (`xgboost/`, `lstm/`, `custom/`) may exist historically but are not the primary v4 path
 
 ## Environment Variables
 
-- `MODEL_DIR`: Points to BTCUSD metadata directory (for v5 BTCUSD: `./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19`)
+- `MODEL_DIR`: Root for discovery (e.g. `./agent/model_storage` or a specific bundle folder)
+- `MODEL_DISCOVERY_RECURSIVE`: When true (default), find `metadata_BTCUSD_*.json` in subfolders
 - `MODEL_DISCOVERY_ENABLED`: Enable metadata-based discovery
 - `MODEL_AUTO_REGISTER`: Auto-register discovered models in MCP registry
 

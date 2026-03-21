@@ -279,29 +279,94 @@ def update_model_if_needed(model_dir: Optional[Path] = None) -> bool:
 # 7. MODEL LOADING
 # ------------------------------------------------
 
+# Optional Colab export names (when artifacts are copied flat into MODEL_DIR).
+JACKSPARROW_ENTRY_ARTIFACTS = [
+    "entry_long_model_BTCUSD_5m.joblib",
+    "entry_short_model_BTCUSD_5m.joblib",
+    "entry_long_scaler_BTCUSD_5m.joblib",
+    "entry_short_scaler_BTCUSD_5m.joblib",
+    "entry_long_model_BTCUSD_15m.joblib",
+    "entry_short_model_BTCUSD_15m.joblib",
+    "entry_long_scaler_BTCUSD_15m.joblib",
+    "entry_short_scaler_BTCUSD_15m.joblib",
+]
+
+
 class TradingModels:
+    """
+    Legacy robust-ensemble loader (entry_meta.pkl / exit_model.pkl) or flat JackSparrow
+    entry_long / entry_short joblibs. Production agent uses V4EnsembleNode + metadata instead.
+    """
 
     def __init__(self):
-
         self.entry_model = None
         self.exit_model = None
-
+        self._mode = "none"
+        self._js_models: Dict[str, Any] = {}
+        self._js_scalers: Dict[str, Any] = {}
         self.load_models()
 
-    def load_models(self):
-
+    def load_models(self) -> None:
         print("Loading models...")
+        legacy_entry = MODEL_DIR / "entry_meta.pkl"
+        legacy_exit = MODEL_DIR / "exit_model.pkl"
+        if legacy_entry.exists() and legacy_exit.exists():
+            self._mode = "legacy"
+            self.entry_model = joblib.load(legacy_entry)
+            self.exit_model = joblib.load(legacy_exit)
+            print("Loaded legacy entry_meta / exit_model.")
+            return
 
-        self.entry_model = joblib.load(MODEL_DIR / "entry_meta.pkl")
-        self.exit_model = joblib.load(MODEL_DIR / "exit_model.pkl")
+        sym, tfs = "BTCUSD", ("5m", "15m")
+        loaded = True
+        for tf in tfs:
+            for direction in ("long", "short"):
+                mp = MODEL_DIR / f"entry_{direction}_model_{sym}_{tf}.joblib"
+                sp = MODEL_DIR / f"entry_{direction}_scaler_{sym}_{tf}.joblib"
+                if not mp.exists() or not sp.exists():
+                    loaded = False
+                    break
+                self._js_models[f"{tf}_{direction}"] = joblib.load(mp)
+                self._js_scalers[f"{tf}_{direction}"] = joblib.load(sp)
+            if not loaded:
+                break
 
-    def predict(self, features):
+        if loaded and self._js_models:
+            self._mode = "jacksparrow"
+            print("Loaded JackSparrow entry long/short models from MODEL_DIR.")
+            return
 
-        entry_signal = self.entry_model.predict(features)
+        self._js_models.clear()
+        self._js_scalers.clear()
+        print(
+            "WARNING: No entry_meta.pkl/exit_model.pkl and no full JackSparrow entry "
+            "joblib set in MODEL_DIR. Use agent model discovery (metadata JSON) for live trading."
+        )
 
-        exit_signal = self.exit_model.predict(features)
+    def predict(self, features: Any) -> tuple:
+        if self._mode == "legacy" and self.entry_model is not None and self.exit_model is not None:
+            entry_signal = self.entry_model.predict(features)
+            exit_signal = self.exit_model.predict(features)
+            return entry_signal, exit_signal
 
-        return entry_signal, exit_signal
+        if self._mode == "jacksparrow":
+            X = np.asarray(features, dtype=np.float64).reshape(1, -1)
+            # Default inference TF for this legacy helper path
+            tf = "5m"
+            if f"{tf}_long" not in self._js_models:
+                tf = "15m"
+            long_m = self._js_models.get(f"{tf}_long")
+            short_m = self._js_models.get(f"{tf}_short")
+            long_s = self._js_scalers.get(f"{tf}_long")
+            short_s = self._js_scalers.get(f"{tf}_short")
+            if long_m is None or short_m is None or long_s is None or short_s is None:
+                return np.array([0.0]), np.array([0.0])
+            pl = float(long_m.predict_proba(long_s.transform(X))[0, 1])
+            ps = float(short_m.predict_proba(short_s.transform(X))[0, 1])
+            combined = np.array([pl - ps], dtype=np.float64)
+            return combined, np.array([0.0])
+
+        return np.array([0.0]), np.array([0.0])
 
 # ------------------------------------------------
 # 8. AUTO MODEL RELOAD LOOP

@@ -659,19 +659,34 @@ class ExecutionEngine:
         current_price = position.get("current_price", position["entry_price"])
         entry_price = position["entry_price"]
         trail_pct = getattr(settings, "trailing_stop_percentage", 0.015) or 0.015
+        act_pct = float(
+            getattr(settings, "trailing_stop_activation_profit_pct", 0.0) or 0.0
+        )
 
-        # Trailing stop: ratchet stop_loss on favorable price moves
+        # Trailing stop: ratchet stop_loss on favorable price moves (optional profit gate)
         if position["side"] == "long" and current_price > entry_price:
-            new_trail_stop = current_price * (1 - trail_pct)
-            if new_trail_stop > (position.get("stop_loss") or 0):
-                position["stop_loss"] = new_trail_stop
-                logger.info("trailing_stop_updated", symbol=position_symbol, new_stop=new_trail_stop)
+            profit_pct = (current_price - entry_price) / entry_price
+            if act_pct <= 0 or profit_pct >= act_pct:
+                new_trail_stop = current_price * (1 - trail_pct)
+                if new_trail_stop > (position.get("stop_loss") or 0):
+                    position["stop_loss"] = new_trail_stop
+                    logger.info(
+                        "trailing_stop_updated",
+                        symbol=position_symbol,
+                        new_stop=new_trail_stop,
+                    )
         elif position["side"] == "short" and current_price < entry_price:
-            new_trail_stop = current_price * (1 + trail_pct)
-            current_sl = position.get("stop_loss")
-            if current_sl is None or new_trail_stop < current_sl:
-                position["stop_loss"] = new_trail_stop
-                logger.info("trailing_stop_updated", symbol=position_symbol, new_stop=new_trail_stop)
+            profit_pct = (entry_price - current_price) / entry_price
+            if act_pct <= 0 or profit_pct >= act_pct:
+                new_trail_stop = current_price * (1 + trail_pct)
+                current_sl = position.get("stop_loss")
+                if current_sl is None or new_trail_stop < current_sl:
+                    position["stop_loss"] = new_trail_stop
+                    logger.info(
+                        "trailing_stop_updated",
+                        symbol=position_symbol,
+                        new_stop=new_trail_stop,
+                    )
 
         # Check stop loss and take profit levels
         stop_loss = position.get("stop_loss")
