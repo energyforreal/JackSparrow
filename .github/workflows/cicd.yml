@@ -73,15 +73,12 @@ jobs:
 
       - name: Lint with ruff
         run: ruff check ${{ matrix.path }}
-        continue-on-error: true
 
       - name: Format check with black
         run: black --check ${{ matrix.path }}
-        continue-on-error: true
 
       - name: Type check with mypy
         run: mypy ${{ matrix.path }} --ignore-missing-imports
-        continue-on-error: true
 
       - name: Run pytest
         run: pytest
@@ -107,6 +104,7 @@ jobs:
         run: npm ci
         working-directory: frontend
 
+      # Pre-existing TS/ESLint issues; keep tests strict — unblock pipeline until cleaned up
       - name: Lint with ESLint
         run: npm run lint
         working-directory: frontend
@@ -138,17 +136,19 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       postgres:
-        image: postgres:15-alpine
+        image: timescale/timescaledb:2.25.1-pg15
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: jacksparrow_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d jacksparrow_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+    env:
+      REDIS_CI_PASSWORD: testredis
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -179,16 +179,23 @@ jobs:
       - name: Set up environment variables
         run: |
           echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/jacksparrow_test" >> $GITHUB_ENV
-          echo "REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+          echo "REDIS_URL=redis://localhost:6379/0" >> $GITHUB_ENV
           echo "API_KEY=test-api-key" >> $GITHUB_ENV
           echo "FRONTEND_URL=http://localhost:3000" >> $GITHUB_ENV
 
       - name: Start services (backend, agent, frontend)
         run: |
-          # Start services in background
           python tools/commands/start_parallel.py &
-          sleep 30  # Wait for services to start
-        continue-on-error: true
+          echo "Waiting for backend health..."
+          for i in $(seq 1 60); do
+            if curl -fsS "http://localhost:8000/api/v1/health" >/dev/null 2>&1; then
+              echo "Backend ready after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend did not become healthy in time"
+          exit 1
 
       - name: Run model-service integration tests
         run: |
@@ -196,7 +203,7 @@ jobs:
           python -m pytest tests/integration/test_model_service_integration.py -v --tb=short
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jacksparrow_test
-          REDIS_URL: redis://localhost:6379
+          REDIS_URL: redis://localhost:6379/0
           DELTA_EXCHANGE_API_KEY: test-key
           DELTA_EXCHANGE_API_SECRET: test-secret
 
@@ -255,6 +262,8 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: ${{ github.ref == 'refs/heads/main' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ghcr.io/${{ github.repository_owner }}/jacksparrow-${{ matrix.name }}:${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/jacksparrow-${{ matrix.name }}:latest
@@ -281,5 +290,4 @@ jobs:
             git checkout main
             git pull origin main
             docker compose pull
-            docker compose up -d --pull always --build
-
+            docker compose up -d --no-build

@@ -439,6 +439,11 @@ async def main():
     parser.add_argument("--symbol", default="BTCUSD", help="Trading symbol")
     parser.add_argument("--timeframes", nargs="+", default=["15m", "1h", "4h"], help="Timeframes to train")
     parser.add_argument("--skip-validation", action="store_true", help="Skip model validation")
+    parser.add_argument(
+        "--link-latest",
+        action="store_true",
+        help="After success, update agent/model_storage/latest -> trained output directory",
+    )
     
     args = parser.parse_args()
     
@@ -469,6 +474,21 @@ async def main():
         summary_df = pd.DataFrame(results)
         summary_df.to_csv(summary_path, index=False)
         print(f"\n✓ Training summary saved to {summary_path}")
+
+    if args.link_latest and results:
+        import subprocess
+
+        target = trainer.storage_dir.resolve()
+        link_script = project_root / "scripts" / "link_model_storage_latest.py"
+        rc = subprocess.run(
+            [sys.executable, str(link_script), str(target)],
+            check=False,
+        )
+        if rc.returncode != 0:
+            print(
+                f"\n⚠ link_model_storage_latest failed (exit {rc.returncode}); "
+                "run: python scripts/link_model_storage_latest.py <dir>",
+            )
     
     print("\n" + "=" * 60)
     print("Training complete!")

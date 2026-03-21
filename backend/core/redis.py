@@ -175,16 +175,21 @@ async def get_redis(required: bool = False) -> Optional[Redis]:
     try:
         # Use connection pool for better concurrency
         if _redis_pool is None:
+            pool_size = settings.redis_max_connections
             _redis_pool = aioredis.ConnectionPool.from_url(
                 settings.redis_url,
                 encoding="utf-8",
                 decode_responses=True,
-                max_connections=50,  # Maximum pool size
+                max_connections=pool_size,
                 socket_connect_timeout=3,
                 retry_on_error=[ConnectionError, TimeoutError],
                 retry_on_timeout=True,
             )
-            logger.debug("redis_connection_pool_created", max_connections=50, service="backend")
+            logger.debug(
+                "redis_connection_pool_created",
+                max_connections=pool_size,
+                service="backend",
+            )
         
         client = aioredis.Redis(connection_pool=_redis_pool)
         
@@ -193,7 +198,11 @@ async def get_redis(required: bool = False) -> Optional[Redis]:
             _redis_client = client
             _redis_connection_failed = False
             _reconnection_attempts = 0
-            logger.info("redis_connected", service="backend", pool_size=50)
+            logger.info(
+                "redis_connected",
+                service="backend",
+                pool_size=settings.redis_max_connections,
+            )
             return client
         else:
             await client.close()
@@ -269,6 +278,19 @@ async def enqueue_command(command: Dict[str, Any], queue_name: Optional[str] = N
             return False
         
         queue = queue_name or settings.agent_command_queue
+        max_depth = settings.agent_command_queue_max_depth
+        if max_depth > 0:
+            depth = await client.llen(queue)
+            if depth >= max_depth:
+                logger.warning(
+                    "redis_command_queue_depth_exceeded",
+                    queue=queue,
+                    depth=depth,
+                    max_depth=max_depth,
+                    service="backend",
+                    message="Skipping enqueue; drain queue or raise AGENT_COMMAND_QUEUE_MAX_DEPTH",
+                )
+                return False
         await client.lpush(queue, json.dumps(command, default=_json_default_encoder))
         return True
     except Exception as e:

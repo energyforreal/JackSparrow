@@ -121,7 +121,9 @@ class ModelPrediction(BaseModel):
 
 class ModelConsensusEntry(BaseModel):
     """Consensus-style view of a single model's prediction."""
-    
+
+    model_config = ConfigDict(protected_namespaces=())
+
     model_name: str = Field(
         ...,
         description="Model name",
@@ -143,7 +145,9 @@ class ModelConsensusEntry(BaseModel):
 
 class ModelReasoningEntry(BaseModel):
     """High-level reasoning summary for a single model."""
-    
+
+    model_config = ConfigDict(protected_namespaces=())
+
     model_name: str = Field(
         ...,
         description="Model name",

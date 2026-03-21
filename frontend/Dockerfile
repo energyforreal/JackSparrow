@@ -6,7 +6,7 @@ ARG VERSION=latest
 ARG COMMIT_SHA=unknown
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ARG NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
-ARG NEXT_PUBLIC_BACKEND_API_KEY=dev-api-key
+ARG NEXT_PUBLIC_BACKEND_PROXY_BASE=/api/backend
 
 # Stage 1: Dependencies
 FROM node:20-bullseye-slim AS deps
@@ -21,13 +21,13 @@ WORKDIR /app
 # Re-declare build-time arguments for Next.js environment variables
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_WS_URL
-ARG NEXT_PUBLIC_BACKEND_API_KEY
+ARG NEXT_PUBLIC_BACKEND_PROXY_BASE
 
-# Convert ARGs to ENV for Next.js build process
+# Convert ARGs to ENV for Next.js build process (no backend secrets in the client bundle)
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
     NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL} \
-    NEXT_PUBLIC_BACKEND_API_KEY=${NEXT_PUBLIC_BACKEND_API_KEY}
+    NEXT_PUBLIC_BACKEND_PROXY_BASE=${NEXT_PUBLIC_BACKEND_PROXY_BASE}
 
 # Copy package files
 COPY package*.json ./

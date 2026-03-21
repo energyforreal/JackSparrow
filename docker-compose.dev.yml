@@ -1,58 +1,55 @@
 version: "3.9"
 
 # Development override for docker-compose.yml
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
-# This enables hot-reload by mounting source code as volumes
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# This enables hot-reload by mounting source code as volumes and exposes DB/Redis to the host.
 
 services:
+  postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile.dev
-    # Override command to use reload flag
     command: ["sh", "-c", "uvicorn backend.api.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000} --reload"]
-    # Mount source code for hot-reload
     volumes:
       - ./backend:/app/backend:rw
       - ./logs/backend:/logs:rw
-    # Development environment
     environment:
-      - LOG_LEVEL=${BACKEND_LOG_LEVEL:-DEBUG}
-    # Keep other settings from base docker-compose.yml
+      LOG_LEVEL: ${BACKEND_LOG_LEVEL:-DEBUG}
 
   agent:
     build:
       context: .
       dockerfile: agent/Dockerfile.dev
-    # Mount source code for hot-reload
     volumes:
       - ./agent:/app/agent:rw
-      - ./agent/model_storage:/app/agent/model_storage:ro
+      - ./agent/model_storage:/app/agent/model_storage:rw
       - ./logs/agent:/logs:rw
-    # Development environment
     environment:
-      - LOG_LEVEL=${AGENT_LOG_LEVEL:-DEBUG}
-      # Discover BTCUSD v5 models in dev by default
-      - MODEL_DIR=/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
-    # Keep other settings from base docker-compose.yml
+      LOG_LEVEL: ${AGENT_LOG_LEVEL:-DEBUG}
+      MODEL_DIR: /app/agent/model_storage/latest
 
   frontend:
     build:
       context: frontend
       dockerfile: Dockerfile.dev
-    # Override environment for development
     environment:
-      - NODE_ENV=development
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
-      - NEXT_PUBLIC_BACKEND_API_KEY=${API_KEY:-dev-api-key}
-      - PORT=${FRONTEND_PORT:-3000}
-    # Mount source code for hot-reload
-    # Exclude node_modules and .next to avoid conflicts
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
+      NEXT_PUBLIC_BACKEND_PROXY_BASE: ${NEXT_PUBLIC_BACKEND_PROXY_BASE:-/api/backend}
+      BACKEND_INTERNAL_URL: http://backend:${BACKEND_PORT:-8000}
+      BACKEND_API_KEY: ${API_KEY}
+      PORT: ${FRONTEND_PORT:-3000}
     volumes:
       - ./frontend:/app:rw
       - /app/node_modules
       - /app/.next
       - ./logs/frontend:/logs:rw
-    # Keep other settings from base docker-compose.yml
-

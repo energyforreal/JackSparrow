@@ -87,5 +87,8 @@ agent/model_storage/custom/*
 frontend/public/logo.png
 tests/functionality/reports/
 redis-tmp/
+*.rdb
+*.vsix
+backend-logs.txt
 agent_logs_temp.txt
 

@@ -129,6 +129,12 @@ app.add_middleware(
 )
 
 
+@app.get("/live")
+async def live_check():
+    """Fast liveness probe (process listening); no dependency checks."""
+    return {"status": "live"}
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""

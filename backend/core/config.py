@@ -4,6 +4,8 @@ Configuration management for backend service.
 Handles environment variable loading, validation, and default values.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,6 +42,11 @@ class Settings(BaseSettings):
         default=False,
         env="REDIS_REQUIRED",
         description="Require Redis connectivity during startup"
+    )
+    redis_max_connections: int = Field(
+        default=12,
+        env="REDIS_MAX_CONNECTIONS",
+        description="Max connections in Redis async pool (command workloads)",
     )
     
     # Delta Exchange API
@@ -80,6 +87,17 @@ class Settings(BaseSettings):
         default=True,
         env="USE_AGENT_WEBSOCKET",
         description="Use WebSocket for agent communication (fallback to Redis queue if False or unavailable)"
+    )
+    agent_redis_fallback_when_ws_connected: bool = Field(
+        default=True,
+        env="AGENT_REDIS_FALLBACK_WHEN_WS_CONNECTED",
+        description="When False, do not enqueue Redis commands if outbound agent WebSocket was connected (avoids duplicate delivery)",
+    )
+    agent_command_queue_max_depth: int = Field(
+        default=5000,
+        env="AGENT_COMMAND_QUEUE_MAX_DEPTH",
+        ge=0,
+        description="Skip LPUSH when agent command queue length exceeds this (0 disables)",
     )
     
     # Feature Server
@@ -323,7 +341,86 @@ class Settings(BaseSettings):
         env="RATE_LIMIT_WINDOW",
         description="Rate limit window in seconds"
     )
-    
+
+    app_environment: str = Field(
+        default="development",
+        env=("ENVIRONMENT", "APP_ENV"),
+        description="Deployment environment name (e.g. development, production)",
+    )
+    strict_secrets: bool = Field(
+        default=False,
+        env="STRICT_SECRETS",
+        description="When True (or ENVIRONMENT=production), reject placeholder secrets",
+    )
+    cors_internal_origins: Optional[str] = Field(
+        default=None,
+        env="CORS_INTERNAL_ORIGINS",
+        description="Comma-separated extra CORS origins (e.g. Docker internal http://frontend:3000)",
+    )
+
+    def get_cors_allow_origins(self) -> List[str]:
+        """Merge CORS_ORIGINS with optional CORS_INTERNAL_ORIGINS."""
+        merged = list(self.cors_origins)
+        raw = self.cors_internal_origins
+        if not raw or not str(raw).strip():
+            return merged
+        extra = (
+            str(raw)
+            .replace("\n", "")
+            .replace("\r", "")
+            .replace("\t", " ")
+            .strip()
+        )
+        for origin in (o.strip() for o in extra.split(",") if o.strip()):
+            if origin not in merged:
+                merged.append(origin)
+        return merged
+
+    @model_validator(mode="after")
+    def validate_no_placeholder_secrets(self) -> Settings:
+        """Reject trivial placeholder secrets when STRICT_SECRETS or production."""
+        env_name = (
+            os.environ.get("ENVIRONMENT", "").strip().lower()
+            or self.app_environment.strip().lower()
+        )
+        must_validate = self.strict_secrets or env_name == "production"
+        if not must_validate:
+            return self
+
+        def bad(v: str) -> bool:
+            s = (v or "").strip()
+            if not s:
+                return True
+            low = s.lower()
+            if low in {"changeme", "xxx", "placeholder", "dev-api-key", "dev-jwt-secret"}:
+                return True
+            if low.startswith("dev-"):
+                return True
+            return False
+
+        if bad(self.jwt_secret_key):
+            raise ValueError(
+                "JWT_SECRET_KEY is missing or looks like a development placeholder. "
+                "Set a strong secret, or use ENVIRONMENT=development with STRICT_SECRETS=false."
+            )
+        if bad(self.api_key):
+            raise ValueError(
+                "API_KEY is missing or looks like a development placeholder. "
+                "Set a strong API key, or use ENVIRONMENT=development with STRICT_SECRETS=false."
+            )
+        if bad(self.delta_exchange_api_key):
+            raise ValueError(
+                "DELTA_EXCHANGE_API_KEY is missing or looks like a placeholder. "
+                "Set real exchange credentials, or use ENVIRONMENT=development with STRICT_SECRETS=false."
+            )
+        if bad(self.delta_exchange_api_secret):
+            raise ValueError(
+                "DELTA_EXCHANGE_API_SECRET is missing or looks like a placeholder. "
+                "Set real exchange credentials, or use ENVIRONMENT=development with STRICT_SECRETS=false."
+            )
+        return self
+
+
 try:
     settings = Settings()
 except Exception as e:

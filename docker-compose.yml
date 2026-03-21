@@ -3,17 +3,11 @@ services:
     image: timescale/timescaledb:2.25.1-pg15
     container_name: jacksparrow-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-jacksparrow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jacksparrow}
-      POSTGRES_DB: ${POSTGRES_DB:-trading_agent}
-    # For local development we expose Postgres to the host. In hardened
-    # production you may remove this mapping and access it only via Docker network.
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jacksparrow} -d ${POSTGRES_DB:-trading_agent}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,21 +26,26 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     networks:
       - jacksparrow-network
 
   redis:
     image: redis:7.2-alpine
     container_name: jacksparrow-redis
-    command: ["redis-server", "--appendonly", "yes"]
-    # For local development we expose Redis to the host. In hardened
-    # production you may remove this mapping and access it only via Docker network.
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -70,6 +69,7 @@ services:
 
   agent:
     container_name: jacksparrow-agent
+    image: ${AGENT_IMAGE:-jacksparrow-agent:latest}
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -81,13 +81,14 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-jacksparrow}:${POSTGRES_PASSWORD:-jacksparrow}@postgres:5432/${POSTGRES_DB:-trading_agent}
-      REDIS_URL: redis://redis:6379/0
-      DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY:-changeme}
-      DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET:-changeme}
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY}
+      DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
-      # Discover BTCUSD v5 models by default
-      MODEL_DIR: /app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
+      MODEL_DIR: /app/agent/model_storage/latest
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}
       AGENT_SYMBOL: ${AGENT_SYMBOL:-BTCUSD}
@@ -129,6 +130,7 @@ services:
 
   backend:
     container_name: jacksparrow-backend
+    image: ${BACKEND_IMAGE:-jacksparrow-backend:latest}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -143,27 +145,36 @@ services:
       - .env
     environment:
       PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
       BACKEND_RELOAD: "false"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-jacksparrow}:${POSTGRES_PASSWORD:-jacksparrow}@postgres:5432/${POSTGRES_DB:-trading_agent}
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       FEATURE_SERVER_URL: http://agent:8002
       AGENT_WS_URL: ws://agent:${AGENT_WS_PORT:-8003}
       USE_AGENT_WEBSOCKET: ${USE_AGENT_WEBSOCKET:-true}
-      DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY:-changeme}
-      DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET:-changeme}
+      DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY}
+      DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret}
-      API_KEY: ${API_KEY:-dev-api-key}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      API_KEY: ${API_KEY}
       BACKEND_PORT: ${BACKEND_PORT:-8000}
       BACKEND_HOST: 0.0.0.0
       LOG_LEVEL: ${BACKEND_LOG_LEVEL:-INFO}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001},http://frontend:3000
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      CORS_INTERNAL_ORIGINS: ${CORS_INTERNAL_ORIGINS:-http://frontend:3000}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./logs/backend:/logs
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:${BACKEND_PORT:-8000}/api/v1/health || exit 1"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/api/v1/health' % os.environ.get('BACKEND_PORT','8000'), timeout=5)",
+        ]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -187,15 +198,13 @@ services:
 
   frontend:
     container_name: jacksparrow-frontend
+    image: ${FRONTEND_IMAGE:-jacksparrow-frontend:latest}
     build:
       context: frontend
       dockerfile: Dockerfile
       args:
-        # These NEXT_PUBLIC_* values are embedded into the browser bundle (host-side),
-        # so they must be resolvable from the host browser.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
-        NEXT_PUBLIC_BACKEND_API_KEY: ${API_KEY:-dev-api-key}
     depends_on:
       backend:
         condition: service_healthy
@@ -203,7 +212,9 @@ services:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000/ws}
-      NEXT_PUBLIC_BACKEND_API_KEY: ${API_KEY:-dev-api-key}
+      NEXT_PUBLIC_BACKEND_PROXY_BASE: ${NEXT_PUBLIC_BACKEND_PROXY_BASE:-/api/backend}
+      BACKEND_INTERNAL_URL: http://backend:${BACKEND_PORT:-8000}
+      BACKEND_API_KEY: ${API_KEY}
       PORT: ${FRONTEND_PORT:-3000}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"

@@ -238,9 +238,15 @@ class AgentService:
             payload=parameters
         )
 
-        # BACKEND -> AGENT: Entry logging
-        logger.info("BACKEND -> AGENT: Sending command=%s", command)
-        
+        # BACKEND -> AGENT (outbound command WebSocket to agent — not the same as agent -> backend /ws/agent)
+        logger.info(
+            "outbound_agent_command_ws_send",
+            command=command,
+            message="Sending command to agent (preferred path: outbound WS to AGENT_WS_URL)",
+        )
+
+        outbound_ws_active = False
+
         # Attempt WebSocket initialization if disconnected.
         if self.use_websocket and websockets is not None:
             if not self._websocket_connected or self._websocket is None:
@@ -256,11 +262,20 @@ class AgentService:
                             error=str(e)
                         )
         
-        # Try WebSocket first if available
-        logger.debug("BACKEND -> AGENT: Checking WebSocket availability: use_websocket=%s, connected=%s, websocket=%s",
-                    self.use_websocket, self._websocket_connected, self._websocket is not None)
+        # Try outbound WebSocket first if available
+        logger.debug(
+            "outbound_agent_command_ws_check",
+            use_websocket=self.use_websocket,
+            connected=self._websocket_connected,
+            has_socket=self._websocket is not None,
+        )
         if self.use_websocket and self._websocket_connected and self._websocket:
-            logger.info("BACKEND -> AGENT: Attempting WebSocket send for command=%s", command)
+            outbound_ws_active = True
+            logger.info(
+                "outbound_agent_command_ws_attempt",
+                command=command,
+                message="Using outbound WebSocket to agent for command delivery",
+            )
             try:
                 command_message = {
                     "type": "command",
@@ -344,11 +359,25 @@ class AgentService:
                     # Fall through to Redis fallback
             
             except Exception as e:
-                logger.error("BACKEND -> AGENT WS FAIL: %s - falling back to Redis", e)
-                # Fall through to Redis fallback
-                # Note: Redis fallback will be handled below
-        
-        # Fallback to Redis queue
+                logger.error(
+                    "outbound_agent_command_ws_send_exception",
+                    error=str(e),
+                    command=command,
+                    message="Outbound WebSocket send failed; may fall back to Redis",
+                )
+
+        if (
+            outbound_ws_active
+            and not settings.agent_redis_fallback_when_ws_connected
+        ):
+            logger.warning(
+                "agent_service_redis_fallback_disabled",
+                command=command,
+                message="Outbound WS was connected; skipping Redis enqueue (AGENT_REDIS_FALLBACK_WHEN_WS_CONNECTED=false)",
+            )
+            return None
+
+        # Fallback to Redis queue (command transport)
         try:
             message = {
                 "request_id": request_id,
@@ -357,19 +386,29 @@ class AgentService:
                 "timestamp": time.time()
             }
             
-            # Send command via Redis
-            logger.info("BACKEND -> AGENT: Attempting Redis enqueue for command=%s to queue=%s", command, self.command_queue)
+            logger.info(
+                "redis_command_transport_enqueue",
+                command=command,
+                queue=self.command_queue,
+            )
             success = await enqueue_command(message, self.command_queue)
             if not success:
-                logger.error("BACKEND -> AGENT: Redis enqueue failed for command=%s", command)
+                logger.error(
+                    "redis_command_transport_enqueue_failed",
+                    command=command,
+                    queue=self.command_queue,
+                )
                 return None
 
-            logger.info("BACKEND -> AGENT: Command sent via Redis fallback, command=%s", command)
-            # Give agent a moment to process and respond
+            logger.info(
+                "redis_command_transport_enqueued",
+                command=command,
+                message="Command sent via Redis (used when outbound WS unavailable or after WS failure)",
+            )
             await asyncio.sleep(0.5)
             return await self._wait_for_response(request_id, timeout)
         except Exception as e:
-            logger.error("BACKEND -> AGENT: Redis fallback failed: %s", e)
+            logger.error("redis_command_transport_failed", command=command, error=str(e))
             return None
     
     async def get_prediction(
