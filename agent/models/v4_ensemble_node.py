@@ -326,6 +326,17 @@ class V4EnsembleNode(MCPModelNode):
                 exit_hold, exit_exit = 1.0, 0.0
 
             entry_signal, entry_conf = _entry_signal(entry_proba_raw)
+            if (
+                self._entry_long_model is not None
+                and self._entry_short_model is not None
+            ):
+                gap = float(getattr(settings, "entry_long_short_min_gap", 0.0) or 0.0)
+                if gap > 0:
+                    buy_ls = float(entry_proba_raw[2])
+                    sell_ls = float(entry_proba_raw[0])
+                    if abs(buy_ls - sell_ls) < gap:
+                        entry_signal = 0.0
+                        entry_conf = min(buy_ls, sell_ls)
 
             reasoning = (
                 f"v4 ensemble {self._timeframe}: "

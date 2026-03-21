@@ -513,9 +513,14 @@ class XGBoostNode(MCPModelNode):
                     # Multi-class: prediction_raw is already in [-1, 1] range (BUY - SELL)
                     prediction_normalized = max(-1.0, min(1.0, float(prediction_raw)))
                 else:
-                    # Binary: probability [0, 1] -> [-1, 1]
-                    # Map: 0.0 -> -1.0, 0.5 -> 0.0, 1.0 -> +1.0
-                    prediction_normalized = (prediction_raw - 0.5) * 2.0
+                    # Binary: probability [0, 1] -> [-1, 1] using configurable neutral midpoint.
+                    # This avoids hardcoding 0.5 when calibration/output scale shifts.
+                    midpoint = float(getattr(settings, "xgb_binary_decision_midpoint", 0.5))
+                    midpoint = max(0.01, min(0.99, midpoint))
+                    if prediction_raw >= midpoint:
+                        prediction_normalized = (prediction_raw - midpoint) / (1.0 - midpoint)
+                    else:
+                        prediction_normalized = (prediction_raw - midpoint) / midpoint
             elif self._is_regressor:
                 # Regressor: Convert absolute price prediction to relative return
                 # Regressor models predict absolute future prices (e.g., $50,500)
@@ -602,9 +607,10 @@ class XGBoostNode(MCPModelNode):
                     # Confidence is absolute value (distance from neutral)
                     confidence = abs(prediction_raw)
                 else:
-                    # Binary: prediction_raw is probability [0, 1]
-                    # Confidence is how certain the model is (distance from 0.5)
-                    confidence = abs(prediction_raw - 0.5) * 2.0  # [0, 1] range
+                    # Binary: use class certainty rather than distance-from-0.5.
+                    # This aligns with v4 long/short handling where confidence reflects
+                    # directional conviction even when calibrated probabilities are compressed.
+                    confidence = max(float(prediction_raw), 1.0 - float(prediction_raw))
             else:
                 # Confidence is absolute value of normalized prediction
                 confidence = abs(prediction_normalized)

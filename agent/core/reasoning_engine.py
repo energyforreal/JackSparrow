@@ -488,9 +488,12 @@ class MCPReasoningEngine:
 
             evidence.append(f"Model consensus: {consensus:.2f} ({len(model_predictions)} models, avg confidence: {avg_confidence:.2f})")
             
-            if consensus > 0.5:
+            consensus_label_thr = abs(
+                float(getattr(settings, "reasoning_consensus_label_threshold", 0.5))
+            )
+            if consensus > consensus_label_thr:
                 evidence.append("Strong bullish consensus")
-            elif consensus < -0.5:
+            elif consensus < -consensus_label_thr:
                 evidence.append("Strong bearish consensus")
             else:
                 evidence.append("Mixed signals from models")

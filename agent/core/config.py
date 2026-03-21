@@ -258,7 +258,7 @@ class Settings(BaseSettings):
         description="Comma-separated fallbacks if primary entry TF model is missing",
     )
     mtf_entry_min_confidence: float = Field(
-        default=0.6,
+        default=0.52,
         env="MTF_ENTRY_MIN_CONFIDENCE",
         description="Minimum entry-TF confidence to confirm a trade with trend",
     )
@@ -278,32 +278,32 @@ class Settings(BaseSettings):
         description="Use entry_proba buy/sell thresholds for MTF gating when available",
     )
     mtf_trend_min_buy_prob: float = Field(
-        default=0.6,
+        default=0.50,
         env="MTF_TREND_MIN_BUY_PROB",
         description="Minimum trend-TF BUY probability for bullish MTF bias",
     )
     mtf_trend_min_sell_prob: float = Field(
-        default=0.6,
+        default=0.50,
         env="MTF_TREND_MIN_SELL_PROB",
         description="Minimum trend-TF SELL probability for bearish MTF bias",
     )
     mtf_entry_min_buy_prob: float = Field(
-        default=0.6,
+        default=0.50,
         env="MTF_ENTRY_MIN_BUY_PROB",
         description="Minimum entry-TF BUY probability to confirm BUY decision",
     )
     mtf_entry_min_sell_prob: float = Field(
-        default=0.6,
+        default=0.50,
         env="MTF_ENTRY_MIN_SELL_PROB",
         description="Minimum entry-TF SELL probability to confirm SELL decision",
     )
     mtf_strong_min_buy_prob: float = Field(
-        default=0.72,
+        default=0.60,
         env="MTF_STRONG_MIN_BUY_PROB",
         description="Minimum BUY probability/confidence to emit STRONG_BUY",
     )
     mtf_strong_min_sell_prob: float = Field(
-        default=0.72,
+        default=0.60,
         env="MTF_STRONG_MIN_SELL_PROB",
         description="Minimum SELL probability/confidence to emit STRONG_SELL",
     )
@@ -378,11 +378,19 @@ class Settings(BaseSettings):
         ),
     )
     mtf_min_confidence_gap: float = Field(
-        default=0.0,
+        default=0.05,
         env="MTF_MIN_CONFIDENCE_GAP",
         description=(
             "Minimum |buy-sell| entry probability gap on entry TF when using proba gating; "
-            "0 disables (JackSparrow v6 optional filter)"
+            "0 disables uncertainty filter"
+        ),
+    )
+    entry_long_short_min_gap: float = Field(
+        default=0.0,
+        env="ENTRY_LONG_SHORT_MIN_GAP",
+        description=(
+            "In v4 ensemble with binary long/short heads: if |buy_prob-sell_prob| is below this, "
+            "force neutral entry signal and reduce confidence. 0 disables (use MTF_MIN_CONFIDENCE_GAP when MTF is on)."
         ),
     )
     model_disagreement_threshold: float = Field(
@@ -546,6 +554,22 @@ class Settings(BaseSettings):
         default=0.52,
         env="MIN_CONFIDENCE_THRESHOLD",
         description="Minimum confidence threshold for trades"
+    )
+    xgb_binary_decision_midpoint: float = Field(
+        default=0.5,
+        env="XGB_BINARY_DECISION_MIDPOINT",
+        description=(
+            "Neutral probability midpoint for binary XGBoost outputs. "
+            "Used when mapping predict_proba to [-1, +1] in xgboost_node."
+        ),
+    )
+    reasoning_consensus_label_threshold: float = Field(
+        default=0.5,
+        env="REASONING_CONSENSUS_LABEL_THRESHOLD",
+        description=(
+            "Consensus magnitude threshold used by reasoning step-3 labels "
+            "('strong bullish/bearish consensus' vs mixed)."
+        ),
     )
     update_interval: int = Field(
         default=900,

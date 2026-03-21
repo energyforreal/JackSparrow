@@ -133,6 +133,32 @@ def test_synthesize_mtf_proba_gating_blocks_low_entry_buy_prob():
     assert "not confirming" in conclusion.lower()
 
 
+def test_synthesize_mtf_proba_gap_hold_when_entry_uncertain():
+    """|buy-sell| below mtf_min_confidence_gap should yield HOLD (JackSparrow v6-style filter)."""
+    settings = SimpleNamespace(
+        mtf_decision_engine_enabled=True,
+        mtf_trend_timeframe="15m",
+        mtf_entry_timeframe="5m",
+        mtf_filter_timeframe="none",
+        mtf_trend_fallback_timeframes="",
+        mtf_entry_fallback_timeframes="",
+        mtf_entry_min_confidence=0.52,
+        mtf_use_entry_proba_gating=True,
+        mtf_trend_min_buy_prob=0.50,
+        mtf_trend_min_sell_prob=0.50,
+        mtf_entry_min_buy_prob=0.50,
+        mtf_entry_min_sell_prob=0.50,
+        mtf_min_confidence_gap=0.05,
+    )
+    preds = [
+        _pred("jack_BTC_15m", 0.1, 0.7, {"sell": 0.2, "hold": 0.1, "buy": 0.7}),
+        _pred("jack_BTC_5m", 0.2, 0.7, {"sell": 0.48, "hold": 0.04, "buy": 0.48}),
+    ]
+    code, conclusion, _, evidence = synthesize_mtf_trading_decision(preds, settings)
+    assert code == "HOLD"
+    assert "gap" in conclusion.lower()
+
+
 def test_synthesize_mtf_proba_fallback_to_signal_thresholds():
     settings = SimpleNamespace(
         mtf_decision_engine_enabled=True,
