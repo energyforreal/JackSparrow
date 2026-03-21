@@ -14,6 +14,7 @@ from agent.events.schemas import DecisionReadyEvent, RiskApprovedEvent, EventTyp
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
+from agent.core.mtf_decision_engine import compute_context_position_size_multiplier
 from agent.core.signal_filter import EntrySignalFilter
 
 logger = structlog.get_logger()
@@ -334,7 +335,20 @@ class TradingEventHandler:
                 win_probability=0.52 + confidence * 0.1,
                 risk_reward_ratio=rr_ratio,
             )
-            proposed_size = max(0.01, min(position_size, settings.max_position_size))
+            ctx_mult = compute_context_position_size_multiplier(
+                signal, model_predictions, settings
+            )
+            if ctx_mult != 1.0:
+                logger.info(
+                    "trading_context_tf_size_adjustment",
+                    symbol=symbol,
+                    signal=signal,
+                    multiplier=ctx_mult,
+                    event_id=event.event_id,
+                )
+            proposed_size = max(
+                0.01, min(position_size * ctx_mult, settings.max_position_size)
+            )
 
             # Validate trade with risk manager
             validation = await self.risk_manager.validate_trade(

@@ -6,6 +6,7 @@ import pytest
 
 from agent.core.entry_edge_tracker import EntryEdgeTracker
 from agent.core.mtf_decision_engine import (
+    compute_context_position_size_multiplier,
     index_predictions_by_timeframe,
     parse_timeframe_from_model_name,
     synthesize_mtf_trading_decision,
@@ -201,6 +202,78 @@ def test_synthesize_mtf_percentile_blocks_when_history_stronger():
     code, conclusion, _, _ = synthesize_mtf_trading_decision(preds, settings, symbol=sym)
     assert code == "HOLD"
     assert "percentile" in conclusion.lower()
+
+
+def test_short_tf_primary_long_and_strong():
+    settings = SimpleNamespace(
+        mtf_decision_engine_enabled=True,
+        mtf_signal_architecture="short_tf_primary",
+        mtf_primary_signal_timeframe="5m",
+        mtf_primary_signal_fallback_timeframes="",
+        mtf_context_timeframe="15m",
+        mtf_context_fallback_timeframes="",
+        mtf_primary_dead_zone=0.05,
+        mtf_primary_edge_long=0.08,
+        mtf_primary_edge_short=0.08,
+        mtf_primary_strong_long_min_prob=0.55,
+        mtf_primary_strong_short_min_prob=0.58,
+        mtf_entry_strength_percentile_enabled=False,
+    )
+    preds = [
+        _pred("j_BTC_5m", 0.2, 0.6, {"sell": 0.30, "hold": 0.05, "buy": 0.65}),
+        _pred("j_BTC_15m", 0.0, 0.5, {"sell": 0.40, "hold": 0.20, "buy": 0.40}),
+    ]
+    code, conclusion, conf, ev = synthesize_mtf_trading_decision(
+        preds, settings, symbol="BTCUSD"
+    )
+    assert code == "STRONG_BUY"
+    assert conf == pytest.approx(0.6)
+    assert any("short-primary" in e for e in ev)
+
+
+def test_short_tf_primary_dead_zone():
+    settings = SimpleNamespace(
+        mtf_decision_engine_enabled=True,
+        mtf_signal_architecture="short_tf_primary",
+        mtf_primary_signal_timeframe="5m",
+        mtf_primary_signal_fallback_timeframes="",
+        mtf_context_timeframe="15m",
+        mtf_context_fallback_timeframes="",
+        mtf_primary_dead_zone=0.05,
+        mtf_primary_edge_long=0.08,
+        mtf_primary_edge_short=0.08,
+        mtf_primary_strong_long_min_prob=0.55,
+        mtf_primary_strong_short_min_prob=0.58,
+        mtf_entry_strength_percentile_enabled=False,
+    )
+    preds = [
+        _pred("j_BTC_5m", 0.0, 0.5, {"sell": 0.48, "hold": 0.04, "buy": 0.52}),
+    ]
+    code, conclusion, _, _ = synthesize_mtf_trading_decision(preds, settings)
+    assert code == "HOLD"
+    assert "dead" in conclusion.lower()
+
+
+def test_compute_context_multiplier_boost_when_aligned_long():
+    settings = SimpleNamespace(
+        mtf_signal_architecture="short_tf_primary",
+        mtf_context_timeframe="15m",
+        mtf_context_fallback_timeframes="",
+        mtf_context_agree_edge=0.02,
+        mtf_context_aligned_size_multiplier=1.15,
+        mtf_context_misaligned_size_multiplier=0.75,
+    )
+    preds = [
+        _pred("j_BTC_15m", 0.0, 0.5, {"sell": 0.30, "hold": 0.0, "buy": 0.70}),
+    ]
+    m = compute_context_position_size_multiplier("BUY", preds, settings)
+    assert m == pytest.approx(1.15)
+
+
+def test_compute_context_multiplier_standard_arch_is_one():
+    settings = SimpleNamespace(mtf_signal_architecture="standard")
+    preds = [_pred("j_BTC_15m", 0.0, 0.5, {"sell": 0.5, "hold": 0.0, "buy": 0.5})]
+    assert compute_context_position_size_multiplier("BUY", preds, settings) == 1.0
 
 
 def test_synthesize_mtf_proba_fallback_to_signal_thresholds():

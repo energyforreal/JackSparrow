@@ -232,6 +232,75 @@ class Settings(BaseSettings):
             "instead of averaging all models into one consensus"
         ),
     )
+    mtf_signal_architecture: str = Field(
+        default="standard",
+        env="MTF_SIGNAL_ARCHITECTURE",
+        description=(
+            "'standard' = higher-TF trend gates lower-TF entry (MTF_TREND/ENTRY_TIMEFRAME). "
+            "'short_tf_primary' = primary TF (default 5m) prob_long - prob_short drives trades; "
+            "context TF (default 15m) never blocks — used only for position sizing in trading handler."
+        ),
+    )
+    mtf_primary_signal_timeframe: str = Field(
+        default="5m",
+        env="MTF_PRIMARY_SIGNAL_TIMEFRAME",
+        description="Primary alpha TF when mtf_signal_architecture=short_tf_primary",
+    )
+    mtf_primary_signal_fallback_timeframes: str = Field(
+        default="15m,30m",
+        env="MTF_PRIMARY_SIGNAL_FALLBACK_TIMEFRAMES",
+        description="Comma-separated fallbacks if primary signal TF model is missing",
+    )
+    mtf_context_timeframe: str = Field(
+        default="15m",
+        env="MTF_CONTEXT_TIMEFRAME",
+        description="Weak context TF for alignment sizing only (short_tf_primary mode)",
+    )
+    mtf_context_fallback_timeframes: str = Field(
+        default="30m,1h",
+        env="MTF_CONTEXT_FALLBACK_TIMEFRAMES",
+        description="Fallbacks if context TF model is missing",
+    )
+    mtf_primary_dead_zone: float = Field(
+        default=0.05,
+        env="MTF_PRIMARY_DEAD_ZONE",
+        description="If abs(buy-sell) on primary TF is below this, HOLD (short_tf_primary)",
+    )
+    mtf_primary_edge_long: float = Field(
+        default=0.08,
+        env="MTF_PRIMARY_EDGE_LONG",
+        description="Minimum (buy-sell) on primary TF for LONG (short_tf_primary)",
+    )
+    mtf_primary_edge_short: float = Field(
+        default=0.08,
+        env="MTF_PRIMARY_EDGE_SHORT",
+        description="Minimum (sell-buy) on primary TF for SHORT (short_tf_primary)",
+    )
+    mtf_primary_strong_long_min_prob: float = Field(
+        default=0.55,
+        env="MTF_PRIMARY_STRONG_LONG_MIN_PROB",
+        description="Primary-TF buy prob floor for STRONG_BUY (short_tf_primary)",
+    )
+    mtf_primary_strong_short_min_prob: float = Field(
+        default=0.58,
+        env="MTF_PRIMARY_STRONG_SHORT_MIN_PROB",
+        description="Primary-TF sell prob floor for STRONG_SELL (short_tf_primary)",
+    )
+    mtf_context_agree_edge: float = Field(
+        default=0.02,
+        env="MTF_CONTEXT_AGREE_EDGE",
+        description="Signed prob edge on context TF to count as aligned / misaligned for sizing",
+    )
+    mtf_context_aligned_size_multiplier: float = Field(
+        default=1.15,
+        env="MTF_CONTEXT_ALIGNED_SIZE_MULTIPLIER",
+        description="Scale proposed size when context TF agrees with signal (short_tf_primary)",
+    )
+    mtf_context_misaligned_size_multiplier: float = Field(
+        default=0.75,
+        env="MTF_CONTEXT_MISALIGNED_SIZE_MULTIPLIER",
+        description="Scale proposed size when context TF disagrees (short_tf_primary)",
+    )
     mtf_trend_timeframe: str = Field(
         default="15m",
         env="MTF_TREND_TIMEFRAME",

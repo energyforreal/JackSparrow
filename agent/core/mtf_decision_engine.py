@@ -2,13 +2,17 @@
 Multi-timeframe (MTF) decision synthesis from per-timeframe model outputs.
 
 Maps model names like ``jacksparrow_BTCUSD_15m`` to timeframes and applies:
-  - Trend direction from a higher TF (default 15m)
-  - Entry confirmation from a middle TF (default 5m) with minimum confidence
-  - Optional veto from a shorter TF (default 3m)
 
-When required TFs are missing from the registry, falls back to comma-separated
-fallback lists in settings. If still insufficient, returns None so the
-reasoning engine uses legacy flat consensus.
+**standard** (``mtf_signal_architecture``): higher TF trend + lower TF entry
+confirmation, optional shorter-TF veto.
+
+**short_tf_primary**: primary TF (default 5m) uses ``buy - sell`` with a dead zone
+and long/short edges; STRONG_* uses primary-TF probability floors. A context TF
+(default 15m) never blocks — ``compute_context_position_size_multiplier`` scales
+size up/down in the trading handler when context agrees or disagrees.
+
+When required TFs are missing, falls back to comma-separated lists in settings.
+If still insufficient, returns None so the reasoning engine uses legacy consensus.
 """
 
 from __future__ import annotations
@@ -107,6 +111,207 @@ def _filter_timeframe_enabled(raw: str) -> Optional[str]:
     return t
 
 
+def _dedupe_tf_order(order: List[str]) -> List[str]:
+    seen: set[str] = set()
+    return [x for x in order if x and not (x in seen or seen.add(x))]
+
+
+def compute_context_position_size_multiplier(
+    signal: str,
+    model_predictions: List[Dict[str, Any]],
+    settings: Any,
+) -> float:
+    """
+    When short_tf_primary mode: scale size up if context TF agrees, down if it disagrees.
+
+    Never returns 0; clamped to [0.25, 1.5].
+    """
+    arch = (getattr(settings, "mtf_signal_architecture", "standard") or "standard").strip().lower()
+    if arch != "short_tf_primary":
+        return 1.0
+    if signal in ("HOLD", None, "") or signal not in (
+        "BUY",
+        "STRONG_BUY",
+        "SELL",
+        "STRONG_SELL",
+    ):
+        return 1.0
+    by_tf = index_predictions_by_timeframe(model_predictions)
+    if not by_tf:
+        return 1.0
+    ctx_tf = getattr(settings, "mtf_context_timeframe", "15m").strip().lower()
+    ctx_order = [ctx_tf] + _parse_tf_list(
+        getattr(settings, "mtf_context_fallback_timeframes", "")
+    )
+    ctx_order = _dedupe_tf_order(ctx_order)
+    ctx_row, _ctx_name = _first_available(by_tf, ctx_order)
+    if ctx_row is None:
+        return 1.0
+    proba = ctx_row.get("proba")
+    if not proba:
+        return 1.0
+    try:
+        cb = float(proba["buy"])
+        cs = float(proba["sell"])
+    except (TypeError, ValueError, KeyError):
+        return 1.0
+    edge = float(getattr(settings, "mtf_context_agree_edge", 0.02))
+    boost = float(getattr(settings, "mtf_context_aligned_size_multiplier", 1.15))
+    cut = float(getattr(settings, "mtf_context_misaligned_size_multiplier", 0.75))
+    long_sig = signal in ("BUY", "STRONG_BUY")
+    ctx_bull = (cb - cs) >= edge
+    ctx_bear = (cs - cb) >= edge
+    if long_sig:
+        if ctx_bull:
+            m = boost
+        elif ctx_bear:
+            m = cut
+        else:
+            m = 1.0
+    else:
+        if ctx_bear:
+            m = boost
+        elif ctx_bull:
+            m = cut
+        else:
+            m = 1.0
+    return max(0.25, min(1.5, m))
+
+
+def _synthesize_short_tf_primary(
+    by_tf: Dict[str, Dict[str, Any]],
+    settings: Any,
+    symbol: Optional[str],
+) -> Optional[Tuple[str, str, float, List[str]]]:
+    """
+    5m (or configured)-driven scalping: signal = buy - sell on primary TF.
+
+    Context TF (e.g. 15m) is logged for diagnostics only — never blocks. Position sizing
+    uses compute_context_position_size_multiplier in the trading handler.
+    """
+    primary_tf = getattr(settings, "mtf_primary_signal_timeframe", "5m").strip().lower()
+    primary_order = [primary_tf] + _parse_tf_list(
+        getattr(settings, "mtf_primary_signal_fallback_timeframes", "")
+    )
+    primary_order = _dedupe_tf_order(primary_order)
+    prim, prim_tf = _first_available(by_tf, primary_order)
+    if prim is None:
+        logger.info(
+            "mtf_short_primary_skipped_missing_tf",
+            have=list(by_tf.keys()),
+            primary_order=primary_order,
+        )
+        return None
+
+    proba = prim.get("proba")
+    if not isinstance(proba, dict):
+        return None
+    try:
+        buy = float(proba["buy"])
+        sell = float(proba["sell"])
+    except (TypeError, ValueError, KeyError):
+        return None
+
+    raw_signal = buy - sell
+    edge_hist_val = abs(raw_signal)
+    conf = max(0.0, min(1.0, float(prim.get("confidence", max(buy, sell)))))
+
+    def _emit(
+        result: Tuple[str, str, float, List[str]],
+    ) -> Tuple[str, str, float, List[str]]:
+        if symbol and edge_hist_val is not None:
+            EntryEdgeTracker.observe(symbol, edge_hist_val)
+        return result
+
+    dead = float(getattr(settings, "mtf_primary_dead_zone", 0.05))
+    edge_long = float(getattr(settings, "mtf_primary_edge_long", 0.08))
+    edge_short = float(getattr(settings, "mtf_primary_edge_short", 0.08))
+    slong = float(getattr(settings, "mtf_primary_strong_long_min_prob", 0.55))
+    sshort = float(getattr(settings, "mtf_primary_strong_short_min_prob", 0.58))
+
+    ctx_tf = getattr(settings, "mtf_context_timeframe", "15m").strip().lower()
+    ctx_order = [ctx_tf] + _parse_tf_list(
+        getattr(settings, "mtf_context_fallback_timeframes", "")
+    )
+    ctx_order = _dedupe_tf_order(ctx_order)
+    ctx_row, ctx_used = _first_available(by_tf, ctx_order)
+    ctx_note = ""
+    if ctx_row and isinstance(ctx_row.get("proba"), dict):
+        try:
+            cb = float(ctx_row["proba"]["buy"])
+            cs = float(ctx_row["proba"]["sell"])
+            ctx_note = f" context[{ctx_used}]: buy={cb:.2f} sell={cs:.2f} (sizing only)"
+        except (TypeError, ValueError, KeyError):
+            ctx_note = f" context[{ctx_used}]: (sizing only)"
+
+    evidence: List[str] = [
+        f"MTF short-primary: tf={prim_tf} signal={raw_signal:+.3f} buy={buy:.2f} sell={sell:.2f}{ctx_note}",
+    ]
+
+    pct_enabled = bool(getattr(settings, "mtf_entry_strength_percentile_enabled", False))
+    pct_val = int(getattr(settings, "mtf_entry_strength_percentile", 80))
+    pct_min_n = int(getattr(settings, "mtf_entry_strength_percentile_min_samples", 30))
+
+    def _percentile_blocks() -> Optional[Tuple[str, str, float, List[str]]]:
+        if not pct_enabled:
+            return None
+        ok, thr = EntryEdgeTracker.strength_vs_prior_percentile(
+            symbol or "", edge_hist_val, pct_val, pct_min_n
+        )
+        if ok:
+            return None
+        ev = evidence + [
+            f"MTF: primary |buy-sell|={edge_hist_val:.3f} below P{pct_val} prior={thr:.3f} — HOLD",
+        ]
+        return (
+            "HOLD",
+            "HOLD - MTF primary strength below rolling percentile",
+            max(0.0, conf * 0.25),
+            ev,
+        )
+
+    if abs(raw_signal) < dead:
+        evidence.append(f"MTF: |signal| {abs(raw_signal):.3f} < dead zone {dead:.2f} — HOLD")
+        return _emit(
+            (
+                "HOLD",
+                "HOLD - MTF primary signal in dead zone",
+                max(0.0, conf * 0.2),
+                evidence,
+            )
+        )
+
+    blocked = _percentile_blocks()
+    if blocked is not None:
+        return _emit(blocked)
+
+    if raw_signal > edge_long:
+        code = "STRONG_BUY" if buy >= slong else "BUY"
+        conclusion = (
+            f"{code} - short-primary {prim_tf} (long edge, context TF adjusts size only)"
+        )
+        return _emit((code, conclusion, conf, evidence))
+
+    if raw_signal < -edge_short:
+        code = "STRONG_SELL" if sell >= sshort else "SELL"
+        conclusion = (
+            f"{code} - short-primary {prim_tf} (short edge, context TF adjusts size only)"
+        )
+        return _emit((code, conclusion, conf, evidence))
+
+    evidence.append(
+        f"MTF: signal between dead zone and edge (|{raw_signal:.3f}| in ({dead:.2f},{edge_long:.2f})) — HOLD"
+    )
+    return _emit(
+        (
+            "HOLD",
+            "HOLD - MTF primary signal below entry edge",
+            max(0.0, conf * 0.25),
+            evidence,
+        )
+    )
+
+
 def synthesize_mtf_trading_decision(
     model_predictions: List[Dict[str, Any]],
     settings: Any,
@@ -127,6 +332,10 @@ def synthesize_mtf_trading_decision(
     by_tf: Dict[str, Dict[str, Any]] = index_predictions_by_timeframe(model_predictions)
     if not by_tf:
         return None
+
+    arch = (getattr(settings, "mtf_signal_architecture", "standard") or "standard").strip().lower()
+    if arch == "short_tf_primary":
+        return _synthesize_short_tf_primary(by_tf, settings, symbol)
 
     primary_trend = getattr(settings, "mtf_trend_timeframe", "15m").strip().lower()
     primary_entry = getattr(settings, "mtf_entry_timeframe", "5m").strip().lower()
