@@ -175,7 +175,7 @@ If you want workspace-specific settings (applies only to this project):
 
 - `.cursor/TROUBLESHOOTING.md` - Comprehensive troubleshooting guide
 - `.cursor/cursor-settings.md` - Detailed settings guide
-- `CURSOR_SETTINGS_QUICK_FIX.md` - Quick fix for approval issues
+- `docs/cursor/settings-quick-fix.md` - Quick fix for approval issues
 
 ## Verification Checklist
 

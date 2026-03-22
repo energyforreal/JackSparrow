@@ -39,8 +39,8 @@ The `.cursor/context/docs` directory mirrors the entire `docs/` tree. Reference 
 - `.cursor/context/docs/remediation-plan.md`
 - `.cursor/context/docs/training-and-feature-parity.md`
 
-**Important Reference Documents** (in project root):
-- `MAJOR_CHANGES.md` - Complete change log for architectural improvements (2025-01-27)
-- `MODEL_INTEGRATION_SUMMARY.md` - Details on integration of 6 XGBoost models for BTCUSD trading
+**Important reference documents** (in `docs/`):
+- `docs/major-changes.md` - Change log for architectural improvements (2025-01-27 baseline)
+- `docs/model-integration-summary.md` - v5 BTCUSD entry/exit bundles, `MODEL_DIR`, and Docker defaults
 
 **Note:** This rule does not auto-load documentation. Documentation files should be loaded explicitly when needed to reduce context token usage and improve performance.

@@ -13,7 +13,7 @@ print('='*70)
 print('MODEL VERIFICATION - Testing Saved Exit Models')
 print('='*70)
 
-MODEL_DIR = Path('agent') / 'model_storage' / 'robust_ensemble'
+MODEL_DIR = Path(__file__).resolve().parent.parent / "agent" / "model_storage" / "robust_ensemble"
 TIMEFRAMES = ['15m', '30m', '1h', '2h', '4h']
 SYMBOL = 'BTCUSD'
 

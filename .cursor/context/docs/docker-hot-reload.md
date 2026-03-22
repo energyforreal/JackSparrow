@@ -1,212 +1,356 @@
-# Docker Hot-Reload Development Guide
-
-This guide explains the Docker hot-reload development workflow for the JackSparrow Trading Agent project.
+# Docker Hot Reload Guide
 
 ## Overview
 
-The hot-reload development setup enables real-time code changes without rebuilding Docker images, significantly speeding up the development and debugging process.
+The JackSparrow project supports hot reload for Docker deployments, allowing code changes to be automatically reflected in running containers without rebuilding Docker images. This significantly speeds up development iteration.
 
-## Architecture
+## How It Works
 
-### Development Dockerfiles
+The hot reload system uses Docker volume mounts to sync your local source code with the container filesystem, combined with file watchers and development servers that automatically restart when files change.
 
-Development Dockerfiles (`Dockerfile.dev`) differ from production Dockerfiles:
+### Architecture
 
-- **Install dependencies only**: No `COPY` of source code
-- **Optimized for development**: Includes dev dependencies
-- **Volume-mounted code**: Source code mounted at runtime
+**Backend (FastAPI):**
+- Uses `uvicorn --reload` flag to watch for Python file changes
+- Automatically restarts the FastAPI server when `.py` files are modified
+- Volume mount: `./backend:/app/backend:rw`
 
-**Files:**
-- `backend/Dockerfile.dev`
-- `agent/Dockerfile.dev`
-- `frontend/Dockerfile.dev`
+**Agent (Python):**
+- Uses `watchdog` library to monitor Python files for changes
+- Automatically restarts the agent process when `.py` files are modified
+- Volume mount: `./agent:/app/agent:rw`
 
-### Docker Compose Override
+**Frontend (Next.js):**
+- Uses Next.js built-in Hot Module Replacement (HMR)
+- Automatically updates the browser when React/TypeScript files change
+- Volume mount: `./frontend:/app:rw` (with `node_modules` and `.next` excluded)
 
-`docker-compose.dev.yml` extends `docker-compose.yml`:
+## Quick Start
 
-- **Volume mounts**: Source directories mounted into containers
-- **Command overrides**: Development commands with hot-reload flags
-- **Environment variables**: Development-specific settings
+### Prerequisites
 
-## How Hot-Reload Works
+- Docker Engine 20.10+ and Docker Compose 2.0+
+- `.env` file configured in project root
+- Source code in `backend/`, `agent/`, and `frontend/` directories
 
-### Backend (FastAPI)
+### Validate Setup
 
-- Uses `uvicorn --reload` flag
-- Watches Python files (`.py`) for changes
-- Automatically restarts server on file save
-- Preserves application state where possible
+Before starting, you can validate the hot reload configuration:
 
-**Command:**
 ```bash
-uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --reload
+# Unix/Linux/macOS
+./scripts/docker/validate-hot-reload.sh
+
+# Windows PowerShell
+.\scripts\docker\validate-hot-reload.ps1
 ```
 
-### Frontend (Next.js)
-
-- Uses `npm run dev` (Next.js development server)
-- Hot Module Replacement (HMR) for React components
-- Fast Refresh for instant UI updates
-- No full page reload for most changes
-
-**Command:**
-```bash
-npm run dev
-```
-
-### Agent (Python)
-
-- Python module reloads on `.py` file changes
-- Some state may be preserved depending on implementation
-- Watchdog patterns can be added for more control
-
-**Command:**
-```bash
-python -m agent.core.intelligent_agent
-```
-
-## Volume Mounts
-
-### Backend
-```
-./backend:/app/backend:rw
-```
-- Source code mounted read-write
-- Changes immediately visible in container
-- Python bytecode (`__pycache__`) excluded via `.dockerignore`
-
-### Agent
-```
-./agent:/app/agent:rw
-```
-- Source code mounted read-write
-- Models directory mounted separately (read-only)
-- Logs directory mounted for persistence
-
-### Frontend
-```
-./frontend:/app:rw
-/app/node_modules        # Anonymous volume (excluded)
-/app/.next              # Anonymous volume (excluded)
-```
-- Source code mounted read-write
-- `node_modules` excluded to avoid conflicts
-- `.next` build directory excluded for dev server
-
-## Usage
+This checks that all required files, volume mounts, and configurations are in place.
 
 ### Starting Development Environment
 
-**First time (build images):**
+**Using Helper Scripts (Recommended):**
+
 ```bash
-make docker-dev
-# or
-scripts/docker/dev-start.ps1 --Build
-scripts/docker/dev-start.sh --build
+# Unix/Linux/macOS
+./scripts/docker/dev-start.sh --build
+
+# Windows PowerShell
+.\scripts\docker\dev-start.ps1 -Build
 ```
 
-**Subsequent starts:**
+**Manual Docker Compose:**
+
 ```bash
-make docker-dev
-# or
+# First time (builds images)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Subsequent starts (uses cached images)
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 ```
 
+**Detached Mode (Background):**
+
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+### Stopping Services
+
+```bash
+# Stop all services
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+# Stop and remove volumes (WARNING: deletes data)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml down -v
+```
+
+## Usage Examples
+
 ### Making Code Changes
 
-1. Edit files in your local editor
-2. Save the file
-3. Changes are automatically detected:
-   - **Backend**: Server restarts (watch console)
-   - **Frontend**: Browser refreshes/updates
-   - **Agent**: Module reloads
+1. **Backend Changes:**
+   ```bash
+   # Edit any Python file in backend/
+   vim backend/api/routes/trades.py
+   
+   # Save the file - uvicorn will automatically reload
+   # Check logs to see reload confirmation
+   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f backend
+   ```
+
+2. **Agent Changes:**
+   ```bash
+   # Edit any Python file in agent/
+   vim agent/core/intelligent_agent.py
+   
+   # Save the file - watchdog will restart the agent
+   # Check logs to see restart confirmation
+   docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f agent
+   ```
+
+3. **Frontend Changes:**
+   ```bash
+   # Edit any React/TypeScript file in frontend/
+   vim frontend/components/Dashboard.tsx
+   
+   # Save the file - Next.js HMR will update the browser automatically
+   # No container restart needed for frontend changes
+   ```
 
 ### Viewing Logs
 
 ```bash
 # All services
-make docker-logs
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 # Specific service
-make docker-logs SERVICE=backend
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f backend
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f agent
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f frontend
 
-# Filter by level
-make docker-logs SERVICE=backend LEVEL=ERROR
-
-# Follow logs
-scripts/docker/logs.ps1 backend -Follow
+# Last 100 lines
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml logs --tail=100 backend
 ```
 
-## Limitations and Considerations
+### Restarting a Specific Service
 
-### Performance
+```bash
+# Restart backend only
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart backend
 
-- **Slower than production**: Volume mounts add overhead
-- **File watching**: Uses system resources for file monitoring
-- **Not for load testing**: Use production mode for performance tests
+# Restart agent only
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart agent
+```
 
-### File Permissions
+## Development vs Production
 
-- Ensure Docker has access to mounted directories
-- On Windows: Share drives with Docker Desktop
-- On Linux/macOS: Check directory permissions
+### Development Mode (`docker-compose.dev.yml`)
 
-### Dependencies
+**Characteristics:**
+- ✅ Hot reload enabled
+- ✅ Source code mounted as volumes
+- ✅ Faster iteration (no rebuild needed)
+- ✅ Development dependencies included
+- ✅ Debug logging enabled
+- ⚠️ Not optimized for production performance
+- ⚠️ Larger container images
 
-- **Python dependencies**: Installed in image, not mounted
-- **Node modules**: Excluded from mount (use anonymous volume)
-- **System packages**: Installed in image
+**When to Use:**
+- Active development and debugging
+- Testing code changes quickly
+- Local development environment
 
-### State Management
+### Production Mode (`docker-compose.yml`)
 
-- **Database**: Persistent via Docker volumes
-- **Redis**: Persistent via Docker volumes
-- **Application state**: May reset on reload (backend/agent)
+**Characteristics:**
+- ✅ Optimized builds (multi-stage)
+- ✅ Source code baked into images
+- ✅ Production dependencies only
+- ✅ Better security and performance
+- ✅ Smaller container images
+- ⚠️ Requires rebuild for code changes
+
+**When to Use:**
+- Production deployments
+- Performance testing
+- CI/CD pipelines
+- Staging environments
+
+## File Watching Details
+
+### Backend (Uvicorn)
+
+Uvicorn's `--reload` flag watches for changes in:
+- All `.py` files in the mounted `backend/` directory
+- Automatically restarts the FastAPI server
+- Reload delay: ~1-2 seconds
+
+**Reload Detection:**
+```bash
+# You'll see this in logs when reload happens:
+INFO:     Detected file change in 'backend/api/routes/trades.py'. Reloading...
+INFO:     Application startup complete.
+```
+
+### Agent (Watchdog)
+
+The agent uses a custom file watcher (`agent/scripts/dev_watcher.py`) that:
+- Monitors `/app/agent` directory recursively
+- Watches for `.py` file changes
+- Debounces rapid file changes (1 second delay)
+- Gracefully restarts the agent process
+
+**Restart Detection:**
+```bash
+# You'll see this in logs when restart happens:
+INFO: agent_file_changed file=agent/core/intelligent_agent.py message="Python file changed, restarting agent..."
+INFO: agent_stopping message="Stopping existing agent process for restart"
+INFO: agent_starting message="Starting agent process"
+```
+
+### Frontend (Next.js HMR)
+
+Next.js Hot Module Replacement:
+- Updates React components without full page reload
+- Preserves component state when possible
+- Updates CSS/styles instantly
+- Shows compilation errors in browser
+
+**HMR Detection:**
+- Browser console shows: `[HMR] connected`
+- Changes appear instantly in browser
+- No container restart needed
 
 ## Troubleshooting
 
-### Changes Not Reflecting
+### Code Changes Not Reflecting
 
-1. **Verify volume mounts:**
+**Problem:** Changes to files aren't being picked up
+
+**Solutions:**
+1. Verify you're using the dev compose file:
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml config
+   docker-compose -f docker-compose.yml -f docker-compose.dev.yml ps
    ```
 
-2. **Check file permissions:**
+2. Check volume mounts:
    ```bash
+   docker-compose -f docker-compose.yml -f docker-compose.dev.yml config | grep volumes
+   ```
+
+3. Verify file permissions:
+   ```bash
+   # Files should be readable by container user
    ls -la backend/
    ```
 
-3. **Restart containers:**
+4. Check if files are being watched:
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml restart backend
+   # Backend - should see reload messages
+   docker-compose logs -f backend | grep -i reload
+   
+   # Agent - should see file change messages
+   docker-compose logs -f agent | grep -i "file_changed"
    ```
 
-### Build Issues
+### Agent Not Restarting
 
-1. **Rebuild images:**
+**Problem:** Agent doesn't restart on file changes
+
+**Solutions:**
+1. Verify watchdog is installed:
    ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.dev.yml build --no-cache
+   docker-compose exec agent pip list | grep watchdog
    ```
 
-2. **Check Dockerfile.dev syntax:**
+2. Check agent watcher logs:
    ```bash
-   docker build -f backend/Dockerfile.dev -t test-backend .
+   docker-compose logs -f agent | grep -i watcher
    ```
+
+3. Verify file watcher script exists:
+   ```bash
+   docker-compose exec agent ls -la /app/agent/scripts/dev_watcher.py
+   ```
+
+4. Manually restart agent:
+   ```bash
+   docker-compose restart agent
+   ```
+
+### Frontend Not Updating
+
+**Problem:** Browser doesn't show changes
+
+**Solutions:**
+1. Check Next.js dev server is running:
+   ```bash
+   docker-compose logs frontend | grep -i "ready"
+   ```
+
+2. Verify HMR is connected (check browser console)
+
+3. Hard refresh browser: `Ctrl+Shift+R` (Windows/Linux) or `Cmd+Shift+R` (macOS)
+
+4. Check for compilation errors:
+   ```bash
+   docker-compose logs -f frontend
+   ```
+
+### Permission Errors
+
+**Problem:** Permission denied errors when writing files
+
+**Solutions:**
+1. Fix file permissions:
+   ```bash
+   sudo chown -R $USER:$USER backend/ agent/ frontend/
+   ```
+
+2. Check container user:
+   ```bash
+   docker-compose exec backend whoami
+   docker-compose exec agent whoami
+   ```
+
+3. Run containers with user mapping (if needed):
+   ```yaml
+   # Add to docker-compose.dev.yml
+   user: "${UID}:${GID}"
+   ```
+
+### Performance Issues
+
+**Problem:** Development mode is slow
+
+**Solutions:**
+1. Development mode is intentionally slower than production
+2. Use production mode for performance testing
+3. Exclude large directories from volumes:
+   ```yaml
+   volumes:
+     - ./backend:/app/backend:rw
+     - /app/backend/__pycache__  # Exclude cache
+   ```
+
+4. Use `.dockerignore` to exclude unnecessary files
 
 ### Port Conflicts
 
-1. **Check if ports are in use:**
+**Problem:** Port already in use
+
+**Solutions:**
+1. Check what's using the port:
    ```bash
-   # Windows
-   netstat -an | findstr 8000
-   
-   # Linux/macOS
+   # Unix/Linux/macOS
    lsof -i :8000
+   
+   # Windows
+   netstat -ano | findstr :8000
    ```
 
-2. **Modify ports in `.env`:**
+2. Change port in `.env`:
    ```bash
    BACKEND_PORT=8001
    FRONTEND_PORT=3001
@@ -214,37 +358,44 @@ scripts/docker/logs.ps1 backend -Follow
 
 ## Best Practices
 
-1. **Use development mode** for active coding
-2. **Use production mode** for final testing
-3. **Rebuild images** when dependencies change
-4. **Monitor logs** for errors during development
-5. **Run audits** before committing changes
-6. **Keep `.env` updated** with correct configuration
+1. **Use Development Mode for Active Coding**
+   - Faster iteration cycle
+   - Immediate feedback on changes
+   - Better debugging experience
 
-## Comparison: Development vs Production
+2. **Use Production Mode for Testing**
+   - Test actual production behavior
+   - Verify optimized builds work
+   - Performance benchmarking
 
-| Feature | Development | Production |
-|---------|------------|------------|
-| Hot-reload | ✅ Enabled | ❌ Disabled |
-| Build time | Fast (cached) | Slower (full build) |
-| Code changes | Instant | Requires rebuild |
-| Performance | Lower | Higher |
-| Dependencies | All (dev + prod) | Production only |
-| Source code | Volume mount | Baked into image |
-| Debugging | Easy | Requires logs |
+3. **Monitor Logs Regularly**
+   - Watch for reload/restart messages
+   - Catch errors early
+   - Verify changes are applied
 
-## Related Commands
+4. **Keep Dependencies Updated**
+   - Rebuild images when dependencies change
+   - Use `--build` flag after `requirements.txt` updates
 
-- `make docker-dev` - Start development environment
-- `make docker-logs` - View container logs
-- `make docker-start` - Start specific container
-- `make docker-audit` - Audit container errors
-- `make docker-stop` - Stop all containers
+5. **Use .dockerignore**
+   - Exclude unnecessary files from builds
+   - Faster build times
+   - Smaller context size
 
-## Additional Resources
+## Related Documentation
 
-- [Deployment Documentation](../docs/10-deployment.md) - Full deployment guide
-- [Docker Commands](../commands/docker-deploy.md) - Docker command reference
-- [Build Guide](../docs/11-build-guide.md) - Build instructions
-- [Debugging Guide](../docs/13-debugging.md) - Debugging tips
+- [Quick Reference](docker-hot-reload-quick-reference.md) - Command cheat sheet
+- [Deployment Guide](10-deployment.md) - Complete Docker deployment documentation
+- [Build Guide](11-build-guide.md) - Project build and development commands
+- [Debugging Guide](13-debugging.md) - Debugging tips and techniques
+
+## Summary
+
+Hot reload in Docker enables rapid development iteration by automatically applying code changes without manual rebuilds. The system uses:
+
+- **Backend**: Uvicorn `--reload` for automatic server restarts
+- **Agent**: Custom watchdog-based file watcher for process restarts
+- **Frontend**: Next.js HMR for instant browser updates
+
+Use development mode (`docker-compose.dev.yml`) for active coding and production mode (`docker-compose.yml`) for final testing and deployment.
 

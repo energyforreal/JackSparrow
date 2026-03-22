@@ -35,6 +35,9 @@ export interface Trade {
   price: number | string
   status: string
   executed_at: Date | string
+  /** Present on some WebSocket / API payloads */
+  timestamp?: Date | string
+  fill_price?: number | string
 }
 
 export interface ModelPrediction {

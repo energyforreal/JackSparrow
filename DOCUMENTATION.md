@@ -35,10 +35,11 @@ This document serves as the central index for all project documentation. Navigat
    - Model type detection and understanding
    - Model versioning and management
    - Price prediction models with pagination and data reversal support
-   - Currently integrated: 6 XGBoost models (3 classifiers + 3 regressors) for BTCUSD trading
+   - Currently integrated: **v5 BTCUSD entry/exit ensembles** — five timeframe nodes (15m–4h); see [Model Integration Summary](docs/model-integration-summary.md)
    - **[ML Training Guide - Google Colab](docs/ml-training-google-colab.md)** - Comprehensive guide for training models in Google Colab
+   - **[Colab Quick Start](docs/colab-quick-start.md)** - Short path into Colab training workflows
    - **[Training and Feature Parity](docs/training-and-feature-parity.md)** - Authoritative notebook path, parity checklist, and HOLD-context guidance
-   - **[Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md)** - Details on recent model integration
+   - **[Model Integration Summary](docs/model-integration-summary.md)** - Current model bundle layout, `MODEL_DIR`, and discovery contract
 
 4. **[Features Documentation](docs/04-features.md)**
    - Core trading agent features
@@ -74,9 +75,9 @@ This document serves as the central index for all project documentation. Navigat
 
 7. **[Frontend Documentation](docs/07-frontend.md)**
    - Next.js application structure
-   - Component architecture
+   - **`useTradingData`** as the unified dashboard state hook (replaces ad-hoc `switch` on `lastMessage` in `Dashboard`)
+   - Dashboard UX: skeleton loaders, trade toasts (`react-hot-toast`), tab title price, keyboard **P** for prediction, and related polish (see *Dashboard UX enhancements*)
    - WebSocket integration (simplified format)
-   - State management patterns
    - Real-time update mechanisms
    - UI component specifications
    - **[WebSocket Simplification Guide](docs/WEBSOCKET_SIMPLIFICATION.md)** - Simplified WebSocket communication format
@@ -92,7 +93,8 @@ This document serves as the central index for all project documentation. Navigat
 
 9. **[UI/UX Documentation](docs/09-ui-ux.md)**
    - Dashboard design specifications
-   - Component design guidelines
+   - Loading skeletons, empty states, and trade toasts
+   - Component design guidelines (e.g. strong-signal pulse on **STRONG_BUY** / **STRONG_SELL**)
    - User interaction flows
    - Visual design system
    - Responsive design patterns
@@ -105,7 +107,7 @@ This document serves as the central index for all project documentation. Navigat
     - Testing environment configuration
     - Environment variables
     - Database setup and migrations
-    - Docker deployment (alternative containerized deployment option)
+    - Docker deployment: `docker compose build --pull` and `up -d --force-recreate` for full rebuilds; optional `frontend`-only recreate after image build
     - Monitoring and observability setup
     - Troubleshooting guide
 
@@ -194,6 +196,29 @@ This document serves as the central index for all project documentation. Navigat
 20. **Archived time-stamped reports (`docs/archive/`)**
     - Historical audit outputs and log-analysis snapshots
     - Kept for reference only; can be regenerated or pruned as needed
+
+### Narrative & change history
+
+- **[Major Changes Summary](docs/major-changes.md)** — Architectural overhaul and production-readiness changelog (2025-01-27 baseline)
+- **[Project Comprehensive Documentation](docs/project-comprehensive-documentation.md)** — Long-form narrative archive; prefer numbered `docs/01-*.md` … `docs/11-*.md` for day-to-day maintenance
+
+### Reports (`docs/reports/`)
+
+Deep-dive and historical reports (non-canonical; useful for context):
+
+- [System audit report 2025](docs/reports/system-audit-report-2025.md) — Full-stack paper-trading audit (distinct from [documentation audit](docs/15-audit-report.md))
+- [JackSparrow ML redesign report](docs/reports/jacksparrow-ml-redesign-report.md)
+- [JackSparrow reworked report](docs/reports/jacksparrow-reworked-report.md)
+- [ML pipeline and dataflow report](docs/reports/ml-pipeline-and-dataflow-report.md)
+- [ML pipeline enhancement proposal](docs/reports/ml-pipeline-enhancement-proposal.md)
+- [Exit models training report](docs/reports/exit-models-training-report.md)
+- [Trading agent improvement report](docs/reports/trading-agent-improvement-report.md)
+- [JackSparrow implementation analysis](docs/reports/jacksparrow-implementation-analysis.md)
+
+### Cursor IDE (`docs/cursor/`)
+
+- [Auto-approve setup](docs/cursor/auto-approve-setup.md)
+- [Settings quick fix](docs/cursor/settings-quick-fix.md)
 
 ---
 
@@ -285,51 +310,27 @@ See [Architecture Documentation – Startup and Operations](docs/01-architecture
 ```
 Trading Agent Documentation
 │
-├── DOCUMENTATION.md (this file)
+├── DOCUMENTATION.md (this file — index only)
+├── README.md
 │
 ├── docs/
-│   ├── architecture.md          # System architecture and design
-│   ├── mcp-layer.md             # MCP layer architecture and orchestration
-│   ├── ml-models.md             # ML model management and intelligence
-│   ├── features.md              # Feature specifications
-│   ├── logic-reasoning.md       # AI reasoning and decision-making
-│   ├── backend.md               # Backend API and services
-│   ├── frontend.md              # Frontend application
-│   ├── file-structure.md        # Project organization
-│   ├── ui-ux.md                 # User interface design
-│   ├── deployment.md            # Setup and deployment
-│   ├── docker-hot-reload.md     # Docker hot reload guide
-│   ├── docker-hot-reload-quick-reference.md  # Quick command reference
-│   ├── docker-hot-reload-implementation-summary.md  # Implementation details
-│   ├── docker-hot-reload-testing-guide.md   # Testing procedures
-│   ├── build-guide.md           # Complete build instructions
-│   ├── logging.md               # Centralized logging plan
-│   ├── project-rules.md         # Development standards
-│   ├── 15-audit-report.md       # Documentation audit report
-│   ├── audit-report-consolidated.md  # Consolidated audit report
-│   ├── audit-summary-2025-01-27.md  # Audit summary
-│   ├── comprehensive-audit-report.md  # Complete audit report
-│   ├── docker-logs-analysis-report-current.md # Current Docker logs analysis
-│   ├── docker-logs-agent-communication-analysis.md # Agent communication analysis
-│   ├── remediation-plan.md      # Issue remediation plan
-│   └── archive/
-│       ├── docker-logs-followup-report-2025-11-20.md  # Docker logs follow-up (archived)
-│       ├── docker-logs-analysis-report-2025-11-20.md  # Timestamped analysis (archived)
-│       └── docker-logs-analysis-report-2025-11-23.md  # Timestamped analysis (archived)
+│   ├── 01-architecture.md … 15-audit-report.md   # Numbered canonical guides
+│   ├── major-changes.md
+│   ├── model-integration-summary.md
+│   ├── project-comprehensive-documentation.md   # Long-form archive
+│   ├── colab-quick-start.md
+│   ├── docker-hot-reload*.md, training-and-feature-parity.md, …
+│   ├── reports/            # Deep-dive / historical reports
+│   ├── cursor/             # Cursor IDE setup notes
+│   ├── analysis/           # Targeted analyses
+│   └── archive/            # Timestamped snapshots
 │
-├── models/                      # Managed production artefacts (see docs/03-ml-models.md)
-│   ├── *.pkl                    # Trained model binaries
-│   └── training_summary.csv     # Latest training metrics
+├── agent/model_storage/   # Trained bundles (see docs/03-ml-models.md, docs/model-integration-summary.md)
 │
-├── .env.example                 # Environment variables template (see docs/10-deployment.md)
-├── .env                         # Runtime configuration (ignored by VCS, copy from .env.example)
+├── .env.example             # Environment template (see docs/10-deployment.md)
+├── .env                     # Local runtime (gitignored)
 │
-└── reference/                   # Reference specifications
-    ├── tradingagent_rebuild_spec.md
-    ├── trading_agent_rework.md
-    ├── agent_reasoning_spec.md
-    ├── implementation_guide.md
-    └── improvements_summary.md
+└── reference/               # Design specs (rebuild, reasoning, implementation guides)
 ```
 
 ---
@@ -393,14 +394,15 @@ When adding or updating documentation:
 
 ## 📅 Last Updated
 
-Documentation last updated: 2025-01-30
+Documentation last updated: 2026-03-22
 
 For the latest specifications and implementation details, refer to the files in the `reference/` directory.
 
 ### Recent Changes
 
-- **[Major Changes Summary](MAJOR_CHANGES.md)** - Complete change log for architectural improvements (2025-01-27)
-- **[Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md)** - Details on integration of 6 XGBoost models for BTCUSD trading
+- **[Major Changes Summary](docs/major-changes.md)** - Complete change log for architectural improvements (2025-01-27)
+- **[Model Integration Summary](docs/model-integration-summary.md)** - v5 BTCUSD entry/exit ensembles, `MODEL_DIR`, and Docker bundle defaults
+- **Documentation layout** - Root markdown reports moved under `docs/`, `docs/reports/`, and `docs/cursor/` (2026-03-22)
 - **Startup System Documentation** - Comprehensive documentation of the advanced startup system including validation, health checks, and monitoring (2025-01-30)
 - **Paper Trading Safety Features** - Documentation of safety mechanisms preventing accidental live trading
 - **Real-time Monitoring Dashboard** - Documentation of the monitoring system with data freshness tracking

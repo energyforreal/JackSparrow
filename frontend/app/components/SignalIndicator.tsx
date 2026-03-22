@@ -80,12 +80,29 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center gap-4">
-          <Badge 
-            className={cn('px-4 py-2 text-base', getSignalBadgeClasses(signal.signal))}
-            aria-label={`Trading signal: ${signal.signal}`}
-          >
-            {signal.signal ? signal.signal.toString().replace('_', ' ') : 'Unknown'}
-          </Badge>
+          {(() => {
+            const isStrong =
+              signal.signal === 'STRONG_BUY' || signal.signal === 'STRONG_SELL'
+            return (
+              <span className="relative inline-flex rounded-md">
+                {isStrong && (
+                  <span
+                    className="absolute inset-0 rounded-md animate-ping opacity-30 bg-current"
+                    aria-hidden
+                  />
+                )}
+                <Badge
+                  className={cn(
+                    'relative px-4 py-2 text-base',
+                    getSignalBadgeClasses(signal.signal)
+                  )}
+                  aria-label={`Trading signal: ${signal.signal}`}
+                >
+                  {signal.signal ? signal.signal.toString().replace('_', ' ') : 'Unknown'}
+                </Badge>
+              </span>
+            )
+          })()}
           {latencyMs != null && (
             <span className="text-xs text-muted-foreground">Latency: {Math.round(latencyMs)}ms</span>
           )}
@@ -134,14 +151,23 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
                               {model.model_name}
                             </div>
                             <div className="mt-1 flex items-center gap-3">
-                              <Badge
-                                className={cn(
-                                  'px-2 py-0.5 text-xs',
-                                  getSignalBadgeClasses(model.signal)
+                              <span className="relative inline-flex rounded-md">
+                                {(model.signal === 'STRONG_BUY' ||
+                                  model.signal === 'STRONG_SELL') && (
+                                  <span
+                                    className="absolute inset-0 rounded-md animate-ping opacity-25 bg-current"
+                                    aria-hidden
+                                  />
                                 )}
-                              >
-                                {model.signal.replace('_', ' ')}
-                              </Badge>
+                                <Badge
+                                  className={cn(
+                                    'relative px-2 py-0.5 text-xs',
+                                    getSignalBadgeClasses(model.signal)
+                                  )}
+                                >
+                                  {model.signal.replace('_', ' ')}
+                                </Badge>
+                              </span>
                               <div className="flex items-center gap-2 flex-1">
                                 <ConfidenceProgress
                                   value={percent}

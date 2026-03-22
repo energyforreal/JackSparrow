@@ -72,3 +72,7 @@ Key Changes from Original:
 ✅ **Data validation** (gap detection)
 ✅ **Class distribution** (label analysis)
 ✅ **Colab path handling** (auto-detect)
+
+---
+
+**See also:** [ML training guide – Google Colab](ml-training-google-colab.md) for the full training workflow, parity, and export conventions.

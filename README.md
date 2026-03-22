@@ -129,6 +129,15 @@ All 24/7 services now run via Docker images orchestrated with Compose.
    docker compose up --build -d
    ```
 
+   For a clean rebuild of all images (e.g. after frontend or backend changes), use:
+
+   ```bash
+   docker compose build --pull
+   docker compose up -d --force-recreate
+   ```
+
+   If the frontend image was still building when `up` ran, pick up the latest tag with `docker compose up -d --force-recreate frontend`.
+
 4. Inspect status & logs:
 
    ```bash
@@ -136,11 +145,11 @@ All 24/7 services now run via Docker images orchestrated with Compose.
    docker compose logs -f backend
    ```
 
-The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on `8001`), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./agent/model_storage`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
+The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on **`8002`**, agent WS on **`8003`** per default compose ports), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./agent/model_storage`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
 
 ## Model Training
 
-The system currently includes **6 integrated XGBoost models** (3 classifiers + 3 regressors) for BTCUSD trading across 15m, 1h, and 4h timeframes. These models are automatically discovered and registered on agent startup.
+The system uses **v5 BTCUSD entry/exit ensemble** artefacts: **five timeframe nodes** (15m, 30m, 1h, 2h, 4h) when using the full bundle under `agent/model_storage/`. Models are discovered from `MODEL_DIR` on agent startup. Docker Compose defaults to a smaller dated bundle; override `AGENT_MODEL_DIR` / `MODEL_DIR` for the full set — see [Model integration summary](docs/model-integration-summary.md).
 
 If you need to train or regenerate ML models:
 
@@ -152,7 +161,7 @@ python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
 python scripts/validate_models_before_deployment.py
 ```
 
-See [ML Models Documentation](docs/03-ml-models.md#model-training) for detailed guide. For information on the current model integration, see [Model Integration Summary](MODEL_INTEGRATION_SUMMARY.md).
+See [ML Models Documentation](docs/03-ml-models.md#model-training) for detailed guide. For the current bundle layout and `MODEL_DIR`, see [Model integration summary](docs/model-integration-summary.md).
 
 ## Testing
 
@@ -240,7 +249,7 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for the complete index.
 JackSparrow/
 ├── backend/          # FastAPI backend API
 ├── agent/            # AI agent core with MCP layer
-│   └── model_storage/ # ML models (XGBoost in xgboost/ subdirectory)
+│   └── model_storage/ # Trained bundles (e.g. jacksparrow_v5_*); see docs/model-integration-summary.md
 ├── frontend/         # Next.js frontend dashboard
 ├── tests/            # Test suite
 ├── scripts/          # Utility scripts

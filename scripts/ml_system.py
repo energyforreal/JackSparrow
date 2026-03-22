@@ -25,7 +25,7 @@ try:
     )
 except ImportError:
     # Fallback when run without package context (e.g. notebook before sys.path fix)
-    PROJECT_ROOT = Path(__file__).resolve().parent
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
     SCRIPTS_DIR = PROJECT_ROOT / "scripts"
     MODEL_DIR = PROJECT_ROOT / "agent" / "model_storage" / "xgboost"
     DATA_DIR = PROJECT_ROOT / "data"

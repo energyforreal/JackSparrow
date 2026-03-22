@@ -4,7 +4,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-project_root = Path(__file__).parent
+project_root = Path(__file__).resolve().parent.parent.parent
 script_path = project_root / "tools" / "commands" / "start_parallel.py"
 log_file = project_root / "startup_full_output.log"
 

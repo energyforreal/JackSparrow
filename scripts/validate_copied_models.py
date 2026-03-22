@@ -3,14 +3,14 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent
+project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from scripts.validate_model_files import validate_all_models, generate_report
 
 def main():
     """Validate copied models."""
-    models_dir = Path("agent/model_storage")
+    models_dir = project_root / "agent" / "model_storage"
     
     print("=" * 60)
     print("Validating Copied Models")

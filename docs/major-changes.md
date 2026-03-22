@@ -4,9 +4,9 @@
 **Commit:** Major system overhaul and production-ready deployment
 
 > **Note:** For detailed documentation on these changes, see:
-> - [Architecture Documentation](docs/01-architecture.md#recent-architectural-enhancements) - Recent architectural enhancements section
-> - [Deployment Documentation](docs/10-deployment.md) - Docker setup and CI/CD details
-> - [ML Models Documentation](docs/03-ml-models.md) - Model integration details
+> - [Architecture Documentation](01-architecture.md#recent-architectural-enhancements) - Recent architectural enhancements section
+> - [Deployment Documentation](10-deployment.md) - Docker setup and CI/CD details
+> - [ML Models Documentation](03-ml-models.md) - Model integration details
 
 ## 🚀 Major Architectural Changes
 
@@ -181,6 +181,16 @@
 - ✅ Documentation complete
 - ✅ Testing infrastructure in place
 - ✅ Security measures implemented
+
+## Dashboard UX refresh (2026-03)
+
+Additive Next.js dashboard improvements (no WebSocket or API contract changes). Documented in [Frontend Documentation](07-frontend.md#dashboard-ux-enhancements) and [UI/UX Documentation](09-ui-ux.md).
+
+- Unified loading **skeletons** and clearer **empty states** for portfolio, positions, and recent trades
+- **react-hot-toast** for new trades (`data_update` / `trade` and legacy `trade_executed`)
+- **RealTimePrice**: tick flash + live **document title**; **PerformanceChart** tooltip/cursor polish (Recharts)
+- **SignalIndicator** pulse for strong signals; **HealthMonitor** latency bars; position **duration** colors; keyboard **P** → `apiClient.getPrediction('BTCUSD')`
+- Docker: documented **full rebuild** flow in [Deployment Documentation](10-deployment.md) (`docker compose build --pull`, `up -d --force-recreate`)
 
 ## 📝 Notes
 

@@ -45,7 +45,6 @@ frontend/
 │   │   ├── PerformanceChart.tsx
 │   │   ├── HealthMonitor.tsx
 │   │   ├── ReasoningChainView.tsx
-│   │   ├── ModelReasoningView.tsx
 │   │   └── LearningReport.tsx
 │   └── api/                    # API routes (if needed)
 ├── hooks/
@@ -337,6 +336,69 @@ interface HealthMonitorProps {
 
 ---
 
+### RealTimePrice Component
+
+**File**: `app/components/RealTimePrice.tsx`
+
+**Purpose**: Display real-time price data with change indicators and position impact analysis.
+
+**Props**:
+```typescript
+interface RealTimePriceProps {
+  symbol?: string
+  className?: string
+  positions?: Position[]
+  showPositionImpact?: boolean
+}
+```
+
+**Features**:
+- Real-time price display with currency formatting
+- Momentary price change indicators with trend icons
+- 24-hour statistics (change, volume, high/low)
+- WebSocket/WebSocket fallback for data updates
+- Connection status indicators
+- **Position Impact Preview** (New Feature):
+  - Real-time P&L impact calculation for open positions
+  - Risk level assessment (low/medium/high/critical)
+  - Liquidation risk detection with warnings
+  - Portfolio summary with aggregated impact
+  - Visual indicators with color-coded risk levels
+
+**Position Impact Risk Levels**:
+- **Low**: <2% position impact (gray indicator)
+- **Medium**: 2-5% position impact (yellow indicator)
+- **High**: 5-10% position impact (orange indicator)
+- **Critical**: >10% position impact (red indicator) ⚠️
+
+**Visual Feedback**:
+- Green badges for profitable impacts
+- Red badges for losses
+- Risk level badges with appropriate colors
+- AlertTriangle icons for liquidation risk
+- Tooltips showing detailed impact breakdown
+
+**Integration**:
+- Uses `usePositionImpact` hook for real-time calculations
+- Integrates with `useWebSocket` for live price updates
+- Displays alongside existing price change indicators
+- Responsive design for mobile and desktop
+
+**Example Usage**:
+```typescript
+// Basic usage
+<RealTimePrice symbol="BTCUSD" />
+
+// With position impact analysis
+<RealTimePrice
+  symbol="BTCUSD"
+  positions={portfolio.positions}
+  showPositionImpact={true}
+/>
+```
+
+---
+
 ### ReasoningChainView Component
 
 **File**: `app/components/ReasoningChainView.tsx`
@@ -372,33 +434,6 @@ interface ReasoningChainViewProps {
 - Confidence bars
 - Evidence tags
 - Conclusion section
-
----
-
-### ModelReasoningView Component
-
-**File**: `app/components/ModelReasoningView.tsx`
-
-**Purpose**: Display model consensus showing how individual ML models contribute to the overall prediction.
-
-**Props**:
-```typescript
-interface ModelReasoningViewProps {
-  modelConsensus?: ModelConsensus[];
-  // Individual model reasoning data is accepted but not displayed
-  // to keep the UI focused on consensus signals.
-  individualModelReasoning?: ModelReasoning[];
-}
-```
-
-**Features**:
-- Model consensus breakdown showing each model's signal and confidence
-- Color-coded signal badges (STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL)
-- Confidence progress bars for each model
-- Model name display with timeframe information
-- Clean, focused UI showing only consensus-level information
-
-**Note**: The component intentionally displays only the Model Consensus section. Individual model reasoning details are not shown in the UI to maintain a clean, focused user experience. The backend still provides `individual_model_reasoning` data for potential future use, but it is not rendered.
 
 ---
 
@@ -693,26 +728,305 @@ export const apiClient = new ApiClient(API_BASE_URL);
 
 ### Real-Time Updates
 
-The frontend uses WebSocket for real-time updates:
+The frontend uses WebSocket for real-time updates with a simplified, unified message format:
+
+### Simplified WebSocket Message Format
+
+The WebSocket communication has been simplified from 10+ message types to 3 core types:
+
+1. **`data_update`**: Unified data updates
+   - **Resource: `signal`**: Trading decision updates (replaces `signal_update`, `reasoning_chain_update`)
+     - Includes signal, confidence, reasoning chain, model consensus
+     - Updates signal indicator and trading decision components
+   - **Resource: `portfolio`**: Portfolio state changes (replaces `portfolio_update`)
+     - Updates portfolio summary and positions
+   - **Resource: `trade`**: Trade execution notifications (replaces `trade_executed`)
+     - Updates recent trades list
+     - Triggers portfolio refresh
+   - **Resource: `market`**: Real-time price updates (replaces `market_tick`)
+     - Includes symbol, price, volume, timestamp
+     - Updates real-time price display
+   - **Resource: `model`**: ML model prediction updates (replaces `model_prediction_update`)
+     - Includes model consensus and individual model reasoning
+     - Updates model reasoning view component
+
+2. **`agent_update`**: Agent state transitions (replaces `agent_state`)
+   - Updates agent status display
+   - Includes state, reason, and timestamp
+
+3. **`system_update`**: System updates
+   - **Resource: `health`**: System health status (replaces `health_update`)
+     - Updates health monitor component
+   - **Resource: `time`**: Time synchronization (replaces `time_sync`)
+     - Periodic server time sync
+
+### Message Envelope Format
+
+All messages use a unified envelope format:
+
+```typescript
+{
+  type: "data_update" | "agent_update" | "system_update",
+  resource?: "signal" | "portfolio" | "trade" | "market" | "model" | "agent" | "health" | "time",
+  data: any,
+  timestamp: string,
+  source: string,
+  sequence?: number
+}
+```
+
+### Message Handling Flow
 
 1. **Connection**: Establish WebSocket connection on mount
-2. **Subscription**: Subscribe to relevant channels
-3. **Message Handling**: Update local state based on message types
-4. **Reconnection**: Automatic reconnection with exponential backoff
-5. **Queue Management**: Queue messages during disconnection
+2. **Subscription**: Subscribe to 3 core channels (`data_update`, `agent_update`, `system_update`)
+3. **Message Normalization**: Frontend automatically normalizes legacy message types
+4. **Message Handling**: Update local state based on message type and resource
+5. **Reconnection**: Automatic reconnection with exponential backoff
+6. **Queue Management**: Queue messages during disconnection
 
 ### State Updates Flow
 
 ```
-WebSocket Message → Message Handler → State Update → Component Re-render
+WebSocket Message → Normalize Format → Message Handler → State Update → Component Re-render
 ```
 
-**Message Types Handled**:
-- `agent_state`: Update agent state
-- `trade_executed`: Add to recent trades
-- `portfolio_update`: Update portfolio data
-- `health_status`: Update health status
-- `prediction_generated`: Update signal indicator
+**Simplified Message Handling**:
+- `data_update` with `resource: "signal"`: Update trading signal and decision
+- `data_update` with `resource: "portfolio"`: Update portfolio data
+- `data_update` with `resource: "trade"`: Add to recent trades
+- `data_update` with `resource: "market"`: Update real-time price display
+- `data_update` with `resource: "model"`: Update model predictions and consensus
+- `agent_update`: Update agent state
+- `system_update` with `resource: "health"`: Update health status
+- `system_update` with `resource: "time"`: Time synchronization
+
+### Backward Compatibility
+
+The frontend automatically handles legacy message types (`signal_update`, `portfolio_update`, etc.) for backward compatibility during the transition period. Legacy types are normalized to the new format automatically.
+
+---
+
+## Data Freshness Display
+
+The frontend implements visual indicators to show data freshness, helping users understand how current the displayed information is.
+
+### DataFreshnessIndicator Component
+
+**File**: `app/components/DataFreshnessIndicator.tsx`
+
+**Purpose**: Display timestamp with color-coded freshness indicator.
+
+**Props**:
+```typescript
+interface DataFreshnessIndicatorProps {
+  timestamp: Date | string | null | undefined
+  label?: string  // Default: "Last update"
+  className?: string
+}
+```
+
+**Features**:
+- Color-coded freshness based on age
+- Formatted time display (IST timezone)
+- Visual dot indicator
+- Handles missing timestamps gracefully
+
+**Freshness Color Thresholds**:
+- Green (< 1 minute): Data is fresh and current
+- Amber (1-5 minutes): Data is somewhat stale but acceptable
+- Red (> 5 minutes): Data is very stale and may need refresh
+
+**Usage Example**:
+```typescript
+<DataFreshnessIndicator 
+  timestamp={signal.timestamp} 
+  label="Signal time"
+/>
+```
+
+### Timestamp Normalization
+
+**File**: `utils/formatters.ts`
+
+The frontend normalizes timestamps to handle various formats and ensures consistent UTC → IST conversion:
+
+1. **UTC Assumption**: If timestamp string lacks timezone, assumes UTC by appending 'Z'
+2. **ISO 8601 Parsing**: Handles multiple timezone formats:
+   - `YYYY-MM-DDTHH:mm:ss.sssZ` (with Z suffix)
+   - `YYYY-MM-DDTHH:mm:ss.sss+00:00` (with timezone offset)
+   - `YYYY-MM-DDTHH:mm:ss.sss+0000` (without colon)
+   - `YYYY-MM-DDTHH:mm:ss.sss` (no timezone - treated as UTC)
+3. **IST Display**: All times displayed in IST (Asia/Kolkata) timezone using `toLocaleTimeString`
+4. **Format Functions**:
+   - `normalizeDate()`: Normalizes timestamps to Date objects with UTC parsing
+   - `formatTime()`: Formats time in IST (HH:mm:ss AM/PM)
+   - `formatClockTime()`: Formats time matching system clock format (HH:mm:ss am/pm IST)
+   - `formatDateTime()`: Formats date and time
+   - `getDataFreshnessColor()`: Returns color class based on age with granular thresholds
+
+**Normalization Logic** (Updated):
+```typescript
+export function normalizeDate(date: Date | string): Date {
+  if (typeof date === 'string') {
+    // Backend sends timestamps like "2025-12-02T10:11:11.976865" without timezone
+    // These should be treated as UTC and displayed in IST on the frontend
+    const trimmedDate = date.trim()
+    const hasExplicitTimezone =
+      trimmedDate.endsWith('Z') || 
+      /[+-]\d{2}:\d{2}$/.test(trimmedDate) ||
+      /[+-]\d{4}$/.test(trimmedDate) // Handle formats like +0000 (without colon)
+
+    const isoString = hasExplicitTimezone ? trimmedDate : `${trimmedDate}Z`
+    return new Date(isoString)
+  }
+  return date
+}
+```
+
+**Key Improvements**:
+- Trims whitespace from timestamp strings
+- Handles multiple timezone formats (+00:00, +0000, Z)
+- Appends 'Z' to timestamps without timezone to ensure UTC parsing
+- Includes debug logging in development mode for troubleshooting
+
+**Clock Time Formatting**:
+```typescript
+export function formatClockTime(date: Date | string | null | undefined): string {
+  if (!date || !isValidDate(date)) {
+    return '--:--:--'
+  }
+  const d = normalizeDate(date)
+  return d.toLocaleTimeString(IST_LOCALE, {
+    timeZone: IST_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
+}
+```
+
+This ensures all timestamps are:
+1. Parsed as UTC (via `normalizeDate`)
+2. Converted to IST using `toLocaleTimeString` with `timeZone: 'Asia/Kolkata'`
+3. Displayed in consistent format matching system clock (HH:mm:ss am/pm)
+
+### Components Using Freshness Indicators
+
+1. **AgentStatus** (`app/components/AgentStatus.tsx`):
+   - Displays `lastUpdate` timestamp
+   - Shows when agent state was last updated
+   - Updates on `agent_state` WebSocket messages
+
+2. **SignalIndicator** (`app/components/SignalIndicator.tsx`):
+   - Displays `signal.timestamp`
+   - Shows when trading signal was generated
+   - Updates on `signal_update` WebSocket messages
+
+3. **TradingDecision** (`app/components/TradingDecision.tsx`):
+   - Displays `signal.timestamp`
+   - Shows when trading decision was made
+   - Updates on `signal_update` WebSocket messages
+
+### Timestamp Sources
+
+Frontend extracts timestamps from WebSocket messages in priority order:
+
+1. **Primary**: `data.timestamp` - Event-specific timestamp
+2. **Fallback**: `server_timestamp_ms` - Server broadcast time (available but not currently used)
+3. **Default**: Current time if no timestamp available
+
+**Example from useAgent hook** (Updated):
+```typescript
+case 'agent_state': {
+  const data = lastMessage.data
+  if (data?.last_update) {
+    try {
+      const ts = normalizeDate(data.last_update)
+      if (!isNaN(ts.getTime())) {
+        setLastUpdate(ts)
+      } else {
+        setLastUpdate(new Date()) // Fallback to current time
+      }
+    } catch (error) {
+      setLastUpdate(new Date()) // Fallback to current time
+    }
+  } else if (data?.timestamp) {
+    try {
+      const ts = normalizeDate(data.timestamp)
+      if (!isNaN(ts.getTime())) {
+        setLastUpdate(ts)
+      } else {
+        setLastUpdate(new Date()) // Fallback to current time
+      }
+    } catch (error) {
+      setLastUpdate(new Date()) // Fallback to current time
+    }
+  } else {
+    setLastUpdate(new Date()) // Fallback to current time
+  }
+  break
+}
+
+case 'signal_update': {
+  const signalData = lastMessage.data as Signal
+  if (signalData?.timestamp) {
+    try {
+      const ts = normalizeDate(signalData.timestamp)
+      if (!isNaN(ts.getTime())) {
+        setLastUpdate(ts)
+      }
+    } catch (error) {
+      setLastUpdate(new Date())
+    }
+  }
+  setSignal(signalData)
+  break
+}
+```
+
+**Key Changes**:
+- All timestamp parsing uses `normalizeDate()` to ensure UTC parsing
+- Error handling for invalid timestamps
+- Debug logging in development mode for troubleshooting
+
+### Freshness Calculation
+
+The frontend calculates data age using:
+
+1. **Extract timestamp** from message data
+2. **Normalize to Date object** using `normalizeDate()` (handles string/Date, UTC assumption)
+3. **Calculate age**: `Date.now() - timestamp.getTime()`
+4. **Apply granular thresholds** (Updated):
+   - < 30 seconds: Green (very fresh)
+   - 30-60 seconds: Light green (fresh)
+   - 1-2 minutes: Yellow (recent)
+   - 2-5 minutes: Amber (moderate)
+   - 5-15 minutes: Orange (stale)
+   - >= 15 minutes: Red (very stale)
+5. **Display** formatted time with colored indicator and dot
+
+**Color Coding Implementation**:
+- Text color: `getDataFreshnessColor(timestamp)` - returns Tailwind color class
+- Dot indicator: `getFreshnessDotColor(timestamp)` - matches text color thresholds
+- Both use `normalizeDate()` for consistent age calculation
+
+### Server Timestamp Availability
+
+All WebSocket messages include `server_timestamp_ms` at the message root level:
+
+```typescript
+{
+  type: "signal_update",
+  data: { ... },
+  server_timestamp_ms: 1706356800123  // Available for freshness calculation
+}
+```
+
+While the frontend currently uses `data.timestamp` as primary source, `server_timestamp_ms` is available for:
+- Fallback when `data.timestamp` is missing
+- More precise latency calculation
+- Server-side freshness validation
 
 ---
 
@@ -824,10 +1138,98 @@ class ErrorBoundary extends React.Component {
 
 ---
 
+## Environment Configuration
+
+### Environment Variables
+
+The frontend reads environment variables from the **root `.env` file** in the project root directory. The `frontend/next.config.js` file includes a `loadRootEnv()` function that automatically reads from `../.env` (project root).
+
+**Required Frontend Variables:**
+
+```bash
+# Backend API URL
+NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# WebSocket URL
+NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+
+# Backend API key (inherited from API_KEY)
+NEXT_PUBLIC_BACKEND_API_KEY=your_api_key
+```
+
+**How It Works:**
+
+- **Local Development**: The `loadRootEnv()` function in `next.config.js` reads variables from the root `.env` file at build time and runtime
+- **Docker Deployment**: Variables are passed through the `environment:` section in `docker-compose.yml`, which reads from root `.env`
+- **No `frontend/.env.local` needed**: All frontend environment variables are configured in the root `.env` file
+
+**Note**: See `.env.example` in the project root for the complete list of all available environment variables. All services (backend, agent, frontend) share the same root `.env` file.
+
+---
+
+## Testing
+
+### Frontend Functionality Tests
+
+The frontend includes comprehensive functionality tests that validate:
+- Frontend accessibility and HTTP responses
+- API integration with backend
+- WebSocket connectivity and real-time data flow
+- Health endpoint availability
+- CORS headers configuration
+
+**Running Frontend Tests**:
+
+```bash
+# Run all functionality tests (includes frontend)
+python tools/commands/start_and_test.py
+
+# Run only integration tests (includes frontend functionality)
+python tools/commands/start_and_test.py --groups integration
+
+# Run tests without starting services (assume services already running)
+python tools/commands/start_and_test.py --no-startup
+```
+
+**Test Suite Location**: `tests/functionality/test_frontend_functionality.py`
+
+**Test Coverage**:
+- ✅ Frontend HTTP accessibility
+- ✅ Backend API integration
+- ✅ WebSocket connection and subscriptions
+- ✅ Health endpoint checks
+- ✅ CORS headers validation
+
+**Test Configuration**:
+
+Frontend tests use the `FRONTEND_URL` environment variable (defaults to `http://localhost:3000`). If the frontend starts on a different port, the test runner automatically configures the correct URL.
+
+**CI/CD Integration**:
+
+Frontend functionality tests are automatically run in the CI/CD pipeline as part of the functionality test suite. See `.github/workflows/cicd.yml` for details.
+
+### Frontend Unit Tests
+
+The frontend also includes React component unit tests using Jest and React Testing Library:
+
+```bash
+# Run frontend unit tests
+cd frontend
+npm test
+
+# Run with coverage
+npm test -- --coverage
+```
+
+**Test Location**: `frontend/__tests__/` and `frontend/**/*.test.tsx`
+
+---
+
 ## Related Documentation
 
 - [Backend Documentation](06-backend.md) - API specifications
 - [UI/UX Documentation](09-ui-ux.md) - Design guidelines
 - [Architecture Documentation](01-architecture.md) - System design
 - [Deployment Documentation](10-deployment.md) - Setup instructions
+- [Testing Guide](testing-guide.md) - Comprehensive testing documentation
 

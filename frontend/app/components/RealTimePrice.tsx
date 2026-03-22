@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { TrendingUp, TrendingDown, Minus, AlertTriangle, TrendingDown as LossIcon, TrendingUp as ProfitIcon } from 'lucide-react'
@@ -51,6 +51,8 @@ const resolveWebSocketUrl = (): string => {
 
 const WS_URL = resolveWebSocketUrl()
 
+const DEFAULT_DOCUMENT_TITLE = 'JackSparrow Trading Agent'
+
 export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], showPositionImpact = true }: RealTimePriceProps) {
   const { isConnected, lastMessage } = useWebSocket(WS_URL)
   const [ticker, setTicker] = useState<EnhancedTickerData | null>(null)
@@ -59,6 +61,8 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
   const [lastPrice, setLastPrice] = useState<number | null>(null)
   const [previousPrice, setPreviousPrice] = useState<number | null>(null)
   const [connectionStatus, setConnectionStatus] = useState<string>('connecting')
+  const [flash, setFlash] = useState<'up' | 'down' | null>(null)
+  const prevTickPriceRef = useRef<number | null>(null)
 
   // Component mount diagnostics
   useEffect(() => {
@@ -219,6 +223,35 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
     }
   }, [isConnected])
 
+  // Brief green/red flash on the headline price when the tick changes
+  useEffect(() => {
+    const price = ticker?.price
+    if (price == null || Number.isNaN(Number(price))) return
+    const n = Number(price)
+    const prev = prevTickPriceRef.current
+    if (prev === null) {
+      prevTickPriceRef.current = n
+      return
+    }
+    if (n === prev) return
+    setFlash(n > prev ? 'up' : 'down')
+    prevTickPriceRef.current = n
+    const t = window.setTimeout(() => setFlash(null), 600)
+    return () => window.clearTimeout(t)
+  }, [ticker?.price])
+
+  // Live price in browser tab
+  useEffect(() => {
+    const price = ticker?.price
+    if (price == null || Number.isNaN(Number(price)) || Number(price) <= 0) return
+    const n = Number(price)
+    const tabPrice = `$${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+    document.title = `${tabPrice} — JackSparrow`
+    return () => {
+      document.title = DEFAULT_DOCUMENT_TITLE
+    }
+  }, [ticker?.price])
+
   const formatPrice = (price: number | null | undefined) => {
     if (!price || price <= 0) return '$0.00'
     return new Intl.NumberFormat('en-US', {
@@ -317,10 +350,20 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
           <div className="space-y-4">
             {/* Current Price with Momentary Change Indicator */}
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-4xl font-bold tracking-tight" title={`Current price: ${ticker.price}`}>
+              <span
+                className={cn(
+                  'text-4xl font-bold tracking-tight transition-colors duration-300',
+                  flash === 'up' && 'text-green-600 dark:text-green-400',
+                  flash === 'down' && 'text-red-600 dark:text-red-400',
+                  flash === null && 'text-foreground'
+                )}
+                title={`Current price: ${ticker.price}`}
+              >
                 {(() => {
                   const formatted = ticker.price ? formatPrice(ticker.price) : '$0.00'
-                  console.log('[RealTimePrice] Rendering price:', { raw: ticker.price, formatted })
+                  if (process.env.NODE_ENV === 'development') {
+                    console.log('[RealTimePrice] Rendering price:', { raw: ticker.price, formatted })
+                  }
                   return formatted
                 })()}
               </span>

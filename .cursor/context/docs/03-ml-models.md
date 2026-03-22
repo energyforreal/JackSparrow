@@ -11,7 +11,6 @@ This document describes how ML models are managed, uploaded, discovered, and int
 ## Table of Contents
 
 - [Overview](#overview)
-- [Current Production Models (`models/`)](#current-production-models-models)
 - [Model Directory Structure](#model-directory-structure)
 - [Model Upload Process](#model-upload-process)
 - [Model Discovery and Registration](#model-discovery-and-registration)
@@ -51,14 +50,19 @@ Legacy notebooks such as `notebooks/train_models_colab.ipynb` and `notebooks/tra
 |----------|---------|---------------------|-------|
 | `agent/model_storage/` | All trained ML models | `MODEL_DIR` (points to directory) | Automatic model discovery and registration |
 
-**Current Model Types**:
-- **v4 BTCUSD entry/exit ensembles** are stored in `agent/model_storage/jacksparrow_v4_BTCUSD/`
-- Each timeframe includes entry/exit models, scalers, features JSON, and metadata JSON
-- The system discovers and registers models from v4 metadata files in `MODEL_DIR`
+**Current model bundles** (pick one directory for `MODEL_DIR`):
+
+| Directory | Role |
+|-----------|------|
+| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | **Full** v5 BTCUSD bundle: five timeframes (15m–4h), entry/exit pairs, standard `entry_model_*` / `exit_model_*` layout. Recommended for local/dev when you want all horizons. |
+| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | **Default in Docker Compose** (`AGENT_MODEL_DIR` / in-container `MODEL_DIR`): partial experimental layout (e.g. 5m/15m, `entry_long` / `entry_short` naming). Not a complete multi-timeframe set. |
+
+- Discovery reads `metadata_BTCUSD_*.json` from `MODEL_DIR` (non-recursive).
+- For production-like behaviour with every documented timeframe, point `MODEL_DIR` at the **2026-03-19** bundle (or your own full export).
 
 ### Currently Integrated Models
 
-As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **5 v4 BTCUSD models** by timeframe:
+As of the latest integration (see [Model Integration Summary](model-integration-summary.md)), a **full** v5 deployment includes **5 v5 BTCUSD timeframe nodes**:
 
 - `jacksparrow_BTCUSD_15m`
 - `jacksparrow_BTCUSD_30m`
@@ -72,6 +76,462 @@ Each model is loaded from `metadata_BTCUSD_<timeframe>.json` and references:
 - `entry_scaler_BTCUSD_<timeframe>.joblib`
 - `exit_scaler_BTCUSD_<timeframe>.joblib`
 - `features_BTCUSD_<timeframe>.json`
+
+### Environment Configuration
+
+The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:
+
+```bash
+MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
+MODEL_DISCOVERY_ENABLED=true
+MODEL_AUTO_REGISTER=true
+MIN_CONFIDENCE_THRESHOLD=0.65
+```
+
+The `MODEL_DIR` environment variable must point to the directory containing `metadata_BTCUSD_*.json`. In v4-only mode, discovery is metadata-driven and non-recursive.
+
+### ML Models in Docker
+
+When running under Docker, the agent container mounts the host `agent/model_storage/` directory.
+
+- **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service).
+- **Default in-container `MODEL_DIR`**: override with `AGENT_MODEL_DIR` in root `.env`; otherwise Compose sets  
+  `MODEL_DIR=/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21` (see `docker-compose.yml` / `docker-compose.dev.yml`).
+
+To use the **full** five-timeframe bundle instead, set in root `.env`:
+
+```bash
+AGENT_MODEL_DIR=/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
+```
+
+Then restart the agent service.
+
+This means:
+
+- Artefacts you place under `agent/model_storage/` on the host are visible in-container without rebuilding images.
+- Updating models: copy files on the host, then `docker compose restart agent`.
+
+**Verification steps before `docker compose up`:**
+
+1. Ensure metadata and joblibs for your chosen bundle exist under the host path that matches `AGENT_MODEL_DIR` / default `MODEL_DIR`.
+2. Run:
+
+   ```bash
+   python scripts/validate_docker_config.py
+   ```
+
+   and confirm it reports at least one model file discovered under `agent/model_storage`.
+3. After the stack is running, check the agent logs for a `model_discovery_complete` entry with a `discovered_count > 0`, and confirm the backend health view reports active model nodes.
+
+### XGBoost Dependency Requirements
+
+- Runtime environments must install `xgboost==2.0.2` (see `agent/requirements.txt`) so that `XGBClassifier` and `XGBRegressor` remain available for deserializing the trained models.
+- If you rebuild or upgrade the models, ensure `requirements*.txt` stay synchronized with the version used during training.
+- When the validator reports `ModuleNotFoundError: No module named 'XGBClassifier'`, re-run `pip install -r agent/requirements.txt` inside the active environment before retrying the load.
+
+### Operational Workflow
+
+1. Train models using the training scripts (see [Model Training](#model-training) section below)
+2. Models are automatically saved to `agent/model_storage/xgboost/` during training
+3. The model discovery system automatically finds and registers models on agent startup
+4. Run the smoke-test commands captured in the [Build Guide](11-build-guide.md#project-commands) before deploying
+5. Monitor model performance and update models as needed
+
+---
+
+## Model Training
+
+### Training Script
+
+The project includes a comprehensive model training script (`scripts/train_models.py`) that:
+- Fetches historical market data from Delta Exchange API
+- Computes all 49 technical indicators/features
+- Trains XGBoost classifiers for multiple timeframes
+- Saves models correctly (as XGBClassifier instances, not feature names)
+- Validates saved models before completion
+
+### Prerequisites
+
+Before training models, ensure:
+- Delta Exchange API credentials are configured (`.env` file)
+- Sufficient historical data is available (script fetches from API)
+- Python dependencies are installed: `pip install -r agent/requirements.txt`
+
+### Training Process
+
+1. **Run the training script**:
+   ```bash
+   python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
+   ```
+
+2. **Script will**:
+   - Fetch ~3000 candles per timeframe from Delta Exchange
+   - Compute 49 features for each candle
+   - Create labels based on forward-looking returns
+   - Train XGBoost models with train/val/test split (70/15/15)
+   - Save models to `agent/model_storage/xgboost/` directory:
+     - `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl`
+     - `agent/model_storage/xgboost/xgboost_BTCUSD_1h.pkl`
+     - `agent/model_storage/xgboost/xgboost_BTCUSD_4h.pkl`
+   - Validate saved models (ensures they're XGBClassifier instances)
+
+3. **Training metrics** are saved alongside models in the storage directory
+
+### Feature List (49 Features)
+
+The models use 49 technical indicators:
+
+**Price-based (15)**: SMAs (10, 20, 50, 100, 200), EMAs (12, 26, 50), price ratios, candle patterns
+
+**Momentum (10)**: RSI (7, 14), Stochastic (%K, %D), Williams %R, CCI, ROC, Momentum
+
+**Trend (8)**: MACD, MACD signal, MACD histogram, ADX, Aroon (up, down, oscillator), trend strength
+
+**Volatility (8)**: Bollinger Bands (upper, lower, width, position), ATR (14, 20), volatility (10, 20)
+
+**Volume (6)**: Volume SMA, volume ratio, OBV, volume-price trend, accumulation/distribution, Chaikin oscillator
+
+**Returns (2)**: 1h returns, 24h returns
+
+See the feature engineering documentation for the complete list of 49 features.
+
+### Model Validation
+
+**Before deployment**, always validate models:
+```bash
+python scripts/validate_models_before_deployment.py
+```
+
+This checks:
+- Model files exist and are readable
+- Models are XGBClassifier instances (not numpy arrays)
+- Models have required methods (`predict`, `predict_proba`)
+- Models can make predictions on sample data
+
+**During startup** (optional):
+Set `VALIDATE_MODELS_ON_STARTUP=1` in `.env` to validate models before starting the agent.
+
+### Troubleshooting Training
+
+**Issue**: Models contain numpy arrays instead of trained models
+- **Cause**: Model files were saved incorrectly (feature names saved instead of model object)
+- **Fix**: Re-run training script: `python scripts/train_models.py`
+- **Prevention**: Always use the training script, never manually save feature names
+
+**Issue**: Insufficient data for training
+- **Cause**: API returned fewer candles than expected
+- **Fix**: Check Delta Exchange API connectivity and increase `limit` parameter
+
+**Issue**: Feature computation fails
+- **Cause**: Missing candles or invalid data
+- **Fix**: Ensure candles have required fields (open, high, low, close, volume)
+
+---
+
+## Price Prediction Models
+
+### Overview
+
+The project includes a comprehensive price prediction training script (`scripts/train_price_prediction_models.py`) that supports both **regression** (price prediction) and **classification** (buy/sell/hold signal prediction) tasks using XGBoost and LSTM algorithms.
+
+**Key Features**:
+- **Pagination Support**: Automatically handles Delta Exchange API 2,000 candle limit
+- **Data Reversal**: Converts API reverse chronological order to chronological order
+- **Multiple Model Types**: XGBoost Regressor, XGBoost Classifier, LSTM Regressor, LSTM Classifier
+- **Google Colab Optimized**: Designed for cloud training environments
+
+### Regressor vs Classifier: Key Differences
+
+**Regressor Models**:
+- **Predict**: Absolute future prices (e.g., $50,500)
+- **Training**: Uses future close prices as targets
+- **Normalization**: Converts absolute price to relative return, then normalizes to [-1, 1]
+- **Use Case**: Price prediction with magnitude information
+
+**Classifier Models**:
+- **Predict**: Trading signals directly (BUY/SELL/HOLD)
+- **Training**: Uses return-based signal labels (BUY if return > 0.5%, SELL if return < -0.5%, HOLD otherwise)
+- **Normalization**: Directly normalizes probabilities/class labels to [-1, 1]
+- **Use Case**: Direct signal classification without price magnitude
+
+**Consensus Calculation**: Both model types output normalized values in [-1, 1] range, allowing them to be combined in weighted consensus calculations.
+
+## Current Model Support (2025-01-27)
+
+### Supported Model Types
+
+The system now supports **5 different ML model types** through the complete MCP Model Protocol implementation:
+
+#### 1. XGBoost Models ✅ **FULLY IMPLEMENTED**
+- **Classifiers**: Predict trading signals directly (buy/sell/hold) with `predict_proba()` method
+- **Regressors**: Predict absolute future prices with `predict()` method
+- **Auto-detection**: XGBoostNode automatically detects classifier vs regressor types
+- **Normalization**: All outputs normalized to [-1, 1] range for consensus
+
+#### 2. LightGBM Models ✅ **FULLY IMPLEMENTED**
+- **Complete Implementation**: Full LightGBM Booster support with proper loading
+- **SHAP Explanations**: Feature importance extraction for interpretability
+- **Same Interface**: Compatible with MCP Model Protocol
+- **Performance**: Alternative gradient boosting with potentially better speed
+
+#### 3. Random Forest Models ✅ **FULLY IMPLEMENTED**
+- **Scikit-learn Integration**: Full RandomForestClassifier/RandomForestRegressor support
+- **Feature Importance**: Built-in feature importance extraction
+- **Ensemble Method**: Bagging-based ensemble learning
+- **Robust**: Good resistance to overfitting
+
+#### 4. LSTM Models ✅ **FULLY IMPLEMENTED**
+- **TensorFlow/Keras Support**: Complete neural network implementation
+- **Sequence Processing**: Handles temporal dependencies in price data
+- **Configurable Architecture**: Supports various LSTM configurations
+- **GPU Acceleration**: Leverages TensorFlow's GPU capabilities
+
+#### 5. Transformer Models ✅ **FULLY IMPLEMENTED**
+- **Multi-format Support**: ONNX and PyTorch implementations
+- **Attention Mechanisms**: Captures complex relationships in market data
+- **Scalable Architecture**: Handles variable input sequences
+- **Modern AI**: State-of-the-art transformer architectures
+
+### Implementation Status
+
+All model types are **production-ready** with:
+- ✅ Complete MCP Model Node implementations
+- ✅ Proper error handling and health monitoring
+- ✅ SHAP explanations and feature importance
+- ✅ Confidence scoring and normalization
+- ✅ Parallel inference support
+- ✅ Comprehensive validation
+
+### Delta Exchange API Limitations
+
+The training script properly handles Delta Exchange API constraints:
+
+1. **2,000 Candle Limit**: Maximum candles per request is 2,000
+   - Script automatically implements pagination for datasets > 2,000 candles
+   - Calculates batches: `ceil(total_candles / 2000)`
+   - Makes multiple requests with adjusted time ranges
+
+2. **Reverse Chronological Order**: API returns data in reverse chronological order (newest first)
+   - Script automatically reverses data to chronological order (oldest first)
+   - Critical for time-series models (LSTM) which require chronological sequences
+
+3. **Supported Resolutions**:
+   - Valid: `1m`, `3m`, `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `1d`, `1w`
+   - Deprecated (do not use): `7d`, `2w`, `30d`
+
+4. **Rate Limiting**: Script includes automatic rate limiting (0.75s delay between requests)
+
+### Training Script Usage
+
+#### Basic Usage
+
+```bash
+# Train regression and classification models for multiple timeframes
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m 1h 4h \
+  --total-candles 5000
+```
+
+#### Advanced Options
+
+```bash
+# Train only regression models
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m \
+  --total-candles 5000 \
+  --regression \
+  --no-classification
+
+# Train with LSTM models (requires TensorFlow)
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m \
+  --total-candles 5000 \
+  --lstm
+
+# Train only classification models
+python scripts/train_price_prediction_models.py \
+  --symbol BTCUSD \
+  --timeframes 15m \
+  --total-candles 5000 \
+  --classification \
+  --no-regression
+```
+
+### Model Types
+
+#### 1. XGBoost Regressor
+
+**Purpose**: Predict absolute future price (continuous value)
+
+**Training Target**: Future close price (e.g., if current price is $50,000, predicts $50,500)
+
+**Raw Output**: Absolute price value (e.g., 50500.0)
+
+**Normalization**: The agent automatically converts regressor outputs to relative returns:
+1. Calculates return percentage: `(predicted_price - current_price) / current_price`
+2. Normalizes return to [-1, 1] range: ±10% return maps to ±1.0
+3. Returns beyond ±10% are clamped to ±1.0
+
+**Example**: 
+- Current price: $50,000
+- Predicted price: $50,500
+- Return: +1.0%
+- Normalized output: +0.1 (in [-1, 1] range)
+
+**Usage**:
+```python
+import pickle
+import numpy as np
+from pathlib import Path
+
+# Load model
+model_path = Path("agent/model_storage/xgboost/xgboost_regressor_BTCUSD_15m.pkl")
+with open(model_path, "rb") as f:
+    model = pickle.load(f)
+
+# Predict
+features = np.array([[...]])  # 50 features
+predicted_price = model.predict(features)  # Absolute price value
+```
+
+**Note**: When used in the agent, regressor predictions are automatically normalized to [-1, 1] range using current price from context. If current price is not available, a fallback normalization is used.
+
+#### 2. XGBoost Classifier
+
+**Purpose**: Predict trading signal directly (buy/sell/hold)
+
+**Training Target**: Trading signals based on return thresholds:
+- `1` (BUY) if return > 0.5%
+- `-1` (SELL) if return < -0.5%
+- `0` (HOLD) otherwise
+
+**Raw Output**: Class probabilities or class labels
+
+**Normalization**: Classifier outputs are normalized to [-1, 1] range:
+- Probability output [0, 1] → [-1, 1]: `(probability - 0.5) * 2.0`
+- Class label (0 or 1) → [-1, 1]: `(label * 2.0) - 1.0`
+
+**Usage**:
+```python
+import pickle
+import numpy as np
+from pathlib import Path
+
+# Load model
+model_path = Path("agent/model_storage/xgboost/xgboost_classifier_BTCUSD_15m.pkl")
+with open(model_path, "rb") as f:
+    model = pickle.load(f)
+
+# Predict
+features = np.array([[...]])  # 50 features
+signal = model.predict(features)  # 0, 1, or 2 (or -1, 0, 1 depending on training)
+probabilities = model.predict_proba(features)  # [P(SELL), P(HOLD), P(BUY)] or [P(0), P(1)]
+```
+
+**Note**: Classifier models directly predict trading signals, so their outputs are more directly interpretable as buy/sell/hold decisions compared to regressors.
+
+#### 3. LSTM Regressor
+
+**Purpose**: Sequence-based price prediction (requires TensorFlow)
+
+**Output**: Future price value
+
+**Usage**:
+```python
+from tensorflow import keras
+import numpy as np
+from pathlib import Path
+
+# Load model
+model_path = Path("agent/model_storage/lstm/lstm_regressor_BTCUSD_15m.h5")
+model = keras.models.load_model(model_path)
+
+# Predict (requires sequence of 60 candles)
+# Shape: (1, 60, 49) - (batch, sequence_length, features)
+sequence = np.array([[[...]]])  # 60 candles × 49 features
+predicted_price = model.predict(sequence)
+```
+
+#### 4. LSTM Classifier
+
+**Purpose**: Sequence-based signal prediction (requires TensorFlow)
+
+**Output**: Class probabilities
+
+**Usage**:
+```python
+from tensorflow import keras
+import numpy as np
+from pathlib import Path
+
+# Load model
+model_path = Path("agent/model_storage/lstm/lstm_classifier_BTCUSD_15m.h5")
+model = keras.models.load_model(model_path)
+
+# Predict (requires sequence of 60 candles)
+sequence = np.array([[[...]]])  # 60 candles × 49 features
+probabilities = model.predict(sequence)  # [P(SELL), P(HOLD), P(BUY)]
+```
+
+### Google Colab Training
+
+For detailed instructions on training models in Google Colab, see:
+
+**[ML Training Guide - Google Colab](ml-training-google-colab.md)**
+
+The guide includes:
+- Step-by-step Colab setup instructions
+- API limitations and solutions
+- Pagination handling details
+- Data reversal explanation
+- Troubleshooting common issues
+
+**Notebook Template**: A comprehensive Jupyter notebook is available at `notebooks/train_btcusd_price_prediction.ipynb` with:
+- Interactive training workflow
+- Data exploration and visualization
+- Model evaluation and comparison
+- Feature importance analysis
+- Comprehensive error handling
+- Works in both Google Colab and local environments
+
+### Training Output
+
+Models are saved to the `agent/model_storage/` directory, organized by model type:
+
+```
+agent/model_storage/
+├── xgboost/
+│   ├── xgboost_regressor_BTCUSD_15m.pkl
+│   ├── xgboost_classifier_BTCUSD_15m.pkl
+│   ├── xgboost_regressor_BTCUSD_1h.pkl
+│   ├── xgboost_classifier_BTCUSD_1h.pkl
+│   └── ...
+├── lstm/                              # If TensorFlow available
+│   ├── lstm_regressor_BTCUSD_15m.h5
+│   ├── lstm_classifier_BTCUSD_15m.h5
+│   └── ...
+└── price_prediction_training_summary.csv
+```
+
+Training metrics are saved to `agent/model_storage/price_prediction_training_summary.csv` with columns:
+- `timeframe`: Timeframe identifier
+- `model_type`: Model type (xgboost_regressor, xgboost_classifier, etc.)
+- `train_metric`: Training metric (RMSE for regression, accuracy for classification)
+- `val_metric`: Validation metric
+- `test_metric`: Test metric
+- `training_time`: Training time in seconds
+- `model_path`: Path to saved model file
+
+### Best Practices
+
+1. **Start with Small Datasets**: Test with 3,000 candles before training on larger datasets
+2. **Monitor API Usage**: Be aware of API rate limits when fetching large datasets
+3. **Validate Models**: Always validate saved models before deployment
+4. **Use Appropriate Timeframes**: Match training timeframe to trading strategy
+5. **Consider LSTM for Sequences**: LSTM models capture temporal dependencies better than XGBoost
 
 ---
 
@@ -111,19 +571,20 @@ trading-agent/
 
 ### Environment Configuration
 
-Model storage is configured via environment variables:
+Model storage is configured via environment variables in the root `.env` file:
 
-**Root `.env`** (for production models):
 ```bash
-MODEL_DIR=./agent/model_storage/jacksparrow_v4_BTCUSD
+# Points to directory for automatic model discovery
+MODEL_DIR=./agent/model_storage
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 MIN_CONFIDENCE_THRESHOLD=0.65
 ```
 
-**Important**:
-- `MODEL_DIR` should point to the v4 metadata directory
-- v4 discovery reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR` (non-recursive)
+**Important**: 
+- `MODEL_DIR` is used by the model discovery system to find and register models from `agent/model_storage/` and its subdirectories
+- All models are automatically discovered and registered on agent startup
+- Models are organized by type in subdirectories (e.g., `xgboost/`, `lstm/`, `transformer/`)
 
 ---
 
@@ -601,52 +1062,47 @@ Custom models must:
 
 ## Model Performance Tracking
 
-### Performance Metrics
+### Performance Metrics (implementation: agent/core/learning_system.py)
 
-The system tracks model performance:
+The `ModelPerformanceTracker` tracks **trade outcomes** (per-model PnL and win/loss), not raw prediction-vs-outcome error. This avoids using a continuous error metric (e.g. MAE) for classifier predictions, which would mix normalized signal [-1, 1] with actual return and mis-rank models.
 
-```python
-class ModelPerformanceTracker:
-    """Track model performance over time."""
-    
-    def record_prediction_outcome(
-        self,
-        model_name: str,
-        prediction: MCPModelPrediction,
-        actual_outcome: float
-    ):
-        """Record prediction and actual outcome."""
-        error = abs(prediction.prediction - actual_outcome)
-        
-        performance_record = {
-            "model_name": model_name,
-            "prediction": prediction.prediction,
-            "actual": actual_outcome,
-            "error": error,
-            "confidence": prediction.confidence,
-            "timestamp": datetime.utcnow()
-        }
-        
-        self.records.append(performance_record)
-    
-    def calculate_performance_metrics(
-        self,
-        model_name: str,
-        window_size: int = 100
-    ) -> Dict:
-        """Calculate performance metrics."""
-        recent_records = self._get_recent_records(model_name, window_size)
-        
-        if not recent_records:
-            return None
-        
-        return {
-            "accuracy": self._calculate_accuracy(recent_records),
-            "mae": self._calculate_mae(recent_records),
-            "sharpe_ratio": self._calculate_sharpe(recent_records),
-            "win_rate": self._calculate_win_rate(recent_records)
-        }
+**Implemented API:**
+- `record_trade_outcome(trade_outcome: TradeOutcome, model_predictions: List[Dict])` — records a closed trade for each participating model; triggered from the state machine on `PositionClosedEvent` when `model_predictions` are present in the payload.
+- Metrics maintained per model: `total_trades`, `profitable_trades`, `total_pnl`, `win_rate`, `avg_pnl`, `sharpe_ratio` (from recent returns), `recent_performance` (last 50 trades).
+- `get_model_weight(model_name, base_weight)` — returns a dynamic weight from win rate, Sharpe, and recent performance (used when learning is enabled).
+
+**If adding prediction-level outcome recording:** For classifiers, use directional accuracy (e.g. `sign(prediction) == sign(actual_return)`) or a classification metric (e.g. AUC), not `abs(prediction - actual_outcome)`, so correct direction is rewarded regardless of magnitude.
+
+---
+
+## Model Inference Testing
+
+### Automated Smoke Test
+
+Use `scripts/test_model_inference.py` to validate that every model stored under `agent/model_storage/` can be discovered, loaded, and queried end-to-end without starting the full agent:
+
+```bash
+python scripts/test_model_inference.py \
+  --model-dir agent/model_storage
 ```
+
+The script runs the standard discovery pipeline, issues a lightweight prediction request to each registered node, and prints a confidence summary so regressions are obvious in CI logs. It also reports which artefacts failed to deserialize so you can remove or regenerate them before production deployments.
+
+### Latest Validation Snapshot
+
+Running the script against models in `agent/model_storage/` validates that all models can be discovered, loaded, and queried. The script reports which models load successfully and which fail to deserialize.
+
+Keep this section updated whenever the script uncovers model-health changes so other contributors know which artefacts require attention.
+
+### Feature Vector Expectations
+
+The MCP orchestrator now forwards both the ordered feature values and the associated `feature_names` inside the model request context. Models must continue to:
+
+1. Accept a `List[float]` feature vector shaped exactly like their training data.
+2. Read `request.context["feature_names"]` when feature importance needs human-readable labels.
+3. Validate the feature count and raise a descriptive error if the input is malformed.
+
+Document the expected feature order inside each model’s metadata so downstream scripts (including the inference smoke test) can source realistic inputs.
 
 ---
 
@@ -699,8 +1155,9 @@ class ModelPerformanceTracker:
 1. Verify model file format is supported
 2. Check model dependencies are installed
 3. Verify model file is not corrupted
-4. Check model compatibility with Python version
+4. Check model compatibility with Python version (re-export pickled models using `Booster.save_model()` or the framework-native exporter before upgrading XGBoost/LightGBM versions)
 5. Review error logs for specific issues
+6. If you observe `invalid load key` errors, delete the affected file from `agent/model_storage/` and replace it with a freshly serialized artefact from the training environment.
 
 ### Model Prediction Errors
 
@@ -708,7 +1165,7 @@ class ModelPerformanceTracker:
 
 **Solutions**:
 1. Verify required features are available
-2. Check feature format matches model expectations
+2. Check feature format matches model expectations (the context now carries both `features` and `feature_names`; custom nodes should rely on those keys instead of positional assumptions)
 3. Verify model is properly loaded
 4. Check model health status
 5. Review prediction logs for errors

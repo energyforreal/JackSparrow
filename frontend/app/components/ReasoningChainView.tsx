@@ -302,7 +302,7 @@ export function ReasoningChainView({
                         className="w-20 h-2 cursor-help"
                         title={getConfidenceTooltip(step)}
                       >
-                        <ConfidenceProgress value={stepConfidence} />
+                        <ConfidenceProgress value={stepConfidence} variant="reasoningStep" />
                       </div>
                     </div>
                   </div>
@@ -407,50 +407,3 @@ export function ReasoningChainView({
     </Card>
   )
 }
-
-        {/* Old layout retained for reference in git history
-            (replaced by the richer 6-step UX above). */}
-          {/* {overallConfidence !== undefined && (
-            <Badge variant="outline" className="text-sm">
-              Confidence: {overallConfidence}%
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        <Accordion type="single" collapsible className="w-full">
-          {sortedSteps.slice(0, -1).map((step) => (
-            <AccordionItem key={step.step_number} value={`step-${step.step_number}`}>
-              <AccordionTrigger>
-                <div className="flex items-center justify-between w-full pr-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium">
-                      Step {step.step_number}: {step.title}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {step.confidence}%
-                    </span>
-                    <Progress value={step.confidence} className="w-16 h-2" />
-                  </div>
-                </div>
-              </AccordionTrigger>
-              <AccordionContent>
-                <div className="space-y-3 pt-2">
-                  <p className="text-sm text-muted-foreground">{step.content}</p>
-                  {step.evidence && step.evidence.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {step.evidence.map((evidence, index) => (
-                        <Badge key={index} variant="outline" className="text-xs">
-                          {evidence}
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
-*/}

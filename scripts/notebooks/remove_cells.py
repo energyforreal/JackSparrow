@@ -1,9 +1,13 @@
 import json
 import sys
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent.parent
+_nb = _ROOT / "notebooks" / "train_btcusd_price_prediction.ipynb"
 
 # Read notebook
 try:
-    with open('notebooks/train_btcusd_price_prediction.ipynb', 'r', encoding='utf-8') as f:
+    with open(_nb, "r", encoding="utf-8") as f:
         nb = json.load(f)
     sys.stderr.write(f"Loaded notebook with {len(nb['cells'])} cells\n")
 except Exception as e:
@@ -36,7 +40,7 @@ for idx in reversed(sorted(cells_to_remove)):
 
 # Write back
 try:
-    with open('notebooks/train_btcusd_price_prediction.ipynb', 'w', encoding='utf-8') as f:
+    with open(_nb, "w", encoding="utf-8") as f:
         json.dump(nb, f, indent=1, ensure_ascii=False)
     sys.stderr.write(f"Successfully removed {len(cells_to_remove)} cell(s) from notebook\n")
 except Exception as e:

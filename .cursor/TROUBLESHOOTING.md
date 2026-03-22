@@ -349,7 +349,7 @@ See `.cursor/RULE_PATTERNS_ANALYSIS.md` for detailed analysis.
 4. **Review project-specific docs**:
    - `.cursor/RULE_PATTERNS_ANALYSIS.md` - Rule analysis
    - `.cursor/cursor-settings.md` - Settings guide
-   - `CURSOR_SETTINGS_QUICK_FIX.md` - Quick approval fix
+   - `docs/cursor/settings-quick-fix.md` - Quick approval fix
 
 ### Reporting Issues
 

@@ -218,12 +218,16 @@ pip install -r requirements.txt
 
 ### 5.3 Configure Environment Variables
 
-**Option 1: Use .env.example template (recommended)**
-```bash
-# Copy the example file
-cp backend/.env.example backend/.env
+**Single Root `.env` File**: All services (backend, agent, frontend) read from a **single root `.env` file** in the project root directory. The backend reads from this file via `ROOT_ENV_PATH` in `backend/core/config.py`.
 
-# Edit backend/.env with your actual values
+**Setup Instructions:**
+
+```bash
+# From project root directory
+# Copy the example template
+cp .env.example .env
+
+# Edit .env with your actual values
 # Required variables:
 #   - DATABASE_URL
 #   - DELTA_EXCHANGE_API_KEY
@@ -232,8 +236,7 @@ cp backend/.env.example backend/.env
 #   - API_KEY
 ```
 
-**Option 2: Create manually**
-Create `backend/.env` with the following required variables:
+**Minimum Required Variables:**
 
 ```bash
 # Database (REQUIRED)
@@ -245,28 +248,14 @@ REDIS_URL=redis://localhost:6379
 # Delta Exchange (REQUIRED - Paper Trading)
 DELTA_EXCHANGE_API_KEY=your_api_key
 DELTA_EXCHANGE_API_SECRET=your_api_secret
-DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
+DELTA_EXCHANGE_BASE_URL=https://api.india.delta.exchange
 
 # Security (REQUIRED)
 JWT_SECRET_KEY=your_secret_key_here_minimum_32_characters
 API_KEY=your_api_key_here_minimum_32_characters
-
-# Agent Communication (defaults provided)
-AGENT_COMMAND_QUEUE=agent_commands
-AGENT_RESPONSE_QUEUE=agent_responses
-
-# Feature Server (default: http://localhost:8001)
-FEATURE_SERVER_URL=http://localhost:8001
-
-# Vector Database (Optional)
-QDRANT_URL=
-QDRANT_API_KEY=
-
-# Logging (default: INFO)
-LOG_LEVEL=INFO
 ```
 
-**Note**: If `.env.example` files don't exist, refer to `backend/core/config.py` and `agent/core/config.py` for all available configuration options and their descriptions.
+**Note**: See `.env.example` in the project root for the complete list of all available environment variables. The backend automatically reads from the root `.env` file - no service-specific `.env` files are needed.
 
 ### 5.4 Initialize Database
 
@@ -286,7 +275,7 @@ This script will:
 **Troubleshooting**:
 - Ensure PostgreSQL is running: `pg_isready` or `psql -U postgres -c "SELECT 1"`
 - Verify TimescaleDB is installed: `psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"`
-- Check DATABASE_URL in `backend/.env` is correct
+- Check DATABASE_URL in the root `.env` file is correct
 
 ### 5.5 Verify Backend Setup
 
@@ -324,10 +313,10 @@ pip install -r requirements.txt
 
 ### 6.3 Create Model Storage Directory
 
-**Note**: The root `models/` directory already contains production models. The `agent/model_storage/` directory is for uploading new or custom models.
+**Note**: All trained ML models are stored in the `agent/model_storage/` directory. Models are automatically discovered and registered on agent startup.
 
 ```bash
-# Create upload directory for custom models (if you plan to upload models)
+# Create model storage directories (if they don't exist)
 mkdir -p agent/model_storage/custom
 mkdir -p agent/model_storage/xgboost
 mkdir -p agent/model_storage/lstm
@@ -336,42 +325,28 @@ mkdir -p agent/model_storage/transformer
 
 ### 6.4 Configure Environment Variables
 
-**Option 1: Use .env.example template (recommended)**
-```bash
-# Copy the example file
-cp agent/.env.example agent/.env
+**Single Root `.env` File**: The agent reads from the **same root `.env` file** used by the backend. The agent reads from this file via `ROOT_ENV_PATH` in `agent/core/config.py`.
 
-# Edit agent/.env with your actual values
-# Required variables:
-#   - DATABASE_URL
-#   - DELTA_EXCHANGE_API_KEY
-#   - DELTA_EXCHANGE_API_SECRET
+**Setup Instructions:**
+
+If you haven't already created the root `.env` file (from Step 5.3), do so now:
+
+```bash
+# From project root directory
+# Copy the example template (if not already done)
+cp .env.example .env
+
+# Edit .env with your actual values
+# The agent shares the same .env file as the backend
 ```
 
-**Option 2: Create manually**
-Create `agent/.env` with the following required variables:
+**Agent-Specific Variables (Optional):**
+
+These variables can be added to the root `.env` file if you need to customize agent behavior:
 
 ```bash
-# Database (REQUIRED)
-DATABASE_URL=postgresql://trading_agent_user:your_password@localhost:5432/trading_agent
-
-# Redis (default: redis://localhost:6379)
-REDIS_URL=redis://localhost:6379
-
-# Delta Exchange (REQUIRED - Paper Trading)
-DELTA_EXCHANGE_API_KEY=your_api_key
-DELTA_EXCHANGE_API_SECRET=your_api_secret
-DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
-
-# Vector Database (Optional)
-QDRANT_URL=
-QDRANT_API_KEY=
-
 # Model Configuration
-# Option 1: Use production model from root models/ directory (recommended for initial setup)
-# MODEL_PATH=models/xgboost_BTCUSD_15m.pkl  # Uncomment to use production model
-
-# Option 2: Use model discovery for uploaded models in agent/model_storage/
+# Use model discovery for models in agent/model_storage/
 MODEL_DIR=./agent/model_storage
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
@@ -382,16 +357,17 @@ AGENT_SYMBOL=BTCUSD
 AGENT_INTERVAL=15m
 
 # Risk Management (defaults provided)
-MAX_POSITION_SIZE=0.1
-MAX_PORTFOLIO_HEAT=0.3
+MAX_POSITION_SIZE=0.10
+MAX_PORTFOLIO_HEAT=0.30
 STOP_LOSS_PERCENTAGE=0.02
 TAKE_PROFIT_PERCENTAGE=0.05
-
-# Logging (default: INFO)
-LOG_LEVEL=INFO
+MAX_DAILY_LOSS=0.05
+MAX_DRAWDOWN=0.15
+MAX_CONSECUTIVE_LOSSES=5
+MIN_TIME_BETWEEN_TRADES=300
 ```
 
-**Note**: If `.env.example` files don't exist, refer to `agent/core/config.py` for all available configuration options and their descriptions.
+**Note**: See `.env.example` in the project root for the complete list of all available environment variables. The template is already segmented by service domain (infrastructure, Delta Exchange credentials, backend security, agent configuration, frontend, optional services), so copy it as-is and only change the values. The agent automatically reads from the root `.env` file - no service-specific `.env` files are needed.
 
 ### 6.5 Verify Agent Setup
 
@@ -415,12 +391,23 @@ npm install
 
 ### 7.2 Configure Environment Variables
 
-Create `frontend/.env.local`:
+**Single Root `.env` File**: The frontend reads from the **same root `.env` file** used by backend and agent. The frontend reads from this file via `loadRootEnv()` function in `frontend/next.config.js`.
+
+**Setup Instructions:**
+
+If you haven't already created the root `.env` file (from Step 5.3), do so now:
 
 ```bash
+# From project root directory
+# Copy the example template (if not already done)
+cp .env.example .env
+
+# Edit .env and ensure these frontend variables are set:
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 ```
+
+**Note**: The frontend automatically reads `NEXT_PUBLIC_*` variables from the root `.env` file. No `frontend/.env.local` file is needed. See `.env.example` for the complete list of frontend variables.
 
 ### 7.3 Verify Frontend Setup
 
@@ -431,79 +418,212 @@ npm run build
 
 ---
 
+## Step 7.5: Validate Configuration and Prerequisites
+
+**Important**: Before starting services, validate your configuration and prerequisites to catch issues early.
+
+### Validate Environment Variables
+
+```bash
+python scripts/validate-env.py
+```
+
+This checks:
+- All required variables are present
+- Variable formats are correct (URLs, connection strings)
+- Security keys meet minimum requirements
+- Model files exist in MODEL_DIR
+
+### Validate Prerequisites
+
+```bash
+python tools/commands/validate-prerequisites.py
+```
+
+This checks:
+- Python 3.11+ is installed
+- Node.js 18+ is installed
+- PostgreSQL is running and accessible
+- Redis is running and accessible
+- Database schema is initialized (tables exist)
+- Service ports are available
+
+### Quick Validation Command
+
+Run both validations at once:
+
+```bash
+python scripts/validate-env.py && python tools/commands/validate-prerequisites.py
+```
+
+**If validation fails:**
+1. Review the error messages
+2. Fix issues in your `.env` file or start missing services
+3. Re-run validation until all checks pass
+4. See [Troubleshooting Guide](troubleshooting-local-startup.md) for detailed help
+
+**Note**: The startup script (`python tools/commands/start_parallel.py`) automatically runs these validations before starting services, but it's recommended to run them manually first to catch issues early.
+
+---
+
 ## Step 8: Start Services
 
-You'll need **three separate terminal windows** for this step.
+**Recommended**: Use the parallel startup script for faster initialization and automatic validation.
 
-### 8.1 Terminal 1: Start Backend
+### 8.1 Pre-Startup Validation (Recommended)
 
+Before starting services, validate your configuration:
+
+```bash
+# Validate environment variables
+python scripts/validate-env.py
+
+# Validate system prerequisites
+python tools/commands/validate-prerequisites.py
+
+# Optional: Validate model files (set VALIDATE_MODELS_ON_STARTUP=true in .env)
+```
+
+### 8.2 Parallel Startup (Recommended)
+
+Start all services simultaneously with automatic validation:
+
+```bash
+# From project root directory
+python tools/commands/start_parallel.py
+```
+
+**Startup Sequence Performed:**
+1. **Environment Loading**: Loads and validates `.env` configuration
+2. **Paper Trading Validation**: Verifies safe paper trading mode (blocks live trading)
+3. **Redis Availability**: Checks Redis service and attempts auto-startup if needed
+4. **Configuration Validation**: Runs environment variable and prerequisite validation
+5. **Optional Model Validation**: Validates ML model files if enabled
+6. **Service Dependencies**: Ensures all dependencies are properly set up
+7. **Parallel Startup**: Launches backend, agent, and frontend services simultaneously
+8. **Health Checks**: Performs post-startup health verification
+9. **Monitoring Dashboard**: Activates real-time monitoring with data freshness tracking
+
+**Expected Output:**
+```
+JackSparrow Trading Agent - Startup Sequence
+Process ID: 12345
+Project root: /path/to/JackSparrow
+
+Step 1/4: Loading environment configuration...
+Step 2/4: Checking Redis availability...
+[PAPER TRADING] Validating configuration...
+[PAPER TRADING] ✓ Mode: PAPER TRADING (Safe)
+Step 3/4: Running configuration validators...
+Step 4/4: Ensuring service dependencies...
+
+[BACKEND] INFO: Uvicorn running on http://127.0.0.1:8000
+[AGENT] INFO: Agent initialized
+[FRONTEND] - ready started server on 0.0.0.0:3000
+
+Running health checks...
+✓ Backend: healthy
+✓ Feature Server: healthy
+✓ Frontend: healthy
+
+Monitoring dashboard started - refresh rate: 2s
+```
+
+### 8.3 Alternative: Manual Startup
+
+If you prefer separate terminals (not recommended for production):
+
+#### Terminal 1: Backend
 ```bash
 cd backend
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 uvicorn api.main:app --reload --port 8000
 ```
 
-Expected output:
-```
-INFO:     Uvicorn running on http://127.0.0.1:8000
-INFO:     Application startup complete.
-```
-
-### 8.2 Terminal 2: Start Agent
-
+#### Terminal 2: Agent
 ```bash
 cd agent
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 python -m agent.core.intelligent_agent
 ```
 
-Expected output:
-```
-INFO: Agent initialized
-INFO: Model discovery started
-INFO: Models registered: XGBoost, LSTM, Transformer
-INFO: Agent ready
-```
-
-### 8.3 Terminal 3: Start Frontend
-
+#### Terminal 3: Frontend
 ```bash
 cd frontend
 npm run dev
 ```
 
-Expected output:
-```
-- ready started server on 0.0.0.0:3000
-- Local:        http://localhost:3000
-```
+### 8.4 Verification Checklist
 
-### 8.4 Smoke Test Checklist
+After successful parallel startup:
 
-After all three terminals report successful startup:
+#### Automatic Verification (Built-in)
+The startup script automatically performs:
+- ✅ **Health Checks**: HTTP endpoints verified for backend, feature server, and frontend
+- ✅ **Configuration Validation**: Environment variables and prerequisites validated
+- ✅ **Paper Trading Safety**: Live trading mode blocked with clear warnings
+- ✅ **Monitoring Dashboard**: Real-time monitoring activated
 
-1. Visit `http://localhost:3000` and confirm the dashboard renders without console errors.
-2. Open `http://localhost:8000/api/v1/health` in a second tab—health score should be ≥ `0.90` when all components are healthy.
-3. Trigger a manual prediction with `curl -X POST http://localhost:8000/api/v1/predict -d '{}' -H 'Content-Type: application/json'` and verify the response arrives in the dashboard.
-4. Inspect `logs/start.log` for any WARN/ERROR entries; resolve before continuing development.
+#### Manual Verification Steps
+1. **Check Startup Output**: Verify all services show "healthy" in the startup summary
+2. **Visit Dashboard**: `http://localhost:3000` should load without console errors
+3. **API Health Check**: Visit `http://localhost:8000/api/v1/health` - should show health score ≥ 0.90
+4. **Monitoring Dashboard**: Look for real-time updates showing service status and paper trading mode
+5. **Test Prediction**: Run `curl -X POST http://localhost:8000/api/v1/predict -d '{}' -H 'Content-Type: application/json'` and verify response
+6. **Check Logs**: Review `logs/start.log` for any WARN/ERROR entries
+
+#### Troubleshooting Startup Issues
+If startup fails:
+- **Paper Trading Error**: Check `PAPER_TRADING_MODE` and `TRADING_MODE` in `.env`
+- **Validation Failed**: Run `python scripts/validate-env.py` and `python tools/commands/validate-prerequisites.py`
+- **Health Check Failed**: Run `python tools/commands/health_check.py` to diagnose service issues
+- **Port Conflicts**: Ensure ports 8000, 8001, and 3000 are available
 
 ---
 
 ## Project Commands
-The project root contains a `Makefile` with convenience commands that orchestrate the full JackSparrow stack. Run these commands from the repository root (`JackSparrow/`).
 
-### `make start`
+The project provides Python scripts and shell scripts for managing the JackSparrow stack. Run these commands from the repository root (`JackSparrow/`).
+
+### Validation Commands
+
+**Validate environment variables and prerequisites:**
+```bash
+# Run both validations
+python scripts/validate-env.py && python tools/commands/validate-prerequisites.py
+
+# Or run individually:
+python scripts/validate-env.py
+python tools/commands/validate-prerequisites.py
+```
+
+**Recommended**: Run validation before starting services to catch configuration issues early.
+
+### Start Services
+
+**Start all services (parallel startup):**
+```bash
+# Direct Python execution (recommended)
+python tools/commands/start_parallel.py
+
+# Or use shell scripts:
+# Linux/macOS:
+./tools/commands/start.sh
+
+# Windows PowerShell:
+.\tools\commands\start.ps1
+```
+
+**Features:**
 - Launches backend (`uvicorn`), agent (`python -m agent.core.intelligent_agent`), and frontend (`npm run dev`) **simultaneously** using parallel process manager
+- **Automatically validates** environment and prerequisites before starting services
 - Automatically sets up virtual environments and installs dependencies if needed
 - Streams real-time color-coded logs to console with service prefixes
 - Writes individual service logs to `logs/{service}.log`
 - Creates PID files for process management
+- Runs health checks after services start
 
-```bash
-make start
-# or directly:
-python tools/commands/start_parallel.py
-```
+**Note**: If validation fails during startup, services will not start and you'll see clear error messages with troubleshooting steps.
 
 **Parallel Startup Benefits:**
 - Faster initialization (all services start at once)
@@ -514,22 +634,44 @@ python tools/commands/start_parallel.py
 
 **Note**: Services handle their own dependency checks (e.g., backend waits for Redis/PostgreSQL). The parallel startup ensures faster initialization while maintaining service reliability.
 
-### `make restart`
-- Gracefully stops any running services (`make stop`)
-- Clears temporary state (local caches, stale pid files)
-- Re-runs `make start`
+### Restart Services
 
+**Restart all services:**
 ```bash
-make restart
+# Linux/macOS:
+./tools/commands/restart.sh
+
+# Windows PowerShell:
+.\tools\commands\restart.ps1
 ```
 
-### `make audit`
-- Runs full quality gate: formatting, linting, tests, and service health checks
-- Captures recent service logs (backend, agent, frontend) to `logs/audit/`
-- Summarises findings to the console and writes a report to `logs/audit/report.md`
+This will:
+- Gracefully stop any running services
+- Clear temporary state (local caches, stale pid files)
+- Re-run the start command
 
+### Health Check
+
+**Check health of running services:**
 ```bash
-make audit
+python tools/commands/health_check.py
+```
+
+This verifies:
+- Backend health endpoint responds
+- Agent is responding (via backend)
+- Frontend is accessible
+- Individual service status (database, redis, agent)
+
+### Audit Commands
+
+**Run full quality gate:**
+```bash
+# Linux/macOS:
+./tools/commands/audit.sh
+
+# Windows PowerShell:
+.\tools\commands\audit.ps1
 ```
 
 The audit command executes:
@@ -539,15 +681,23 @@ The audit command executes:
 - Service health check (`curl http://localhost:8000/api/v1/health`)
 - Log scan for warnings/errors (`grep -E "WARN|ERROR" logs/*.log`)
 
-### `make error`
-- Quick diagnostic for a running environment
-- Verifies process status (backend, agent, frontend)
-- Tails the last 200 lines of each service log
-- Highlights new warnings/errors since the previous run
+Output is written to `logs/audit/report.md` for review.
 
+### Error Diagnostics
+
+**Quick diagnostic for a running environment:**
 ```bash
-make error
+# Linux/macOS:
+./tools/commands/error.sh
+
+# Windows PowerShell:
+.\tools\commands\error.ps1
 ```
+
+This will:
+- Verify process status (backend, agent, frontend)
+- Tail the last 200 lines of each service log
+- Highlight new warnings/errors since the previous run
 
 Output is written to `logs/error/summary.log` for later review.
 
@@ -636,6 +786,8 @@ If you need to train new models or regenerate corrupted models, use the authorit
 
 - `notebooks/JackSparrow_Trading_Colab_v4.ipynb`
 
+**Prerequisites**: Ensure Delta Exchange API credentials are configured in `.env`
+
 Use script-based training only for legacy or experimental workflows.
 
 **Legacy script path (optional)**:
@@ -643,6 +795,17 @@ Use script-based training only for legacy or experimental workflows.
 # From project root
 python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
 ```
+
+**Validate Models**:
+```bash
+# Validate all models
+python scripts/validate_model_files.py
+
+# Or run pre-deployment validation
+python scripts/validate_models_before_deployment.py
+```
+
+See [ML Models Documentation](03-ml-models.md#model-training) for detailed training guide.
 
 **Post-train parity checklist (required before deployment)**:
 1. Confirm `MODEL_DIR` points to the exact export folder that contains `metadata_BTCUSD_*.json`.
@@ -746,6 +909,62 @@ npm install
 npm run build
 ```
 
+### Validation Errors
+
+**Problem**: Startup fails with validation errors
+
+**Solutions**:
+```bash
+# Run individual validations to diagnose
+python scripts/validate-env.py
+python tools/commands/validate-prerequisites.py
+
+# Common fixes:
+# 1. Check .env file exists and has required variables
+# 2. Verify DATABASE_URL format: postgresql://user:pass@host:port/db
+# 3. Check API credentials: DELTA_EXCHANGE_API_KEY and SECRET
+# 4. Ensure Python 3.11+ and Node.js 18+ are installed
+# 5. Verify PostgreSQL and Redis are running
+```
+
+### Paper Trading Validation Failed
+
+**Problem**: Startup blocked with paper trading safety warnings
+
+**Solutions**:
+```bash
+# Check environment variables
+echo $PAPER_TRADING_MODE
+echo $TRADING_MODE
+
+# Set safe paper trading mode
+# Add to .env file:
+PAPER_TRADING_MODE=true
+TRADING_MODE=paper
+
+# Remove any live trading configuration
+# Remove or comment: TRADING_MODE=live
+```
+
+### Health Check Failures
+
+**Problem**: Services start but health checks fail
+
+**Solutions**:
+```bash
+# Run manual health check
+python tools/commands/health_check.py
+
+# Check detailed health status
+python tools/commands/validate-health.py
+
+# Common fixes:
+# 1. Verify ports 8000, 8001, 3000 are available
+# 2. Check database and Redis connectivity
+# 3. Review service logs in logs/ directory
+# 4. Restart services: stop then run startup again
+```
+
 ---
 
 ## Quick Start Script
@@ -804,7 +1023,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd frontend; npm 
 After successful build:
 
 1. **Configure Delta Exchange API**: Add your paper trading API keys
-2. **Upload Models**: Place trained models in `agent/model_storage/custom/` (for model discovery) or copy to root `models/` directory (for production use)
+2. **Upload Models**: Place trained models in `agent/model_storage/` directory (organized by type, e.g., `agent/model_storage/xgboost/` for XGBoost models)
 3. **Start Trading**: Use the dashboard or API to start the agent
 4. **Monitor Performance**: Check dashboard for real-time updates
 5. **Review Logs**: Check terminal outputs for debugging

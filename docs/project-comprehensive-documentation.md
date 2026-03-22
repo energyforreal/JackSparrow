@@ -1,9 +1,11 @@
 # JackSparrow Trading Agent - Comprehensive Project Documentation
 
+> **Maintenance note:** For up-to-date structure and operations, prefer the numbered guides in `docs/` (`01-architecture.md` through `11-build-guide.md`) and the index [DOCUMENTATION.md](../DOCUMENTATION.md). This file is a long-form narrative archive.
+
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)  
 **Project Name**: JackSparrow Trading Agent  
 **Version**: Production Ready (2025-01-27)  
-**Last Updated**: 2025-12-28
+**Last Updated**: 2026-03-22
 
 > **For the pirates who love treasure hunting, except for the fact that there is no water here. The treasure is sought out of thin air.**
 
@@ -42,8 +44,8 @@ JackSparrow is a **production-ready AI-powered autonomous trading agent** design
 ### Key Characteristics
 
 - **Paper Trading Only**: Safe testing environment on Delta Exchange India
-- **BTCUSD Focus**: Initially designed for BTCUSD trading across multiple timeframes (15m, 1h, 4h)
-- **Multi-Model Ensemble**: Uses 6 XGBoost models (3 classifiers + 3 regressors) for consensus-based predictions
+- **BTCUSD Focus**: BTCUSD trading across multiple timeframes (v5 full bundle: 15m, 30m, 1h, 2h, 4h)
+- **Multi-Model Ensemble**: **v5 entry/exit ensembles** (XGBoost-based); one registered node per timeframe from `MODEL_DIR` (see [model-integration-summary.md](model-integration-summary.md))
 - **Real-Time Processing**: WebSocket-based real-time data ingestion and decision making
 - **Production Ready**: Full Docker containerization, CI/CD pipeline, comprehensive monitoring
 
@@ -284,12 +286,10 @@ agent/model_storage/
 - **Implementation**: `TransformerNode` class
 - **Usage**: Attention-based models for sequence prediction
 
-**Current Models** (As of Latest Integration):
-- **6 XGBoost Models**:
-  - 3 Classifier models (15m, 1h, 4h timeframes)
-  - 3 Regressor models (15m, 1h, 4h timeframes)
-- **Location**: `agent/model_storage/xgboost/`
-- **Auto-Discovered**: Yes, on agent startup
+**Current models** (as of 2026-03; see [model-integration-summary.md](model-integration-summary.md)):
+- **v5 BTCUSD** metadata-driven bundles under `agent/model_storage/` (e.g. full bundle `jacksparrow_v5_BTCUSD_2026-03-19/`)
+- **Per timeframe**: entry + exit models, scalers, `features_*.json`, `metadata_*.json`
+- **Discovery**: Non-recursive scan of `metadata_BTCUSD_*.json` in `MODEL_DIR` on agent startup
 
 #### Model Inference Flow
 
@@ -1152,8 +1152,8 @@ JackSparrow/
 ├── .env.example               # Environment variables template
 ├── README.md                  # Project README
 ├── DOCUMENTATION.md           # Documentation index
-├── MAJOR_CHANGES.md           # Major changes summary
-└── MODEL_INTEGRATION_SUMMARY.md # Model integration summary
+├── docs/major-changes.md           # Major changes summary
+└── docs/model-integration-summary.md # Model integration summary
 ```
 
 ### File Organization Principles

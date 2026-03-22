@@ -6,7 +6,7 @@ Successfully trained and saved EXIT_MODELS stacking ensemble for all 5 BTCUSD ti
 ## Solution Approach
 **Challenge:** The Jupyter notebook (JackSparrow_Trading_Colab_v3.ipynb) Cell 47 was hanging when attempting to execute within the notebook kernel.
 
-**Solution:** Created standalone Python script (`train_exit_models.py`) that:
+**Solution:** Created standalone Python script (`scripts/train_exit_models.py`) that:
 1. Replicates the neural network training logic from Cell 47
 2. Trains stacking ensemble models (base XGBoost + meta-learner)
 3. Uses RobustScaler for feature normalization
@@ -113,8 +113,8 @@ The EXIT_MODELS are now ready for integration with:
 - **Data Processing:** pandas, numpy
 
 ## Files Generated
-- `train_exit_models.py` - Standalone training script
-- `verify_exit_models.py` - Verification script
+- `scripts/train_exit_models.py` - Standalone training script
+- `scripts/verify_exit_models.py` - Verification script
 - `agent/model_storage/robust_ensemble/` - 20 model artifacts
 
 ## Status: ✅ COMPLETE

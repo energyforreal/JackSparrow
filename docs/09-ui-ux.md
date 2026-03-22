@@ -88,6 +88,7 @@ The JackSparrow dashboard UI is built using modern web technologies:
 - **shadcn/ui**: High-quality component library built on Radix UI and Tailwind CSS
 - **Radix UI**: Unstyled, accessible component primitives
 - **Lucide React**: Icon library
+- **react-hot-toast**: Lightweight trade-execution toasts (mounted from `app/providers.tsx`)
 
 This combination provides:
 - **Rapid Development**: Tailwind utilities enable fast styling without custom CSS
@@ -145,6 +146,8 @@ This combination provides:
 - Confidence bar visualization
 - Model consensus breakdown
 - Expandable reasoning section
+
+**Strong signals**: **STRONG_BUY** and **STRONG_SELL** use an additional **pulse** (`animate-ping`) ring so they stand out from regular BUY/SELL at a glance (main badge and per-model consensus rows).
 
 **Signal Badge Colors**:
 - **STRONG_BUY**: Dark Green (#059669)
@@ -1576,6 +1579,19 @@ This example uses the shadcn/ui `Badge` component with Tailwind utility classes.
 - Helpful empty state messages
 - Guidance on next steps
 - Visual indicators
+
+**Dashboard (implemented)**:
+- Portfolio, active positions, and recent trades use **dashed-border** empty panels with primary + secondary lines when data is loaded but absent.
+- Recent trades avoids showing “no trades” during the initial portfolio/trades fetch by using a dedicated **`isLoading`** skeleton state.
+
+### Loading states (skeletons)
+
+- **Portfolio summary**, **positions table**, and **trades table** use **Tailwind `animate-pulse`** placeholders that mirror the final layout (not a generic single bar).
+- Shown while WebSocket is not yet connected or portfolio loading flags are true; see [Frontend: Dashboard UX enhancements](07-frontend.md#dashboard-ux-enhancements).
+
+### Trade feedback
+
+- New executions surface as a **toast** (bottom-right) for both unified `data_update` / `trade` and legacy `trade_executed` messages, without changing server payloads.
 
 ---
 

@@ -11,7 +11,8 @@
  * - Consolidated data fetching and updates
  */
 
-import { useState, useEffect, useReducer, useRef } from 'react'
+import { useEffect, useReducer, useRef } from 'react'
+import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
 import type {
@@ -489,10 +490,52 @@ const WS_URL = resolveWebSocketUrl()
  *
  * This replaces useAgent, useWebSocket, usePortfolio, and other specialized hooks.
  */
+function isTradeExecutedMessage(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false
+  const m = message as { type?: string; resource?: string }
+  return (
+    m.type === 'trade_executed' ||
+    (m.type === 'data_update' && m.resource === 'trade')
+  )
+}
+
+function showTradeExecutedToast(data: Record<string, unknown>) {
+  const tradeId = data.trade_id
+  if (tradeId == null || tradeId === '') return
+
+  const sideRaw = data.side
+  const side =
+    typeof sideRaw === 'string' ? sideRaw.toUpperCase() : String(sideRaw ?? '').toUpperCase()
+
+  const symbol = typeof data.symbol === 'string' ? data.symbol : '—'
+
+  const rawPrice = data.price ?? data.fill_price ?? data.entry_price
+  let priceNum: number | null = null
+  if (typeof rawPrice === 'number' && !Number.isNaN(rawPrice)) {
+    priceNum = rawPrice
+  } else if (typeof rawPrice === 'string') {
+    const p = parseFloat(rawPrice)
+    if (!Number.isNaN(p)) priceNum = p
+  }
+
+  const priceLabel =
+    priceNum != null
+      ? `$${priceNum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+      : '—'
+
+  const isBuy = side === 'BUY' || side === 'LONG'
+
+  toast(`${side} ${symbol} @ ${priceLabel}`, {
+    icon: isBuy ? '↑' : '↓',
+    duration: 4000,
+  })
+}
+
 export function useTradingData() {
   const [state, dispatch] = useReducer(tradingDataReducer, initialState)
   const { isConnected, lastMessage, sendMessage, error: wsError } = useWebSocket(WS_URL)
   const lastMessageRef = useRef(lastMessage)
+  const lastToastedTradeIdRef = useRef<string | null>(null)
 
   // Keep lastMessageRef in sync with lastMessage (required for apiClient response polling)
   useEffect(() => {
@@ -552,6 +595,20 @@ export function useTradingData() {
 
       dispatch({ type: 'WEBSOCKET_MESSAGE', payload: lastMessage })
     }
+  }, [lastMessage])
+
+  // Trade executed: toast (deduped; does not change reducer / WS contract)
+  useEffect(() => {
+    if (!lastMessage || !isTradeExecutedMessage(lastMessage)) return
+    const msg = lastMessage as { data?: unknown; payload?: unknown }
+    const data = (msg.data ?? msg.payload ?? {}) as Record<string, unknown>
+    if (!data || typeof data !== 'object') return
+    const id = data.trade_id
+    if (id == null || id === '') return
+    const idStr = String(id)
+    if (lastToastedTradeIdRef.current === idStr) return
+    lastToastedTradeIdRef.current = idStr
+    showTradeExecutedToast(data as Record<string, unknown>)
   }, [lastMessage])
 
   // Handle WebSocket errors

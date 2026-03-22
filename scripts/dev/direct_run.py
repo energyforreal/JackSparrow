@@ -8,7 +8,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
 sys.stderr.reconfigure(encoding='utf-8', line_buffering=True)
 
-project_root = Path(__file__).parent
+project_root = Path(__file__).resolve().parent.parent.parent
 output_file = project_root / "direct_output.txt"
 
 print(f"Starting execution...", file=sys.stderr, flush=True)

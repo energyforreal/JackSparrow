@@ -1083,7 +1083,7 @@ This prioritization reflects maximum impact per unit of effort:
 ---
 
 *Report generated from code-traced analysis of: `JackSparrow_Trading_Colab_v4.ipynb`,  
-`train_robust_ensemble.py`, `train_regime_model.py`, `HOLD_SIGNAL_DIAGNOSIS.md`,  
-`ML_PIPELINE_AND_DATAFLOW_REPORT.md`, `ML_PIPELINE_ENHANCEMENT_PROPOSAL.md`*
+`train_robust_ensemble.py`, `train_regime_model.py`, `docs/analysis/HOLD_SIGNAL_DIAGNOSIS.md`,  
+`docs/reports/ml-pipeline-and-dataflow-report.md`, `docs/reports/ml-pipeline-enhancement-proposal.md`*
 
 *All patches reference actual file paths and method names found in the uploaded codebase.*

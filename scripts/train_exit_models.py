@@ -43,9 +43,9 @@ CFG = Config()
 # PROJECT PATHS
 # ============================================================================
 
-BASE = Path('.')
-MODEL_DIR = BASE / 'agent' / 'model_storage' / 'robust_ensemble'
-DATA_DIR = BASE / 'data' / 'candles'
+BASE = Path(__file__).resolve().parent.parent
+MODEL_DIR = BASE / "agent" / "model_storage" / "robust_ensemble"
+DATA_DIR = BASE / "data" / "candles"
 
 # Create directories
 MODEL_DIR.mkdir(parents=True, exist_ok=True)

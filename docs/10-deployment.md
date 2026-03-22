@@ -460,7 +460,7 @@ Before running `docker compose up` (or the deployment scripts) on a new host:
 
 | Service   | Image/Build                     | Port | Resource Limits | Notes |
 |-----------|---------------------------------|------|-----------------|-------|
-| postgres  | `timescale/timescaledb:2.13.1-pg15` | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
+| postgres  | `timescale/timescaledb:2.25.1-pg15` (see `docker-compose.yml`) | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
 | redis     | `redis:7.2-alpine`              | 6379 | 1 CPU, 512MB RAM | Append-only mode, persistent volume |
 | agent     | `agent/Dockerfile`              | 8002 | 4 CPU, 4GB RAM | Multi-stage build, ML-optimized, embeds Feature Server on 8002 |
 | backend   | `backend/Dockerfile`            | 8000 | 2 CPU, 2GB RAM | Multi-stage build, non-root user |
@@ -509,6 +509,19 @@ The browser always connects from your host, even when the frontend runs in a con
 ```bash
 docker compose build frontend --no-cache
 docker compose up -d frontend
+```
+
+**Full stack rebuild (all images)** — use when agent, backend, or frontend code changed:
+
+```bash
+docker compose build --pull
+docker compose up -d --force-recreate
+```
+
+If the frontend image finished building after `up` already started, ensure the running container uses the new tag:
+
+```bash
+docker compose up -d --force-recreate frontend
 ```
 
 If you place the stack behind a reverse proxy or different hostname, update these env vars accordingly so the built frontend points to the correct public URL.

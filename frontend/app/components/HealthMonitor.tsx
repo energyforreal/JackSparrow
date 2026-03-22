@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { HealthStatus } from '@/types'
+import { cn } from '@/lib/utils'
 import { CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
 
 interface HealthMonitorProps {
@@ -23,6 +24,12 @@ const getStatusIcon = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
     default:
       return <AlertCircle className="h-4 w-4 text-muted-foreground" />
   }
+}
+
+function latencyBarColor(ms: number): string {
+  if (ms < 50) return 'bg-green-500'
+  if (ms < 150) return 'bg-amber-500'
+  return 'bg-red-500'
 }
 
 const getStatusVariant = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
@@ -125,9 +132,25 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
                   </div>
                   <div className="flex items-center gap-3">
                     {service.latency !== undefined && service.latency !== null && (
-                      <span className="text-xs text-muted-foreground">
-                        {service.latency}ms
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {service.latency}ms
+                        </span>
+                        <div
+                          className="w-16 h-1 rounded-full bg-muted overflow-hidden"
+                          title={`Latency vs 500ms reference: ${service.latency}ms`}
+                        >
+                          <div
+                            className={cn(
+                              'h-1 rounded-full transition-all',
+                              latencyBarColor(service.latency)
+                            )}
+                            style={{
+                              width: `${Math.min((service.latency / 500) * 100, 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
                     )}
                     <Badge variant={getStatusVariant(service.status as 'up' | 'degraded' | 'down' | 'unknown')}>
                       {service.status.toUpperCase()}

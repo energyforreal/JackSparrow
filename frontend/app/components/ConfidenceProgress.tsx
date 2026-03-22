@@ -8,7 +8,14 @@ import { normalizeConfidenceToPercent, getConfidenceColorClass } from '@/utils/f
 interface ConfidenceProgressProps {
   value: number | null | undefined
   className?: string
-  variant?: 'confidence' | 'health'
+  variant?: 'confidence' | 'health' | 'reasoningStep'
+}
+
+/** 80% / 60% tiers for reasoning-chain step bars (0–100 scale after normalization). */
+function getReasoningStepColorClass(percent: number): string {
+  if (percent >= 80) return 'bg-green-500'
+  if (percent >= 60) return 'bg-yellow-500'
+  return 'bg-red-500'
 }
 
 function getHealthColorClass(score: number): string {
@@ -25,9 +32,12 @@ function getHealthColorClass(score: number): string {
 
 export function ConfidenceProgress({ value, className, variant = 'confidence' }: ConfidenceProgressProps) {
   const percent = normalizeConfidenceToPercent(value)
-  const colorClass = variant === 'health' 
-    ? getHealthColorClass(percent)
-    : getConfidenceColorClass(value ?? 0)
+  const colorClass =
+    variant === 'health'
+      ? getHealthColorClass(percent)
+      : variant === 'reasoningStep'
+        ? getReasoningStepColorClass(percent)
+        : getConfidenceColorClass(value ?? 0)
 
   return (
     <ProgressPrimitive.Root

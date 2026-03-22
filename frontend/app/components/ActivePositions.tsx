@@ -12,7 +12,6 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Position } from '@/types'
 import { cn } from '@/lib/utils'
-import { LoadingSkeleton } from './LoadingSpinner'
 
 interface ActivePositionsProps {
   positions?: Position[]
@@ -22,12 +21,53 @@ interface ActivePositionsProps {
 export function ActivePositions({ positions, isLoading = false }: ActivePositionsProps) {
   if (isLoading) {
     return (
-      <Card>
+      <Card role="status" aria-label="Loading active positions">
         <CardHeader>
           <CardTitle>Active Positions</CardTitle>
         </CardHeader>
         <CardContent>
-          <LoadingSkeleton className="py-4" />
+          <div className="overflow-x-auto -mx-6 px-6 animate-pulse">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Side</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Entry Price</TableHead>
+                  <TableHead>Current Price</TableHead>
+                  <TableHead>PnL</TableHead>
+                  <TableHead>Duration</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[1, 2, 3, 4, 5].map((row) => (
+                  <TableRow key={row}>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-16" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-6 bg-muted rounded-md w-12" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-10" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-6 bg-muted rounded-md w-16" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-14" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     )
@@ -39,8 +79,11 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
         <CardHeader>
           <CardTitle>Active Positions</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="rounded-xl border border-dashed p-8 text-center">
           <p className="text-sm text-muted-foreground">No active positions</p>
+          <p className="text-xs mt-2 text-muted-foreground/80">
+            The agent is monitoring — no open trades right now.
+          </p>
         </CardContent>
       </Card>
     )
@@ -53,12 +96,22 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
     return `$${numPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
+  const getOpenMinutes = (openedAt: Date | string) => {
+    const diff = Date.now() - new Date(openedAt).getTime()
+    return Math.max(0, Math.floor(diff / (1000 * 60)))
+  }
+
   const getDuration = (openedAt: Date | string) => {
-    const now = new Date()
-    const diff = now.getTime() - new Date(openedAt).getTime()
-    const hours = Math.floor(diff / (1000 * 60 * 60))
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
+    const totalMin = getOpenMinutes(openedAt)
+    const hours = Math.floor(totalMin / 60)
+    const minutes = totalMin % 60
     return `${hours}h ${minutes}m`
+  }
+
+  function durationClass(minutes: number): string {
+    if (minutes < 30) return 'text-green-600 dark:text-green-400'
+    if (minutes < 120) return 'text-amber-600 dark:text-amber-400'
+    return 'text-red-600 dark:text-red-400'
   }
 
   return (
@@ -119,7 +172,12 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
                       'N/A'
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
+                  <TableCell
+                    className={cn(
+                      'tabular-nums',
+                      durationClass(getOpenMinutes(position.opened_at))
+                    )}
+                  >
                     {getDuration(position.opened_at)}
                   </TableCell>
                 </TableRow>

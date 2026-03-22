@@ -42,8 +42,9 @@ The Data Layer is responsible for:
 #### Components
 
 **Market Data Service**
-- Fetches real-time ticker data from Delta Exchange API
-- Retrieves historical OHLCV data
+- Continuously monitors real-time BTCUSD ticker prices (every 0.5 seconds)
+- Emits PriceFluctuationEvent when price changes exceed threshold (≥0.5%)
+- Retrieves historical OHLCV data for analysis
 - Implements circuit breakers for API failures
 - Caches frequently accessed data
 
@@ -185,7 +186,31 @@ For detailed orchestration documentation, see [MCP Layer Documentation - Orchest
 
 ### MCP Components
 
-#### 1. MCP Feature Protocol
+#### 1. MCP Orchestrator
+
+**Purpose**: Central coordinator for all MCP components providing unified AI agent functionality
+
+**Key Features**:
+- Unified prediction pipeline (Feature → Model → Reasoning)
+- Parallel model inference processing
+- Complete reasoning chain generation
+- Consensus calculation and decision synthesis
+- Event-driven architecture integration
+
+**Implementation**: `agent/core/mcp_orchestrator.py`
+
+**Architecture**:
+```python
+class MCPOrchestrator:
+    async def process_prediction_request(self, symbol, context):
+        # 1. Feature computation via MCP Feature Server
+        # 2. Parallel model inference via MCP Model Registry
+        # 3. Reasoning synthesis via MCP Reasoning Engine
+        # 4. Consensus and decision extraction
+        return complete_prediction_result
+```
+
+#### 2. MCP Feature Protocol
 
 **Purpose**: Standardized feature communication with versioning and quality tracking
 
@@ -212,7 +237,7 @@ class MCPFeature(BaseModel):
 
 For detailed Feature Protocol documentation, see [MCP Layer Documentation - Feature Protocol](02-mcp-layer.md#mcp-feature-protocol).
 
-#### 2. MCP Model Protocol
+#### 3. MCP Model Protocol
 
 **Purpose**: Standardized model prediction format with explanations
 
@@ -242,7 +267,7 @@ class MCPModelPrediction(BaseModel):
 
 For detailed Model Protocol documentation, see [MCP Layer Documentation - Model Protocol](02-mcp-layer.md#mcp-model-protocol).
 
-#### 3. MCP Reasoning Protocol
+#### 4. MCP Reasoning Protocol
 
 **Purpose**: Structured reasoning chains for decision transparency
 
@@ -347,11 +372,18 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 
 ### Backend ↔ Agent Communication
 
-**Pattern**: Message queue with command/response
-- Backend sends commands to agent via queue
-- Agent processes and responds via response queue
-- Timeout handling for unresponsive agent
-- Health check ping mechanism
+**Pattern**: WebSocket (preferred) + Redis Queue (fallback)
+- **WebSocket**: Real-time bidirectional communication
+  - Backend connects to agent WebSocket server (`ws://localhost:8002`)
+  - Commands sent via WebSocket with instant responses (<10ms latency)
+  - Agent sends events directly to backend WebSocket (`ws://localhost:8000/ws/agent`)
+  - Automatic reconnection with exponential backoff
+- **Redis Queue**: Fallback for resilience
+  - Backend sends commands via Redis queue if WebSocket unavailable
+  - Agent polls Redis queue and responds via key-value store
+  - Polling interval: 200ms (higher latency but reliable)
+- **Dual-mode operation**: Events published to both Redis Streams (persistence) and WebSocket (low latency)
+- Configuration: `USE_AGENT_WEBSOCKET=true` (default) enables WebSocket, falls back to Redis if unavailable
 
 ### Frontend ↔ Backend Communication
 
@@ -422,14 +454,96 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 
 ### WebSocket Protocol
 
+#### Frontend ↔ Backend
+
 **Connection**: `ws://localhost:8000/ws`
 
 **Message Types**:
 - `agent_state` - Agent state updates
-- `trade_executed` - New trade notifications
-- `portfolio_update` - Portfolio value changes
-- `health_status` - Health status changes
-- `prediction_generated` - New prediction available
+- `signal_update` - AI signal updates (BUY/SELL/HOLD) with full decision data
+- `reasoning_chain_update` - Reasoning chain updates (6-step reasoning process)
+- `model_prediction_update` - ML model prediction updates (consensus and individual models)
+- `market_tick` - Real-time price updates (BTCUSD and other symbols)
+**Simplified Message Format** (as of 2026-02-01):
+The WebSocket communication uses a unified envelope format with 3 core message types:
+
+- `data_update` - Unified data updates (replaces: `signal_update`, `portfolio_update`, `trade_executed`, `market_tick`, `reasoning_chain_update`, `model_prediction_update`)
+- `agent_update` - Agent state changes (replaces: `agent_state`)
+- `system_update` - System updates (replaces: `health_update`, `time_sync`, `performance_update`)
+
+**Unified Message Envelope Structure**:
+All WebSocket messages use a standardized envelope format:
+
+```json
+{
+  "type": "data_update" | "agent_update" | "system_update",
+  "resource": "signal" | "portfolio" | "trade" | "market" | "model" | "agent" | "health" | "time",
+  "data": {
+    "field1": "value1",
+    "timestamp": "2025-01-27T12:00:00Z"
+  },
+  "timestamp": "2025-01-27T12:00:00.123Z",
+  "sequence": 12345,
+  "source": "agent" | "system",
+  "server_timestamp_ms": 1706356800123
+}
+```
+
+**Message Type Mapping**:
+- `data_update` with `resource: "signal"` → Trading signals and reasoning
+- `data_update` with `resource: "portfolio"` → Portfolio value changes
+- `data_update` with `resource: "trade"` → New trade notifications
+- `data_update` with `resource: "market"` → Market price updates
+- `data_update` with `resource: "model"` → Model predictions
+- `agent_update` with `resource: "agent"` → Agent state changes
+- `system_update` with `resource: "health"` → Health status changes
+- `system_update` with `resource: "time"` → Time synchronization
+
+**Timestamp Fields**:
+- `timestamp`: ISO 8601 formatted message timestamp
+- `server_timestamp_ms`: Unix timestamp in milliseconds (for precise age calculation)
+- `data.timestamp`: Event-specific timestamp (when the event actually occurred)
+
+**Subscription Channels**:
+Simplified to 3 core channels:
+- `data_update` - All data updates (signal, portfolio, trade, market, model)
+- `agent_update` - Agent state changes
+- `system_update` - System updates (health, time, performance)
+
+**Periodic Update Frequencies**:
+- Agent State: Every 30 seconds (heartbeat mechanism)
+- Health Status: Every 60 seconds
+- Time Sync: Every 30 seconds
+- Market Ticks: Every 5 seconds (fallback) or on price change >0.01%
+- Portfolio Updates: On market tick or trade execution
+
+**Client Actions**:
+- `subscribe` - Subscribe to channels (simplified: `["data_update", "agent_update", "system_update"]`)
+- `unsubscribe` - Unsubscribe from channels
+- `get_state` - Request current connection state
+- `get_agent_state` - Request current agent state on demand
+
+**Backward Compatibility**:
+The frontend automatically normalizes legacy message types (`signal_update`, `portfolio_update`, etc.) to the new format for smooth transition.
+
+#### Backend ↔ Agent
+
+**Agent WebSocket Server**: `ws://localhost:8002` (agent side)
+- Backend connects to agent for command/response
+- Commands: `predict`, `execute_trade`, `get_status`, `control`
+- Responses: JSON with `success`, `data`, `error` fields
+- Latency: <10ms (vs ~200ms with Redis polling)
+
+**Backend WebSocket Endpoint**: `ws://localhost:8000/ws/agent` (backend side)
+- Agent connects to backend to send events directly
+- Events: `decision_ready`, `state_transition`, `order_fill`, `position_closed`, etc.
+- Backend routes events to frontend clients
+- Dual publishing: Events sent to both WebSocket (low latency) and Redis Streams (persistence)
+
+**Fallback Mechanism**:
+- If WebSocket unavailable, automatically falls back to Redis queue/streams
+- Configuration: `USE_AGENT_WEBSOCKET=true` (default) enables WebSocket
+- Redis remains as backup for reliability
 
 **Client Actions**:
 - `subscribe` - Subscribe to channels
@@ -466,6 +580,102 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
   "final_confidence": 0.75
 }
 ```
+
+---
+
+## Startup and Operations
+
+### Startup Sequence Architecture
+
+The system employs a comprehensive 4-step startup sequence managed by `start_parallel.py`:
+
+#### Step 1: Environment Loading
+- Loads root `.env` configuration file
+- Validates environment variable format and presence
+- Sets up child process environment inheritance
+
+#### Step 2: Paper Trading Validation
+- **Safety Feature**: Validates `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
+- **Protection Logic**: Blocks startup if live trading mode is detected
+- **Safety Indicators**: Displays clear status messages and warnings
+
+#### Step 3: Configuration Validation
+- **Environment Validation**: Runs `validate-env.py` to check required variables
+- **Prerequisite Validation**: Runs `validate-prerequisites.py` for system requirements
+- **Optional Model Validation**: Validates ML model files if `VALIDATE_MODELS_ON_STARTUP=true`
+
+#### Step 4: Service Dependencies & Startup
+- Ensures virtual environments and dependencies are set up
+- Performs parallel service startup (backend, agent, frontend)
+- Executes post-startup health checks
+- Activates monitoring dashboard
+
+### Validation System Architecture
+
+#### Paper Trading Validator (`PaperTradingValidator`)
+- **Purpose**: Prevents accidental live trading execution
+- **Configuration Check**: Validates environment variables for safe operation
+- **Startup Blocking**: Terminates startup with clear warnings for live trading mode
+- **Status Reporting**: Provides current trading mode status to monitoring systems
+
+#### Environment Validator (`validate-env.py`)
+- **Configuration Verification**: Validates all required environment variables
+- **Format Checking**: Ensures proper connection string formats
+- **Security Validation**: Verifies API keys and security tokens
+- **Error Reporting**: Provides specific guidance for configuration issues
+
+#### Prerequisite Validator (`validate-prerequisites.py`)
+- **System Requirements**: Validates Python, Node.js, PostgreSQL, Redis versions
+- **Connectivity Testing**: Verifies database and cache connections
+- **Dependency Checking**: Ensures required libraries are available
+- **Platform Compatibility**: Handles Windows/macOS/Linux differences
+
+### Health Check System
+
+#### Post-Startup Health Verification
+- **HTTP Endpoint Checks**: Validates backend, feature server, and frontend health
+- **Service Readiness**: Ensures all services are responding correctly
+- **Automatic Retry**: Continues startup with warnings if health checks fail
+- **Status Reporting**: Provides detailed health status information
+
+#### Health Check Components
+- **Backend Health**: `GET http://localhost:8000/api/v1/health`
+- **Feature Server Health**: `GET http://localhost:8001/health`
+- **Frontend Accessibility**: HTTP connectivity check on configured port
+
+### Monitoring Architecture
+
+#### Real-time Monitoring Dashboard (`MonitoringDashboard`)
+- **Service Status Tracking**: Real-time health monitoring of all services
+- **Paper Trading Status**: Continuous display of trading mode safety
+- **Data Freshness Monitoring**: Message age tracking across WebSocket channels
+- **Signal Generation Analytics**: Frequency and timing analysis of trading signals
+
+#### WebSocket Monitoring (`WebSocketMonitor`)
+- **Connection Management**: Automatic WebSocket connection establishment and monitoring
+- **Message Freshness Tracking**: Age analysis for different message types
+- **Stale Message Detection**: Threshold-based alerts for data freshness issues
+- **Signal Analysis**: Generation frequency and interval tracking
+
+#### Validation Reporting (`ValidationReporter`)
+- **Comprehensive Reports**: Generates detailed validation status reports
+- **Service Health Status**: Current health status of all components
+- **Data Freshness Metrics**: WebSocket message freshness statistics
+- **Recommendations**: Actionable guidance for identified issues
+
+### Operational Safety Mechanisms
+
+#### Live Trading Protection
+- **Environment Validation**: Blocks startup with live trading configuration
+- **Configuration Verification**: Multiple checkpoints for trading mode safety
+- **Clear Warnings**: Unambiguous messages about live trading risks
+- **Forced Paper Mode**: Defaults to safe paper trading operation
+
+#### Process Lifecycle Management
+- **Graceful Startup**: Parallel service initialization with dependency checking
+- **Health Verification**: Post-startup validation before declaring success
+- **Clean Shutdown**: Proper process termination and resource cleanup
+- **Restart Capability**: Clean restart functionality for configuration changes
 
 ---
 
@@ -567,6 +777,71 @@ When a circuit breaker opens:
 
 Include the checklist in runbooks so operators know which mitigation should trigger automatically and which ones need manual verification.
 
+### Validation Error Handling
+
+The startup and configuration validation system implements comprehensive error handling for safe system operation:
+
+#### Startup Validation Errors
+
+**Paper Trading Validation Failures**:
+- **Detection**: Invalid `PAPER_TRADING_MODE` or `TRADING_MODE` environment variables
+- **Response**: Immediate startup termination with clear warnings
+- **Recovery**: User must correct environment configuration and restart
+- **Safety**: Prevents accidental live trading execution
+
+**Environment Validation Failures**:
+- **Detection**: Missing or malformed required environment variables
+- **Response**: Detailed error messages with specific configuration guidance
+- **Recovery**: Automatic validation scripts provide actionable fixes
+- **Examples**: Database URL format, API credential validation, security key verification
+
+**Prerequisite Validation Failures**:
+- **Detection**: Missing system dependencies or version incompatibilities
+- **Response**: Platform-specific installation and configuration guidance
+- **Recovery**: Automatic prerequisite checking with clear error messages
+- **Examples**: Python/Node.js version checks, database connectivity, Redis availability
+
+#### Health Check Error Handling
+
+**Service Health Failures**:
+- **Detection**: HTTP endpoint failures during post-startup verification
+- **Response**: Startup continues with warnings, detailed health status reporting
+- **Recovery**: Automatic retry mechanisms and troubleshooting guidance
+- **Monitoring**: Real-time health status tracking in monitoring dashboard
+
+**WebSocket Connection Failures**:
+- **Detection**: WebSocket monitoring connection drops or message staleness
+- **Response**: Automatic reconnection attempts with exponential backoff
+- **Recovery**: Connection status displayed in monitoring dashboard
+- **Alerting**: Freshness threshold violations trigger status warnings
+
+#### Configuration Error Recovery
+
+**Validation Error Categories**:
+- **Critical**: Block startup (paper trading mode, missing credentials)
+- **Warning**: Allow startup with reduced functionality (optional services)
+- **Informational**: Log issues but continue operation (performance optimizations)
+
+**Error Response Format for Validation**:
+```json
+{
+  "validation": {
+    "component": "paper_trading_validator",
+    "status": "failed",
+    "error": {
+      "code": "LIVE_TRADING_DETECTED",
+      "message": "Live trading mode detected - startup blocked for safety",
+      "details": {
+        "PAPER_TRADING_MODE": "false",
+        "TRADING_MODE": "live"
+      },
+      "guidance": "Set PAPER_TRADING_MODE=true or TRADING_MODE=paper"
+    },
+    "timestamp": "2025-01-12T10:30:00Z"
+  }
+}
+```
+
 ### Error Response Format
 
 **Standard Error Response**:
@@ -614,14 +889,28 @@ Include the checklist in runbooks so operators know which mitigation should trig
 
 ### Prediction Flow
 
+**Primary Flow (Fluctuation-Based):**
 ```
-1. Market Data Service → Fetch current ticker
-2. Feature Server → Compute features
-3. Model Registry → Get predictions from all models
-4. Reasoning Engine → Generate reasoning chain
-5. Risk Manager → Assess risks
-6. Decision Engine → Synthesize decision
-7. Backend API → Return prediction to client
+1. Market Data Service → Continuous price monitoring (0.5s intervals)
+2. PriceFluctuationEvent → Triggered on ≥0.5% price change
+3. Feature Server → Compute all 50 features
+4. Model Registry → Get predictions from all models
+5. Reasoning Engine → Generate reasoning chain
+6. Risk Manager → Assess risks
+7. Decision Engine → Synthesize decision
+8. Backend API → Return prediction to client
+9. WebSocket → Broadcast signal_update
+```
+
+**Secondary Flow (Time-Based):**
+```
+1. Market Data Service → Monitor candle closes
+2. CandleClosedEvent → Periodic analysis (15m intervals)
+3. Feature Server → Compute features
+4. Model Registry → Get predictions
+5. Reasoning Engine → Generate reasoning chain
+6. Risk Manager → Assess risks
+7. Decision Engine → Synthesize decision
 8. WebSocket → Broadcast update
 ```
 
@@ -640,10 +929,12 @@ Include the checklist in runbooks so operators know which mitigation should trig
 ```
 
 **Exit Flow (implemented):**
-- **Dual path**: (1) Timer-based loop at `position_monitor_interval_seconds` / `min_monitor_interval_seconds`; (2) WebSocket-driven when `websocket_sl_tp_enabled` (MarketDataService → ExecutionEngine.update_position_price_and_check, 200ms throttle).
-- Trailing stop, time-based exit (`max_position_hold_hours`), signal-reversal exit (TradingHandler). ExecutionEngine.initialize(risk_manager); on close, risk_manager.portfolio.remove_position(symbol).
-- Exit reasons: stop_loss_hit, take_profit_hit, market_close, signal_reversal, time_limit.
-- State Machine → OBSERVING; Learning System records outcome when model_predictions present; WebSocket and database updated.
+- **Dual path**: (1) **Timer-based**: Position monitor loop (`IntelligentAgent._position_monitor_loop`) runs at `position_monitor_interval_seconds` (e.g. 15s) when no positions, or `min_monitor_interval_seconds` (e.g. 2s) when positions are open. (2) **WebSocket-driven** (when `websocket_sl_tp_enabled`): MarketDataService WebSocket ticker triggers `ExecutionEngine.update_position_price_and_check(symbol, price)` per symbol with a 200ms throttle.
+- For each open position: update current price, apply **trailing stop** (ratchet stop_loss on favorable moves), check **time-based exit** (force-close after `max_position_hold_hours`), then compare price to stop loss / take profit; if hit, close with appropriate `exit_reason`.
+- **Signal-reversal exit**: TradingHandler checks open position before entry; if the new signal contradicts the position (e.g. long + SELL), it closes the position with `exit_reason='signal_reversal'` and returns.
+- ExecutionEngine.initialize() accepts optional `risk_manager`; on close it calls `risk_manager.portfolio.remove_position(symbol)`.
+- Exit reasons: `stop_loss_hit`, `take_profit_hit`, `market_close`, `signal_reversal`, `time_limit`.
+- State Machine → Transition MONITORING_POSITION → OBSERVING; WebSocket and database updated.
 
 ### Learning Flow
 
@@ -714,7 +1005,7 @@ Include the checklist in runbooks so operators know which mitigation should trig
 
 ## Recent Architectural Enhancements
 
-As of 2025-01-27, the system has undergone major architectural improvements. For a complete change log, see [Major Changes Summary](../../MAJOR_CHANGES.md).
+As of 2025-01-27, the system has undergone major architectural improvements. For a complete change log, see [Major Changes Summary](major-changes.md).
 
 ### Docker Containerization
 
@@ -764,5 +1055,5 @@ This architecture enables better scalability, testability, and maintainability b
 - [Frontend Documentation](07-frontend.md) - UI implementation
 - [Deployment Documentation](10-deployment.md) - Setup and deployment
 - [Build Guide](11-build-guide.md) - Complete build instructions
-- [Major Changes Summary](../../MAJOR_CHANGES.md) - Detailed change log for recent architectural improvements
+- [Major Changes Summary](major-changes.md) - Detailed change log for recent architectural improvements
 

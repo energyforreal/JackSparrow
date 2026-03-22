@@ -63,7 +63,7 @@ After restarting Cursor:
 
 - `.cursor/TROUBLESHOOTING.md` - Comprehensive troubleshooting guide
 - `.cursor/cursor-settings.md` - Detailed settings documentation
-- `CURSOR_SETTINGS_QUICK_FIX.md` - Alternative methods
+- [Settings quick fix](settings-quick-fix.md) - Alternative methods
 
 ---
 

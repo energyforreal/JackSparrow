@@ -1005,7 +1005,7 @@ The startup and configuration validation system implements comprehensive error h
 
 ## Recent Architectural Enhancements
 
-As of 2025-01-27, the system has undergone major architectural improvements. For a complete change log, see [Major Changes Summary](../../MAJOR_CHANGES.md).
+As of 2025-01-27, the system has undergone major architectural improvements. For a complete change log, see [Major Changes Summary](major-changes.md).
 
 ### Docker Containerization
 
@@ -1055,5 +1055,5 @@ This architecture enables better scalability, testability, and maintainability b
 - [Frontend Documentation](07-frontend.md) - UI implementation
 - [Deployment Documentation](10-deployment.md) - Setup and deployment
 - [Build Guide](11-build-guide.md) - Complete build instructions
-- [Major Changes Summary](../../MAJOR_CHANGES.md) - Detailed change log for recent architectural improvements
+- [Major Changes Summary](major-changes.md) - Detailed change log for recent architectural improvements
 

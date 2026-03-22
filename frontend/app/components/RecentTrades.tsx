@@ -15,17 +15,71 @@ import { formatClockTime } from '@/utils/formatters'
 
 interface RecentTradesProps {
   trades?: Trade[]
+  isLoading?: boolean
 }
 
-export function RecentTrades({ trades }: RecentTradesProps) {
+export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
+  if (isLoading) {
+    return (
+      <Card role="status" aria-label="Loading recent trades">
+        <CardHeader>
+          <CardTitle>Recent Trades</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto -mx-6 px-6 animate-pulse">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Side</TableHead>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[1, 2, 3, 4, 5].map((row) => (
+                  <TableRow key={row}>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-14" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-6 bg-muted rounded-md w-12" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-16" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-10" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-6 bg-muted rounded-md w-16" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (!trades || trades.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>Recent Trades</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="rounded-xl border border-dashed p-8 text-center">
           <p className="text-sm text-muted-foreground">No recent trades</p>
+          <p className="text-xs mt-2 text-muted-foreground/80">
+            Executions will appear here after the agent places paper trades.
+          </p>
         </CardContent>
       </Card>
     )

@@ -391,47 +391,6 @@ This combination provides:
 
 ---
 
-### ModelReasoningView Component
-
-**Purpose**: Display model consensus showing how individual ML models contribute to predictions
-
-**Visual Design**:
-- Model consensus list
-- Color-coded signal badges
-- Confidence progress bars
-- Model name with timeframe information
-
-**Layout**:
-```
-┌─────────────────────────────────────────────────┐
-│  Model Reasoning                                │
-│                                                 │
-│  Model Consensus:                               │
-│  ┌───────────────────────────────────────────┐ │
-│  │ xgboost_classifier_BTCUSD_15m             │ │
-│  │ [STRONG SELL] ▓▓▓▓▓▓▓▓▓▓░░░░ 80.1%       │ │
-│  └───────────────────────────────────────────┘ │
-│  ┌───────────────────────────────────────────┐ │
-│  │ xgboost_regressor_BTCUSD_1h               │ │
-│  │ [STRONG BUY] ▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 100.0%       │ │
-│  └───────────────────────────────────────────┘ │
-│  ┌───────────────────────────────────────────┐ │
-│  │ xgboost_regressor_BTCUSD_4h              │ │
-│  │ [STRONG BUY] ▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 100.0%       │ │
-│  └───────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────┘
-```
-
-**Display Features**:
-- Each model shows its name, signal badge, and confidence percentage
-- Progress bars visually represent confidence levels
-- Color-coded badges match signal types (green for BUY, red for SELL, gray for HOLD)
-- Clean, scannable layout focusing on consensus-level information
-
-**Note**: Individual model reasoning details (detailed explanations per model) are intentionally not displayed to keep the UI focused and improve user experience. Only the consensus-level signals and confidences are shown.
-
----
-
 ### LearningReport Component
 
 **Purpose**: Display agent learning updates
@@ -1244,44 +1203,6 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
 - `Badge` - Evidence tags
 
 **Implementation**: Uses `Accordion` for collapsible steps, `Card` for conclusion, and `Badge` components for evidence tags.
-
-### ModelReasoningView Component
-
-**shadcn/ui Components Used**:
-- `Card` - Container for model consensus list
-- `Badge` - Signal badges (STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL)
-- `Progress` - Confidence progress bars
-
-**Implementation**:
-```tsx
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { normalizeConfidenceToPercent } from "@/utils/formatters";
-
-export function ModelReasoningView({ modelConsensus }: ModelReasoningViewProps) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Model Reasoning</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <h3>Model Consensus</h3>
-        {modelConsensus?.map((model) => (
-          <div key={model.model_name}>
-            <div>{model.model_name}</div>
-            <Badge>{model.signal}</Badge>
-            <Progress value={normalizeConfidenceToPercent(model.confidence)} />
-            <span>{normalizeConfidenceToPercent(model.confidence).toFixed(1)}%</span>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-```
-
-**Note**: The component displays only the Model Consensus section. Individual model reasoning details are intentionally not rendered to maintain a focused user experience.
 
 ### LearningReport Component
 

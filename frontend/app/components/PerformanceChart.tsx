@@ -102,17 +102,23 @@ export function PerformanceChart({ data }: PerformanceChartProps) {
                 />
                 <YAxis
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => `$${value.toLocaleString()}`}
+                  tickFormatter={(value) =>
+                    `$${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+                  }
                 />
                 <Tooltip
+                  shared
+                  trigger="hover"
+                  wrapperStyle={{ zIndex: 50 }}
                   contentStyle={{
                     backgroundColor: 'hsl(var(--card))',
                     border: '1px solid hsl(var(--border))',
                     borderRadius: '0.5rem',
                     padding: '0.75rem',
+                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
                   }}
                   formatter={(value: number) => [
-                    `$${value.toLocaleString(undefined, {
+                    `$${value.toLocaleString('en-IN', {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}`,
@@ -130,7 +136,11 @@ export function PerformanceChart({ data }: PerformanceChartProps) {
                       minute: '2-digit',
                     })
                   }}
-                  cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3' }}
+                  cursor={{
+                    stroke: 'hsl(var(--primary))',
+                    strokeWidth: 2,
+                    strokeDasharray: '4 4',
+                  }}
                 />
                 <Line
                   type="monotone"

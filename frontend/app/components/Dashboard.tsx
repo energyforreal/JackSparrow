@@ -1,5 +1,7 @@
 'use client'
 import dynamic from 'next/dynamic'
+import { useEffect } from 'react'
+import toast from 'react-hot-toast'
 import { AgentStatus } from './AgentStatus'
 import { PortfolioSummary } from './PortfolioSummary'
 import { Header } from './Header'
@@ -13,6 +15,7 @@ import { TradingDecision } from './TradingDecision'
 import { RealTimePrice } from './RealTimePrice'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useTradingData } from '@/hooks/useTradingData'
+import { apiClient } from '@/services/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -55,6 +58,32 @@ export function Dashboard() {
   // Extract positions from portfolio - much simpler now!
   const positions = portfolio?.positions || []
   const portfolioBlockLoading = !isConnected || isPortfolioLoading
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'p' && e.key !== 'P') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      e.preventDefault()
+      if (!isConnected) {
+        toast.error('Connect to the agent to request a prediction')
+        return
+      }
+      void apiClient.getPrediction('BTCUSD').catch((err) => {
+        toast.error(err instanceof Error ? err.message : 'Prediction request failed')
+      })
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isConnected])
 
   return (
     <div className="min-h-screen bg-background">
@@ -137,7 +166,13 @@ export function Dashboard() {
                 />
               </ErrorBoundary>
               <ErrorBoundary>
-                <SignalIndicator signal={signal || undefined} modelData={modelData || undefined} />
+                <div className="space-y-1">
+                  <SignalIndicator signal={signal || undefined} modelData={modelData || undefined} />
+                  <p className="text-[10px] text-muted-foreground text-center px-1">
+                    Press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">P</kbd> for
+                    prediction
+                  </p>
+                </div>
               </ErrorBoundary>
               <ErrorBoundary>
                 <HealthMonitor health={health || undefined} />
@@ -158,7 +193,7 @@ export function Dashboard() {
                 <ActivePositions positions={positions} isLoading={portfolioBlockLoading} />
               </ErrorBoundary>
               <ErrorBoundary>
-                <RecentTrades trades={recentTrades} />
+                <RecentTrades trades={recentTrades} isLoading={portfolioBlockLoading} />
               </ErrorBoundary>
             </div>
 

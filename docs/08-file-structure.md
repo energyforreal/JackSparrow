@@ -178,12 +178,16 @@ JackSparrow/
 │   └── e2e/
 │       └── test_dashboard_flows.py     # E2E dashboard tests
 │
-├── scripts/                            # Utility scripts
-│   ├── setup_db.py                    # Database setup script
-│   ├── train_models.py               # Model training script
-│   ├── seed_data.py                  # Seed test data
-│   ├── deploy.sh                      # Deployment script
-│   └── migrate_db.py                 # Database migration script
+├── scripts/                            # Utility scripts (training, audits, DB, etc.)
+│   ├── dev/                           # Ad-hoc dev helpers (startup logging, direct_run)
+│   ├── notebooks/                    # One-off notebook maintenance (cell dump, restore)
+│   ├── ml_system.py                 # Shared ML helpers (used by train_robust_ensemble)
+│   ├── train_exit_models.py         # Exit-model training (robust_ensemble layout)
+│   ├── verify_exit_models.py        # Load-test saved exit models
+│   ├── validate_copied_models.py    # Wrapper around validate_model_files for agent/model_storage
+│   ├── setup_db.py                  # Database setup script
+│   ├── train_models.py              # Model training script
+│   └── …                            # Other training, audit, and migration scripts
 │
 ├── tools/                             # Command toolkit
 │   ├── commands/
@@ -244,7 +248,7 @@ Each directory has a clear, single responsibility:
 - **agent/**: AI agent core logic
 - **frontend/**: User interface
 - **tests/**: Test code organized by type, plus `tests/functionality/reports/` for **generated** test reports (not kept in version control)
-- **scripts/**: Utility and setup scripts
+- **scripts/**: Utility and setup scripts; `scripts/dev/` for local debugging helpers; `scripts/notebooks/` for rare notebook edits
 - **docs/**: Documentation files (including archived reports under `docs/archive/`)
 
 ### Module Boundaries
@@ -867,7 +871,7 @@ agent/model_storage/
     └── README.md
 ```
 
-**Currently Integrated Models** (as of latest integration - see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)):
+**Currently Integrated Models** (as of latest integration - see [Model Integration Summary](model-integration-summary.md)):
 - **5 v5 BTCUSD timeframe ensembles**: 15m, 30m, 1h, 2h, 4h
 - Each timeframe has entry + exit models and dedicated scalers/features metadata
 - All models are automatically discovered and registered on agent startup

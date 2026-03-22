@@ -178,7 +178,7 @@ After configuring settings and restarting Cursor:
 
 ## Additional Resources
 
-- `CURSOR_AUTO_APPROVE_SETUP.md` - Quick reference guide
+- `docs/cursor/auto-approve-setup.md` - Quick reference guide
 - `.cursor/TROUBLESHOOTING.md` - Comprehensive troubleshooting
 - `.cursor/cursor-settings.md` - Detailed settings documentation
 - `.cursor/SETTINGS_VERIFICATION.md` - Settings verification guide

@@ -115,6 +115,26 @@ Comprehensive health check endpoint that tests all services.
 }
 ```
 
+#### Model Nodes Troubleshooting
+
+When the dashboard shows `model_nodes: UNKNOWN`, the backend is intentionally reporting that the agent cannot confirm any active ML models. Common scenarios:
+
+- **Discovery disabled** – No model directory is configured and discovery was never attempted.
+- **No model files found** – Discovery ran but `MODEL_DIR` was empty.
+- **Failed models** – Discovery attempted to load files but all failed validation.
+- **Agent unavailable** – The backend could not reach the agent process.
+
+Use these steps to recover:
+
+1. Ensure the desired `.pkl`/model artifacts exist under `agent/model_storage` (or the path pointed to by `MODEL_DIR`/`MODEL_PATH`).
+2. Restart the agent or trigger manual discovery so `_handle_get_status` can rebuild the registry.
+3. Tail the agent logs for the new structured events:
+   - `model_nodes_discovery_result` – Emitted whenever discovery completes with zero loaded models. Includes `discovery_reason`, `failed_models`, and `total_models`.
+   - `model_nodes_status_missing` – Emitted when the agent cannot read registry health at all.
+4. Re-run `GET /api/v1/health` or refresh the dashboard to confirm the `model_nodes` entry now reports precise counts.
+
+These log lines surface the exact remediation hint (`note`) that is also forwarded to the frontend `HealthMonitor`, allowing operators to correlate dashboard status with agent logs.
+
 **Status Codes**:
 - `200`: Success
 - `503`: Service unavailable (unhealthy)
@@ -444,32 +464,60 @@ Emergency stop - immediately halt all trading.
 
 ## WebSocket Protocol
 
-### Connection
+### Connection Endpoints
 
-**Endpoint**: `ws://localhost:8000/ws`
+**Frontend Client Endpoint**: `ws://localhost:8000/ws`
+- Used by frontend for real-time updates
+- **Simplified Format**: Uses 3 core message types (`data_update`, `agent_update`, `system_update`)
+- **See**: [WebSocket Simplification Guide](WEBSOCKET_SIMPLIFICATION.md) for complete details
+
+**Agent Event Endpoint**: `ws://localhost:8000/ws/agent`
+- Used by agent to send events directly to backend
+- Lower latency than Redis Streams
+- Backend routes agent events to frontend clients
 
 **Authentication**: Token-based (optional for development)
+
+### Simplified Message Format
+
+All WebSocket messages use a unified envelope format:
+
+```json
+{
+  "type": "data_update" | "agent_update" | "system_update",
+  "resource": "signal" | "portfolio" | "trade" | "market" | "model" | "agent" | "health" | "time",
+  "data": { ... },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "sequence": 12345,
+  "source": "agent" | "system",
+  "server_timestamp_ms": 1706356800123
+}
+```
 
 ### Message Types
 
 #### Server → Client Messages
 
-**Agent State Update**:
+**Agent State Update** (`agent_update`):
 ```json
 {
-  "type": "agent_state",
+  "type": "agent_update",
+  "resource": "agent",
   "data": {
     "state": "ANALYZING",
     "message": "Processing new market data",
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "agent"
 }
 ```
 
-**Trade Executed**:
+**Trade Executed** (`data_update` with `resource: "trade"`):
 ```json
 {
-  "type": "trade_executed",
+  "type": "data_update",
+  "resource": "trade",
   "data": {
     "order_id": "order_abc123",
     "symbol": "BTCUSD",
@@ -477,49 +525,136 @@ Emergency stop - immediately halt all trading.
     "price": 50000.0,
     "quantity": 0.05,
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "system"
 }
 ```
 
-**Portfolio Update**:
+**Portfolio Update** (`data_update` with `resource: "portfolio"`):
 ```json
 {
-  "type": "portfolio_update",
+  "type": "data_update",
+  "resource": "portfolio",
   "data": {
     "total_value": 100500.0,
     "unrealized_pnl": 500.0,
     "cash": 95000.0,
     "positions_value": 5000.0,
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "system"
 }
 ```
 
-**Health Status Change**:
+**Health Status Change** (`system_update` with `resource: "health"`):
 ```json
 {
-  "type": "health_status",
+  "type": "system_update",
+  "resource": "health",
   "data": {
     "status": "degraded",
     "health_score": 0.72,
     "reason": "Delta Exchange API latency high",
     "timestamp": "2025-01-12T10:30:00Z"
-  }
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "system"
 }
 ```
 
-**Prediction Generated**:
+**Signal Update** (`data_update` with `resource: "signal"`):
 ```json
 {
-  "type": "prediction_generated",
+  "type": "data_update",
+  "resource": "signal",
   "data": {
     "signal": "BUY",
     "confidence": 0.75,
-    "reasoning_chain_id": "chain_123",
+    "symbol": "BTCUSD",
+    "model_consensus": [...],
+    "reasoning_chain": [...],
+    "individual_model_reasoning": [...],
+    "agent_decision_reasoning": "Market shows bullish trend...",
     "timestamp": "2025-01-12T10:30:00Z"
   }
 }
 ```
+
+**Reasoning Chain Update** (`data_update` with `resource: "signal"`):
+```json
+{
+  "type": "data_update",
+  "resource": "signal",
+  "data": {
+    "symbol": "BTCUSD",
+    "reasoning_chain": [
+      {
+        "step_number": 1,
+        "description": "Situational assessment...",
+        "confidence": 0.8
+      }
+    ],
+    "conclusion": "Final decision reasoning...",
+    "final_confidence": 0.75,
+    "chain_id": "chain_123",
+    "timestamp": "2025-01-12T10:30:00Z"
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "agent"
+}
+```
+
+**Model Prediction Update** (`data_update` with `resource: "model"`):
+```json
+{
+  "type": "data_update",
+  "resource": "model",
+  "data": {
+    "symbol": "BTCUSD",
+    "consensus_signal": "BUY",
+    "signal": "BUY",
+    "consensus_confidence": 0.825,
+    "model_consensus": [
+      {
+        "model_name": "xgboost_v1",
+        "signal": "BUY",
+        "confidence": 0.85,
+        "prediction": 0.8
+      }
+    ],
+    "individual_model_reasoning": [
+      {
+        "model_name": "xgboost_v1",
+        "reasoning": "RSI indicates oversold...",
+        "confidence": 0.85,
+        "prediction": 0.8
+      }
+    ],
+    "timestamp": "2025-01-12T10:30:00Z"
+  }
+}
+```
+
+**Note:** `consensus_signal` is mapped from numeric (-1 to +1) to discrete string (STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL). Per-model `confidence` values are normalized to 0.0-1.0 range.
+
+**Market Tick Update**:
+```json
+{
+  "type": "market_tick",
+  "data": {
+    "symbol": "BTCUSD",
+    "price": 50000.0,
+    "volume": 1234.56,
+    "timestamp": "2025-01-12T10:30:00Z"
+  },
+  "timestamp": "2025-01-12T10:30:00Z",
+  "source": "agent"
+}
+```
+
+**Note**: All legacy message types have been unified under the simplified format. See [WebSocket Simplification Guide](WEBSOCKET_SIMPLIFICATION.md) for complete details.
 
 #### Client → Server Messages
 
@@ -545,6 +680,181 @@ Emergency stop - immediately halt all trading.
   "channels": ["health"]
 }
 ```
+
+#### Agent → Backend Messages (via `/ws/agent`)
+
+**Agent Event**:
+```json
+{
+  "type": "agent_event",
+  "event_type": "decision_ready|state_transition|order_fill|...",
+  "payload": {
+    "symbol": "BTCUSD",
+    "signal": "BUY",
+    "confidence": 0.75,
+    ...
+  },
+  "event_id": "uuid",
+  "correlation_id": "uuid",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+**Event Deduplication:** The backend extracts `event_id` from the top level of the event (not from `payload`) for deduplication. Duplicate events (e.g., from Redis Streams and WebSocket) are skipped using Redis key `processed_event:{event_id}` with 5-minute TTL.
+
+**Position-Closed Handling:** When a position is closed, the backend broadcasts only the full portfolio update (not a partial `{position_closed: {...}}` message). This ensures the frontend never receives an incomplete portfolio that would cause UI flicker.
+
+**Ping**:
+```json
+{
+  "type": "ping",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+#### Backend → Agent Messages (via Agent WebSocket Server)
+
+**Command**:
+```json
+{
+  "type": "command",
+  "request_id": "uuid",
+  "command": "predict|execute_trade|get_status|control",
+  "parameters": {}
+}
+```
+
+**Ping**:
+```json
+{
+  "type": "ping",
+  "request_id": "uuid"
+}
+```
+
+#### Agent → Backend Response Messages
+
+**Response**:
+```json
+{
+  "type": "response",
+  "request_id": "uuid",
+  "success": true,
+  "data": {},
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+**Error**:
+```json
+{
+  "type": "error",
+  "request_id": "uuid",
+  "success": false,
+  "error": "Error message",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+**Pong**:
+```json
+{
+  "type": "pong",
+  "request_id": "uuid",
+  "timestamp": "2025-01-12T10:30:00Z"
+}
+```
+
+---
+
+### Data Freshness Protocol
+
+The backend implements a comprehensive data freshness protocol to ensure frontend clients receive timely updates with accurate timestamps.
+
+#### Server Timestamp Injection
+
+All WebSocket messages broadcast via `websocket_manager.broadcast()` automatically receive server-side timestamps:
+
+```json
+{
+  "type": "message_type",
+  "data": {
+    "field1": "value1",
+    "timestamp": "2025-01-27T12:00:00Z"
+  },
+  "server_timestamp": "2025-01-27T12:00:00.123Z",
+  "server_timestamp_ms": 1706356800123
+}
+```
+
+**Fields**:
+- `server_timestamp`: ISO 8601 formatted server time when message was broadcast
+- `server_timestamp_ms`: Unix timestamp in milliseconds for precise age calculation
+- `data.timestamp`: Event-specific timestamp (when the event occurred)
+
+**Implementation**: The `WebSocketManager.broadcast()` method automatically injects these timestamps using `time_service.get_time_info()` before sending messages to clients.
+
+#### Message-Level Timestamps
+
+All event handlers in `agent_event_subscriber.py` add `timestamp` fields to their message data:
+
+- `data_update` (resource: `market`): Includes timestamp from market data event
+- `data_update` (resource: `signal`): Includes timestamp from decision ready event
+- `data_update` (resource: `model`): Includes timestamp from model prediction event
+- `data_update` (resource: `portfolio`): Includes current UTC timestamp
+- `data_update` (resource: `trade`): Includes execution timestamp
+- `agent_update`: Includes timestamp from state transition or periodic sync
+- `system_update` (resource: `health`): Includes health check timestamp
+- `system_update` (resource: `time`): Includes server time synchronization
+
+#### Periodic Update Frequencies
+
+The backend maintains several periodic sync loops to ensure fresh data:
+
+1. **Agent State Sync** (`_agent_state_sync_loop`):
+   - Frequency: Every 30 seconds
+   - Purpose: Broadcast current agent state even when idle
+   - Ensures frontend always has up-to-date agent status
+
+2. **Health Status Sync** (`_health_sync_loop`):
+   - Frequency: Every 60 seconds
+   - Purpose: Broadcast system health status
+   - Includes all service health checks
+
+3. **Time Sync** (`_time_sync_loop`):
+   - Frequency: Every 30 seconds
+   - Purpose: Synchronize client clocks with server time
+   - Helps with accurate freshness calculations
+
+4. **Market Ticks**:
+   - Frequency: Every 5 seconds (time-based fallback) OR on price change >0.01%
+   - Purpose: Provide real-time price updates
+   - Ensures frequent updates even during low volatility
+
+5. **Portfolio Updates**:
+   - Triggered: On market tick or trade execution
+   - Purpose: Keep portfolio data synchronized with market changes
+
+#### Timestamp Format
+
+All timestamps use ISO 8601 format:
+- **Backend sends**: `YYYY-MM-DDTHH:mm:ss.sss` (UTC, no timezone suffix)
+- **Example**: `2025-01-27T12:00:00.123456` (from `datetime.utcnow().isoformat()`)
+- **Frontend normalizes**: Appends 'Z' to treat as UTC: `2025-01-27T12:00:00.123456Z`
+- **Display format**: Converted to IST (Asia/Kolkata) and displayed as `HH:mm:ss am/pm`
+- Milliseconds included for precision
+- Frontend assumes UTC when timezone is missing (standard practice)
+
+#### Freshness Calculation
+
+Frontend calculates data freshness using:
+1. Primary: `data.timestamp` (event-specific timestamp)
+2. Fallback: `server_timestamp_ms` (server broadcast time)
+3. Age calculation: `current_time - timestamp`
+4. Color coding:
+   - Green: < 1 minute old (fresh)
+   - Amber: 1-5 minutes old (stale)
+   - Red: > 5 minutes old (very stale)
 
 ---
 
@@ -766,7 +1076,7 @@ logger = structlog.get_logger()
 
 # Log with context
 logger.info(
-    "trade_executed",
+    "data_update",  // Simplified format - replaces trade_executed, portfolio_update, signal_update, etc.
     trade_id="trade_123",
     symbol="BTCUSD",
     side="buy",
@@ -810,29 +1120,35 @@ Refer to [Logging Documentation](12-logging.md) for rotation policy, retention s
 
 ### Environment Variables
 
+**Single Root `.env` File**: The backend reads environment variables from the **root `.env` file** in the project root directory via `ROOT_ENV_PATH` in `backend/core/config.py`. No service-specific `.env` files are needed.
+
+**Setup**: Copy `.env.example` to `.env` in the project root and configure your values. See `.env.example` for the complete list of all available variables.
+
+**Key Backend Variables:**
+
 ```bash
-# Database
+# Database (REQUIRED)
 DATABASE_URL=postgresql://user:pass@localhost/trading_agent
 
 # Redis
 REDIS_URL=redis://localhost:6379
 
-# Delta Exchange
+# Delta Exchange (REQUIRED)
 DELTA_EXCHANGE_API_KEY=your_api_key
 DELTA_EXCHANGE_API_SECRET=your_api_secret
-DELTA_EXCHANGE_BASE_URL=https://api.delta.exchange
+DELTA_EXCHANGE_BASE_URL=https://api.india.delta.exchange
 
-# Agent
+# Agent Communication
 AGENT_COMMAND_QUEUE=agent_commands
 AGENT_RESPONSE_QUEUE=agent_responses
 
 # Feature Server
 FEATURE_SERVER_URL=http://localhost:8001
 
-# Vector Database
+# Vector Database (Optional)
 QDRANT_URL=http://localhost:6333
 
-# Security
+# Security (REQUIRED)
 JWT_SECRET_KEY=your_secret_key
 API_KEY=your_api_key
 
@@ -842,13 +1158,8 @@ TELEGRAM_CHAT_ID=
 
 # Logging
 LOG_LEVEL=INFO
-LOG_DIR=./logs/backend
-LOG_RETENTION_DAYS=7
-LOG_ARCHIVE_MODE=archive  # or delete
-LOG_SESSION_ID=  # optional override
 LOG_FORWARDING_ENABLED=false
 LOG_FORWARDING_ENDPOINT=
-LOG_INCLUDE_STACKTRACE=false
 ```
 
 When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are populated, the backend automatically publishes trade notifications to the configured chat. Leaving either value blank disables the integration without requiring code changes.
@@ -865,7 +1176,7 @@ Deployment checklist for Telegram alerts:
 
 1. Create a bot with [@BotFather](https://core.telegram.org/bots#botfather) and record the token.
 2. Obtain the chat ID (e.g., via @userinfobot or a simple script using `getUpdates`).
-3. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the root or backend `.env`.
+3. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the root `.env` file.
 4. Restart the backend so the new configuration is applied.
 
 ---
@@ -882,7 +1193,7 @@ The project-level commands documented in the [Build Guide](11-build-guide.md#pro
 ### `restart`
 - Gracefully stops the running `uvicorn` process via the stop routine
 - Clears cached sockets/PID files under `tmp/`
-- Re-sources environment variables from `backend/.env`
+- Re-sources environment variables from the root `.env` file
 - Archives previous backend logs to `logs/restart/<timestamp>/backend.log`
 - Invokes the `start` command to bring the service back online
 

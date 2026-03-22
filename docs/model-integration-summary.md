@@ -1,10 +1,14 @@
 # Model Integration Summary (v5 BTCUSD)
 
+> **Canonical numbered guides**: Prefer [ML Models](03-ml-models.md) for ongoing edits; this page summarizes bundles and discovery.
+
 ## Overview
 
-The project is integrated with **v5 BTCUSD entry/exit ensemble models (expanded ~122-feature schema)** stored in:
+The project is integrated with **v5 BTCUSD entry/exit ensemble models (expanded ~122-feature schema)**. The **full** multi-timeframe bundle lives at:
 
 - `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
+
+**Docker Compose** defaults the agent to `jacksparrow_v5_BTCUSD_2026-03-21/` (partial / experimental layout). Override `AGENT_MODEL_DIR` in root `.env` to point at `…/jacksparrow_v5_BTCUSD_2026-03-19` when you need all five horizons. See [ML Models in Docker](03-ml-models.md#ml-models-in-docker).
 
 The runtime uses metadata-driven model discovery and registers one model node per
 timeframe in the MCP model registry.

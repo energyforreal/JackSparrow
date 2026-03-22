@@ -318,9 +318,9 @@ except CircuitBreakerOpenError as e:
 - `agent/models/xgboost_node.py`: Prediction normalization
 - `agent/core/mcp_orchestrator.py`: Model orchestration
 
-**Model Integration**:
-- 6 XGBoost models currently integrated (3 classifiers + 3 regressors)
-- Models for 15m, 1h, and 4h timeframes
+**Model Integration** (audit snapshot; **superseded** by v5 narrative):
+- At audit time: six XGBoost models (3 classifiers + 3 regressors), 15m / 1h / 4h
+- **Current system**: v5 BTCUSD entry/exit ensembles and `MODEL_DIR` layout — see [Model integration summary](../model-integration-summary.md)
 - Automatic discovery and registration on startup
 - Parallel inference using `asyncio.gather()`
 
@@ -524,7 +524,7 @@ TAKE_PROFIT_PERCENTAGE=0.05  # 5%
 - **Method**: Parallel execution using `asyncio.gather()`
 - **Time**: ~50-200ms per model (parallel)
 - **Status**: ✅ Optimized
-- **Models**: 6 XGBoost models run concurrently
+- **Models**: Multiple registered nodes run concurrently (audit referenced six XGBoost; current v5 layout — see [model integration summary](../model-integration-summary.md))
 
 ### Caching Strategy
 - **Ticker Cache**: 10 seconds TTL

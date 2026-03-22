@@ -1,6 +1,6 @@
 # Trading Agent Improvements – Implementation Summary
 
-This document summarizes the implementation of the improvements described in [trading_agent_improvement_report.md](../trading_agent_improvement_report.md). Each item from the report is listed with status and pointers to the relevant code.
+This document summarizes the implementation of the improvements described in [trading agent improvement report](reports/trading-agent-improvement-report.md). Each item from the report is listed with status and pointers to the relevant code.
 
 ## Verification Summary
 
@@ -46,7 +46,7 @@ Defined in `agent/core/config.py` and documented in [01-architecture.md](01-arch
 
 ## Related Documentation
 
-- [trading_agent_improvement_report.md](../trading_agent_improvement_report.md) – original improvement report
+- [Trading agent improvement report](reports/trading-agent-improvement-report.md) – original improvement report
 - [01-architecture.md](01-architecture.md) – data flow and exit flow
 - [05-logic-reasoning.md](05-logic-reasoning.md) – position monitoring, Kelly, adaptive consensus, confidence
 - [04-features.md](04-features.md) – paper trading, risk management, learning feedback

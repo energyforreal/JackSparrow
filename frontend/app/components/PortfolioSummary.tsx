@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { Portfolio } from '@/types'
 import { cn } from '@/lib/utils'
-import { LoadingSkeleton } from './LoadingSpinner'
 
 interface PortfolioSummaryProps {
   portfolio?: Portfolio
@@ -15,12 +14,23 @@ interface PortfolioSummaryProps {
 export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSummaryProps) {
   if (isLoading) {
     return (
-      <Card>
+      <Card role="status" aria-label="Loading portfolio summary">
         <CardHeader>
           <CardTitle>Portfolio Value</CardTitle>
         </CardHeader>
-        <CardContent>
-          <LoadingSkeleton className="py-4" />
+        <CardContent className="space-y-4 animate-pulse">
+          <div className="h-4 bg-muted rounded-md w-28" />
+          <div className="h-10 bg-muted rounded-md w-48 max-w-[66%]" />
+          <div className="h-6 bg-muted rounded-md w-24" />
+          <div className="grid grid-cols-3 gap-4 pt-4 border-t">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="space-y-2">
+                <div className="h-3 bg-muted rounded-md w-14" />
+                <div className="h-7 bg-muted rounded-md w-24" />
+                <div className="h-3 bg-muted rounded-md w-20" />
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     )
@@ -32,8 +42,11 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
         <CardHeader>
           <CardTitle>Portfolio Value</CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">No portfolio data available yet.</p>
+        <CardContent className="rounded-xl border border-dashed p-8 text-center">
+          <p className="text-sm text-muted-foreground">No portfolio data yet</p>
+          <p className="text-xs mt-2 text-muted-foreground/80">
+            Connect to the agent and wait for the first portfolio snapshot over the WebSocket.
+          </p>
         </CardContent>
       </Card>
     )

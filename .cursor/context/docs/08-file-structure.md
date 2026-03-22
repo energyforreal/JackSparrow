@@ -71,10 +71,11 @@ JackSparrow/
 │   │   ├── __init__.py
 │   │   ├── intelligent_agent.py       # Main agent class
 │   │   ├── reasoning_engine.py        # MCP Reasoning Engine
-│   │   ├── mcp_orchestrator.py         # MCP Orchestrator
-│   │   ├── learning_system.py          # Learning module
+│   │   ├── mcp_orchestrator.py         # MCP Orchestrator (NEW - complete implementation)
+│   │   ├── learning_system.py          # Learning module (TODO - needs implementation)
 │   │   ├── state_machine.py            # Agent state machine (see [Logic & Reasoning Documentation](05-logic-reasoning.md#enhanced-agent-state-machine))
-│   │   └── context_manager.py         # Context management
+│   │   ├── context_manager.py         # Context management (TODO - needs implementation)
+│   │   └── execution.py                # Trade execution engine (TODO - needs implementation)
 │   ├── models/
 │   │   ├── __init__.py
 │   │   ├── mcp_model_node.py          # Base MCP model node interface
@@ -149,7 +150,8 @@ JackSparrow/
 │   ├── types/
 │   │   └── index.ts                   # TypeScript type definitions
 │   ├── utils/
-│   │   ├── formatters.ts              # Data formatting utilities
+│   │   ├── formatters.ts              # Data formatting utilities (currency, percentages, timestamps)
+│   │   │                              # Includes UTC→IST time conversion and normalization
 │   │   └── calculations.ts            # Calculation utilities
 │   ├── styles/
 │   │   └── globals.css                # Global styles
@@ -176,12 +178,16 @@ JackSparrow/
 │   └── e2e/
 │       └── test_dashboard_flows.py     # E2E dashboard tests
 │
-├── scripts/                            # Utility scripts
-│   ├── setup_db.py                    # Database setup script
-│   ├── train_models.py               # Model training script
-│   ├── seed_data.py                  # Seed test data
-│   ├── deploy.sh                      # Deployment script
-│   └── migrate_db.py                 # Database migration script
+├── scripts/                            # Utility scripts (training, audits, DB, etc.)
+│   ├── dev/                           # Ad-hoc dev helpers (startup logging, direct_run)
+│   ├── notebooks/                    # One-off notebook maintenance (cell dump, restore)
+│   ├── ml_system.py                 # Shared ML helpers (used by train_robust_ensemble)
+│   ├── train_exit_models.py         # Exit-model training (robust_ensemble layout)
+│   ├── verify_exit_models.py        # Load-test saved exit models
+│   ├── validate_copied_models.py    # Wrapper around validate_model_files for agent/model_storage
+│   ├── setup_db.py                  # Database setup script
+│   ├── train_models.py              # Model training script
+│   └── …                            # Other training, audit, and migration scripts
 │
 ├── tools/                             # Command toolkit
 │   ├── commands/
@@ -213,11 +219,6 @@ JackSparrow/
 │   ├── 14-project-rules.md            # Project rules documentation
 │   └── 15-audit-report.md             # Audit report
 │
-├── models/                             # Production-ready ML artefacts (root level)
-│   ├── *.pkl                           # Trained model binaries (versioned production models)
-│   └── training_summary.csv            # Latest training metrics snapshot
-│   # Note: Use MODEL_PATH env var to specify which model file to load
-│
 ├── reference/                          # Reference specifications
 │   ├── tradingagent_rebuild_spec.md
 │   ├── trading_agent_rework.md
@@ -225,7 +226,7 @@ JackSparrow/
 │   ├── implementation_guide.md
 │   └── improvements_summary.md
 │
-├── Makefile                             # Project command targets (start/restart/audit/error)
+├── tools/commands/                      # Command scripts (start, restart, audit, error)
 ├── logs/                                # Aggregated outputs from start/restart/audit/error
 ├── .env                                 # Runtime configuration (ignored from version control)
 ├── .env.example                       # Environment variables template
@@ -246,10 +247,9 @@ Each directory has a clear, single responsibility:
 - **backend/**: API and service layer
 - **agent/**: AI agent core logic
 - **frontend/**: User interface
-- **tests/**: Test code organized by type
-- **scripts/**: Utility and setup scripts
-- **docs/**: Documentation files
-- **models/**: Versioned ML artefacts referenced by runtime configuration
+- **tests/**: Test code organized by type, plus `tests/functionality/reports/` for **generated** test reports (not kept in version control)
+- **scripts/**: Utility and setup scripts; `scripts/dev/` for local debugging helpers; `scripts/notebooks/` for rare notebook edits
+- **docs/**: Documentation files (including archived reports under `docs/archive/`)
 
 ### Module Boundaries
 
@@ -556,10 +556,11 @@ tests/unit/backend/test_agent_service.py
 - Historical data import
 - Mock data creation
 
-**`scripts/migrate_db.py`**:
-- Database migrations
-- Schema updates
-- Data migrations
+**`scripts/migrate_enums.py`**:
+- Database schema migration for ENUM types
+- Converts VARCHAR enum columns to PostgreSQL ENUM types
+- Required for existing databases created before ENUM support
+- Includes transaction safety and rollback capability
 
 ---
 
@@ -575,13 +576,16 @@ tests/unit/backend/test_agent_service.py
 
 ### Command Automation
 
-**Makefile (root)**:
-- `make start`: Launches backend, agent, and frontend services simultaneously using parallel process manager; streams real-time logs to console and writes to `logs/{service}.log`.
-- `make restart`: Stops running services, clears temporary artefacts, re-executes `make start`, and archives previous logs under `logs/restart/`.
-- `make audit`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
-- `make error`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
+**Command Scripts (tools/commands/)**:
+- `start_parallel.py`: Launches backend, agent, and frontend services simultaneously using parallel process manager; streams real-time logs to console and writes to `logs/{service}.log`. Automatically validates configuration and prerequisites before starting.
+- `start.sh` / `start.ps1`: Shell script wrappers for `start_parallel.py` (Linux/macOS and Windows respectively).
+- `restart.sh` / `restart.ps1`: Stops running services, clears temporary artefacts, re-executes start command, and archives previous logs under `logs/restart/`.
+- `audit.sh` / `audit.ps1`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
+- `error.sh` / `error.ps1`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
+- `validate-prerequisites.py`: Validates system prerequisites (Python, Node.js, PostgreSQL, Redis).
+- `health_check.py`: Checks health of running services.
 
-Supporting helper scripts live under `scripts/commands/` (when present) and are invoked automatically by the Makefile targets.
+Supporting helper scripts live under `scripts/` and are invoked automatically by the command scripts.
 
 ---
 
@@ -591,28 +595,168 @@ Supporting helper scripts live under `scripts/commands/` (when present) and are 
 - Directory: `tools/commands/`
 - Companion docs: `tools/README.md`
 
-### Available Commands
-- `start_parallel.py`: Python-based parallel process manager (cross-platform) - starts all services simultaneously
-- `start.sh` / `start.ps1`: Wrapper scripts that invoke `start_parallel.py` for convenience
-- `restart.sh` / `restart.ps1`: Perform a clean shutdown and restart
-- `audit.sh` / `audit.ps1`: Run formatting, tests, health checks, and log review
-- `error.sh` / `error.ps1`: Gather live diagnostics and recent log summaries
+### Core Startup System
+
+#### `start_parallel.py` - Parallel Process Manager
+
+**Purpose**: Comprehensive startup system with validation, monitoring, and health checks.
+
+**Key Features**:
+- **4-Step Startup Sequence**: Environment loading → Paper trading validation → Redis check → Configuration validation → Service startup
+- **Paper Trading Safety**: Validates `PAPER_TRADING_MODE` and `TRADING_MODE` to prevent accidental live trading
+- **Configuration Validation**: Automatic environment variable and prerequisite validation
+- **Health Checks**: Post-startup HTTP health verification for all services
+- **Monitoring Dashboard**: Real-time service monitoring with data freshness tracking
+- **WebSocket Monitoring**: Automatic connection monitoring and message freshness analysis
+- **Validation Reporting**: Comprehensive validation reports with recommendations
+
+**Capabilities**:
+- Cross-platform (Windows, macOS, Linux)
+- Parallel service startup (faster than sequential)
+- Real-time log streaming with color coding
+- Graceful shutdown handling
+- Process lifecycle management
+
+**Usage**:
+```bash
+python tools/commands/start_parallel.py
+```
+
+#### `start.sh` / `start.ps1` - Convenience Wrappers
+
+**Purpose**: Shell script wrappers for `start_parallel.py`.
+
+**Platforms**:
+- `start.sh`: Linux/macOS
+- `start.ps1`: Windows PowerShell
+
+**Functionality**: Invoke `start_parallel.py` with appropriate shell integration.
+
+### Validation Commands
+
+#### `validate-prerequisites.py` - System Prerequisites
+
+**Purpose**: Validate system requirements before starting services.
+
+**Validates**:
+- Python 3.11+ availability and version
+- Node.js 18+ availability and version
+- PostgreSQL connection and version
+- Redis connection and version
+
+**Usage**:
+```bash
+python tools/commands/validate-prerequisites.py
+```
+
+#### `validate-health.py` - Enhanced Health Validation
+
+**Purpose**: Comprehensive health validation with detailed reporting.
+
+**Features**:
+- Detailed health status for all services
+- Performance metrics and latency information
+- Recommendations for failed services
+- Troubleshooting guidance
+
+**Usage**:
+```bash
+python tools/commands/validate-health.py
+```
+
+#### `health_check.py` - Basic Health Checks
+
+**Purpose**: Quick health verification for running services.
+
+**Checks**:
+- Backend service health (`http://localhost:8000/api/v1/health`)
+- Feature server health (`http://localhost:8001/health`)
+- Frontend accessibility
+
+**Usage**:
+```bash
+python tools/commands/health_check.py
+```
+
+### Testing and Monitoring
+
+#### `start_and_test.py` - Orchestrated Testing
+
+**Purpose**: Start services and run continuous functionality tests.
+
+**Features**:
+- Automated service startup
+- Continuous test execution (configurable intervals)
+- Parallel test execution modes
+- Failure detection and termination
+- Comprehensive test reporting
+
+**Usage**:
+```bash
+python tools/commands/start_and_test.py
+python tools/commands/start_and_test.py --test-interval 60
+python tools/commands/start_and_test.py --groups infrastructure,core-services
+```
+
+### Management Commands
+
+#### `restart.sh` / `restart.ps1` - Clean Restart
+
+**Purpose**: Perform clean shutdown and restart of all services.
+
+**Actions**:
+1. Gracefully stop backend, agent, and frontend processes
+2. Clear temporary artifacts (PID files, cached sockets)
+3. Re-run the startup command
+
+#### `audit.sh` / `audit.ps1` - System Audit
+
+**Purpose**: Run comprehensive system audit.
+
+**Checks**:
+- Python code quality (ruff, black, pytest)
+- Frontend quality (lint, test)
+- Service health checks
+- Log review for errors/warnings
+- Report generation
+
+#### `error.sh` / `error.ps1` - Diagnostics Collection
+
+**Purpose**: Gather live diagnostics and recent log summaries.
+
+**Collects**:
+- Process status for all services
+- Latest log lines per service
+- Summary of new warnings/errors
+- Diagnostic output with timestamps
 
 ### Invocation Options
-- Direct Python execution (`python tools/commands/start_parallel.py`) - recommended for fastest startup
-- Direct script execution (`./tools/commands/start.sh` or `start.ps1`)
-- Makefile wrappers (`make start`, `make audit`, etc.)
-- PowerShell scripts for Windows environments
+
+**Recommended Methods**:
+1. **Direct Python**: `python tools/commands/start_parallel.py` (fastest, most reliable)
+2. **Shell Scripts**: `./tools/commands/start.sh` or `.\tools/commands\start.ps1`
+3. **PowerShell**: For Windows environments with proper execution policy
 
 ### Log Outputs
-- All commands write to the `logs/` tree:
-  - `logs/backend.log` - Backend service logs
-  - `logs/agent.log` - Agent service logs
-  - `logs/frontend.log` - Frontend service logs
-  - `logs/backend.pid`, `logs/agent.pid`, `logs/frontend.pid` - Process ID files
-  - `logs/restart.log` - Restart operation logs
-  - `logs/audit/` - Audit reports
-  - `logs/error/`
+
+**All commands write to the `logs/` directory**:
+
+**Service Logs**:
+- `logs/backend.log` - Backend service logs
+- `logs/agent.log` - Agent service logs
+- `logs/frontend.log` - Frontend service logs
+
+**Process Management**:
+- `logs/backend.pid`, `logs/agent.pid`, `logs/frontend.pid` - Process ID files
+
+**Operation Logs**:
+- `logs/start.log` - Startup sequence logs
+- `logs/restart.log` - Restart operation logs
+- `logs/audit/` - Audit reports and results
+- `logs/error/` - Diagnostic collections
+
+**Validation Reports**:
+- `logs/validation/` - Configuration and prerequisite validation results
 
 ---
 
@@ -665,7 +809,7 @@ sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
 
 # ML/AI
-xgboost==2.0.0
+xgboost==2.0.2
 tensorflow==2.14.0
 
 # Utilities
@@ -698,37 +842,22 @@ pydantic==2.5.0
 
 ## ML Model Storage
 
-### Model Storage Locations
+### Model Storage Location
 
-JackSparrow uses two distinct model storage locations:
+JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**:
 
-1. **Root `models/` directory** - Production models shipped with codebase
-   - Contains versioned production model files (`.pkl` files)
-   - Referenced via `MODEL_PATH` environment variable (points to specific file)
-   - Example: `MODEL_PATH=models/xgboost_BTCUSD_15m.pkl`
-   - Used at runtime to load a specific production model
-
-2. **`agent/model_storage/` directory** - Upload directory for new/custom models
-   - Contains uploaded models that are discovered automatically
-   - Referenced via `MODEL_DIR` environment variable (points to directory)
-   - Example: `MODEL_DIR=./agent/model_storage`
-   - Used by model discovery system to find and register models
+- Contains all trained model files (current production uses v5 `.joblib` + `.json` artefacts for BTCUSD)
+- Referenced via `MODEL_DIR` environment variable (points to directory)
+- Example: `MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19`
+- Used by model discovery system to automatically find and register models
+- Current BTCUSD discovery is metadata-driven and reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
 
 ### Model Directory Structure
 
-**Production Models** (`models/` at root):
-```
-models/
-├── xgboost_BTCUSD_15m.pkl              # Production model files
-├── xgboost_BTCUSD_1h.pkl
-├── lightgbm_BTCUSD_4h_production_*.pkl
-└── training_summary.csv                 # Training metrics
-```
-
-**Upload Directory** (`agent/model_storage/`):
+**Model Storage** (`agent/model_storage/`):
 ```
 agent/model_storage/
-└── jacksparrow_v4_BTCUSD/
+└── jacksparrow_v5_BTCUSD_2026-03-19/
     ├── metadata_BTCUSD_15m.json
     ├── metadata_BTCUSD_30m.json
     ├── metadata_BTCUSD_1h.json
@@ -738,16 +867,23 @@ agent/model_storage/
     ├── exit_model_BTCUSD_<tf>.joblib
     ├── entry_scaler_BTCUSD_<tf>.joblib
     ├── exit_scaler_BTCUSD_<tf>.joblib
-    └── features_BTCUSD_<tf>.json
+    ├── features_BTCUSD_<tf>.json
+    └── README.md
 ```
+
+**Currently Integrated Models** (as of latest integration - see [Model Integration Summary](model-integration-summary.md)):
+- **5 v5 BTCUSD timeframe ensembles**: 15m, 30m, 1h, 2h, 4h
+- Each timeframe has entry + exit models and dedicated scalers/features metadata
+- All models are automatically discovered and registered on agent startup
 
 ### Model Discovery
 
 Models in `agent/model_storage/` are automatically discovered on agent startup:
 - Reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
-- Loads v4 artefacts through `V4EnsembleNode`
+- Loads BTCUSD artefacts via `V4EnsembleNode`
 - Registers models with MCP Model Registry
 - Models become available for predictions immediately
+- Current production path is `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

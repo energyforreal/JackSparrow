@@ -50,14 +50,19 @@ Legacy notebooks such as `notebooks/train_models_colab.ipynb` and `notebooks/tra
 |----------|---------|---------------------|-------|
 | `agent/model_storage/` | All trained ML models | `MODEL_DIR` (points to directory) | Automatic model discovery and registration |
 
-**Current Model Types**:
-- **v5 BTCUSD entry/exit ensembles** are stored in `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
-- Each timeframe includes entry/exit models, scalers, features JSON, and metadata JSON
-- The system discovers and registers models from BTCUSD metadata files in `MODEL_DIR`
+**Current model bundles** (pick one directory for `MODEL_DIR`):
+
+| Directory | Role |
+|-----------|------|
+| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | **Full** v5 BTCUSD bundle: five timeframes (15m–4h), entry/exit pairs, standard `entry_model_*` / `exit_model_*` layout. Recommended for local/dev when you want all horizons. |
+| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | **Default in Docker Compose** (`AGENT_MODEL_DIR` / in-container `MODEL_DIR`): partial experimental layout (e.g. 5m/15m, `entry_long` / `entry_short` naming). Not a complete multi-timeframe set. |
+
+- Discovery reads `metadata_BTCUSD_*.json` from `MODEL_DIR` (non-recursive).
+- For production-like behaviour with every documented timeframe, point `MODEL_DIR` at the **2026-03-19** bundle (or your own full export).
 
 ### Currently Integrated Models
 
-As of the latest integration (see [Model Integration Summary](../../MODEL_INTEGRATION_SUMMARY.md)), the system includes **5 v5 BTCUSD models** by timeframe:
+As of the latest integration (see [Model Integration Summary](model-integration-summary.md)), a **full** v5 deployment includes **5 v5 BTCUSD timeframe nodes**:
 
 - `jacksparrow_BTCUSD_15m`
 - `jacksparrow_BTCUSD_30m`
@@ -87,22 +92,28 @@ The `MODEL_DIR` environment variable must point to the directory containing `met
 
 ### ML Models in Docker
 
-When running under Docker, the agent container mounts the host `agent/model_storage/` directory and uses the v5 BTCUSD subdirectory as the model discovery root:
+When running under Docker, the agent container mounts the host `agent/model_storage/` directory.
 
-- **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service)
-- **Agent MODEL_DIR**: inside the container, `MODEL_DIR=/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19`
+- **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service).
+- **Default in-container `MODEL_DIR`**: override with `AGENT_MODEL_DIR` in root `.env`; otherwise Compose sets  
+  `MODEL_DIR=/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21` (see `docker-compose.yml` / `docker-compose.dev.yml`).
+
+To use the **full** five-timeframe bundle instead, set in root `.env`:
+
+```bash
+AGENT_MODEL_DIR=/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
+```
+
+Then restart the agent service.
 
 This means:
 
-- Models you place on the host in `agent/model_storage/jacksparrow_v4_BTCUSD/`
-  are discovered by the Dockerized agent without rebuilding images.
-- Updating or adding models only requires:
-  1. Copying artefacts into `agent/model_storage/` on the host
-  2. Restarting the `agent` container (`docker compose restart agent`)
+- Artefacts you place under `agent/model_storage/` on the host are visible in-container without rebuilding images.
+- Updating models: copy files on the host, then `docker compose restart agent`.
 
 **Verification steps before `docker compose up`:**
 
-1. Ensure your trained models are present under `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` on the host.
+1. Ensure metadata and joblibs for your chosen bundle exist under the host path that matches `AGENT_MODEL_DIR` / default `MODEL_DIR`.
 2. Run:
 
    ```bash

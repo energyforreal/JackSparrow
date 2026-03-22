@@ -261,6 +261,9 @@ For production deployments:
 # Build all services
 docker compose build
 
+# Rebuild all services and refresh base images
+docker compose build --pull
+
 # Build specific service
 docker compose build backend
 
@@ -322,6 +325,12 @@ docker compose build --progress=plain
 ```bash
 # Start services in detached mode
 docker compose up -d
+
+# Recreate containers after a full image rebuild (picks up new tags)
+docker compose up -d --force-recreate
+
+# If the frontend image finished building after `up` already ran:
+docker compose up -d --force-recreate frontend
 
 # Start with logs visible
 docker compose up
