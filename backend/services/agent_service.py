@@ -79,6 +79,7 @@ class AgentService:
                     self.websocket_url,
                     ping_interval=30,
                     ping_timeout=30,
+                    open_timeout=20,
                 )
                 self._websocket_connected = True
                 
@@ -98,10 +99,60 @@ class AgentService:
                     service="backend",
                     url=self.websocket_url,
                     error=str(e),
-                    message="Falling back to Redis queue communication"
+                    error_type=type(e).__name__,
+                    error_repr=repr(e),
+                    message="Falling back to Redis queue communication",
                 )
                 self._websocket_connected = False
                 await self._schedule_reconnect()
+
+    async def warmup_outbound_websocket(
+        self, attempts: int = 8, delay_s: float = 1.25
+    ) -> None:
+        """Best-effort first connect to the agent command WebSocket after backend startup.
+
+        Docker ``depends_on: service_healthy`` only guarantees the agent healthcheck passed
+        (Redis, feature HTTP, WS on loopback). The backend can still occasionally see
+        ``Connection refused`` on the first TCP connect to ``agent:8003`` (scheduling / bridge
+        race). Redis fallback serves traffic until this or the reconnect loop succeeds.
+        """
+        if not self.use_websocket or websockets is None:
+            return
+
+        for attempt in range(1, attempts + 1):
+            if self._websocket_connected and self._websocket is not None:
+                logger.info(
+                    "agent_service_websocket_warmup_ok",
+                    service="backend",
+                    attempt=attempt,
+                    url=self.websocket_url,
+                )
+                return
+
+            await self._initialize_websocket()
+
+            if self._websocket_connected and self._websocket is not None:
+                logger.info(
+                    "agent_service_websocket_warmup_ok",
+                    service="backend",
+                    attempt=attempt,
+                    url=self.websocket_url,
+                )
+                return
+
+            if attempt < attempts:
+                await asyncio.sleep(delay_s)
+
+        logger.warning(
+            "agent_service_websocket_warmup_exhausted",
+            service="backend",
+            attempts=attempts,
+            url=self.websocket_url,
+            message=(
+                "Outbound WebSocket not ready after warmup; Redis fallback active "
+                "until the reconnect loop succeeds"
+            ),
+        )
 
     async def _teardown_websocket(self) -> None:
         """Close the current agent WebSocket cleanly (best-effort)."""

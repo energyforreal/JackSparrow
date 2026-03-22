@@ -194,7 +194,6 @@ class TradingEventHandler:
                     elif isinstance(ts, (int, float)):
                         ts_sec = float(ts)
                     else:
-                        from datetime import datetime
                         dt = datetime.fromisoformat(ts.replace("Z", "+00:00")) if isinstance(ts, str) else ts
                         ts_sec = dt.timestamp() if hasattr(dt, "timestamp") else 0
                     age = time.time() - ts_sec

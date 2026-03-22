@@ -91,7 +91,9 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
           )}
           <div className="flex-1">
             <div className="flex justify-between text-sm mb-1">
-              <span className="text-muted-foreground">Confidence</span>
+              <span className="text-muted-foreground" title="Calibrated across the 6-step reasoning pipeline (may differ from raw model scores)">
+                Reasoning confidence
+              </span>
               <span className="font-medium">
                 {formatConfidence(overallConfidence)}
               </span>
@@ -100,6 +102,9 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
               value={overallConfidence}
               className="h-2" 
             />
+            <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
+              Blended and calibrated in the agent; not a simple average of the rows below.
+            </p>
           </div>
         </div>
 
@@ -108,7 +113,12 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
             <Accordion type="single" collapsible defaultValue="models">
               <AccordionItem value="models">
                 <AccordionTrigger className="text-sm font-medium text-left">
-                  Individual Models ({modelConsensus.length})
+                  <span className="block">
+                    Individual Models ({modelConsensus.length})
+                    <span className="block text-xs font-normal text-muted-foreground mt-0.5">
+                      Raw model output confidence per ensemble member
+                    </span>
+                  </span>
                 </AccordionTrigger>
                 <AccordionContent>
                   <div className="space-y-3 mt-1">

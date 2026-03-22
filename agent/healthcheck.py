@@ -91,10 +91,9 @@ async def _check_websocket_port(host: str, port: int) -> bool:
 
 
 async def _check_websocket_any_port(host: str, port: int) -> bool:
-    """Check for a WebSocket handshake on the configured port or common alternates.
+    """Check for a WebSocket handshake on the configured port (and a small fallback range).
 
-    The agent's WebSocket server may auto-select an alternate port (e.g. 8002 -> 8003)
-    when the default port is occupied (often by the feature server).
+    Primary port is ``AGENT_WS_PORT`` (default 8003), distinct from the feature API on 8002.
     """
     # Prefer configured port, then scan a small range to match websocket_server.py.
     candidate_ports = [port] + list(range(port + 1, port + 9))  # up to +8
@@ -134,6 +133,8 @@ async def _run_check() -> int:
         )
         # Also verify the agent command WebSocket is reachable; backend depends
         # on `agent: condition: service_healthy` before it starts issuing commands.
+        # The backend still runs `AgentService.warmup_outbound_websocket()` on startup because
+        # the first connect to hostname `agent:8003` can briefly race the bridge after healthy.
         #
         # Use protocol-safe WebSocket handshake probing to avoid false positives.
         ws_ok = await _check_websocket_any_port("127.0.0.1", settings.agent_websocket_port)

@@ -666,9 +666,9 @@ class Settings(BaseSettings):
         description="Host for agent WebSocket server"
     )
     agent_websocket_port: int = Field(
-        default=8002,
+        default=8003,
         env="AGENT_WS_PORT",
-        description="Port for agent WebSocket server"
+        description="Port for agent WebSocket server (8002 is reserved for the feature HTTP API)",
     )
     backend_websocket_url: str = Field(
         default="ws://localhost:8000/ws/agent",

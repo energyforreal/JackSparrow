@@ -154,6 +154,21 @@ async def lifespan(app: FastAPI):
             error=str(e),
             exc_info=True
         )
+
+    # Outbound agent command WebSocket: absorb Docker bridge race after agent reports healthy.
+    try:
+        from backend.services.agent_service import agent_service
+
+        await agent_service.warmup_outbound_websocket()
+    except Exception as e:
+        logger.warning(
+            "backend_agent_outbound_ws_warmup_warning",
+            service="backend",
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True,
+            message="Warmup failed; Redis fallback remains available",
+        )
     
     # Initialize and start agent event subscriber (separate block so failure does not block poller)
     logger.info("backend_starting_agent_event_subscriber", service="backend")

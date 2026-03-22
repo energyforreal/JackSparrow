@@ -1070,7 +1070,7 @@ class WebSocketManager:
                             if model_health.details:
                                 healthy_count = model_health.details.get("healthy_models", 0)
                                 total_count = model_health.details.get("total_models", 0)
-                                if total_count > 0 and healthy_count < 3:
+                                if total_count > 0 and healthy_count < total_count:
                                     degradation_reasons.append(f"Only {healthy_count}/{total_count} models are healthy")
                                 health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
                             else:

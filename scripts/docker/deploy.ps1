@@ -38,12 +38,12 @@ function Check-Health {
         $status = docker-compose ps $Service 2>$null | Select-String -Pattern "healthy|unhealthy"
         
         if ($status -match "healthy") {
-            Write-Host "✓ $Service is healthy" -ForegroundColor Green
+            Write-Host "[OK] $Service is healthy" -ForegroundColor Green
             return $true
         }
         
         if ($status -match "unhealthy") {
-            Write-Host "✗ $Service is unhealthy" -ForegroundColor Red
+            Write-Host "[FAIL] $Service is unhealthy" -ForegroundColor Red
             return $false
         }
         
@@ -53,7 +53,7 @@ function Check-Health {
     }
     
     Write-Host ""
-    Write-Host "✗ $Service health check timeout" -ForegroundColor Red
+    Write-Host "[FAIL] $Service health check timeout" -ForegroundColor Red
     return $false
 }
 
@@ -98,13 +98,13 @@ switch ($Mode) {
     "down" {
         Write-Host "Stopping all services..." -ForegroundColor Yellow
         docker-compose down
-        Write-Host "✓ All services stopped" -ForegroundColor Green
+        Write-Host "[OK] All services stopped" -ForegroundColor Green
     }
     
     "restart" {
         Write-Host "Restarting all services..." -ForegroundColor Yellow
         docker-compose restart
-        Write-Host "✓ All services restarted" -ForegroundColor Green
+        Write-Host "[OK] All services restarted" -ForegroundColor Green
     }
     
     "update" {
@@ -126,7 +126,7 @@ switch ($Mode) {
         docker-compose up -d --no-deps frontend
         Check-Health "frontend" 20 | Out-Null
         
-        Write-Host "✓ Rolling update completed" -ForegroundColor Green
+        Write-Host "[OK] Rolling update completed" -ForegroundColor Green
     }
     
     "logs" {

@@ -1,4 +1,5 @@
 'use client'
+import dynamic from 'next/dynamic'
 import { AgentStatus } from './AgentStatus'
 import { PortfolioSummary } from './PortfolioSummary'
 import { Header } from './Header'
@@ -7,16 +8,32 @@ import { HealthMonitor } from './HealthMonitor'
 import { ActivePositions } from './ActivePositions'
 import { RecentTrades } from './RecentTrades'
 import { PerformanceChart } from './PerformanceChart'
-import { ReasoningChainView } from './ReasoningChainView'
+import { LoadingSkeleton } from './LoadingSpinner'
 import { TradingDecision } from './TradingDecision'
 import { RealTimePrice } from './RealTimePrice'
 import { ErrorBoundary } from './ErrorBoundary'
 import { useTradingData } from '@/hooks/useTradingData'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { AlertCircle, RefreshCw, TrendingUp, Activity, BarChart3, Settings } from 'lucide-react'
+const ReasoningChainView = dynamic(
+  () => import('./ReasoningChainView').then((m) => ({ default: m.ReasoningChainView })),
+  {
+    ssr: false,
+    loading: () => (
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent Reasoning Chain</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <LoadingSkeleton className="h-40 w-full" />
+        </CardContent>
+      </Card>
+    ),
+  }
+)
 
 export function Dashboard() {
   // Use the unified trading data hook - replaces multiple specialized hooks
@@ -30,12 +47,14 @@ export function Dashboard() {
     isConnected,
     lastUpdate,
     isLoading,
+    isPortfolioLoading,
     error,
     performanceData
   } = useTradingData()
 
   // Extract positions from portfolio - much simpler now!
   const positions = portfolio?.positions || []
+  const portfolioBlockLoading = !isConnected || isPortfolioLoading
 
   return (
     <div className="min-h-screen bg-background">
@@ -127,7 +146,7 @@ export function Dashboard() {
 
             {/* Portfolio Summary */}
             <ErrorBoundary>
-              <PortfolioSummary portfolio={portfolio || undefined} isLoading={isLoading} />
+              <PortfolioSummary portfolio={portfolio || undefined} isLoading={portfolioBlockLoading} />
             </ErrorBoundary>
           </TabsContent>
 
@@ -136,7 +155,7 @@ export function Dashboard() {
             {/* Active Positions and Recent Trades */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <ErrorBoundary>
-                <ActivePositions positions={positions} isLoading={isLoading} />
+                <ActivePositions positions={positions} isLoading={portfolioBlockLoading} />
               </ErrorBoundary>
               <ErrorBoundary>
                 <RecentTrades trades={recentTrades} />

@@ -82,6 +82,8 @@ export interface TradingDataState {
 
   // Loading states
   isLoading: boolean
+  /** True until the portfolio REST request settles (success or failure). */
+  isPortfolioLoading: boolean
   error: Error | null
 }
 
@@ -89,6 +91,7 @@ export interface TradingDataState {
 type TradingDataAction =
   | { type: 'WEBSOCKET_MESSAGE'; payload: any }
   | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_PORTFOLIO_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: Error | null }
   | { type: 'UPDATE_SIGNAL'; payload: Signal }
   | { type: 'UPDATE_PORTFOLIO'; payload: Portfolio }
@@ -116,6 +119,7 @@ const initialState: TradingDataState = {
   lastUpdate: null,
   dataSource: 'none',
   isLoading: true,
+  isPortfolioLoading: false,
   error: null,
 }
 
@@ -420,6 +424,9 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload }
 
+    case 'SET_PORTFOLIO_LOADING':
+      return { ...state, isPortfolioLoading: action.payload }
+
     case 'SET_ERROR':
       return { ...state, error: action.payload }
 
@@ -558,34 +565,51 @@ export function useTradingData() {
 
     const fetchInitialData = async () => {
       dispatch({ type: 'SET_LOADING', payload: true })
+      dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: true })
 
       try {
-        // Fetch health first so HealthMonitor shows immediately (not after first WS push)
-        try {
-          const healthData = await apiClient.getHealth()
+        const [
+          healthResult,
+          portfolioResult,
+          tradesResult,
+          performanceResult,
+          agentStatusResult,
+        ] = await Promise.allSettled([
+          apiClient.getHealth(),
+          apiClient.getPortfolioSummary(),
+          apiClient.getTrades(),
+          apiClient.getPerformance(),
+          apiClient.getAgentStatus(),
+        ])
+
+        if (healthResult.status === 'fulfilled') {
+          const healthData = healthResult.value
           if (healthData && typeof healthData === 'object') {
             dispatch({ type: 'UPDATE_HEALTH', payload: healthData as HealthData })
           }
-        } catch {
-          // Health fetch optional; WS will push health on connect and periodically
         }
 
-        // Fetch portfolio data
-        const portfolioData = await apiClient.getPortfolioSummary()
-        dispatch({ type: 'UPDATE_PORTFOLIO', payload: portfolioData as Portfolio })
-
-        // Fetch recent trades
-        const trades = await apiClient.getTrades()
-        if (Array.isArray(trades)) {
-          // Update recent trades (we'll get individual trade updates via WebSocket)
-          trades.slice(0, 10).forEach(trade => {
-            dispatch({ type: 'ADD_TRADE', payload: trade as Trade })
+        if (portfolioResult.status === 'fulfilled') {
+          dispatch({
+            type: 'UPDATE_PORTFOLIO',
+            payload: portfolioResult.value as Portfolio,
           })
+        } else {
+          console.warn('Portfolio summary fetch failed:', portfolioResult.reason)
+        }
+        dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
+
+        if (tradesResult.status === 'fulfilled') {
+          const trades = tradesResult.value
+          if (Array.isArray(trades)) {
+            trades.slice(0, 10).forEach((trade) => {
+              dispatch({ type: 'ADD_TRADE', payload: trade as Trade })
+            })
+          }
         }
 
-        // Fetch performance metrics (used to render the PerformanceChart)
-        try {
-          const performanceMetrics = await apiClient.getPerformance()
+        if (performanceResult.status === 'fulfilled') {
+          const performanceMetrics = performanceResult.value
           if (performanceMetrics && typeof performanceMetrics === 'object') {
             const totalReturn =
               typeof (performanceMetrics as any).total_return === 'number'
@@ -599,51 +623,53 @@ export function useTradingData() {
               payload: [{ date: new Date().toISOString(), value: totalReturn }],
             })
           }
-        } catch {
-          // Performance is optional; chart can stay empty.
         }
 
-        // Fetch agent status
-        const agentStatus = await apiClient.getAgentStatus()
-        if (agentStatus?.state) {
-          dispatch({ type: 'UPDATE_AGENT_STATE', payload: agentStatus.state })
+        if (agentStatusResult.status === 'fulfilled') {
+          const agentStatus = agentStatusResult.value
+          if (agentStatus?.state) {
+            dispatch({ type: 'UPDATE_AGENT_STATE', payload: agentStatus.state })
 
-          if (
-            process.env.NODE_ENV === 'development' &&
-            process.env.NEXT_PUBLIC_DEBUG_AGENT_LOGS === 'true'
-          ) {
-            try {
-              fetch('http://127.0.0.1:7242/ingest/7dea5b1b-57ff-4463-be90-44a6ac830f12', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-Debug-Session-Id': 'c0204f',
-                },
-                body: JSON.stringify({
-                  sessionId: 'c0204f',
-                  runId: 'pre-fix',
-                  hypothesisId: 'H5',
-                  location: 'frontend/hooks/useTradingData.ts:fetchInitialData',
-                  message: 'agent_status_api_fallback',
-                  data: {
-                    state: agentStatus.state,
-                    available: agentStatus.available,
+            if (
+              process.env.NODE_ENV === 'development' &&
+              process.env.NEXT_PUBLIC_DEBUG_AGENT_LOGS === 'true'
+            ) {
+              try {
+                fetch('http://127.0.0.1:7242/ingest/7dea5b1b-57ff-4463-be90-44a6ac830f12', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Debug-Session-Id': 'c0204f',
                   },
-                  timestamp: Date.now(),
-                }),
-              }).catch(() => {})
-            } catch {
-              // Ignore logging errors entirely
+                  body: JSON.stringify({
+                    sessionId: 'c0204f',
+                    runId: 'pre-fix',
+                    hypothesisId: 'H5',
+                    location: 'frontend/hooks/useTradingData.ts:fetchInitialData',
+                    message: 'agent_status_api_fallback',
+                    data: {
+                      state: agentStatus.state,
+                      available: agentStatus.available,
+                    },
+                    timestamp: Date.now(),
+                  }),
+                }).catch(() => {})
+              } catch {
+                // Ignore logging errors entirely
+              }
             }
           }
         }
 
         dispatch({ type: 'SET_LOADING', payload: false })
         dispatch({ type: 'SET_DATA_SOURCE', payload: 'api' })
-
       } catch (error) {
         console.error('Error fetching initial trading data:', error)
-        dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error : new Error('Unknown error') })
+        dispatch({
+          type: 'SET_ERROR',
+          payload: error instanceof Error ? error : new Error('Unknown error'),
+        })
+        dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
         dispatch({ type: 'SET_LOADING', payload: false })
       }
     }
@@ -670,6 +696,7 @@ export function useTradingData() {
 
     // State
     isLoading: state.isLoading,
+    isPortfolioLoading: state.isPortfolioLoading,
     error: state.error,
   }
 }

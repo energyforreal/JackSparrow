@@ -10,7 +10,9 @@ channels for redundancy and performance.
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
+import socket
 from datetime import datetime
 from typing import Any, Dict, Optional
 import structlog
@@ -36,6 +38,26 @@ from agent.core.communication_logger import (
 logger = structlog.get_logger()
 
 
+def _is_transient_backend_connect_error(exc: BaseException) -> bool:
+    """True for startup races (backend not listening yet), DNS blips, and connect timeouts."""
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    if isinstance(exc, socket.gaierror):
+        return True
+    if isinstance(exc, OSError):
+        err_no = getattr(exc, "errno", None)
+        if err_no is not None and err_no in (
+            errno.ECONNREFUSED,
+            errno.ENETUNREACH,
+            errno.EHOSTUNREACH,
+            errno.ETIMEDOUT,
+        ):
+            return True
+    return False
+
+
 class AgentWebSocketClient:
     """WebSocket client for sending agent events to backend."""
 
@@ -52,6 +74,8 @@ class AgentWebSocketClient:
         self._running = False
         self._reconnect_delay = 1.0
         self._max_reconnect_delay = 60.0
+        self._connect_failure_streak = 0
+        self._transient_error_log_threshold = 5
 
     async def start(self) -> None:
         """Start WebSocket client and begin connection attempts."""
@@ -117,13 +141,52 @@ class AgentWebSocketClient:
         while self._running:
             try:
                 await self._connect()
-                # If connection succeeds, wait for it to close
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self._connect_failure_streak += 1
+                if (
+                    self._connect_failure_streak <= self._transient_error_log_threshold
+                    and _is_transient_backend_connect_error(exc)
+                ):
+                    logger.warning(
+                        "agent_websocket_client_connection_retry",
+                        service="agent",
+                        component="agent_websocket_client",
+                        url=self.url,
+                        attempt=self._connect_failure_streak,
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                    )
+                else:
+                    log_error_with_context(
+                        "agent_websocket_client_connection_error",
+                        error=exc,
+                        component="agent_websocket_client",
+                        url=self.url,
+                    )
+
+                if not self._running:
+                    break
+
+                delay = min(self._reconnect_delay, self._max_reconnect_delay)
+                logger.info(
+                    "agent_websocket_client_reconnecting",
+                    service="agent",
+                    url=self.url,
+                    delay=delay,
+                )
+                await asyncio.sleep(delay)
+                self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
+                continue
+
+            try:
                 await self._wait_for_close()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 log_error_with_context(
-                    "agent_websocket_client_connection_error",
+                    "agent_websocket_client_session_error",
                     error=exc,
                     component="agent_websocket_client",
                     url=self.url,
@@ -132,7 +195,6 @@ class AgentWebSocketClient:
             if not self._running:
                 break
 
-            # Exponential backoff before reconnecting
             delay = min(self._reconnect_delay, self._max_reconnect_delay)
             logger.info(
                 "agent_websocket_client_reconnecting",
@@ -154,6 +216,7 @@ class AgentWebSocketClient:
             )
             self._connected = True
             self._reconnect_delay = 1.0  # Reset delay on successful connection
+            self._connect_failure_streak = 0
 
             logger.info(
                 "agent_websocket_client_connected",

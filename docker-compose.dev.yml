@@ -34,7 +34,7 @@ services:
       - ./logs/agent:/logs:rw
     environment:
       LOG_LEVEL: ${AGENT_LOG_LEVEL:-DEBUG}
-      MODEL_DIR: /app/agent/model_storage/latest
+      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21}
 
   frontend:
     build:

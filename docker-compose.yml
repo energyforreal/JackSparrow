@@ -88,7 +88,8 @@ services:
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
-      MODEL_DIR: /app/agent/model_storage/latest
+      # In-container path; override with AGENT_MODEL_DIR in root .env if bundle folder name changes
+      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21}
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}
       AGENT_SYMBOL: ${AGENT_SYMBOL:-BTCUSD}
@@ -151,7 +152,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       FEATURE_SERVER_URL: http://agent:8002
-      AGENT_WS_URL: ws://agent:${AGENT_WS_PORT:-8003}
+      # Always use container listen port (right side of ports mapping); do not use
+      # AGENT_WS_PORT here — that variable is for the host publish port only.
+      AGENT_WS_URL: ws://agent:8003
       USE_AGENT_WEBSOCKET: ${USE_AGENT_WEBSOCKET:-true}
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}

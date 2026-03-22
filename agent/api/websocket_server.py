@@ -73,7 +73,7 @@ class AgentWebSocketServer:
         self,
         agent: IntelligentAgent,
         host: str = "0.0.0.0",
-        port: int = 8002,
+        port: int = 8003,
     ) -> None:
         self._agent = agent
         self._host = host
@@ -361,6 +361,15 @@ class AgentWebSocketServer:
         try:
             await ctx.websocket.send(json.dumps(payload, default=str))
         except Exception as exc:  # pragma: no cover - best‑effort send path
+            mod = getattr(type(exc), "__module__", "")
+            name = type(exc).__name__
+            if mod == "websockets.exceptions" and name == "ConnectionClosedOK":
+                logger.debug(
+                    "agent_websocket_send_skipped_connection_closed_ok",
+                    component="agent_websocket_server",
+                    remote=ctx.remote,
+                )
+                return
             log_error_with_context(
                 "agent_websocket_send_failed",
                 error=exc,
@@ -475,46 +484,9 @@ async def get_websocket_server(agent: IntelligentAgent) -> AgentWebSocketServer:
     global _server_instance
 
     if _server_instance is None:
-        host = getattr(settings, "agent_websocket_host", "0.0.0.0")
-        port = getattr(settings, "agent_websocket_port", 8002)
-
-        # Check if the default port is available, if not try alternative ports
-        import socket
-        def check_port_accessible(hostname: str, port: int) -> bool:
-            """Check if a TCP port is accessible."""
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1.0)
-                result = sock.connect_ex((hostname, port))
-                sock.close()
-                return result == 0
-            except Exception:
-                return False
-
-        # If default port is in use, try alternative ports
-        if check_port_accessible(host, port):
-            logger.warning(
-                "agent_websocket_port_in_use",
-                port=port,
-                message="Default WebSocket port is in use, trying alternative ports"
-            )
-            # Try ports 8003-8010
-            for alt_port in range(8003, 8010):
-                if not check_port_accessible(host, alt_port):
-                    port = alt_port
-                    logger.info(
-                        "agent_websocket_alternative_port_found",
-                        original_port=getattr(settings, "agent_websocket_port", 8002),
-                        new_port=port
-                    )
-                    break
-            else:
-                logger.error(
-                    "agent_websocket_no_ports_available",
-                    message="No available ports found for WebSocket server, server will not start"
-                )
-                return None
-
+        host = settings.agent_websocket_host
+        port = settings.agent_websocket_port
+        # AGENT_WS_PORT (default 8003) must not collide with the feature server on FEATURE_SERVER_PORT (8002).
         _server_instance = AgentWebSocketServer(agent, host=host, port=port)
 
     return _server_instance

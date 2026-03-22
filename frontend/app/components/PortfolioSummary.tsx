@@ -13,7 +13,7 @@ interface PortfolioSummaryProps {
 }
 
 export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSummaryProps) {
-  if (isLoading || !portfolio) {
+  if (isLoading) {
     return (
       <Card>
         <CardHeader>
@@ -21,6 +21,19 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
         </CardHeader>
         <CardContent>
           <LoadingSkeleton className="py-4" />
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (!portfolio) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Portfolio Value</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">No portfolio data available yet.</p>
         </CardContent>
       </Card>
     )
