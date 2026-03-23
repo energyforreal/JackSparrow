@@ -63,6 +63,7 @@ class MarketDataService:
         self._last_sl_tp_check: Dict[str, float] = {}  # symbol -> time.time() for WebSocket SL/TP throttle
         self._candle_store = CandleStore()
         self._pipeline_direct_trigger: Optional[Any] = None
+        self._ws_reconnect_backoff_seconds: float = 1.0
 
     def set_pipeline_direct_trigger(self, callback: Any) -> None:
         """Set callback for direct pipeline trigger when Redis is unavailable."""
@@ -244,10 +245,19 @@ class MarketDataService:
             try:
                 # Check WebSocket connection health and reconnect if needed
                 if self._websocket_enabled and not self._websocket_connected and websocket_reconnect_attempts < max_websocket_reconnect_attempts:
+                    wait_s = min(self._ws_reconnect_backoff_seconds, 60.0)
+                    if wait_s > 0:
+                        logger.info(
+                            "market_data_websocket_reconnect_backoff",
+                            sleep_seconds=round(wait_s, 2),
+                            attempt=websocket_reconnect_attempts + 1,
+                        )
+                        await asyncio.sleep(wait_s)
                     logger.info(
                         "market_data_attempting_websocket_reconnect",
                         attempt=websocket_reconnect_attempts + 1,
-                        max_attempts=max_websocket_reconnect_attempts
+                        max_attempts=max_websocket_reconnect_attempts,
+                        backoff_seconds=round(self._ws_reconnect_backoff_seconds, 2),
                     )
                     try:
                         await self._connect_websocket()
@@ -256,15 +266,23 @@ class MarketDataService:
                             await self.websocket_client.subscribe_ticker(self.streaming_symbols)
                             logger.info("market_data_websocket_reconnected_and_subscribed", symbols=self.streaming_symbols)
                             websocket_reconnect_attempts = 0  # Reset on success
+                            self._ws_reconnect_backoff_seconds = 1.0
                         else:
                             websocket_reconnect_attempts += 1
+                            self._ws_reconnect_backoff_seconds = min(
+                                self._ws_reconnect_backoff_seconds * 2.0, 60.0
+                            )
                     except Exception as e:
                         logger.warning(
                             "market_data_websocket_reconnect_failed",
                             attempt=websocket_reconnect_attempts + 1,
-                            error=str(e)
+                            error=str(e),
+                            next_backoff_seconds=min(self._ws_reconnect_backoff_seconds * 2.0, 60.0),
                         )
                         websocket_reconnect_attempts += 1
+                        self._ws_reconnect_backoff_seconds = min(
+                            self._ws_reconnect_backoff_seconds * 2.0, 60.0
+                        )
 
                 for symbol in self.streaming_symbols:
                     # Only poll tickers via REST API if WebSocket is not available or enabled

@@ -21,6 +21,7 @@ from agent.events.event_bus import event_bus
 from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, DecisionReadyEvent, EventType
 from agent.core.config import settings
 from agent.core.mtf_decision_engine import synthesize_mtf_trading_decision
+from agent.learning.dynamic_thresholds import apply_redis_hold_band_overrides
 import structlog
 
 logger = structlog.get_logger()
@@ -73,6 +74,36 @@ class MCPReasoningEngine:
         self.feature_server = feature_server
         self.model_registry = model_registry
         self.vector_store = vector_store
+
+    @staticmethod
+    def _extract_hold_bucket(conclusion: str, evidence: List[str]) -> str:
+        """Map free-text HOLD outcomes to a stable diagnostics bucket."""
+        text = f"{conclusion} {' '.join(evidence or [])}".lower()
+        if "dead zone" in text:
+            return "mtf_dead_zone"
+        if "below entry edge" in text or "edge below minimum" in text:
+            return "mtf_entry_edge"
+        if "probability gap below minimum" in text:
+            return "mtf_probability_gap"
+        if "trend neutral" in text or "trend timeframe neutral" in text:
+            return "mtf_trend_neutral"
+        if "not confirming trend" in text:
+            return "mtf_not_confirming_trend"
+        if "trend proba below thresholds" in text:
+            return "mtf_trend_probability_threshold"
+        if "trend prob diff below edge" in text:
+            return "mtf_trend_prob_edge"
+        if "entry confidence below minimum" in text:
+            return "mtf_entry_confidence_gate"
+        if "below rolling percentile" in text:
+            return "mtf_strength_percentile"
+        if "filter conflicts" in text:
+            return "mtf_filter_conflict"
+        if "consensus_in_hold_band" in text:
+            return "consensus_in_hold_band"
+        if "mixed signals" in text:
+            return "mixed_signals"
+        return "other_hold"
     
     async def initialize(self):
         """Initialize reasoning engine."""
@@ -628,17 +659,23 @@ class MCPReasoningEngine:
             )
             if mtf_out is not None:
                 decision_code, conclusion, avg_confidence, mtf_evidence = mtf_out
+                hold_bucket = None
+                if decision_code == "HOLD":
+                    hold_bucket = self._extract_hold_bucket(conclusion, mtf_evidence)
                 if getattr(settings, "diagnostics_enabled", True):
                     logger.info(
                         "reasoning_stage5_mtf_decision",
                         symbol=request.symbol,
                         decision=decision_code,
                         avg_confidence=float(avg_confidence),
+                        hold_bucket=hold_bucket,
                     )
                 evidence = list(mtf_evidence) + [
                     f"Decision code: {decision_code}",
                     f"Based on {len(previous_steps)} analysis steps",
                 ]
+                if hold_bucket:
+                    evidence.append(f"HOLD bucket: {hold_bucket}")
                 data_freshness_seconds = None
                 market_timestamp = request.market_context.get("timestamp")
                 if market_timestamp:
@@ -765,6 +802,39 @@ class MCPReasoningEngine:
             else:
                 strong_thresh, mild_thresh = 0.40, 0.18
 
+            strong_thresh, mild_thresh = await apply_redis_hold_band_overrides(
+                strong_thresh, mild_thresh
+            )
+
+            # Preserve high-separation class probabilities: when buy/sell margins are
+            # consistently strong, slightly narrow hold bands to avoid over-HOLD bias.
+            prob_margins: List[float] = []
+            for p in model_predictions:
+                ctx = p.get("context") if isinstance(p, dict) else None
+                entry_proba = (
+                    ctx.get("entry_proba")
+                    if isinstance(ctx, dict) and isinstance(ctx.get("entry_proba"), dict)
+                    else None
+                )
+                if not entry_proba:
+                    continue
+                try:
+                    buy_p = float(entry_proba.get("buy", 0.0))
+                    sell_p = float(entry_proba.get("sell", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                prob_margins.append(abs(buy_p - sell_p))
+
+            margin_mean = (
+                sum(prob_margins) / len(prob_margins) if prob_margins else 0.0
+            )
+            if margin_mean >= 0.18:
+                strong_thresh = max(0.30, strong_thresh - 0.03)
+                mild_thresh = max(0.10, mild_thresh - 0.02)
+            elif margin_mean >= 0.12:
+                strong_thresh = max(0.32, strong_thresh - 0.02)
+                mild_thresh = max(0.11, mild_thresh - 0.01)
+
             decision_code = "HOLD"
             if consensus > strong_thresh:
                 decision_code = "STRONG_BUY"
@@ -782,6 +852,7 @@ class MCPReasoningEngine:
                 conclusion = "HOLD - Mixed signals, waiting for clearer direction"
 
             if getattr(settings, "diagnostics_enabled", True):
+                hold_bucket = "consensus_in_hold_band" if decision_code == "HOLD" else None
                 logger.info(
                     "reasoning_stage5_decision",
                     symbol=request.symbol,
@@ -794,18 +865,22 @@ class MCPReasoningEngine:
                     total_models=len(model_predictions),
                     classifiers=len(classifier_predictions),
                     regressors=len(regressor_predictions),
+                    probability_margin_mean=float(margin_mean),
+                    hold_bucket=hold_bucket,
                 )
                 if decision_code == "HOLD":
                     logger.info(
                         "reasoning_hold_exit",
                         symbol=request.symbol,
                         reason="consensus_in_hold_band",
+                        hold_bucket="consensus_in_hold_band",
                         consensus=float(consensus),
                         strong_thresh=float(strong_thresh),
                         mild_thresh=float(mild_thresh),
                         vol=float(vol) if vol is not None else None,
                         avg_confidence=float(avg_confidence),
                         total_models=len(model_predictions),
+                        probability_margin_mean=float(margin_mean),
                     )
             
             evidence = [
@@ -848,13 +923,18 @@ class MCPReasoningEngine:
 
         # Weighted average with step importance weights
         # Steps 3 (model consensus) and 5 (decision synthesis) get higher weights
+        step5 = next((s for s in steps if s.step_number == 5), None)
+        step5_desc = (step5.description if step5 else "").upper()
+        is_hold = "HOLD" in step5_desc
+
+        # Increase model-driven influence (3/5) to avoid midpoint compression.
         step_weights = {
-            1: 0.1,  # Situational assessment
-            2: 0.1,  # Historical context
-            3: 0.3,  # Model consensus (most important)
-            4: 0.1,  # Risk assessment
-            5: 0.3,  # Decision synthesis (most important)
-            6: 0.1   # Confidence calibration (meta-step)
+            1: 0.08,  # Situational assessment
+            2: 0.05,  # Historical context
+            3: 0.37,  # Model consensus
+            4: 0.05,  # Risk assessment
+            5: 0.40,  # Decision synthesis
+            6: 0.05,  # Confidence calibration (meta-step)
         }
 
         weighted_sum = sum(
@@ -868,7 +948,10 @@ class MCPReasoningEngine:
         if steps:
             confidence_range = max(step.confidence for step in steps) - min(step.confidence for step in steps)
             # Use consistency as a small adjustment factor, not a multiplier
-            consistency_adjustment = max(0.9, 1.0 - (confidence_range * 0.2))  # Max 10% penalty
+            consistency_adjustment = max(0.95, 1.0 - (confidence_range * 0.12))
+            # For actionable non-HOLD outputs, avoid strong confidence collapse.
+            if not is_hold:
+                consistency_adjustment = max(0.98, consistency_adjustment)
         else:
             consistency_adjustment = 1.0
 
@@ -884,6 +967,30 @@ class MCPReasoningEngine:
             # Unanimous HOLD: all models agree on neutral (confidence 0). Avoid showing 0% in UI.
             if model_avg == 0 and model_confidences:
                 final_confidence = max(final_confidence, 0.5)
+
+            # Probability separation boost: if entry buy/sell margins are strong
+            # across models, confidence should reflect that separation.
+            prob_margins: List[float] = []
+            for p in model_predictions:
+                ctx = p.get("context") if isinstance(p, dict) else None
+                entry_proba = (
+                    ctx.get("entry_proba")
+                    if isinstance(ctx, dict) and isinstance(ctx.get("entry_proba"), dict)
+                    else None
+                )
+                if not entry_proba:
+                    continue
+                try:
+                    buy_p = float(entry_proba.get("buy", 0.0))
+                    sell_p = float(entry_proba.get("sell", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                prob_margins.append(abs(buy_p - sell_p))
+
+            margin_mean = sum(prob_margins) / len(prob_margins) if prob_margins else 0.0
+            if margin_mean > 0.10 and not is_hold:
+                # Cap boost so confidence remains conservative.
+                final_confidence += min(0.08, (margin_mean - 0.10) * 0.4)
 
         # Detect fallback scenario for logging/diagnostics
         is_fallback_scenario = not model_predictions or all(

@@ -67,6 +67,28 @@ services:
     networks:
       - jacksparrow-network
 
+  qdrant:
+    image: qdrant/qdrant:v1.13.2
+    container_name: jacksparrow-qdrant
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - jacksparrow-network
+
   agent:
     container_name: jacksparrow-agent
     image: ${AGENT_IMAGE:-jacksparrow-agent:latest}
@@ -77,6 +99,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      qdrant:
         condition: service_healthy
     env_file:
       - .env
@@ -90,6 +114,7 @@ services:
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
       # In-container path; override with AGENT_MODEL_DIR in root .env if bundle folder name changes
       MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21}
+      REQUIRE_MODELS_ON_STARTUP: ${REQUIRE_MODELS_ON_STARTUP:-true}
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}
       AGENT_SYMBOL: ${AGENT_SYMBOL:-BTCUSD}
@@ -99,6 +124,8 @@ services:
       LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
       LOGS_ROOT: /logs
       BACKEND_WS_URL: ws://backend:8000/ws/agent
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
     volumes:
       - ./agent/model_storage:/app/agent/model_storage
       - ./logs/agent:/logs
@@ -140,6 +167,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_healthy
       agent:
         condition: service_healthy
     env_file:
@@ -166,6 +195,8 @@ services:
       LOG_LEVEL: ${BACKEND_LOG_LEVEL:-INFO}
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_INTERNAL_ORIGINS: ${CORS_INTERNAL_ORIGINS:-http://frontend:3000}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -250,6 +281,8 @@ volumes:
   postgres-data:
     driver: local
   redis-data:
+    driver: local
+  qdrant-data:
     driver: local
 
 networks:

@@ -20,7 +20,7 @@ JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 
 - **Paper trading only** on Delta Exchange India (BTCUSD initially)
 - **Real-time price monitoring** with instant BTCUSD price updates in frontend
-- **Fluctuation-based signal generation** triggered by ≥0.5% price changes (not time-based)
+- **Fluctuation-based signal generation** triggered when price moves exceed `PRICE_FLUCTUATION_THRESHOLD_PCT` (default **0.10** = 0.10%; configurable in `.env`, e.g. `0.5` for 0.5%)
 - **Reliable frontend-backend integration** with real-time communication
 - **True AI agent behavior** with autonomous decision-making capabilities
 - **Comprehensive monitoring** with health checks and degradation detection

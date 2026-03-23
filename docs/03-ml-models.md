@@ -57,7 +57,7 @@ Legacy notebooks such as `notebooks/train_models_colab.ipynb` and `notebooks/tra
 | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | **Full** v5 BTCUSD bundle: five timeframes (15m–4h), entry/exit pairs, standard `entry_model_*` / `exit_model_*` layout. Recommended for local/dev when you want all horizons. |
 | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | **Default in Docker Compose** (`AGENT_MODEL_DIR` / in-container `MODEL_DIR`): partial experimental layout (e.g. 5m/15m, `entry_long` / `entry_short` naming). Not a complete multi-timeframe set. |
 
-- Discovery reads `metadata_BTCUSD_*.json` from `MODEL_DIR` (non-recursive).
+- Discovery reads `metadata_BTCUSD_*.json` from `MODEL_DIR`; with **`MODEL_DISCOVERY_RECURSIVE=true`** (default), subfolders under `MODEL_DIR` are scanned (`rglob`).
 - For production-like behaviour with every documented timeframe, point `MODEL_DIR` at the **2026-03-19** bundle (or your own full export).
 
 ### Currently Integrated Models
@@ -82,13 +82,14 @@ Each model is loaded from `metadata_BTCUSD_<timeframe>.json` and references:
 The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:
 
 ```bash
-MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
+MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
-MIN_CONFIDENCE_THRESHOLD=0.65
+MODEL_DISCOVERY_RECURSIVE=true
+MIN_CONFIDENCE_THRESHOLD=0.52
 ```
 
-The `MODEL_DIR` environment variable must point to the directory containing `metadata_BTCUSD_*.json`. In v4-only mode, discovery is metadata-driven and non-recursive.
+The `MODEL_DIR` environment variable must point to the directory containing `metadata_BTCUSD_*.json` (or a parent folder when using recursive discovery). In v4-loader mode, discovery is metadata-driven; recursion is controlled by `MODEL_DISCOVERY_RECURSIVE`.
 
 ### ML Models in Docker
 

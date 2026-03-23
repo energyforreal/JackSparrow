@@ -8,6 +8,8 @@ and MCP Reasoning Engine to provide unified AI agent functionality.
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 import asyncio
+import time
+import uuid
 import structlog
 
 from agent.data.feature_server import MCPFeatureServer, MCPFeatureRequest, MCPFeatureResponse
@@ -84,7 +86,25 @@ class MCPOrchestrator:
             # continue in monitoring mode without ML predictions.
             # Default to best-effort (False) so v4-only deployments do not crash-loop
             # when metadata/artifacts are temporarily unavailable.
-            require_models = getattr(settings, "require_models_on_startup", False)
+            require_models = bool(getattr(settings, "require_models_on_startup", False))
+            if self.model_registry:
+                try:
+                    reg_health = await asyncio.wait_for(
+                        self.model_registry.get_health_status(),
+                        timeout=5.0,
+                    )
+                except Exception:
+                    reg_health = {}
+                logger.info(
+                    "mcp_orchestrator_startup_model_registry_check",
+                    service="agent",
+                    component="model_registry",
+                    model_dir=str(getattr(settings, "model_dir", "")),
+                    total_models=reg_health.get("total_models", len(self.model_registry.models)),
+                    healthy_models=reg_health.get("healthy_models", 0),
+                    registry_health=reg_health.get("registry_health"),
+                    discovered_metadata_files=len(discovered_models),
+                )
             if not self.model_registry.models:
                 if require_models:
                     logger.critical(
@@ -190,6 +210,7 @@ class MCPOrchestrator:
             raise RuntimeError("MCP Orchestrator not initialized")
 
         try:
+            _t0 = time.perf_counter()
             logger.info("mcp_orchestrator_prediction_start",
                        symbol=symbol,
                        context_keys=list(context.keys()) if context else None)
@@ -415,6 +436,7 @@ class MCPOrchestrator:
                        final_confidence=reasoning_chain.final_confidence,
                        decision=result["decision"]["signal"])
 
+            result["inference_latency_ms"] = (time.perf_counter() - _t0) * 1000.0
             return result
 
         except Exception as e:
@@ -871,6 +893,64 @@ class MCPOrchestrator:
 
         return health_status
 
+    def _schedule_prediction_audit(
+        self,
+        *,
+        correlation_id: str,
+        symbol: str,
+        confidence: float,
+        decision_payload: Dict[str, Any],
+        latency_ms: Optional[float] = None,
+    ) -> None:
+        """Fire-and-forget insert into prediction_audit (non-blocking)."""
+        if not getattr(settings, "prediction_audit_writes_enabled", True):
+            logger.info(
+                "prediction_audit_skipped_disabled",
+                correlation_id=correlation_id,
+                symbol=symbol,
+                message="prediction_audit write skipped because feature flag is disabled.",
+            )
+            return
+        db_url = getattr(settings, "database_url", None)
+        if not db_url:
+            logger.warning(
+                "prediction_audit_skipped_no_database_url",
+                correlation_id=correlation_id,
+                symbol=symbol,
+                message="prediction_audit write skipped because DATABASE_URL is missing.",
+            )
+            return
+
+        from agent.persistence.db_writes import persist_prediction_audit_async
+
+        rc = decision_payload.get("reasoning_chain") or {}
+        meta: Dict[str, Any] = {
+            "correlation_id": correlation_id,
+            "signal": decision_payload.get("signal"),
+            "position_size": decision_payload.get("position_size"),
+            "reasoning_chain_id": rc.get("chain_id"),
+            "conclusion": (rc.get("conclusion") or "")[:500],
+            "model_prediction_count": len(rc.get("model_predictions") or []),
+        }
+
+        async def _run() -> None:
+            await persist_prediction_audit_async(
+                db_url,
+                symbol=symbol,
+                confidence=float(confidence) if confidence is not None else None,
+                latency_ms=latency_ms,
+                source="agent_mcp",
+                model_version=None,
+                outcome_reference=correlation_id,
+                metadata=meta,
+                request_id=str(uuid.uuid4()),
+            )
+
+        try:
+            asyncio.create_task(_run(), name="prediction_audit_write")
+        except Exception as e:
+            logger.warning("prediction_audit_schedule_failed", error=str(e))
+
     async def _handle_prediction_request(self, event: ModelPredictionRequestEvent):
         """Handle prediction request event."""
         try:
@@ -946,6 +1026,14 @@ class MCPOrchestrator:
                     market_context=reasoning_chain_payload.get("market_context", {}),
                     chain_id=reasoning.get("chain_id", "unknown"),
                     timestamp=timestamp,
+                )
+
+                self._schedule_prediction_audit(
+                    correlation_id=event.event_id,
+                    symbol=decision_symbol,
+                    confidence=float(confidence) if confidence is not None else None,
+                    decision_payload=decision_event.payload,
+                    latency_ms=result.get("inference_latency_ms"),
                 )
 
                 logger.info(
@@ -1030,6 +1118,14 @@ class MCPOrchestrator:
                 market_context=reasoning_chain_payload.get("market_context", {}),
                 chain_id=reasoning_chain.chain_id,
                 timestamp=datetime.utcnow(),
+            )
+
+            self._schedule_prediction_audit(
+                correlation_id=event.event_id,
+                symbol=symbol,
+                confidence=float(decision.get("confidence", 0.0) or 0.0),
+                decision_payload=decision_event.payload,
+                latency_ms=None,
             )
 
         except NoHealthyModelPredictionsError:

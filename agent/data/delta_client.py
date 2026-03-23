@@ -137,6 +137,80 @@ class DeltaExchangeClient:
         
         # Validate system time synchronization on initialization
         self._validate_time_sync()
+        # Delta signature timestamps are Unix seconds; offset = server - local (refreshed on auth errors).
+        self._auth_timestamp_offset_seconds: int = 0
+
+    @staticmethod
+    def _classify_delta_auth_error(error_text: str) -> str:
+        """Coarse bucket for 401/403 bodies (logging and retry policy)."""
+        t = (error_text or "").lower()
+        if "expired_signature" in t:
+            return "expired_signature"
+        if "timestamp" in t and ("expired" in t or "invalid" in t):
+            return "timestamp_skew"
+        if "invalid_signature" in t or ("signature" in t and "invalid" in t):
+            return "invalid_signature"
+        if "permission" in t or "scope" in t:
+            return "permission_scope"
+        if "ip" in t and "not" in t:
+            return "ip_restriction"
+        return "unknown_auth"
+
+    def _parse_server_unix_seconds(self, data: Dict[str, Any]) -> Optional[int]:
+        """Extract server Unix seconds from common Delta JSON shapes."""
+        if not isinstance(data, dict):
+            return None
+        r = data.get("result")
+        candidates: List[Any] = []
+        if isinstance(r, dict):
+            for k in ("server_time", "time", "timestamp", "current_timestamp"):
+                if r.get(k) is not None:
+                    candidates.append(r.get(k))
+        for k in ("server_time", "time", "timestamp"):
+            if data.get(k) is not None:
+                candidates.append(data.get(k))
+        for v in candidates:
+            try:
+                iv = int(float(v))
+                if iv > 1_000_000_000_000:
+                    iv //= 1000
+                return iv
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    async def _refresh_auth_time_offset_unauthenticated(self) -> None:
+        """Align local signature timestamp offset using a public time endpoint."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                for path in ("/v2/public/time", "/v2/time"):
+                    try:
+                        r = await client.get(f"{self.base_url}{path}")
+                        if r.status_code != 200:
+                            continue
+                        data = r.json()
+                        ts = self._parse_server_unix_seconds(data)
+                        if ts is None:
+                            continue
+                        local = int(time.time())
+                        self._auth_timestamp_offset_seconds = int(ts) - local
+                        logger.info(
+                            "delta_exchange_auth_time_offset_refreshed",
+                            server_ts=ts,
+                            local_ts=local,
+                            offset_seconds=self._auth_timestamp_offset_seconds,
+                            path=path,
+                            component="delta_client",
+                        )
+                        return
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.debug(
+                "delta_exchange_time_offset_refresh_failed",
+                error=str(e),
+                component="delta_client",
+            )
 
     @staticmethod
     def _is_placeholder_credential(value: Optional[str]) -> bool:
@@ -244,10 +318,29 @@ class DeltaExchangeClient:
                 # Handle authentication errors with retry logic
                 if response.status_code in (401, 403):
                     error_text = response.text
-                    
+                    auth_class = DeltaExchangeClient._classify_delta_auth_error(error_text)
+
                     # Check if it's an expired_signature error that we can retry
                     is_expired_signature = "expired_signature" in error_text.lower()
-                    
+
+                    if (
+                        auth_class in ("expired_signature", "timestamp_skew")
+                        and attempt < max_auth_retries
+                        and not is_expired_signature
+                    ):
+                        await self._refresh_auth_time_offset_unauthenticated()
+                        await asyncio.sleep(max(0.05, 1.0 - (time.time() % 1.0)))
+                        logger.info(
+                            "delta_exchange_auth_retry",
+                            attempt=attempt + 1,
+                            max_retries=max_auth_retries,
+                            endpoint=clean_endpoint,
+                            reason="timestamp_skew_offset_refresh",
+                            auth_error_class=auth_class,
+                            component="delta_client",
+                        )
+                        return await _request(attempt + 1)
+
                     if is_expired_signature and attempt < max_auth_retries:
                         # Important: signatures use whole-second timestamps.
                         # If we retry within the same second, the signature stays identical
@@ -260,6 +353,7 @@ class DeltaExchangeClient:
                         next_second = timestamp_used + 1
                         sleep_for = max(0.01, next_second - time.time())
                         await asyncio.sleep(sleep_for)
+                        await self._refresh_auth_time_offset_unauthenticated()
                         logger.info(
                             "delta_exchange_auth_retry",
                             attempt=attempt + 1,
@@ -269,6 +363,7 @@ class DeltaExchangeClient:
                             timestamp_used=timestamp_used,
                             sleep_seconds=round(sleep_for, 3),
                             local_time=int(time.time()),
+                            auth_error_class=auth_class,
                         )
                         # Retry with fresh timestamp
                         return await _request(attempt + 1)
@@ -286,7 +381,9 @@ class DeltaExchangeClient:
                             attempt=attempt + 1,
                             timestamp=headers.get("timestamp"),
                             local_time=int(time.time()),
-                            message="Authentication failed - check API credentials and signature format"
+                            auth_error_class=auth_class,
+                            auth_timestamp_offset_seconds=self._auth_timestamp_offset_seconds,
+                            message="Authentication failed - check API credentials, scopes, and clock sync",
                         )
                     
                     # Log signature details for debugging (without exposing secret)
@@ -555,29 +652,8 @@ class DeltaExchangeClient:
         if not endpoint.startswith('/'):
             raise ValueError(f"Endpoint must start with '/': {endpoint}")
         
-        # Generate timestamp in seconds
-        # Use current time to ensure freshness
-        current_time = time.time()
-        timestamp = int(current_time)
-        
-        # Validate timestamp is reasonable (not more than 5 seconds in the future or past)
-        # This helps catch clock synchronization issues
-        max_drift_seconds = 5  # 5 seconds
-        current_timestamp = int(current_time)
-        drift_seconds = abs(timestamp - current_timestamp)
-        
-        if drift_seconds > max_drift_seconds:
-            logger.warning(
-                "delta_exchange_timestamp_drift",
-                timestamp=timestamp,
-                current_time=current_timestamp,
-                drift_seconds=drift_seconds,
-                max_drift_seconds=max_drift_seconds,
-                message="System clock drift detected - may cause authentication failures"
-            )
-            # Use current time instead to ensure accuracy
-            timestamp = current_timestamp
-        
+        # Unix seconds for signing, adjusted by server-derived offset when refreshed.
+        timestamp = int(time.time()) + int(getattr(self, "_auth_timestamp_offset_seconds", 0))
         timestamp_str = str(timestamp)
         method_upper = method.upper()
         

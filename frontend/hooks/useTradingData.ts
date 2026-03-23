@@ -15,6 +15,7 @@ import { useEffect, useReducer, useRef } from 'react'
 import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
+import { getBackendProxyBase } from '@/lib/backendProxy'
 import type {
   Signal as SharedSignal,
   Portfolio as SharedPortfolio,
@@ -485,6 +486,24 @@ const resolveWebSocketUrl = (): string => {
 
 const WS_URL = resolveWebSocketUrl()
 
+async function fetchPortfolioSummaryViaRestProxy(): Promise<Portfolio | null> {
+  try {
+    const base = getBackendProxyBase()
+    const res = await fetch(`${base}/api/v1/portfolio/summary`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as Portfolio
+    if (!data || typeof data !== 'object') return null
+    return data
+  } catch {
+    return null
+  }
+}
+
 /**
  * Unified hook for all trading data management.
  *
@@ -653,6 +672,29 @@ export function useTradingData() {
           })
         } else {
           console.warn('Portfolio summary fetch failed:', portfolioResult.reason)
+          // Robust fallback path: retry WS command, then fallback to REST proxy.
+          let portfolioRecovered: Portfolio | null = null
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              await new Promise((r) => setTimeout(r, attempt * 600))
+              const retry = (await apiClient.getPortfolioSummary()) as Portfolio
+              if (retry && typeof retry === 'object') {
+                portfolioRecovered = retry
+                break
+              }
+            } catch {
+              // Continue to next retry/fallback
+            }
+          }
+          if (!portfolioRecovered) {
+            portfolioRecovered = await fetchPortfolioSummaryViaRestProxy()
+          }
+          if (portfolioRecovered) {
+            dispatch({
+              type: 'UPDATE_PORTFOLIO',
+              payload: portfolioRecovered,
+            })
+          }
         }
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
 

@@ -248,6 +248,32 @@ class ModelDeployment(Base):
     created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
 
 
+class TradeOutcomeRecord(Base):
+    """Closed position outcomes for adaptive learning and performance analytics."""
+
+    __tablename__ = "trade_outcomes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    position_id = Column(String(255), nullable=True, index=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    side = Column(String(16), nullable=True)
+    signal = Column(String(64), nullable=True)
+    entry_price = Column(DECIMAL(24, 8), nullable=False)
+    exit_price = Column(DECIMAL(24, 8), nullable=False)
+    quantity = Column(DECIMAL(24, 8), nullable=False)
+    pnl = Column(DECIMAL(24, 8), nullable=True)
+    pnl_pct = Column(DECIMAL(12, 6), nullable=True)
+    close_reason = Column(String(64), nullable=True)
+    opened_at = Column(TIMESTAMPTZ, nullable=True)
+    closed_at = Column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_trade_outcomes_symbol_closed", "symbol", "closed_at"),
+    )
+
+
 class PredictionAudit(Base):
     """Audit log for prediction requests: request_id, model version, confidence, latency, outcome reference."""
     __tablename__ = "prediction_audit"

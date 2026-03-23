@@ -1041,7 +1041,9 @@ class WebSocketManager:
                             health_scores.append(0.0)
                         
                         # Check agent (fetch status once and share with dependent checks)
-                        agent_status = await agent_service.get_agent_status(timeout=10)
+                        agent_status = await agent_service.get_agent_status(
+                            timeout=settings.agent_status_command_timeout_seconds
+                        )
                         agent_health = await check_agent_health(agent_status)
                         agent_weight = 0.15
                         if agent_health.status == "up":

@@ -185,6 +185,7 @@ This document serves as the central index for all project documentation. Navigat
    - Container health analysis
    - Service-specific issue identification
    - Docker deployment troubleshooting
+   - Latest 8h AI/signals review: [Docker Logs Analysis Report — 2026-03-23](docs/docker-logs-analysis-report-20260323.md)
    - Related: [Docker Logs Follow-up Report](docs/archive/docker-logs-followup-report-2025-11-20.md), [Docker Logs Analysis Report - 2025-11-23](docs/archive/docker-logs-analysis-report-2025-11-23.md)
 
 19. **[Remediation Plan](docs/remediation-plan.md)**

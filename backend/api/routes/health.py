@@ -59,7 +59,9 @@ async def check_agent_health(agent_status: Optional[Dict[str, Any]] = None) -> H
     try:
         # Use a slightly longer timeout here to accommodate downstream MCP checks
         if agent_status is None:
-            agent_status = await agent_service.get_agent_status(timeout=10)
+            agent_status = await agent_service.get_agent_status(
+                timeout=settings.agent_status_command_timeout_seconds
+            )
 
         return HealthServiceStatus(
             status="up" if agent_status.get("available", False) else "down",
@@ -87,7 +89,9 @@ async def check_feature_server_health(
         # Try to check feature server directly if possible
         # For now, check via agent but handle failures gracefully
         if agent_status is None:
-            agent_status = await agent_service.get_agent_status(timeout=10)
+            agent_status = await agent_service.get_agent_status(
+                timeout=settings.agent_status_command_timeout_seconds
+            )
         feature_server_status = agent_status.get("feature_server", {})
         agent_available = agent_status.get("available", False)
         
@@ -154,7 +158,9 @@ async def check_model_nodes_health(
     """
     try:
         if agent_status is None:
-            agent_status = await agent_service.get_agent_status(timeout=10)
+            agent_status = await agent_service.get_agent_status(
+                timeout=settings.agent_status_command_timeout_seconds
+            )
         model_nodes_status = agent_status.get("model_nodes", {})
         agent_available = agent_status.get("available", False)
         
@@ -280,7 +286,9 @@ async def check_delta_exchange_health(
     """
     try:
         if agent_status is None:
-            agent_status = await agent_service.get_agent_status(timeout=10)
+            agent_status = await agent_service.get_agent_status(
+                timeout=settings.agent_status_command_timeout_seconds
+            )
         delta_status = agent_status.get("delta_exchange", {})
         agent_available = agent_status.get("available", False)
         
@@ -378,7 +386,9 @@ async def check_reasoning_engine_health(
     """
     try:
         if agent_status is None:
-            agent_status = await agent_service.get_agent_status(timeout=10)
+            agent_status = await agent_service.get_agent_status(
+                timeout=settings.agent_status_command_timeout_seconds
+            )
         reasoning_status = agent_status.get("reasoning_engine", {})
         agent_available = agent_status.get("available", False)
         
@@ -495,7 +505,9 @@ async def check_overall_health(db: AsyncSession) -> dict:
     # Check agent (fetch status once and share with dependent checks)
     raw_agent_status: Optional[Dict[str, Any]] = None
     try:
-        raw_agent_status = await agent_service.get_agent_status(timeout=10)
+        raw_agent_status = await agent_service.get_agent_status(
+            timeout=settings.agent_status_command_timeout_seconds
+        )
     except Exception:
         # Use a placeholder dict so dependent checks don't trigger
         # additional agent round-trips (which can cascade into timeouts).

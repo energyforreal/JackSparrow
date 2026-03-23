@@ -61,6 +61,8 @@ class AgentService:
         self._agent_status_cache: Optional[Dict[str, Any]] = None
         self._agent_status_cache_updated_at: float = 0.0
         self._agent_status_cache_ttl_seconds: float = 2.0
+        self._last_good_agent_status: Optional[Dict[str, Any]] = None
+        self._last_good_agent_status_at: float = 0.0
     
     async def _initialize_websocket(self):
         """Initialize WebSocket connection to agent."""
@@ -572,12 +574,18 @@ class AgentService:
             )
             return None
     
-    async def get_agent_status(self, timeout: float = 5) -> Optional[Dict[str, Any]]:
+    async def get_agent_status(self, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """Get agent status.
 
         Args:
-            timeout: Timeout in seconds for the command (default 5)
+            timeout: Timeout in seconds for the command. When omitted, uses
+                settings.agent_status_command_timeout_seconds (default 15).
         """
+        timeout_s = float(
+            timeout
+            if timeout is not None
+            else getattr(settings, "agent_status_command_timeout_seconds", 15.0)
+        )
         now_ts = time.time()
         if (
             self._agent_status_cache is not None
@@ -599,12 +607,33 @@ class AgentService:
             response = await self._send_command(
                 "get_status",
                 parameters={},
-                timeout=timeout,
+                timeout=timeout_s,
             )
             latency_ms = (time.time() - start_time) * 1000
             now = datetime.now(timezone.utc)
 
             if not response:
+                grace_s = float(
+                    getattr(settings, "agent_status_timeout_grace_seconds", 30) or 30
+                )
+                now_unix = time.time()
+                if (
+                    self._last_good_agent_status is not None
+                    and (now_unix - self._last_good_agent_status_at) <= grace_s
+                ):
+                    stale_status = dict(self._last_good_agent_status)
+                    stale_status["status_stale"] = True
+                    stale_status["health_status"] = "stale"
+                    stale_status["message"] = (
+                        "Agent status timeout; showing last known good status "
+                        f"({int(now_unix - self._last_good_agent_status_at)}s old)."
+                    )
+                    stale_status["latency_ms"] = round(latency_ms, 2)
+                    stale_status["last_update"] = now
+                    self._agent_status_cache = stale_status
+                    self._agent_status_cache_updated_at = time.time()
+                    return dict(stale_status)
+
                 status_response = {
                     "available": True,
                     "state": "DEGRADED",
@@ -759,6 +788,8 @@ class AgentService:
 
             self._agent_status_cache = status_response
             self._agent_status_cache_updated_at = time.time()
+            self._last_good_agent_status = dict(status_response)
+            self._last_good_agent_status_at = time.time()
             return dict(status_response)
     
     async def control_agent(

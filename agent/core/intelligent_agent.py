@@ -125,6 +125,7 @@ class IntelligentAgent:
         # FeatureServerAPI is bound to the initialized MCP Feature Server in initialize().
         self.feature_server_api: FeatureServerAPI | None = None
         self.running = False
+        self._threshold_adapter_task: Optional[asyncio.Task] = None
         self.command_queue = settings.agent_command_queue
         self.default_symbol = settings.trading_symbol or settings.agent_symbol
         timeframe_list = settings.parsed_timeframes()
@@ -195,6 +196,22 @@ class IntelligentAgent:
             feature_server_host=settings.feature_server_host,
             feature_server_port=settings.feature_server_port,
             message="Agent configuration loaded from environment variables"
+        )
+        logger.info(
+            "agent_persistence_configuration",
+            service="agent",
+            prediction_audit_writes_enabled=getattr(
+                settings, "prediction_audit_writes_enabled", True
+            ),
+            trade_outcomes_writes_enabled=getattr(
+                settings, "trade_outcomes_writes_enabled", True
+            ),
+            threshold_adapter_enabled=getattr(settings, "threshold_adapter_enabled", True),
+            database_url_configured=bool(getattr(settings, "database_url", None)),
+            message=(
+                "Persistence flags loaded. If prediction_audit remains empty, "
+                "verify DATABASE_URL reachability from the agent container."
+            ),
         )
         
         # Initialize event bus
@@ -405,6 +422,29 @@ class IntelligentAgent:
         # Position monitoring loop is started in start() after self.running = True
         # so the loop does not exit immediately (while self.running).
 
+    async def _threshold_adapter_loop(self) -> None:
+        """Periodically nudge Redis thresholds from trade_outcomes (bounded)."""
+        from agent.learning.threshold_adapter import ThresholdAdapter
+
+        adapter = ThresholdAdapter()
+        interval = float(getattr(settings, "threshold_adapter_interval_seconds", 3600) or 3600)
+        interval = max(60.0, interval)
+        while self.running:
+            try:
+                await asyncio.sleep(interval)
+                if not self.running:
+                    break
+                await adapter.adapt()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(
+                    "threshold_adapter_loop_tick_failed",
+                    service="agent",
+                    error=str(e),
+                    exc_info=True,
+                )
+
     async def _position_monitor_loop(self) -> None:
         """Background loop: update position prices and run manage_position for stop/take profit."""
         while self.running:
@@ -471,6 +511,14 @@ class IntelligentAgent:
             environment=settings.environment,
         )
         self.running = False
+
+        if getattr(self, "_threshold_adapter_task", None):
+            self._threshold_adapter_task.cancel()
+            try:
+                await self._threshold_adapter_task
+            except asyncio.CancelledError:
+                pass
+            self._threshold_adapter_task = None
 
         # Cancel position monitoring loop
         if getattr(self, "_position_monitor_task", None):
@@ -697,6 +745,14 @@ class IntelligentAgent:
             service="agent",
             message="Position monitoring loop started for stop loss / take profit",
         )
+
+        if getattr(settings, "threshold_adapter_enabled", True):
+            self._threshold_adapter_task = asyncio.create_task(self._threshold_adapter_loop())
+            logger.info(
+                "agent_threshold_adapter_started",
+                service="agent",
+                interval_seconds=getattr(settings, "threshold_adapter_interval_seconds", 3600),
+            )
 
         # Start command handler (for backward compatibility)
         logger.info("agent_creating_command_task")

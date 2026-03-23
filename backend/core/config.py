@@ -235,6 +235,31 @@ class Settings(BaseSettings):
         env="PAPER_TRADING_MODE",
         description="When True, paper trading (no real orders); when False, live trading. Also set by TRADING_MODE=paper|live."
     )
+    reset_paper_state_on_startup: bool = Field(
+        default=True,
+        env="RESET_PAPER_STATE_ON_STARTUP",
+        description=(
+            "When True in paper mode, backend clears positions/trades on startup. "
+            "Set False to preserve paper portfolio across restarts."
+        ),
+    )
+    agent_status_timeout_grace_seconds: int = Field(
+        default=30,
+        env="AGENT_STATUS_TIMEOUT_GRACE_SECONDS",
+        description=(
+            "Grace window to reuse last successful agent status after timeout, "
+            "avoiding transient DEGRADED flicker."
+        ),
+    )
+    agent_status_command_timeout_seconds: float = Field(
+        default=15.0,
+        env="AGENT_STATUS_COMMAND_TIMEOUT_SECONDS",
+        ge=1.0,
+        description=(
+            "Timeout for backend -> agent get_status command. "
+            "Raised from 5s to reduce false timeouts during CPU spikes."
+        ),
+    )
 
     @model_validator(mode="after")
     def sync_paper_trading_with_trading_mode(self):

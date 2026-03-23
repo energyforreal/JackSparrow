@@ -16,6 +16,7 @@ from agent.core.context_manager import context_manager
 from agent.core.config import settings
 from agent.core.mtf_decision_engine import compute_context_position_size_multiplier
 from agent.core.signal_filter import EntrySignalFilter
+from agent.learning.dynamic_thresholds import get_effective_min_confidence_threshold
 
 logger = structlog.get_logger()
 
@@ -98,6 +99,43 @@ class TradingEventHandler:
             **context,
         )
 
+    def _reasoning_pipeline_diagnostics(
+        self, reasoning_chain: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Structured fields to distinguish HOLD-at-synthesis vs execution-layer rejects."""
+        if not isinstance(reasoning_chain, dict):
+            return {}
+        out: Dict[str, Any] = {
+            "reasoning_final_confidence": reasoning_chain.get("final_confidence"),
+            "reasoning_conclusion": (reasoning_chain.get("conclusion") or "")[:200],
+        }
+        steps = reasoning_chain.get("steps") or []
+        if isinstance(steps, list):
+            for s in steps:
+                if not isinstance(s, dict):
+                    continue
+                sn = s.get("step_number")
+                if sn == 5:
+                    out["synthesis_step5_description"] = (s.get("description") or "")[:240]
+                    out["synthesis_step5_confidence"] = s.get("confidence")
+                elif sn == 6:
+                    out["calibration_step6_confidence"] = s.get("confidence")
+        hold_bucket = None
+        conclusion = (out.get("reasoning_conclusion") or "").lower()
+        if "dead zone" in conclusion:
+            hold_bucket = "mtf_dead_zone"
+        elif "below entry edge" in conclusion:
+            hold_bucket = "mtf_entry_edge"
+        elif "not confirming trend" in conclusion:
+            hold_bucket = "mtf_not_confirming_trend"
+        elif "trend neutral" in conclusion:
+            hold_bucket = "mtf_trend_neutral"
+        elif "mixed signals" in conclusion:
+            hold_bucket = "consensus_in_hold_band"
+        if hold_bucket:
+            out["hold_bucket"] = hold_bucket
+        return out
+
     def _summarize_model_entry_proba(
         self, model_predictions: Any
     ) -> Dict[str, Any]:
@@ -170,9 +208,18 @@ class TradingEventHandler:
 
             now_utc = datetime.now(timezone.utc)
             hour_bucket_utc = now_utc.strftime("%Y-%m-%dT%H:00Z")
-            model_predictions = (payload.get("reasoning_chain") or {}).get("model_predictions") or []
+            reasoning_chain = payload.get("reasoning_chain") or {}
+            model_predictions = (
+                reasoning_chain.get("model_predictions") if isinstance(reasoning_chain, dict) else None
+            ) or []
             entry_proba_summary = self._summarize_model_entry_proba(model_predictions)
-            diagnostics_base: Dict[str, Any] = {"hour_bucket_utc": hour_bucket_utc, **entry_proba_summary}
+            diagnostics_base: Dict[str, Any] = {
+                "hour_bucket_utc": hour_bucket_utc,
+                **entry_proba_summary,
+                **self._reasoning_pipeline_diagnostics(
+                    reasoning_chain if isinstance(reasoning_chain, dict) else {}
+                ),
+            }
 
             # Skip HOLD - no trade to execute
             if signal == "HOLD" or not signal:
@@ -245,15 +292,17 @@ class TradingEventHandler:
                         await self.execution_module.close_position(symbol, exit_reason="signal_reversal")
                         return
 
-            # Check confidence threshold
-            if confidence < settings.min_confidence_threshold:
+            # Check confidence threshold (Redis learning layer may nudge within bounds)
+            eff_min_conf = await get_effective_min_confidence_threshold()
+            if confidence < eff_min_conf:
                 self._log_entry_rejected(
                     "low_confidence",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
                     confidence=confidence,
-                    threshold=settings.min_confidence_threshold,
+                    threshold=eff_min_conf,
+                    config_min_confidence_threshold=settings.min_confidence_threshold,
                     **diagnostics_base,
                 )
                 return

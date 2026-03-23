@@ -105,7 +105,10 @@ async def lifespan(app: FastAPI):
                 service="backend",
                 auto_create=True
             )
-        if getattr(settings, "paper_trading_mode", True):
+        if (
+            getattr(settings, "paper_trading_mode", True)
+            and getattr(settings, "reset_paper_state_on_startup", True)
+        ):
             try:
                 await _reset_paper_trade_state()
             except Exception as reset_err:
@@ -115,6 +118,15 @@ async def lifespan(app: FastAPI):
                     error=str(reset_err),
                     message="Paper trade state reset failed; continuing startup",
                 )
+        elif getattr(settings, "paper_trading_mode", True):
+            logger.info(
+                "paper_trade_state_reset_disabled",
+                service="backend",
+                message=(
+                    "Paper trade reset on startup is disabled "
+                    "(RESET_PAPER_STATE_ON_STARTUP=false)."
+                ),
+            )
     except Exception as e:
         logger.error(
             "backend_database_connection_failed",

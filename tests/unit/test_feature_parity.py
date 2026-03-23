@@ -4,6 +4,7 @@ Feature parity tests: verify batch and single compute produce identical values.
 Ensures train-serve parity for UnifiedFeatureEngine.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -21,7 +22,9 @@ from feature_store.feature_registry import (
     CANDLESTICK_FEATURES,
     CHART_PATTERN_FEATURES,
     MTF_CONTEXT_FEATURES,
+    EXPANDED_FEATURE_LIST,
 )
+from feature_store.unified_feature_engine import FEATURE_ALIASES
 
 
 def _make_test_df(n: int = 150) -> pd.DataFrame:
@@ -139,3 +142,29 @@ def test_full_canonical_parity():
         single_val = engine.compute_single(name, candles)
         batch_val = float(batch[name].iloc[-1])
         assert abs(batch_val - single_val) < 1e-5, f"Parity failure: {name}"
+
+
+def test_active_v5_bundle_metadata_features_known_to_engine():
+    """metadata features_required must map to UnifiedFeatureEngine (train-serve gate)."""
+    meta_path = (
+        ROOT
+        / "agent"
+        / "model_storage"
+        / "jacksparrow_v5_BTCUSD_2026-03-21"
+        / "metadata_BTCUSD_5m.json"
+    )
+    if not meta_path.is_file():
+        pytest.skip("jacksparrow_v5_BTCUSD_2026-03-21 metadata not present")
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+    required = meta.get("features_required") or []
+    assert len(required) > 0
+    expanded = set(EXPANDED_FEATURE_LIST)
+    engine = UnifiedFeatureEngine()
+    df = _make_test_df_5m_with_ts(220)
+    candles = df.to_dict("records")
+    for name in required[:40]:
+        canonical = FEATURE_ALIASES.get(name, name)
+        assert canonical in expanded or name in expanded, f"Unknown feature in metadata: {name}"
+        val = engine.compute_single(name, candles, resolution_minutes=5)
+        assert val == val, f"Non-numeric feature {name}"

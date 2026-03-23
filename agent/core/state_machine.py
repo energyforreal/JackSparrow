@@ -8,7 +8,10 @@ Event-driven state transitions.
 from enum import Enum
 from typing import Optional, Callable, Dict, Any, List
 from datetime import datetime, timezone
+import asyncio
 import structlog
+
+from agent.core.config import settings
 
 from agent.events.event_bus import event_bus
 from agent.events.schemas import (
@@ -187,7 +190,49 @@ class AgentStateMachine:
                     error=str(e),
                     exc_info=True,
                 )
-    
+
+        if getattr(settings, "trade_outcomes_writes_enabled", True):
+            try:
+                from agent.persistence.db_writes import persist_trade_outcome_async
+
+                async def _persist_sql_outcome() -> None:
+                    raw_closed = payload.get("timestamp")
+                    closed_at = (
+                        raw_closed
+                        if isinstance(raw_closed, datetime)
+                        else datetime.now(timezone.utc)
+                    )
+                    raw_opened = payload.get("entry_time")
+                    opened_at = raw_opened if isinstance(raw_opened, datetime) else None
+                    entry = float(payload.get("entry_price") or 0)
+                    exitp = float(payload.get("exit_price") or 0)
+                    qty = float(payload.get("quantity") or 0)
+                    pnl = float(payload.get("pnl") or 0)
+                    denom = (entry * qty) if entry and qty else 0.0
+                    pnl_pct = (pnl / denom * 100.0) if denom else None
+                    await persist_trade_outcome_async(
+                        settings.database_url,
+                        position_id=payload.get("position_id"),
+                        symbol=str(payload.get("symbol", "")),
+                        side=payload.get("side"),
+                        signal=payload.get("predicted_signal"),
+                        entry_price=entry,
+                        exit_price=exitp,
+                        quantity=qty,
+                        pnl=pnl,
+                        pnl_pct=pnl_pct,
+                        close_reason=payload.get("exit_reason"),
+                        opened_at=opened_at,
+                        closed_at=closed_at,
+                        metadata={
+                            "reasoning_chain_id": payload.get("reasoning_chain_id"),
+                        },
+                    )
+
+                asyncio.create_task(_persist_sql_outcome(), name="trade_outcome_write")
+            except Exception as e:
+                logger.warning("trade_outcome_schedule_failed", error=str(e), exc_info=True)
+
     async def _transition_to(self, new_state: AgentState, reason: str):
         """Transition to new state and emit event.
         

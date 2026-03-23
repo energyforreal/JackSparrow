@@ -153,6 +153,35 @@ class Settings(BaseSettings):
             "are disabled so that all trading decisions require real ML model predictions."
         ),
     )
+    require_models_on_startup: bool = Field(
+        default=False,
+        env="REQUIRE_MODELS_ON_STARTUP",
+        description=(
+            "When True, the MCP orchestrator raises if zero ML models load at startup. "
+            "Recommended True in Docker/production; False for local/tests without model artifacts."
+        ),
+    )
+    prediction_audit_writes_enabled: bool = Field(
+        default=True,
+        env="PREDICTION_AUDIT_WRITES_ENABLED",
+        description="When True, persist each DecisionReady path to prediction_audit (PostgreSQL).",
+    )
+    trade_outcomes_writes_enabled: bool = Field(
+        default=True,
+        env="TRADE_OUTCOMES_WRITES_ENABLED",
+        description="When True, persist closed positions to trade_outcomes (PostgreSQL).",
+    )
+    threshold_adapter_enabled: bool = Field(
+        default=True,
+        env="THRESHOLD_ADAPTER_ENABLED",
+        description="When True, periodically adjust Redis-backed learning thresholds from trade_outcomes.",
+    )
+    threshold_adapter_interval_seconds: int = Field(
+        default=3600,
+        env="THRESHOLD_ADAPTER_INTERVAL_SECONDS",
+        ge=60,
+        description="How often to run ThresholdAdapter (seconds).",
+    )
     
     # Agent Configuration
     agent_start_mode: str = Field(

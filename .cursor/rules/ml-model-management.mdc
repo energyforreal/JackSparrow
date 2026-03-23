@@ -10,9 +10,10 @@ alwaysApply: false
 
 ## Model File Organization
 
-- **Current production models**: Stored in `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
-- **Discovery contract (v4-only)**: `metadata_BTCUSD_*.json` is discovered under `MODEL_DIR`; with `MODEL_DISCOVERY_RECURSIVE=true` (default), subfolders such as `jacksparrow_v5_BTCUSD_*/` are scanned so `MODEL_DIR` may be `./agent/model_storage`.
-- **Artefact set per timeframe**: entry/exit model `.joblib`, entry/exit scaler `.joblib`, `features_*.json`, `metadata_*.json`
+- **Default Docker bundle**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` (slim 5m+15m export; see metadata `artifacts`).
+- **Full multi-TF bundle (reference)**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` (five horizons; entry+exit per TF when exported).
+- **Discovery contract (v4 loader)**: `metadata_BTCUSD_*.json` is discovered under `MODEL_DIR`; with `MODEL_DISCOVERY_RECURSIVE=true` (default), subfolders such as `jacksparrow_v5_BTCUSD_*/` are scanned so `MODEL_DIR` may be `./agent/model_storage`.
+- **Artefact set per timeframe**: depends on export — classic `entry_model`/`exit_model` joblibs **or** binary `entry_long`/`entry_short` only; always `metadata_*.json` (+ optional `features_*.json`).
 - Legacy model directories (`xgboost/`, `lstm/`, `custom/`) may exist historically but are not the primary v4 path
 
 ## Environment Variables

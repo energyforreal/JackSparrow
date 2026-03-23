@@ -1,6 +1,8 @@
 # JackSparrow Trading Agent — Complete ML Redesign Report
 ## HOLD Signal Fix · Scalping Conversion · Colab Execution Guide
 
+> **Historical diagnosis (read with current code):** This report captures a deep code-traced audit from a fixed point in time. Thresholds, feature counts, and bundle layouts **have evolved** — verify live behaviour against `agent/core/config.py`, `agent/core/reasoning_engine.py`, `agent/events/handlers/trading_handler.py`, and the active `metadata_BTCUSD_*.json` under `MODEL_DIR` (e.g. `jacksparrow_v5_BTCUSD_2026-03-21`).
+
 **Scope:** Full system diagnosis, root cause analysis, and actionable redesign  
 **Based on:** Code-traced audit of all uploaded artifacts  
 **Target:** XGBoost classifier, Delta Exchange, Google Colab, local script execution
