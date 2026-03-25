@@ -195,7 +195,10 @@ class MCPFeatureServer:
         has_pattern_features = any(
             name.startswith(PATTERN_FEATURE_PREFIXES) for name in request.feature_names
         )
-        limit = CANDLES_FOR_PATTERNS if has_pattern_features else 100
+        has_regime_features = any(
+            name.startswith("regime_") for name in request.feature_names
+        )
+        limit = CANDLES_FOR_PATTERNS if (has_pattern_features or has_regime_features) else 100
         market_data = await self.market_data_service.get_market_data(
             symbol=request.symbol,
             limit=limit

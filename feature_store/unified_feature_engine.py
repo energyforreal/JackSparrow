@@ -15,6 +15,7 @@ from feature_store.feature_registry import (
     CHART_PATTERN_FEATURES,
     EXPECTED_FEATURE_COUNT,
     FEATURE_LIST,
+    REGIME_FEATURES,
     MTF_CONTEXT_FEATURES,
 )
 from feature_store.pattern_features.candlestick_patterns import CandlestickPatternEngine
@@ -66,15 +67,53 @@ def _ensure_timestamp_series(df: pd.DataFrame) -> pd.Series:
     return ts
 
 
+def _compute_regime_series(
+    df: pd.DataFrame,
+    atr_window: int = 14,
+    adx_window: int = 14,
+) -> pd.Series:
+    """Compute regime label: 0=ranging, 1=trending, 2=volatile."""
+    tr = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - df["close"].shift()).abs(),
+            (df["low"].shift() - df["low"]).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    atr = tr.rolling(atr_window).mean()
+
+    dm_pos = (df["high"] - df["high"].shift()).clip(lower=0)
+    dm_neg = (df["low"].shift() - df["low"]).clip(lower=0)
+
+    di_pos = 100 * (dm_pos.rolling(adx_window).mean() / atr)
+    di_neg = 100 * (dm_neg.rolling(adx_window).mean() / atr)
+    dx = 100 * (di_pos - di_neg).abs() / (di_pos + di_neg)
+    adx = dx.rolling(adx_window).mean()
+
+    atr_pct = atr / df["close"]
+    atr_rank = atr_pct.rolling(200).rank(pct=True)
+
+    regime = pd.Series(1, index=df.index)
+    regime[adx < 25] = 0
+    regime[atr_rank > 0.85] = 2
+    return regime.fillna(1).astype(int)
+
+
 class UnifiedFeatureEngine:
     """
     Single source of truth for all feature computation.
     Both live and training MUST use this class.
     """
 
-    SUPPORTED_FEATURES = list(FEATURE_LIST) + list(
-        {f for f in V4_EXTRA_FEATURES if f not in FEATURE_LIST}
-    ) + list(CANDLESTICK_FEATURES) + list(CHART_PATTERN_FEATURES) + list(MTF_CONTEXT_FEATURES)
+    SUPPORTED_FEATURES = (
+        list(FEATURE_LIST)
+        + list({f for f in V4_EXTRA_FEATURES if f not in FEATURE_LIST})
+        + list(CANDLESTICK_FEATURES)
+        + list(CHART_PATTERN_FEATURES)
+        + list(MTF_CONTEXT_FEATURES)
+        + list(REGIME_FEATURES)
+    )
 
     def __init__(self):
         self._cdl_engine = CandlestickPatternEngine()
@@ -319,6 +358,23 @@ class UnifiedFeatureEngine:
             df = pd.DataFrame(candles)
             mtf = self._mtf_context_from_primary(df, resolution_minutes)
             return float(mtf[feature_name].iloc[-1])
+
+        if feature_name in REGIME_FEATURES:
+            df = pd.DataFrame(candles)
+            # Ensure numeric types; compute_regime uses OHLC only.
+            for col in ("open", "high", "low", "close", "volume"):
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            regime = _compute_regime_series(df)
+            last = int(regime.iloc[-1]) if not regime.empty else 1
+            if feature_name == "regime_state":
+                return float(last)
+            if feature_name == "regime_is_ranging":
+                return float(1 if last == 0 else 0)
+            if feature_name == "regime_is_trending":
+                return float(1 if last == 1 else 0)
+            if feature_name == "regime_is_volatile":
+                return float(1 if last == 2 else 0)
 
         resolved = FEATURE_ALIASES.get(feature_name, feature_name)
         if resolved in FEATURE_LIST:
