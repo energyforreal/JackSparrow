@@ -16,7 +16,10 @@ from agent.core.context_manager import context_manager
 from agent.core.config import settings
 from agent.core.mtf_decision_engine import compute_context_position_size_multiplier
 from agent.core.signal_filter import EntrySignalFilter
-from agent.learning.dynamic_thresholds import get_effective_min_confidence_threshold
+from agent.learning.dynamic_thresholds import (
+    get_effective_min_confidence_threshold,
+    resolve_metadata_recommended_threshold,
+)
 
 logger = structlog.get_logger()
 
@@ -224,7 +227,7 @@ class TradingEventHandler:
             # Skip HOLD - no trade to execute
             if signal == "HOLD" or not signal:
                 self._log_entry_rejected(
-                    "hold_signal",
+                    "hold_at_synthesis",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
@@ -246,7 +249,7 @@ class TradingEventHandler:
                     age = time.time() - ts_sec
                     if age > getattr(settings, "max_signal_age_seconds", 10):
                         self._log_entry_rejected(
-                            "stale_signal",
+                            "stale_signal_reject",
                             symbol=symbol,
                             signal=signal,
                             event_id=event.event_id,
@@ -294,14 +297,27 @@ class TradingEventHandler:
 
             # Check confidence threshold (Redis learning layer may nudge within bounds)
             eff_min_conf = await get_effective_min_confidence_threshold()
+            rec_threshold = resolve_metadata_recommended_threshold(
+                signal=signal,
+                model_predictions=model_predictions,
+            )
+            # Optional temporary validation mode for paper-trading pipeline checks.
+            if bool(getattr(settings, "paper_trade_validation_mode", False)):
+                eff_min_conf = float(
+                    getattr(settings, "paper_trade_validation_min_confidence", 0.45) or 0.45
+                )
+            elif rec_threshold is not None:
+                # Choose a conservative midpoint between global threshold and metadata recommendation.
+                eff_min_conf = max(0.0, min(1.0, (eff_min_conf + rec_threshold) / 2.0))
             if confidence < eff_min_conf:
                 self._log_entry_rejected(
-                    "low_confidence",
+                    "low_confidence_reject",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
                     confidence=confidence,
                     threshold=eff_min_conf,
+                    metadata_recommended_threshold=rec_threshold,
                     config_min_confidence_threshold=settings.min_confidence_threshold,
                     **diagnostics_base,
                 )
@@ -327,7 +343,7 @@ class TradingEventHandler:
             vol = features.get("volatility")
             if vol is None:
                 self._log_entry_rejected(
-                    "missing_volatility",
+                    "missing_volatility_reject",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,

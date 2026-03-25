@@ -355,6 +355,14 @@ class Settings(BaseSettings):
         env="MTF_ENTRY_FALLBACK_TIMEFRAMES",
         description="Comma-separated fallbacks if primary entry TF model is missing",
     )
+    mtf_allow_partial_timeframe_fallback: bool = Field(
+        default=True,
+        env="MTF_ALLOW_PARTIAL_TIMEFRAME_FALLBACK",
+        description=(
+            "Allow best-available timeframe selection when configured MTF trend/entry "
+            "timeframes are unavailable."
+        ),
+    )
     mtf_entry_min_confidence: float = Field(
         default=0.52,
         env="MTF_ENTRY_MIN_CONFIDENCE",
@@ -726,6 +734,21 @@ class Settings(BaseSettings):
         env="MIN_CONFIDENCE_THRESHOLD",
         description="Minimum confidence threshold for trades"
     )
+    paper_trade_validation_mode: bool = Field(
+        default=False,
+        env="PAPER_TRADE_VALIDATION_MODE",
+        description=(
+            "When true, use relaxed confidence gate for paper-trading "
+            "pipeline validation only."
+        ),
+    )
+    paper_trade_validation_min_confidence: float = Field(
+        default=0.45,
+        env="PAPER_TRADE_VALIDATION_MIN_CONFIDENCE",
+        description=(
+            "Temporary minimum confidence while PAPER_TRADE_VALIDATION_MODE is enabled."
+        ),
+    )
     xgb_binary_decision_midpoint: float = Field(
         default=0.5,
         env="XGB_BINARY_DECISION_MIDPOINT",
@@ -800,6 +823,16 @@ class Settings(BaseSettings):
         default=30,
         env="CANDLE_POLL_INTERVAL_SECONDS",
         description="How often to check for completed candles while streaming (seconds)"
+    )
+    candle_close_trigger_enabled: bool = Field(
+        default=True,
+        env="CANDLE_CLOSE_TRIGGER_ENABLED",
+        description="Enable candle-close event path to trigger ML decision pipeline.",
+    )
+    price_fluctuation_trigger_enabled: bool = Field(
+        default=True,
+        env="PRICE_FLUCTUATION_TRIGGER_ENABLED",
+        description="Enable price-fluctuation event path to trigger ML decision pipeline.",
     )
     # Signal staleness configuration
     signal_staleness_minutes: int = Field(

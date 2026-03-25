@@ -124,8 +124,8 @@ class Config:
     # Adaptive lookahead (candles ahead for entry / TP-SL label window).
     # Option A: longer window → more TP-before-SL positives at same TP/SL as agent.
     entry_lookahead_map: dict = field(default_factory=lambda: {
-        '5m': 10,
-        '15m': 6,
+        '5m': 20,
+        '15m': 10,
     })
 
     label_mode: str = 'tp_sl'
@@ -650,6 +650,12 @@ for tf in CFG.timeframes:
             'Alternatives: lower TP/SL in training AND agent env together; hybrid return-based auxiliary targets.'
         ),
         'label_stats': label_stats,
+        'RECOMMENDED_LONG_THRESHOLD': 0.50,
+        'RECOMMENDED_SHORT_THRESHOLD': 0.50,
+        'runtime_threshold_hints': {
+            'mtf_entry_min_buy_prob': 0.50,
+            'mtf_entry_min_sell_prob': 0.50,
+        },
         'exit_policy_note': 'Live agent: TP/SL + trailing + max hold; no ML exit artefact in this export.',
         'config': {
             'entry_tp_pct':     TP_PCT,

@@ -374,6 +374,13 @@ class V4EnsembleNode(MCPModelNode):
                 "exit_signal": exit_signal,
                 "exit_confidence": exit_conf,
                 "feature_names_used": applied_feature_names,
+                "runtime_threshold_hints": self._metadata.get("runtime_threshold_hints", {}),
+                "RECOMMENDED_LONG_THRESHOLD": self._metadata.get(
+                    "RECOMMENDED_LONG_THRESHOLD"
+                ),
+                "RECOMMENDED_SHORT_THRESHOLD": self._metadata.get(
+                    "RECOMMENDED_SHORT_THRESHOLD"
+                ),
             }
 
             return MCPModelPrediction(

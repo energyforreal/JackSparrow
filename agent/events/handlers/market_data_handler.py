@@ -93,6 +93,12 @@ class MarketDataEventHandler:
             event: Candle closed event
         """
         try:
+            if not bool(getattr(settings, "candle_close_trigger_enabled", True)):
+                logger.debug(
+                    "candle_close_trigger_disabled",
+                    event_id=event.event_id,
+                )
+                return
             payload = event.payload
             symbol = payload.get("symbol")
             interval = payload.get("interval")
@@ -157,6 +163,12 @@ class MarketDataEventHandler:
             event: Price fluctuation event
         """
         try:
+            if not bool(getattr(settings, "price_fluctuation_trigger_enabled", True)):
+                logger.debug(
+                    "price_fluctuation_trigger_disabled",
+                    event_id=event.event_id,
+                )
+                return
             payload = event.payload
             symbol = payload.get("symbol")
             change_pct = payload.get("change_pct")

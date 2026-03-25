@@ -76,15 +76,24 @@ MTF_CONTEXT_FEATURES: List[str] = [
     "mtf_1m_vol_ratio",
 ]
 
-# Expanded: canonical + candlestick + chart patterns + MTF context (~127)
+# Regime-awareness features produced by notebook/live feature layer.
+REGIME_FEATURES: List[str] = [
+    "regime_state",
+    "regime_is_ranging",
+    "regime_is_trending",
+    "regime_is_volatile",
+]
+
+# Expanded: canonical + candlestick + chart patterns + MTF context + regime flags.
 EXPANDED_FEATURE_LIST: List[str] = (
     FEATURE_LIST
     + CANDLESTICK_FEATURES
     + CHART_PATTERN_FEATURES
     + MTF_CONTEXT_FEATURES
+    + REGIME_FEATURES
 )
 
-FEATURE_VERSION = "1.1"
+FEATURE_VERSION = "1.2"
 
 
 def get_feature_list() -> List[str]:

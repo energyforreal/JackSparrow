@@ -6,7 +6,7 @@ Safe bounds prevent runaway threshold drift when Redis is empty or invalid.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
@@ -70,3 +70,49 @@ async def get_effective_min_confidence_threshold() -> float:
     if rv is None:
         return base
     return _clamp(rv, MIN_CONF_BOUNDS[0], MIN_CONF_BOUNDS[1])
+
+
+def resolve_metadata_recommended_threshold(
+    signal: str,
+    model_predictions: List[Dict[str, Any]],
+) -> Optional[float]:
+    """Resolve median recommended threshold from model prediction metadata/context.
+
+    Accepts either:
+    - `RECOMMENDED_LONG_THRESHOLD` / `RECOMMENDED_SHORT_THRESHOLD`
+    - `runtime_threshold_hints.mtf_entry_min_buy_prob` / `...sell_prob`
+    """
+    target_key = (
+        "RECOMMENDED_LONG_THRESHOLD"
+        if signal in ("BUY", "STRONG_BUY")
+        else "RECOMMENDED_SHORT_THRESHOLD"
+    )
+    hint_key = (
+        "mtf_entry_min_buy_prob"
+        if signal in ("BUY", "STRONG_BUY")
+        else "mtf_entry_min_sell_prob"
+    )
+    values: List[float] = []
+    for pred in model_predictions or []:
+        if not isinstance(pred, dict):
+            continue
+        ctx = pred.get("context")
+        if not isinstance(ctx, dict):
+            continue
+        raw = ctx.get(target_key)
+        if raw is None:
+            hints = ctx.get("runtime_threshold_hints")
+            if isinstance(hints, dict):
+                raw = hints.get(hint_key)
+        if raw is None:
+            continue
+        try:
+            values.append(float(raw))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return None
+    values.sort()
+    mid = len(values) // 2
+    median = values[mid] if len(values) % 2 == 1 else (values[mid - 1] + values[mid]) / 2.0
+    return _clamp(float(median), MIN_CONF_BOUNDS[0], MIN_CONF_BOUNDS[1])

@@ -355,13 +355,34 @@ def synthesize_mtf_trading_decision(
     trend, trend_tf = _first_available(by_tf, trend_order)
     entry, entry_tf = _first_available(by_tf, entry_order)
     if trend is None or entry is None:
-        logger.info(
-            "mtf_decision_skipped_missing_tf",
-            have=list(by_tf.keys()),
-            trend_order=trend_order,
-            entry_order=entry_order,
+        allow_partial = bool(
+            getattr(settings, "mtf_allow_partial_timeframe_fallback", True)
         )
-        return None
+        if allow_partial and by_tf:
+            sorted_tfs = sorted(by_tf.keys())
+            if trend is None:
+                trend_tf = sorted_tfs[-1]
+                trend = by_tf.get(trend_tf)
+            if entry is None:
+                entry_tf = sorted_tfs[0]
+                entry = by_tf.get(entry_tf)
+            if trend is not None and entry is not None:
+                logger.info(
+                    "mtf_partial_timeframe_fallback",
+                    have=list(by_tf.keys()),
+                    selected_trend_tf=trend_tf,
+                    selected_entry_tf=entry_tf,
+                    trend_order=trend_order,
+                    entry_order=entry_order,
+                )
+        if trend is None or entry is None:
+            logger.info(
+                "mtf_decision_skipped_missing_tf",
+                have=list(by_tf.keys()),
+                trend_order=trend_order,
+                entry_order=entry_order,
+            )
+            return None
 
     filt_tf = _filter_timeframe_enabled(getattr(settings, "mtf_filter_timeframe", "3m"))
     filt = by_tf.get(filt_tf) if filt_tf else None

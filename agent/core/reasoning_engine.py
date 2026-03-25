@@ -104,6 +104,49 @@ class MCPReasoningEngine:
         if "mixed signals" in text:
             return "mixed_signals"
         return "other_hold"
+
+    @staticmethod
+    def _summarize_entry_probabilities(
+        model_predictions: List[Dict[str, Any]],
+    ) -> Dict[str, Optional[float]]:
+        """Aggregate buy/sell probability signals for diagnostics logs."""
+        buy_vals: List[float] = []
+        sell_vals: List[float] = []
+        hints_long: List[float] = []
+        hints_short: List[float] = []
+        for pred in model_predictions or []:
+            if not isinstance(pred, dict):
+                continue
+            ctx = pred.get("context") if isinstance(pred.get("context"), dict) else {}
+            entry_proba = ctx.get("entry_proba")
+            if isinstance(entry_proba, dict):
+                try:
+                    buy_vals.append(float(entry_proba.get("buy", 0.0)))
+                    sell_vals.append(float(entry_proba.get("sell", 0.0)))
+                except (TypeError, ValueError):
+                    pass
+            for key, bucket in (
+                ("RECOMMENDED_LONG_THRESHOLD", hints_long),
+                ("RECOMMENDED_SHORT_THRESHOLD", hints_short),
+            ):
+                raw = ctx.get(key)
+                if raw is None:
+                    continue
+                try:
+                    bucket.append(float(raw))
+                except (TypeError, ValueError):
+                    continue
+        return {
+            "entry_proba_buy_mean": (sum(buy_vals) / len(buy_vals)) if buy_vals else None,
+            "entry_proba_sell_mean": (sum(sell_vals) / len(sell_vals)) if sell_vals else None,
+            "entry_proba_models": float(len(buy_vals)) if buy_vals else 0.0,
+            "recommended_long_threshold_median": (
+                statistics.median(hints_long) if hints_long else None
+            ),
+            "recommended_short_threshold_median": (
+                statistics.median(hints_short) if hints_short else None
+            ),
+        }
     
     async def initialize(self):
         """Initialize reasoning engine."""
@@ -261,6 +304,29 @@ class MCPReasoningEngine:
             )
             
             await event_bus.publish(event)
+
+            proba_diag = self._summarize_entry_probabilities(
+                reasoning_chain.model_predictions or []
+            )
+            threshold_used = None
+            if signal in ("BUY", "STRONG_BUY"):
+                threshold_used = proba_diag.get("recommended_long_threshold_median")
+            elif signal in ("SELL", "STRONG_SELL"):
+                threshold_used = proba_diag.get("recommended_short_threshold_median")
+            else:
+                threshold_used = max(
+                    float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52),
+                    0.0,
+                )
+            logger.info(
+                "ml_signal_evaluated",
+                symbol=request_event.payload.get("symbol"),
+                signal=signal,
+                decision=reasoning_chain.conclusion,
+                confidence=reasoning_chain.final_confidence,
+                threshold_used=threshold_used,
+                **proba_diag,
+            )
             
             logger.info(
                 "decision_ready_event_emitted",
