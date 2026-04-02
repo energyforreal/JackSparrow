@@ -910,6 +910,46 @@ Position sizing is computed in **TradingHandler** using **RiskManager.calculate_
 - **Adaptive consensus thresholds** (`_step5_decision_synthesis`): When volatility is present in market context features, strong/mild thresholds vary (e.g. high vol: 0.75/0.40; low vol: 0.60/0.25; else 0.70/0.30). When volatility is missing, fixed 0.70/0.30 are used.
 - **Confidence calibration** (`_step6_confidence_calibration`): The model-average floor is applied only when `reasoning_only_confidence > 0.1`, using `max(final_confidence, model_avg * 0.8)`.
 
+## HOLD dominance (runtime, code-traced)
+
+`HOLD` can dominate even with improved training because **reasoning and execution** apply wide neutral bands and damping:
+
+1. **`_step5_decision_synthesis()`** (`agent/core/reasoning_engine.py`): Maps scalar `consensus` in `[-1,1]` to BUY/SELL/STRONG_* / **HOLD** using volatility-adaptive `(strong_thresh, mild_thresh)`. Example bands (verify in code): high `volatility` feature → mild band about `±0.40`; mid → about `±0.30`; low → about `±0.25`. Values inside the band are **HOLD**.
+2. **`_step3_model_consensus()`**: If per-model prediction stdev exceeds `model_disagreement_threshold` (default `0.4`), consensus magnitude is scaled down, pushing more outcomes into the HOLD band.
+3. **Ensemble mapping** (`V4EnsembleNode`): Entry signal is often `buy_prob - sell_prob`; confidence uses class probabilities. Near-neutral ensemble output maps to HOLD after step 5.
+4. **`TradingEventHandler`**: `signal == "HOLD"` skips execution (no trade), so outcomes look “inactive” even when the pipeline ran.
+
+**Scalping**: Align training horizon, `PRICE_FLUCTUATION_THRESHOLD_PCT`, TP/SL, and position monitor intervals with the intended timeframe; defaults may still reflect swing-style risk. See [Features – Signal triggers](04-features.md#market-signal-generation-triggers).
+
+## Multi-timeframe decision engine and exits
+
+When `MTF_DECISION_ENGINE_ENABLED=true`, `agent/core/mtf_decision_engine.py` participates in decisions; `reasoning_engine` may early-return in `_step5` when MTF synthesis applies.
+
+| Role | Default TF | Notes |
+|------|------------|--------|
+| Trend | `15m` | Direction gate |
+| Entry | `5m` | Confirm trend + `MTF_ENTRY_MIN_CONFIDENCE` |
+| Filter | `3m` | Optional veto; `MTF_FILTER_TIMEFRAME=none` disables |
+
+Fallback lists (`MTF_TREND_FALLBACK_TIMEFRAMES`, `MTF_ENTRY_FALLBACK_TIMEFRAMES`) apply if primary TFs are missing from loaded models.
+
+**ML exit models**: With `USE_ML_EXIT_MODEL=false` (common default), exit `predict_proba` is skipped in `v4_ensemble_node`; exits rely on **TP/SL**, trailing stop, and max hold—tune `TAKE_PROFIT_PERCENTAGE`, `STOP_LOSS_PERCENTAGE`, `TRAILING_STOP_PERCENTAGE`, `MAX_POSITION_HOLD_HOURS`.
+
+**Default candle stack**: `TIMEFRAMES` is typically **`3m,5m,15m`**. Train/deploy metadata whose timeframes match loaded models so MTF resolution works.
+
+**Execution feature filter**: `FEATURE_FILTER_ENABLED` and `BLOCK_BUY_NEAR_BB_UPPER_PCT` can block BUY/STRONG_BUY when `bb_position` indicates chasing near the upper band.
+
+**Simulation**: `scripts/trade_simulator.py` — CSV OHLCV sanity checks for TP/SL/fees independent of classifier metrics.
+
+Env names for the above are documented in root `.env.example`.
+
+## Entry vs exit signals and position closes
+
+- **`V4EnsembleNode`** produces an **entry** signal (normalized direction) as `prediction` and exposes **`exit_signal`** and probabilities in prediction `context` (`entry_signal`, `exit_signal`, `entry_proba`, `exit_proba` as applicable).
+- **`MCPModelRegistry`** aggregates **entry** signals into one consensus for the orchestrator’s discrete **signal** (`BUY` / `SELL` / `STRONG_*` / `HOLD`) and `position_size`.
+- **`MCPOrchestrator`** passes per-model contexts (including `exit_signal`) in `market_context` for reasoning and downstream use.
+- **Position closes today**: signal reversal, stop-loss, take-profit, time limit, and risk logic in `execution` / risk components—not a standalone “force close” on `exit_signal` unless you add that rule in `trading_handler` or execution.
+
 ## Related Documentation
 
 - [MCP Layer Documentation](02-mcp-layer.md) - MCP architecture and protocols

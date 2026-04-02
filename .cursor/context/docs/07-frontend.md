@@ -14,6 +14,8 @@ The recommended way to launch the frontend alongside the backend and agent is vi
 
 - [Overview](#overview)
 - [Next.js Application Structure](#nextjs-application-structure)
+- [Unified dashboard state (`useTradingData`)](#unified-dashboard-state-usetradingdata)
+- [Dashboard UX enhancements](#dashboard-ux-enhancements)
 - [Core Components](#core-components)
 - [WebSocket Integration](#websocket-integration)
 - [API Service](#api-service)
@@ -33,7 +35,8 @@ The recommended way to launch the frontend alongside the backend and agent is vi
 ```
 frontend/
 ├── app/
-│   ├── layout.tsx              # Root layout
+│   ├── layout.tsx              # Root layout (wraps children with client Providers)
+│   ├── providers.tsx          # Client: react-hot-toast Toaster
 │   ├── page.tsx                # Main dashboard page
 │   ├── components/
 │   │   ├── Dashboard.tsx       # Main dashboard container
@@ -48,10 +51,11 @@ frontend/
 │   │   └── LearningReport.tsx
 │   └── api/                    # API routes (if needed)
 ├── hooks/
-│   ├── useWebSocket.ts         # WebSocket connection hook
-│   ├── useAgent.ts             # Agent state management
-│   ├── usePortfolio.ts         # Portfolio data hook
-│   └── usePredictions.ts       # Prediction data hook
+│   ├── useTradingData.ts       # Primary hook: portfolio, trades, signal, health, WS dispatch
+│   ├── useWebSocket.ts         # WebSocket connection hook (used by useTradingData and RealTimePrice)
+│   ├── useAgent.ts             # Thin compatibility wrapper over useTradingData (deprecated for new code)
+│   ├── usePortfolio.ts         # Portfolio selector helper
+│   └── usePredictions.ts       # Prediction display helper (signal from unified data)
 ├── services/
 │   ├── api.ts                  # API client
 │   └── websocket.ts            # WebSocket client
@@ -66,6 +70,43 @@ frontend/
 
 ---
 
+## Unified dashboard state (`useTradingData`)
+
+**File**: `hooks/useTradingData.ts`
+
+The dashboard reads all trading-related state from a single hook backed by a `useReducer` and one WebSocket connection (see [WebSocket Integration](#websocket-integration)). `Dashboard.tsx` does **not** implement a local `switch` on `lastMessage`; message handling lives in the reducer.
+
+**Returned data (selected)**:
+- `signal`, `portfolio`, `recentTrades`, `modelData`, `health`, `performanceData`
+- `agentState`, `isConnected`, `lastUpdate`, `isLoading`, `isPortfolioLoading`, `error`
+
+**Trade notifications**: When a trade arrives as `data_update` with `resource: "trade"` or as legacy `trade_executed`, the reducer updates `recentTrades`. A separate `useEffect` in the same hook shows a **deduplicated** toast (via `react-hot-toast`) for user feedback without changing WebSocket contracts.
+
+**Predictions from the UI**: There is no `requestPrediction` on `useAgent`. Use **`apiClient.getPrediction(symbol)`** from `services/api.ts` (WebSocket command `predict`) when the connection is initialized—e.g. the dashboard keyboard shortcut (**P**) calls this when not focused in an input field.
+
+---
+
+## Dashboard UX enhancements
+
+Additive UI-only behaviors (no backend or message-shape changes):
+
+| Area | Behavior |
+|------|----------|
+| **Loading** | `PortfolioSummary`, `ActivePositions`, and `RecentTrades` show layout-matched **skeleton** placeholders while `isLoading` / `portfolioBlockLoading` is true. |
+| **Empty states** | Clear copy when portfolio, positions, or trades are absent after load. |
+| **Paper trading** | Paper mode remains indicated in **`TradingDecision`** and backend/health copy; no global dashboard banner. |
+| **Real-time price** | Main price **color flash** on tick up/down; **browser tab title** shows live price (`$… — JackSparrow`). |
+| **Signals** | **STRONG_BUY** / **STRONG_SELL** badges use a subtle **pulse** ring (main signal and per-model rows). |
+| **Reasoning chain** | Step confidence bars use **`ConfidenceProgress`** variant **`reasoningStep`** (80% / 60% green / yellow / red tiers on normalized 0–100%). |
+| **Positions** | **Duration** cell color by minutes open (&lt;30m green, &lt;2h amber, longer red). |
+| **Health** | Per-service **latency bar** (scaled to 500ms) next to the ms label. |
+| **Performance chart** | **Recharts** `Tooltip` with shared hover, `en-IN` formatting, stronger cursor line (not Chart.js). |
+| **Keyboard** | **P** requests a prediction for `BTCUSD` when connected; hint shown near the signal card. |
+
+**Dependencies**: `react-hot-toast` (toast UI); root **`app/providers.tsx`** mounts `<Toaster position="bottom-right" />`.
+
+---
+
 ## Core Components
 
 ### Dashboard Component
@@ -75,46 +116,11 @@ frontend/
 **Purpose**: Main container component that orchestrates all dashboard sections.
 
 **Features**:
-- Layout management
-- State coordination
-- WebSocket connection management
-- Error boundary handling
-
-**Structure**:
-```typescript
-export function Dashboard() {
-  const { isConnected, lastMessage } = useWebSocket('ws://localhost:8000/ws');
-  const [agentState, setAgentState] = useState('MONITORING');
-  const [portfolio, setPortfolio] = useState(null);
-  const [recentTrades, setRecentTrades] = useState([]);
-  
-  // Handle WebSocket messages
-  useEffect(() => {
-    if (!lastMessage) return;
-    
-    switch (lastMessage.type) {
-      case 'agent_state':
-        setAgentState(lastMessage.data.state);
-        break;
-      case 'portfolio_update':
-        setPortfolio(lastMessage.data);
-        break;
-      case 'trade_executed':
-        setRecentTrades(prev => [lastMessage.data, ...prev].slice(0, 10));
-        break;
-    }
-  }, [lastMessage]);
-  
-  return (
-    <div className="dashboard">
-      <AgentStatus state={agentState} />
-      <PortfolioSummary portfolio={portfolio} />
-      <RecentTrades trades={recentTrades} />
-      {/* ... more components */}
-    </div>
-  );
-}
-```
+- Uses **`useTradingData()`** for state (not a local WebSocket message switch)
+- Tabbed layout (Overview / Trading / Analysis / System)
+- Global **keydown** handler for **P** → `apiClient.getPrediction('BTCUSD')` (with input-field guard)
+- Error boundary wrapping for major panels
+- Passes `isLoading` / `portfolioBlockLoading` into summary, positions, and recent trades
 
 ---
 
@@ -165,22 +171,15 @@ interface AgentStatusProps {
 **Props**:
 ```typescript
 interface PortfolioSummaryProps {
-  portfolio: {
-    total_value: number;
-    cash: number;
-    positions_value: number;
-    unrealized_pnl: number;
-    realized_pnl: number;
-  };
+  portfolio?: Portfolio;
+  isLoading?: boolean;
 }
 ```
 
 **Features**:
-- Total portfolio value
-- Cash vs positions breakdown
-- Unrealized PnL (color-coded)
-- Realized PnL
-- Percentage changes
+- Total portfolio value, cash, positions, PnL (aligned with `Portfolio` in `types/`)
+- **Skeleton** UI when `isLoading`
+- **Empty state** when loaded but no portfolio object yet
 
 ---
 
@@ -193,24 +192,16 @@ interface PortfolioSummaryProps {
 **Props**:
 ```typescript
 interface ActivePositionsProps {
-  positions: Array<{
-    symbol: string;
-    quantity: number;
-    entry_price: number;
-    current_price: number;
-    unrealized_pnl: number;
-    entry_time: Date;
-    duration_minutes: number;
-  }>;
+  positions?: Position[];
+  isLoading?: boolean;
 }
 ```
 
 **Features**:
-- Position details table
-- Real-time PnL updates
-- Entry price vs current price
-- Position duration
-- Color-coded PnL (green/red)
+- Position details table (`Position` from `types/`)
+- Duration derived from **`opened_at`** (display `Xh Ym`) with **color by minutes open**
+- Table **skeleton** when `isLoading`; **empty state** when no positions
+- Color-coded PnL badges
 
 ---
 
@@ -223,26 +214,15 @@ interface ActivePositionsProps {
 **Props**:
 ```typescript
 interface RecentTradesProps {
-  trades: Array<{
-    trade_id: string;
-    symbol: string;
-    side: 'buy' | 'sell';
-    quantity: number;
-    entry_price: number;
-    exit_price?: number;
-    pnl?: number;
-    status: 'open' | 'closed';
-    timestamp: Date;
-  }>;
+  trades?: Trade[];
+  isLoading?: boolean;
 }
 ```
 
 **Features**:
-- Trade list with details
-- PnL display
-- Status indicators
-- Timestamp formatting
-- Link to reasoning chain
+- Recent trades table (`Trade` in `types/`; optional `timestamp` / `fill_price` on payloads)
+- **Skeleton** while `isLoading` (avoids flashing “no trades” during initial fetch)
+- **Empty state** when loaded and list is empty
 
 ---
 
@@ -255,25 +235,15 @@ interface RecentTradesProps {
 **Props**:
 ```typescript
 interface SignalIndicatorProps {
-  signal: {
-    direction: 'BUY' | 'SELL' | 'HOLD' | 'STRONG_BUY' | 'STRONG_SELL';
-    confidence: number;
-    models: Array<{
-      name: string;
-      prediction: string;
-      confidence: number;
-    }>;
-    reasoning: string;
-  };
+  signal?: Signal;
+  modelData?: { model_consensus?; inference_latency_ms?; ... };
 }
 ```
 
 **Features**:
-- Large signal badge (color-coded)
-- Confidence bar visualization
-- Model consensus breakdown
-- Expandable reasoning display
-- Confidence percentage
+- Main signal uses **`signal.signal`** (`SignalType`: BUY, SELL, HOLD, STRONG_BUY, STRONG_SELL)
+- **STRONG_BUY** / **STRONG_SELL**: extra **animate-ping** ring on the badge (and on strong per-model badges)
+- Reasoning confidence bar, model consensus accordion, agent decision text, freshness indicator
 
 ---
 
@@ -286,21 +256,14 @@ interface SignalIndicatorProps {
 **Props**:
 ```typescript
 interface PerformanceChartProps {
-  data: Array<{
-    timestamp: Date;
-    value: number;
-    pnl: number;
-  }>;
-  period: '1d' | '7d' | '30d' | 'all';
+  data?: Array<{ date: string; value: number }>;
 }
 ```
 
 **Features**:
-- Line chart of portfolio value
-- PnL overlay
-- Period selector
-- Interactive tooltips
-- Responsive design
+- **Recharts** line chart (`LineChart`, `Tooltip`, `ResponsiveContainer`)
+- In-chart tabs for **1d / 7d / 30d / all** (slice of `data`)
+- Tooltip and axes use **`en-IN`** where applicable; vertical cursor line on hover
 
 ---
 
@@ -329,8 +292,8 @@ interface HealthMonitorProps {
 
 **Features**:
 - Overall health score display
-- Service status grid
-- Latency indicators
+- Service status list (array or object-shaped `services` normalized in-component)
+- Latency **number + mini bar** (fill vs 500ms, green / amber / red)
 - Degradation reasons
 - Color-coded status indicators
 
@@ -354,6 +317,8 @@ interface RealTimePriceProps {
 
 **Features**:
 - Real-time price display with currency formatting
+- **Brief green/red flash** on the headline price when the tick changes
+- **Document title** updates with formatted price while mounted
 - Momentary price change indicators with trend icons
 - 24-hour statistics (change, volume, high/low)
 - WebSocket/WebSocket fallback for data updates
@@ -422,18 +387,13 @@ interface ReasoningChainViewProps {
 ```
 
 **Features**:
-- Expandable step-by-step reasoning
-- Confidence indicators per step
-- Evidence badges
-- Conclusion highlight
-- Copy-to-clipboard functionality
+- Expandable step-by-step reasoning (6-step chain from live `Signal` / API)
+- Per-step **`ConfidenceProgress`** with **`variant="reasoningStep"`** for tiered colors
+- Evidence badges, conclusion card, optional model reasoning accordion
 
 **UI Structure**:
-- Collapsible steps
-- Step numbers with icons
-- Confidence bars
-- Evidence tags
-- Conclusion section
+- Accordion per step with summary + confidence readout
+- Model reasoning integrated below the chain
 
 ---
 
@@ -590,48 +550,31 @@ export function useWebSocket(url: string) {
 
 **File**: `hooks/useAgent.ts`
 
-**Purpose**: Manage agent state and operations.
+**Purpose**: Backward-compatible **subset** of trading data for older call sites.
 
-**Features**:
-- Agent state tracking
-- Prediction requests
-- Trade execution
-- State change notifications
+**Current behavior**: Re-exports a small slice of **`useTradingData()`** (`agentState`, `portfolio`, `recentTrades`, `signal`, `isConnected`, `lastUpdate`, `dataSource`). It does **not** expose `requestPrediction`.
 
-**Usage Example**:
+**For new code**: Prefer **`useTradingData()`** for the dashboard, and **`apiClient.getPrediction(symbol)`** (after the WebSocket sender is registered by `useTradingData`) to trigger a prediction—same path used by the **P** keyboard shortcut on the dashboard.
+
+**Example (on-demand prediction button)**:
 
 ```typescript
-import { useAgent } from '@/hooks/useAgent';
+import { useTradingData } from '@/hooks/useTradingData';
+import { apiClient } from '@/services/api';
 
-export function QuickSignalCard() {
-  const { state, requestPrediction, latestPrediction } = useAgent();
-
+function PredictButton() {
+  const { isConnected } = useTradingData();
   return (
-    <section className="rounded-xl border p-4">
-      <header className="flex items-center justify-between">
-        <span className="font-semibold text-slate-200">Agent state</span>
-        <span className="rounded-full bg-blue-500/20 px-3 py-1 text-sm uppercase">
-          {state}
-        </span>
-      </header>
-
-      <p className="mt-4 text-sm text-slate-400">
-        Latest signal: {latestPrediction?.signal ?? '—'} (confidence{' '}
-        {(latestPrediction?.confidence ?? 0).toFixed(2)})
-      </p>
-
-      <button
-        className="mt-4 rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white"
-        onClick={() => requestPrediction('BTCUSD')}
-      >
-        Request new prediction
-      </button>
-    </section>
+    <button
+      type="button"
+      disabled={!isConnected}
+      onClick={() => void apiClient.getPrediction('BTCUSD').catch(console.error)}
+    >
+      Request prediction
+    </button>
   );
 }
 ```
-
-The hook abstracts away WebSocket coordination and REST fallbacks, so components can focus on rendering without duplicating subscription logic.
 
 ---
 
@@ -655,16 +598,15 @@ The hook abstracts away WebSocket coordination and REST fallbacks, so components
 
 **File**: `services/api.ts`
 
-**Purpose**: Centralized API client for backend communication.
+**Purpose**: Backend communication from the browser. In the current stack, **commands** (health, portfolio, predict, trades, ticker, etc.) are sent as **WebSocket** messages with request/response correlation; `useTradingData` registers the sender via `setWebSocketConnection`. The simplified REST-style snippet below illustrates the call surface only—see the source file for the real implementation.
 
 **Features**:
-- Type-safe API calls
-- Error handling
-- Request/response interceptors
-- Retry logic
-- Authentication handling
+- Command/response pattern over the same WS URL as realtime updates
+- Type-safe wrappers for common operations (`getPrediction`, `getPortfolioSummary`, …)
+- Pending-request registry and timeouts
 
-**Implementation**:
+**Illustrative pattern** (not literal fetch-based code):
+
 ```typescript
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -741,8 +683,8 @@ The WebSocket communication has been simplified from 10+ message types to 3 core
    - **Resource: `portfolio`**: Portfolio state changes (replaces `portfolio_update`)
      - Updates portfolio summary and positions
    - **Resource: `trade`**: Trade execution notifications (replaces `trade_executed`)
-     - Updates recent trades list
-     - Triggers portfolio refresh
+     - Updates recent trades list in reducer
+     - Optional **toast** (deduped by `trade_id`) for immediate user feedback
    - **Resource: `market`**: Real-time price updates (replaces `market_tick`)
      - Includes symbol, price, volume, timestamp
      - Updates real-time price display
@@ -1127,7 +1069,7 @@ class ErrorBoundary extends React.Component {
 ### Keyboard Navigation
 
 - Tab order management
-- Keyboard shortcuts
+- **Dashboard**: **P** triggers `apiClient.getPrediction('BTCUSD')` when connected; skipped inside `INPUT` / `TEXTAREA` / `contentEditable` (see [Dashboard UX enhancements](#dashboard-ux-enhancements))
 - Focus management
 
 ### Visual Accessibility
@@ -1231,5 +1173,5 @@ npm test -- --coverage
 - [UI/UX Documentation](09-ui-ux.md) - Design guidelines
 - [Architecture Documentation](01-architecture.md) - System design
 - [Deployment Documentation](10-deployment.md) - Setup instructions
-- [Testing Guide](testing-guide.md) - Comprehensive testing documentation
+- [Build Guide – Tests and verification](11-build-guide.md#tests-and-verification) - Test commands and checks
 

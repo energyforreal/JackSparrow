@@ -363,8 +363,14 @@ class DeltaExchangeConnectionTestSuite(TestSuiteBase):
         try:
             if self.delta_client:
                 # Try to get historical candles
+                start_ts, end_ts = self.delta_client._calculate_candle_time_range("15m", 10)
                 candles = await asyncio.wait_for(
-                    self.delta_client.get_historical_candles("BTCUSD", "15m", limit=10),
+                    self.delta_client.get_candles(
+                        "BTCUSD",
+                        "15m",
+                        start=start_ts,
+                        end=end_ts,
+                    ),
                     timeout=10.0
                 )
                 if candles:

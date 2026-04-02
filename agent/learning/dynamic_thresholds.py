@@ -6,6 +6,7 @@ Safe bounds prevent runaway threshold drift when Redis is empty or invalid.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
@@ -38,7 +39,10 @@ async def _redis_get_float(key: str) -> Optional[float]:
         raw = await r.get(key)
         if raw is None:
             return None
-        return float(raw)
+        parsed = float(raw)
+        if not math.isfinite(parsed):
+            return None
+        return parsed
     except Exception as e:
         logger.debug("dynamic_threshold_redis_read_failed", key=key, error=str(e))
         return None
@@ -66,6 +70,7 @@ async def apply_redis_hold_band_overrides(
 async def get_effective_min_confidence_threshold() -> float:
     """Minimum confidence for trade entry; Redis may nudge within bounds."""
     base = float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52)
+    base = _clamp(base, MIN_CONF_BOUNDS[0], MIN_CONF_BOUNDS[1])
     rv = await _redis_get_float(REDIS_KEY_MIN_CONF)
     if rv is None:
         return base

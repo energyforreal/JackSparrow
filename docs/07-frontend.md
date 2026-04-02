@@ -74,7 +74,7 @@ frontend/
 
 **File**: `hooks/useTradingData.ts`
 
-The dashboard reads all trading-related state from a single hook backed by a `useReducer` and one WebSocket connection (see [WebSocket Simplification](WEBSOCKET_SIMPLIFICATION.md)). `Dashboard.tsx` does **not** implement a local `switch` on `lastMessage`; message handling lives in the reducer.
+The dashboard reads all trading-related state from a single hook backed by a `useReducer` and one WebSocket connection (see [WebSocket Integration](#websocket-integration)). `Dashboard.tsx` does **not** implement a local `switch` on `lastMessage`; message handling lives in the reducer.
 
 **Returned data (selected)**:
 - `signal`, `portfolio`, `recentTrades`, `modelData`, `health`, `performanceData`
@@ -1173,5 +1173,5 @@ npm test -- --coverage
 - [UI/UX Documentation](09-ui-ux.md) - Design guidelines
 - [Architecture Documentation](01-architecture.md) - System design
 - [Deployment Documentation](10-deployment.md) - Setup instructions
-- [Testing Guide](testing-guide.md) - Comprehensive testing documentation
+- [Build Guide – Tests and verification](11-build-guide.md#tests-and-verification) - Test commands and checks
 

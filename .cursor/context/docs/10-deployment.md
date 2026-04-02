@@ -394,7 +394,7 @@ Each service logs to `logs/{service}.log` while also streaming to the console wi
 
 Use Docker when you need repeatable 24/7 runtimes or remote deployments. The Docker deployment includes production-ready configurations, optimized multi-stage builds, non-root users, resource limits, and health checks.
 
-For comprehensive Docker deployment documentation, see [Docker Deployment Guide](DOCKER_DEPLOYMENT.md).
+Docker deployment detail is in this document under [Docker Compose Deployment](#docker-compose-deployment) and [Docker Deployment (Alternative)](#docker-deployment-alternative).
 
 ### Prerequisites
 
@@ -460,7 +460,7 @@ Before running `docker compose up` (or the deployment scripts) on a new host:
 
 | Service   | Image/Build                     | Port | Resource Limits | Notes |
 |-----------|---------------------------------|------|-----------------|-------|
-| postgres  | `timescale/timescaledb:2.13.1-pg15` | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
+| postgres  | `timescale/timescaledb:2.25.1-pg15` (see `docker-compose.yml`) | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
 | redis     | `redis:7.2-alpine`              | 6379 | 1 CPU, 512MB RAM | Append-only mode, persistent volume |
 | agent     | `agent/Dockerfile`              | 8002 | 4 CPU, 4GB RAM | Multi-stage build, ML-optimized, embeds Feature Server on 8002 |
 | backend   | `backend/Dockerfile`            | 8000 | 2 CPU, 2GB RAM | Multi-stage build, non-root user |
@@ -509,6 +509,19 @@ The browser always connects from your host, even when the frontend runs in a con
 ```bash
 docker compose build frontend --no-cache
 docker compose up -d frontend
+```
+
+**Full stack rebuild (all images)** — use when agent, backend, or frontend code changed:
+
+```bash
+docker compose build --pull
+docker compose up -d --force-recreate
+```
+
+If the frontend image finished building after `up` already started, ensure the running container uses the new tag:
+
+```bash
+docker compose up -d --force-recreate frontend
 ```
 
 If you place the stack behind a reverse proxy or different hostname, update these env vars accordingly so the built frontend points to the correct public URL.
@@ -639,7 +652,7 @@ docker compose up -d --remove-orphans
 
 ### Troubleshooting
 
-See [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#troubleshooting) for comprehensive troubleshooting steps.
+See [Troubleshooting](#troubleshooting) in this document for Docker-related issues.
 
 **Common Issues:**
 - **Port conflicts**: Update port in `.env` file (e.g., `BACKEND_PORT=8001`)
@@ -671,7 +684,7 @@ See [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#troubleshooting) for comprehe
 
 ### Production Deployment
 
-For production deployments, see [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#production-deployment) for:
+For production deployments, see [Production Deployment Considerations](#production-deployment-considerations) and the checklist under [Docker Compose Deployment](#docker-compose-deployment) for:
 - Security hardening checklist
 - Secrets management
 - HTTPS/TLS configuration
@@ -1304,7 +1317,7 @@ Perform health checks on running services.
 
 **Checks:**
 - Backend service health (`http://localhost:8000/api/v1/health`)
-- Feature server health (`http://localhost:8001/health`)
+- Feature server health (`http://localhost:${FEATURE_SERVER_PORT:-8001}/health`)
 - Frontend accessibility
 
 ### `validate-health`
@@ -2025,7 +2038,7 @@ docker-compose exec agent pytest
 
 The project includes a development Docker setup that enables hot-reload, allowing code changes to be reflected immediately without rebuilding Docker images.
 
-> **📖 For comprehensive hot reload documentation**, see [Docker Hot Reload Guide](docker-hot-reload.md)
+> **📖 Hot reload**: see [Docker development hot reload](#docker-development-hot-reload) in this document.
 
 #### Quick Start
 
@@ -2143,7 +2156,7 @@ docker-compose ps
 - Check if ports are already in use: `netstat -an | grep 8000` (Unix) or `netstat -ano | findstr :8000` (Windows)
 - Modify ports in `.env` file if needed
 
-> **💡 For detailed troubleshooting**, see [Docker Hot Reload Guide - Troubleshooting](docker-hot-reload.md#troubleshooting)
+> **💡 Hot reload troubleshooting**: verify volume mounts and use `scripts/docker/validate-hot-reload.ps1` / `.sh`; see [Troubleshooting](#troubleshooting).
 
 #### Best Practices
 
@@ -2361,13 +2374,59 @@ When deploying to production with Docker:
 
 ---
 
+## Docker runtime topology (reference)
+
+Containers on Docker bridge **`jacksparrow-network`** (service DNS names):
+
+| Service | Role | Typical host ports |
+|--------|------|--------------------|
+| `postgres` | TimescaleDB/PostgreSQL | `${POSTGRES_PORT:-5432}` → 5432 |
+| `redis` | Cache / queues | `${REDIS_PORT:-6379}` → 6379 |
+| `agent` | Feature HTTP + agent command WS | `${FEATURE_SERVER_PORT:-8002}` → 8002, `${AGENT_WS_PORT:-8003}` → 8003 |
+| `backend` | FastAPI + dashboard WS | `${BACKEND_PORT:-8000}` → 8000 |
+| `frontend` | Next.js | `${FRONTEND_PORT:-3000}` → 3000 |
+
+**Backend ↔ agent**
+
+- Agent → backend: outbound WebSocket to `BACKEND_WS_URL` (Docker example `ws://backend:8000/ws/agent`) for events.
+- Backend → agent: HTTP to `FEATURE_SERVER_URL` (e.g. `http://agent:8002`) for features; optional `AGENT_WS_URL` (e.g. `ws://agent:8003`) when `USE_AGENT_WEBSOCKET=true`.
+- Redis lists can back command/response when WebSocket is unavailable.
+
+**Frontend ↔ backend**: Browser uses `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` (e.g. `ws://localhost:8000/ws`). Unified envelopes: `data_update`, `agent_update`, `system_update` (see [Frontend](07-frontend.md)).
+
+**Agent ↔ Delta Exchange**: REST and optional WSS (`DELTA_EXCHANGE_BASE_URL`, `WEBSOCKET_URL`, credentials in agent env).
+
+## Database maintenance
+
+**VARCHAR vs enum mismatch** (`positions.status`, `trades.status`): run `python scripts/migrate_enum_types.py` after backup; see SQLAlchemy `PostgresEnum` in `backend/core/database.py`. Rollback: convert columns back to `VARCHAR` and restore from dump if needed.
+
+**TimescaleDB extension version** in an existing volume: after backup, `ALTER EXTENSION timescaledb UPDATE;` in `psql` per [Timescale upgrade docs](https://docs.timescale.com/self-hosted/latest/upgrades/). Test on a copy of the volume first.
+
+## Windows local setup (without Docker)
+
+Use Python 3.11+ (installer: **Add Python to PATH**), Node.js 18+ LTS, PostgreSQL 15+ with TimescaleDB Windows install, and Redis for Windows or WSL. Prefer PowerShell; verify `python`, `node`, `psql`, `redis-cli`. Create DB and enable `timescaledb` extension as in [Development Environment Setup](#development-environment-setup).
+
+## Validation and monitoring commands
+
+```bash
+python scripts/validate-env.py
+python tools/commands/validate-prerequisites.py
+python tools/commands/health_check.py
+python tools/commands/validate-health.py
+python tools/commands/monitor-system.py   # optional continuous checks
+```
+
+## Docker development hot reload
+
+Use `docker-compose.dev.yml` with source bind mounts: backend `uvicorn --reload`, agent `watchdog` restarts, frontend Next.js HMR. Validate with `scripts/docker/validate-hot-reload.sh` or `scripts/docker/validate-hot-reload.ps1`; start via `scripts/docker/dev-start.sh` / `dev-start.ps1` or `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`.
+
 ## Related Documentation
 
 - [Architecture Documentation](01-architecture.md) - System design
 - [Backend Documentation](06-backend.md) - API implementation
 - [Logging Documentation](12-logging.md) - Centralized logging plan and procedures
 - [Frontend Documentation](07-frontend.md) - Frontend implementation
-- [Docker Hot Reload Guide](docker-hot-reload.md) - Hot reload setup and usage
+- [Build Guide](11-build-guide.md) - Full local build and test steps
 - [Project Rules](14-project-rules.md) - Development standards
 
 ---

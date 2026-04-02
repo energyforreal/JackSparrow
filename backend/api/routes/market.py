@@ -12,10 +12,7 @@ If authentication is required in the future, add `dependencies=[Depends(require_
 to the router initialization below.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from typing import Optional, List
-
-from backend.api.models.requests import MarketDataRequest
+from fastapi import APIRouter, HTTPException, status, Query
 from backend.api.models.responses import MarketDataResponse
 from backend.services.market_service import market_service
 

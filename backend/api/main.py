@@ -9,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-import asyncio
 import os
 import sys
 import time
@@ -18,7 +17,7 @@ import structlog
 from sqlalchemy import text
 
 from backend.core.config import settings
-from backend.core.logging import configure_logging, log_error_with_context, get_session_id
+from backend.core.logging import configure_logging, log_error_with_context
 from backend.core.exceptions import BackendException
 
 # Configure logging and get session ID
@@ -26,7 +25,7 @@ SESSION_ID = configure_logging()
 logger = structlog.get_logger()
 from backend.core.database import engine, Base
 from backend.core.redis import get_redis, close_redis
-from backend.api.routes import health, trading
+from backend.api.routes import health, trading, market, portfolio, admin, system
 from backend.api.websocket.unified_manager import unified_websocket_manager
 from backend.services.agent_event_subscriber import agent_event_subscriber
 from backend.services.health_poller import health_poller
@@ -284,6 +283,10 @@ async def add_request_id(request: Request, call_next):
 # Include routers
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(trading.router, prefix="/api/v1", tags=["trading"])
+app.include_router(market.router, prefix="/api/v1", tags=["market"])
+app.include_router(portfolio.router, prefix="/api/v1", tags=["portfolio"])
+app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
+app.include_router(system.router, prefix="/api/v1", tags=["system"])
 
 
 # WebSocket endpoint for frontend clients (unified manager, legacy envelope)

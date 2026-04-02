@@ -195,6 +195,17 @@ jq 'select(.level == "ERROR")' logs/backend/2025-11-13.log
 
 ---
 
+## Local startup and Windows-specific issues
+
+1. **Validate before start**: `python scripts/validate-env.py` and `python tools/commands/validate-prerequisites.py` (see [Deployment](10-deployment.md#validation-and-monitoring-commands)).
+2. **Health**: `python tools/commands/health_check.py` or `validate-health.py` once services are up.
+3. **Unicode / encoding on Windows**: if scripts print Unicode to a legacy console, set UTF-8 mode (`chcp 65001`) or run from Windows Terminal; prefer structured logs in `logs/` over console-only traces.
+4. **Model load failures**: check `MODEL_DIR`, metadata paths, and `xgboost` version vs training; see [ML Models Troubleshooting](03-ml-models.md#troubleshooting).
+5. **Docker**: `docker compose ps`, `docker compose logs -f <service>`, full rebuild `docker compose build --pull && docker compose up -d --force-recreate` ([Deployment](10-deployment.md)).
+6. **Event deduplication**: duplicate agent events on Redis + WS use `processed_event:{event_id}`—if the UI “misses” an event, confirm it was not deduped as a duplicate ID.
+
+---
+
 ## References
 
 - [Logging Documentation](12-logging.md) – Log schema, bootstrapper, and retention policies.

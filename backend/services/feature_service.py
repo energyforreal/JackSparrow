@@ -6,7 +6,6 @@ Provides client for MCP Feature Server.
 
 from typing import Optional, Dict, Any, List
 import httpx
-import asyncio
 import structlog
 
 from backend.core.config import settings

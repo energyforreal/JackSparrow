@@ -7,8 +7,11 @@ based on historical trading results.
 
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
+import os
 import structlog
 import statistics
+import json
+from pathlib import Path
 
 logger = structlog.get_logger()
 
@@ -184,14 +187,140 @@ class LearningSystem:
         self.confidence_calibration = ConfidenceCalibrator()
         self.strategy_adapter = StrategyAdapter()
         self._initialized = False
+        self._state_loaded = False
+
+    def _state_path(self) -> Path:
+        from agent.core.config import settings
+
+        p = str(getattr(settings, "learning_state_path", "learning_state.json") or "learning_state.json")
+        path = Path(p)
+        if path.is_absolute():
+            return path
+        # If LOGS_ROOT is set (Docker compose), persist alongside structured logs.
+        logs_root = os.environ.get("LOGS_ROOT")
+        if logs_root:
+            return Path(logs_root) / path
+        return path
+
+    def _persistence_enabled(self) -> bool:
+        from agent.core.config import settings
+
+        return bool(getattr(settings, "learning_state_persistence_enabled", True))
+
+    def _serialize_state(self) -> Dict[str, Any]:
+        stats = self.performance_tracker.model_stats or {}
+        # Normalize datetimes so JSON is stable.
+        out_stats: Dict[str, Any] = {}
+        for model_name, s in stats.items():
+            if not isinstance(s, dict):
+                continue
+            ss = dict(s)
+            lu = ss.get("last_updated")
+            if isinstance(lu, datetime):
+                ss["last_updated"] = lu.isoformat()
+            rp = ss.get("recent_performance")
+            if isinstance(rp, list):
+                norm_rp = []
+                for r in rp:
+                    if not isinstance(r, dict):
+                        continue
+                    rr = dict(r)
+                    ts = rr.get("timestamp")
+                    if isinstance(ts, datetime):
+                        rr["timestamp"] = ts.isoformat()
+                    norm_rp.append(rr)
+                ss["recent_performance"] = norm_rp
+            out_stats[model_name] = ss
+
+        return {
+            "saved_at": datetime.utcnow().isoformat(),
+            "model_stats": out_stats,
+            "calibration_factors": dict(self.confidence_calibration.calibration_factors),
+            "strategy_params": dict(self.strategy_adapter.strategy_params),
+        }
+
+    def _load_state(self) -> None:
+        if self._state_loaded:
+            return
+        self._state_loaded = True
+        if not self._persistence_enabled():
+            return
+        path = self._state_path()
+        if not path.is_file():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("learning_state_load_failed", path=str(path), error=str(e))
+            return
+
+        stats = data.get("model_stats")
+        if not isinstance(stats, dict):
+            return
+        # Best-effort parse back into the in-memory structure expected by tracker.
+        parsed: Dict[str, Dict[str, Any]] = {}
+        for model_name, s in stats.items():
+            if not isinstance(model_name, str) or not isinstance(s, dict):
+                continue
+            ss = dict(s)
+            lu = ss.get("last_updated")
+            if isinstance(lu, str):
+                try:
+                    ss["last_updated"] = datetime.fromisoformat(lu)
+                except Exception:
+                    pass
+            rp = ss.get("recent_performance")
+            if isinstance(rp, list):
+                norm_rp = []
+                for r in rp:
+                    if not isinstance(r, dict):
+                        continue
+                    rr = dict(r)
+                    ts = rr.get("timestamp")
+                    if isinstance(ts, str):
+                        try:
+                            rr["timestamp"] = datetime.fromisoformat(ts)
+                        except Exception:
+                            pass
+                    norm_rp.append(rr)
+                ss["recent_performance"] = norm_rp
+            parsed[model_name] = ss
+
+        self.performance_tracker.model_stats = parsed
+        factors = data.get("calibration_factors")
+        if isinstance(factors, dict):
+            norm_factors: Dict[str, float] = {}
+            for name, value in factors.items():
+                try:
+                    norm_factors[str(name)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            self.confidence_calibration.calibration_factors = norm_factors
+        strategy_params = data.get("strategy_params")
+        if isinstance(strategy_params, dict):
+            self.strategy_adapter.strategy_params.update(strategy_params)
+        logger.info("learning_state_loaded", path=str(path), models=len(parsed))
+
+    def _persist_state(self) -> None:
+        if not self._persistence_enabled():
+            return
+        path = self._state_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = self._serialize_state()
+            path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        except Exception as e:
+            logger.warning("learning_state_persist_failed", path=str(path), error=str(e))
 
     async def initialize(self):
         """Initialize learning system."""
+        self._load_state()
         self._initialized = True
         logger.info("learning_system_initialized")
 
     async def shutdown(self):
         """Shutdown learning system."""
+        self._persist_state()
         logger.info("learning_system_shutdown")
 
     async def record_trade_outcome(self, trade_outcome: TradeOutcome,
@@ -226,9 +355,52 @@ class LearningSystem:
                    models_used=len(participating_models),
                    was_profitable=trade_outcome.was_profitable())
 
+        # Persist after updating rolling stats so adaptive weights survive restarts.
+        self._persist_state()
+
     async def get_updated_model_weights(self, current_weights: Dict[str, float]) -> Dict[str, float]:
         """Get updated model weights based on learning."""
         return self.performance_tracker.get_all_model_weights(current_weights)
+
+    async def calibrate_runtime_confidence(
+        self, raw_confidence: float, model_predictions: List[Dict[str, Any]]
+    ) -> float:
+        """Calibrate runtime confidence using learned per-model calibration factors."""
+        if not self._initialized:
+            await self.initialize()
+        try:
+            base = max(0.0, min(1.0, float(raw_confidence)))
+        except (TypeError, ValueError):
+            return 0.0
+        if not isinstance(model_predictions, list) or not model_predictions:
+            return base
+
+        total_weight = 0.0
+        weighted_factor = 0.0
+        for pred in model_predictions:
+            if not isinstance(pred, dict):
+                continue
+            model_name = pred.get("model_name")
+            if not model_name:
+                continue
+            try:
+                pred_weight = float(pred.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                pred_weight = 0.0
+            pred_weight = max(0.0, min(1.0, pred_weight))
+            if pred_weight <= 0:
+                continue
+            factor = float(
+                self.confidence_calibration.calibration_factors.get(str(model_name), 1.0)
+            )
+            weighted_factor += factor * pred_weight
+            total_weight += pred_weight
+
+        if total_weight <= 0:
+            return base
+        avg_factor = weighted_factor / total_weight
+        calibrated = base * avg_factor
+        return max(0.0, min(1.0, calibrated))
 
     async def get_learning_insights(self) -> Dict[str, Any]:
         """Get current learning insights and recommendations."""

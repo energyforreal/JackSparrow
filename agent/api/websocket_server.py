@@ -17,7 +17,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional, Set, Callable, Awaitable
+from typing import Any, Dict, Optional, Set
 
 import structlog
 
@@ -36,7 +36,6 @@ from agent.core.intelligent_agent import IntelligentAgent
 from agent.core.communication_logger import (
     log_websocket_message,
     log_backend_command,
-    generate_correlation_id,
     extract_correlation_id
 )
 
@@ -78,7 +77,7 @@ class AgentWebSocketServer:
         self._agent = agent
         self._host = host
         self._port = port
-        self._server: Optional[websockets.server.Serve] = None  # type: ignore[assignment]
+        self._server: Optional[Any] = None
         self._clients: Set[_ClientContext] = set()
         self._running: bool = False
 
@@ -165,11 +164,8 @@ class AgentWebSocketServer:
     # ------------------------------------------------------------------
     # Connection / message handling
     # ------------------------------------------------------------------
-    async def _handle_connection(self, websocket: WebSocketServerProtocol, path: str) -> None:
+    async def _handle_connection(self, websocket: WebSocketServerProtocol, path: str = "") -> None:
         """Handle an individual client connection."""
-        
-        # AGENT WS: Client connected logging
-        logger.info("AGENT WS: Client connected")
 
         remote = "unknown"
         try:
@@ -213,9 +209,6 @@ class AgentWebSocketServer:
                 remote=remote,
             )
         except Exception as exc:  # pragma: no cover - unexpected connection error
-            logger.error("AGENT WS ERROR: %s", exc)
-            logger.warning("AGENT WS: Forcing reconnect in 1s")
-            await asyncio.sleep(1)
             log_error_with_context(
                 "agent_websocket_connection_error",
                 error=exc,
@@ -322,7 +315,7 @@ class AgentWebSocketServer:
             await self._send_error(ctx, request_id, f"Command failed: {exc}")
             return
 
-        await self._send_response(ctx, request_id, response)
+        await self._send_response(ctx, request_id, command, response)
 
     async def _handle_command_request(self, command: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Handle command request and return response dictionary.
@@ -377,7 +370,13 @@ class AgentWebSocketServer:
                 remote=ctx.remote,
             )
 
-    async def _send_response(self, ctx: _ClientContext, request_id: str, response: Dict[str, Any]) -> None:
+    async def _send_response(
+        self,
+        ctx: _ClientContext,
+        request_id: str,
+        command: str,
+        response: Dict[str, Any],
+    ) -> None:
         """Send a structured response back to the backend client."""
 
         # Extract latency if present (added during command processing)
@@ -386,13 +385,13 @@ class AgentWebSocketServer:
         message = {
             "type": "response",
             "request_id": request_id,
+            "command": command,
             "success": response.get("success", True),
             "data": response.get("data", response),
             "timestamp": datetime.utcnow().isoformat(),
         }
 
         # Log outbound response to backend
-        command = response.get("command") or "unknown"
         log_backend_command(
             direction="outbound",
             command=command,

@@ -39,7 +39,8 @@ JackSparrow/
 │   │   │   ├── trading.py              # Trading operations endpoints
 │   │   │   ├── portfolio.py            # Portfolio management endpoints
 │   │   │   ├── market.py               # Market data endpoints
-│   │   │   └── admin.py                # Admin/control endpoints
+│   │   │   ├── admin.py                # Admin/control endpoints
+│   │   │   └── system.py               # System/time synchronization endpoints
 │   │   ├── middleware/
 │   │   │   ├── __init__.py
 │   │   │   ├── auth.py                 # Authentication middleware
@@ -52,13 +53,18 @@ JackSparrow/
 │   │   │   └── responses.py            # Pydantic response models
 │   │   └── websocket/
 │   │       ├── __init__.py
-│   │       └── manager.py              # WebSocket connection manager
+│   │       ├── unified_manager.py      # Active WebSocket manager used by backend.api.main
+│   │       └── manager.py              # Legacy manager retained for compatibility/testing
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── agent_service.py            # Agent communication service
+│   │   ├── agent_event_subscriber.py   # Agent event ingestion + WS fanout
+│   │   ├── health_poller.py            # Background health polling and cache updates
 │   │   ├── market_service.py           # Market data service
-│   │   ├── portfolio_service.py       # Portfolio calculations service
-│   │   └── feature_service.py         # MCP Feature Server client
+│   │   ├── portfolio_service.py        # Portfolio calculations service
+│   │   ├── trade_persistence_service.py # Trade + position persistence helpers
+│   │   ├── feature_service.py          # MCP Feature Server client (currently not wired in runtime)
+│   │   └── time_service.py             # Time normalization and formatting service
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py                   # Configuration management
@@ -76,6 +82,11 @@ JackSparrow/
 │   │   ├── state_machine.py            # Agent state machine (see [Logic & Reasoning Documentation](05-logic-reasoning.md#enhanced-agent-state-machine))
 │   │   ├── context_manager.py         # Context management (TODO - needs implementation)
 │   │   └── execution.py                # Trade execution engine (TODO - needs implementation)
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── websocket_server.py         # Backend→agent command WebSocket bridge (active)
+│   │   ├── websocket_client.py         # Agent→backend event WebSocket client (active)
+│   │   └── feature_server.py           # Legacy standalone FastAPI bridge (compat/diagnostics)
 │   ├── models/
 │   │   ├── __init__.py
 │   │   ├── mcp_model_node.py          # Base MCP model node interface
@@ -104,23 +115,31 @@ JackSparrow/
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── feature_server.py          # MCP Feature Server
+│   │   ├── feature_server_api.py      # Active aiohttp bridge used by IntelligentAgent
 │   │   ├── feature_engineering.py     # Feature computation
+│   │   ├── candle_store.py            # Parquet storage for closed OHLCV candles
 │   │   ├── delta_client.py            # Delta Exchange client
 │   │   └── market_data_service.py     # Market data ingestion
 │   ├── risk/
 │   │   ├── __init__.py
 │   │   ├── risk_manager.py            # Risk management
-│   │   └── position_sizer.py          # Position sizing logic
+│   │   └── position_sizer.py          # Legacy standalone helper (runtime uses RiskManager.calculate_position_size)
+│   ├── scripts/
+│   │   ├── __init__.py
+│   │   └── dev_watcher.py             # Docker-dev hot-reload watcher for `agent.core.intelligent_agent`
 │   ├── memory/
 │   │   ├── __init__.py
 │   │   ├── vector_store.py            # Vector memory store
 │   │   └── embedding_service.py       # Embedding generation
 │   ├── learning/
 │   │   ├── __init__.py
-│   │   ├── performance_tracker.py     # Performance tracking
-│   │   ├── model_weight_adjuster.py   # Model weight updates
-│   │   ├── confidence_calibrator.py   # Confidence calibration
-│   │   └── strategy_adapter.py       # Strategy adaptation
+│   │   ├── performance_tracker.py     # Directional accuracy/PnL tracker (bounded history)
+│   │   ├── model_weight_adjuster.py   # Adaptive model weights (accuracy + saturated profit)
+│   │   ├── confidence_calibrator.py   # Confidence calibration with cold-start safeguards
+│   │   ├── strategy_adapter.py        # Parameter adaptation from aggregate evaluated outcomes
+│   │   ├── dynamic_thresholds.py      # Redis threshold overrides with bounded clamps
+│   │   ├── threshold_adapter.py       # Periodic threshold nudging from recent trade_outcomes
+│   │   └── retraining_scheduler.py    # Trigger + execute retraining command with cooldown/state
 │   └── requirements.txt               # Python dependencies
 │
 ├── frontend/                            # Frontend web application
@@ -249,7 +268,15 @@ Each directory has a clear, single responsibility:
 - **frontend/**: User interface
 - **tests/**: Test code organized by type, plus `tests/functionality/reports/` for **generated** test reports (not kept in version control)
 - **scripts/**: Utility and setup scripts; `scripts/dev/` for local debugging helpers; `scripts/notebooks/` for rare notebook edits
-- **docs/**: Documentation files (including archived reports under `docs/archive/`)
+- **docs/**: Canonical documentation only — `01-architecture.md` through `15-audit-report.md` (see [DOCUMENTATION.md](../DOCUMENTATION.md))
+
+**Cleanup Guidance (2026-04-01 audit)**:
+- `agent/risk/position_sizer.py` is currently not referenced by runtime code paths; keep only for compatibility or remove after confirming no external imports.
+- `agent/venv/` should remain local-only and excluded from version control; do not place source code under this path.
+- `agent/scripts/dev_watcher.py` is active in Docker development flow (`Dockerfile.dev`), so it should be retained.
+- `backend/api/websocket/manager.py` is not used by `backend/api/main.py` runtime paths (which use `unified_manager.py`); treat it as legacy until removed.
+- `backend/services/feature_service.py` is currently not imported by backend runtime code paths; remove or wire it explicitly.
+- `notebooks/` was consolidated to a single authoritative training notebook (`JackSparrow_Trading_Colab_v5.ipynb`) plus dedicated template notebooks; legacy v3/v4/duplicate training notebooks were removed.
 
 ### Module Boundaries
 
@@ -670,7 +697,7 @@ python tools/commands/validate-health.py
 
 **Checks**:
 - Backend service health (`http://localhost:8000/api/v1/health`)
-- Feature server health (`http://localhost:8001/health`)
+- Feature server health (`http://localhost:${FEATURE_SERVER_PORT:-8001}/health`)
 - Frontend accessibility
 
 **Usage**:
@@ -871,7 +898,7 @@ agent/model_storage/
     └── README.md
 ```
 
-**Currently Integrated Models** (as of latest integration - see [Model Integration Summary](model-integration-summary.md)):
+**Currently Integrated Models** (see [ML Models](03-ml-models.md#bundle-profiles-and-docker-defaults)):
 - **5 v5 BTCUSD timeframe ensembles**: 15m, 30m, 1h, 2h, 4h
 - Each timeframe has entry + exit models and dedicated scalers/features metadata
 - All models are automatically discovered and registered on agent startup

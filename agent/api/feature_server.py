@@ -3,9 +3,13 @@ Agent Feature Server API.
 
 HTTP API server for the MCP Feature Server, exposing feature computation
 endpoints for the backend to query.
+
+Legacy note:
+    Runtime startup uses ``agent.data.feature_server_api.FeatureServerAPI``.
+    This module is kept as an optional standalone FastAPI bridge for
+    compatibility and manual diagnostics.
 """
 
-import asyncio
 import os
 import sys
 from pathlib import Path
@@ -14,7 +18,7 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import structlog
@@ -23,9 +27,8 @@ import structlog
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from agent.data.feature_server import MCPFeatureServer, MCPFeatureRequest, MCPFeatureResponse
-from agent.models.mcp_model_registry import MCPModelRegistry, MCPModelRequest, MCPModelResponse
-from agent.core.reasoning_engine import MCPReasoningEngine
+from agent.data.feature_server import MCPFeatureRequest
+from agent.models.mcp_model_registry import MCPModelRequest
 from agent.core.mcp_orchestrator import MCPOrchestrator
 from agent.core.redis_config import get_redis, close_redis
 
@@ -225,7 +228,7 @@ async def get_agent_status():
 
 
 @app.post("/api/v1/features/compute", response_model=FeatureComputeResponse)
-async def compute_features(request: FeatureComputeRequest, background_tasks: BackgroundTasks):
+async def compute_features(request: FeatureComputeRequest):
     """Compute features for a symbol."""
     if not orchestrator or not orchestrator.feature_server:
         raise HTTPException(status_code=503, detail="Feature server not available")
@@ -259,7 +262,7 @@ async def compute_features(request: FeatureComputeRequest, background_tasks: Bac
 
 
 @app.post("/api/v1/models/predict", response_model=ModelPredictionResponse)
-async def get_predictions(request: ModelPredictionRequest, background_tasks: BackgroundTasks):
+async def get_predictions(request: ModelPredictionRequest):
     """Get model predictions for a symbol."""
     if not orchestrator or not orchestrator.model_registry:
         raise HTTPException(status_code=503, detail="Model registry not available")

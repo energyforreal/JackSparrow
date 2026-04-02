@@ -4,10 +4,8 @@ Model discovery service.
 Automatically discovers and registers ML models from storage directory.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List
 from pathlib import Path
-import json
-import pickle
 import structlog
 
 from agent.core.config import settings
@@ -56,6 +54,71 @@ class ModelDiscovery:
         )
         
         try:
+            single_model_mode = bool(
+                getattr(settings, "single_model_mode_enabled", False)
+            )
+            if single_model_mode:
+                from agent.models.consolidated_model_node import ConsolidatedModelNode
+
+                pattern = str(
+                    getattr(
+                        settings,
+                        "consolidated_model_metadata_glob",
+                        "metadata_BTCUSD_consolidated*.json",
+                    )
+                    or "metadata_BTCUSD_consolidated*.json"
+                )
+                strict_single = bool(
+                    getattr(settings, "single_model_strict_startup", False)
+                )
+                recursive = getattr(settings, "model_discovery_recursive", True)
+                if recursive:
+                    metadata_files = sorted(self.model_dir.rglob(pattern))
+                else:
+                    metadata_files = sorted(self.model_dir.glob(pattern))
+
+                discovery_attempted = True
+                logger.info(
+                    "model_discovery_single_model_scan",
+                    model_dir=str(self.model_dir),
+                    metadata_pattern=pattern,
+                    recursive=recursive,
+                    files_found=len(metadata_files),
+                )
+                if not metadata_files:
+                    msg = (
+                        "No consolidated metadata file found for single-model mode "
+                        f"(pattern={pattern})."
+                    )
+                    if strict_single:
+                        raise RuntimeError(msg)
+                    logger.warning(
+                        "model_discovery_single_model_not_found",
+                        message=msg,
+                    )
+                else:
+                    # Prefer the newest file when multiple artifacts are present.
+                    metadata_path = max(
+                        metadata_files, key=lambda p: p.stat().st_mtime
+                    )
+                    node = ConsolidatedModelNode.from_metadata(metadata_path)
+                    await node.initialize()
+                    self._handle_discovered_model(node, discovered_models)
+                    loaded_model_names.add(node.model_name)
+                    logger.info(
+                        "model_discovered_single_model",
+                        model_name=node.model_name,
+                        model_path=str(metadata_path),
+                        model_type=node.model_type,
+                    )
+                self.registry.record_discovery_summary(
+                    discovered_models,
+                    failed_models,
+                    failed_reasons,
+                    discovery_attempted=discovery_attempted,
+                )
+                return discovered_models
+
             # V4-only discovery: load BTCUSD ensembles from metadata_BTCUSD_*.json
             # under MODEL_DIR (typically agent/model_storage/jacksparrow_v4_BTCUSD).
             if not settings.model_discovery_enabled:
@@ -240,102 +303,3 @@ class ModelDiscovery:
                 reason="model_auto_register disabled"
             )
     
-    _STRICT_ARTIFACTS = frozenset({
-        "entry_meta", "exit_model", "regime_model",
-        "entry_base", "exit_base", "entry_scaler", "exit_scaler",
-    })
-
-    def _find_model_files(self) -> List[Path]:
-        """Find all model files in storage directory. Excludes strict robust-ensemble artifacts in xgboost."""
-        model_files = []
-        if self.model_dir.exists():
-            model_files.extend(self.model_dir.glob("*.pkl"))
-            model_files.extend(self.model_dir.glob("*.h5"))
-            model_files.extend(self.model_dir.glob("*.onnx"))
-        for subdir in ["custom", "xgboost", "lightgbm", "random_forest", "lstm", "transformer"]:
-            subdir_path = self.model_dir / subdir
-            if subdir_path.exists():
-                for ext in ("*.pkl", "*.h5", "*.onnx", "*.pt", "*.pth"):
-                    for p in subdir_path.glob(ext):
-                        if subdir == "xgboost" and p.stem in self._STRICT_ARTIFACTS:
-                            continue
-                        model_files.append(p)
-        return model_files
-    
-    async def _load_model_from_path(self, model_path: Path) -> Optional[MCPModelNode]:
-        """Load model node from file path."""
-        
-        # Determine model type from path and metadata
-        model_type = self._detect_model_type(model_path)
-
-        if model_type == "xgboost":
-            from agent.models.xgboost_node import XGBoostNode
-            return await XGBoostNode.load_from_file(model_path)
-        elif model_type == "lightgbm":
-            from agent.models.lightgbm_node import LightGBMNode
-            return await LightGBMNode.load_from_file(model_path)
-        elif model_type == "random_forest":
-            from agent.models.random_forest_node import RandomForestNode
-            return await RandomForestNode.load_from_file(model_path)
-        elif model_type == "lstm":
-            from agent.models.lstm_node import LSTMNode
-            return await LSTMNode.load_from_file(model_path)
-        elif model_type == "transformer":
-            from agent.models.transformer_node import TransformerNode
-            return await TransformerNode.load_from_file(model_path)
-        else:
-            logger.warning(
-                "model_discovery_unknown_type",
-                model_path=str(model_path),
-                detected_type=model_type
-            )
-            return None
-    
-    def _detect_model_type(self, model_path: Path) -> str:
-        """Detect model type from path and metadata."""
-        
-        # Check parent directory name
-        parent_dir = model_path.parent.name
-        if parent_dir in ["xgboost", "lightgbm", "random_forest", "lstm", "transformer"]:
-            return parent_dir
-        
-        # Check metadata file
-        metadata_path = model_path.parent / "metadata.json"
-        if metadata_path.exists():
-            try:
-                with open(metadata_path, "r") as f:
-                    metadata = json.load(f)
-                    return metadata.get("model_type", "unknown")
-            except Exception:
-                pass
-        
-        # Check filename
-        filename = model_path.name.lower()
-        if "xgboost" in filename:
-            return "xgboost"
-        elif "lightgbm" in filename or "lgb" in filename:
-            return "lightgbm"
-        elif "random_forest" in filename or "rf" in filename:
-            return "random_forest"
-        elif "lstm" in filename:
-            return "lstm"
-        elif "transformer" in filename:
-            return "transformer"
-        
-        # Default: try to load as pickle and detect
-        try:
-            with open(model_path, "rb") as f:
-                model = pickle.load(f)
-                model_type = type(model).__name__.lower()
-                
-                if "xgboost" in model_type:
-                    return "xgboost"
-                elif "lightgbm" in model_type or "lgb" in model_type:
-                    return "lightgbm"
-                elif "randomforest" in model_type or "forest" in model_type:
-                    return "random_forest"
-        except Exception:
-            pass
-        
-        return "unknown"
-

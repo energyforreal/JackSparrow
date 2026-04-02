@@ -16,7 +16,7 @@ from agent.events.schemas import (
 )
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
-from agent.data.feature_list import get_feature_list
+from feature_store.feature_registry import get_feature_list
 
 logger = structlog.get_logger()
 

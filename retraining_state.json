@@ -1,0 +1,7 @@
+{
+  "last_retrain_at": "2026-04-01T17:46:05.545294+00:00",
+  "last_retrain_command": "echo ok",
+  "last_retrain_exit_code": 0,
+  "last_retrain_stderr_tail": "",
+  "last_retrain_stdout_tail": "ok"
+}

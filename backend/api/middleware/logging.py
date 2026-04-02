@@ -9,7 +9,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable
 import time
 import structlog
-import json
 
 from backend.core.logging import log_error_with_context
 

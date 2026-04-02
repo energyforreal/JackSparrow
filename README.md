@@ -51,7 +51,7 @@ See [Build Guide](docs/11-build-guide.md) for complete step-by-step instructions
 
 ```bash
 # Validate configuration and prerequisites (recommended before starting)
-python scripts/validate-env.py && python tools/commands/validate-prerequisites.py
+python tools/commands/validate-prerequisites.py
 
 # Start all services (parallel startup - faster!)
 # The startup script automatically validates configuration and prerequisites before starting
@@ -149,23 +149,15 @@ The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server
 
 ## Model Training
 
-The system uses **v5 BTCUSD entry/exit ensemble** artefacts: **five timeframe nodes** (15m, 30m, 1h, 2h, 4h) when using the full bundle under `agent/model_storage/`. Models are discovered from `MODEL_DIR` on agent startup. Docker Compose defaults to a smaller dated bundle; override `AGENT_MODEL_DIR` / `MODEL_DIR` for the full set — see [Model integration summary](docs/model-integration-summary.md).
+The system uses **metadata-driven BTCUSD JackSparrow bundles** discovered from `MODEL_DIR` on agent startup. This checkout ships a slim operational bundle with **5m + 15m** metadata under `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/`. For full multi-timeframe bundles and `AGENT_MODEL_DIR`, see [ML Models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults).
 
-If you need to train or regenerate ML models:
+If you need to train or regenerate ML models, use the workspace’s training/export notebook (`notebooks/JackSparrow_Trading_Colab_v5.ipynb`) to produce a dated bundle under `agent/model_storage/` containing `metadata_BTCUSD_*.json` + joblib artifacts.
 
-```bash
-# Train models for all timeframes
-python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
-
-# Validate models before use
-python scripts/validate_models_before_deployment.py
-```
-
-See [ML Models Documentation](docs/03-ml-models.md#model-training) for detailed guide. For the current bundle layout and `MODEL_DIR`, see [Model integration summary](docs/model-integration-summary.md).
+See [ML Models Documentation](docs/03-ml-models.md) for discovery, bundles, and training.
 
 ## Testing
 
-The project includes comprehensive test suites and validation scripts. See [Testing Guide](docs/testing-guide.md) for complete documentation.
+The project includes comprehensive test suites and validation scripts. See [Build Guide – Tests and verification](docs/11-build-guide.md#tests-and-verification).
 
 ### Quick Test Commands
 
@@ -196,18 +188,18 @@ python tools/commands/validate-health.py
 - **Validation Scripts**: Fix validation and system checks
 - **Monitoring**: Continuous health monitoring
 
-See [Testing Guide](docs/testing-guide.md) and [Troubleshooting Guide](docs/troubleshooting.md) for detailed information.
+See [Build Guide](docs/11-build-guide.md) and [Debugging](docs/13-debugging.md) for detailed information.
 
 ### Common Startup Issues
 
 The startup script provides clear error messages for common issues:
 
 - **Paper Trading Validation Failed**: Check `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
-- **Environment Validation Failed**: Run `python scripts/validate-env.py` to check `.env` file configuration
+- **Environment Validation Failed**: Re-run `python tools/commands/validate-prerequisites.py` and review startup logs for missing `.env` values
 - **Prerequisite Validation Failed**: Run `python tools/commands/validate-prerequisites.py` to check Python, Node.js, PostgreSQL, Redis
 - **Model Validation Failed**: Check ML model files or disable with `VALIDATE_MODELS_ON_STARTUP=false`
 
-For detailed troubleshooting, see [Troubleshooting Guide](docs/troubleshooting.md).
+For detailed troubleshooting, see [Debugging](docs/13-debugging.md) and [Deployment](docs/10-deployment.md#troubleshooting).
 
 ## CI/CD Pipeline
 
@@ -225,7 +217,7 @@ GitHub Actions workflow [`cicd.yml`](.github/workflows/cicd.yml) runs backend/ag
    - `JWT_SECRET_KEY` and `API_KEY` - Security keys
    - `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` - Frontend API endpoints
    - *(Optional)* `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` - Enable Telegram trade alerts
-3. **Initialize database**: Run `python scripts/setup_db.py` before starting services
+3. **Initialize database**: Follow the DB setup steps in [Build Guide](docs/11-build-guide.md) (this repo checkout does not include `scripts/setup_db.py`)
 4. See [Deployment Documentation](docs/10-deployment.md) for complete details
 
 **Note**: No service-specific `.env` files are needed. Backend reads via `ROOT_ENV_PATH`, agent reads via `ROOT_ENV_PATH`, and frontend reads via `loadRootEnv()` in `next.config.js`.
@@ -249,7 +241,7 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for the complete index.
 JackSparrow/
 ├── backend/          # FastAPI backend API
 ├── agent/            # AI agent core with MCP layer
-│   └── model_storage/ # Trained bundles (e.g. jacksparrow_v5_*); see docs/model-integration-summary.md
+│   └── model_storage/ # Trained bundles (e.g. jacksparrow_v5_*); see docs/03-ml-models.md
 ├── frontend/         # Next.js frontend dashboard
 ├── tests/            # Test suite
 ├── scripts/          # Utility scripts

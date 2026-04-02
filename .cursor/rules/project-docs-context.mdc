@@ -5,42 +5,28 @@ alwaysApply: false
 ---
 # JackSparrow Project Documentation Context
 
-The `.cursor/context/docs` directory mirrors the entire `docs/` tree. Reference this file when you need to know which documentation files are available. Load specific documentation files on-demand using `@` mentions or explicit file references:
+**Canonical documentation** lives only in the repository root index and fifteen numbered guides:
 
-**To load documentation context:**
-- Use `@.cursor/context/docs/<filename>` to reference specific docs
-- Use `@Folders .cursor/context/docs` to load all docs (use sparingly)
-- Reference individual files directly when needed
+- [DOCUMENTATION.md](../../DOCUMENTATION.md) — index
+- [docs/01-architecture.md](../../docs/01-architecture.md) through [docs/15-audit-report.md](../../docs/15-audit-report.md)
 
-**Available documentation files:**
+**To load documentation context in Cursor:**
 
-- `.cursor/context/docs/01-architecture.md`
-- `.cursor/context/docs/02-mcp-layer.md`
-- `.cursor/context/docs/03-ml-models.md`
-- `.cursor/context/docs/04-features.md`
-- `.cursor/context/docs/05-logic-reasoning.md`
-- `.cursor/context/docs/06-backend.md`
-- `.cursor/context/docs/07-frontend.md`
-- `.cursor/context/docs/08-file-structure.md`
-- `.cursor/context/docs/09-ui-ux.md`
-- `.cursor/context/docs/10-deployment.md`
-- `.cursor/context/docs/11-build-guide.md`
-- `.cursor/context/docs/12-logging.md`
-- `.cursor/context/docs/13-debugging.md`
-- `.cursor/context/docs/14-project-rules.md`
-- `.cursor/context/docs/15-audit-report.md`
-- `.cursor/context/docs/AUDIT_REPORT.md`
-- `.cursor/context/docs/audit-findings.md`
-- `.cursor/context/docs/comprehensive-audit-report.md`
-- `.cursor/context/docs/docker-logs-analysis-report.md`
-- `.cursor/context/docs/docker-logs-followup-report.md`
-- `.cursor/context/docs/docker-logs-analysis-report-20251123.md`
-- `.cursor/context/docs/docker-hot-reload.md`
-- `.cursor/context/docs/remediation-plan.md`
-- `.cursor/context/docs/training-and-feature-parity.md`
+- Use `@docs/03-ml-models.md` (or any `0N-*.md`) for the live files under `docs/`.
+- The `.cursor/context/docs/` folder may be a **stale mirror**; prefer `@docs/` paths unless you have refreshed the mirror.
 
-**Important reference documents** (in `docs/`):
-- `docs/major-changes.md` - Change log for architectural improvements (2025-01-27 baseline)
-- `docs/model-integration-summary.md` - v5 BTCUSD entry/exit bundles, `MODEL_DIR`, and Docker defaults
+**Important topics by doc:**
 
-**Note:** This rule does not auto-load documentation. Documentation files should be loaded explicitly when needed to reduce context token usage and improve performance.
+| Doc | Use for |
+|-----|---------|
+| 01 | Architecture, startup, communication |
+| 02 | MCP protocols |
+| 03 | Models, `MODEL_DIR`, bundles, training notebook |
+| 04–05 | Features, reasoning, HOLD/MTF |
+| 06–07 | Backend API, WebSocket, frontend |
+| 08–09 | Layout, UI/UX |
+| 10–11 | Deploy, Docker, build, tests |
+| 12–13 | Logging, debugging |
+| 14–15 | Rules, audit / remediation |
+
+**Note:** This rule does not auto-load documentation. Load files explicitly when needed.

@@ -313,3 +313,47 @@ Refer to [Deployment Documentation](10-deployment.md#operations--maintenance-com
 
 **Status**: All identified gaps have been addressed. Documentation is now complete and aligned with reference specifications. No new blocking findings were introduced during the November 2025 refresh.
 
+---
+
+## Documentation consolidation (canonical set)
+
+Operational and audit-style markdown outside the numbered guides has been **merged or retired**. The only maintained documentation under `docs/` are **`01-architecture.md` through `15-audit-report.md`** plus the root index **[DOCUMENTATION.md](../DOCUMENTATION.md)**.
+
+When filing new gaps, reference the numbered doc that should change and verify against the current codebase (configs under `agent/core/config.py`, `backend/core/config.py`, and compose files).
+
+---
+
+## Remediation and database governance (summary)
+
+- **Enum / VARCHAR mismatch** on `positions.status` / `trades.status`: backup, then `python scripts/migrate_enum_types.py` ([Deployment – Database maintenance](10-deployment.md#database-maintenance)).
+- **TimescaleDB extension** older than the image library: maintenance-window `ALTER EXTENSION timescaledb UPDATE;` after volume backup.
+- **Secrets and compose**: keep a single root `.env`; never commit live keys.
+
+---
+
+## ML confidence validation (paper trading)
+
+To compare baseline vs tuned confidence without promoting blindly:
+
+1. Run two comparable windows (e.g. 12–24h paper trading) with only confidence/threshold changes between them.
+2. Capture agent logs and DB tables `prediction_audit`, `trade_outcomes` (when migrations are applied).
+
+Example aggregation:
+
+```sql
+SELECT metadata->>'signal' AS signal, COUNT(*) AS n, AVG(confidence) AS avg_conf
+FROM prediction_audit
+WHERE created_at >= NOW() - INTERVAL '24 hours'
+GROUP BY 1 ORDER BY n DESC;
+```
+
+```sql
+SELECT COUNT(*) AS total_trades,
+       AVG(CASE WHEN pnl > 0 THEN 1.0 ELSE 0.0 END) AS win_rate,
+       SUM(pnl) AS net_pnl
+FROM trade_outcomes
+WHERE closed_at >= NOW() - INTERVAL '24 hours';
+```
+
+See [ML Models](03-ml-models.md) for learning and threshold adapters.
+

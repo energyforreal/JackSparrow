@@ -8,7 +8,7 @@ feature_schema.json and drift validation.
 from typing import Any, Dict, List
 
 # 50 features: 16 price + 10 momentum + 8 trend + 8 volatility + 6 volume + 2 returns
-# Must match agent/data/feature_list.py for compatibility
+# Canonical source used by both runtime and training paths.
 FEATURE_LIST: List[str] = [
     # Price-based (16)
     "sma_10", "sma_20", "sma_50", "sma_100", "sma_200",

@@ -466,6 +466,12 @@ class DeltaExchangeClient:
         """
         # Handle backward compatibility: if limit is provided but start/end are not, calculate them
         if limit is not None and (start is None or end is None):
+            logger.warning(
+                "delta_exchange_get_candles_limit_deprecated",
+                resolution=resolution,
+                limit=limit,
+                message="Using deprecated `limit` argument; pass explicit start/end timestamps.",
+            )
             start, end = self._calculate_candle_time_range(resolution, limit)
         
         # Validate required parameters
@@ -482,37 +488,6 @@ class DeltaExchangeClient:
             "end": end
         }
         return await self._make_request("GET", "/v2/history/candles", params=params)
-    
-    async def get_historical_candles(
-        self,
-        symbol: str,
-        resolution: str = "1h",
-        limit: Optional[int] = None,
-        start: Optional[int] = None,
-        end: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """Get historical candles (alias for get_candles for backward compatibility).
-        
-        Args:
-            symbol: Trading symbol (e.g., "BTCUSD")
-            resolution: Candle resolution (e.g., "15m", "1h", "4h", "1d")
-            limit: Number of candles to retrieve (will calculate start/end automatically)
-            start: Start timestamp in Unix seconds (optional if limit provided)
-            end: End timestamp in Unix seconds (optional if limit provided)
-            
-        Returns:
-            API response with candles data
-            
-        Note:
-            This is an alias for get_candles() for backward compatibility.
-        """
-        return await self.get_candles(
-            symbol=symbol,
-            resolution=resolution,
-            start=start,
-            end=end,
-            limit=limit
-        )
     
     @staticmethod
     def _calculate_candle_time_range(resolution: str, candle_count: int) -> tuple[int, int]:

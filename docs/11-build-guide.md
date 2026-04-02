@@ -460,7 +460,7 @@ python scripts/validate-env.py && python tools/commands/validate-prerequisites.p
 1. Review the error messages
 2. Fix issues in your `.env` file or start missing services
 3. Re-run validation until all checks pass
-4. See [Troubleshooting Guide](troubleshooting-local-startup.md) for detailed help
+4. See [Debugging](13-debugging.md) and [Deployment – Troubleshooting](10-deployment.md#troubleshooting) for detailed help
 
 **Note**: The startup script (`python tools/commands/start_parallel.py`) automatically runs these validations before starting services, but it's recommended to run them manually first to catch issues early.
 
@@ -784,11 +784,11 @@ Check logs for model discovery messages.
 
 If you need to train new models or regenerate corrupted models, use the authoritative Colab notebook path for production-style BTCUSD artefacts:
 
-- `notebooks/JackSparrow_Trading_Colab_v4.ipynb`
+- `notebooks/JackSparrow_Trading_Colab_v5.ipynb`
 
 **Prerequisites**: Ensure Delta Exchange API credentials are configured in `.env`
 
-Use script-based training only for legacy or experimental workflows.
+Use script-based training only for explicitly non-production experiments.
 
 **Legacy script path (optional)**:
 ```bash
@@ -1027,6 +1027,35 @@ After successful build:
 3. **Start Trading**: Use the dashboard or API to start the agent
 4. **Monitor Performance**: Check dashboard for real-time updates
 5. **Review Logs**: Check terminal outputs for debugging
+
+---
+
+## Tests and verification
+
+**Before first run**
+
+```bash
+python scripts/validate-env.py
+python tools/commands/validate-prerequisites.py
+```
+
+**Unit and integration tests**
+
+```bash
+cd backend && pytest
+cd agent && pytest
+pytest tests/unit tests/integration tests/functionality   # from repo root as applicable
+```
+
+**Frontend**
+
+```bash
+cd frontend && npm test -- --ci
+```
+
+**Models**: After training or bundle promotion, run `pytest tests/unit/test_feature_parity.py -q` and `python scripts/test_model_inference.py --model-dir <path-to-bundle>` (see [ML Models](03-ml-models.md#training-parity-and-promotion)).
+
+**Docker dev hot reload**: See [Deployment – Docker development hot reload](10-deployment.md#docker-development-hot-reload).
 
 ---
 

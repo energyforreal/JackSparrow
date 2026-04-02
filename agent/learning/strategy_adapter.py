@@ -1,54 +1,51 @@
 """Strategy parameter adaptation."""
 
-from typing import Dict, Any
+from __future__ import annotations
+
+from typing import Any, Dict
+
 from agent.learning.performance_tracker import PerformanceTracker
 
 
 class StrategyAdapter:
-    """Strategy adaptation service."""
-    
-    def __init__(self, performance_tracker: PerformanceTracker):
-        """Initialize strategy adapter."""
+    """Adapt high-level strategy guardrails from live performance."""
+
+    def __init__(self, performance_tracker: PerformanceTracker) -> None:
         self.performance_tracker = performance_tracker
         self.base_params = {
             "position_size_multiplier": 1.0,
-            "confidence_threshold": 0.6,
-            "stop_loss_multiplier": 1.0
+            "confidence_threshold": 0.60,
+            "stop_loss_multiplier": 1.0,
         }
-    
+
     def adapt_parameters(self) -> Dict[str, Any]:
-        """Adapt strategy parameters based on performance."""
-        
-        # Get overall performance
-        overall_accuracy = self._calculate_overall_accuracy()
-        overall_profit = self._calculate_overall_profit()
-        
-        # Adjust parameters based on performance
+        """Derive bounded strategy parameters from aggregate model performance."""
+        perf = self.performance_tracker.get_overall_performance()
+        evaluated = int(perf.get("evaluated_predictions", 0) or 0)
+        accuracy = float(perf.get("accuracy", 0.0) or 0.0)
+        total_profit = float(perf.get("total_profit", 0.0) or 0.0)
+
         params = self.base_params.copy()
-        
-        # If performing well, increase position size
-        if overall_accuracy > 0.6 and overall_profit > 0:
-            params["position_size_multiplier"] = min(1.2, 1.0 + (overall_accuracy - 0.6))
-        
-        # If performing poorly, decrease position size
-        elif overall_accuracy < 0.4 or overall_profit < 0:
-            params["position_size_multiplier"] = max(0.8, 1.0 - (0.6 - overall_accuracy))
-        
-        # Adjust confidence threshold
-        if overall_accuracy > 0.6:
-            params["confidence_threshold"] = max(0.5, self.base_params["confidence_threshold"] - 0.1)
-        elif overall_accuracy < 0.4:
-            params["confidence_threshold"] = min(0.8, self.base_params["confidence_threshold"] + 0.1)
-        
+        if evaluated < 10:
+            # Avoid overreacting before enough labeled outcomes exist.
+            return params
+
+        # Accuracy-centered aggressiveness score in [-1, +1].
+        quality_score = max(-1.0, min(1.0, (accuracy - 0.50) / 0.25))
+
+        # Position sizing: scale risk up/down with observed quality.
+        params["position_size_multiplier"] = max(0.75, min(1.25, 1.0 + 0.15 * quality_score))
+
+        # Confidence threshold: increase selectivity on poor quality.
+        params["confidence_threshold"] = max(
+            0.50, min(0.75, self.base_params["confidence_threshold"] - 0.08 * quality_score)
+        )
+
+        # Stop-loss multiplier: tighten slightly during drawdowns.
+        if total_profit < 0:
+            params["stop_loss_multiplier"] = 0.95
+        elif total_profit > 0 and quality_score > 0.3:
+            params["stop_loss_multiplier"] = 1.05
+
         return params
-    
-    def _calculate_overall_accuracy(self) -> float:
-        """Calculate overall accuracy across all models."""
-        # Simplified - would aggregate from performance tracker
-        return 0.55  # Placeholder
-    
-    def _calculate_overall_profit(self) -> float:
-        """Calculate overall profit across all models."""
-        # Simplified - would aggregate from performance tracker
-        return 0.0  # Placeholder
 

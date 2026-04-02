@@ -454,7 +454,7 @@ class HealthChecker:
             print("  1. Check service logs in logs/ directory")
             print("  2. Verify services are running: python tools/commands/error.sh")
             print("  3. Check prerequisites: python scripts/validate-env.py && python tools/commands/validate-prerequisites.py")
-            print("  4. See docs/troubleshooting-local-startup.md for help")
+            print("  4. See docs/13-debugging.md for help")
 
 
 def main():

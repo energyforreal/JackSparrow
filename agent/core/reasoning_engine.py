@@ -5,7 +5,7 @@ Implements 6-step reasoning chain for trading decisions.
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict
 import statistics
 import uuid
@@ -74,6 +74,30 @@ class MCPReasoningEngine:
         self.feature_server = feature_server
         self.model_registry = model_registry
         self.vector_store = vector_store
+
+    @staticmethod
+    def _compute_data_freshness_seconds(market_timestamp: Any) -> Optional[int]:
+        """Return age in seconds for a timestamp, handling naive/aware values safely."""
+        if not market_timestamp:
+            return None
+        try:
+            if isinstance(market_timestamp, str):
+                market_time = datetime.fromisoformat(market_timestamp.replace("Z", "+00:00"))
+            elif isinstance(market_timestamp, datetime):
+                market_time = market_timestamp
+            else:
+                return None
+
+            if market_time.tzinfo is None:
+                market_time = market_time.replace(tzinfo=timezone.utc)
+            return int(
+                (
+                    datetime.now(timezone.utc)
+                    - market_time.astimezone(timezone.utc)
+                ).total_seconds()
+            )
+        except (ValueError, TypeError):
+            return None
 
     @staticmethod
     def _extract_hold_bucket(conclusion: str, evidence: List[str]) -> str:
@@ -449,18 +473,9 @@ class MCPReasoningEngine:
         else:
             evidence.append("Data quality score unavailable")
 
-        # Calculate data freshness from market data timestamps
-        data_freshness_seconds = None
-        market_timestamp = request.market_context.get("timestamp")
-        if market_timestamp:
-            try:
-                if isinstance(market_timestamp, str):
-                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
-                else:
-                    market_time = market_timestamp
-                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
-            except (ValueError, TypeError):
-                pass
+        data_freshness_seconds = self._compute_data_freshness_seconds(
+            request.market_context.get("timestamp")
+        )
 
         return ReasoningStep(
             step_number=1,
@@ -483,7 +498,7 @@ class MCPReasoningEngine:
         similar_contexts = None  # Initialize to avoid UnboundLocalError
         avg_similarity = 0.0
 
-        if self.vector_store:
+        if request.use_memory and self.vector_store:
             try:
                 # Create DecisionContext from market context for similarity search
                 query_context = DecisionContext(
@@ -599,18 +614,9 @@ class MCPReasoningEngine:
             consensus = 0.0
             avg_confidence = 0.0
 
-        # Calculate data freshness from market data timestamps
-        data_freshness_seconds = None
-        market_timestamp = request.market_context.get("timestamp")
-        if market_timestamp:
-            try:
-                if isinstance(market_timestamp, str):
-                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
-                else:
-                    market_time = market_timestamp
-                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
-            except (ValueError, TypeError):
-                pass
+        data_freshness_seconds = self._compute_data_freshness_seconds(
+            request.market_context.get("timestamp")
+        )
 
         return ReasoningStep(
             step_number=3,
@@ -672,18 +678,9 @@ class MCPReasoningEngine:
         # Ensure confidence doesn't exceed 1.0
         confidence = min(1.0, confidence)
 
-        # Calculate data freshness from market data timestamps
-        data_freshness_seconds = None
-        market_timestamp = request.market_context.get("timestamp")
-        if market_timestamp:
-            try:
-                if isinstance(market_timestamp, str):
-                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
-                else:
-                    market_time = market_timestamp
-                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
-            except (ValueError, TypeError):
-                pass
+        data_freshness_seconds = self._compute_data_freshness_seconds(
+            request.market_context.get("timestamp")
+        )
 
         return ReasoningStep(
             step_number=4,
@@ -719,10 +716,13 @@ class MCPReasoningEngine:
                     message="Step 5 produced HOLD due to missing model predictions.",
                 )
         else:
-            # Multi-timeframe decision layer (trend + entry ± filter) when enabled
-            mtf_out = synthesize_mtf_trading_decision(
-                model_predictions, settings, symbol=request.symbol
-            )
+            # Multi-timeframe decision layer (trend + entry ± filter) is bypassed in
+            # single-model mode, where one consolidated model already encodes MTF context.
+            mtf_out = None
+            if not bool(getattr(settings, "single_model_mode_enabled", False)):
+                mtf_out = synthesize_mtf_trading_decision(
+                    model_predictions, settings, symbol=request.symbol
+                )
             if mtf_out is not None:
                 decision_code, conclusion, avg_confidence, mtf_evidence = mtf_out
                 hold_bucket = None
@@ -742,21 +742,9 @@ class MCPReasoningEngine:
                 ]
                 if hold_bucket:
                     evidence.append(f"HOLD bucket: {hold_bucket}")
-                data_freshness_seconds = None
-                market_timestamp = request.market_context.get("timestamp")
-                if market_timestamp:
-                    try:
-                        if isinstance(market_timestamp, str):
-                            market_time = datetime.fromisoformat(
-                                market_timestamp.replace("Z", "+00:00")
-                            )
-                        else:
-                            market_time = market_timestamp
-                        data_freshness_seconds = int(
-                            (datetime.utcnow() - market_time).total_seconds()
-                        )
-                    except (ValueError, TypeError):
-                        pass
+                data_freshness_seconds = self._compute_data_freshness_seconds(
+                    request.market_context.get("timestamp")
+                )
                 return ReasoningStep(
                     step_number=5,
                     step_name="Decision Synthesis",
@@ -956,18 +944,9 @@ class MCPReasoningEngine:
                 f"Total models: {len(model_predictions)} ({len(classifier_predictions)} classifiers, {len(regressor_predictions)} regressors)"
             ]
 
-        # Calculate data freshness from market data timestamps
-        data_freshness_seconds = None
-        market_timestamp = request.market_context.get("timestamp")
-        if market_timestamp:
-            try:
-                if isinstance(market_timestamp, str):
-                    market_time = datetime.fromisoformat(market_timestamp.replace('Z', '+00:00'))
-                else:
-                    market_time = market_timestamp
-                data_freshness_seconds = int((datetime.utcnow() - market_time).total_seconds())
-            except (ValueError, TypeError):
-                pass
+        data_freshness_seconds = self._compute_data_freshness_seconds(
+            request.market_context.get("timestamp")
+        )
 
         return ReasoningStep(
             step_number=5,

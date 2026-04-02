@@ -6,7 +6,7 @@ Supports event-driven streaming via event bus.
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import asyncio
 import time
 import structlog
@@ -300,7 +300,7 @@ class MarketDataService:
 
                 # Reset error count on successful iteration
                 consecutive_errors = 0
-                websocket_reconnect_attempts = min(websocket_reconnect_attempts, 0)  # Don't let it go negative
+                websocket_reconnect_attempts = 0
 
                 # Use appropriate polling interval
                 await asyncio.sleep(min(poll_interval, candle_poll_interval_seconds))
@@ -354,97 +354,6 @@ class MarketDataService:
                     break
                 await asyncio.sleep(5)
     
-    def _get_interval_seconds(self, interval: str) -> int:
-        """Get sleep seconds for interval."""
-        interval_map = {
-            "15m": 15,
-            "1h": 60,
-            "4h": 240,
-            "1d": 86400
-        }
-        return interval_map.get(interval, 60)
-    
-    @staticmethod
-    def _calculate_candle_time_range(resolution: str, candle_count: int) -> tuple[int, int]:
-        """Calculate start and end timestamps for candle request.
-        
-        Args:
-            resolution: Candle resolution (e.g., "15m", "1h", "4h", "1d")
-            candle_count: Number of candles to retrieve
-            
-        Returns:
-            Tuple of (start_timestamp, end_timestamp) in Unix seconds
-        """
-        import time
-        
-        # Map resolution to seconds per candle
-        resolution_seconds = {
-            "1m": 60, "3m": 180, "5m": 300, "15m": 900,
-            "30m": 1800, "1h": 3600, "2h": 7200, "4h": 14400,
-            "6h": 21600, "1d": 86400, "1w": 604800
-        }
-        
-        seconds_per_candle = resolution_seconds.get(resolution.lower(), 3600)
-        total_seconds = candle_count * seconds_per_candle
-        
-        end_time = int(time.time())
-        start_time = end_time - total_seconds
-        
-        return start_time, end_time
-    
-    async def _check_and_emit_ticker(self, symbol: str):
-        """Check ticker and emit tick event if changed.
-
-        Emits tick if:
-        1. Price changed by >0.001% (very sensitive for real-time updates)
-        2. OR at least 2 seconds have passed since last tick (time-based fallback for realtime display)
-        """
-        try:
-            ticker = await self.get_ticker(symbol)
-            if not ticker:
-                return
-            
-            # Throttle ticks (prevent too frequent updates)
-            now = datetime.now(timezone.utc)
-            last_tick_time = self._last_tick_time.get(symbol)
-            if last_tick_time:
-                elapsed_ms = (now - last_tick_time).total_seconds() * 1000
-                if elapsed_ms < self._tick_throttle_ms:
-                    return
-            
-            # Check if we should emit tick
-            should_emit = False
-            last_ticker = self._last_ticker_cache.get(symbol)
-            
-            if last_ticker:
-                # Check if price changed significantly (>0.001% - very sensitive for real-time updates)
-                price_change_pct = abs((ticker["price"] - last_ticker["price"]) / last_ticker["price"])
-                if price_change_pct >= 0.00001:  # At least 0.001% change (very responsive)
-                    should_emit = True
-                else:
-                    # Time-based fallback: emit tick at least every N seconds for real-time display
-                    elapsed_seconds = (now - last_tick_time).total_seconds()
-                    if elapsed_seconds >= self._tick_force_emit_interval:
-                        should_emit = True
-            else:
-                # No previous ticker cached, always emit first tick
-                should_emit = True
-            
-            if should_emit:
-                # Emit tick event
-                await self._on_tick(symbol, ticker)
-                
-                self._last_ticker_cache[symbol] = ticker
-                self._last_tick_time[symbol] = now
-            
-        except Exception as e:
-            logger.error(
-                "market_data_ticker_check_error",
-                symbol=symbol,
-                error=str(e),
-                exc_info=True
-            )
-
     async def _check_and_emit_ticker_with_fluctuation_from_data(self, symbol: str, ticker_data: Dict[str, Any]):
         """Process ticker data and emit both tick and fluctuation events as needed.
 
@@ -886,8 +795,10 @@ class MarketDataService:
             }
             resolution = resolution_map.get(interval, "1h")
             
-            # Calculate start and end timestamps from limit and interval
-            start_time, end_time = self._calculate_candle_time_range(resolution, limit)
+            # Calculate start and end timestamps from limit and interval.
+            start_time, end_time = self.delta_client._calculate_candle_time_range(
+                resolution, limit
+            )
             
             # Fetch from Delta Exchange
             response = await self.delta_client.get_candles(

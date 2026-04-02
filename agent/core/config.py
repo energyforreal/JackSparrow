@@ -139,6 +139,30 @@ class Settings(BaseSettings):
         env="MODEL_DISCOVERY_ENABLED",
         description="Enable automatic model discovery"
     )
+    single_model_mode_enabled: bool = Field(
+        default=False,
+        env="SINGLE_MODEL_MODE_ENABLED",
+        description=(
+            "When True, load only one consolidated BTCUSD model artifact and bypass "
+            "timeframe-indexed runtime decision synthesis."
+        ),
+    )
+    consolidated_model_metadata_glob: str = Field(
+        default="metadata_BTCUSD_consolidated*.json",
+        env="CONSOLIDATED_MODEL_METADATA_GLOB",
+        description=(
+            "Glob used by model discovery to locate the consolidated model metadata "
+            "artifact when SINGLE_MODEL_MODE_ENABLED is true."
+        ),
+    )
+    single_model_strict_startup: bool = Field(
+        default=False,
+        env="SINGLE_MODEL_STRICT_STARTUP",
+        description=(
+            "When True in single-model mode, fail startup if no consolidated model "
+            "metadata artifact is found."
+        ),
+    )
     model_auto_register: bool = Field(
         default=True,
         env="MODEL_AUTO_REGISTER",
@@ -165,6 +189,73 @@ class Settings(BaseSettings):
         default=True,
         env="PREDICTION_AUDIT_WRITES_ENABLED",
         description="When True, persist each DecisionReady path to prediction_audit (PostgreSQL).",
+    )
+    learning_state_persistence_enabled: bool = Field(
+        default=True,
+        env="LEARNING_STATE_PERSISTENCE_ENABLED",
+        description="When True, persist learning system state snapshots to local disk.",
+    )
+    learning_state_path: str = Field(
+        default="learning_state.json",
+        env="LEARNING_STATE_PATH",
+        description="Path to persisted learning state (JSON).",
+    )
+    feature_drift_logging_enabled: bool = Field(
+        default=True,
+        env="FEATURE_DRIFT_LOGGING_ENABLED",
+        description="When True, log feature drift warnings during live inference (when stats available).",
+    )
+    feature_drift_sigma_threshold: float = Field(
+        default=4.0,
+        env="FEATURE_DRIFT_SIGMA_THRESHOLD",
+        description="Drift threshold in training stddev units (z-score) beyond which a feature is flagged.",
+    )
+
+    # Retraining scheduler (local automation)
+    retraining_scheduler_enabled: bool = Field(
+        default=False,
+        env="RETRAINING_SCHEDULER_ENABLED",
+        description="When True, periodically evaluate outcomes and trigger a local retraining command.",
+    )
+    retraining_scheduler_interval_seconds: int = Field(
+        default=3600,
+        env="RETRAINING_SCHEDULER_INTERVAL_SECONDS",
+        description="How often to evaluate retraining triggers (seconds).",
+    )
+    retraining_min_closed_trades: int = Field(
+        default=50,
+        env="RETRAINING_MIN_CLOSED_TRADES",
+        description="Minimum closed trades required before retraining trigger can fire.",
+    )
+    retraining_rolling_window: int = Field(
+        default=100,
+        env="RETRAINING_ROLLING_WINDOW",
+        description="How many recent closed trades to evaluate for retraining trigger.",
+    )
+    retraining_win_rate_threshold: float = Field(
+        default=0.45,
+        env="RETRAINING_WIN_RATE_THRESHOLD",
+        description="Trigger retraining when win rate falls below this threshold over the rolling window.",
+    )
+    retraining_profit_factor_threshold: float = Field(
+        default=0.90,
+        env="RETRAINING_PROFIT_FACTOR_THRESHOLD",
+        description="Trigger retraining when profit factor falls below this threshold over the rolling window.",
+    )
+    retraining_cooldown_minutes: int = Field(
+        default=360,
+        env="RETRAINING_COOLDOWN_MINUTES",
+        description="Minimum minutes between retraining runs.",
+    )
+    retraining_command: str = Field(
+        default="",
+        env="RETRAINING_COMMAND",
+        description="Shell command to run for retraining/export (empty disables execution).",
+    )
+    retraining_state_path: str = Field(
+        default="retraining_state.json",
+        env="RETRAINING_STATE_PATH",
+        description="Path to retraining scheduler state (JSON).",
     )
     trade_outcomes_writes_enabled: bool = Field(
         default=True,
@@ -572,6 +663,21 @@ class Settings(BaseSettings):
             "0 disables."
         ),
     )
+    trade_signal_debounce_seconds: int = Field(
+        default=10,
+        env="TRADE_SIGNAL_DEBOUNCE_SECONDS",
+        description="Debounce: block duplicate (symbol, side) approvals within this many seconds",
+    )
+    min_risk_reward_ratio: float = Field(
+        default=1.2,
+        env="MIN_RISK_REWARD_RATIO",
+        description="Minimum reward/risk ratio required for entry (TP distance / SL distance).",
+    )
+    adx_ranging_threshold: float = Field(
+        default=15.0,
+        env="ADX_RANGING_THRESHOLD",
+        description="Reject mild BUY/SELL signals when adx_14 is below this threshold (trend too weak).",
+    )
     model_disagreement_threshold: float = Field(
         default=0.6,
         env="MODEL_DISAGREEMENT_THRESHOLD",
@@ -882,6 +988,7 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             cleaned = [tf.strip() for tf in value.split(",") if tf.strip()]
             return ",".join(dict.fromkeys(cleaned)) or "15m"
+        raise ValueError("TIMEFRAMES must be a comma-separated string")
 
     @field_validator("price_fluctuation_threshold_pct", mode="before")
     @classmethod
@@ -1021,7 +1128,7 @@ To fix:
   3. Verify variable formats are correct
   4. Run validation: python scripts/validate-env.py
   5. Ensure database is initialized: python scripts/setup_db.py
-  6. See docs/troubleshooting-local-startup.md for detailed help
+  6. See docs/13-debugging.md and docs/10-deployment.md for detailed help
 """
     else:
         error_msg += f"""

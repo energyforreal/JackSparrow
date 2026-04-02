@@ -469,7 +469,7 @@ Emergency stop - immediately halt all trading.
 **Frontend Client Endpoint**: `ws://localhost:8000/ws`
 - Used by frontend for real-time updates
 - **Simplified Format**: Uses 3 core message types (`data_update`, `agent_update`, `system_update`)
-- **See**: [WebSocket Simplification Guide](WEBSOCKET_SIMPLIFICATION.md) for complete details
+- **Details**: [Simplified Message Format](#simplified-message-format) below and [Frontend WebSocket Integration](07-frontend.md#websocket-integration)
 
 **Agent Event Endpoint**: `ws://localhost:8000/ws/agent`
 - Used by agent to send events directly to backend
@@ -654,7 +654,7 @@ All WebSocket messages use a unified envelope format:
 }
 ```
 
-**Note**: All legacy message types have been unified under the simplified format. See [WebSocket Simplification Guide](WEBSOCKET_SIMPLIFICATION.md) for complete details.
+**Note**: Legacy message types are normalized to the unified envelope; map old types to `data_update` / `agent_update` / `system_update` plus `resource` (see table in [Frontend](07-frontend.md#simplified-websocket-message-format)).
 
 #### Client → Server Messages
 
@@ -1252,6 +1252,15 @@ class AgentService:
 ```
 
 For detailed MCP layer documentation, see [MCP Layer Documentation](02-mcp-layer.md).
+
+---
+
+## Backend–frontend contract essentials
+
+- **Transport**: Primary real-time path is WebSocket `GET /ws`; commands use `{ "action": "command", "command": "<name>", "request_id": "<id>", "parameters": { ... } }` with responses `{ "type": "response", "request_id", "command", "success", "data", "timestamp" }`.
+- **Types**: Currency/quantity as JSON `float`; datetimes ISO 8601; backend confidence `0.0`–`1.0` (UI may show percent).
+- **Signals**: `STRONG_BUY` | `BUY` | `HOLD` | `SELL` | `STRONG_SELL` (exact strings).
+- **Code touchpoints** (when changing contracts): `backend/api/models/responses.py`, Pydantic request models, `frontend/services/api.ts`, `frontend/types/*`, and generated types if used.
 
 ---
 

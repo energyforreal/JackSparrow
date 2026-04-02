@@ -124,6 +124,53 @@ class V4EnsembleNode(MCPModelNode):
         self._call_count = 0
         self._total_ms = 0.0
         self._error_count = 0
+        self._training_stats: Dict[str, Dict[str, float]] = {}
+        self._drift_stats_loaded = False
+
+    def _load_feature_drift_stats(self) -> None:
+        if self._drift_stats_loaded:
+            return
+        self._drift_stats_loaded = True
+        try:
+            from feature_store.drift import load_training_stats
+
+            base_dir: Optional[Path] = None
+            meta_path = self._metadata.get("_metadata_path")
+            if isinstance(meta_path, str) and meta_path:
+                try:
+                    base_dir = Path(meta_path).parent
+                except Exception:
+                    base_dir = None
+
+            if base_dir is None and self._artifacts.features_path is not None:
+                base_dir = self._artifacts.features_path.parent
+            if base_dir is None:
+                return
+
+            candidates = [
+                base_dir / "feature_schema.json",
+                base_dir / "training_metadata.json",
+                base_dir / "feature_drift_stats.json",
+            ]
+            for p in candidates:
+                stats = load_training_stats(p)
+                if stats:
+                    self._training_stats = stats
+                    logger.info(
+                        "feature_drift_stats_loaded",
+                        model_name=self.model_name,
+                        timeframe=self._timeframe,
+                        path=str(p),
+                        feature_count=len(stats),
+                    )
+                    return
+        except Exception as e:
+            logger.debug(
+                "feature_drift_stats_load_skipped",
+                model_name=self.model_name,
+                timeframe=self._timeframe,
+                error=str(e),
+            )
 
     # ------------------------------------------------------------------
     # Factory
@@ -162,6 +209,9 @@ class V4EnsembleNode(MCPModelNode):
             features_path=_opt("features"),
         )
 
+        # Stash metadata path for optional drift-stats autodiscovery.
+        meta["_metadata_path"] = str(metadata_path)
+
         return cls(
             model_name=model_name,
             model_version=version,
@@ -188,6 +238,7 @@ class V4EnsembleNode(MCPModelNode):
 
     async def initialize(self) -> None:
         """Lazy-load models and scalers on first use."""
+        self._load_feature_drift_stats()
         if self._artifacts.entry_model_path and self._entry_model is None:
             self._entry_model = _load(self._artifacts.entry_model_path)
         if self._artifacts.entry_long_model_path and self._entry_long_model is None:
@@ -229,6 +280,40 @@ class V4EnsembleNode(MCPModelNode):
             if not features_vec:
                 raise ValueError("No features available for v4 ensemble prediction.")
 
+            # Optional drift monitoring against training baselines (when available).
+            drifted_features: List[str] = []
+            if (
+                bool(getattr(settings, "feature_drift_logging_enabled", True))
+                and self._training_stats
+                and applied_feature_names
+            ):
+                try:
+                    from feature_store.drift import check_drift
+
+                    sigma = float(getattr(settings, "feature_drift_sigma_threshold", 4.0) or 4.0)
+                    drifted_features = check_drift(
+                        feature_vector=[float(x) for x in features_vec],
+                        feature_names=list(applied_feature_names),
+                        training_stats=self._training_stats,
+                        threshold_sigma=sigma,
+                    )
+                    if drifted_features:
+                        logger.warning(
+                            "feature_drift_detected",
+                            model_name=self.model_name,
+                            timeframe=self._timeframe,
+                            drifted_count=len(drifted_features),
+                            sigma_threshold=sigma,
+                            drifted_features=drifted_features[:25],
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "feature_drift_check_failed",
+                        model_name=self.model_name,
+                        timeframe=self._timeframe,
+                        error=str(e),
+                    )
+
             X_entry = np.array([features_vec], dtype=np.float32)
             X_exit = np.array([features_vec], dtype=np.float32)
             use_ml_exit = getattr(settings, "use_ml_exit_model", False)
@@ -253,6 +338,11 @@ class V4EnsembleNode(MCPModelNode):
                 hold = float(max(0.0, 1.0 - max(buy, sell)))
                 entry_proba_raw = np.array([sell, hold, buy], dtype=np.float32)
             else:
+                if self._entry_model is None:
+                    raise ValueError(
+                        f"v4 ensemble {self._timeframe}: no entry model artifacts loaded "
+                        f"(expected entry_long+entry_short or legacy entry_model)"
+                    )
                 if self._entry_scaler is not None:
                     X_entry = self._entry_scaler.transform(X_entry)
                 entry_proba_raw = self._entry_model.predict_proba(X_entry)[0]  # type: ignore[attr-defined]
@@ -374,6 +464,7 @@ class V4EnsembleNode(MCPModelNode):
                 "exit_signal": exit_signal,
                 "exit_confidence": exit_conf,
                 "feature_names_used": applied_feature_names,
+                "drifted_features": drifted_features,
                 "runtime_threshold_hints": self._metadata.get("runtime_threshold_hints", {}),
                 "RECOMMENDED_LONG_THRESHOLD": self._metadata.get(
                     "RECOMMENDED_LONG_THRESHOLD"

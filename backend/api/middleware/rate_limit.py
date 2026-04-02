@@ -8,7 +8,6 @@ from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable
 import time
-import json
 import structlog
 
 from backend.core.redis import get_redis
@@ -31,7 +30,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_id = request.client.host if request.client else "unknown"
         
         # Get user ID if authenticated
-        user = request.state.get("user")
+        user = getattr(request.state, "user", None)
         if user:
             client_id = user.get("user_id", client_id)
         

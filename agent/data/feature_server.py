@@ -96,6 +96,7 @@ class MCPFeatureServer:
         Args:
             event: Feature request event
         """
+        computation_key: Optional[str] = None
         try:
             payload = event.payload
             symbol = payload.get("symbol")
@@ -129,7 +130,9 @@ class MCPFeatureServer:
                 await self._emit_feature_computed_event(event, response)
                 
             finally:
-                self._computing[computation_key] = False
+                if computation_key:
+                    # Remove completed key to avoid unbounded growth.
+                    self._computing.pop(computation_key, None)
                 
         except Exception as e:
             logger.error(
@@ -138,7 +141,8 @@ class MCPFeatureServer:
                 error=str(e),
                 exc_info=True
             )
-            self._computing[computation_key] = False
+            if computation_key:
+                self._computing.pop(computation_key, None)
     
     async def _emit_feature_computed_event(self, request_event: FeatureRequestEvent, response: MCPFeatureResponse):
         """Emit feature computed event.

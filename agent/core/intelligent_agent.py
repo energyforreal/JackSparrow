@@ -126,6 +126,7 @@ class IntelligentAgent:
         self.feature_server_api: FeatureServerAPI | None = None
         self.running = False
         self._threshold_adapter_task: Optional[asyncio.Task] = None
+        self._retraining_scheduler_task: Optional[asyncio.Task] = None
         self.command_queue = settings.agent_command_queue
         self.default_symbol = settings.trading_symbol or settings.agent_symbol
         timeframe_list = settings.parsed_timeframes()
@@ -445,6 +446,52 @@ class IntelligentAgent:
                     exc_info=True,
                 )
 
+    async def _retraining_scheduler_loop(self) -> None:
+        """Periodically evaluate outcomes and (optionally) trigger local retraining."""
+        from agent.learning.retraining_scheduler import RetrainingScheduler
+
+        interval = int(getattr(settings, "retraining_scheduler_interval_seconds", 3600) or 3600)
+        interval = max(60, interval)
+        scheduler = RetrainingScheduler()
+
+        while self.running:
+            try:
+                await asyncio.sleep(interval)
+                if not self.running:
+                    break
+                if not getattr(settings, "retraining_scheduler_enabled", False):
+                    continue
+                db_url = getattr(settings, "database_url", None)
+                if not db_url:
+                    continue
+                should = await scheduler.should_retrain(None, db_url)
+                if should:
+                    run_result = await scheduler.run(None)
+                    if run_result.get("success"):
+                        try:
+                            await self.mcp_orchestrator.refresh_models()
+                            logger.info(
+                                "agent_retraining_model_refresh_complete",
+                                service="agent",
+                                message="Model discovery refreshed after retraining.",
+                            )
+                        except Exception as refresh_error:
+                            logger.warning(
+                                "agent_retraining_model_refresh_failed",
+                                service="agent",
+                                error=str(refresh_error),
+                                exc_info=True,
+                            )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(
+                    "retraining_scheduler_loop_tick_failed",
+                    service="agent",
+                    error=str(e),
+                    exc_info=True,
+                )
+
     async def _position_monitor_loop(self) -> None:
         """Background loop: update position prices and run manage_position for stop/take profit."""
         while self.running:
@@ -519,6 +566,14 @@ class IntelligentAgent:
             except asyncio.CancelledError:
                 pass
             self._threshold_adapter_task = None
+
+        if getattr(self, "_retraining_scheduler_task", None):
+            self._retraining_scheduler_task.cancel()
+            try:
+                await self._retraining_scheduler_task
+            except asyncio.CancelledError:
+                pass
+            self._retraining_scheduler_task = None
 
         # Cancel position monitoring loop
         if getattr(self, "_position_monitor_task", None):
@@ -752,6 +807,16 @@ class IntelligentAgent:
                 "agent_threshold_adapter_started",
                 service="agent",
                 interval_seconds=getattr(settings, "threshold_adapter_interval_seconds", 3600),
+            )
+
+        if getattr(settings, "retraining_scheduler_enabled", False):
+            self._retraining_scheduler_task = asyncio.create_task(
+                self._retraining_scheduler_loop()
+            )
+            logger.info(
+                "agent_retraining_scheduler_started",
+                service="agent",
+                interval_seconds=getattr(settings, "retraining_scheduler_interval_seconds", 3600),
             )
 
         # Start command handler (for backward compatibility)

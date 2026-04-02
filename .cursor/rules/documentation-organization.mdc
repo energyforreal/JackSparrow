@@ -12,13 +12,10 @@ All project documentation markdown files (`.md`) must be organized according to 
 
 ### Required Locations
 
-1. **Project Documentation** → `docs/` directory
-   - All project documentation, guides, and reports should be placed in `docs/`
-   - Use descriptive kebab-case naming (e.g., `audit-findings.md`, `docker-logs-analysis-report.md`)
-   - Examples:
-     - Audit reports: `docs/audit-findings.md`, `docs/comprehensive-audit-report.md`
-     - Docker logs: `docs/docker-logs-analysis-report.md`, `docs/docker-logs-followup-report.md`
-     - Remediation plans: `docs/remediation-plan.md`
+1. **Project Documentation** → `docs/` directory (**canonical set only**)
+   - Maintain exactly **fifteen** numbered guides: `docs/01-architecture.md` through `docs/15-audit-report.md`
+   - Do **not** add extra `.md` files under `docs/`; merge new content into the appropriate numbered doc
+   - Root **[DOCUMENTATION.md](../DOCUMENTATION.md)** is the only index
 
 2. **Cursor Rules** → `.cursor/rules/` directory
    - Cursor-specific configuration and rules should be in `.cursor/rules/`
@@ -86,10 +83,9 @@ Before committing new markdown files, verify:
 
 ```
 docs/
-  ├── audit-findings.md
-  ├── comprehensive-audit-report.md
-  ├── docker-logs-analysis-report.md
-  └── remediation-plan.md
+  ├── 01-architecture.md
+  ├── … 
+  └── 15-audit-report.md
 
 .cursor/rules/
   ├── design.mdc

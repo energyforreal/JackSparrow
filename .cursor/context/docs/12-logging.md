@@ -117,7 +117,7 @@ Service Emitters → Local Rotating Files → (optional) Forwarder → Central C
 
 - **Logs are not version-controlled**: the `logs/` directory and individual `*.log` files are ignored via `.gitignore` and must never be committed.
 - **Run-scoped only**: log files are treated as per-run diagnostics that are cleared or rotated between sessions (see [Startup Clearing Procedure](#startup-clearing-procedure)).
-- **Diagnostic markdown reports**: time-stamped log-analysis or audit snapshots are kept under `docs/` (usually `docs/archive/`) as examples; they can be regenerated or pruned without affecting application behaviour.
+- **Documentation**: operational log-triage guidance lives in this file and [Debugging](13-debugging.md); the canonical doc set is `docs/01`–`docs/15` only.
 
 ### 5. Clearing Strategy
 
@@ -498,6 +498,16 @@ Error summaries are also logged periodically (every 5 minutes) with the event `e
 5. **Phase 4 – Compliance & Hardening**
    - Implement retention, redaction, and security controls.
    - Add automated logging audits in CI.
+
+---
+
+## Container and Docker log triage
+
+- **Follow logs**: `docker compose logs -f backend`, `docker compose logs -f agent`, `docker compose logs -f frontend`.
+- **Engine vs app**: Docker captures stdout/stderr; structured JSON may appear as single lines—pipe through `rg` / `findstr` for `level`, `event`, `correlation_id`.
+- **Agent discovery**: search agent logs for `model_discovery_complete` and `discovered_count` after startup.
+- **Backend ↔ agent**: look for WebSocket reconnect loops, `FEATURE_SERVER_URL` / `AGENT_WS_URL` misconfiguration, or Redis queue fallback messages.
+- **Audit command output**: prior workflows wrote under `logs/audit/` (`backend.log`, `agent.log`, `frontend.log`, `report.md`) when using `tools/commands/audit.sh` / `audit.ps1`.
 
 ---
 

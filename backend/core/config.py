@@ -499,7 +499,7 @@ To fix:
   2. Ensure all required variables are set (no empty values)
   3. Verify variable formats are correct
   4. Run validation: python scripts/validate-env.py
-  5. See docs/troubleshooting-local-startup.md for detailed help
+  5. See docs/13-debugging.md and docs/10-deployment.md for detailed help
 """
     else:
         error_msg += f"""

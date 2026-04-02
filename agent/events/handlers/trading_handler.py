@@ -14,6 +14,7 @@ from agent.events.schemas import DecisionReadyEvent, RiskApprovedEvent, EventTyp
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
+from agent.core.learning_system import LearningSystem
 from agent.core.mtf_decision_engine import compute_context_position_size_multiplier
 from agent.core.signal_filter import EntrySignalFilter
 from agent.learning.dynamic_thresholds import (
@@ -23,11 +24,11 @@ from agent.learning.dynamic_thresholds import (
 
 logger = structlog.get_logger()
 
-# Debounce: one RiskApproved per (symbol, side) within this many seconds
-# Scalping: allow more frequent entries.
-TRADE_SIGNAL_DEBOUNCE_SECONDS = 10
-# Minimum risk/reward ratio (reward/risk) to allow entry (e.g. 1.5 = take_profit distance >= 1.5 * stop_loss distance)
-MIN_RISK_REWARD_RATIO = 1.2
+# Defaults live in config (`Settings.trade_signal_debounce_seconds`,
+# `Settings.min_risk_reward_ratio`, `Settings.adx_ranging_threshold`).
+DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS = 10
+DEFAULT_MIN_RISK_REWARD_RATIO = 1.2
+DEFAULT_ADX_RANGING_THRESHOLD = 15.0
 
 
 class TradingEventHandler:
@@ -45,8 +46,13 @@ class TradingEventHandler:
         self.context_manager = context_manager
         self.delta_client = delta_client
         self.execution_module = execution_module
+        self.learning_system = LearningSystem()
         # Deduplicate: last (symbol, side) -> timestamp of last RiskApproved published
         self._last_risk_approved: Dict[str, float] = {}
+        self._entry_signal_filter = EntrySignalFilter(
+            max_trades_per_hour=int(getattr(settings, "max_trades_per_hour", 0) or 0),
+            min_breakout_score=float(getattr(settings, "entry_min_breakout_score", 0.0) or 0.0),
+        )
 
     def _debounce_key(self, symbol: str, side: str) -> str:
         """Key for debounce: same symbol+side within window = duplicate."""
@@ -57,7 +63,11 @@ class TradingEventHandler:
         key = self._debounce_key(symbol, side)
         now = time.time()
         last = self._last_risk_approved.get(key, 0)
-        if now - last < TRADE_SIGNAL_DEBOUNCE_SECONDS:
+        debounce_seconds = int(
+            getattr(settings, "trade_signal_debounce_seconds", DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS)
+            or DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS
+        )
+        if now - last < debounce_seconds:
             return True
         self._last_risk_approved[key] = now
         return False
@@ -81,7 +91,11 @@ class TradingEventHandler:
         if risk <= 0:
             return True
         ratio = reward / risk
-        return ratio >= MIN_RISK_REWARD_RATIO
+        min_ratio = float(
+            getattr(settings, "min_risk_reward_ratio", DEFAULT_MIN_RISK_REWARD_RATIO)
+            or DEFAULT_MIN_RISK_REWARD_RATIO
+        )
+        return ratio >= min_ratio
 
     def _log_entry_rejected(
         self,
@@ -223,6 +237,12 @@ class TradingEventHandler:
                     reasoning_chain if isinstance(reasoning_chain, dict) else {}
                 ),
             }
+            raw_confidence = confidence
+            confidence = await self.learning_system.calibrate_runtime_confidence(
+                confidence, model_predictions
+            )
+            diagnostics_base["raw_confidence"] = raw_confidence
+            diagnostics_base["calibrated_confidence"] = confidence
 
             # Skip HOLD - no trade to execute
             if signal == "HOLD" or not signal:
@@ -350,23 +370,34 @@ class TradingEventHandler:
                     **diagnostics_base,
                 )
                 return
+            try:
+                vol_f = float(vol)
+            except (TypeError, ValueError):
+                self._log_entry_rejected(
+                    "invalid_volatility",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    volatility=vol,
+                    **diagnostics_base,
+                )
+                return
             min_vol = float(getattr(settings, "entry_min_volatility_for_trade", 0.0) or 0.0)
             if min_vol > 0:
                 try:
-                    vol_f = float(vol)
-                except (TypeError, ValueError):
-                    vol_f = 0.0
-                if vol_f < min_vol:
-                    self._log_entry_rejected(
-                        "low_volatility",
-                        symbol=symbol,
-                        signal=signal,
-                        event_id=event.event_id,
-                        volatility=vol_f,
-                        min_volatility=min_vol,
-                        **diagnostics_base,
-                    )
-                    return
+                    if vol_f < min_vol:
+                        self._log_entry_rejected(
+                            "low_volatility",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            volatility=vol_f,
+                            min_volatility=min_vol,
+                            **diagnostics_base,
+                        )
+                        return
+                except Exception:
+                    pass
             min_atr_pct = float(getattr(settings, "entry_min_atr_pct_of_price", 0.0) or 0.0)
             if min_atr_pct > 0 and entry_price > 0:
                 atr_raw = features.get("atr_14")
@@ -387,7 +418,7 @@ class TradingEventHandler:
                     except (TypeError, ValueError):
                         pass
             strength_map = {"STRONG_BUY": 0.9, "BUY": 0.65, "STRONG_SELL": 0.9, "SELL": 0.65}
-            regime = "high" if vol > 5 else "medium" if vol > 2.5 else "low"
+            regime = "high" if vol_f > 5 else "medium" if vol_f > 2.5 else "low"
             rr_ratio = (
                 settings.take_profit_percentage / settings.stop_loss_percentage
                 if settings.stop_loss_percentage
@@ -399,9 +430,11 @@ class TradingEventHandler:
                 win_probability=0.52 + confidence * 0.1,
                 risk_reward_ratio=rr_ratio,
             )
-            ctx_mult = compute_context_position_size_multiplier(
-                signal, model_predictions, settings
-            )
+            ctx_mult = 1.0
+            if not bool(getattr(settings, "single_model_mode_enabled", False)):
+                ctx_mult = compute_context_position_size_multiplier(
+                    signal, model_predictions, settings
+                )
             if ctx_mult != 1.0:
                 logger.info(
                     "trading_context_tf_size_adjustment",
@@ -443,7 +476,14 @@ class TradingEventHandler:
                     signal=signal,
                     event_id=event.event_id,
                     side=side,
-                    debounce_seconds=TRADE_SIGNAL_DEBOUNCE_SECONDS,
+                    debounce_seconds=int(
+                        getattr(
+                            settings,
+                            "trade_signal_debounce_seconds",
+                            DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS,
+                        )
+                        or DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS
+                    ),
                     **diagnostics_base,
                 )
                 return
@@ -483,7 +523,12 @@ class TradingEventHandler:
                         event_id=event.event_id,
                         side=side,
                         entry_price=entry_price,
-                        min_ratio=MIN_RISK_REWARD_RATIO,
+                        min_ratio=float(
+                            getattr(
+                                settings, "min_risk_reward_ratio", DEFAULT_MIN_RISK_REWARD_RATIO
+                            )
+                            or DEFAULT_MIN_RISK_REWARD_RATIO
+                        ),
                         **diagnostics_base,
                     )
                     return
@@ -500,7 +545,12 @@ class TradingEventHandler:
                         event_id=event.event_id,
                         side=side,
                         entry_price=entry_price,
-                        min_ratio=MIN_RISK_REWARD_RATIO,
+                        min_ratio=float(
+                            getattr(
+                                settings, "min_risk_reward_ratio", DEFAULT_MIN_RISK_REWARD_RATIO
+                            )
+                            or DEFAULT_MIN_RISK_REWARD_RATIO
+                        ),
                         **diagnostics_base,
                     )
                     return
@@ -532,13 +582,18 @@ class TradingEventHandler:
 
             # ADX ranging market filter: block mild BUY/SELL in very low trend strength
             adx = features.get("adx_14")
-            if adx is not None and adx < 15 and signal in ("BUY", "SELL"):
+            adx_floor = float(
+                getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)
+                or DEFAULT_ADX_RANGING_THRESHOLD
+            )
+            if adx is not None and float(adx) < adx_floor and signal in ("BUY", "SELL"):
                 self._log_entry_rejected(
                     "adx_ranging_filter",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
                     adx=adx,
+                    adx_floor=adx_floor,
                     **diagnostics_base,
                 )
                 return

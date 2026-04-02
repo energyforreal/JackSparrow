@@ -339,6 +339,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - **Dependencies**: Portfolio state, Market data
 - **Output**: Risk-adjusted position sizes, stop losses
 - **Portfolio sync**: ExecutionEngine syncs portfolio with RiskManager on order fill and position close (add_position/remove_position) so risk limits reflect actual exposure.
+- **Sizing path**: Active sizing is via `RiskManager.calculate_position_size()`; `agent/risk/position_sizer.py` is legacy and not in the runtime decision path.
 
 #### Learning System
 - **Responsibility**: Learn from trade outcomes and adapt
@@ -374,7 +375,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 
 **Pattern**: WebSocket (preferred) + Redis Queue (fallback)
 - **WebSocket**: Real-time bidirectional communication
-  - Backend connects to agent WebSocket server (`ws://localhost:8002`)
+  - Backend connects to agent WebSocket server (`ws://localhost:8003` by default, configurable via `AGENT_WS_PORT`)
   - Commands sent via WebSocket with instant responses (<10ms latency)
   - Agent sends events directly to backend WebSocket (`ws://localhost:8000/ws/agent`)
   - Automatic reconnection with exponential backoff
@@ -412,6 +413,10 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - Pattern-feature requests (`cdl_`, `chp_`, `sr_`, `tl_`, `bo_`) fetch deeper candle history (200) to support chart-pattern lookbacks
 
 **Implementation**: MCP Feature Server (`agent/data/feature_server.py`) implements the protocol and is accessed through the MCP Orchestrator.
+
+**Runtime bridge note**:
+- Active HTTP bridge used by `IntelligentAgent`: `agent/data/feature_server_api.py`
+- Legacy compatibility bridge (standalone FastAPI): `agent/api/feature_server.py` (kept for manual diagnostics/backward compatibility)
 
 ### Agent ↔ Model Nodes
 
@@ -528,7 +533,7 @@ The frontend automatically normalizes legacy message types (`signal_update`, `po
 
 #### Backend ↔ Agent
 
-**Agent WebSocket Server**: `ws://localhost:8002` (agent side)
+**Agent WebSocket Server**: `ws://localhost:8003` (agent side, configurable via `AGENT_WS_PORT`)
 - Backend connects to agent for command/response
 - Commands: `predict`, `execute_trade`, `get_status`, `control`
 - Responses: JSON with `success`, `data`, `error` fields
@@ -640,7 +645,7 @@ The system employs a comprehensive 4-step startup sequence managed by `start_par
 
 #### Health Check Components
 - **Backend Health**: `GET http://localhost:8000/api/v1/health`
-- **Feature Server Health**: `GET http://localhost:8001/health`
+- **Feature Server Health**: `GET http://localhost:8001/health` (local default) or `GET http://localhost:8002/health` (common Docker mapping)
 - **Frontend Accessibility**: HTTP connectivity check on configured port
 
 ### Monitoring Architecture
@@ -1005,7 +1010,7 @@ The startup and configuration validation system implements comprehensive error h
 
 ## Recent Architectural Enhancements
 
-As of 2025-01-27, the system has undergone major architectural improvements. For a complete change log, see [Major Changes Summary](major-changes.md).
+As of 2025-01-27, the system has undergone major architectural improvements. Subsequent changes are reflected in the canonical numbered guides (`docs/01`–`docs/15`) and repository history.
 
 ### Docker Containerization
 
@@ -1055,5 +1060,5 @@ This architecture enables better scalability, testability, and maintainability b
 - [Frontend Documentation](07-frontend.md) - UI implementation
 - [Deployment Documentation](10-deployment.md) - Setup and deployment
 - [Build Guide](11-build-guide.md) - Complete build instructions
-- [Major Changes Summary](major-changes.md) - Detailed change log for recent architectural improvements
+- [Documentation index](../DOCUMENTATION.md) - Canonical `docs/01`–`docs/15` map
 

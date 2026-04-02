@@ -168,3 +168,51 @@ def test_active_v5_bundle_metadata_features_known_to_engine():
         assert canonical in expanded or name in expanded, f"Unknown feature in metadata: {name}"
         val = engine.compute_single(name, candles, resolution_minutes=5)
         assert val == val, f"Non-numeric feature {name}"
+
+
+def test_compute_batch_last_row_is_finite_for_active_v5_required_features():
+    """
+    Guardrail: for the active slim bundle, UnifiedFeatureEngine must produce finite
+    (not NaN/Inf) values for the metadata-required features on the most recent bar.
+    """
+    meta_path = (
+        ROOT
+        / "agent"
+        / "model_storage"
+        / "jacksparrow_v5_BTCUSD_2026-03-21"
+        / "metadata_BTCUSD_5m.json"
+    )
+    if not meta_path.is_file():
+        pytest.skip("jacksparrow_v5_BTCUSD_2026-03-21 metadata not present")
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+    required = meta.get("features_required") or []
+    assert len(required) > 0
+
+    df = _make_test_df_5m_with_ts(240)
+    engine = UnifiedFeatureEngine()
+    batch = engine.compute_batch(
+        df,
+        resolution_minutes=5,
+        fill_invalid=True,
+        include_pattern_features=True,
+        include_mtf_context=True,
+    )
+
+    # Validate only what the model requests (train-serve contract).
+    last = batch.iloc[-1]
+    for name in required:
+        assert name in batch.columns, f"Missing required feature in batch output: {name}"
+        v = float(last[name])
+        assert np.isfinite(v), f"Non-finite value for feature {name}: {v}"
+
+
+def test_feature_pipeline_wrapper_produces_finite_last_row():
+    """Guardrail: FeaturePipeline.transform should never output NaN/Inf on last row."""
+    from feature_store.feature_pipeline import FeaturePipeline
+
+    df = _make_test_df(200)
+    pipe = FeaturePipeline(resolution_minutes=15, fill_invalid=True, validate=True)
+    feat = pipe.transform(df)
+    last = feat.iloc[-1].to_numpy(dtype=float)
+    assert np.isfinite(last).all(), "FeaturePipeline produced NaN/Inf in last row"

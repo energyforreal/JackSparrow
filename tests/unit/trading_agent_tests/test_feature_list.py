@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
 
 import pytest
 
-from agent.data.feature_list import (
+from feature_store.feature_registry import (
     FEATURE_LIST,
     EXPECTED_FEATURE_COUNT,
     get_feature_list,

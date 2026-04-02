@@ -412,7 +412,7 @@ To fix:
   3. Verify variable formats are correct
   4. Run validation: python scripts/validate-env.py
   5. Ensure database is initialized: python scripts/setup_db.py
-  6. See docs/troubleshooting-local-startup.md for detailed help
+  6. See docs/13-debugging.md for detailed help
 """
     else:
         error_msg += f"""

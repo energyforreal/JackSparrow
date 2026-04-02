@@ -28,11 +28,41 @@ This document describes how ML models are managed, uploaded, discovered, and int
 
 JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**. Models are automatically discovered and registered on agent startup through the model discovery system.
 
+### `agent/models` Redundancy Audit (2026-04-01)
+
+Current runtime-critical files in `agent/models/` are:
+
+- `model_discovery.py`
+- `mcp_model_registry.py`
+- `mcp_model_node.py`
+- `v4_ensemble_node.py`
+- `consolidated_model_node.py` (single-model cutover mode)
+- `xgboost_node.py`
+- `advanced_consensus.py`
+
+Legacy compatibility wrappers that are currently redundant in this checkout:
+
+| File | Current status | Reason |
+|------|----------------|--------|
+| `agent/models/robust_ensemble_node.py` | Removed | Legacy shim removed on 2026-04-01 (target `scripts/` module missing, no in-repo imports). |
+| `agent/models/ensemble_signal_bridge.py` | Removed | Legacy shim removed on 2026-04-01 (target `scripts/` module missing, no in-repo imports). |
+| `agent/models/regime_classifier.py` | Removed | Legacy shim removed on 2026-04-01 (target `scripts/` module missing, no in-repo imports). |
+| `agent/models/lightgbm_node.py` | Removed | Legacy generic node removed on 2026-04-01; active runtime path is metadata-driven v4/consolidated nodes. |
+| `agent/models/random_forest_node.py` | Removed | Legacy generic node removed on 2026-04-01; active runtime path is metadata-driven v4/consolidated nodes. |
+| `agent/models/lstm_node.py` | Removed | Legacy generic node removed on 2026-04-01; active runtime path is metadata-driven v4/consolidated nodes. |
+| `agent/models/transformer_node.py` | Removed | Legacy generic node removed on 2026-04-01; active runtime path is metadata-driven v4/consolidated nodes. |
+
+Operational guidance:
+
+1. Keep these shims only if you still need backward import compatibility for external tooling not tracked in this repo.
+2. If no external dependency remains, remove these three wrapper files to reduce dead paths and startup/path-mutation risk.
+3. If compatibility is required, replace wrapper indirection with first-class modules under `agent/models/` and stop mutating `sys.path` at import time.
+
 ### Training Authority and Train-Serve Parity
 
-For BTCUSD production-style entry/exit ensembles, the authoritative training path is:
+For BTCUSD production-style ensembles, the authoritative training/export path in this workspace is:
 
-- `notebooks/JackSparrow_Trading_Colab_v4.ipynb`
+- `notebooks/JackSparrow_Trading_Colab_v5.ipynb`
 
 This notebook uses `UnifiedFeatureEngine`, validates `EXPANDED_FEATURE_LIST` coverage, applies fee-aware TP/SL labeling, and exports timeframe artefacts as a versioned bundle (`entry_*`, `exit_*`, scaler files, `features_*.json`, `metadata_*.json`).
 
@@ -42,7 +72,7 @@ Parity requirements before deployment:
 2. Metadata `features` and `features_required` must match `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in both order and length.
 3. Run feature parity tests (`tests/unit/test_feature_parity.py`) and review pattern-feature importances from the notebook report outputs.
 
-Legacy notebooks such as `notebooks/train_models_colab.ipynb` and `notebooks/train_xgboost_colab.ipynb` are still useful for experiments, but should not be treated as the primary production training authority unless their schema and labels are explicitly aligned with current live metadata.
+Legacy notebook variants (`train_models_colab`, `train_xgboost_colab`, and older `JackSparrow_Trading_Colab_v3/v4`) were removed from this workspace during the 2026-04 cleanup. Use `notebooks/JackSparrow_Trading_Colab_v5.ipynb` as the single training/export authority.
 
 ### Model Storage Location
 
@@ -54,15 +84,15 @@ Legacy notebooks such as `notebooks/train_models_colab.ipynb` and `notebooks/tra
 
 | Directory | Role |
 |-----------|------|
-| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | **Full** v5 BTCUSD bundle: five timeframes (15m–4h), entry/exit pairs, standard `entry_model_*` / `exit_model_*` layout. Recommended for local/dev when you want all horizons. |
-| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | **Default in Docker Compose** (`AGENT_MODEL_DIR` / in-container `MODEL_DIR`): partial experimental layout (e.g. 5m/15m, `entry_long` / `entry_short` naming). Not a complete multi-timeframe set. |
+| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | **Full** v5 BTCUSD bundle (if present): five horizons (15m–4h) with entry + exit joblib artefacts per timeframe. |
+| `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | **Operational slim bundle in this checkout**: 5m/15m metadata; binary `entry_long` / `entry_short` artifacts; no ML exit artifact in metadata by default. |
 
-- Discovery reads `metadata_BTCUSD_*.json` from `MODEL_DIR` (non-recursive).
+- Discovery reads `metadata_BTCUSD_*.json` from `MODEL_DIR`; with **`MODEL_DISCOVERY_RECURSIVE=true`** (default), subfolders under `MODEL_DIR` are scanned (`rglob`).
 - For production-like behaviour with every documented timeframe, point `MODEL_DIR` at the **2026-03-19** bundle (or your own full export).
 
 ### Currently Integrated Models
 
-As of the latest integration (see [Model Integration Summary](model-integration-summary.md)), a **full** v5 deployment includes **5 v5 BTCUSD timeframe nodes**:
+A **full** v5 deployment (bundle `jacksparrow_v5_BTCUSD_2026-03-19` or equivalent) includes **5 v5 BTCUSD timeframe nodes**:
 
 - `jacksparrow_BTCUSD_15m`
 - `jacksparrow_BTCUSD_30m`
@@ -82,13 +112,14 @@ Each model is loaded from `metadata_BTCUSD_<timeframe>.json` and references:
 The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:
 
 ```bash
-MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19
+MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
-MIN_CONFIDENCE_THRESHOLD=0.65
+MODEL_DISCOVERY_RECURSIVE=true
+MIN_CONFIDENCE_THRESHOLD=0.52
 ```
 
-The `MODEL_DIR` environment variable must point to the directory containing `metadata_BTCUSD_*.json`. In v4-only mode, discovery is metadata-driven and non-recursive.
+The `MODEL_DIR` environment variable must point to the directory containing `metadata_BTCUSD_*.json` (or a parent folder when using recursive discovery). In v4-loader mode, discovery is metadata-driven; recursion is controlled by `MODEL_DISCOVERY_RECURSIVE`.
 
 ### ML Models in Docker
 
@@ -117,7 +148,8 @@ This means:
 2. Run:
 
    ```bash
-   python scripts/validate_docker_config.py
+   # Confirm models were discovered from MODEL_DIR by inspecting agent logs:
+   # look for `model_discovery_complete` with `discovered_count > 0`.
    ```
 
    and confirm it reports at least one model file discovered under `agent/model_storage`.
@@ -129,26 +161,48 @@ This means:
 - If you rebuild or upgrade the models, ensure `requirements*.txt` stay synchronized with the version used during training.
 - When the validator reports `ModuleNotFoundError: No module named 'XGBClassifier'`, re-run `pip install -r agent/requirements.txt` inside the active environment before retrying the load.
 
-### Operational Workflow
+### Operational Workflow (bundle-first)
 
-1. Train models using the training scripts (see [Model Training](#model-training) section below)
-2. Models are automatically saved to `agent/model_storage/xgboost/` during training
-3. The model discovery system automatically finds and registers models on agent startup
-4. Run the smoke-test commands captured in the [Build Guide](11-build-guide.md#project-commands) before deploying
-5. Monitor model performance and update models as needed
+1. Train/export a dated bundle (recommended: `notebooks/JackSparrow_Trading_Colab_v5.ipynb`)
+2. Set `MODEL_DIR` to the bundle folder containing `metadata_BTCUSD_*.json`
+3. Start the agent and confirm discovery logs show `discovered_count > 0`
+4. Run feature parity tests (`tests/unit/test_feature_parity.py`) before promotion
+5. Monitor `trade_outcomes` / `prediction_audit` (when enabled) and adjust thresholds via Redis learning if configured
+
+### Single consolidated model mode (optional cutover)
+
+If you export a consolidated artifact from `notebooks/JackSparrow_Trading_Colab_v5.ipynb`, enable single-model mode explicitly in `.env`:
+
+```bash
+MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_YYYY-MM-DD
+SINGLE_MODEL_MODE_ENABLED=true
+CONSOLIDATED_MODEL_METADATA_GLOB=metadata_BTCUSD_consolidated*.json
+USE_ML_EXIT_MODEL=false
+```
+
+Notes:
+- `SINGLE_MODEL_MODE_ENABLED=true` is required; otherwise discovery follows the standard per-timeframe metadata flow.
+- Keep `USE_ML_EXIT_MODEL=false` with current v5 notebook exports (entry-focused, rule-based exits at runtime).
+
+### Learning Control Modules (agent runtime)
+
+The adaptive control loop under `agent/learning/` now uses bounded, production-safe behavior:
+
+- `performance_tracker.py`: tracks both total and evaluated predictions separately so accuracy is calculated only from labeled outcomes; per-model event history is capped.
+- `confidence_calibrator.py`: applies reliability scaling with cold-start blending so new models do not collapse confidence to near-zero before enough outcomes exist.
+- `model_weight_adjuster.py`: combines reliability and profit with a saturated (`tanh`) profit component to avoid runaway single-model dominance.
+- `strategy_adapter.py`: adapts position-size and confidence gate only after a minimum evaluated sample count.
+- `threshold_adapter.py` / `dynamic_thresholds.py`: parse and clamp Redis threshold values with finite-number guards; DB fetch paths dispose SQLAlchemy engines after use.
+- `threshold_adapter.py`: threshold key updates are emitted in a single Redis transaction and adaptation runs are serialized per process.
+- `retraining_scheduler.py`: retrain subprocess execution is serialized per process, retrain triggers use sanitized PnL values, and cooldown/state is persisted with atomic file replace semantics.
 
 ---
 
 ## Model Training
 
-### Training Script
+### Training (this workspace)
 
-The project includes a comprehensive model training script (`scripts/train_models.py`) that:
-- Fetches historical market data from Delta Exchange API
-- Computes all 49 technical indicators/features
-- Trains XGBoost classifiers for multiple timeframes
-- Saves models correctly (as XGBClassifier instances, not feature names)
-- Validates saved models before completion
+This checkout’s primary training/export path is the notebook flow, which produces metadata-driven bundles under `agent/model_storage/` (e.g. `jacksparrow_v5_BTCUSD_2026-03-21`) consumed by `agent/models/model_discovery.py`.
 
 ### Prerequisites
 
@@ -159,27 +213,18 @@ Before training models, ensure:
 
 ### Training Process
 
-1. **Run the training script**:
-   ```bash
-   python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
-   ```
+1. **Run the training/export notebook**:
+   - `notebooks/JackSparrow_Trading_Colab_v5.ipynb`
 
-2. **Script will**:
-   - Fetch ~3000 candles per timeframe from Delta Exchange
-   - Compute 49 features for each candle
-   - Create labels based on forward-looking returns
-   - Train XGBoost models with train/val/test split (70/15/15)
-   - Save models to `agent/model_storage/xgboost/` directory:
-     - `agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl`
-     - `agent/model_storage/xgboost/xgboost_BTCUSD_1h.pkl`
-     - `agent/model_storage/xgboost/xgboost_BTCUSD_4h.pkl`
-   - Validate saved models (ensures they're XGBClassifier instances)
+2. **Notebook export will** (high level):
+   - Fetch historical candles per timeframe
+   - Compute expanded features via `UnifiedFeatureEngine`
+   - Create TP/SL-aligned labels (per bundle config)
+   - Export joblib artifacts + `metadata_BTCUSD_*.json` in a dated bundle directory
 
-3. **Training metrics** are saved alongside models in the storage directory
+### Feature counts (important)
 
-### Feature List (49 Features)
-
-The models use 49 technical indicators:
+- **Runtime feature count is metadata-defined** (`metadata_BTCUSD_*.json` `n_features` / `features_required`). The slim v5 bundle in this checkout uses ~126 features.\n+- Legacy docs referencing 49/50 features apply to older single-vector model nodes and are not the default JackSparrow bundle path.
 
 **Price-based (15)**: SMAs (10, 20, 50, 100, 200), EMAs (12, 26, 50), price ratios, candle patterns
 
@@ -478,24 +523,9 @@ probabilities = model.predict(sequence)  # [P(SELL), P(HOLD), P(BUY)]
 
 ### Google Colab Training
 
-For detailed instructions on training models in Google Colab, see:
+Use **`notebooks/JackSparrow_Trading_Colab_v5.ipynb`** in Google Colab or locally as the **authoritative** training/export path (Delta API pagination, `UnifiedFeatureEngine`, metadata export). See [Training, parity, and promotion](#training-parity-and-promotion).
 
-**[ML Training Guide - Google Colab](ml-training-google-colab.md)**
-
-The guide includes:
-- Step-by-step Colab setup instructions
-- API limitations and solutions
-- Pagination handling details
-- Data reversal explanation
-- Troubleshooting common issues
-
-**Notebook Template**: A comprehensive Jupyter notebook is available at `notebooks/train_btcusd_price_prediction.ipynb` with:
-- Interactive training workflow
-- Data exploration and visualization
-- Model evaluation and comparison
-- Feature importance analysis
-- Comprehensive error handling
-- Works in both Google Colab and local environments
+Delta REST limits (e.g. **2,000 candles per request**), reverse-chronological candle order, and rate limits are handled inside that notebook workflow—mirror the same patterns if you add new training scripts.
 
 ### Training Output
 
@@ -547,11 +577,7 @@ trading-agent/
 │   │   ├── mcp_model_node.py          # Base MCP model interface
 │   │   ├── mcp_model_registry.py      # Model registry
 │   │   ├── model_discovery.py         # Automatic model discovery
-│   │   ├── xgboost_node.py            # XGBoost implementation
-│   │   ├── lstm_node.py               # LSTM implementation
-│   │   ├── transformer_node.py        # Transformer implementation
-│   │   ├── lightgbm_node.py           # LightGBM implementation
-│   │   └── random_forest_node.py      # Random Forest implementation
+│   │   └── xgboost_node.py            # Legacy generic node (retained for compatibility)
 │   │
 │   └── model_storage/                  # Uploaded model files
 │       ├── xgboost/
@@ -1180,6 +1206,57 @@ Document the expected feature order inside each model’s metadata so downstream
 3. Check that `features_required` lines up with the actual feature names emitted by the MCP Feature Server. Typos cause the registry to reject the model.
 4. Run `python scripts/validate_metadata.py --path agent/model_storage/custom/metadata.json` to lint the file locally before restarting the agent.
 5. Inspect the agent logs for the detailed validation error payload and adjust the metadata accordingly.
+
+---
+
+## Bundle profiles and Docker defaults
+
+Two common bundle layouts exist; always point `MODEL_DIR` / `AGENT_MODEL_DIR` at the folder you intend to run.
+
+| Profile | Typical path | Contents |
+|--------|--------------|----------|
+| **Full multi-timeframe** | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | Five horizons (15m–4h) with entry + exit joblib per timeframe (when exported). |
+| **Slim Docker default** | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | Often **5m + 15m** metadata; binary long/short entry heads; **no ML exit** in metadata by default—see each `metadata_*.json` `artifacts` and `exit_policy_note`. Docker Compose often sets `AGENT_MODEL_DIR` here. |
+
+Override `AGENT_MODEL_DIR` in root `.env` to promote a different dated export.
+
+## Inference MCP flow (runtime)
+
+1. `MCPOrchestrator.initialize()` creates `MCPModelRegistry`.
+2. `ModelDiscovery.discover_models()` scans `MODEL_DIR` for `metadata_BTCUSD_*.json` (`rglob` when `MODEL_DISCOVERY_RECURSIVE=true`, default).
+3. Each metadata file loads a `V4EnsembleNode` (loader name is historical; bundles may be v5).
+4. Nodes register in `MCPModelRegistry`.
+5. At inference, each node returns `prediction` (entry signal) and per-model `context` including `entry_signal` and `exit_signal` where applicable.
+
+**Entry vs exit at execution**: The registry aggregates **entry** signals into consensus for the trading decision. `exit_signal` is exposed in prediction context for reasoning and analytics; position closes are driven by risk rules (TP/SL, trailing, time limit, signal reversal) unless you add an explicit exit rule—see [Logic & Reasoning](05-logic-reasoning.md#entry-vs-exit-signals-and-position-closes).
+
+## Training, parity, and promotion
+
+- **Authoritative export**: `notebooks/JackSparrow_Trading_Colab_v5.ipynb` (UnifiedFeatureEngine, `EXPANDED_FEATURE_LIST` / `feature_store/feature_registry.py`, fee-aware TP/SL labeling, metadata + joblib per timeframe).
+- After export: set `MODEL_DIR` to the directory containing `metadata_BTCUSD_*.json`; ensure metadata `features` / `features_required` match registry order and length.
+- **Checks**: `pytest tests/unit/test_feature_parity.py -q`; `python scripts/test_model_inference.py --model-dir <bundle_path>`.
+- **Learning DB**: apply `prediction_audit` / `trade_outcomes` migrations (`scripts/migrate_model_governance.py`) when using learning features.
+
+### Single-model (consolidated) mode
+
+When using a consolidated export from the v5 notebook:
+
+```bash
+SINGLE_MODEL_MODE_ENABLED=true
+MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_YYYY-MM-DD
+CONSOLIDATED_MODEL_METADATA_GLOB=metadata_BTCUSD_consolidated*.json
+USE_ML_EXIT_MODEL=false
+```
+
+## Runtime hardening (learning and reasoning)
+
+- `MCPReasoningRequest.use_memory` is honored for Step-2 retrieval when a vector store exists.
+- Threshold adaptation uses Redis `pipeline(transaction=True)` for atomic multi-key updates; retraining subprocess runs are serialized; retraining state uses atomic file replace where implemented.
+- `TIMEFRAMES` config validation rejects non-string values (fail fast).
+
+## Script hygiene
+
+Prefer canonical scripts under `scripts/` and `tools/commands/`. Treat duplicate trees such as `scripts/files(3)/` as non-authoritative.
 
 ---
 

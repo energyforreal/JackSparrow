@@ -1,14 +1,13 @@
-"""Position sizing service using Kelly Criterion."""
+"""Legacy position sizing helper.
 
-from typing import Dict, Any
-from decimal import Decimal
-import math
+Prefer `RiskManager.calculate_position_size()` in active runtime paths.
+"""
 
 from agent.core.config import settings
 
 
 class PositionSizer:
-    """Position sizing service using Kelly Criterion."""
+    """Legacy standalone Kelly-based position sizing helper."""
     
     def __init__(self):
         """Initialize position sizer."""
@@ -45,6 +44,9 @@ class PositionSizer:
         position_value = portfolio_value * position_size
         
         # Ensure we have enough balance
+        if portfolio_value <= 0:
+            return 0.0
+
         if position_value > available_balance:
             position_size = available_balance / portfolio_value
         

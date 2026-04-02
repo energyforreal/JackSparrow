@@ -178,7 +178,7 @@ After configuring settings and restarting Cursor:
 
 ## Additional Resources
 
-- `docs/cursor/auto-approve-setup.md` - Quick reference guide
+- [Cursor documentation](https://cursor.com/docs) and in-editor Settings for agent/YOLO preferences
 - `.cursor/TROUBLESHOOTING.md` - Comprehensive troubleshooting
 - `.cursor/cursor-settings.md` - Detailed settings documentation
 - `.cursor/SETTINGS_VERIFICATION.md` - Settings verification guide

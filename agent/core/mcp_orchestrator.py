@@ -32,6 +32,7 @@ from agent.events.schemas import (
     EventType
 )
 from agent.core.config import settings
+from feature_store.feature_registry import get_feature_list
 
 logger = structlog.get_logger()
 
@@ -185,6 +186,27 @@ class MCPOrchestrator:
 
         except Exception as e:
             logger.error("mcp_orchestrator_shutdown_failed", error=str(e), exc_info=True)
+
+    async def refresh_models(self) -> Dict[str, Any]:
+        """Re-run model discovery and refresh required feature cache."""
+        if not self.model_registry:
+            raise RuntimeError("Model registry not initialized")
+        from agent.models.model_discovery import ModelDiscovery
+
+        discovery = ModelDiscovery(self.model_registry)
+        discovered_models = await discovery.discover_models()
+        self._required_feature_names_cache = self.model_registry.get_required_feature_names()
+        logger.info(
+            "mcp_orchestrator_models_refreshed",
+            discovered_count=len(discovered_models),
+            registry_models=len(self.model_registry.models),
+            required_feature_count=len(self._required_feature_names_cache),
+        )
+        return {
+            "discovered_models": discovered_models,
+            "total_models": len(self.model_registry.models),
+            "required_feature_count": len(self._required_feature_names_cache),
+        }
     
     async def process_prediction_request(
         self,
@@ -383,7 +405,7 @@ class MCPOrchestrator:
             reasoning_request = MCPReasoningRequest(
                 symbol=symbol,
                 market_context=market_context_for_reasoning,
-                use_memory=False,  # TODO: Enable when VectorMemoryStore is implemented
+                use_memory=bool(self.vector_store),
             )
 
             reasoning_chain = await self.reasoning_engine.generate_reasoning(reasoning_request)
@@ -568,7 +590,6 @@ class MCPOrchestrator:
             return list(names)
         if self._required_feature_names_cache:
             return list(self._required_feature_names_cache)
-        from agent.data.feature_list import get_feature_list
         logger.warning(
             "mcp_orchestrator_required_features_fallback_canonical",
             feature_count=len(get_feature_list()),
@@ -924,6 +945,16 @@ class MCPOrchestrator:
         from agent.persistence.db_writes import persist_prediction_audit_async
 
         rc = decision_payload.get("reasoning_chain") or {}
+        model_predictions = rc.get("model_predictions") or []
+        inferred_versions = []
+        if isinstance(model_predictions, list):
+            for p in model_predictions:
+                if isinstance(p, dict):
+                    mv = p.get("model_version")
+                    if isinstance(mv, str) and mv.strip():
+                        inferred_versions.append(mv.strip())
+        versions = sorted(set(inferred_versions))
+        model_version_for_row = versions[0] if len(versions) == 1 else None
         meta: Dict[str, Any] = {
             "correlation_id": correlation_id,
             "signal": decision_payload.get("signal"),
@@ -931,6 +962,7 @@ class MCPOrchestrator:
             "reasoning_chain_id": rc.get("chain_id"),
             "conclusion": (rc.get("conclusion") or "")[:500],
             "model_prediction_count": len(rc.get("model_predictions") or []),
+            "model_versions": versions,
         }
 
         async def _run() -> None:
@@ -940,7 +972,7 @@ class MCPOrchestrator:
                 confidence=float(confidence) if confidence is not None else None,
                 latency_ms=latency_ms,
                 source="agent_mcp",
-                model_version=None,
+                model_version=model_version_for_row,
                 outcome_reference=correlation_id,
                 metadata=meta,
                 request_id=str(uuid.uuid4()),
@@ -1062,7 +1094,7 @@ class MCPOrchestrator:
             request = MCPReasoningRequest(
                 symbol=symbol,
                 market_context=market_context,
-                use_memory=False  # TODO: Enable when VectorMemoryStore implemented
+                use_memory=bool(self.vector_store)
             )
 
             reasoning_chain = await self.reasoning_engine.generate_reasoning(request)

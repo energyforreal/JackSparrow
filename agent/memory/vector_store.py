@@ -13,7 +13,7 @@ import structlog
 import json
 import hashlib
 
-from agent.data.feature_list import FEATURE_LIST, EXPECTED_FEATURE_COUNT
+from feature_store.feature_registry import FEATURE_LIST, EXPECTED_FEATURE_COUNT
 try:
     from sklearn.metrics.pairwise import cosine_similarity
     SKLEARN_AVAILABLE = True

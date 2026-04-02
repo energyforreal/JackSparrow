@@ -6,8 +6,7 @@ position sizing, drawdown control, and Kelly Criterion calculations.
 """
 
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timedelta
-import math
+from datetime import datetime
 import statistics
 import structlog
 
@@ -424,10 +423,10 @@ class RiskManager:
         # Adjust for current portfolio risk
         portfolio_risk_adjustment = 1.0
         current_drawdown = self.portfolio.get_drawdown()
-        if current_drawdown > 0.05:  # >5% drawdown
-            portfolio_risk_adjustment = 0.7
-        elif current_drawdown > 0.10:  # >10% drawdown
+        if current_drawdown > 0.10:  # >10% drawdown
             portfolio_risk_adjustment = 0.4
+        elif current_drawdown > 0.05:  # >5% drawdown
+            portfolio_risk_adjustment = 0.7
 
         position_size *= portfolio_risk_adjustment
 
@@ -591,7 +590,14 @@ class RiskManager:
             # Calculate suggested stop loss based on risk limits
             max_risk_dollars = self.portfolio.total_value * self.risk_limits["max_portfolio_risk"]
             position_size_dollars = proposed_size * self.portfolio.total_value
-            position_size_units = position_size_dollars / entry_price
+            position_size_units = (
+                position_size_dollars / entry_price if entry_price > 0 else 0.0
+            )
+
+            if position_size_units <= 0:
+                result["approved"] = False
+                result["reason"] = "Invalid position size/entry price for stop loss calculation"
+                return result
             
             # Calculate stop loss distance that would result in max risk
             max_risk_per_unit = max_risk_dollars / position_size_units
@@ -609,7 +615,13 @@ class RiskManager:
             position_size_dollars = proposed_size * self.portfolio.total_value
             # Calculate risk amount (price difference * position size in base currency)
             # For simplicity, assume position size is already in base currency units
-            position_size_units = position_size_dollars / entry_price
+            position_size_units = (
+                position_size_dollars / entry_price if entry_price > 0 else 0.0
+            )
+            if position_size_units <= 0:
+                result["approved"] = False
+                result["reason"] = "Invalid position size/entry price for risk validation"
+                return result
             risk_amount = abs(entry_price - stop_loss) * position_size_units
             max_risk = self.portfolio.total_value * self.risk_limits["max_portfolio_risk"]
 
@@ -679,8 +691,22 @@ class RiskManager:
         allocation = {s: alloc * risk_multiplier for s, alloc in allocation.items()}
 
         # Ensure we don't exceed position limits
-        max_positions = min(self.risk_limits["max_open_positions"] - len(self.portfolio.positions),
-                           len(allocation))
+        max_positions = max(
+            0,
+            min(
+                self.risk_limits["max_open_positions"] - len(self.portfolio.positions),
+                len(allocation),
+            ),
+        )
+
+        if max_positions == 0:
+            logger.info(
+                "portfolio_allocation_calculated",
+                symbols=[],
+                allocations=[],
+                risk_multiplier=risk_multiplier,
+            )
+            return {}
 
         if len(allocation) > max_positions:
             # Keep only top allocations
