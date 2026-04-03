@@ -290,6 +290,33 @@ class Settings(BaseSettings):
         env="AGENT_INTERVAL",
         description="Default analysis interval"
     )
+
+    # Perpetual futures contract configuration
+    product_id: int = Field(27, env="PRODUCT_ID")
+    symbol: str = Field("BTCUSD", env="SYMBOL")
+    contract_type: str = Field("perpetual_futures", env="CONTRACT_TYPE")
+    contract_value_btc: float = Field(0.001, env="CONTRACT_VALUE_BTC")
+    tick_size: float = Field(0.50, env="TICK_SIZE")
+    taker_fee_rate: float = Field(0.0005, env="TAKER_FEE_RATE")
+    maker_fee_rate: float = Field(0.0002, env="MAKER_FEE_RATE")
+    funding_interval_hours: int = Field(8, env="FUNDING_INTERVAL_HOURS")
+    funding_interest_rate: float = Field(0.0001, env="FUNDING_INTEREST_RATE")
+
+    # Leverage (set manually in exchange UI)
+    default_leverage: int = Field(5, env="DEFAULT_LEVERAGE")
+    max_leverage: int = Field(20, env="MAX_LEVERAGE")
+    min_leverage: int = Field(1, env="MIN_LEVERAGE")
+
+    # Order execution limits
+    slippage_bps: float = Field(5.0, env="SLIPPAGE_BPS")
+    min_lot_size: int = Field(1, env="MIN_LOT_SIZE")
+    max_lots_per_order: int = Field(100, env="MAX_LOTS_PER_ORDER")
+
+    active_timeframes: str = Field(
+        default="5m,15m,30m,1h,2h",
+        env="ACTIVE_TIMEFRAMES",
+        description="Comma-separated list of active trading timeframes"
+    )
     
     # Trading Mode
     paper_trading_mode: bool = Field(
@@ -310,14 +337,44 @@ class Settings(BaseSettings):
         description="Maximum portfolio heat"
     )
     stop_loss_percentage: float = Field(
-        default=0.0025,
+        default=0.01,
         env="STOP_LOSS_PERCENTAGE",
-        description="Stop loss as fraction of price (e.g. 0.0025 = 0.25%; scalping default)"
+        description="Stop loss as fraction of price (e.g. 0.01 = 1%; default for medium-term strategy)"
     )
     take_profit_percentage: float = Field(
-        default=0.003,
+        default=0.015,
         env="TAKE_PROFIT_PERCENTAGE",
-        description="Take profit as fraction of price (e.g. 0.003 = 0.3%; scalping default)"
+        description="Take profit as fraction of price (e.g. 0.015 = 1.5%; default for medium-term strategy)"
+    )
+    use_atr_scaled_sl_tp: bool = Field(
+        default=True,
+        env="USE_ATR_SCALED_SL_TP",
+        description="Use ATR-scaled stop loss / take profit when available"
+    )
+    atr_sl_distance_mult: float = Field(
+        default=1.0,
+        env="ATR_SL_DISTANCE_MULT",
+        description="ATR multiplier for stop loss distance"
+    )
+    atr_tp_distance_mult: float = Field(
+        default=1.5,
+        env="ATR_TP_DISTANCE_MULT",
+        description="ATR multiplier for take profit distance"
+    )
+    entry_min_atr_pct_of_price: float = Field(
+        default=0.003,
+        env="ENTRY_MIN_ATR_PCT_OF_PRICE",
+        description="Minimum ATR% of price required to authorize new entry (market regime filter)"
+    )
+    min_risk_reward_ratio: float = Field(
+        default=1.2,
+        env="MIN_RISK_REWARD_RATIO",
+        description="Minimum risk/reward ratio to allow a trade"
+    )
+    enforce_ema200_trend_filter: bool = Field(
+        default=True,
+        env="ENFORCE_EMA200_TREND_FILTER",
+        description="When True, require long trades above EMA200 and short trades below EMA200."
     )
     max_signal_age_seconds: int = Field(
         default=10,
@@ -380,6 +437,11 @@ class Settings(BaseSettings):
         default="30m,1h",
         env="MTF_CONTEXT_FALLBACK_TIMEFRAMES",
         description="Fallbacks if context TF model is missing",
+    )
+    mtf_strict_trend_entry_alignment: bool = Field(
+        default=True,
+        env="MTF_STRICT_TREND_ENTRY_ALIGNMENT",
+        description="Require entry TF direction matches trend TF direction for long/short execution",
     )
     mtf_primary_dead_zone: float = Field(
         default=0.05,

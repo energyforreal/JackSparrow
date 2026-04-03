@@ -14,6 +14,7 @@ from agent.events.schemas import DecisionReadyEvent, RiskApprovedEvent, EventTyp
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
+from agent.core.futures_utils import price_to_lots
 from agent.core.learning_system import LearningSystem
 from agent.core.mtf_decision_engine import compute_context_position_size_multiplier
 from agent.core.signal_filter import EntrySignalFilter
@@ -28,7 +29,7 @@ logger = structlog.get_logger()
 # `Settings.min_risk_reward_ratio`, `Settings.adx_ranging_threshold`).
 DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS = 10
 DEFAULT_MIN_RISK_REWARD_RATIO = 1.2
-DEFAULT_ADX_RANGING_THRESHOLD = 15.0
+DEFAULT_ADX_RANGING_THRESHOLD = 20.0
 
 
 class TradingEventHandler:
@@ -598,6 +599,37 @@ class TradingEventHandler:
                 )
                 return
 
+            # EMA200 regime filter for trend conformity
+            if getattr(settings, "enforce_ema200_trend_filter", False):
+                ema200 = features.get("ema_200")
+                if ema200 is not None:
+                    try:
+                        ema200_f = float(ema200)
+                        if signal in ("BUY", "STRONG_BUY") and entry_price < ema200_f:
+                            self._log_entry_rejected(
+                                "ema200_trend_filter",
+                                symbol=symbol,
+                                signal=signal,
+                                event_id=event.event_id,
+                                entry_price=entry_price,
+                                ema200=ema200_f,
+                                **diagnostics_base,
+                            )
+                            return
+                        if signal in ("SELL", "STRONG_SELL") and entry_price > ema200_f:
+                            self._log_entry_rejected(
+                                "ema200_trend_filter",
+                                symbol=symbol,
+                                signal=signal,
+                                event_id=event.event_id,
+                                entry_price=entry_price,
+                                ema200=ema200_f,
+                                **diagnostics_base,
+                            )
+                            return
+                    except (TypeError, ValueError):
+                        pass
+
             # Feature gate: near upper Bollinger band = resistance — avoid chasing BUY
             if getattr(settings, "feature_filter_enabled", True) and signal in (
                 "BUY",
@@ -714,17 +746,27 @@ class TradingEventHandler:
 
             adjusted_size = validation.get("adjusted_size", proposed_size)
             quantity_dollars = adjusted_size * portfolio_value
-            quantity = quantity_dollars / entry_price if entry_price > 0 else 0
+            lots = price_to_lots(
+                usd_margin=quantity_dollars,
+                btc_price=entry_price,
+                leverage=int(getattr(settings, "default_leverage", 5)),
+                contract_value_btc=float(getattr(settings, "contract_value_btc", 0.001)),
+                max_lots=int(getattr(settings, "max_lots_per_order", 100)),
+                min_lots=int(getattr(settings, "min_lot_size", 1)),
+            )
 
-            if quantity <= 0:
+            if lots < int(getattr(settings, "min_lot_size", 1)):
                 logger.warning(
                     "trading_handler_zero_quantity",
                     symbol=symbol,
                     entry_price=entry_price,
                     quantity_dollars=quantity_dollars,
+                    lots=lots,
                     event_id=event.event_id,
                 )
                 return
+
+            quantity = float(lots)
 
             # Publish RiskApprovedEvent to trigger execution
             risk_payload = {

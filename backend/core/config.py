@@ -273,14 +273,19 @@ class Settings(BaseSettings):
 
     # Risk Management Settings (must match agent config)
     stop_loss_percentage: float = Field(
-        default=0.02,
+        default=0.01,
         env="STOP_LOSS_PERCENTAGE",
-        description="Stop loss percentage (default: 2%)"
+        description="Stop loss percentage (default: 1%)"
     )
     take_profit_percentage: float = Field(
-        default=0.05,
+        default=0.015,
         env="TAKE_PROFIT_PERCENTAGE",
-        description="Take profit percentage (default: 5%)"
+        description="Take profit percentage (default: 1.5%)"
+    )
+    enforce_ema200_trend_filter: bool = Field(
+        default=True,
+        env="ENFORCE_EMA200_TREND_FILTER",
+        description="Require trend alignment with EMA200 in backtest analysis"
     )
     
     # CORS

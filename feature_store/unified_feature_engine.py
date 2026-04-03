@@ -18,6 +18,10 @@ from feature_store.feature_registry import (
     REGIME_FEATURES,
     MTF_CONTEXT_FEATURES,
 )
+from feature_store.perpetual_features import (
+    compute_perpetual_features,
+    PERPETUAL_FEATURE_NAMES,
+)
 from feature_store.pattern_features.candlestick_patterns import CandlestickPatternEngine
 from feature_store.pattern_features.chart_patterns import ChartPatternEngine
 
@@ -113,6 +117,7 @@ class UnifiedFeatureEngine:
         + list(CHART_PATTERN_FEATURES)
         + list(MTF_CONTEXT_FEATURES)
         + list(REGIME_FEATURES)
+        + list(PERPETUAL_FEATURE_NAMES)
     )
 
     def __init__(self):
@@ -324,6 +329,12 @@ class UnifiedFeatureEngine:
             cdl = self._cdl_engine.compute_all(df)
             chp = self._chp_engine.compute_all(df)
             result = pd.concat([result, cdl, chp], axis=1)
+
+        # Perpetual futures custom features
+        if "mark_price" in df.columns and "funding_rate" in df.columns and "open_interest" in df.columns:
+            perp = compute_perpetual_features(df)
+            result = pd.concat([result, perp], axis=1)
+
         if include_mtf_context:
             mtf = self._mtf_context_from_primary(df, resolution_minutes)
             result = pd.concat([result, mtf], axis=1)
@@ -358,6 +369,11 @@ class UnifiedFeatureEngine:
             df = pd.DataFrame(candles)
             mtf = self._mtf_context_from_primary(df, resolution_minutes)
             return float(mtf[feature_name].iloc[-1])
+
+        if feature_name in PERPETUAL_FEATURE_NAMES:
+            df = pd.DataFrame(candles)
+            perp = compute_perpetual_features(df)
+            return float(perp[feature_name].iloc[-1])
 
         if feature_name in REGIME_FEATURES:
             df = pd.DataFrame(candles)

@@ -110,10 +110,13 @@ class PositionManager:
                      stop_loss: Optional[float] = None,
                      take_profit: Optional[float] = None) -> Dict[str, Any]:
         """Open a new position. Optionally store stop_loss and take_profit for monitoring."""
+        contract_value_btc = float(getattr(settings, "contract_value_btc", 0.001))
+
         position = {
             "symbol": symbol,
             "side": side,
-            "quantity": quantity,
+            "lots": quantity,
+            "contract_value_btc": contract_value_btc,
             "entry_price": entry_price,
             "entry_time": datetime.now(timezone.utc),
             "current_price": entry_price,
@@ -141,9 +144,10 @@ class PositionManager:
             position = self.positions[symbol]
             position["current_price"] = current_price
 
-            # Calculate unrealized P&L
-            entry_value = position["entry_price"] * position["quantity"]
-            current_value = current_price * position["quantity"]
+            # Calculate unrealized P&L for perpetual futures using lot size
+            contract_value_btc = position.get("contract_value_btc", float(getattr(settings, "contract_value_btc", 0.001)))
+            entry_value = position["entry_price"] * position.get("lots", position.get("quantity", 0)) * contract_value_btc
+            current_value = current_price * position.get("lots", position.get("quantity", 0)) * contract_value_btc
 
             if position["side"] == "long":
                 position["unrealized_pnl"] = current_value - entry_value
@@ -160,9 +164,11 @@ class PositionManager:
 
         position = self.positions[symbol]
 
-        # Calculate realized P&L
-        entry_value = position["entry_price"] * position["quantity"]
-        exit_value = exit_price * position["quantity"]
+        # Calculate realized P&L for perpetual futures using lot size
+        contract_value_btc = position.get("contract_value_btc", float(getattr(settings, "contract_value_btc", 0.001)))
+        lots = position.get("lots", position.get("quantity", 0))
+        entry_value = position["entry_price"] * lots * contract_value_btc
+        exit_value = exit_price * lots * contract_value_btc
 
         if position["side"] == "long":
             realized_pnl = exit_value - entry_value
@@ -198,8 +204,11 @@ class PositionManager:
         """Get positions summary."""
         open_positions = self.get_all_positions()
 
-        total_exposure = sum(pos["entry_price"] * pos["quantity"] for pos in open_positions.values())
-        total_unrealized_pnl = sum(pos["unrealized_pnl"] for pos in open_positions.values())
+        total_exposure = sum(
+            pos.get("entry_price", 0) * pos.get("lots", pos.get("quantity", 0)) * pos.get("contract_value_btc", float(getattr(settings, "contract_value_btc", 0.001)))
+            for pos in open_positions.values()
+        )
+        total_unrealized_pnl = sum(pos.get("unrealized_pnl", 0) for pos in open_positions.values())
 
         return {
             "open_positions_count": len(open_positions),

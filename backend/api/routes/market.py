@@ -12,6 +12,7 @@ If authentication is required in the future, add `dependencies=[Depends(require_
 to the router initialization below.
 """
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status, Query
 from backend.api.models.responses import MarketDataResponse
 from backend.services.market_service import market_service
@@ -96,6 +97,62 @@ async def get_ticker_by_symbol(symbol: str):
     `/api/v1/market/ticker/{symbol}`.
     """
     return await get_ticker(symbol=symbol)
+
+
+@router.get("/market/perpetual-stats")
+async def get_perpetual_stats(symbol: str = Query("BTCUSD", description="Trading symbol")):
+    """Get perpetual futures stats (price, basis, funding, open interest)."""
+    try:
+        ticker = await market_service.get_ticker(symbol)
+        if not ticker:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticker not found for symbol {symbol}")
+
+        # get_mark_price is expected to return similar object with close key else fallback
+        mark_price_data = await market_service.get_ticker(symbol)  # using same ticker for now; can be changed
+        mark_price = float(mark_price_data.get("price", ticker.get("price", 0)))
+
+        return {
+            "symbol": symbol,
+            "last_price": float(ticker.get("price", 0)),
+            "mark_price": mark_price,
+            "basis_usd": round(mark_price - float(ticker.get("price", 0)), 2),
+            "basis_pct": round((mark_price / max(float(ticker.get("price", 1)), 1e-9) - 1) * 100, 4),
+            "funding_rate": float(ticker.get("funding_rate", 0.0)),
+            "open_interest": float(ticker.get("open_interest", 0.0)),
+            "next_funding_time": ticker.get("next_funding_time"),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get perpetual stats: {str(e)}",
+        )
+
+
+@router.get("/market/funding-history")
+async def get_funding_history(symbol: str = Query("BTCUSD", description="Trading symbol"), hours: int = Query(72, description="Lookback in hours")):
+    """Get funding history for perpetual futures."""
+    try:
+        # New MarketService method to implement; if missing return 404
+        if not hasattr(market_service, "get_funding_history"):
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Funding history is not supported by current market service implementation"
+            )
+
+        rates = await market_service.get_funding_history(symbol, hours)
+        return {"symbol": symbol, "funding_history": rates}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get funding history: {str(e)}",
+        )
 
 
 @router.get("/market/orderbook")

@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import numpy as np
 from xgboost import XGBRegressor, XGBClassifier
+from sklearn.calibration import CalibratedClassifierCV
 import structlog
 
 # Add project root to path
@@ -1014,46 +1015,99 @@ class PricePredictionTrainer:
         candles: List[Dict[str, Any]],
         forward_periods: int = 1,
         buy_threshold: float = 0.5,
-        sell_threshold: float = -0.5
+        sell_threshold: float = -0.5,
+        label_method: str = "return_threshold",
+        atr_periods: int = 14,
+        atr_sl_mult: float = 1.0,
+        atr_tp_mult: float = 1.5,
+        max_holding_periods: int = 20,
     ) -> np.ndarray:
         """Create classification labels (buy/sell/hold).
-        
+
+        Supports multiple label engineering methods:
+        - return_threshold (default): forward return vs fixed thresholds
+        - atr_barrier: ATR-based TP/SL with max holding time (triple barrier)
+
         Args:
             candles: List of candle dictionaries
-            forward_periods: Number of periods to look ahead
+            forward_periods: Number of periods to look ahead (for return_threshold)
             buy_threshold: Return threshold for BUY signal (%)
             sell_threshold: Return threshold for SELL signal (%)
-            
+            label_method: "return_threshold" or "atr_barrier"
+            atr_periods: ATR length if label_method="atr_barrier"
+            atr_sl_mult: ATR multiplier for stop-loss distance
+            atr_tp_mult: ATR multiplier for take-profit distance
+            max_holding_periods: Max bars to hold for triple-barrier method
+
         Returns:
             Array of labels: 1 (BUY), -1 (SELL), 0 (HOLD)
         """
         labels = []
-        
-        for i in range(len(candles)):
-            if i + forward_periods >= len(candles):
-                # No future data, label as HOLD
-                labels.append(0)
-                continue
-            
-            current_close = candles[i]["close"]
-            future_close = candles[i + forward_periods]["close"]
-            
-            # Calculate return percentage
-            return_pct = (future_close - current_close) / current_close * 100
-            
-            if return_pct > buy_threshold:
-                labels.append(1)  # BUY
-            elif return_pct < sell_threshold:
-                labels.append(-1)  # SELL
-            else:
-                labels.append(0)  # HOLD
-        
-        return np.array(labels)
-    
-    def train_xgboost_regressor(
-        self,
-        X: pd.DataFrame,
-        y: np.ndarray,
+
+        if not candles:
+            return np.array(labels, dtype=int)
+
+        if label_method == "atr_barrier":
+            df = pd.DataFrame(candles)
+            if "high" not in df or "low" not in df or "close" not in df:
+                raise ValueError("candles must include high/low/close for atr_barrier labels")
+
+            df = df.reset_index(drop=True)
+            df["prev_close"] = df["close"].shift(1)
+            df["tr"] = pd.concat([
+                df["high"] - df["low"],
+                (df["high"] - df["prev_close"]).abs(),
+                (df["low"] - df["prev_close"]).abs(),
+            ], axis=1).max(axis=1)
+            df["atr"] = df["tr"].rolling(atr_periods, min_periods=1).mean().fillna(method="bfill")
+
+            for i in range(len(df)):
+                if i + 1 >= len(df):
+                    labels.append(0)
+                    continue
+
+                entry_price = float(df.loc[i, "close"])
+                atr = float(df.loc[i, "atr"])
+                sl_half = atr * atr_sl_mult
+                tp_half = atr * atr_tp_mult
+
+                sl_price_long = entry_price - sl_half
+                tp_price_long = entry_price + tp_half
+                sl_price_short = entry_price + sl_half
+                tp_price_short = entry_price - tp_half
+
+                label = 0
+                for j in range(i + 1, min(len(df), i + 1 + max_holding_periods)):
+                    high = float(df.loc[j, "high"])
+                    low = float(df.loc[j, "low"])
+                    if low <= sl_price_long or high >= tp_price_long:
+                        label = 1
+                        break
+                    if high >= sl_price_short or low <= tp_price_short:
+                        label = -1
+                        break
+
+                labels.append(label)
+
+        else:
+            # return_threshold method
+            for i in range(len(candles)):
+                if i + forward_periods >= len(candles):
+                    labels.append(0)
+                    continue
+
+                current_close = candles[i]["close"]
+                future_close = candles[i + forward_periods]["close"]
+                return_pct = (future_close - current_close) / current_close * 100
+
+                if return_pct > buy_threshold:
+                    labels.append(1)
+                elif return_pct < sell_threshold:
+                    labels.append(-1)
+                else:
+                    labels.append(0)
+
+        return np.array(labels, dtype=int)
         timeframe: str
     ) -> Tuple[XGBRegressor, Dict[str, Any]]:
         """Train XGBoost regressor for price prediction.
@@ -1126,15 +1180,19 @@ class PricePredictionTrainer:
         self,
         X: pd.DataFrame,
         y: np.ndarray,
-        timeframe: str
+        timeframe: str,
+        calibrate: bool = True,
+        calibration_method: str = "isotonic",
     ) -> Tuple[XGBClassifier, Dict[str, Any]]:
         """Train XGBoost classifier for signal prediction.
-        
+
         Args:
             X: Feature matrix
             y: Target labels (-1, 0, 1)
             timeframe: Timeframe identifier
-            
+            calibrate: Whether to apply probability calibration (Platt/Isotonic)
+            calibration_method: 'isotonic' or 'sigmoid'
+
         Returns:
             Tuple of (trained model, metrics dictionary)
         """
@@ -1225,7 +1283,32 @@ class PricePredictionTrainer:
         train_acc = model.score(X_train, y_train)
         val_acc = model.score(X_val, y_val)
         test_acc = model.score(X_test, y_test)
-        
+
+        if calibrate and num_classes == 2:
+            try:
+                calibrator = CalibratedClassifierCV(
+                    base_estimator=model,
+                    method=calibration_method,
+                    cv="prefit",
+                )
+                calibrator.fit(X_val, y_val)
+                model = calibrator
+                val_acc = model.score(X_val, y_val)
+                test_acc = model.score(X_test, y_test)
+                logger.info(
+                    "xgboost_classifier_calibrated",
+                    timeframe=timeframe,
+                    calibration_method=calibration_method,
+                    val_accuracy=val_acc,
+                    test_accuracy=test_acc,
+                )
+            except Exception as e:
+                logger.warning(
+                    "xgboost_classifier_calibration_failed",
+                    timeframe=timeframe,
+                    error=str(e),
+                )
+
         logger.info(
             "xgboost_classifier_trained",
             timeframe=timeframe,
@@ -1897,7 +1980,13 @@ class PricePredictionTrainer:
         # Train classification models
         if train_classification:
             y_classification = self.create_classification_labels(
-                candles, forward_periods=1, buy_threshold=0.5, sell_threshold=-0.5
+                candles,
+                forward_periods=1,
+                label_method="atr_barrier",
+                atr_periods=14,
+                atr_sl_mult=1.0,
+                atr_tp_mult=1.5,
+                max_holding_periods=20,
             )
             
             # Remove rows with insufficient data and HOLD labels for training

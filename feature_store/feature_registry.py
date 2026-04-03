@@ -84,13 +84,24 @@ REGIME_FEATURES: List[str] = [
     "regime_is_volatile",
 ]
 
-# Expanded: canonical + candlestick + chart patterns + MTF context + regime flags.
+# Perpetual futures-specific features (non-canonical but included for v6 futures models)
+PERPETUAL_FEATURES: List[str] = [
+    "basis", "basis_pct", "basis_zscore", "basis_direction",
+    "funding_rate", "funding_cumsum3", "funding_zscore",
+    "funding_spike", "funding_sign",
+    "oi", "oi_change_pct", "oi_change_5", "oi_price_confirm", "oi_zscore",
+    "long_squeeze_risk", "short_squeeze_risk",
+    "ob_imbalance",
+]
+
+# Expanded: canonical + candlestick + chart patterns + MTF context + regime flags + perpetual features.
 EXPANDED_FEATURE_LIST: List[str] = (
     FEATURE_LIST
     + CANDLESTICK_FEATURES
     + CHART_PATTERN_FEATURES
     + MTF_CONTEXT_FEATURES
     + REGIME_FEATURES
+    + PERPETUAL_FEATURES
 )
 
 FEATURE_VERSION = "1.2"

@@ -253,6 +253,14 @@ DELTA_EXCHANGE_BASE_URL=https://api.india.delta.exchange
 # Security (REQUIRED)
 JWT_SECRET_KEY=your_secret_key_here_minimum_32_characters
 API_KEY=your_api_key_here_minimum_32_characters
+
+# Perpetual Futures (recommended for new perp migration)
+PERPETUAL_DEFAULT_SYMBOL=BTCUSD
+PERPETUAL_CONTRACT_MULTIPLIER=1
+PERPETUAL_MAX_LEVERAGE=50
+PERPETUAL_MAX_PORTFOLIO_HEAT=0.15
+PERPETUAL_LIQUIDATION_BUFFER_PCT=0.015
+
 ```
 
 **Note**: See `.env.example` in the project root for the complete list of all available environment variables. The backend automatically reads from the root `.env` file - no service-specific `.env` files are needed.
@@ -784,7 +792,8 @@ Check logs for model discovery messages.
 
 If you need to train new models or regenerate corrupted models, use the authoritative Colab notebook path for production-style BTCUSD artefacts:
 
-- `notebooks/JackSparrow_Trading_Colab_v5.ipynb`
+- `notebooks/JackSparrow_Training_Colab_v6.ipynb` (recommended)
+- `notebooks/JackSparrow_Trading_Colab_v5.ipynb` (legacy)
 
 **Prerequisites**: Ensure Delta Exchange API credentials are configured in `.env`
 

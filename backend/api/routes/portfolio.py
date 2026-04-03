@@ -247,13 +247,19 @@ async def get_positions(
                 symbol=pos.symbol,
                 side=pos.side.value,
                 quantity=pos.quantity,
+                lots=getattr(pos, 'lots', None) or pos.quantity,
                 entry_price=pos.entry_price,
+                mark_price=pos.current_price,
                 current_price=pos.current_price,
                 unrealized_pnl=pos.unrealized_pnl,
+                liquidation_price=getattr(pos, 'liquidation_price', None),
+                stop_loss=pos.stop_loss,
+                take_profit=pos.take_profit,
+                accumulated_funding_cost_usd=getattr(pos, 'accumulated_funding_cost_usd', None),
+                leverage=getattr(pos, 'leverage', None),
+                notional_usd=getattr(pos, 'notional_usd', None),
                 status=pos.status.value,
                 opened_at=pos.opened_at,
-                stop_loss=pos.stop_loss,
-                take_profit=pos.take_profit
             )
             for pos in positions
         ]

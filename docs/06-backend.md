@@ -139,6 +139,55 @@ These log lines surface the exact remediation hint (`note`) that is also forward
 - `200`: Success
 - `503`: Service unavailable (unhealthy)
 
+### Perpetual Futures Market API
+
+#### GET `/api/v1/market/perpetual-stats`
+
+Returns perpetual futures symbol stats for agent risk and feature decisions.
+
+Response:
+```json
+{
+  "symbol": "BTCUSD",
+  "mark_price": 51240.5,
+  "index_price": 51200.9,
+  "basis": 39.6,
+  "basis_pct": 0.077,
+  "funding_rate": -0.00012,
+  "funding_timestamp": "2026-04-02T12:00:00Z",
+  "open_interest": 350000000.0,
+  "oi_change_pct_1h": 0.8,
+  "bid_ask_imbalance": 0.042
+}
+```
+
+Status Codes:
+- `200`: Success
+- `400`: Invalid symbol
+- `503`: Market unavailable
+
+#### GET `/api/v1/market/funding-history`
+
+Query params:
+- `symbol` (required)
+- `limit` (optional, default 24)
+
+Response:
+```json
+{
+  "symbol": "BTCUSD",
+  "funding_history": [
+    {"timestamp": "2026-04-02T04:00:00Z", "funding_rate": -0.00012},
+    {"timestamp": "2026-04-01T20:00:00Z", "funding_rate": -0.00010}
+  ]
+}
+```
+
+Status Codes:
+- `200`: Success
+- `400`: Invalid parameters
+- `503`: Market unavailable
+
 ---
 
 ### Trading Operations

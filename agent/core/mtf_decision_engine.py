@@ -535,6 +535,16 @@ def synthesize_mtf_trading_decision(
                 ("HOLD", "HOLD - MTF filter conflicts with bearish entry", e_conf * 0.4, evidence)
             )
 
+    # Strict trend-entry alignment guard (hard filter)
+    use_strict_alignment = bool(getattr(settings, "mtf_strict_trend_entry_alignment", True))
+    if use_strict_alignment:
+        if trend_dir == "bull" and e_sig <= 0:
+            evidence.append("MTF: entry TF non-bullish while trend TF is bullish — HOLD")
+            return _emit(("HOLD", "HOLD - MTF strict trend/entry alignment", 0.0, evidence))
+        if trend_dir == "bear" and e_sig >= 0:
+            evidence.append("MTF: entry TF non-bearish while trend TF is bearish — HOLD")
+            return _emit(("HOLD", "HOLD - MTF strict trend/entry alignment", 0.0, evidence))
+
     pct_enabled = bool(getattr(settings, "mtf_entry_strength_percentile_enabled", False))
     pct_val = int(getattr(settings, "mtf_entry_strength_percentile", 80))
     pct_min_n = int(getattr(settings, "mtf_entry_strength_percentile_min_samples", 30))

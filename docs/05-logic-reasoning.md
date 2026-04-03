@@ -196,6 +196,17 @@ The AgentContext is used throughout the reasoning process to make context-aware 
 
 ## 6-Step Reasoning Chain
 
+## Perpetual Futures Reasoning Integration
+
+The perpetual futures migration adds an extra layer of situational analysis to the standard reasoning chain. The agent now evaluates:
+
+- `market_type`: spot vs perpetual (currently non-spot set to `perpetual`)
+- `funding_rate` momentum, `open_interest` acceleration, and `basis` spreads
+- leverage stress: `near_liq_level` and `implied_margin` exposures
+- danger signals: rising BASIS + negative funding + rolling OI spike
+
+This is incorporated into Step 1 (`Situational Assessment`) and Step 4 (`Risk Assessment`) in the reasoning chain.
+
 ### Step 1: Situational Assessment
 
 **Purpose**: Understand what is happening right now in the market.

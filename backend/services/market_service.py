@@ -7,6 +7,7 @@ Fetches market data from Delta Exchange API or agent service.
 from typing import Optional, Dict, Any, List
 import httpx
 import asyncio
+import time
 import structlog
 
 from backend.core.config import settings
@@ -206,6 +207,62 @@ class MarketService:
             )
         
         return None
+
+    async def get_mark_price(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Get mark price for perpetual symbol."""
+        ticker = await self.get_ticker(symbol)
+        if not ticker:
+            return None
+        return {
+            "symbol": symbol,
+            "mark_price": float(ticker.get("price", 0)),
+            "timestamp": ticker.get("timestamp")
+        }
+
+    async def get_funding_history(self, symbol: str, hours: int = 72) -> List[Dict[str, Any]]:
+        """Fetch historical funding rate candles from Delta Exchange REST API."""
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                end_ts = int(time.time())
+                start_ts = int(end_ts - hours * 3600)
+                url = f"{self.base_url}/v2/history/candles"
+                params = {
+                    "symbol": f"FUNDING:{symbol}",
+                    "resolution": "1h",
+                    "start": start_ts,
+                    "end": end_ts,
+                    "limit": 1000,
+                }
+                response = await client.get(url, params=params)
+                if response.status_code != 200:
+                    logger.error(
+                        "market_service_funding_history_error",
+                        symbol=symbol,
+                        status_code=response.status_code,
+                        response_text=response.text[:300],
+                    )
+                    return []
+
+                data = response.json()
+                if not data.get("success") or not data.get("result"):
+                    return []
+
+                rates = []
+                for row in data.get("result", []):
+                    rates.append({
+                        "time": row.get("time"),
+                        "funding_rate": row.get("close"),
+                    })
+                return rates
+
+        except Exception as e:
+            logger.error(
+                "market_service_funding_history_failed",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True,
+            )
+            return []
 
 
 # Global market service instance

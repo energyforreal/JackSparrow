@@ -381,63 +381,97 @@ class RiskManager:
 
         return assessment
 
-    def calculate_position_size(self, signal_strength: float, volatility_regime: str = "normal",
-                              win_probability: float = 0.55, risk_reward_ratio: float = 2.0) -> float:
+    def calculate_position_size(
+        self,
+        mark_price: float,
+        confidence: float,
+        funding_rate: float = 0.0,
+        volatility: float = 0.0,
+        return_dict: bool = False,
+    ) -> float:
         """
-        Calculate optimal position size using Kelly Criterion and risk management.
+        Calculate position sizing for perpetual futures.
 
-        Args:
-            signal_strength: Model prediction strength (0-1)
-            volatility_regime: Current market volatility ("low", "medium", "high", "extreme")
-            win_probability: Estimated probability of winning trade
-            risk_reward_ratio: Expected reward/risk ratio
-
-        Returns:
-            Position size as fraction of portfolio (0-1)
+        Returns either position size fraction (default) or detailed sizing dict when return_dict=True.
         """
         if not self._initialized or not self.portfolio:
-            return 0.0
+            return 0.0 if not return_dict else {
+                "lots": 0,
+                "leverage": 0,
+                "margin_usd": 0.0,
+                "liq_price_long": 0.0,
+                "liq_price_short": 0.0,
+                "notional_usd": 0.0,
+            }
 
-        # Kelly Criterion calculation
-        # K = (p * (r+1) - 1) / r
-        # Where: p = win probability, r = risk/reward ratio
-        kelly_fraction = (win_probability * (risk_reward_ratio + 1) - 1) / risk_reward_ratio
+        # Base signal strength and consensus
+        base_strength = max(0.0, min(1.0, confidence))
 
-        # Apply risk management constraints
-        kelly_fraction = max(0.0, min(kelly_fraction, 0.25))  # Cap at 25% Kelly
+        # Funding rate penalty
+        if abs(funding_rate) > 0.0003:
+            fpen = 0.5
+        else:
+            fpen = 1.0
 
-        # Adjust for signal strength
-        signal_adjustment = signal_strength  # Stronger signal = larger position
+        # Leverage caps
+        min_lev = max(1, int(getattr(self.config, 'min_leverage', 1)))
+        default_lev = max(1, int(getattr(self.config, 'default_leverage', 5)))
+        max_lev = max(min_lev, int(getattr(self.config, 'max_leverage', 20)))
 
-        # Adjust for volatility
-        volatility_multiplier = self.volatility_adjustments.get(volatility_regime, 1.0)
+        leverage = max(min_lev, min(max_lev, int(round(default_lev * base_strength * fpen))))
+        if leverage < min_lev:
+            leverage = min_lev
 
-        # Apply risk limits
-        max_size = self.risk_limits["max_position_size"]
-        min_size = self.risk_limits["min_position_size"]
+        # Volatility scaling
+        vol_mult = 1.0
+        if volatility > 0.05:
+            vol_mult = 0.5
+        elif volatility > 0.03:
+            vol_mult = 0.7
 
-        # Calculate final position size
-        position_size = kelly_fraction * signal_adjustment * volatility_multiplier
-        position_size = max(min_size, min(position_size, max_size))
+        target_pct = self.risk_limits.get("max_position_size", 0.1) * base_strength * vol_mult * fpen
+        target_pct = max(self.risk_limits.get("min_position_size", 0.01), min(target_pct, self.risk_limits.get("max_position_size", 0.1)))
 
-        # Adjust for current portfolio risk
-        portfolio_risk_adjustment = 1.0
-        current_drawdown = self.portfolio.get_drawdown()
-        if current_drawdown > 0.10:  # >10% drawdown
-            portfolio_risk_adjustment = 0.4
-        elif current_drawdown > 0.05:  # >5% drawdown
-            portfolio_risk_adjustment = 0.7
+        # margin and lots
+        from agent.core.futures_utils import price_to_lots, calculate_liquidation_price
 
-        position_size *= portfolio_risk_adjustment
+        available_margin = self.portfolio.cash_balance
+        margin_to_use = available_margin * target_pct
+        lots = price_to_lots(
+            usd_margin=margin_to_use,
+            btc_price=mark_price,
+            leverage=leverage,
+            contract_value_btc=float(getattr(self.config, 'contract_value_btc', 0.001)),
+            max_lots=int(getattr(self.config, 'max_lots_per_order', 100)),
+            min_lots=int(getattr(self.config, 'min_lot_size', 1)),
+        )
 
-        # Final bounds check
-        position_size = max(min_size, min(position_size, max_size))
+        notional_usd = lots * mark_price * float(getattr(self.config, 'contract_value_btc', 0.001))
+        liq_long = calculate_liquidation_price(mark_price, leverage, 'long')
+        liq_short = calculate_liquidation_price(mark_price, leverage, 'short')
 
-        logger.debug("position_size_calculated",
-                    kelly_fraction=kelly_fraction,
-                    signal_strength=signal_strength,
-                    volatility_multiplier=volatility_multiplier,
-                    final_size=position_size)
+        position_size = max(0.0, min(1.0, target_pct))
+
+        logger.debug("position_size_calculated_futures",
+                     mark_price=mark_price,
+                     confidence=confidence,
+                     funding_rate=funding_rate,
+                     volatility=volatility,
+                     leverage=leverage,
+                     lots=lots,
+                     target_pct=target_pct,
+                     position_size=position_size)
+
+        if return_dict:
+            return {
+                "lots": lots,
+                "leverage": leverage,
+                "margin_usd": margin_to_use,
+                "liq_price_long": liq_long,
+                "liq_price_short": liq_short,
+                "notional_usd": notional_usd,
+                "position_size": position_size,
+            }
 
         return position_size
 

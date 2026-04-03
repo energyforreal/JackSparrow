@@ -375,15 +375,40 @@ class PositionResponse(DecimalSerializerMixin, BaseModel):
         description="Entry price",
         example=50000.0
     )
-    current_price: Optional[Decimal] = Field(
+    lots: Optional[int] = Field(
         default=None,
-        description="Current market price",
+        description="Open lots (contract units)",
+        example=58
+    )
+    mark_price: Optional[Decimal] = Field(
+        default=None,
+        description="Current mark price",
         example=51000.0
+    )
+    liquidation_price: Optional[Decimal] = Field(
+        default=None,
+        description="Estimated liquidation price",
+        example=45000.0
+    )
+    accumulated_funding_cost_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Accumulated funding cost in USD",
+        example=12.45
     )
     unrealized_pnl: Optional[Decimal] = Field(
         default=None,
         description="Unrealized profit/loss",
         example=100.0
+    )
+    leverage: Optional[int] = Field(
+        default=None,
+        description="Position leverage",
+        example=5
+    )
+    notional_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Notional USD value computed as lots*contract_value*price",
+        example=4930.2
     )
     status: str = Field(
         ...,

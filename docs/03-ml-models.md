@@ -62,9 +62,10 @@ Operational guidance:
 
 For BTCUSD production-style ensembles, the authoritative training/export path in this workspace is:
 
-- `notebooks/JackSparrow_Trading_Colab_v5.ipynb`
+- `notebooks/JackSparrow_Training_Colab_v6.ipynb` (new v6 unified model + integrated backtest)
+- `notebooks/JackSparrow_Trading_Colab_v5.ipynb` (legacy v5 flow)
 
-This notebook uses `UnifiedFeatureEngine`, validates `EXPANDED_FEATURE_LIST` coverage, applies fee-aware TP/SL labeling, and exports timeframe artefacts as a versioned bundle (`entry_*`, `exit_*`, scaler files, `features_*.json`, `metadata_*.json`).
+These notebooks use `UnifiedFeatureEngine`, validate `EXPANDED_FEATURE_LIST` coverage, apply fee-aware TP/SL labeling, and export timeframe artefacts as a versioned bundle (`entry_*`, `exit_*`, scaler files, `features_*.json`, `metadata_*.json`).
 
 Parity requirements before deployment:
 
@@ -72,7 +73,7 @@ Parity requirements before deployment:
 2. Metadata `features` and `features_required` must match `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in both order and length.
 3. Run feature parity tests (`tests/unit/test_feature_parity.py`) and review pattern-feature importances from the notebook report outputs.
 
-Legacy notebook variants (`train_models_colab`, `train_xgboost_colab`, and older `JackSparrow_Trading_Colab_v3/v4`) were removed from this workspace during the 2026-04 cleanup. Use `notebooks/JackSparrow_Trading_Colab_v5.ipynb` as the single training/export authority.
+Legacy notebook variants (`train_models_colab`, `train_xgboost_colab`, and older `JackSparrow_Trading_Colab_v3/v4`) were removed from this workspace during the 2026-04 cleanup. Use `notebooks/JackSparrow_Training_Colab_v6.ipynb` as the primary training/export authority; `notebooks/JackSparrow_Trading_Colab_v5.ipynb` remains available for backward compatibility.
 
 ### Model Storage Location
 
@@ -86,6 +87,7 @@ Legacy notebook variants (`train_models_colab`, `train_xgboost_colab`, and older
 |-----------|------|
 | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | **Full** v5 BTCUSD bundle (if present): five horizons (15m–4h) with entry + exit joblib artefacts per timeframe. |
 | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | **Operational slim bundle in this checkout**: 5m/15m metadata; binary `entry_long` / `entry_short` artifacts; no ML exit artifact in metadata by default. |
+| `agent/model_storage/jacksparrow_v6_BTCUSD_<date>/` | **v6 unified model bundle**: five horizons (5m,15m,30m,1h,2h) with single unified entry classifier, scaler, features + metadata + backtest report resume. |
 
 - Discovery reads `metadata_BTCUSD_*.json` from `MODEL_DIR`; with **`MODEL_DISCOVERY_RECURSIVE=true`** (default), subfolders under `MODEL_DIR` are scanned (`rglob`).
 - For production-like behaviour with every documented timeframe, point `MODEL_DIR` at the **2026-03-19** bundle (or your own full export).

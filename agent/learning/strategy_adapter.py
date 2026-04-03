@@ -14,7 +14,7 @@ class StrategyAdapter:
         self.performance_tracker = performance_tracker
         self.base_params = {
             "position_size_multiplier": 1.0,
-            "confidence_threshold": 0.60,
+            "confidence_threshold": 0.50,
             "stop_loss_multiplier": 1.0,
         }
 
@@ -36,10 +36,19 @@ class StrategyAdapter:
         # Position sizing: scale risk up/down with observed quality.
         params["position_size_multiplier"] = max(0.75, min(1.25, 1.0 + 0.15 * quality_score))
 
-        # Confidence threshold: increase selectivity on poor quality.
-        params["confidence_threshold"] = max(
-            0.50, min(0.75, self.base_params["confidence_threshold"] - 0.08 * quality_score)
-        )
+        # Confidence threshold: increase selectivity on poor quality, relax on strong performance.
+        if quality_score < 0:
+            # Poor quality → tighter filter
+            params["confidence_threshold"] = min(
+                0.95,
+                max(0.45, self.base_params["confidence_threshold"] + 0.10 * abs(quality_score))
+            )
+        else:
+            # Good quality → looser filter to capture more opportunities
+            params["confidence_threshold"] = max(
+                0.20,
+                min(0.75, self.base_params["confidence_threshold"] - 0.10 * quality_score)
+            )
 
         # Stop-loss multiplier: tighten slightly during drawdowns.
         if total_profit < 0:

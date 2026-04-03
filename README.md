@@ -151,7 +151,7 @@ The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server
 
 The system uses **metadata-driven BTCUSD JackSparrow bundles** discovered from `MODEL_DIR` on agent startup. This checkout ships a slim operational bundle with **5m + 15m** metadata under `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/`. For full multi-timeframe bundles and `AGENT_MODEL_DIR`, see [ML Models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults).
 
-If you need to train or regenerate ML models, use the workspace’s training/export notebook (`notebooks/JackSparrow_Trading_Colab_v5.ipynb`) to produce a dated bundle under `agent/model_storage/` containing `metadata_BTCUSD_*.json` + joblib artifacts.
+If you need to train or regenerate ML models, use the workspace’s training/export notebook (`notebooks/JackSparrow_Training_Colab_v6.ipynb` recommended, or `notebooks/JackSparrow_Trading_Colab_v5.ipynb` legacy) to produce a dated bundle under `agent/model_storage/` containing `metadata_BTCUSD_*.json` + joblib artifacts.
 
 See [ML Models Documentation](docs/03-ml-models.md) for discovery, bundles, and training.
 

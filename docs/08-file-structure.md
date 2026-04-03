@@ -77,6 +77,17 @@ JackSparrow/
 │   │   ├── __init__.py
 │   │   ├── intelligent_agent.py       # Main agent class
 │   │   ├── reasoning_engine.py        # MCP Reasoning Engine
+│   │   ├── execution.py                # Trade execution engine (now lot-based for futures)
+│   │   ├── config.py                   # Agent configuration includes perpetual futures parameters
+│   ├── data/
+│   │   ├── perpetual_data_fetcher.py   # Perpetual futures candles/orderbook loader and normalizer
+│   │   ├── ...
+
+├── feature_store/                      # Per-feature engineering layer
+│   ├── feature_registry.py            # Canonical and perpetual feature lists
+│   ├── unified_feature_engine.py      # Batch/single feature computation including perpetual markets
+│   ├── perpetual_features.py          # Perpetual-specific feature computation
+│   └── ...
 │   │   ├── mcp_orchestrator.py         # MCP Orchestrator (NEW - complete implementation)
 │   │   ├── learning_system.py          # Learning module (TODO - needs implementation)
 │   │   ├── state_machine.py            # Agent state machine (see [Logic & Reasoning Documentation](05-logic-reasoning.md#enhanced-agent-state-machine))
@@ -276,7 +287,7 @@ Each directory has a clear, single responsibility:
 - `agent/scripts/dev_watcher.py` is active in Docker development flow (`Dockerfile.dev`), so it should be retained.
 - `backend/api/websocket/manager.py` is not used by `backend/api/main.py` runtime paths (which use `unified_manager.py`); treat it as legacy until removed.
 - `backend/services/feature_service.py` is currently not imported by backend runtime code paths; remove or wire it explicitly.
-- `notebooks/` was consolidated to a single authoritative training notebook (`JackSparrow_Trading_Colab_v5.ipynb`) plus dedicated template notebooks; legacy v3/v4/duplicate training notebooks were removed.
+- `notebooks/` was consolidated to authoritative training notebooks (`JackSparrow_Training_Colab_v6.ipynb`, `JackSparrow_Trading_Colab_v5.ipynb`) plus dedicated template notebooks; legacy v3/v4/duplicate training notebooks were removed.
 
 ### Module Boundaries
 

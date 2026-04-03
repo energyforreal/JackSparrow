@@ -247,6 +247,32 @@ The example illustrates how raw market context, historical success rate, and mod
 **Monitoring Features**:
 
 **Agent State Monitoring**:
+
+### 7. Perpetual Futures Support
+
+**Description**: Perpetual futures support has been integrated throughout the agent, including feature generation, risk sizing, execution and backend observability.
+
+**Key Perpetual Features**:
+- `funding_rate` (normalized per 8h) and funding rate trend
+- `open_interest` absolute and % change
+- `mark_price`, `reference_price`, `basis` (mark - index) and `basis_pct`
+- orderbook imbalance (`bid_ask_imbalance`) and microprice depth
+- cross-margin / isolated leverage normalization
+- enforce minimal `tick_size` and contract multiples
+
+**Perpetual Risk Controls**:
+- per-instrument `max_leverage` and `liquidation_buffer_pct`
+- `max_loss_per_trade_pct` and `max_portfolio_heat` calibrated for perp volatility
+- funding-rollover and contagion guard triggers
+
+**Perpetual Backtesting Notes**:
+- Data loader now includes `feature_store/perpetual_features.py` with market-depth and funding features.
+- Model feature set includes perp-specific features in `feature_store/feature_registry.py`.
+- In production, `agent/core/execution.py` and `agent/risk/risk_manager.py` use lot-based sizes.
+
+**Agent State Metrics**:
+
+**Agent State Monitoring**:
 - Current agent state with enhanced state machine
 - State transition history
 - Time in current state

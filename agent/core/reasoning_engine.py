@@ -445,6 +445,47 @@ class MCPReasoningEngine:
         if features.get("volatility", 0) > 5:
             evidence.append("High volatility detected")
 
+        # Perpetual futures regime assessment
+        funding_rate = float(features.get("funding_rate", 0.0) or 0.0)
+        funding_spike = float(features.get("funding_spike", 0.0) or 0.0)
+        oi_confirm = float(features.get("oi_price_confirm", 0.0) or 0.0)
+        basis_pct = float(features.get("basis_pct", 0.0) or 0.0)
+        long_squeeze = float(features.get("long_squeeze_risk", 0.0) or 0.0)
+        short_squeeze = float(features.get("short_squeeze_risk", 0.0) or 0.0)
+        ob_imbalance = float(features.get("ob_imbalance", 0.0) or 0.0)
+
+        perp_regime = "neutral"
+        if funding_rate > 0.0003 and funding_spike > 0.0:
+            perp_regime = "overheated_long"
+            evidence.append("Funds heavy long bias — elevated crowding risk")
+        elif funding_rate < -0.0002 and funding_spike > 0.0:
+            perp_regime = "overheated_short"
+            evidence.append("Funds heavy short bias — elevated crowding risk")
+        elif basis_pct > 0.002:
+            perp_regime = "contango_heavy"
+            evidence.append("Contango structure" )
+        elif basis_pct < -0.002:
+            perp_regime = "backwardation"
+            evidence.append("Backwardation structure")
+
+        if max(long_squeeze, short_squeeze) > 0:
+            squeeze_type = "long" if long_squeeze > short_squeeze else "short"
+            evidence.append(f"{squeeze_type.capitalize()} squeeze risk detected")
+
+        if abs(ob_imbalance) > 0.2:
+            evidence.append("Orderbook imbalance indicates directional pressure")
+
+        # Store perp info in context for downstream usage
+        context["perp_regime"] = perp_regime
+        context["squeeze_risk"] = max(long_squeeze, short_squeeze)
+        context["squeeze_type"] = "long" if long_squeeze > short_squeeze else "short"
+        context["ob_imbalance"] = ob_imbalance
+        context["funding_rate"] = funding_rate
+
+        # Funding warning if expensive carry runaway
+        if abs(funding_rate) > 0.0005:
+            evidence.append("Funding cost elevated — consider position reduction")
+
         # Use feature quality score as confidence when available; otherwise fall
         # back to the qualitative feature_quality label, and finally to 0.0.
         raw_quality = context.get("quality_score")
