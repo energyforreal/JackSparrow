@@ -810,8 +810,11 @@ python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
 # Validate all models
 python scripts/validate_model_files.py
 
-# Or run pre-deployment validation
+# Or run pre-deployment validation (v15 pipeline bundles: 5m/15m metadata + pkl)
 python scripts/validate_models_before_deployment.py
+
+# With backend running — REST smoke (health, models/status, edge-history)
+python scripts/smoke_test_v15.py
 ```
 
 See [ML Models Documentation](03-ml-models.md#model-training) for detailed training guide.
@@ -820,6 +823,8 @@ See [ML Models Documentation](03-ml-models.md#model-training) for detailed train
 1. Confirm `MODEL_DIR` points to the exact export folder that contains `metadata_BTCUSD_*.json`.
 2. Confirm `metadata_*` includes `features` and `features_required` matching `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in order and count.
 3. Run `pytest tests/unit/test_feature_parity.py -q`.
+
+**v15 pipeline** (when using `jacksparrow_v15_*` bundles): run `pytest tests/unit/test_v15_signal.py tests/unit/test_v15_feature_registry.py -q` in addition to the above; feature lists are `V15_FEATURES_*` in `feature_registry.py`, not `EXPANDED_FEATURE_LIST`.
 
 ---
 

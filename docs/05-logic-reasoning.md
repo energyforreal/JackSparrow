@@ -932,6 +932,19 @@ Position sizing is computed in **TradingHandler** using **RiskManager.calculate_
 
 **Scalping**: Align training horizon, `PRICE_FLUCTUATION_THRESHOLD_PCT`, TP/SL, and position monitor intervals with the intended timeframe; defaults may still reflect swing-style risk. See [Features – Signal triggers](04-features.md#market-signal-generation-triggers).
 
+## v15 pipeline (5m / 15m) — signals, gates, and execution
+
+When loaded models are **v15 full pipelines** (`PipelineV15Node`, `context.format == v15_pipeline`):
+
+- **Prediction**: Edge is `p_buy − p_sell` with confidence `max(p_buy, p_sell)`; per-model context carries `p_buy`, `p_sell`, `p_hold`, `timeframe`.
+- **Orchestrator**: If **all** registered models are v15, features are fetched **per model timeframe** (5m vs 15m) before consensus, so live behavior can follow per-TF models instead of a single blended feature row. Filter features for the entry gate use `V15_FILTER_FEATURE_SOURCE_TF` (default **5m**).
+- **MTF synthesis**: When `V15_DISABLE_MTF_SYNTHESIS=true` and predictions are v15-only, the reasoning engine skips MTF synthesis in favor of the standard step-5 band mapping on the v15 consensus (see `agent/core/reasoning_engine.py`).
+- **Entry gate**: `agent/core/v15_signal.py` — rolling **percentile** threshold (`CONFIDENCE_PERCENTILE`), `EDGE_FLOOR`, optional **volatility** (`V15_ATR_PCT_FLOOR` / `VOLATILITY_FILTER_ENABLED`) and **regime** (`ADX` vs `V15_ADX_RANGING_MAX`). Applied in `TradingEventHandler` via `apply_v15_entry_gate()` before side mapping; can downgrade BUY/SELL to HOLD.
+- **Execution**: `RiskApprovedEvent` may carry `v15_diagnostics` (includes `atr_14`, `v15_timeframe`). `ExecutionEngine` stores `v15_entry_atr`, `v15_trail_mult`, `v15_min_hold_until` on the position; `manage_position` ratchets an **ATR-based** stop (and uses exit reason `atr_trail_stop` when that stop fires). **Signal reversal** closes are suppressed until `v15_min_hold_until` when `MIN_HOLD_BARS` is positive.
+- **Not yet wired end-to-end**: **edge-decay** exits (needs current edge fed into the monitor loop). `EDGE_DECAY_THRESHOLD` is reserved for future use.
+
+See [ML models – v15 pipeline](03-ml-models.md#jacksparrow-v15-pipeline-5m--15m-joblib) for env vars and bundle layout.
+
 ## Multi-timeframe decision engine and exits
 
 When `MTF_DECISION_ENGINE_ENABLED=true`, `agent/core/mtf_decision_engine.py` participates in decisions; `reasoning_engine` may early-return in `_step5` when MTF synthesis applies.

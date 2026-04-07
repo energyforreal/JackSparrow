@@ -108,7 +108,8 @@ class PositionManager:
     def open_position(self, symbol: str, side: str, quantity: float,
                      entry_price: float, order_id: str,
                      stop_loss: Optional[float] = None,
-                     take_profit: Optional[float] = None) -> Dict[str, Any]:
+                     take_profit: Optional[float] = None,
+                     position_extras: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Open a new position. Optionally store stop_loss and take_profit for monitoring."""
         contract_value_btc = float(getattr(settings, "contract_value_btc", 0.001))
 
@@ -127,6 +128,8 @@ class PositionManager:
             "stop_loss": stop_loss,
             "take_profit": take_profit,
         }
+        if position_extras:
+            position.update(position_extras)
 
         self.positions[symbol] = position
 
@@ -373,6 +376,33 @@ class ExecutionEngine:
                 "take_profit": take_profit,
             }
 
+            vd = payload.get("v15_diagnostics") or {}
+            if vd and bool(getattr(settings, "v15_signal_logic_enabled", True)):
+                extras: Dict[str, Any] = {}
+                atr_raw = vd.get("atr_14")
+                if atr_raw is not None:
+                    try:
+                        atr_f = float(atr_raw)
+                        if atr_f > 0:
+                            extras["v15_entry_atr"] = atr_f
+                            extras["v15_trail_mult"] = float(
+                                getattr(settings, "atr_trailing_mult", 2.0) or 2.0
+                            )
+                    except (TypeError, ValueError):
+                        pass
+                tf = str(vd.get("v15_timeframe") or "15m")
+                bars = int(getattr(settings, "min_hold_bars", 0) or 0)
+                if bars > 0:
+                    tf_l = tf.strip().lower()
+                    bar_sec = 900
+                    if tf_l.endswith("m") and tf_l[:-1].isdigit():
+                        bar_sec = int(tf_l[:-1]) * 60
+                    extras["v15_min_hold_until"] = datetime.now(timezone.utc) + timedelta(
+                        seconds=bars * bar_sec
+                    )
+                if extras:
+                    trade["position_extras"] = extras
+
             result = await self.execute_trade(trade)
 
             if not result.success:
@@ -518,6 +548,7 @@ class ExecutionEngine:
                     order_id=order_id,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
+                    position_extras=trade.get("position_extras"),
                 )
 
                 # Place stop loss and take profit orders if specified
@@ -672,8 +703,40 @@ class ExecutionEngine:
             getattr(settings, "trailing_stop_activation_profit_pct", 0.0) or 0.0
         )
 
+        v15_atr = position.get("v15_entry_atr")
+        v15_mult = position.get("v15_trail_mult")
+        v15_trail_active = False
+        if v15_atr is not None and v15_mult is not None:
+            try:
+                atr_v = float(v15_atr)
+                mult_v = float(v15_mult)
+            except (TypeError, ValueError):
+                atr_v = 0.0
+                mult_v = 0.0
+            if atr_v > 0 and mult_v > 0:
+                v15_trail_active = True
+                if position["side"] == "long":
+                    new_sl = current_price - mult_v * atr_v
+                    if position.get("stop_loss") is None or new_sl > position["stop_loss"]:
+                        position["stop_loss"] = new_sl
+                        logger.info(
+                            "v15_atr_trailing_stop_updated",
+                            symbol=position_symbol,
+                            new_stop=new_sl,
+                        )
+                elif position["side"] == "short":
+                    new_sl = current_price + mult_v * atr_v
+                    cur_sl = position.get("stop_loss")
+                    if cur_sl is None or new_sl < cur_sl:
+                        position["stop_loss"] = new_sl
+                        logger.info(
+                            "v15_atr_trailing_stop_updated",
+                            symbol=position_symbol,
+                            new_stop=new_sl,
+                        )
+
         # Trailing stop: ratchet stop_loss on favorable price moves (optional profit gate)
-        if position["side"] == "long" and current_price > entry_price:
+        if not v15_trail_active and position["side"] == "long" and current_price > entry_price:
             profit_pct = (current_price - entry_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 - trail_pct)
@@ -684,7 +747,7 @@ class ExecutionEngine:
                         symbol=position_symbol,
                         new_stop=new_trail_stop,
                     )
-        elif position["side"] == "short" and current_price < entry_price:
+        elif not v15_trail_active and position["side"] == "short" and current_price < entry_price:
             profit_pct = (entry_price - current_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 + trail_pct)
@@ -705,7 +768,12 @@ class ExecutionEngine:
             should_stop = (position["side"] == "long" and current_price <= stop_loss) or \
                          (position["side"] == "short" and current_price >= stop_loss)
             if should_stop:
-                close_result = await self.close_position(position_symbol, exit_reason="stop_loss_hit")
+                sl_reason = (
+                    "atr_trail_stop"
+                    if position.get("v15_entry_atr") is not None
+                    else "stop_loss_hit"
+                )
+                close_result = await self.close_position(position_symbol, exit_reason=sl_reason)
                 if close_result.success:
                     actions_taken.append({
                         "action": "stop_loss_triggered",

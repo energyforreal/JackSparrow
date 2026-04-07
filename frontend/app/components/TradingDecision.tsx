@@ -6,6 +6,9 @@ import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
 import { formatConfidence, formatDateTime } from '@/utils/formatters'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
+import { EdgeGauge } from './v15/EdgeGauge'
+import { ProbabilityBar } from './v15/ProbabilityBar'
+import { ModelStatusPanel } from './v15/ModelStatusPanel'
 
 interface TradingDecisionProps {
   signal?: Signal | null
@@ -115,15 +118,28 @@ export function TradingDecision({
                   label="Decision time"
                 />
               )}
+
+              {typeof signal.edge === 'number' && (
+                <div className="pt-2 space-y-2 border-t">
+                  <p className="text-xs font-medium text-muted-foreground">v15 edge</p>
+                  <EdgeGauge edge={signal.edge} />
+                  <ProbabilityBar
+                    pBuy={signal.p_buy}
+                    pSell={signal.p_sell}
+                    pHold={signal.p_hold}
+                  />
+                </div>
+              )}
             </div>
           ) : (
-            <div className="p-4 rounded-lg border bg-muted/50">
+            <div className="p-4 rounded-lg border bg-muted/50 space-y-3">
               <p className="text-sm text-muted-foreground">
                 No trading decision available
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 Waiting for real-time signal updates via WebSocket. Ensure backend and agent services are running.
               </p>
+              <ModelStatusPanel />
             </div>
           )}
         </div>

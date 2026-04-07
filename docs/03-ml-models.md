@@ -1250,6 +1250,19 @@ CONSOLIDATED_MODEL_METADATA_GLOB=metadata_BTCUSD_consolidated*.json
 USE_ML_EXIT_MODEL=false
 ```
 
+### JackSparrow v15 pipeline (5m / 15m joblib)
+
+This is the **single full-pipeline** artefact path (one XGBoost/sklearn pipeline per timeframe, three-class `predict_proba`, edge = `p_buy − p_sell`). It complements the older v4/v5 **entry/exit joblib pairs** under the same discovery system.
+
+- **Bundle layout**: `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/{5m,15m}/` with `metadata_BTCUSD_*.json` and `pipeline_*_v14.pkl`. You can also keep the older flat `model_5m_v14/` style if discovery resolves the pickle path next to metadata (see `metadata_is_v15_pipeline()` in `agent/models/pipeline_v15_node.py`).
+- **Pickle shape**: Exports may be a bare estimator or a **`dict` with a `model` key** (Colab bundle). `PipelineV15Node` unwraps `dict["model"]` before `predict_proba`.
+- **`MODEL_FORMAT`**: `v15_pipeline` (v15-oriented scan), `v4_ensemble` (legacy), or `auto` (metadata + sibling `pipeline_{timeframe}_v14.pkl` detection).
+- **Code map**: `agent/models/pipeline_v15_node.py` (load/infer), `agent/models/model_discovery.py` (branching), `agent/models/mcp_model_registry.py` (`model_format` in health, per-model feature requests when all nodes are v15), `agent/core/mcp_orchestrator.py` (per-TF feature fetch for v15-only registry), `agent/core/v15_signal.py` + `agent/events/handlers/trading_handler.py` (entry gate), `agent/core/execution.py` (ATR trail, `v15_min_hold_until`, `atr_trail_stop` exit reason when applicable).
+- **Features**: Canonical name lists in `feature_store/feature_registry.py` (`V15_FEATURES_5M`, `V15_FEATURES_15M`, `V15_FEATURES_BY_TF`). Rows are built in `feature_store/v15_feature_compute.py`; the MCP path is selected in `agent/data/feature_server.py` when `candle_interval` matches a full v15 set. **5m** pulls **15m** OHLCV for `*_15m` columns; **15m** 15m candle cache uses Redis key `jacksparrow:v15:htf15:{symbol}` with `HTF_CACHE_TTL_SECONDS`.
+- **Environment** (see root `.env.example`): `CONFIDENCE_PERCENTILE`, `EDGE_FLOOR`, `ATR_TRAILING_MULT`, `MIN_HOLD_BARS`, `EDGE_DECAY_THRESHOLD`, `VOLATILITY_FILTER_ENABLED`, `V15_ATR_PCT_FLOOR`, `V15_ADX_RANGING_MAX`, `V15_SIGNAL_LOGIC_ENABLED`, `V15_DISABLE_MTF_SYNTHESIS`, `V15_FILTER_FEATURE_SOURCE_TF`, `HTF_CACHE_TTL_SECONDS`. Docker default `MODEL_DIR` / `AGENT_MODEL_DIR` targets the v15 bundle in `docker-compose.yml`.
+- **Validation**: `python scripts/validate_models_before_deployment.py [<bundle_root>]` — loads metadata feature order + `predict_proba` shape `(1,3)`. **Tests**: `pytest tests/unit/test_v15_signal.py tests/unit/test_v15_feature_registry.py -q`. **Smoke** (backend up): `python scripts/smoke_test_v15.py`.
+- **Rollback**: Point `MODEL_DIR` at your v5/v4 bundle, set `MODEL_FORMAT=v4_ensemble`, restore `ACTIVE_TIMEFRAMES` / `AGENT_INTERVAL` as needed, restart agent and backend, re-run `validate_models_before_deployment.py` if you switch back to v15 later.
+
 ## Runtime hardening (learning and reasoning)
 
 - `MCPReasoningRequest.use_memory` is honored for Step-2 retrieval when a vector store exists.
@@ -1258,7 +1271,7 @@ USE_ML_EXIT_MODEL=false
 
 ## Script hygiene
 
-Prefer canonical scripts under `scripts/` and `tools/commands/`. Treat duplicate trees such as `scripts/files(3)/` as non-authoritative.
+Prefer canonical scripts under `scripts/` and `tools/commands/`. Treat duplicate trees such as `scripts/files(3)/` as non-authoritative. Ad-hoc planning copies under `files(4)/` were **removed**; v15 integration detail lives in this file and in `05-logic-reasoning.md`, `04-features.md`, `06-backend.md`, and `07-frontend.md`.
 
 ---
 

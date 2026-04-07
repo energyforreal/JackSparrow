@@ -129,7 +129,7 @@ class IntelligentAgent:
         self._retraining_scheduler_task: Optional[asyncio.Task] = None
         self.command_queue = settings.agent_command_queue
         self.default_symbol = settings.trading_symbol or settings.agent_symbol
-        timeframe_list = settings.parsed_timeframes()
+        timeframe_list = settings.resolved_agent_timeframes()
         self.timeframes = timeframe_list or [settings.agent_interval]
         self.primary_interval = self.timeframes[0]
         self.trading_mode = settings.trading_mode
@@ -1137,6 +1137,9 @@ class IntelligentAgent:
                 "registry_health": registry_health,
                 "discovery": discovery_info,
             }
+            mf = model_registry_health.get("model_format")
+            if mf is not None:
+                model_nodes_status["model_format"] = mf
             if note:
                 model_nodes_status["note"] = note
         else:

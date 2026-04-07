@@ -760,7 +760,14 @@ class MCPReasoningEngine:
             # Multi-timeframe decision layer (trend + entry ± filter) is bypassed in
             # single-model mode, where one consolidated model already encodes MTF context.
             mtf_out = None
-            if not bool(getattr(settings, "single_model_mode_enabled", False)):
+            all_v15 = model_predictions and all(
+                isinstance(p, dict)
+                and (p.get("context") or {}).get("format") == "v15_pipeline"
+                for p in model_predictions
+            )
+            if all_v15 and bool(getattr(settings, "v15_disable_mtf_synthesis", True)):
+                mtf_out = None
+            elif not bool(getattr(settings, "single_model_mode_enabled", False)):
                 mtf_out = synthesize_mtf_trading_decision(
                     model_predictions, settings, symbol=request.symbol
                 )

@@ -48,7 +48,8 @@ frontend/
 │   │   ├── PerformanceChart.tsx
 │   │   ├── HealthMonitor.tsx
 │   │   ├── ReasoningChainView.tsx
-│   │   └── LearningReport.tsx
+│   │   ├── LearningReport.tsx
+│   │   └── v15/                # Optional v15 dashboard widgets (edge, proba, model status)
 │   └── api/                    # API routes (if needed)
 ├── hooks/
 │   ├── useTradingData.ts       # Primary hook: portfolio, trades, signal, health, WS dispatch
@@ -75,6 +76,18 @@ frontend/
 **File**: `hooks/useTradingData.ts`
 
 The dashboard reads all trading-related state from a single hook backed by a `useReducer` and one WebSocket connection (see [WebSocket Integration](#websocket-integration)). `Dashboard.tsx` does **not** implement a local `switch` on `lastMessage`; message handling lives in the reducer.
+
+### v15 signal fields (optional)
+
+`frontend/types/index.ts` extends **`Signal`** and **`ModelConsensus`** with optional `edge`, `p_buy`, `p_sell`, `p_hold`, `v15_timeframe`, etc. WebSocket `data_update` / `resource: "signal"` merges these when the backend forwards v15 metadata (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
+
+**Components** (under `app/components/v15/`):
+
+- `EdgeGauge` — horizontal edge bar (roughly [-1, 1]).
+- `ProbabilityBar` — stacked BUY / HOLD / SELL probability bar.
+- `ModelStatusPanel` — fetches `GET /api/backend/.../api/v1/models/status` via `getBackendProxyBase()` for registry / `model_format`.
+
+`TradingDecision.tsx` shows **EdgeGauge** and **ProbabilityBar** when `signal.edge` is present, and **ModelStatusPanel** in the empty-state card when no signal yet.
 
 **Returned data (selected)**:
 - `signal`, `portfolio`, `recentTrades`, `modelData`, `health`, `performanceData`

@@ -30,6 +30,97 @@ from backend.core.enums import SignalType
 logger = structlog.get_logger()
 
 
+def _v15_ws_fields_from_predictions(
+    model_predictions: Any,
+    reasoning_chain: Any,
+) -> Dict[str, Any]:
+    """Best-effort v15 fields for WebSocket signal payload (optional / backward compatible)."""
+    out: Dict[str, Any] = {}
+    preds = model_predictions
+    if preds is None and isinstance(reasoning_chain, dict):
+        preds = reasoning_chain.get("model_predictions")
+    if not isinstance(preds, list):
+        return out
+    best: Optional[tuple] = None
+    best_abs = -1.0
+    for p in preds:
+        if not isinstance(p, dict):
+            continue
+        ctx = p.get("context") or {}
+        if not isinstance(ctx, dict) or ctx.get("format") != "v15_pipeline":
+            continue
+        try:
+            edge = float(p.get("prediction", 0.0))
+        except (TypeError, ValueError):
+            edge = 0.0
+        if abs(edge) >= best_abs:
+            best_abs = abs(edge)
+            best = (edge, ctx)
+    if not best:
+        return out
+    edge, ctx = best
+    out["edge"] = edge
+    if ctx.get("p_buy") is not None:
+        out["p_buy"] = ctx.get("p_buy")
+    if ctx.get("p_sell") is not None:
+        out["p_sell"] = ctx.get("p_sell")
+    if ctx.get("p_hold") is not None:
+        out["p_hold"] = ctx.get("p_hold")
+    if ctx.get("timeframe") is not None:
+        out["v15_timeframe"] = ctx.get("timeframe")
+    return out
+
+
+async def _append_v15_edge_history_redis(symbol: str, signal_data: Dict[str, Any]) -> None:
+    if signal_data.get("edge") is None:
+        return
+    try:
+        r = await get_redis(required=False)
+        if not r:
+            return
+        key = f"jacksparrow:v15:edge_history:{symbol}"
+        entry = json.dumps(
+            {
+                "ts": signal_data.get("timestamp"),
+                "edge": signal_data["edge"],
+                "signal": signal_data.get("signal"),
+                "timeframe": signal_data.get("v15_timeframe"),
+            },
+            default=str,
+        )
+        await r.lpush(key, entry)
+        await r.ltrim(key, 0, 199)
+    except Exception:
+        pass
+
+
+def _model_consensus_row(
+    model_name: str,
+    signal_value: Any,
+    pred_confidence: float,
+    prediction_value: Any,
+    pred: Dict[str, Any],
+) -> Dict[str, Any]:
+    row: Dict[str, Any] = {
+        "model_name": model_name,
+        "signal": signal_value,
+        "confidence": pred_confidence,
+        "prediction": prediction_value,
+    }
+    pctx = pred.get("context") or {}
+    if isinstance(pctx, dict) and pctx.get("format") == "v15_pipeline":
+        if pctx.get("p_buy") is not None:
+            row["p_buy"] = pctx.get("p_buy")
+        if pctx.get("p_sell") is not None:
+            row["p_sell"] = pctx.get("p_sell")
+        if pctx.get("p_hold") is not None:
+            row["p_hold"] = pctx.get("p_hold")
+        if pctx.get("timeframe") is not None:
+            row["timeframe"] = pctx.get("timeframe")
+        row["edge"] = prediction_value
+    return row
+
+
 def _map_consensus_signal_to_string(value: Any) -> str:
     """Map numeric consensus_signal (-1 to +1) to discrete SignalType string.
     
@@ -804,12 +895,15 @@ class AgentEventSubscriber:
                         })
                         
                         # Build model consensus entry
-                        model_consensus.append({
-                            "model_name": model_name,
-                            "signal": signal_value,
-                            "confidence": pred_confidence,
-                            "prediction": prediction_value
-                        })
+                        model_consensus.append(
+                            _model_consensus_row(
+                                model_name,
+                                signal_value,
+                                pred_confidence,
+                                prediction_value,
+                                pred,
+                            )
+                        )
             
             # Handle timestamp formatting - ensure 'Z' suffix for UTC
             from backend.services.time_service import time_service
@@ -1243,12 +1337,15 @@ class AgentEventSubscriber:
                             "prediction": prediction_value
                         })
 
-                        model_consensus.append({
-                            "model_name": model_name,
-                            "signal": signal_value,
-                            "confidence": pred_confidence,
-                            "prediction": prediction_value
-                        })
+                        model_consensus.append(
+                            _model_consensus_row(
+                                model_name,
+                                signal_value,
+                                pred_confidence,
+                                prediction_value,
+                                pred,
+                            )
+                        )
         except Exception:
             # Per-model enrichment is best-effort only; never break decision broadcasts.
             individual_reasoning = []
@@ -1274,6 +1371,11 @@ class AgentEventSubscriber:
             "model_consensus": model_consensus,
             "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
         }
+        signal_data.update(
+            _v15_ws_fields_from_predictions(model_predictions, reasoning_chain)
+        )
+
+        await _append_v15_edge_history_redis(symbol, signal_data)
 
         # Broadcast signal update
         signal_message = create_signal_update(signal_data)
@@ -1370,12 +1472,15 @@ class AgentEventSubscriber:
                         "prediction": prediction_value
                     })
 
-                    model_consensus.append({
-                        "model_name": model_name,
-                        "signal": signal_value,
-                        "confidence": pred_confidence,
-                        "prediction": prediction_value
-                    })
+                    model_consensus.append(
+                        _model_consensus_row(
+                            model_name,
+                            signal_value,
+                            pred_confidence,
+                            prediction_value,
+                            pred,
+                        )
+                    )
 
         # Create model data
         model_data = {

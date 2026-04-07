@@ -630,9 +630,23 @@ async def check_overall_health(db: AsyncSession) -> dict:
             and (total_models == 0 or (healthy_models is not None and healthy_models > 0))
         )
 
+    ml_models_summary: Optional[Dict[str, Any]] = None
+    try:
+        mdet = details if isinstance(details, dict) else {}
+        if mdet.get("total_models") is not None:
+            ml_models_summary = {
+                "loaded_count": mdet.get("total_models"),
+                "healthy_count": mdet.get("healthy_models"),
+                "model_format": mdet.get("model_format"),
+                "models": mdet.get("models") or mdet.get("registered_models"),
+            }
+    except Exception:
+        ml_models_summary = None
+
     result = {
         "status": status_str,
         "health_score": round(health_score, 3),
+        "ml_models": ml_models_summary,
         "services": {
             "database": _to_dict(db_health),
             "redis": _to_dict(redis_status),

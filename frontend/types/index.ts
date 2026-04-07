@@ -82,6 +82,13 @@ export interface ModelConsensus {
   model_name: string
   signal: SignalType
   confidence: number
+  prediction?: number
+  /** v15 pipeline (optional) */
+  p_buy?: number
+  p_sell?: number
+  p_hold?: number
+  edge?: number
+  timeframe?: string
 }
 
 export interface ModelReasoning {
@@ -114,6 +121,14 @@ export interface Signal {
   inference_source?: InferenceSource
   inference_mode?: InferenceMode
   model_version?: string
+  /** v15: model edge p_buy − p_sell (optional) */
+  edge?: number
+  p_buy?: number
+  p_sell?: number
+  p_hold?: number
+  v15_timeframe?: string
+  edge_threshold?: number
+  v15_filters?: Record<string, unknown>
 }
 
 export interface HealthStatus {

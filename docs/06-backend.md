@@ -36,6 +36,7 @@ backend/
 │   ├── main.py                 # FastAPI app initialization
 │   ├── routes/
 │   │   ├── health.py           # Health and status endpoints
+│   │   ├── ml_signal.py        # Model status + v15 edge history (Redis)
 │   │   ├── trading.py          # Trading operations
 │   │   ├── portfolio.py        # Portfolio queries
 │   │   ├── market.py           # Market data endpoints
@@ -138,6 +139,45 @@ These log lines surface the exact remediation hint (`note`) that is also forward
 **Status Codes**:
 - `200`: Success
 - `503`: Service unavailable (unhealthy)
+
+Health responses may include an optional **`ml_models`** summary when the agent exposes model-node details (see `backend/api/routes/health.py`).
+
+#### GET `/api/v1/models/status`
+
+Proxies agent registry summary via `agent_service.get_agent_status()`.
+
+**Response** (shape is best-effort; fields depend on agent version):
+
+```json
+{
+  "available": true,
+  "agent_state": "MONITORING",
+  "model_nodes": {
+    "status": "up",
+    "healthy_models": 2,
+    "total_models": 2,
+    "model_format": "auto",
+    "discovery": {}
+  },
+  "model_format": "auto",
+  "latency_ms": 12.3,
+  "status_stale": false
+}
+```
+
+#### GET `/api/v1/signal/edge-history`
+
+Query params: `symbol` (default `BTCUSD`), `limit` (1–200, default 50).
+
+Returns recent **v15 edge** samples appended by `agent_event_subscriber` to Redis (`jacksparrow:v15:edge_history:{symbol}`) when WebSocket signal payloads include `edge`.
+
+```json
+{
+  "symbol": "BTCUSD",
+  "edges": [{ "ts": "...", "edge": 0.21, "signal": "BUY", "timeframe": "5m" }],
+  "count": 1
+}
+```
 
 ### Perpetual Futures Market API
 
@@ -631,6 +671,16 @@ All WebSocket messages use a unified envelope format:
 }
 ```
 
+**v15 extensions** (optional on the same `signal` payload when v15 models produced the strongest edge):
+
+| Field | Description |
+|-------|-------------|
+| `edge` | `p_buy − p_sell` from the selected v15 prediction |
+| `p_buy`, `p_sell`, `p_hold` | Class probabilities from model context |
+| `v15_timeframe` | `5m` or `15m` for that prediction |
+
+Per-model `model_consensus[]` entries may also include `p_buy`, `p_sell`, `p_hold`, `edge`, and `timeframe` when `context.format === "v15_pipeline"`.
+
 **Reasoning Chain Update** (`data_update` with `resource: "signal"`):
 ```json
 {
@@ -670,7 +720,12 @@ All WebSocket messages use a unified envelope format:
         "model_name": "xgboost_v1",
         "signal": "BUY",
         "confidence": 0.85,
-        "prediction": 0.8
+        "prediction": 0.8,
+        "p_buy": 0.52,
+        "p_sell": 0.21,
+        "p_hold": 0.27,
+        "edge": 0.31,
+        "timeframe": "5m"
       }
     ],
     "individual_model_reasoning": [

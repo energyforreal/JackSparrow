@@ -7,13 +7,18 @@ Implements MCP Feature Protocol for standardized feature communication.
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+import json
 import uuid
 import time
 import structlog
 
+from agent.core.config import settings
+from agent.core.redis_config import get_redis
 from agent.data.feature_engineering import FeatureEngineering
 from agent.data.market_data_service import MarketDataService
+from feature_store.feature_registry import V15_FEATURES_BY_TF
+from feature_store.v15_feature_compute import build_v15_feature_dict_for_tf
 from agent.events.event_bus import event_bus
 from agent.events.schemas import FeatureRequestEvent, FeatureComputedEvent, EventType
 
@@ -46,11 +51,15 @@ class MCPFeature(BaseModel):
 
 class MCPFeatureRequest(BaseModel):
     """MCP Feature Protocol request."""
+
+    model_config = ConfigDict(extra="ignore")
+
     feature_names: List[str]
     symbol: str
     timestamp: Optional[datetime] = None
     version: str = "latest"
     require_quality: FeatureQuality = FeatureQuality.MEDIUM
+    candle_interval: Optional[str] = None
 
 
 class MCPFeatureResponse(BaseModel):
@@ -187,11 +196,91 @@ class MCPFeatureServer:
                 exc_info=True
             )
     
+    async def _get_v15_feature_response(
+        self,
+        request: MCPFeatureRequest,
+        tf: str,
+        request_id: str,
+        timestamp: datetime,
+    ) -> MCPFeatureResponse:
+        """Compute full v15 feature row for one timeframe (5m includes 15m HTF)."""
+        md = await self.market_data_service.get_market_data(
+            symbol=request.symbol,
+            interval=tf,
+            limit=280,
+        )
+        if not md or not md.get("candles"):
+            return MCPFeatureResponse(
+                features=[],
+                quality_score=0.0,
+                overall_quality=FeatureQuality.DEGRADED,
+                timestamp=timestamp,
+                request_id=request_id,
+            )
+        candles = md["candles"]
+        candles_15 = None
+        if tf == "5m":
+            cache_key = f"jacksparrow:v15:htf15:{request.symbol}"
+            ttl = int(getattr(settings, "htf_cache_ttl_seconds", 840) or 840)
+            r = await get_redis()
+            if r:
+                try:
+                    raw = await r.get(cache_key)
+                    if raw:
+                        candles_15 = json.loads(raw)
+                except Exception:
+                    candles_15 = None
+            if candles_15 is None:
+                md15 = await self.market_data_service.get_market_data(
+                    symbol=request.symbol,
+                    interval="15m",
+                    limit=280,
+                )
+                if md15:
+                    candles_15 = md15.get("candles")
+                if r and candles_15:
+                    try:
+                        await r.setex(cache_key, ttl, json.dumps(candles_15[-280:]))
+                    except Exception:
+                        pass
+        fmap = build_v15_feature_dict_for_tf(candles, tf, candles_15m=candles_15)
+        features: List[MCPFeature] = []
+        for feature_name in request.feature_names:
+            t0 = time.time()
+            val = float(fmap.get(feature_name, 0.0))
+            features.append(
+                MCPFeature(
+                    name=feature_name,
+                    version=self.feature_registry.get(feature_name, "1.0.0"),
+                    value=val,
+                    timestamp=timestamp,
+                    quality=FeatureQuality.HIGH,
+                    metadata={"symbol": request.symbol, "v15_tf": tf},
+                    computation_time_ms=(time.time() - t0) * 1000,
+                )
+            )
+        qs = self._calculate_quality_score(features)
+        return MCPFeatureResponse(
+            features=features,
+            quality_score=qs,
+            overall_quality=self._determine_overall_quality(qs),
+            timestamp=datetime.utcnow(),
+            request_id=request_id,
+        )
+
     async def get_features(self, request: MCPFeatureRequest) -> MCPFeatureResponse:
         """Get features according to MCP Feature Protocol."""
         
         request_id = str(uuid.uuid4())
         timestamp = request.timestamp or datetime.utcnow()
+
+        if request.candle_interval:
+            tf = request.candle_interval.strip().lower()
+            expected = V15_FEATURES_BY_TF.get(tf)
+            if expected and set(request.feature_names) == set(expected):
+                return await self._get_v15_feature_response(
+                    request, tf, request_id, timestamp
+                )
         
         features: List[MCPFeature] = []
         
@@ -205,7 +294,7 @@ class MCPFeatureServer:
         limit = CANDLES_FOR_PATTERNS if (has_pattern_features or has_regime_features) else 100
         market_data = await self.market_data_service.get_market_data(
             symbol=request.symbol,
-            limit=limit
+            limit=limit,
         )
         
         if not market_data or not market_data.get("candles"):

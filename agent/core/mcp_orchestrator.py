@@ -5,14 +5,20 @@ Coordinates the interaction between MCP Feature Server, MCP Model Registry,
 and MCP Reasoning Engine to provide unified AI agent functionality.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import asyncio
 import time
 import uuid
 import structlog
 
-from agent.data.feature_server import MCPFeatureServer, MCPFeatureRequest, MCPFeatureResponse
+from agent.data.feature_server import (
+    MCPFeature,
+    MCPFeatureRequest,
+    MCPFeatureResponse,
+    MCPFeatureServer,
+    FeatureQuality,
+)
 from agent.models.mcp_model_registry import (
     MCPModelRegistry,
     MCPModelRequest,
@@ -239,66 +245,172 @@ class MCPOrchestrator:
 
             context = context or {}
 
-            # Step 1: Get features via MCP Feature Server
-            feature_request = MCPFeatureRequest(
-                feature_names=self._get_required_features(),
-            symbol=symbol,
-                timestamp=context.get("timestamp"),
-                require_quality=context.get("feature_quality", "medium")
-            )
+            def _all_v15_pipeline_models() -> bool:
+                if not self.model_registry or not self.model_registry.models:
+                    return False
+                return all(
+                    getattr(m, "model_type", "") == "xgboost_pipeline_v15"
+                    for m in self.model_registry.models.values()
+                )
 
-            logger.debug("mcp_orchestrator_requesting_features",
-                        symbol=symbol,
-                        feature_count=len(feature_request.feature_names))
+            use_v15_path = _all_v15_pipeline_models()
+            model_request: MCPModelRequest
 
-            feature_response = await self.feature_server.get_features(feature_request)
-
-            if not feature_response.features:
-                logger.warning("mcp_orchestrator_no_features_available",
-                             symbol=symbol,
-                             message="No features available for prediction")
-                # Try to get at least basic features before giving up
-                # This might happen if feature server is still initializing
-                try:
-                    # Request basic required features explicitly
-                    basic_features = self._get_required_features()
-                    basic_feature_response = await self.get_features(basic_features, symbol)
-                    if basic_feature_response.features:
-                        feature_response = basic_feature_response
-                        logger.info("mcp_orchestrator_basic_features_retrieved",
-                                  symbol=symbol,
-                                  feature_count=len(basic_feature_response.features))
-                    else:
-                        return self._create_empty_prediction_response(symbol, context)
-                except Exception as e:
-                    logger.warning("mcp_orchestrator_basic_features_failed",
-                                 symbol=symbol,
-                                 error=str(e))
+            if use_v15_path:
+                req_id = f"pred_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+                per_model_requests: Dict[str, MCPModelRequest] = {}
+                v15_feature_snapshots: Dict[str, Dict[str, float]] = {}
+                first_fr: Optional[MCPFeatureResponse] = None
+                for model_name, model in self.model_registry.models.items():
+                    info = model.get_model_info()
+                    names = list(info.get("features_required") or [])
+                    tf = str(info.get("timeframe", "15m"))
+                    fr = await self.feature_server.get_features(
+                        MCPFeatureRequest(
+                            feature_names=names,
+                            symbol=symbol,
+                            timestamp=context.get("timestamp"),
+                            candle_interval=tf,
+                        )
+                    )
+                    if first_fr is None:
+                        first_fr = fr
+                    snap = {f.name: float(f.value) for f in fr.features}
+                    v15_feature_snapshots[tf] = snap
+                    vals = [f.value for f in fr.features]
+                    fnames = [f.name for f in fr.features]
+                    mctx = {
+                        **context,
+                        "features": vals,
+                        "feature_names": fnames,
+                        "feature_quality": fr.overall_quality.value,
+                        "current_price": context.get("current_price"),
+                        "v15_timeframe": tf,
+                        "v15_feature_snapshots": v15_feature_snapshots,
+                    }
+                    per_model_requests[model_name] = MCPModelRequest(
+                        request_id=req_id,
+                        features=vals,
+                        context=mctx,
+                        require_explanation=True,
+                    )
+                if not per_model_requests:
                     return self._create_empty_prediction_response(symbol, context)
-
-            # Step 2: Prepare model context with features
-            model_context = {
-                **context,
-                "features": [feature.value for feature in feature_response.features],
-                "feature_names": [feature.name for feature in feature_response.features],
-                "feature_quality": feature_response.overall_quality.value,
-                "current_price": context.get("current_price")  # For regressor normalization
-            }
-
-            # Step 3: Get model predictions via MCP Model Registry
-            model_request = MCPModelRequest(
-                request_id=f"pred_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                features=[feature.value for feature in feature_response.features],  # Raw feature values
-                context=model_context,
-                require_explanation=True
-            )
-
-            logger.debug("mcp_orchestrator_requesting_predictions",
+                model_request = next(iter(per_model_requests.values()))
+                filter_tf = (
+                    getattr(settings, "v15_filter_feature_source_tf", "5m") or "5m"
+                ).strip().lower()
+                features_dict_merged: Dict[str, Any] = {}
+                if filter_tf in v15_feature_snapshots:
+                    features_dict_merged.update(v15_feature_snapshots[filter_tf])
+                for tf_k, snap in v15_feature_snapshots.items():
+                    if tf_k == filter_tf:
+                        continue
+                    for k, v in snap.items():
+                        features_dict_merged.setdefault(k, v)
+                ts = datetime.utcnow()
+                merged_list = [
+                    MCPFeature(
+                        name=k,
+                        version="1.0.0",
+                        value=float(v),
+                        timestamp=ts,
+                        quality=FeatureQuality.HIGH,
+                        metadata={"v15_merged": True},
+                        computation_time_ms=0.0,
+                    )
+                    for k, v in sorted(features_dict_merged.items())
+                ]
+                qsum = (
+                    sum(1.0 for _ in merged_list) / len(merged_list) if merged_list else 0.0
+                )
+                feature_response = MCPFeatureResponse(
+                    features=merged_list,
+                    quality_score=qsum,
+                    overall_quality=FeatureQuality.HIGH,
+                    timestamp=ts,
+                    request_id=req_id,
+                )
+                if not first_fr or not first_fr.features:
+                    logger.warning(
+                        "mcp_orchestrator_v15_no_features",
                         symbol=symbol,
-                        model_request_id=model_request.request_id)
+                    )
+                    return self._create_empty_prediction_response(symbol, context)
+            else:
+                # Step 1: Get features via MCP Feature Server (legacy / v4 path)
+                feature_request = MCPFeatureRequest(
+                    feature_names=self._get_required_features(),
+                    symbol=symbol,
+                    timestamp=context.get("timestamp"),
+                    require_quality=context.get("feature_quality", "medium"),
+                )
+
+                logger.debug(
+                    "mcp_orchestrator_requesting_features",
+                    symbol=symbol,
+                    feature_count=len(feature_request.feature_names),
+                )
+
+                feature_response = await self.feature_server.get_features(feature_request)
+
+                if not feature_response.features:
+                    logger.warning(
+                        "mcp_orchestrator_no_features_available",
+                        symbol=symbol,
+                        message="No features available for prediction",
+                    )
+                    try:
+                        basic_features = self._get_required_features()
+                        basic_feature_response = await self.get_features(
+                            basic_features, symbol
+                        )
+                        if basic_feature_response.features:
+                            feature_response = basic_feature_response
+                            logger.info(
+                                "mcp_orchestrator_basic_features_retrieved",
+                                symbol=symbol,
+                                feature_count=len(basic_feature_response.features),
+                            )
+                        else:
+                            return self._create_empty_prediction_response(symbol, context)
+                    except Exception as e:
+                        logger.warning(
+                            "mcp_orchestrator_basic_features_failed",
+                            symbol=symbol,
+                            error=str(e),
+                        )
+                        return self._create_empty_prediction_response(symbol, context)
+
+                model_context = {
+                    **context,
+                    "features": [feature.value for feature in feature_response.features],
+                    "feature_names": [feature.name for feature in feature_response.features],
+                    "feature_quality": feature_response.overall_quality.value,
+                    "current_price": context.get("current_price"),
+                }
+
+                model_request = MCPModelRequest(
+                    request_id=f"pred_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                    features=[feature.value for feature in feature_response.features],
+                    context=model_context,
+                    require_explanation=True,
+                )
+
+            logger.debug(
+                "mcp_orchestrator_requesting_predictions",
+                symbol=symbol,
+                model_request_id=model_request.request_id,
+            )
 
             try:
-                model_response = await self.model_registry.get_predictions(model_request)
+                if use_v15_path:
+                    model_response = await self.model_registry.get_predictions(
+                        model_request,
+                        per_model_requests=per_model_requests,
+                    )
+                else:
+                    model_response = await self.model_registry.get_predictions(model_request)
             except NoModelsRegisteredError as e:
                 logger.error(
                     "mcp_orchestrator_no_models_registered",
@@ -754,6 +866,11 @@ class MCPOrchestrator:
     @staticmethod
     def _serialize_model_prediction(pred: Any) -> Dict[str, Any]:
         """Serialize model prediction while preserving model-level context."""
+        ctx = getattr(pred, "context", None)
+        ctx_d = ctx if isinstance(ctx, dict) else {}
+        model_type = getattr(pred, "model_type", None) or ctx_d.get(
+            "format", "unknown"
+        )
         return {
             "model_name": pred.model_name,
             "model_version": pred.model_version,
@@ -764,8 +881,8 @@ class MCPOrchestrator:
             "feature_importance": getattr(pred, "feature_importance", {}),
             "computation_time_ms": getattr(pred, "computation_time_ms", 0.0),
             "health_status": getattr(pred, "health_status", "healthy"),
-            "model_type": getattr(pred, "model_type", "unknown"),
-            "context": getattr(pred, "context", None),
+            "model_type": model_type,
+            "context": ctx,
         }
 
     def _build_decision_context_for_storage(

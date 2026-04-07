@@ -47,6 +47,15 @@ Analysis is driven by **price movement** relative to a configurable threshold, n
 
 For why many outcomes still look like **HOLD** at the UI, see [Logic & Reasoning – HOLD dominance](05-logic-reasoning.md#hold-dominance-runtime-code-traced).
 
+#### v15 pipeline feature row (20 features per TF)
+
+When the registry runs **only** `xgboost_pipeline_v15` models, the feature server builds rows aligned to training metadata (not the full expanded v4 list):
+
+- **Registry**: `feature_store/feature_registry.py` — `V15_FEATURES_5M`, `V15_FEATURES_15M`, `V15_FEATURES_BY_TF`.
+- **Computation**: `feature_store/v15_feature_compute.py` — base indicators on the active timeframe; for **5m**, merges higher-timeframe fields from **15m** OHLCV (`*_15m` column names).
+- **Serving**: `agent/data/feature_server.py` — if the MCP request includes `candle_interval` matching a full v15 name set for that TF, the v15 path runs (including optional Redis caching of 15m candles for 5m requests; see [ML models – v15 pipeline](03-ml-models.md#jacksparrow-v15-pipeline-5m--15m-joblib)).
+- **Market data**: `agent/data/market_data_service.py` — resolution map includes **5m** and **15m** (and other intervals) for Delta candle fetches.
+
 ---
 
 ### 2. AI Reasoning Capabilities

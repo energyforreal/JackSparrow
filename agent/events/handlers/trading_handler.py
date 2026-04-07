@@ -5,7 +5,7 @@ Bridges DecisionReadyEvent to RiskApprovedEvent by performing risk validation
 and publishing RiskApprovedEvent when trades are approved.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 import structlog
 import time
@@ -15,6 +15,7 @@ from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
 from agent.core.futures_utils import price_to_lots
+from agent.core.v15_signal import apply_v15_entry_gate
 from agent.core.learning_system import LearningSystem
 from agent.core.mtf_decision_engine import compute_context_position_size_multiplier
 from agent.core.signal_filter import EntrySignalFilter
@@ -230,6 +231,13 @@ class TradingEventHandler:
             model_predictions = (
                 reasoning_chain.get("model_predictions") if isinstance(reasoning_chain, dict) else None
             ) or []
+            features = (
+                (payload.get("reasoning_chain") or {}).get("market_context", {}).get("features", {})
+                if isinstance(payload.get("reasoning_chain"), dict)
+                else {}
+            )
+            if not isinstance(features, dict):
+                features = {}
             entry_proba_summary = self._summarize_model_entry_proba(model_predictions)
             diagnostics_base: Dict[str, Any] = {
                 "hour_bucket_utc": hour_bucket_utc,
@@ -282,7 +290,19 @@ class TradingEventHandler:
                 except Exception:
                     pass
 
-            # Map signal to side (BUY/SELL for event, long/short for risk manager)
+            v15_diag: Dict[str, Any] = {}
+            new_signal, v15_diag = apply_v15_entry_gate(signal, model_predictions, features)
+            if new_signal == "HOLD" and signal not in ("HOLD", None, ""):
+                self._log_entry_rejected(
+                    "v15_entry_gate",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    **diagnostics_base,
+                    **v15_diag,
+                )
+                return
+            signal = new_signal
             if signal in ("BUY", "STRONG_BUY"):
                 side = "BUY"
                 risk_side = "long"
@@ -290,11 +310,12 @@ class TradingEventHandler:
                 side = "SELL"
                 risk_side = "short"
             else:
-                logger.debug(
-                    "trading_handler_skipping_non_trade_signal",
+                self._log_entry_rejected(
+                    "v15_gate_hold",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
+                    **diagnostics_base,
                 )
                 return
 
@@ -306,6 +327,21 @@ class TradingEventHandler:
                     if (pos_side == "long" and signal in ("STRONG_SELL", "SELL")) or (
                         pos_side == "short" and signal in ("STRONG_BUY", "BUY")
                     ):
+                        mh = open_pos.get("v15_min_hold_until")
+                        if mh is not None:
+                            now = datetime.now(timezone.utc)
+                            if isinstance(mh, datetime):
+                                mhu = mh if mh.tzinfo else mh.replace(tzinfo=timezone.utc)
+                                if now < mhu:
+                                    self._log_entry_rejected(
+                                        "v15_min_hold_blocks_reversal",
+                                        symbol=symbol,
+                                        signal=signal,
+                                        event_id=event.event_id,
+                                        min_hold_until=mhu.isoformat(),
+                                        **diagnostics_base,
+                                    )
+                                    return
                         logger.info(
                             "signal_reversal_exit",
                             symbol=symbol,
@@ -360,9 +396,13 @@ class TradingEventHandler:
                 )
                 return
 
-            features = (payload.get("reasoning_chain") or {}).get("market_context", {}).get("features", {})
+            is_v15_pred = any(
+                (p.get("context") or {}).get("format") == "v15_pipeline"
+                for p in model_predictions
+                if isinstance(p, dict)
+            )
             vol = features.get("volatility")
-            if vol is None:
+            if vol is None and not is_v15_pred:
                 self._log_entry_rejected(
                     "missing_volatility_reject",
                     symbol=symbol,
@@ -372,19 +412,21 @@ class TradingEventHandler:
                 )
                 return
             try:
-                vol_f = float(vol)
+                vol_f = float(vol) if vol is not None else 0.0
             except (TypeError, ValueError):
-                self._log_entry_rejected(
-                    "invalid_volatility",
-                    symbol=symbol,
-                    signal=signal,
-                    event_id=event.event_id,
-                    volatility=vol,
-                    **diagnostics_base,
-                )
-                return
+                if not is_v15_pred:
+                    self._log_entry_rejected(
+                        "invalid_volatility",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        volatility=vol,
+                        **diagnostics_base,
+                    )
+                    return
+                vol_f = 0.0
             min_vol = float(getattr(settings, "entry_min_volatility_for_trade", 0.0) or 0.0)
-            if min_vol > 0:
+            if min_vol > 0 and not is_v15_pred:
                 try:
                     if vol_f < min_vol:
                         self._log_entry_rejected(
@@ -419,7 +461,13 @@ class TradingEventHandler:
                     except (TypeError, ValueError):
                         pass
             strength_map = {"STRONG_BUY": 0.9, "BUY": 0.65, "STRONG_SELL": 0.9, "SELL": 0.65}
-            regime = "high" if vol_f > 5 else "medium" if vol_f > 2.5 else "low"
+            regime = (
+                "high"
+                if vol_f > 5
+                else "medium"
+                if vol_f > 2.5
+                else ("medium" if is_v15_pred else "low")
+            )
             rr_ratio = (
                 settings.take_profit_percentage / settings.stop_loss_percentage
                 if settings.stop_loss_percentage
@@ -582,22 +630,23 @@ class TradingEventHandler:
                         return
 
             # ADX ranging market filter: block mild BUY/SELL in very low trend strength
-            adx = features.get("adx_14")
-            adx_floor = float(
-                getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)
-                or DEFAULT_ADX_RANGING_THRESHOLD
-            )
-            if adx is not None and float(adx) < adx_floor and signal in ("BUY", "SELL"):
-                self._log_entry_rejected(
-                    "adx_ranging_filter",
-                    symbol=symbol,
-                    signal=signal,
-                    event_id=event.event_id,
-                    adx=adx,
-                    adx_floor=adx_floor,
-                    **diagnostics_base,
+            if not is_v15_pred:
+                adx = features.get("adx_14")
+                adx_floor = float(
+                    getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)
+                    or DEFAULT_ADX_RANGING_THRESHOLD
                 )
-                return
+                if adx is not None and float(adx) < adx_floor and signal in ("BUY", "SELL"):
+                    self._log_entry_rejected(
+                        "adx_ranging_filter",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        adx=adx,
+                        adx_floor=adx_floor,
+                        **diagnostics_base,
+                    )
+                    return
 
             # EMA200 regime filter for trend conformity
             if getattr(settings, "enforce_ema200_trend_filter", False):
@@ -780,6 +829,8 @@ class TradingEventHandler:
                 "confidence": confidence,
                 "model_predictions": (payload.get("reasoning_chain") or {}).get("model_predictions"),
             }
+            if v15_diag:
+                risk_payload["v15_diagnostics"] = v15_diag
             if stop_loss_price is not None and take_profit_price is not None:
                 risk_payload["stop_loss"] = stop_loss_price
                 risk_payload["take_profit"] = take_profit_price

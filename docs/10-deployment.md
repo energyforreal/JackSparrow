@@ -906,7 +906,9 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | https://api.india.delta.exchange |
 | `QDRANT_URL` | Qdrant vector database URL | No | http://localhost:6333 |
 | `QDRANT_API_KEY` | Qdrant API key | No | - |
-| `MODEL_DIR` | Directory for model discovery (all models) | No | ./agent/model_storage |
+| `MODEL_DIR` | Directory for model discovery (all models) | No | `./agent/model_storage` (local); Docker Compose defaults to the **v15** bundle under `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05` via `AGENT_MODEL_DIR` |
+| `AGENT_MODEL_DIR` | Docker-only override for in-container `MODEL_DIR` | No | See `docker-compose.yml` agent service |
+| `MODEL_FORMAT` | `auto`, `v4_ensemble`, or `v15_pipeline` — discovery / node selection | No | `auto` |
 | `MODEL_PATH` | Specific model file path (optional, for direct model loading) | No | agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl |
 | `LOG_LEVEL` | Agent logging level | No | INFO |
 | `LOG_DIR` | Agent log directory | No | `./logs/agent` |

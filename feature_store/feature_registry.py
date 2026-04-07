@@ -104,6 +104,70 @@ EXPANDED_FEATURE_LIST: List[str] = (
     + PERPETUAL_FEATURES
 )
 
+# JackSparrow v15 pipeline (metadata-driven; keep in sync with model JSON).
+V15_FEATURES_15M: List[str] = [
+    "adx_14",
+    "atr_14",
+    "bb_width",
+    "di_diff",
+    "ema_9",
+    "ema_cross_21_50",
+    "ema_cross_50_200",
+    "hl_range",
+    "macd",
+    "macd_hist",
+    "minus_di",
+    "plus_di",
+    "price_vs_ema200",
+    "roc_20",
+    "rsi_14",
+    "rsi_7",
+    "sr_near_high",
+    "sr_near_low",
+    "volatility",
+    "volatility_10",
+]
+
+V15_FEATURES_5M: List[str] = [
+    "adx_14",
+    "adx_14_15m",
+    "atr_14",
+    "atr_pct",
+    "di_diff_15m",
+    "ema_9",
+    "ema_cross_21_50",
+    "ema_cross_50_200",
+    "ema_cross_50_200_15m",
+    "ema_cross_9_21",
+    "hl_range",
+    "macd",
+    "macd_hist_15m",
+    "price_vs_ema200",
+    "rsi_14",
+    "rsi_14_15m",
+    "sr_breakout_dn",
+    "sr_near_low",
+    "volatility",
+    "volatility_10",
+]
+
+V15_FEATURES_BY_TF: Dict[str, List[str]] = {
+    "5m": V15_FEATURES_5M,
+    "15m": V15_FEATURES_15M,
+}
+
+V15_HTF_FEATURES_FOR_5M: List[str] = [
+    "adx_14_15m",
+    "di_diff_15m",
+    "ema_cross_50_200_15m",
+    "macd_hist_15m",
+    "rsi_14_15m",
+]
+
+V15_ALL_UNIQUE_FEATURES: List[str] = sorted(
+    set(V15_FEATURES_5M) | set(V15_FEATURES_15M)
+)
+
 FEATURE_VERSION = "1.2"
 
 

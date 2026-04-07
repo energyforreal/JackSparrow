@@ -82,6 +82,10 @@ class HealthResponse(BaseModel):
         default=None,
         description="True if paper trading can execute (models healthy); False in degraded mode"
     )
+    ml_models: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional v15 / per-timeframe model summary from agent model_nodes details",
+    )
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Health check timestamp"

@@ -13,6 +13,7 @@ import uuid
 
 from pydantic import BaseModel
 
+from agent.core.config import settings
 from agent.models.mcp_model_node import MCPModelNode, MCPModelRequest, MCPModelPrediction
 from agent.models.advanced_consensus import AdvancedConsensusEngine, ConsensusConfig, ModelPrediction as ConsensusModelPrediction
 from agent.events.event_bus import event_bus
@@ -180,8 +181,16 @@ class MCPModelRegistry:
                 for name, weight in self.model_weights.items()
             }
     
-    async def get_predictions(self, request: MCPModelRequest) -> MCPModelResponse:
-        """Get predictions from all healthy models."""
+    async def get_predictions(
+        self,
+        request: MCPModelRequest,
+        per_model_requests: Optional[Dict[str, MCPModelRequest]] = None,
+    ) -> MCPModelResponse:
+        """Get predictions from all healthy models.
+
+        When ``per_model_requests`` is set, each model name maps to its own
+        MCPModelRequest (used for v15 per-timeframe feature vectors).
+        """
         
         if not self.models:
             logger.error(
@@ -202,9 +211,11 @@ class MCPModelRegistry:
         
         tasks = []
         for model in self.models.values():
-            # Wrap each prediction with timeout
+            mreq = request
+            if per_model_requests and model.model_name in per_model_requests:
+                mreq = per_model_requests[model.model_name]
             task = asyncio.wait_for(
-                self._get_prediction_safe(model, request),
+                self._get_prediction_safe(model, mreq),
                 timeout=MODEL_PREDICTION_TIMEOUT
             )
             tasks.append(task)
@@ -898,6 +909,7 @@ class MCPModelRegistry:
             "model_statuses": health_statuses,
             "registry_health": registry_health,  # Keep for backward compatibility
             "discovery": self._discovery_summary,
+            "model_format": getattr(settings, "model_format", "auto"),
         }
     
     def _record_prediction_result(self, model_name: str, latency_ms: float, success: bool):

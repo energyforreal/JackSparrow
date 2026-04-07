@@ -882,46 +882,38 @@ pydantic==2.5.0
 
 ### Model Storage Location
 
-JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**:
+JackSparrow stores trained ML bundles under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (and **`AGENT_MODEL_DIR`** in Docker). Discovery is metadata-driven (`metadata_BTCUSD_*.json`); the loader depends on **`MODEL_FORMAT`** (`auto` | `v4_ensemble` | `v15_pipeline`).
 
-- Contains all trained model files (current production uses v5 `.joblib` + `.json` artefacts for BTCUSD)
-- Referenced via `MODEL_DIR` environment variable (points to directory)
-- Example: `MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19`
-- Used by model discovery system to automatically find and register models
-- Current BTCUSD discovery is metadata-driven and reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
+**Typical layouts**:
 
-### Model Directory Structure
+- **v5 / v4 ensemble** (entry + exit joblibs per timeframe), e.g. `jacksparrow_v5_BTCUSD_2026-03-19/` — multiple TFs, `V4EnsembleNode`.
+- **v15 pipeline** (single `pipeline_{tf}_v14.pkl` per TF), e.g. `jacksparrow_v15_BTCUSD_2026-04-05/5m/` and `.../15m/` — `PipelineV15Node`. Docker Compose in this repo defaults the agent image to the v15 bundle path unless overridden.
 
-**Model Storage** (`agent/model_storage/`):
+Example v5 tree:
+
 ```
-agent/model_storage/
-└── jacksparrow_v5_BTCUSD_2026-03-19/
-    ├── metadata_BTCUSD_15m.json
-    ├── metadata_BTCUSD_30m.json
-    ├── metadata_BTCUSD_1h.json
-    ├── metadata_BTCUSD_2h.json
-    ├── metadata_BTCUSD_4h.json
-    ├── entry_model_BTCUSD_<tf>.joblib
-    ├── exit_model_BTCUSD_<tf>.joblib
-    ├── entry_scaler_BTCUSD_<tf>.joblib
-    ├── exit_scaler_BTCUSD_<tf>.joblib
-    ├── features_BTCUSD_<tf>.json
-    └── README.md
+agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/
+├── metadata_BTCUSD_15m.json
+├── entry_model_BTCUSD_15m.joblib
+├── exit_model_BTCUSD_15m.joblib
+└── ...
 ```
 
-**Currently Integrated Models** (see [ML Models](03-ml-models.md#bundle-profiles-and-docker-defaults)):
-- **5 v5 BTCUSD timeframe ensembles**: 15m, 30m, 1h, 2h, 4h
-- Each timeframe has entry + exit models and dedicated scalers/features metadata
-- All models are automatically discovered and registered on agent startup
+Example v15 tree:
+
+```
+agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/
+├── 5m/metadata_BTCUSD_5m.json
+├── 5m/pipeline_5m_v14.pkl
+├── 15m/metadata_BTCUSD_15m.json
+└── 15m/pipeline_15m_v14.pkl
+```
 
 ### Model Discovery
 
-Models in `agent/model_storage/` are automatically discovered on agent startup:
-- Reads `metadata_BTCUSD_*.json` directly from `MODEL_DIR`
-- Loads BTCUSD artefacts via `V4EnsembleNode`
-- Registers models with MCP Model Registry
-- Models become available for predictions immediately
-- Current production path is `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/`
+- Scans under `MODEL_DIR` (recursive when enabled) for `metadata_BTCUSD_*.json`.
+- Registers **`V4EnsembleNode`** or **`PipelineV15Node`** per file format (see [ML Models](03-ml-models.md)).
+- Models are registered with the MCP Model Registry for predictions on startup.
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

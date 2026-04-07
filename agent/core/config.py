@@ -168,6 +168,73 @@ class Settings(BaseSettings):
         env="MODEL_AUTO_REGISTER",
         description="Auto-register discovered models"
     )
+    model_format: str = Field(
+        default="auto",
+        env="MODEL_FORMAT",
+        description=(
+            "Model bundle format: auto (detect per metadata), v4_ensemble, v15_pipeline"
+        ),
+    )
+    v15_signal_logic_enabled: bool = Field(
+        default=True,
+        env="V15_SIGNAL_LOGIC_ENABLED",
+        description="When True and v15 models are active, apply v15 entry/exit filters.",
+    )
+    v15_disable_mtf_synthesis: bool = Field(
+        default=True,
+        env="V15_DISABLE_MTF_SYNTHESIS",
+        description="When True, skip mtf_decision_engine synthesis if v15 pipeline models are loaded.",
+    )
+    v15_filter_feature_source_tf: str = Field(
+        default="5m",
+        env="V15_FILTER_FEATURE_SOURCE_TF",
+        description="Which timeframe's feature snapshot to use for ADX/ATR entry filters (5m or 15m).",
+    )
+    confidence_percentile: float = Field(
+        default=90.0,
+        env="CONFIDENCE_PERCENTILE",
+        description="Rolling percentile of |edge| for v15 entry gating (e.g. 90 = top 10%).",
+    )
+    edge_floor: float = Field(
+        default=0.15,
+        env="EDGE_FLOOR",
+        description="Minimum |edge| for v15 directional entry.",
+    )
+    atr_trailing_mult: float = Field(
+        default=1.5,
+        env="ATR_TRAILING_MULT",
+        description="ATR multiplier for v15 trailing stop.",
+    )
+    min_hold_bars: int = Field(
+        default=5,
+        env="MIN_HOLD_BARS",
+        description="Minimum bars before v15 soft exits (trail, edge decay).",
+    )
+    edge_decay_threshold: float = Field(
+        default=0.05,
+        env="EDGE_DECAY_THRESHOLD",
+        description="Exit when |edge| falls below this after min hold (v15).",
+    )
+    volatility_filter_enabled: bool = Field(
+        default=True,
+        env="VOLATILITY_FILTER_ENABLED",
+        description="v15: skip entry when atr_pct is in bottom quartile / below floor.",
+    )
+    v15_atr_pct_floor: float = Field(
+        default=0.0005,
+        env="V15_ATR_PCT_FLOOR",
+        description="Minimum atr_pct (ratio) to pass v15 volatility filter when enabled.",
+    )
+    v15_adx_ranging_max: float = Field(
+        default=25.0,
+        env="V15_ADX_RANGING_MAX",
+        description="v15: only enter when ADX <= this (ranging regime).",
+    )
+    htf_cache_ttl_seconds: int = Field(
+        default=840,
+        env="HTF_CACHE_TTL_SECONDS",
+        description="Redis TTL for 15m HTF feature rows used by 5m v15 model (seconds).",
+    )
     allow_feature_fallback_predictions: bool = Field(
         default=False,
         env="ALLOW_FEATURE_FALLBACK_PREDICTIONS",
@@ -1132,6 +1199,17 @@ class Settings(BaseSettings):
     def parsed_timeframes(self) -> List[str]:
         """Return normalized timeframes as list."""
         return [tf for tf in (self.timeframes or "").split(",") if tf]
+
+    def resolved_agent_timeframes(self) -> List[str]:
+        """Timeframes for candle loops: prefer ACTIVE_TIMEFRAMES when set, else TIMEFRAMES."""
+        active = [
+            tf.strip()
+            for tf in (self.active_timeframes or "").split(",")
+            if tf.strip()
+        ]
+        if active:
+            return active
+        return self.parsed_timeframes() or [self.agent_interval]
     
 try:
     settings = Settings()

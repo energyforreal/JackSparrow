@@ -14,7 +14,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 |---|----------|--------|
 | 01 | [Architecture](docs/01-architecture.md) | System design, tiers, communication, startup |
 | 02 | [MCP layer](docs/02-mcp-layer.md) | Feature / model / reasoning protocols |
-| 03 | [ML models](docs/03-ml-models.md) | Discovery, bundles, training (`JackSparrow_Trading_Colab_v5.ipynb`), parity, Docker models |
+| 03 | [ML models](docs/03-ml-models.md) | Discovery, v4/v5 + **v15 pipeline** bundles, training notebooks, parity, Docker `MODEL_DIR` |
 | 04 | [Features](docs/04-features.md) | Product capabilities, signal triggers |
 | 05 | [Logic & reasoning](docs/05-logic-reasoning.md) | Six-step chain, consensus, HOLD/MTF/exit behavior |
 | 06 | [Backend](docs/06-backend.md) | FastAPI, REST, WebSocket contract, services |
@@ -56,4 +56,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-04-01 (canonical consolidation)
+**Last updated**: 2026-04-07 (v15 docs merged; ad-hoc `files(4)/` removed)

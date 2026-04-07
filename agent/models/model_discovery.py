@@ -4,6 +4,7 @@ Model discovery service.
 Automatically discovers and registers ML models from storage directory.
 """
 
+import json
 from typing import List
 from pathlib import Path
 import structlog
@@ -49,8 +50,9 @@ class ModelDiscovery:
             model_dir=str(self.model_dir),
             discovery_enabled=settings.model_discovery_enabled,
             auto_register=settings.model_auto_register,
-            discovery_mode="v4_only",
-            message="Starting model discovery process (v4-only mode)"
+            discovery_mode="multi_format",
+            model_format=getattr(settings, "model_format", "auto"),
+            message="Starting model discovery process",
         )
         
         try:
@@ -182,18 +184,42 @@ class ModelDiscovery:
                         )
                     else:
                         from agent.models.v4_ensemble_node import V4EnsembleNode
+                        from agent.models.pipeline_v15_node import (
+                            PipelineV15Node,
+                            metadata_is_v15_pipeline,
+                        )
+
+                        model_fmt = (
+                            getattr(settings, "model_format", "auto") or "auto"
+                        ).strip().lower()
 
                         for meta_path in v4_metadata_files:
                             try:
-                                node = V4EnsembleNode.from_metadata(meta_path)
-                                await node.initialize()
+                                with meta_path.open("r", encoding="utf-8") as mf:
+                                    raw_meta = json.load(mf)
+                                is_v15 = metadata_is_v15_pipeline(meta_path, raw_meta)
+
+                                if model_fmt == "v4_ensemble" and is_v15:
+                                    continue
+                                if model_fmt == "v15_pipeline" and not is_v15:
+                                    continue
+
+                                if is_v15:
+                                    node = PipelineV15Node.from_metadata_path(meta_path)
+                                    await node.initialize()
+                                    disc_mode = "v15_pipeline"
+                                else:
+                                    node = V4EnsembleNode.from_metadata(meta_path)
+                                    await node.initialize()
+                                    disc_mode = "v4_ensemble"
+
                                 if node.model_name in loaded_model_names:
                                     logger.warning(
                                         "model_discovery_duplicate_skipped",
                                         model_name=node.model_name,
                                         model_path=str(meta_path),
-                                        reason="v4 ensemble with same name already loaded",
-                                        discovery_mode="v4_only",
+                                        reason="duplicate model_name",
+                                        discovery_mode=disc_mode,
                                     )
                                     continue
                                 self._handle_discovered_model(node, discovered_models)
@@ -203,26 +229,25 @@ class ModelDiscovery:
                                     model_name=node.model_name,
                                     model_path=str(meta_path),
                                     model_type=node.model_type,
-                                    discovery_mode="v4_only",
+                                    discovery_mode=disc_mode,
                                 )
                             except Exception as e:
                                 failed_models.append(str(meta_path))
                                 error_type = type(e).__name__
                                 failed_reasons.append(f"{meta_path}: {error_type} - {str(e)}")
                                 logger.error(
-                                    "model_discovery_v4_metadata_failed",
+                                    "model_discovery_metadata_failed",
                                     model_file=str(meta_path),
                                     error=str(e),
                                     error_type=error_type,
-                                    discovery_mode="v4_only",
                                     exc_info=True,
-                                    message="Failed to load v4 ensemble from metadata; continuing with other v4 metadata files",
+                                    message="Failed to load model metadata; continuing with other files",
                                 )
         except Exception as e:
             logger.critical(
                 "model_discovery_critical_error",
                 error=str(e),
-                discovery_mode="v4_only",
+                discovery_mode="multi_format",
                 exc_info=True,
                 message="Critical error in model discovery, but agent will continue"
             )
@@ -244,7 +269,7 @@ class ModelDiscovery:
                 discovered_count=successful_count,
                 failed_count=failed_count,
                 total_attempted=total_attempted,
-                discovery_mode="v4_only",
+                discovery_mode="multi_format",
                 discovery_attempted=discovery_attempted,
                 models=discovered_models,
                 failed_files=failed_models[:5] if failed_models else [],  # Log first 5 failed files

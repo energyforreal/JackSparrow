@@ -113,7 +113,7 @@ services:
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
       # In-container path; override with AGENT_MODEL_DIR in root .env if bundle folder name changes
-      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21}
+      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05}
       REQUIRE_MODELS_ON_STARTUP: ${REQUIRE_MODELS_ON_STARTUP:-true}
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}
