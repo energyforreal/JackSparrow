@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { usePositionImpact } from '@/hooks/usePositionImpact'
 import { Position, EnhancedTickerData } from '@/types'
-import { formatCurrency } from '@/utils/formatters'
+import { formatCurrency, formatUsdCurrency } from '@/utils/formatters'
 import { apiClient } from '@/services/api'
 
 interface RealTimePriceProps {
@@ -245,7 +245,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
     const price = ticker?.price
     if (price == null || Number.isNaN(Number(price)) || Number(price) <= 0) return
     const n = Number(price)
-    const tabPrice = `$${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+    const tabPrice = formatUsdCurrency(n)
     document.title = `${tabPrice} — JackSparrow`
     return () => {
       document.title = DEFAULT_DOCUMENT_TITLE
@@ -253,13 +253,8 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
   }, [ticker?.price])
 
   const formatPrice = (price: number | null | undefined) => {
-    if (!price || price <= 0) return '$0.00'
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(price)
+    if (!price || price <= 0) return formatUsdCurrency(0)
+    return formatUsdCurrency(price)
   }
 
   const formatVolume = (volume: number | null | undefined) => {
@@ -360,7 +355,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
                 title={`Current price: ${ticker.price}`}
               >
                 {(() => {
-                  const formatted = ticker.price ? formatPrice(ticker.price) : '$0.00'
+                  const formatted = ticker.price ? formatPrice(ticker.price) : formatUsdCurrency(0)
                   if (process.env.NODE_ENV === 'development') {
                     console.log('[RealTimePrice] Rendering price:', { raw: ticker.price, formatted })
                   }
@@ -471,7 +466,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">24h High</div>
                   <div className="text-sm font-medium text-green-600 dark:text-green-400">
-                    {ticker.high_24h ? formatPrice(ticker.high_24h) : '$0.00'}
+                    {ticker.high_24h ? formatPrice(ticker.high_24h) : formatUsdCurrency(0)}
                   </div>
                 </div>
               )}
@@ -479,7 +474,7 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">24h Low</div>
                   <div className="text-sm font-medium text-red-600 dark:text-red-400">
-                    {ticker.low_24h ? formatPrice(ticker.low_24h) : '$0.00'}
+                    {ticker.low_24h ? formatPrice(ticker.low_24h) : formatUsdCurrency(0)}
                   </div>
                 </div>
               )}

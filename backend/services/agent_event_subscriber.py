@@ -26,6 +26,7 @@ from backend.core.websocket_messages import (
 from decimal import Decimal
 
 from backend.core.enums import SignalType
+from backend.services.fx_rate_service import update_usdinr_rate
 
 logger = structlog.get_logger()
 
@@ -1053,6 +1054,14 @@ class AgentEventSubscriber:
             price = payload.get("price", 0.0)
             volume = payload.get("volume", 0.0)
             timestamp = payload.get("timestamp")
+            fx_candidate = (
+                payload.get("usd_inr")
+                or payload.get("usd_inr_rate")
+                or payload.get("usdinr")
+                or payload.get("inr_per_usd")
+            )
+            if fx_candidate is not None:
+                await update_usdinr_rate(fx_candidate)
 
             # Format ticker data for frontend with all available market data
             ticker_data = {
@@ -1537,6 +1546,14 @@ class AgentEventSubscriber:
         price = payload.get("price", 0)
         volume = payload.get("volume")
         change_24h_pct = payload.get("change_24h_pct")
+        fx_candidate = (
+            payload.get("usd_inr")
+            or payload.get("usd_inr_rate")
+            or payload.get("usdinr")
+            or payload.get("inr_per_usd")
+        )
+        if fx_candidate is not None:
+            await update_usdinr_rate(fx_candidate)
 
         # Create market data
         market_data = {

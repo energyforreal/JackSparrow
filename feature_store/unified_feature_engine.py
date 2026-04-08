@@ -41,6 +41,7 @@ FEATURE_ALIASES = {
     "macd_hist": "macd_histogram",
     "bb_pct": "bb_position",
     "vol_ratio": "volume_ratio",
+    "volatility": "volatility_20",
 }
 
 
@@ -392,6 +393,22 @@ class UnifiedFeatureEngine:
             if feature_name == "regime_is_volatile":
                 return float(1 if last == 2 else 0)
 
+        # Backward-compat aliases for legacy/model-exported feature names.
+        if feature_name.endswith("_15m"):
+            base_name = feature_name[:-4]
+            resolved_base = FEATURE_ALIASES.get(base_name, base_name)
+            if (
+                resolved_base in FEATURE_LIST
+                or base_name in V4_EXTRA_FEATURES
+                or base_name in CANDLESTICK_FEATURES
+                or base_name in CHART_PATTERN_FEATURES
+                or base_name in MTF_CONTEXT_FEATURES
+                or base_name in REGIME_FEATURES
+                or base_name in PERPETUAL_FEATURE_NAMES
+                or base_name in ("di_diff", "ema_cross_50_200")
+            ):
+                feature_name = base_name
+
         resolved = FEATURE_ALIASES.get(feature_name, feature_name)
         if resolved in FEATURE_LIST:
             df = pd.DataFrame(candles)
@@ -423,6 +440,18 @@ class UnifiedFeatureEngine:
             ema9 = _ema_series(c, 9).iloc[-1]
             ema21 = _ema_series(c, 21).iloc[-1]
             return float(ema9 - ema21)
+        if feature_name == "ema_cross_9_21":
+            ema9 = _ema_series(c, 9).iloc[-1]
+            ema21 = _ema_series(c, 21).iloc[-1]
+            return float(ema9 - ema21)
+        if feature_name == "ema_cross_21_50":
+            ema21 = _ema_series(c, 21).iloc[-1]
+            ema50 = _ema_series(c, 50).iloc[-1]
+            return float(ema21 - ema50)
+        if feature_name == "ema_cross_50_200":
+            ema50 = _ema_series(c, 50).iloc[-1]
+            ema200 = _ema_series(c, 200).iloc[-1]
+            return float(ema50 - ema200)
         if feature_name == "returns_1":
             if len(c) < 2:
                 return 0.0
@@ -438,6 +467,58 @@ class UnifiedFeatureEngine:
             mean_v = recent.mean()
             std_v = recent.std()
             return float((v.iloc[-1] - mean_v) / std_v) if std_v > 0 else 0.0
+        if feature_name == "hl_range":
+            return float((h.iloc[-1] - l.iloc[-1]))
+        if feature_name in ("plus_di", "minus_di", "di_diff"):
+            tr = np.maximum(
+                h - l,
+                np.maximum((h - c.shift(1)).abs(), (l - c.shift(1)).abs()),
+            )
+            plus_dm = (h - h.shift(1)).where(
+                (h - h.shift(1)) > (l.shift(1) - l), 0
+            ).clip(lower=0)
+            minus_dm = (l.shift(1) - l).where(
+                (l.shift(1) - l) > (h - h.shift(1)), 0
+            ).clip(lower=0)
+            atr_14 = tr.rolling(14, min_periods=1).mean()
+            plus_di = 100 * plus_dm.rolling(14, min_periods=1).mean() / atr_14.replace(
+                0, np.nan
+            )
+            minus_di = 100 * minus_dm.rolling(14, min_periods=1).mean() / atr_14.replace(
+                0, np.nan
+            )
+            plus_di_last = float(plus_di.fillna(0).iloc[-1])
+            minus_di_last = float(minus_di.fillna(0).iloc[-1])
+            if feature_name == "plus_di":
+                return plus_di_last
+            if feature_name == "minus_di":
+                return minus_di_last
+            return plus_di_last - minus_di_last
+        if feature_name == "price_vs_ema200":
+            ema200 = _ema_series(c, 200).iloc[-1]
+            if ema200 == 0:
+                return 0.0
+            return float((c.iloc[-1] - ema200) / ema200)
+        if feature_name in ("sr_near_high", "sr_near_low"):
+            window = 50
+            recent_high = h.rolling(window, min_periods=1).max().iloc[-1]
+            recent_low = l.rolling(window, min_periods=1).min().iloc[-1]
+            close = c.iloc[-1]
+            if feature_name == "sr_near_high":
+                if recent_high <= 0:
+                    return 0.0
+                return float(1.0 if ((recent_high - close) / recent_high) <= 0.002 else 0.0)
+            if recent_low <= 0:
+                return 0.0
+            return float(1.0 if ((close - recent_low) / recent_low) <= 0.002 else 0.0)
+        if feature_name in ("sr_breakout_up", "sr_breakout_dn"):
+            window = 50
+            recent_high = h.rolling(window, min_periods=1).max().iloc[-1]
+            recent_low = l.rolling(window, min_periods=1).min().iloc[-1]
+            close = c.iloc[-1]
+            if feature_name == "sr_breakout_up":
+                return float(1.0 if close > recent_high else 0.0)
+            return float(1.0 if close < recent_low else 0.0)
 
         raise ValueError(f"Unknown feature: {feature_name}")
 

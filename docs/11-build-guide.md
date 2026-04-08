@@ -373,6 +373,12 @@ MAX_DAILY_LOSS=0.05
 MAX_DRAWDOWN=0.15
 MAX_CONSECUTIVE_LOSSES=5
 MIN_TIME_BETWEEN_TRADES=300
+
+# Trading entry/balance defaults
+INITIAL_BALANCE=20000
+MIN_CONFIDENCE_THRESHOLD=0.70
+MIN_LOT_SIZE=1
+CONTRACT_VALUE_BTC=0.001
 ```
 
 **Note**: See `.env.example` in the project root for the complete list of all available environment variables. The template is already segmented by service domain (infrastructure, Delta Exchange credentials, backend security, agent configuration, frontend, optional services), so copy it as-is and only change the values. The agent automatically reads from the root `.env` file - no service-specific `.env` files are needed.

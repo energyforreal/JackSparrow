@@ -2,12 +2,29 @@ const IST_LOCALE = 'en-IN'
 const IST_TIMEZONE = 'Asia/Kolkata'
 
 export function formatCurrency(value: number): string {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) {
+    return '₹0.00'
+  }
   return new Intl.NumberFormat(IST_LOCALE, {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericValue)
+}
+
+export function formatUsdCurrency(value: number): string {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) {
+    return '$0.00'
+  }
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value)
+  }).format(numericValue)
 }
 
 export function formatPercent(value: number): string {

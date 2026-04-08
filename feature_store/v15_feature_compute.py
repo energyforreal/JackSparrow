@@ -113,7 +113,7 @@ def compute_v15_row_from_ohlcv(
     ema200 = _ema(c, 200)
 
     ret = c.pct_change()
-    vol = ret.rolling(20, min_periods=50).std()
+    vol = ret.rolling(20, min_periods=20).std()
     vol10 = ret.rolling(10, min_periods=1).std()
     roc20 = (c - c.shift(20)) / c.shift(20).replace(0, np.nan)
 
@@ -187,7 +187,7 @@ def compute_v15_5m_base_row(
     ema50 = _ema(c, 50)
     ema200 = _ema(c, 200)
     ret = c.pct_change()
-    vol = ret.rolling(20, min_periods=50).std()
+    vol = ret.rolling(20, min_periods=20).std()
     vol10 = ret.rolling(10, min_periods=1).std()
     atr_pct = atr_14 / c.replace(0, np.nan)
     sr_low = float(batch["sr_at_support"].iloc[last_i]) if "sr_at_support" in batch.columns else 0.0

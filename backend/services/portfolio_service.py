@@ -16,6 +16,7 @@ from backend.core.database import Position, Trade, TradeStatus, PositionStatus, 
 from backend.core.config import settings
 from backend.core.redis import get_cache, set_cache, delete_cache
 from backend.services.time_service import time_service
+from backend.services.fx_rate_service import get_usdinr_rate
 
 logger = structlog.get_logger()
 
@@ -177,6 +178,9 @@ class PortfolioService:
                     for pos in open_positions
                 ]
                 
+                # FX conversion (USD -> INR): priority to cached live feed, fallback to last-good/static rate
+                usdinr_rate = Decimal(str(await get_usdinr_rate()))
+
                 # Calculate available balance (initial balance minus positions value)
                 available_balance = initial_balance - positions_value
                 
@@ -207,13 +211,25 @@ class PortfolioService:
                 
                 # Calculate total portfolio value: initial balance + unrealized PnL + realized PnL
                 total_value = initial_balance + total_unrealized_pnl + total_realized_pnl
+
+                # Convert account/PnL fields to INR while leaving market prices in USD.
+                for pos in positions_list:
+                    pos["unrealized_pnl"] = Decimal(str(pos.get("unrealized_pnl", 0))) * usdinr_rate
+
+                available_balance_inr = available_balance * usdinr_rate
+                margin_used_inr = positions_value * usdinr_rate
+                total_unrealized_pnl_inr = total_unrealized_pnl * usdinr_rate
+                total_realized_pnl_inr = total_realized_pnl * usdinr_rate
+                total_value_inr = total_value * usdinr_rate
                 
                 summary = {
-                    "total_value": total_value,
-                    "available_balance": available_balance,
+                    "total_value": total_value_inr,
+                    "available_balance": available_balance_inr,
+                    "margin_used": margin_used_inr,
                     "open_positions": position_count,
-                    "total_unrealized_pnl": total_unrealized_pnl,
-                    "total_realized_pnl": total_realized_pnl,
+                    "total_unrealized_pnl": total_unrealized_pnl_inr,
+                    "total_realized_pnl": total_realized_pnl_inr,
+                    "usd_inr_rate": usdinr_rate,
                     "positions": positions_list
                 }
                 

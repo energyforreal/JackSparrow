@@ -12,6 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Position } from '@/types'
 import { cn } from '@/lib/utils'
+import { formatCurrency, formatUsdCurrency } from '@/utils/formatters'
 
 interface ActivePositionsProps {
   positions?: Position[]
@@ -89,20 +90,33 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
     )
   }
 
+  const parseNumber = (value: number | string | undefined): number | null => {
+    if (value === undefined || value === null) return null
+    const parsed = typeof value === 'number' ? value : parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
   const formatPrice = (price: number | string | undefined) => {
-    if (price === undefined || price === null) return 'N/A'
-    const numPrice = typeof price === 'string' ? parseFloat(price) : price
-    if (isNaN(numPrice)) return 'N/A'
-    return `$${numPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    const numPrice = parseNumber(price)
+    return numPrice === null ? 'N/A' : formatUsdCurrency(numPrice)
+  }
+
+  const formatQuantity = (quantity: number | string | undefined) => {
+    const parsed = parseNumber(quantity)
+    if (parsed === null) return 'N/A'
+    return parsed.toLocaleString('en-IN', { maximumFractionDigits: 6 })
   }
 
   const getOpenMinutes = (openedAt: Date | string) => {
-    const diff = Date.now() - new Date(openedAt).getTime()
+    const openedMs = new Date(openedAt).getTime()
+    if (!Number.isFinite(openedMs)) return null
+    const diff = Date.now() - openedMs
     return Math.max(0, Math.floor(diff / (1000 * 60)))
   }
 
   const getDuration = (openedAt: Date | string) => {
     const totalMin = getOpenMinutes(openedAt)
+    if (totalMin === null) return 'N/A'
     const hours = Math.floor(totalMin / 60)
     const minutes = totalMin % 60
     return `${hours}h ${minutes}m`
@@ -145,29 +159,29 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {typeof position.quantity === 'string' 
-                      ? parseFloat(position.quantity).toLocaleString()
-                      : position.quantity.toLocaleString()}
+                    {formatQuantity(position.quantity)}
                   </TableCell>
                   <TableCell>{formatPrice(position.entry_price)}</TableCell>
                   <TableCell>{formatPrice(position.current_price)}</TableCell>
                   <TableCell>
                     {position.unrealized_pnl !== undefined && position.unrealized_pnl !== null ? (
+                      (() => {
+                        const pnl = parseNumber(position.unrealized_pnl)
+                        if (pnl === null) return 'N/A'
+                        return (
                       <Badge
                         variant="outline"
                         className={cn(
-                          (typeof position.unrealized_pnl === 'string' 
-                            ? parseFloat(position.unrealized_pnl) 
-                            : position.unrealized_pnl) >= 0
+                          pnl >= 0
                             ? 'text-success border-success'
                             : 'text-error border-error'
                         )}
                       >
-                        {(typeof position.unrealized_pnl === 'string' 
-                          ? parseFloat(position.unrealized_pnl) 
-                          : position.unrealized_pnl) >= 0 ? '+' : ''}
-                        {formatPrice(position.unrealized_pnl)}
+                        {pnl > 0 ? '+' : ''}
+                        {formatCurrency(pnl)}
                       </Badge>
+                        )
+                      })()
                     ) : (
                       'N/A'
                     )}
@@ -175,7 +189,7 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
                   <TableCell
                     className={cn(
                       'tabular-nums',
-                      durationClass(getOpenMinutes(position.opened_at))
+                      durationClass(getOpenMinutes(position.opened_at) ?? 0)
                     )}
                   >
                     {getDuration(position.opened_at)}

@@ -14,11 +14,11 @@ from agent.events.schemas import DecisionReadyEvent, RiskApprovedEvent, EventTyp
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
-from agent.core.futures_utils import price_to_lots
+from agent.core.futures_utils import margin_required_inr
 from agent.core.v15_signal import apply_v15_entry_gate
 from agent.core.learning_system import LearningSystem
-from agent.core.mtf_decision_engine import compute_context_position_size_multiplier
 from agent.core.signal_filter import EntrySignalFilter
+from agent.core.redis_config import get_cache
 from agent.learning.dynamic_thresholds import (
     get_effective_min_confidence_threshold,
     resolve_metadata_recommended_threshold,
@@ -382,9 +382,6 @@ class TradingEventHandler:
 
             # Get portfolio value and current price from live market data
             state = self.context_manager.get_state()
-            portfolio_value = (
-                state.portfolio_value if state else settings.initial_balance
-            )
             entry_price = await self._get_current_price(symbol, state)
             if entry_price is None or entry_price <= 0:
                 self._log_entry_rejected(
@@ -460,41 +457,35 @@ class TradingEventHandler:
                             return
                     except (TypeError, ValueError):
                         pass
-            strength_map = {"STRONG_BUY": 0.9, "BUY": 0.65, "STRONG_SELL": 0.9, "SELL": 0.65}
-            regime = (
-                "high"
-                if vol_f > 5
-                else "medium"
-                if vol_f > 2.5
-                else ("medium" if is_v15_pred else "low")
+            fixed_lots = int(getattr(settings, "fixed_lot_size", 1) or 1)
+            if not bool(getattr(settings, "enforce_fixed_lot_size", True)):
+                fixed_lots = max(int(getattr(settings, "min_lot_size", 1) or 1), fixed_lots)
+            leverage = int(getattr(settings, "isolated_margin_leverage", 5) or 5)
+            usdinr_rate = await self._get_usdinr_rate(state)
+            required_margin_inr = margin_required_inr(
+                lots=fixed_lots,
+                btc_price_usd=entry_price,
+                usdinr_rate=usdinr_rate,
+                leverage=leverage,
+                contract_value_btc=float(getattr(settings, "contract_value_btc", 0.001)),
             )
-            rr_ratio = (
-                settings.take_profit_percentage / settings.stop_loss_percentage
-                if settings.stop_loss_percentage
-                else 2.0
-            )
-            position_size = self.risk_manager.calculate_position_size(
-                signal_strength=strength_map.get(signal, 0.65),
-                volatility_regime=regime,
-                win_probability=0.52 + confidence * 0.1,
-                risk_reward_ratio=rr_ratio,
-            )
-            ctx_mult = 1.0
-            if not bool(getattr(settings, "single_model_mode_enabled", False)):
-                ctx_mult = compute_context_position_size_multiplier(
-                    signal, model_predictions, settings
-                )
-            if ctx_mult != 1.0:
-                logger.info(
-                    "trading_context_tf_size_adjustment",
+            available_cash_inr = self._get_available_cash_inr(state)
+            if required_margin_inr <= 0 or available_cash_inr < required_margin_inr:
+                self._log_entry_rejected(
+                    "insufficient_margin_inr",
                     symbol=symbol,
                     signal=signal,
-                    multiplier=ctx_mult,
                     event_id=event.event_id,
+                    available_cash_inr=available_cash_inr,
+                    required_margin_inr=required_margin_inr,
+                    usdinr_rate=usdinr_rate,
+                    leverage=leverage,
+                    fixed_lots=fixed_lots,
+                    **diagnostics_base,
                 )
-            proposed_size = max(
-                0.01, min(position_size * ctx_mult, settings.max_position_size)
-            )
+                return
+
+            proposed_size = max(0.01, min(required_margin_inr / max(available_cash_inr, 1.0), settings.max_position_size))
 
             # Validate trade with risk manager
             validation = await self.risk_manager.validate_trade(
@@ -793,17 +784,7 @@ class TradingEventHandler:
             opp_key = self._debounce_key(symbol, "SELL" if side == "BUY" else "BUY")
             self._last_risk_approved.pop(opp_key, None)
 
-            adjusted_size = validation.get("adjusted_size", proposed_size)
-            quantity_dollars = adjusted_size * portfolio_value
-            lots = price_to_lots(
-                usd_margin=quantity_dollars,
-                btc_price=entry_price,
-                leverage=int(getattr(settings, "default_leverage", 5)),
-                contract_value_btc=float(getattr(settings, "contract_value_btc", 0.001)),
-                max_lots=int(getattr(settings, "max_lots_per_order", 100)),
-                min_lots=int(getattr(settings, "min_lot_size", 1)),
-            )
-
+            lots = fixed_lots
             if lots < int(getattr(settings, "min_lot_size", 1)):
                 logger.warning(
                     "trading_handler_zero_quantity",
@@ -828,6 +809,9 @@ class TradingEventHandler:
                 "reasoning_chain_id": (payload.get("reasoning_chain") or {}).get("chain_id"),
                 "confidence": confidence,
                 "model_predictions": (payload.get("reasoning_chain") or {}).get("model_predictions"),
+                "usd_inr_rate": usdinr_rate,
+                "required_margin_inr": required_margin_inr,
+                "available_cash_inr": available_cash_inr,
             }
             if v15_diag:
                 risk_payload["v15_diagnostics"] = v15_diag
@@ -889,6 +873,39 @@ class TradingEventHandler:
                     error=str(e),
                 )
         return None
+
+    async def _get_usdinr_rate(self, state: Optional[Any]) -> float:
+        """Best-effort USDINR lookup: context -> Redis cached last-good -> config fallback."""
+        try:
+            if state and hasattr(state, "config") and isinstance(state.config, dict):
+                md = state.config.get("market_data", {})
+                if isinstance(md, dict):
+                    for key in ("usd_inr", "usd_inr_rate", "usdinr", "inr_per_usd"):
+                        val = md.get(key)
+                        if val is not None and float(val) > 0:
+                            return float(val)
+        except Exception:
+            pass
+        try:
+            cached = await get_cache("fx:usdinr:last")
+            if isinstance(cached, dict):
+                val = cached.get("rate")
+                if val is not None and float(val) > 0:
+                    return float(val)
+        except Exception:
+            pass
+        return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+
+    def _get_available_cash_inr(self, state: Optional[Any]) -> float:
+        """Best-effort INR cash extraction from runtime state."""
+        if state is not None and hasattr(state, "portfolio_value"):
+            try:
+                val = float(state.portfolio_value)
+                if val > 0:
+                    return val
+            except Exception:
+                pass
+        return float(getattr(settings, "initial_balance", 20000.0) or 20000.0)
 
     async def register_handlers(self):
         """Register event handlers with event bus."""

@@ -22,7 +22,7 @@ REDIS_KEY_MIN_CONF = "learning:min_confidence"
 # Align with ThresholdAdapter.BOUNDS
 MILD_BOUNDS = (0.10, 0.28)
 STRONG_BOUNDS = (0.30, 0.52)
-MIN_CONF_BOUNDS = (0.46, 0.62)
+MIN_CONF_BOUNDS = (0.46, 0.80)
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:

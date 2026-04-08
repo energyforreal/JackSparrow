@@ -378,6 +378,26 @@ class Settings(BaseSettings):
     slippage_bps: float = Field(5.0, env="SLIPPAGE_BPS")
     min_lot_size: int = Field(1, env="MIN_LOT_SIZE")
     max_lots_per_order: int = Field(100, env="MAX_LOTS_PER_ORDER")
+    fixed_lot_size: int = Field(
+        default=1,
+        env="FIXED_LOT_SIZE",
+        description="Fixed lot size used for each entry when fixed sizing is enabled",
+    )
+    enforce_fixed_lot_size: bool = Field(
+        default=True,
+        env="ENFORCE_FIXED_LOT_SIZE",
+        description="When true, always trade the fixed lot size for new entries",
+    )
+    isolated_margin_leverage: int = Field(
+        default=5,
+        env="ISOLATED_MARGIN_LEVERAGE",
+        description="Leverage assumption for isolated margin checks",
+    )
+    usdinr_fallback_rate: float = Field(
+        default=83.0,
+        env="USDINR_FALLBACK_RATE",
+        description="Fallback USDINR conversion rate when live FX is unavailable",
+    )
 
     active_timeframes: str = Field(
         default="5m,15m,30m,1h,2h",
@@ -950,7 +970,7 @@ class Settings(BaseSettings):
     
     # Trading Session Defaults
     initial_balance: float = Field(
-        default=10000.0,
+        default=20000.0,
         env="INITIAL_BALANCE",
         description="Initial trading balance"
     )
@@ -965,7 +985,7 @@ class Settings(BaseSettings):
         description="Trading symbol"
     )
     min_confidence_threshold: float = Field(
-        default=0.52,
+        default=0.70,
         env="MIN_CONFIDENCE_THRESHOLD",
         description="Minimum confidence threshold for trades"
     )

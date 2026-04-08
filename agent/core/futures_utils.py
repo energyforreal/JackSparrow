@@ -66,3 +66,18 @@ def fee_adjusted_pnl(
     fees = 2 * fee_rate * notional
     net = price_pnl - fees - (funding_accumulated * notional)
     return net
+
+
+def margin_required_inr(
+    lots: int,
+    btc_price_usd: float,
+    usdinr_rate: float,
+    leverage: int = 5,
+    contract_value_btc: float = 0.001,
+) -> float:
+    """Estimate isolated margin requirement in INR for a lot-based BTCUSD trade."""
+    if lots <= 0 or btc_price_usd <= 0 or usdinr_rate <= 0 or leverage <= 0:
+        return 0.0
+    notional_usd = notional_value(lots, btc_price_usd, contract_value_btc)
+    margin_usd = notional_usd / leverage
+    return margin_usd * usdinr_rate

@@ -7,6 +7,8 @@ export interface AgentState {
 export interface Portfolio {
   total_value: number | string
   available_balance: number | string
+  margin_used?: number | string
+  usd_inr_rate?: number | string
   open_positions: number
   total_unrealized_pnl: number | string
   total_realized_pnl: number | string

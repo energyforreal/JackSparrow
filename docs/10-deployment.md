@@ -316,7 +316,9 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 > The root `.env.example` is already organized into sections (Infrastructure & Shared Services, Delta Exchange Credentials, Backend Security & API, Agent Configuration with Risk Management/Trading Session defaults, Frontend, and Optional Services). Copy it verbatim to `.env` and only change the values so every service reads the same structured configuration.
 
 > **Agent Risk Controls**  
-> Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Tune these in `.env` to match your testing needs.
+> Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Current defaults are `INITIAL_BALANCE=20000`, `MIN_CONFIDENCE_THRESHOLD=0.70`, `MIN_LOT_SIZE=1`, and `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC on Delta BTCUSD perpetual).
+>
+> Phase-1 runtime alignment also enables fixed lot sizing and isolated margin checks via `ENFORCE_FIXED_LOT_SIZE=true`, `FIXED_LOT_SIZE=1`, `ISOLATED_MARGIN_LEVERAGE=5`, and `USDINR_FALLBACK_RATE` (used only when live/cached FX is unavailable).
 
 ---
 

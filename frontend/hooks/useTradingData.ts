@@ -16,6 +16,7 @@ import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
 import { getBackendProxyBase } from '@/lib/backendProxy'
+import { formatCurrency, formatUsdCurrency } from '@/utils/formatters'
 import type {
   Signal as SharedSignal,
   Portfolio as SharedPortfolio,
@@ -231,14 +232,94 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
             }
             return state
           case 'market':
+            {
+              // Keep active positions visually real-time even if portfolio snapshots
+              // are slightly delayed by backend cache/update cadence.
+              const marketPriceRaw = data?.price
+              const marketPrice =
+                typeof marketPriceRaw === 'number'
+                  ? marketPriceRaw
+                  : typeof marketPriceRaw === 'string'
+                    ? parseFloat(marketPriceRaw)
+                    : NaN
+
+              let nextPortfolio = state.portfolio
+              if (
+                nextPortfolio &&
+                Number.isFinite(marketPrice) &&
+                Array.isArray(nextPortfolio.positions)
+              ) {
+                const usdInrRateRaw =
+                  typeof (nextPortfolio as any).usd_inr_rate === 'number'
+                    ? (nextPortfolio as any).usd_inr_rate
+                    : parseFloat(String((nextPortfolio as any).usd_inr_rate ?? 0))
+                const usdInrRate = Number.isFinite(usdInrRateRaw) && usdInrRateRaw > 0 ? usdInrRateRaw : 1
+                const symbol = data?.symbol
+                const updatedPositions = nextPortfolio.positions.map((pos: any) => {
+                  if (!symbol || pos?.symbol !== symbol) return pos
+                  const qty =
+                    typeof pos.quantity === 'number'
+                      ? pos.quantity
+                      : parseFloat(String(pos.quantity ?? 0))
+                  const entry =
+                    typeof pos.entry_price === 'number'
+                      ? pos.entry_price
+                      : parseFloat(String(pos.entry_price ?? 0))
+                  const side = String(pos.side ?? '').toUpperCase()
+                  const isLong = side === 'BUY' || side === 'LONG'
+                  const pnl =
+                    isLong
+                      ? (marketPrice - entry) * qty * usdInrRate
+                      : (entry - marketPrice) * qty * usdInrRate
+                  return {
+                    ...pos,
+                    current_price: marketPrice,
+                    unrealized_pnl: Number.isFinite(pnl) ? pnl : pos.unrealized_pnl,
+                  }
+                })
+
+                const totalUnrealized = updatedPositions.reduce((acc: number, pos: any) => {
+                  const v =
+                    typeof pos.unrealized_pnl === 'number'
+                      ? pos.unrealized_pnl
+                      : parseFloat(String(pos.unrealized_pnl ?? 0))
+                  return acc + (Number.isFinite(v) ? v : 0)
+                }, 0)
+
+                const totalRealized =
+                  typeof nextPortfolio.total_realized_pnl === 'number'
+                    ? nextPortfolio.total_realized_pnl
+                    : parseFloat(String(nextPortfolio.total_realized_pnl ?? 0))
+                const previousUnrealized =
+                  typeof nextPortfolio.total_unrealized_pnl === 'number'
+                    ? nextPortfolio.total_unrealized_pnl
+                    : parseFloat(String(nextPortfolio.total_unrealized_pnl ?? 0))
+                const previousTotalValue =
+                  typeof nextPortfolio.total_value === 'number'
+                    ? nextPortfolio.total_value
+                    : parseFloat(String(nextPortfolio.total_value ?? 0))
+                const unrealizedDelta = totalUnrealized - (Number.isFinite(previousUnrealized) ? previousUnrealized : 0)
+                const totalValue = (Number.isFinite(previousTotalValue) ? previousTotalValue : 0) + unrealizedDelta
+
+                nextPortfolio = {
+                  ...nextPortfolio,
+                  positions: updatedPositions,
+                  total_unrealized_pnl: totalUnrealized,
+                  total_realized_pnl: Number.isFinite(totalRealized) ? totalRealized : nextPortfolio.total_realized_pnl,
+                  total_value: Number.isFinite(totalValue) ? totalValue : nextPortfolio.total_value,
+                }
+              }
+
             return {
               ...state,
+              portfolio: nextPortfolio,
               marketData: {
                 ...state.marketData,
                 [data.symbol]: data
               },
               lastUpdate: now,
               dataSource: 'websocket'
+            }
             }
           case 'model': {
             // Update model data; set or merge main signal so first meaningful update is from consensus
@@ -415,6 +496,14 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         dataSource: 'api'
       }
 
+    case 'UPDATE_HEALTH':
+      return {
+        ...state,
+        health: action.payload,
+        lastUpdate: new Date(),
+        dataSource: 'api',
+      }
+
     case 'SET_PERFORMANCE_DATA':
       return {
         ...state,
@@ -539,7 +628,7 @@ function showTradeExecutedToast(data: Record<string, unknown>) {
 
   const priceLabel =
     priceNum != null
-      ? `$${priceNum.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+      ? formatUsdCurrency(priceNum)
       : '—'
 
   const isBuy = side === 'BUY' || side === 'LONG'

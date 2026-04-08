@@ -333,20 +333,18 @@ class ExecutionEngine:
                 )
                 return
 
-            # Enforce one position per symbol: reject duplicate RiskApproved if we already have same-side position
+            # Enforce one open position per symbol in phase-1 runtime alignment.
             existing = self.position_manager.get_position(symbol)
             if existing and existing.get("status") == "open":
-                existing_side = existing.get("side", "")
-                want_long = side_raw == "BUY"
-                if (existing_side == "long" and want_long) or (existing_side == "short" and not want_long):
-                    logger.info(
-                        "execution_risk_approved_skipped_duplicate_position",
-                        symbol=symbol,
-                        side=side_raw,
-                        event_id=event.event_id,
-                        message="Already have open position for this symbol and side; skipping duplicate",
-                    )
-                    return
+                logger.info(
+                    "execution_risk_approved_overlap_rejected",
+                    symbol=symbol,
+                    side=side_raw,
+                    existing_side=existing.get("side"),
+                    event_id=event.event_id,
+                    message="Open position exists for symbol; rejecting overlapping entry",
+                )
+                return
 
             # Normalize side to lowercase for execute_trade
             side = "buy" if side_raw == "BUY" else "sell"
@@ -456,6 +454,13 @@ class ExecutionEngine:
 
             if settings.paper_trading_mode:
                 from agent.core.paper_trade_logger import paper_trade_logger
+                usd_inr_rate = payload.get("usd_inr_rate")
+                try:
+                    rate = float(usd_inr_rate) if usd_inr_rate is not None else float(getattr(settings, "usdinr_fallback_rate", 83.0))
+                except (TypeError, ValueError):
+                    rate = float(getattr(settings, "usdinr_fallback_rate", 83.0))
+                contract_value_btc = float(getattr(settings, "contract_value_btc", 0.001))
+                trade_value_inr = float(quantity) * float(fill_price) * contract_value_btc * rate
                 paper_trade_logger.log_trade(
                     trade_id=trade_id,
                     symbol=symbol,
@@ -464,6 +469,9 @@ class ExecutionEngine:
                     fill_price=fill_price,
                     order_id=order_id,
                     reasoning_chain_id=payload.get("reasoning_chain_id"),
+                    usd_inr_rate=rate,
+                    trade_value_inr=trade_value_inr,
+                    fees_inr=0.0,
                 )
 
             logger.info(
@@ -607,7 +615,7 @@ class ExecutionEngine:
             order_result = await self._place_order(
                 symbol=symbol,
                 side=close_side,
-                quantity=position["quantity"],
+                quantity=position.get("lots", position.get("quantity", 0)),
                 order_type=order_type,
                 price=price
             )
@@ -636,7 +644,7 @@ class ExecutionEngine:
                     "side": position["side"],
                     "entry_price": position["entry_price"],
                     "exit_price": exit_price,
-                    "quantity": position["quantity"],
+                    "quantity": position.get("lots", position.get("quantity", 0)),
                     "pnl": closed_position["realized_pnl"],
                     "exit_reason": exit_reason,
                     "timestamp": datetime.now(timezone.utc),
@@ -657,15 +665,27 @@ class ExecutionEngine:
 
                 if settings.paper_trading_mode:
                     from agent.core.paper_trade_logger import paper_trade_logger
+                    usd_inr_rate = float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+                    fees_inr = 0.0
+                    net_pnl_inr = float(closed_position["realized_pnl"]) * usd_inr_rate - fees_inr
+                    duration_seconds = None
+                    if isinstance(position.get("entry_time"), datetime):
+                        duration_seconds = (
+                            datetime.now(timezone.utc) - position["entry_time"]
+                        ).total_seconds()
                     paper_trade_logger.log_position_close(
                         position_id=position_id,
                         symbol=symbol,
                         side=position["side"],
                         entry_price=position["entry_price"],
                         exit_price=exit_price,
-                        quantity=position["quantity"],
+                        quantity=position.get("lots", position.get("quantity", 0)),
                         pnl=closed_position["realized_pnl"],
                         exit_reason=exit_reason,
+                        fees_inr=fees_inr,
+                        net_pnl_inr=net_pnl_inr,
+                        usd_inr_rate=usd_inr_rate,
+                        duration_seconds=duration_seconds,
                     )
 
                 return ExecutionResult(True, order_id=order_result.get("order_id"))
@@ -819,6 +839,10 @@ class ExecutionEngine:
 
         if quantity <= 0:
             return {"valid": False, "error": f"Invalid quantity: {quantity}"}
+
+        existing_position = self.position_manager.get_position(symbol)
+        if existing_position and existing_position.get("status") == "open":
+            return {"valid": False, "error": f"Open position already exists for {symbol}"}
 
         if quantity < self.execution_config["min_order_size"]:
             return {"valid": False, "error": f"Quantity below minimum: {quantity}"}

@@ -190,7 +190,7 @@ interface PortfolioSummaryProps {
 ```
 
 **Features**:
-- Total portfolio value, cash, positions, PnL (aligned with `Portfolio` in `types/`)
+- INR portfolio metrics: Available Cash, Margin Used, Unrealized PnL, Realized PnL, Total Equity
 - **Skeleton** UI when `isLoading`
 - **Empty state** when loaded but no portfolio object yet
 
@@ -234,6 +234,7 @@ interface RecentTradesProps {
 
 **Features**:
 - Recent trades table (`Trade` in `types/`; optional `timestamp` / `fill_price` on payloads)
+- Trade execution price shown in **USD ($)**, while portfolio/PnL cards stay in **INR (₹)**
 - **Skeleton** while `isLoading` (avoids flashing “no trades” during initial fetch)
 - **Empty state** when loaded and list is empty
 
@@ -329,7 +330,7 @@ interface RealTimePriceProps {
 ```
 
 **Features**:
-- Real-time price display with currency formatting
+- Real-time BTCUSD market price display in **USD ($)** (including document title)
 - **Brief green/red flash** on the headline price when the tick changes
 - **Document title** updates with formatted price while mounted
 - Momentary price change indicators with trend icons

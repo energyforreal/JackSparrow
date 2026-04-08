@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatConfidence, formatDateTime } from '@/utils/formatters'
+import { formatConfidence, formatDateTime, formatUsdCurrency } from '@/utils/formatters'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { EdgeGauge } from './v15/EdgeGauge'
 import { ProbabilityBar } from './v15/ProbabilityBar'
@@ -52,11 +52,18 @@ const formatPrice = (price: number | string | undefined) => {
   if (price === undefined || price === null) return 'N/A'
   const numPrice = typeof price === 'string' ? parseFloat(price) : price
   if (isNaN(numPrice)) return 'N/A'
-  return `$${numPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return formatUsdCurrency(numPrice)
 }
 
 const formatDate = (date: Date | string) => {
   return formatDateTime(date)
+}
+
+const formatQuantity = (quantity: number | string | undefined) => {
+  if (quantity === undefined || quantity === null) return 'N/A'
+  const parsed = typeof quantity === 'number' ? quantity : parseFloat(quantity)
+  if (!Number.isFinite(parsed)) return 'N/A'
+  return parsed.toLocaleString('en-IN', { maximumFractionDigits: 6 })
 }
 
 export function TradingDecision({
@@ -172,9 +179,7 @@ export function TradingDecision({
                 <div>
                   <span className="text-muted-foreground">Quantity:</span>
                   <span className="ml-2 font-medium">
-                    {typeof recentTrade.quantity === 'string'
-                      ? parseFloat(recentTrade.quantity).toLocaleString()
-                      : recentTrade.quantity.toLocaleString()}
+                    {formatQuantity(recentTrade.quantity)}
                   </span>
                 </div>
                 <div>

@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Trade } from '@/types'
-import { formatClockTime } from '@/utils/formatters'
+import { formatClockTime, formatUsdCurrency } from '@/utils/formatters'
 
 interface RecentTradesProps {
   trades?: Trade[]
@@ -89,7 +89,14 @@ export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
     if (price === undefined || price === null) return 'N/A'
     const numPrice = typeof price === 'string' ? parseFloat(price) : price
     if (isNaN(numPrice)) return 'N/A'
-    return `$${numPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return formatUsdCurrency(numPrice)
+  }
+
+  const formatQuantity = (quantity: number | string | undefined) => {
+    if (quantity === undefined || quantity === null) return 'N/A'
+    const parsed = typeof quantity === 'number' ? quantity : parseFloat(quantity)
+    if (!Number.isFinite(parsed)) return 'N/A'
+    return parsed.toLocaleString('en-IN', { maximumFractionDigits: 6 })
   }
 
   const formatDate = (date: Date | string) => {
@@ -143,9 +150,7 @@ export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
                   </TableCell>
                   <TableCell className="font-medium">{trade.symbol}</TableCell>
                   <TableCell>
-                    {typeof trade.quantity === 'string' 
-                      ? parseFloat(trade.quantity).toLocaleString()
-                      : trade.quantity.toLocaleString()}
+                    {formatQuantity(trade.quantity)}
                   </TableCell>
                   <TableCell>{formatPrice(trade.price ?? trade.fill_price)}</TableCell>
                   <TableCell>

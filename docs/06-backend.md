@@ -1061,6 +1061,11 @@ class ModelPerformance(Base):
 - `get_portfolio_status()`: Get current portfolio status
 - `calculate_performance(period)`: Calculate performance metrics
 - `get_trade_history(limit, offset)`: Get trade history
+- `get_usdinr_rate()` path: use market-fed cached USDINR first, then last-good/static fallback for INR portfolio/PnL conversion
+
+**Currency contract (Phase 1)**:
+- BTCUSD market prices remain USD in market payloads (`price`, `entry_price`, `current_price`)
+- Portfolio balances/PnL are emitted in INR (`total_value`, `available_balance`, `margin_used`, `total_unrealized_pnl`, `total_realized_pnl`)
 
 ### Feature Service
 

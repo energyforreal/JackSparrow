@@ -19,6 +19,11 @@ JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 ## Key Requirements
 
 - **Paper trading only** on Delta Exchange India (BTCUSD initially)
+- **INR portfolio defaults**: `INITIAL_BALANCE=20000` (displayed as `₹20,000`)
+- **Currency split**: BTCUSD market prices render in `USD ($)` while portfolio/PnL render in `INR (₹)`
+- **Entry confidence gate**: trades execute only when confidence is `>= 70%` (`MIN_CONFIDENCE_THRESHOLD=0.70`)
+- **Delta BTCUSD lot semantics**: `MIN_LOT_SIZE=1` lot with `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC)
+- **Runtime execution controls**: fixed `1` lot entries, isolated margin assumption `5x`, INR margin sufficiency checks
 - **Real-time price monitoring** with instant BTCUSD price updates in frontend
 - **Fluctuation-based signal generation** triggered when price moves exceed `PRICE_FLUCTUATION_THRESHOLD_PCT` (default **0.10** = 0.10%; configurable in `.env`, e.g. `0.5` for 0.5%)
 - **Reliable frontend-backend integration** with real-time communication

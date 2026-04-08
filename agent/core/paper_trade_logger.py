@@ -75,6 +75,9 @@ class PaperTradeLogger:
         order_id: Optional[str] = None,
         position_id: Optional[str] = None,
         reasoning_chain_id: Optional[str] = None,
+        usd_inr_rate: Optional[float] = None,
+        trade_value_inr: Optional[float] = None,
+        fees_inr: Optional[float] = None,
     ) -> None:
         """Log a paper trade execution.
 
@@ -90,11 +93,16 @@ class PaperTradeLogger:
         """
         try:
             py_logger = self._ensure_logger()
-            ts = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
+            ts = now.isoformat()
+            local_ts = datetime.now().astimezone().isoformat()
             line = (
                 f"TRADE|{ts}|{trade_id}|{symbol}|{side}|{quantity}|{fill_price}|"
                 f"order_id={order_id or ''}|position_id={position_id or ''}|"
-                f"reasoning_chain_id={reasoning_chain_id or ''}\n"
+                f"reasoning_chain_id={reasoning_chain_id or ''}|"
+                f"local_time={local_ts}|usd_inr_rate={usd_inr_rate if usd_inr_rate is not None else ''}|"
+                f"trade_value_inr={trade_value_inr if trade_value_inr is not None else ''}|"
+                f"fees_inr={fees_inr if fees_inr is not None else ''}\n"
             )
             py_logger.info(line.strip())
         except Exception as e:
@@ -115,6 +123,10 @@ class PaperTradeLogger:
         quantity: float,
         pnl: float,
         exit_reason: str,
+        fees_inr: Optional[float] = None,
+        net_pnl_inr: Optional[float] = None,
+        usd_inr_rate: Optional[float] = None,
+        duration_seconds: Optional[float] = None,
     ) -> None:
         """Log a position close for P&L tracking.
 
@@ -130,10 +142,16 @@ class PaperTradeLogger:
         """
         try:
             py_logger = self._ensure_logger()
-            ts = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(timezone.utc)
+            ts = now.isoformat()
+            local_ts = datetime.now().astimezone().isoformat()
             line = (
                 f"CLOSE|{ts}|{position_id}|{symbol}|{side}|{entry_price}|{exit_price}|"
-                f"{quantity}|{pnl}|{exit_reason}\n"
+                f"{quantity}|{pnl}|{exit_reason}|local_time={local_ts}|"
+                f"fees_inr={fees_inr if fees_inr is not None else ''}|"
+                f"net_pnl_inr={net_pnl_inr if net_pnl_inr is not None else ''}|"
+                f"usd_inr_rate={usd_inr_rate if usd_inr_rate is not None else ''}|"
+                f"duration_seconds={duration_seconds if duration_seconds is not None else ''}\n"
             )
             py_logger.info(line.strip())
         except Exception as e:
