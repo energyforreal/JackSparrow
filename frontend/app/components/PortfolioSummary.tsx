@@ -70,7 +70,7 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
   const isPositive = totalPnL >= 0
   const availableBalance = parseNumber(portfolio.available_balance)
   const marginUsed = parseNumber(portfolio.margin_used)
-  const totalEquity = availableBalance + totalUnrealizedPnL
+  const totalEquity = totalValue  // Use backend-computed total_value directly
 
   return (
     <Card role="region" aria-label="Portfolio Summary">

@@ -448,6 +448,16 @@ class PortfolioSummaryResponse(DecimalSerializerMixin, BaseModel):
         description="Available balance",
         example=9500.0
     )
+    margin_used: Decimal = Field(
+        default=Decimal("0"),
+        description="Margin currently in use (INR)",
+        example=500.0
+    )
+    usd_inr_rate: Decimal = Field(
+        default=Decimal("0"),
+        description="USD/INR conversion rate used for INR normalization",
+        example=83.0
+    )
     open_positions: int = Field(
         ...,
         description="Number of open positions",

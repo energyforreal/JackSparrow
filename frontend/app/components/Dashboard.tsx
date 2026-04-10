@@ -193,7 +193,11 @@ export function Dashboard() {
                 <ActivePositions positions={positions} isLoading={portfolioBlockLoading} />
               </ErrorBoundary>
               <ErrorBoundary>
-                <RecentTrades trades={recentTrades} isLoading={portfolioBlockLoading} />
+                <RecentTrades
+                  trades={recentTrades}
+                  isLoading={portfolioBlockLoading}
+                  usdInrRate={portfolio?.usd_inr_rate}
+                />
               </ErrorBoundary>
             </div>
 
@@ -203,6 +207,7 @@ export function Dashboard() {
                 signal={signal}
                 recentTrade={recentTrades?.[0] || null}
                 paperTradingMode={true}
+                usdInrRate={portfolio?.usd_inr_rate}
               />
             </ErrorBoundary>
           </TabsContent>

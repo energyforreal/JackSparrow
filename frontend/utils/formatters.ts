@@ -94,142 +94,142 @@ export function getConfidenceColorClass(confidence: number): string {
 }
 
 /**
+ * Parse backend ISO timestamps into a Date. If the string has no timezone suffix,
+ * treats it as UTC (append `Z`). Returns null for missing, invalid, or pre-2000 values
+ * so callers can distinguish bad data from real timestamps.
+ */
+export function parseUtcTimestamp(
+  date: Date | string | null | undefined
+): Date | null {
+  if (date === null || date === undefined) return null
+  if (typeof date === 'string') {
+    if (!date.trim()) return null
+    const trimmedDate = date.trim()
+    const hasExplicitTimezone =
+      trimmedDate.endsWith('Z') ||
+      /[+-]\d{2}:\d{2}$/.test(trimmedDate) ||
+      /[+-]\d{4}$/.test(trimmedDate)
+    const isoString = hasExplicitTimezone ? trimmedDate : `${trimmedDate}Z`
+    const parsedDate = new Date(isoString)
+    if (Number.isNaN(parsedDate.getTime()) || parsedDate.getUTCFullYear() < 2000) {
+      return null
+    }
+    return parsedDate
+  }
+  if (date instanceof Date) {
+    if (Number.isNaN(date.getTime()) || date.getUTCFullYear() < 2000) {
+      return null
+    }
+    return date
+  }
+  return null
+}
+
+/**
  * Calculate data freshness indicator color based on timestamp age.
  * Returns color class for freshness indicators with more granular thresholds.
  */
 export function getDataFreshnessColor(timestamp: Date | string | null | undefined): string {
-  if (!timestamp) return 'text-muted-foreground'
-  
+  if (timestamp === null || timestamp === undefined) return 'text-muted-foreground'
+
+  const dataTime = parseUtcTimestamp(timestamp)
+  if (!dataTime) return 'text-muted-foreground'
+
   const now = new Date()
-  const dataTime = typeof timestamp === 'string' ? new Date(timestamp) : timestamp
   const ageMs = now.getTime() - dataTime.getTime()
   const ageSeconds = ageMs / 1000
   const ageMinutes = ageSeconds / 60
-  
-  // More granular color coding for better visual feedback
-  if (ageSeconds < 30) return 'text-green-600 dark:text-green-400'      // Very fresh (< 30s)
-  if (ageMinutes < 1) return 'text-green-500 dark:text-green-500'       // Fresh (< 1 min)
-  if (ageMinutes < 2) return 'text-yellow-500 dark:text-yellow-500'      // Recent (< 2 min)
-  if (ageMinutes < 5) return 'text-amber-600 dark:text-amber-400'       // Moderate (< 5 min)
-  if (ageMinutes < 15) return 'text-orange-600 dark:text-orange-400'     // Stale (< 15 min)
-  return 'text-red-600 dark:text-red-400'                                 // Very stale (>= 15 min)
+
+  if (ageSeconds < 30) return 'text-green-600 dark:text-green-400'
+  if (ageMinutes < 1) return 'text-green-500 dark:text-green-500'
+  if (ageMinutes < 2) return 'text-yellow-500 dark:text-yellow-500'
+  if (ageMinutes < 5) return 'text-amber-600 dark:text-amber-400'
+  if (ageMinutes < 15) return 'text-orange-600 dark:text-orange-400'
+  return 'text-red-600 dark:text-red-400'
 }
 
 /**
  * Normalize a date string or Date object to a Date object.
  * Ensures UTC timestamps are properly parsed before IST conversion.
- * 
+ *
  * This function is exported so it can be used in hooks to ensure
  * consistent timestamp parsing throughout the application.
  */
 export function normalizeDate(date: Date | string | null | undefined): Date {
-  // Handle null/undefined
-  if (!date) {
+  if (date === null || date === undefined) {
     if (process.env.NODE_ENV === 'development') {
       console.warn('[normalizeDate] Null or undefined date provided, using current time')
     }
     return new Date()
   }
 
-  if (typeof date === 'string') {
-    // Reject empty strings
-    if (!date.trim()) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[normalizeDate] Empty string date provided, using current time')
-      }
-      return new Date()
-    }
-
-    // Backend currently sends timestamps like "2025-12-02T10:11:11.976865"
-    // without an explicit timezone. Those should be treated as UTC and then
-    // displayed in IST on the frontend.
-    //
-    // Heuristic:
-    // - If the string already has a timezone (ends with Z or contains +hh:mm/-hh:mm),
-    //   let the Date constructor handle it.
-    // - Otherwise, assume UTC by appending 'Z'.
-    // 
-    // Check for timezone indicators:
-    // 1. Ends with 'Z' (UTC indicator)
-    // 2. Contains timezone offset like +00:00, +05:30, -05:00 at the end
-    // 3. Handle edge cases with microseconds: "2025-01-27T12:33:19.976865+00:00"
-    const trimmedDate = date.trim()
-    const hasExplicitTimezone =
-      trimmedDate.endsWith('Z') || 
-      /[+-]\d{2}:\d{2}$/.test(trimmedDate) ||
-      /[+-]\d{4}$/.test(trimmedDate) // Handle formats like +0000 (without colon)
-
-    const isoString = hasExplicitTimezone ? trimmedDate : `${trimmedDate}Z`
-    const parsedDate = new Date(isoString)
-    
-    // Validate parsed date is not epoch time or invalid
-    if (isNaN(parsedDate.getTime()) || parsedDate.getFullYear() < 2000) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[normalizeDate] Invalid or epoch date detected:', {
-          raw_input: date,
-          parsed_date: parsedDate,
-          parsed_utc_iso: parsedDate.toISOString(),
-          is_epoch: parsedDate.getFullYear() < 2000
-        })
-      }
-      return new Date()  // Return current time for invalid dates
-    }
-    
-    // Debug logging in development mode
+  if (typeof date === 'string' && !date.trim()) {
     if (process.env.NODE_ENV === 'development') {
+      console.warn('[normalizeDate] Empty string date provided, using current time')
+    }
+    return new Date()
+  }
+
+  const parsed = parseUtcTimestamp(date)
+  if (parsed) {
+    if (process.env.NODE_ENV === 'development' && typeof date === 'string') {
+      const trimmedDate = date.trim()
+      const hasExplicitTimezone =
+        trimmedDate.endsWith('Z') ||
+        /[+-]\d{2}:\d{2}$/.test(trimmedDate) ||
+        /[+-]\d{4}$/.test(trimmedDate)
+      const isoString = hasExplicitTimezone ? trimmedDate : `${trimmedDate}Z`
       console.log('[normalizeDate] Timestamp normalization:', {
         raw_input: date,
         has_explicit_timezone: hasExplicitTimezone,
         normalized_iso_string: isoString,
-        parsed_date: parsedDate,
-        parsed_utc_iso: parsedDate.toISOString(),
-        parsed_local_string: parsedDate.toString(),
-        is_valid: !isNaN(parsedDate.getTime()),
+        parsed_date: parsed,
+        parsed_utc_iso: parsed.toISOString(),
+        parsed_local_string: parsed.toString(),
         current_time: new Date().toISOString(),
-        current_time_local: new Date().toString()
+        current_time_local: new Date().toString(),
       })
     }
-    
-    return parsedDate
-  }
-  
-  // Handle Date objects
-  if (date instanceof Date) {
-    // Validate Date is not invalid or epoch time
-    if (isNaN(date.getTime()) || date.getFullYear() < 2000) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn('[normalizeDate] Invalid or epoch Date object:', {
-          input_date: date,
-          is_epoch: date.getFullYear() < 2000,
-          is_invalid: isNaN(date.getTime())
-        })
-      }
-      return new Date()  // Return current time for invalid dates
-    }
-    
-    // Debug logging for Date objects
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === 'development' && date instanceof Date) {
       console.log('[normalizeDate] Date object passed:', {
         input_date: date,
         utc_iso: date.toISOString(),
         local_string: date.toString(),
-        is_valid: !isNaN(date.getTime())
       })
     }
-    
-    return date
+    return parsed
   }
-  
-  // Fallback for any other type
+
+  if (typeof date === 'string' || date instanceof Date) {
+    if (process.env.NODE_ENV === 'development') {
+      const bad =
+        typeof date === 'string'
+          ? new Date(
+              date.trim().endsWith('Z') ||
+                /[+-]\d{2}:\d{2}$/.test(date.trim()) ||
+                /[+-]\d{4}$/.test(date.trim())
+                ? date.trim()
+                : `${date.trim()}Z`
+            )
+          : date
+      console.warn('[normalizeDate] Unusable timestamp (invalid or before year 2000):', {
+        raw_input: date,
+        parsed_probe: bad,
+        is_invalid: Number.isNaN(bad.getTime()),
+        year_utc: Number.isNaN(bad.getTime()) ? null : bad.getUTCFullYear(),
+      })
+    }
+    return new Date()
+  }
+
   if (process.env.NODE_ENV === 'development') {
     console.warn('[normalizeDate] Unexpected date type:', typeof date, date)
   }
   return new Date()
 }
 
-function isValidDate(date: Date | string): boolean {
-  const d = normalizeDate(date)
-  return !Number.isNaN(d.getTime()) && d.getTime() > 0
+export function isValidDate(date: Date | string | null | undefined): boolean {
+  return parseUtcTimestamp(date) !== null
 }
 
 export function formatDate(date: Date | string): string {

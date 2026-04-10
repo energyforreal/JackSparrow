@@ -604,6 +604,27 @@ class RiskManager:
             result["approved"] = False
             result["reason"] = f"Trading not allowed: {risk_assessment.overall_risk_level} risk level"
             return result
+        
+        # Check budget constraints for BUY trades
+        if side == 'long' or side == 'buy':
+            budget_check = await self.validate_budget_constraint(
+                proposed_size,
+                entry_price,
+                side,
+                proposed_size_is_fraction=True,
+            )
+            if not budget_check["approved"]:
+                result["approved"] = False
+                result["reason"] = budget_check["reason"]
+                result["budget_check"] = budget_check
+                logger.warning(
+                    "trade_rejected_insufficient_budget",
+                    symbol=symbol,
+                    required=budget_check["required_balance"],
+                    available=budget_check["available_balance"]
+                )
+                return result
+            result["budget_check"] = budget_check
 
         # Check position size limits
         max_allowed_size = risk_assessment.max_position_size
@@ -676,6 +697,79 @@ class RiskManager:
                        size=result["adjusted_size"],
                        warnings=len(result["warnings"]))
 
+        return result
+
+    async def validate_budget_constraint(
+        self,
+        proposed_size: float,
+        entry_price: float,
+        side: str = "long",
+        proposed_size_is_fraction: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Validate that proposed trade doesn't exceed available budget.
+        
+        Args:
+            proposed_size: Position size value to validate
+            entry_price: Entry price in USD
+            side: 'long' or 'short'
+            proposed_size_is_fraction: When True, proposed_size is interpreted as
+                portfolio fraction (0..1). When False, as base currency quantity.
+            
+        Returns:
+            Validation result with approval status and available balance
+        """
+        if not self._initialized or not self.portfolio:
+            return {
+                "approved": False,
+                "reason": "Risk manager not initialized",
+                "available_balance": 0.0,
+                "required_balance": 0.0
+            }
+        
+        # Use consistent units with caller intent.
+        if proposed_size_is_fraction:
+            required_balance = self.portfolio.total_value * proposed_size
+            requirement_units = "portfolio_fraction"
+        else:
+            required_balance = entry_price * proposed_size
+            requirement_units = "base_quantity"
+        available_balance = self.portfolio.cash_balance
+        
+        result = {
+            "approved": True,
+            "reason": "Sufficient budget available",
+            "available_balance": available_balance,
+            "required_balance": required_balance,
+            "remaining_balance_after_trade": available_balance - required_balance,
+            "position_cost_pct": (required_balance / self.portfolio.total_value * 100) if self.portfolio.total_value > 0 else 0.0,
+            "requirement_units": requirement_units,
+        }
+        
+        # Check if we have enough cash
+        if required_balance > available_balance:
+            result["approved"] = False
+            result["reason"] = f"Insufficient budget: Required ${required_balance:.2f}, Available ${available_balance:.2f}"
+            result["shortfall"] = required_balance - available_balance
+            logger.warning("budget_validation_failed",
+                          required=required_balance,
+                          available=available_balance,
+                          shortfall=result["shortfall"])
+        elif available_balance - required_balance < 0:
+            result["approved"] = False
+            result["reason"] = "Trade would result in negative available balance"
+            logger.warning("budget_validation_failed_negative_balance",
+                          required=required_balance,
+                          available=available_balance)
+        else:
+            # Warn if using >50% of available balance
+            if required_balance > available_balance * 0.5:
+                result["warnings"] = [
+                    f"Trade uses {(required_balance/available_balance*100):.1f}% of available balance"
+                ]
+                logger.info("high_budget_utilization",
+                           utilization_pct=(required_balance/available_balance*100))
+        
         return result
 
     async def calculate_portfolio_optimal_allocation(self, available_symbols: List[str],

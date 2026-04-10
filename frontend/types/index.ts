@@ -21,8 +21,12 @@ export interface Position {
   side: string
   quantity: number | string
   entry_price: number | string
+  entry_price_usd?: number | string
   current_price?: number | string
+  current_price_usd?: number | string
   unrealized_pnl?: number | string
+  unrealized_pnl_usd?: number | string
+  unrealized_pnl_inr?: number | string
   status: string
   opened_at: Date | string
   stop_loss?: number | string
@@ -35,11 +39,14 @@ export interface Trade {
   side: string
   quantity: number | string
   price: number | string
+  price_inr?: number | string
+  trade_value_inr?: number | string
   status: string
   executed_at: Date | string
   /** Present on some WebSocket / API payloads */
   timestamp?: Date | string
   fill_price?: number | string
+  usd_inr_rate?: number | string
 }
 
 export interface ModelPrediction {

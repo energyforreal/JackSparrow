@@ -12,7 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Position } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatCurrency, formatUsdCurrency } from '@/utils/formatters'
+import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
 
 interface ActivePositionsProps {
   positions?: Position[]
@@ -107,14 +107,15 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
     return parsed.toLocaleString('en-IN', { maximumFractionDigits: 6 })
   }
 
-  const getOpenMinutes = (openedAt: Date | string) => {
-    const openedMs = new Date(openedAt).getTime()
-    if (!Number.isFinite(openedMs)) return null
+  const getOpenMinutes = (openedAt: Date | string | null | undefined) => {
+    const opened = parseUtcTimestamp(openedAt)
+    if (!opened) return null
+    const openedMs = opened.getTime()
     const diff = Date.now() - openedMs
     return Math.max(0, Math.floor(diff / (1000 * 60)))
   }
 
-  const getDuration = (openedAt: Date | string) => {
+  const getDuration = (openedAt: Date | string | null | undefined) => {
     const totalMin = getOpenMinutes(openedAt)
     if (totalMin === null) return 'N/A'
     const hours = Math.floor(totalMin / 60)
@@ -161,12 +162,13 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
                   <TableCell>
                     {formatQuantity(position.quantity)}
                   </TableCell>
-                  <TableCell>{formatPrice(position.entry_price)}</TableCell>
-                  <TableCell>{formatPrice(position.current_price)}</TableCell>
+                  <TableCell>{formatPrice(position.entry_price_usd ?? position.entry_price)}</TableCell>
+                  <TableCell>{formatPrice(position.current_price_usd ?? position.current_price)}</TableCell>
                   <TableCell>
-                    {position.unrealized_pnl !== undefined && position.unrealized_pnl !== null ? (
+                    {(position.unrealized_pnl_inr !== undefined && position.unrealized_pnl_inr !== null) ||
+                    (position.unrealized_pnl !== undefined && position.unrealized_pnl !== null) ? (
                       (() => {
-                        const pnl = parseNumber(position.unrealized_pnl)
+                        const pnl = parseNumber(position.unrealized_pnl_inr ?? position.unrealized_pnl)
                         if (pnl === null) return 'N/A'
                         return (
                       <Badge

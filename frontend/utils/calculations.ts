@@ -1,8 +1,18 @@
-export function calculatePnL(entryPrice: number, currentPrice: number, quantity: number, side: string): number {
-  if (side === 'BUY') {
-    return (currentPrice - entryPrice) * quantity
+// Define contract size (1 lot = 0.001 BTC on Delta Exchange)
+const CONTRACT_VALUE_BTC = 0.001
+
+export function calculatePnL(
+  entryPrice: number,
+  currentPrice: number,
+  quantity: number,
+  side: string,
+  contractValueBtc: number = CONTRACT_VALUE_BTC
+): number {
+  const btcQuantity = quantity * contractValueBtc
+  if (side === 'BUY' || side === 'LONG') {
+    return (currentPrice - entryPrice) * btcQuantity
   } else {
-    return (entryPrice - currentPrice) * quantity
+    return (entryPrice - currentPrice) * btcQuantity
   }
 }
 
@@ -30,7 +40,8 @@ export function calculatePositionImpact(
   currentPrice: number,
   quantity: number,
   side: string,
-  stopLoss?: number
+  stopLoss?: number,
+  contractValueBtc: number = CONTRACT_VALUE_BTC
 ): {
   pnlChange: number
   pnlPercent: number
@@ -39,13 +50,12 @@ export function calculatePositionImpact(
   currentValue: number
   entryValue: number
 } {
-  // Calculate P&L change
-  const pnlChange = side === 'BUY'
-    ? (currentPrice - entryPrice) * quantity
-    : (entryPrice - currentPrice) * quantity
+  // Calculate P&L change using contract size
+  const pnlChange = calculatePnL(entryPrice, currentPrice, quantity, side, contractValueBtc)
 
-  // Calculate position values
-  const entryValue = entryPrice * quantity
+  // Calculate position values with contract size
+  const btcQuantity = quantity * contractValueBtc
+  const entryValue = entryPrice * btcQuantity
   const currentValue = entryValue + pnlChange
 
   // Calculate percentage change

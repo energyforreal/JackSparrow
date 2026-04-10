@@ -226,9 +226,9 @@ class Settings(BaseSettings):
     
     # Trading Configuration
     initial_balance: float = Field(
-        default=10000.0,
+        default=20000.0,
         env="INITIAL_BALANCE",
-        description="Initial balance for paper trading (in USD)"
+        description="Initial balance for paper trading (in INR)"
     )
     paper_trading_mode: bool = Field(
         default=True,

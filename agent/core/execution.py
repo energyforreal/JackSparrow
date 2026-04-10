@@ -38,8 +38,8 @@ class Order:
         self.status = "pending"  # 'pending', 'open', 'filled', 'cancelled', 'rejected'
         self.filled_quantity = 0.0
         self.average_fill_price = 0.0
-        self.created_time = datetime.utcnow()
-        self.updated_time = datetime.utcnow()
+        self.created_time = datetime.now(timezone.utc)
+        self.updated_time = datetime.now(timezone.utc)
         self.fills: List[Dict[str, Any]] = []
 
     def is_complete(self) -> bool:
@@ -53,7 +53,7 @@ class Order:
     def update_fill(self, fill_quantity: float, fill_price: float, timestamp: Optional[datetime] = None):
         """Update order with a fill."""
         if timestamp is None:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now(timezone.utc)
 
         self.fills.append({
             "quantity": fill_quantity,
@@ -77,7 +77,7 @@ class Order:
         """Cancel the order."""
         if self.status in ["pending", "open", "partially_filled"]:
             self.status = "cancelled"
-            self.updated_time = datetime.utcnow()
+            self.updated_time = datetime.now(timezone.utc)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -334,17 +334,19 @@ class ExecutionEngine:
                 return
 
             # Enforce one open position per symbol in phase-1 runtime alignment.
-            existing = self.position_manager.get_position(symbol)
-            if existing and existing.get("status") == "open":
-                logger.info(
-                    "execution_risk_approved_overlap_rejected",
-                    symbol=symbol,
-                    side=side_raw,
-                    existing_side=existing.get("side"),
-                    event_id=event.event_id,
-                    message="Open position exists for symbol; rejecting overlapping entry",
-                )
-                return
+            # Skip for paper trading to allow multiple paper trades
+            if not getattr(settings, "paper_trading_mode", False):
+                existing = self.position_manager.get_position(symbol)
+                if existing and existing.get("status") == "open":
+                    logger.info(
+                        "execution_risk_approved_overlap_rejected",
+                        symbol=symbol,
+                        side=side_raw,
+                        existing_side=existing.get("side"),
+                        event_id=event.event_id,
+                        message="Open position exists for symbol; rejecting overlapping entry",
+                    )
+                    return
 
             # Normalize side to lowercase for execute_trade
             side = "buy" if side_raw == "BUY" else "sell"
@@ -447,6 +449,8 @@ class ExecutionEngine:
                     "side": side_raw,
                     "quantity": quantity,
                     "fill_price": fill_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
                     "timestamp": datetime.now(timezone.utc),
                 },
             )
@@ -517,12 +521,7 @@ class ExecutionEngine:
             stop_loss = trade.get("stop_loss")
             take_profit = trade.get("take_profit")
 
-            # Validate trade parameters
-            validation_result = await self._validate_trade(trade)
-            if not validation_result["valid"]:
-                return ExecutionResult(False, error_message=validation_result["error"])
-
-            # Check if we need to close existing position first
+            # Check if we need to close existing position first (BEFORE validation)
             existing_position = self.position_manager.get_position(symbol)
             if existing_position and existing_position["side"] != ("long" if side == "buy" else "short"):
                 # Close opposite position first
@@ -530,6 +529,11 @@ class ExecutionEngine:
                 # In paper mode, allow a fresh ticker for the open leg so close and open use different fill prices
                 if settings.paper_trading_mode:
                     await asyncio.sleep(0.05)
+
+            # Validate trade parameters (after potential position close)
+            validation_result = await self._validate_trade(trade)
+            if not validation_result["valid"]:
+                return ExecutionResult(False, error_message=validation_result["error"])
 
             # Execute the order
             order_result = await self._place_order(
@@ -784,6 +788,21 @@ class ExecutionEngine:
         stop_loss = position.get("stop_loss")
         take_profit = position.get("take_profit")
 
+        # Check minimum hold time constraint
+        min_hold_until = position.get("v15_min_hold_until")
+        if min_hold_until is not None:
+            now = datetime.now(timezone.utc)
+            # Ensure comparison works regardless of naive/aware
+            if hasattr(min_hold_until, 'tzinfo') and min_hold_until.tzinfo:
+                min_hold_dt = min_hold_until
+            else:
+                # Assume naive datetime is UTC
+                min_hold_dt = min_hold_until.replace(tzinfo=timezone.utc)
+            
+            if now < min_hold_dt:
+                logger.debug("min_hold_not_reached", symbol=position_symbol, until=min_hold_until, now=now)
+                return {"symbol": position_symbol, "actions_taken": [], "position_status": position["status"]}
+
         if stop_loss:
             should_stop = (position["side"] == "long" and current_price <= stop_loss) or \
                          (position["side"] == "short" and current_price >= stop_loss)
@@ -955,11 +974,17 @@ class ExecutionEngine:
         result = ticker.get("result") or ticker
         if not isinstance(result, dict):
             raise ValueError(f"Ticker returned invalid data for {symbol}")
-        ticker_ts = result.get("timestamp")
-        if ticker_ts is None:
+        ticker_ts_raw = result.get("timestamp")
+        if ticker_ts_raw is None:
             raise ValueError(f"Ticker for {symbol} has no timestamp; cannot validate freshness")
+        
+        # Detect whether timestamp is in milliseconds or seconds
+        ticker_ts = float(ticker_ts_raw)
+        if ticker_ts > 1e10:  # Timestamps >~year 2286 in seconds are future; ms values are present
+            ticker_ts /= 1000.0  # Convert ms to seconds
+        
         max_age_s = float(getattr(settings, "paper_ticker_max_age_seconds", 10.0) or 10.0)
-        age_s = time.time() - float(ticker_ts)
+        age_s = time.time() - ticker_ts
         if age_s > max_age_s:
             if getattr(settings, "paper_fill_price_fallback_enabled", True):
                 context_price = self._get_context_price(symbol)

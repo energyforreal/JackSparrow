@@ -11,14 +11,15 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Trade } from '@/types'
-import { formatClockTime, formatUsdCurrency } from '@/utils/formatters'
+import { formatClockTime, formatCurrency } from '@/utils/formatters'
 
 interface RecentTradesProps {
   trades?: Trade[]
   isLoading?: boolean
+  usdInrRate?: number | string
 }
 
-export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
+export function RecentTrades({ trades, isLoading = false, usdInrRate }: RecentTradesProps) {
   if (isLoading) {
     return (
       <Card role="status" aria-label="Loading recent trades">
@@ -34,7 +35,7 @@ export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
                   <TableHead>Side</TableHead>
                   <TableHead>Symbol</TableHead>
                   <TableHead>Quantity</TableHead>
-                  <TableHead>Price</TableHead>
+                  <TableHead>Trade Value</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -85,11 +86,27 @@ export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
     )
   }
 
-  const formatPrice = (price: number | string | undefined) => {
-    if (price === undefined || price === null) return 'N/A'
-    const numPrice = typeof price === 'string' ? parseFloat(price) : price
-    if (isNaN(numPrice)) return 'N/A'
-    return formatUsdCurrency(numPrice)
+  const parseNumber = (value: number | string | undefined): number | null => {
+    if (value === undefined || value === null) return null
+    const parsed = typeof value === 'number' ? value : parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  const usdInr = (() => {
+    const parsed = parseNumber(usdInrRate)
+    return parsed && parsed > 0 ? parsed : 83
+  })()
+
+  const contractValueBtc = 0.001
+
+  const formatTradeValueInr = (trade: Trade) => {
+    const explicit = parseNumber(trade.trade_value_inr)
+    if (explicit !== null) return formatCurrency(explicit)
+    const quantity = parseNumber(trade.quantity)
+    const priceUsd = parseNumber(trade.price ?? trade.fill_price)
+    if (quantity === null || priceUsd === null) return 'N/A'
+    const valueInr = quantity * priceUsd * contractValueBtc * usdInr
+    return formatCurrency(valueInr)
   }
 
   const formatQuantity = (quantity: number | string | undefined) => {
@@ -131,7 +148,7 @@ export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
                 <TableHead>Side</TableHead>
                 <TableHead>Symbol</TableHead>
                 <TableHead>Quantity</TableHead>
-                <TableHead>Price</TableHead>
+                <TableHead>Trade Value</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -152,7 +169,7 @@ export function RecentTrades({ trades, isLoading = false }: RecentTradesProps) {
                   <TableCell>
                     {formatQuantity(trade.quantity)}
                   </TableCell>
-                  <TableCell>{formatPrice(trade.price ?? trade.fill_price)}</TableCell>
+                  <TableCell>{formatTradeValueInr(trade)}</TableCell>
                   <TableCell>
                     <Badge variant={getStatusVariant(trade.status ?? 'EXECUTED')}>
                       {trade.status ?? 'EXECUTED'}

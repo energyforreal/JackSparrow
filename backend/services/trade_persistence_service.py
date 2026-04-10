@@ -9,7 +9,8 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, case, cast, String
+from sqlalchemy.types import Numeric
 import structlog
 import uuid
 
@@ -99,6 +100,80 @@ class TradePersistenceService:
                 
                 # Convert side to TradeSide enum
                 trade_side = TradeSide.BUY if side.upper() == "BUY" else TradeSide.SELL
+                from backend.core.config import settings
+                
+                # For BUY trades, validate we have sufficient available balance
+                if trade_side == TradeSide.BUY and not bool(getattr(settings, "paper_trading_mode", True)):
+                    required_balance_usd = Decimal(str(quantity * fill_price))
+                    initial_balance_inr = Decimal(str(getattr(settings, 'initial_balance', 20000.0)))
+                    
+                    # Get USD/INR rate
+                    from backend.services.fx_rate_service import get_usdinr_rate
+                    usdinr_rate = Decimal(str(await get_usdinr_rate()))
+                    
+                    # Calculate available balance in USD
+                    # Available balance = initial_balance/rate + realized_PnL - open_positions_value
+                    open_positions_agg = select(
+                        func.sum(
+                            case(
+                                ((Position.entry_price.isnot(None)) & (Position.quantity.isnot(None)),
+                                 Position.entry_price * Position.quantity),
+                                else_=0
+                            )
+                        ).label('positions_value')
+                    ).where(cast(Position.status, String) == PositionStatus.OPEN.value)
+                    
+                    result = await session.execute(open_positions_agg)
+                    agg_result = result.first()
+                    positions_value_usd = Decimal(str(agg_result.positions_value or 0))
+                    
+                    # Get realized PnL
+                    closed_positions_agg = select(
+                        func.sum(
+                            case(
+                                (Position.realized_pnl.isnot(None), Position.realized_pnl),
+                                else_=0
+                            )
+                        ).label('total_realized_pnl')
+                    ).where(Position.status == PositionStatus.CLOSED)
+                    
+                    result = await session.execute(closed_positions_agg)
+                    agg_result = result.first()
+                    realized_pnl_usd = Decimal(str(agg_result.total_realized_pnl or 0))
+                    
+                    # Calculate available balance in USD
+                    # initial_balance_inr is in INR, convert to USD
+                    initial_balance_usd = initial_balance_inr / usdinr_rate
+                    available_balance_usd = initial_balance_usd + realized_pnl_usd - positions_value_usd
+                    
+                    # Check if we have sufficient balance
+                    if required_balance_usd > available_balance_usd:
+                        error_msg = f"Insufficient balance: Required ${required_balance_usd:.2f}, Available ${available_balance_usd:.2f}"
+                        logger.error(
+                            "trade_persistence_service_insufficient_balance",
+                            required_usd=float(required_balance_usd),
+                            available_usd=float(available_balance_usd),
+                            symbol=symbol,
+                            quantity=quantity,
+                            fill_price=fill_price,
+                            error=error_msg
+                        )
+                        raise ValueError(error_msg)
+                    
+                    logger.info(
+                        "budget_validation_passed",
+                        required_usd=float(required_balance_usd),
+                        available_usd=float(available_balance_usd),
+                        remaining_usd=float(available_balance_usd - required_balance_usd)
+                    )
+                elif trade_side == TradeSide.BUY:
+                    logger.debug(
+                        "trade_persistence_budget_check_skipped_paper_mode",
+                        symbol=symbol,
+                        quantity=quantity,
+                        fill_price=fill_price,
+                        message="Skipping duplicate balance check in paper mode; agent risk/margin gates already validated entry",
+                    )
                 
                 logger.debug(
                     "trade_persistence_service_starting_transaction",
@@ -217,14 +292,11 @@ class TradePersistenceService:
             try:
                 closed_at = closed_at or datetime.utcnow()
                 
-                # Find position by explicit position_id first.
-                result = await session.execute(
-                    select(Position).where(Position.position_id == position_id)
-                )
-                position = result.scalar_one_or_none()
-
-                # Fallback for cases where agent emits synthetic/non-DB position IDs.
-                if not position and symbol:
+                # Find position - prioritize fallback lookup by symbol when available
+                position = None
+                
+                if symbol:
+                    # Use symbol-based lookup as primary method for agent-generated position_ids
                     side_enum = None
                     if isinstance(side, str):
                         side_upper = side.strip().upper()
@@ -233,28 +305,40 @@ class TradePersistenceService:
                         elif side_upper in {"SELL", "SHORT"}:
                             side_enum = TradeSide.SELL
 
-                    fallback_query = select(Position).where(
+                    symbol_query = select(Position).where(
                         Position.symbol == symbol,
                         Position.status == PositionStatus.OPEN,
                     )
                     if side_enum is not None:
-                        fallback_query = fallback_query.where(Position.side == side_enum)
-                    fallback_query = fallback_query.order_by(Position.opened_at.desc()).limit(1)
+                        symbol_query = symbol_query.where(Position.side == side_enum)
+                    symbol_query = symbol_query.order_by(Position.opened_at.desc()).limit(1)
 
-                    fallback_result = await session.execute(fallback_query)
-                    position = fallback_result.scalar_one_or_none()
+                    symbol_result = await session.execute(symbol_query)
+                    position = symbol_result.scalar_one_or_none()
 
                     if position:
-                        logger.warning(
-                            "position_close_fallback_match_used",
+                        logger.debug(
+                            "position_close_symbol_lookup_used",
                             requested_position_id=position_id,
                             resolved_position_id=position.position_id,
                             symbol=symbol,
                             side=side,
-                            entry_price_hint=entry_price,
-                            quantity_hint=quantity,
-                            message="Resolved close request using latest open position for symbol/side",
+                            message="Resolved close request using symbol-based lookup",
                         )
+                    else:
+                        logger.warning(
+                            "position_close_symbol_lookup_failed",
+                            position_id=position_id,
+                            symbol=symbol,
+                            side=side,
+                            message="No open position found for symbol/side",
+                        )
+                else:
+                    # Fallback to position_id lookup if no symbol provided
+                    result = await session.execute(
+                        select(Position).where(Position.position_id == position_id)
+                    )
+                    position = result.scalar_one_or_none()
                 
                 if not position:
                     logger.warning(
@@ -276,7 +360,8 @@ class TradePersistenceService:
                 
                 # Update position with exit details
                 position.current_price = Decimal(str(exit_price))
-                position.unrealized_pnl = Decimal(str(pnl))  # Now realized PnL
+                position.realized_pnl = Decimal(str(pnl))  # Store realized PnL in dedicated column
+                position.unrealized_pnl = Decimal("0")  # Zero out unrealized PnL for closed position
                 position.closed_at = closed_at
                 position.status = PositionStatus.CLOSED
                 

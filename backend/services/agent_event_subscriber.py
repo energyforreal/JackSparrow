@@ -640,17 +640,22 @@ class AgentEventSubscriber:
                     fill_price=fill_price,
                     message="Calling trade_persistence_service.create_trade_and_position"
                 )
-                # Calculate stop loss and take profit (using same logic as execution module)
-                from backend.core.config import settings
-                stop_loss_pct = settings.stop_loss_percentage
-                take_profit_pct = settings.take_profit_percentage
+                # Use stop loss and take profit from event payload (actual values used during execution)
+                stop_loss = payload.get("stop_loss")
+                take_profit = payload.get("take_profit")
                 
-                if side.upper() == "BUY":
-                    stop_loss = fill_price * (1 - stop_loss_pct) if stop_loss_pct else None
-                    take_profit = fill_price * (1 + take_profit_pct) if take_profit_pct else None
-                else:  # SELL
-                    stop_loss = fill_price * (1 + stop_loss_pct) if stop_loss_pct else None
-                    take_profit = fill_price * (1 - take_profit_pct) if take_profit_pct else None
+                # Fallback to config-based calculation if not provided (shouldn't happen in normal flow)
+                if stop_loss is None or take_profit is None:
+                    from backend.core.config import settings
+                    stop_loss_pct = settings.stop_loss_percentage
+                    take_profit_pct = settings.take_profit_percentage
+                    
+                    if side.upper() == "BUY":
+                        stop_loss = fill_price * (1 - stop_loss_pct) if stop_loss_pct else None
+                        take_profit = fill_price * (1 + take_profit_pct) if take_profit_pct else None
+                    else:  # SELL
+                        stop_loss = fill_price * (1 + stop_loss_pct) if stop_loss_pct else None
+                        take_profit = fill_price * (1 - take_profit_pct) if take_profit_pct else None
                 
                 persistence_result = await trade_persistence_service.create_trade_and_position(
                     trade_id=trade_id,

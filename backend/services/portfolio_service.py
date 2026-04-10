@@ -5,7 +5,7 @@ Provides portfolio calculations and performance metrics.
 """
 
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, desc, select, case, cast, String
@@ -58,6 +58,14 @@ class PortfolioService:
         # Serialize positions list - convert Decimal to float, ensure consistent structure
         positions_list = []
         for pos in summary.get("positions", []):
+            oa = pos.get("opened_at")
+            if isinstance(oa, datetime):
+                dt = oa if oa.tzinfo is not None else oa.replace(tzinfo=timezone.utc)
+                opened_at_str = dt.isoformat()
+            elif oa is not None:
+                opened_at_str = str(oa)
+            else:
+                opened_at_str = None
             serialized_pos = {
                 "position_id": str(pos.get("position_id", "")),
                 "symbol": str(pos.get("symbol", "")),
@@ -66,10 +74,18 @@ class PortfolioService:
                 "entry_price": float(pos.get("entry_price", 0)),
                 "current_price": float(pos.get("current_price", 0)) if pos.get("current_price") else None,
                 "unrealized_pnl": float(pos.get("unrealized_pnl", 0)),
+                "entry_price_usd": float(pos.get("entry_price_usd", pos.get("entry_price", 0))),
+                "current_price_usd": float(pos.get("current_price_usd", pos.get("current_price", 0)))
+                if pos.get("current_price_usd") is not None or pos.get("current_price") is not None
+                else None,
+                "unrealized_pnl_usd": float(pos.get("unrealized_pnl_usd", pos.get("unrealized_pnl", 0))),
+                "unrealized_pnl_inr": float(pos.get("unrealized_pnl_inr", pos.get("unrealized_pnl", 0))),
                 "status": str(pos.get("status", "")),
-                "opened_at": pos.get("opened_at").isoformat() if isinstance(pos.get("opened_at"), datetime) else str(pos.get("opened_at", "")),
+                "opened_at": opened_at_str,
                 "stop_loss": float(pos.get("stop_loss", 0)) if pos.get("stop_loss") else None,
                 "take_profit": float(pos.get("take_profit", 0)) if pos.get("take_profit") else None,
+                "stop_loss_usd": float(pos.get("stop_loss_usd", pos.get("stop_loss", 0))) if pos.get("stop_loss") else None,
+                "take_profit_usd": float(pos.get("take_profit_usd", pos.get("take_profit", 0))) if pos.get("take_profit") else None,
             }
             positions_list.append(serialized_pos)
         
@@ -80,6 +96,8 @@ class PortfolioService:
         serialized = {
             "total_value": float(summary.get("total_value", 0)),
             "available_balance": float(summary.get("available_balance", 0)),
+            "margin_used": float(summary.get("margin_used", 0)),
+            "usd_inr_rate": float(summary.get("usd_inr_rate", 0)),
             "open_positions": int(summary.get("open_positions", 0)),  # Ensure int type
             "total_unrealized_pnl": float(summary.get("total_unrealized_pnl", 0)),
             "total_realized_pnl": float(summary.get("total_realized_pnl", 0)),
@@ -181,25 +199,11 @@ class PortfolioService:
                 # FX conversion (USD -> INR): priority to cached live feed, fallback to last-good/static rate
                 usdinr_rate = Decimal(str(await get_usdinr_rate()))
 
-                # Calculate available balance (initial balance minus positions value)
-                available_balance = initial_balance - positions_value
-                
-                # Ensure available balance doesn't go negative (shouldn't happen, but safety check)
-                if available_balance < 0:
-                    logger.warning(
-                        "portfolio_available_balance_negative",
-                        available_balance=float(available_balance),
-                        positions_value=float(positions_value),
-                        initial_balance=float(initial_balance),
-                        message="Available balance is negative, setting to 0"
-                    )
-                    available_balance = Decimal("0.0")
-                
                 # Get realized PnL from closed positions using SQL aggregation
                 closed_positions_agg = select(
                     func.sum(
                         case(
-                            (Position.unrealized_pnl.isnot(None), Position.unrealized_pnl),
+                            (Position.realized_pnl.isnot(None), Position.realized_pnl),
                             else_=0
                         )
                     ).label('total_realized_pnl')
@@ -209,18 +213,39 @@ class PortfolioService:
                 agg_result = result.first()
                 total_realized_pnl = Decimal(str(agg_result.total_realized_pnl or 0))
                 
-                # Calculate total portfolio value: initial balance + unrealized PnL + realized PnL
-                total_value = initial_balance + total_unrealized_pnl + total_realized_pnl
-
-                # Convert account/PnL fields to INR while leaving market prices in USD.
+                # NOTE: initial_balance is in INR (from config), positions/PnL are in USD
+                # Calculate available balance in INR: INR_balance + USD_PnL_in_INR - USD_positions_in_INR
+                available_balance_inr = initial_balance + (total_realized_pnl * usdinr_rate) - (positions_value * usdinr_rate)
+                
+                # Ensure available balance doesn't go negative (shouldn't happen, but safety check)
+                if available_balance_inr < 0:
+                    logger.warning(
+                        "portfolio_available_balance_inr_negative",
+                        available_balance_inr=float(available_balance_inr),
+                        message="Available balance is negative, setting to 0"
+                    )
+                    available_balance_inr = Decimal("0.0")
+                
+                # Calculate total portfolio value: initial_balance_inr + unrealized_pnl_inr + realized_pnl_inr
+                total_value_inr = initial_balance + (total_unrealized_pnl * usdinr_rate) + (total_realized_pnl * usdinr_rate)
+                
+                # Convert positions to INR while keeping market prices in USD
                 for pos in positions_list:
-                    pos["unrealized_pnl"] = Decimal(str(pos.get("unrealized_pnl", 0))) * usdinr_rate
+                    # Keep original USD values
+                    pos["entry_price_usd"] = pos["entry_price"]
+                    pos["current_price_usd"] = pos["current_price"]
+                    pos["unrealized_pnl_usd"] = pos["unrealized_pnl"]
+                    if pos.get("stop_loss"):
+                        pos["stop_loss_usd"] = pos["stop_loss"]
+                    if pos.get("take_profit"):
+                        pos["take_profit_usd"] = pos["take_profit"]
+                    
+                    # Add INR versions for display
+                    pos["unrealized_pnl_inr"] = pos["unrealized_pnl"] * usdinr_rate
 
-                available_balance_inr = available_balance * usdinr_rate
-                margin_used_inr = positions_value * usdinr_rate
+                margin_used_inr = positions_value * usdinr_rate  # positions_value is in USD, convert to INR
                 total_unrealized_pnl_inr = total_unrealized_pnl * usdinr_rate
                 total_realized_pnl_inr = total_realized_pnl * usdinr_rate
-                total_value_inr = total_value * usdinr_rate
                 
                 summary = {
                     "total_value": total_value_inr,
@@ -233,8 +258,9 @@ class PortfolioService:
                     "positions": positions_list
                 }
                 
-                # Cache result for 5 seconds (store raw summary with Decimal types)
-                await set_cache(cache_key, summary, ttl=5)
+                # Cache result for 5 seconds (serialize Decimals to floats for JSON compatibility)
+                cacheable_summary = self._serialize_for_cache(summary)
+                await set_cache(cache_key, cacheable_summary, ttl=5)
                 logger.debug("portfolio_summary_cache_set", cache_key=cache_key, ttl=5)
                 
                 return summary
@@ -270,6 +296,16 @@ class PortfolioService:
         cache_key = "portfolio:summary"
         await delete_cache(cache_key)
         logger.debug("portfolio_summary_cache_invalidated", cache_key=cache_key)
+    
+    def _serialize_for_cache(self, obj):
+        """Recursively convert Decimal → float for JSON-serializable cache."""
+        if isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {k: self._serialize_for_cache(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._serialize_for_cache(item) for item in obj]
+        return obj
     
     async def get_performance_metrics(
         self,
@@ -407,13 +443,15 @@ class PortfolioService:
             total_pnl = Decimal("0")
             winning_count = 0
             losing_count = 0
+            usdinr_rate = Decimal(str(await get_usdinr_rate()))
 
             for pos in closed_positions:
-                pnl = float(pos.unrealized_pnl or 0)  # Realized PnL stored in unrealized_pnl when closed
-                total_pnl += Decimal(str(pnl))
-                if pnl > 0:
+                pnl_usd = float(pos.realized_pnl or 0)
+                pnl_inr = pnl_usd * float(usdinr_rate)
+                total_pnl += Decimal(str(pnl_inr))
+                if pnl_inr > 0:
                     winning_count += 1
-                elif pnl < 0:
+                elif pnl_inr < 0:
                     losing_count += 1
 
                 closed_trades.append({
@@ -423,7 +461,8 @@ class PortfolioService:
                     "quantity": float(pos.quantity),
                     "entry_price": float(pos.entry_price),
                     "exit_price": float(pos.current_price or pos.entry_price),
-                    "pnl": pnl,
+                    "pnl": pnl_inr,
+                    "pnl_usd": pnl_usd,
                     "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,
                 })
 
@@ -431,6 +470,7 @@ class PortfolioService:
                 "closed_trades": closed_trades,
                 "summary": {
                     "total_pnl": float(total_pnl),
+                    "usd_inr_rate": float(usdinr_rate),
                     "total_trades": len(closed_trades),
                     "winning_trades": winning_count,
                     "losing_trades": losing_count,

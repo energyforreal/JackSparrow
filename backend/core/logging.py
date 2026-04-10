@@ -184,19 +184,21 @@ def configure_logging(force: bool = False) -> str:
 
 
 def log_error_with_context(
-    message: str,
+    event_name: str,
     error: Optional[Exception] = None,
     component: Optional[str] = None,
     request_id: Optional[str] = None,
+    message: Optional[str] = None,
     **kwargs
 ) -> None:
     """Log an error with standardized context.
     
     Args:
-        message: Error message
+        event_name: Event name or error identifier
         error: Exception object (optional)
         component: Component name (optional)
         request_id: Request ID for request tracking (optional)
+        message: Human-readable message for the error event (optional)
         **kwargs: Additional context fields
     """
     # Use stdlib logger to avoid structlog config conflicts (e.g. from communication_logger)
@@ -207,12 +209,13 @@ def log_error_with_context(
         "component": component or kwargs.get("component"),
         "request_id": request_id or kwargs.get("request_id"),
         "error_type": error_type,
+        "event_message": message,
         **{k: v for k, v in kwargs.items() if k not in ("exc_info", "stack_info")},
     }
     if error:
         extra["error_message"] = str(error)
     _log.error(
-        message,
+        event_name,
         exc_info=error is not None,
         extra=extra,
     )

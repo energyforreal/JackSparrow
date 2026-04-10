@@ -61,6 +61,42 @@ async def _initialize_database_schema() -> None:
         await connection.run_sync(Base.metadata.create_all)
 
 
+async def _migrate_database_schema() -> None:
+    """Apply lightweight schema migrations for long-lived database state."""
+    async with engine.begin() as connection:
+        try:
+            await connection.execute(
+                text(
+                    "ALTER TABLE positions ADD COLUMN IF NOT EXISTS unrealized_pnl NUMERIC(18, 8) DEFAULT 0;"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER TABLE positions ADD COLUMN IF NOT EXISTS realized_pnl NUMERIC(18, 8) DEFAULT 0;"
+                )
+            )
+            await connection.execute(
+                text(
+                    "UPDATE positions SET unrealized_pnl = 0 WHERE unrealized_pnl IS NULL;"
+                )
+            )
+            await connection.execute(
+                text(
+                    "UPDATE positions SET realized_pnl = 0 WHERE realized_pnl IS NULL;"
+                )
+            )
+            logger.info("backend_database_schema_migrated", service="backend")
+        except Exception as e:
+            logger.warning(
+                "backend_database_schema_migration_failed",
+                service="backend",
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+                message="Database migration check failed; startup may still continue"
+            )
+
+
 async def _reset_paper_trade_state() -> None:
     """Clear positions and trades in DB so paper trade starts fresh on each backend load."""
     from backend.core.database import AsyncSessionLocal
@@ -93,45 +129,61 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("backend_starting", service="backend")
     
-    # Initialize database
+    # Initialize database — connection is required; schema creation errors must not be swallowed when enabled
     try:
         await _verify_database_connection()
         logger.info("backend_database_connected", service="backend")
-        if settings.auto_create_db_schema:
-            await _initialize_database_schema()
-            logger.info(
-                "backend_database_schema_created",
-                service="backend",
-                auto_create=True
-            )
-        if (
-            getattr(settings, "paper_trading_mode", True)
-            and getattr(settings, "reset_paper_state_on_startup", True)
-        ):
-            try:
-                await _reset_paper_trade_state()
-            except Exception as reset_err:
-                logger.warning(
-                    "paper_trade_reset_skipped",
-                    service="backend",
-                    error=str(reset_err),
-                    message="Paper trade state reset failed; continuing startup",
-                )
-        elif getattr(settings, "paper_trading_mode", True):
-            logger.info(
-                "paper_trade_state_reset_disabled",
-                service="backend",
-                message=(
-                    "Paper trade reset on startup is disabled "
-                    "(RESET_PAPER_STATE_ON_STARTUP=false)."
-                ),
-            )
     except Exception as e:
         logger.error(
             "backend_database_connection_failed",
             service="backend",
             error=str(e),
-            exc_info=True
+            exc_info=True,
+        )
+        raise RuntimeError("Database unreachable; cannot start backend") from e
+
+    if settings.auto_create_db_schema:
+        try:
+            await _initialize_database_schema()
+            await _migrate_database_schema()
+            logger.info(
+                "backend_database_schema_created",
+                service="backend",
+                auto_create=True,
+            )
+        except Exception as e:
+            logger.error(
+                "backend_database_schema_init_failed",
+                service="backend",
+                error=str(e),
+                exc_info=True,
+            )
+            raise RuntimeError(
+                "Database schema initialization failed "
+                "(set AUTO_CREATE_DB_SCHEMA=false only if tables are managed externally)"
+            ) from e
+
+    if (
+        getattr(settings, "paper_trading_mode", True)
+        and getattr(settings, "reset_paper_state_on_startup", True)
+    ):
+        try:
+            await _reset_paper_trade_state()
+        except Exception as reset_err:
+            logger.warning(
+                "paper_trade_reset_skipped",
+                service="backend",
+                error=str(reset_err),
+                message="Paper trade state reset failed; continuing startup",
+            )
+    elif getattr(settings, "paper_trading_mode", True):
+        logger.info(
+            "paper_trade_state_reset_disabled",
+            service="backend",
+            message=(
+                "Paper trade reset on startup is disabled "
+                "(RESET_PAPER_STATE_ON_STARTUP=false)."
+            ),
         )
 
     # Initialize Redis

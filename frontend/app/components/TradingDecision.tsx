@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatConfidence, formatDateTime, formatUsdCurrency } from '@/utils/formatters'
+import { formatConfidence, formatCurrency, formatDateTime } from '@/utils/formatters'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { EdgeGauge } from './v15/EdgeGauge'
 import { ProbabilityBar } from './v15/ProbabilityBar'
@@ -14,6 +14,7 @@ interface TradingDecisionProps {
   signal?: Signal | null
   recentTrade?: Trade | null
   paperTradingMode: boolean
+  usdInrRate?: number | string
 }
 
 const getSignalBadgeClasses = (signal: SignalType) => {
@@ -48,13 +49,6 @@ const getDecisionAction = (signal: SignalType): string => {
   }
 }
 
-const formatPrice = (price: number | string | undefined) => {
-  if (price === undefined || price === null) return 'N/A'
-  const numPrice = typeof price === 'string' ? parseFloat(price) : price
-  if (isNaN(numPrice)) return 'N/A'
-  return formatUsdCurrency(numPrice)
-}
-
 const formatDate = (date: Date | string) => {
   return formatDateTime(date)
 }
@@ -69,9 +63,30 @@ const formatQuantity = (quantity: number | string | undefined) => {
 export function TradingDecision({
   signal,
   recentTrade,
+  usdInrRate,
 }: TradingDecisionProps) {
   const hasSignal = signal && signal.signal
   const hasRecentTrade = recentTrade !== null && recentTrade !== undefined
+
+  const parseNumber = (value: number | string | undefined): number | null => {
+    if (value === undefined || value === null) return null
+    const parsed = typeof value === 'number' ? value : parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  const formatTradeValueInr = (trade: Trade) => {
+    const explicit = parseNumber(trade.trade_value_inr)
+    if (explicit !== null) return formatCurrency(explicit)
+    const quantity = parseNumber(trade.quantity)
+    const priceUsd = parseNumber(trade.price ?? trade.fill_price)
+    const fx =
+      parseNumber((trade as any).usd_inr_rate) ??
+      parseNumber(usdInrRate) ??
+      83
+    if (quantity === null || priceUsd === null) return 'N/A'
+    const valueInr = quantity * priceUsd * 0.001 * fx
+    return formatCurrency(valueInr)
+  }
 
   return (
     <Card role="region" aria-label="Trading Decision Flow">
@@ -183,9 +198,9 @@ export function TradingDecision({
                   </span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Price:</span>
+                  <span className="text-muted-foreground">Trade Value:</span>
                   <span className="ml-2 font-medium">
-                    {formatPrice(recentTrade.price)}
+                    {formatTradeValueInr(recentTrade)}
                   </span>
                 </div>
                 <div>

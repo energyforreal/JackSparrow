@@ -16,7 +16,7 @@ import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
 import { getBackendProxyBase } from '@/lib/backendProxy'
-import { formatCurrency, formatUsdCurrency } from '@/utils/formatters'
+import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
 import type {
   Signal as SharedSignal,
   Portfolio as SharedPortfolio,
@@ -169,15 +169,8 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
               const modelData = state.modelData
               if ((effectiveConf === 0 || effectiveConf === undefined) && modelData) {
                 let modelTimestamp: Date | null = null
-                const rawTs = modelData.timestamp as any
-                if (rawTs instanceof Date) {
-                  modelTimestamp = rawTs
-                } else if (typeof rawTs === 'string') {
-                  const parsed = new Date(rawTs)
-                  if (!Number.isNaN(parsed.getTime())) {
-                    modelTimestamp = parsed
-                  }
-                }
+                const rawTs = modelData.timestamp as Date | string | null | undefined
+                modelTimestamp = parseUtcTimestamp(rawTs)
 
                 let isFresh = false
                 if (modelTimestamp) {
@@ -253,7 +246,8 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                   typeof (nextPortfolio as any).usd_inr_rate === 'number'
                     ? (nextPortfolio as any).usd_inr_rate
                     : parseFloat(String((nextPortfolio as any).usd_inr_rate ?? 0))
-                const usdInrRate = Number.isFinite(usdInrRateRaw) && usdInrRateRaw > 0 ? usdInrRateRaw : 1
+                const usdInrRate = Number.isFinite(usdInrRateRaw) && usdInrRateRaw > 0 ? usdInrRateRaw : 83
+                const contractValueBtc = 0.001
                 const symbol = data?.symbol
                 const updatedPositions = nextPortfolio.positions.map((pos: any) => {
                   if (!symbol || pos?.symbol !== symbol) return pos
@@ -262,19 +256,23 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                       ? pos.quantity
                       : parseFloat(String(pos.quantity ?? 0))
                   const entry =
-                    typeof pos.entry_price === 'number'
-                      ? pos.entry_price
-                      : parseFloat(String(pos.entry_price ?? 0))
+                    typeof pos.entry_price_usd === 'number'
+                      ? pos.entry_price_usd
+                      : typeof pos.entry_price === 'number'
+                        ? pos.entry_price
+                        : parseFloat(String(pos.entry_price_usd ?? pos.entry_price ?? 0))
                   const side = String(pos.side ?? '').toUpperCase()
                   const isLong = side === 'BUY' || side === 'LONG'
                   const pnl =
                     isLong
-                      ? (marketPrice - entry) * qty * usdInrRate
-                      : (entry - marketPrice) * qty * usdInrRate
+                      ? (marketPrice - entry) * qty * contractValueBtc * usdInrRate
+                      : (entry - marketPrice) * qty * contractValueBtc * usdInrRate
                   return {
                     ...pos,
                     current_price: marketPrice,
+                    current_price_usd: marketPrice,
                     unrealized_pnl: Number.isFinite(pnl) ? pnl : pos.unrealized_pnl,
+                    unrealized_pnl_inr: Number.isFinite(pnl) ? pnl : pos.unrealized_pnl_inr,
                   }
                 })
 

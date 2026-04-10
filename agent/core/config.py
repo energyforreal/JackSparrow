@@ -1188,6 +1188,17 @@ class Settings(BaseSettings):
         return interval
 
     @model_validator(mode="after")
+    def validate_futures_lot_contract(self) -> "Settings":
+        """Ensure perpetual lot settings remain valid."""
+        if float(self.contract_value_btc) <= 0:
+            raise ValueError("CONTRACT_VALUE_BTC must be greater than 0")
+        if int(self.min_lot_size) < 1:
+            raise ValueError("MIN_LOT_SIZE must be at least 1")
+        if int(self.fixed_lot_size) < int(self.min_lot_size):
+            self.fixed_lot_size = int(self.min_lot_size)
+        return self
+
+    @model_validator(mode="after")
     def sync_trading_flags(self) -> "Settings":
         """Keep trading_mode and paper_trading_mode aligned."""
         trading_mode_env = os.getenv("TRADING_MODE")

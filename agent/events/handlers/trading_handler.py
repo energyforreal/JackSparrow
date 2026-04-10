@@ -457,9 +457,10 @@ class TradingEventHandler:
                             return
                     except (TypeError, ValueError):
                         pass
-            fixed_lots = int(getattr(settings, "fixed_lot_size", 1) or 1)
-            if not bool(getattr(settings, "enforce_fixed_lot_size", True)):
-                fixed_lots = max(int(getattr(settings, "min_lot_size", 1) or 1), fixed_lots)
+            min_lot_size = max(1, int(getattr(settings, "min_lot_size", 1) or 1))
+            fixed_lots = max(1, int(getattr(settings, "fixed_lot_size", 1) or 1))
+            # Always enforce exchange minimum lots; fixed lot can only increase from this floor.
+            fixed_lots = max(min_lot_size, fixed_lots)
             leverage = int(getattr(settings, "isolated_margin_leverage", 5) or 5)
             usdinr_rate = await self._get_usdinr_rate(state)
             required_margin_inr = margin_required_inr(
@@ -785,13 +786,14 @@ class TradingEventHandler:
             self._last_risk_approved.pop(opp_key, None)
 
             lots = fixed_lots
-            if lots < int(getattr(settings, "min_lot_size", 1)):
+            if lots < min_lot_size:
                 logger.warning(
                     "trading_handler_zero_quantity",
                     symbol=symbol,
                     entry_price=entry_price,
-                    quantity_dollars=quantity_dollars,
                     lots=lots,
+                    min_lot_size=min_lot_size,
+                    contract_value_btc=float(getattr(settings, "contract_value_btc", 0.001)),
                     event_id=event.event_id,
                 )
                 return
