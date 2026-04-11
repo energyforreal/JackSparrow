@@ -14,7 +14,8 @@ from agent.events.schemas import DecisionReadyEvent, RiskApprovedEvent, EventTyp
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
-from agent.core.futures_utils import margin_required_inr
+from agent.core.futures_utils import margin_required_inr, price_to_lots, entry_leg_fees_usd
+from agent.core.product_specs import get_contract_specs
 from agent.core.v15_signal import apply_v15_entry_gate
 from agent.core.learning_system import LearningSystem
 from agent.core.signal_filter import EntrySignalFilter
@@ -31,6 +32,16 @@ logger = structlog.get_logger()
 DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS = 10
 DEFAULT_MIN_RISK_REWARD_RATIO = 1.2
 DEFAULT_ADX_RANGING_THRESHOLD = 20.0
+
+
+def _tf_bar_seconds(tf: str) -> int:
+    """Bar duration in seconds from timeframe string (e.g. 5m, 15m, 1h)."""
+    t = (tf or "15m").strip().lower()
+    if t.endswith("m") and t[:-1].isdigit():
+        return int(t[:-1]) * 60
+    if t.endswith("h") and t[:-1].isdigit():
+        return int(t[:-1]) * 3600
+    return 900
 
 
 class TradingEventHandler:
@@ -55,6 +66,9 @@ class TradingEventHandler:
             max_trades_per_hour=int(getattr(settings, "max_trades_per_hour", 0) or 0),
             min_breakout_score=float(getattr(settings, "entry_min_breakout_score", 0.0) or 0.0),
         )
+        self._last_trade_wall_time: float = 0.0
+        self._trades_day_key: str = ""
+        self._trades_today_by_tf: Dict[str, int] = {}
 
     def _debounce_key(self, symbol: str, side: str) -> str:
         """Key for debounce: same symbol+side within window = duplicate."""
@@ -117,6 +131,18 @@ class TradingEventHandler:
             event_id=event_id,
             **context,
         )
+        try:
+            from agent.core.signal_audit_md import append_entry_rejected
+
+            append_entry_rejected(
+                reason=reason,
+                symbol=symbol,
+                signal=signal,
+                event_id=event_id,
+                extra=dict(context) if context else None,
+            )
+        except Exception:
+            pass
 
     def _reasoning_pipeline_diagnostics(
         self, reasoning_chain: Optional[Dict[str, Any]]
@@ -292,6 +318,16 @@ class TradingEventHandler:
 
             v15_diag: Dict[str, Any] = {}
             new_signal, v15_diag = apply_v15_entry_gate(signal, model_predictions, features)
+            if v15_diag.get("edge") is not None:
+                try:
+                    await self.context_manager.update_state(
+                        {
+                            "v15_live_edge": float(v15_diag["edge"]),
+                            "v15_live_edge_ts": now_utc.isoformat(),
+                        }
+                    )
+                except (TypeError, ValueError):
+                    pass
             if new_signal == "HOLD" and signal not in ("HOLD", None, ""):
                 self._log_entry_rejected(
                     "v15_entry_gate",
@@ -459,19 +495,70 @@ class TradingEventHandler:
                         pass
             min_lot_size = max(1, int(getattr(settings, "min_lot_size", 1) or 1))
             fixed_lots = max(1, int(getattr(settings, "fixed_lot_size", 1) or 1))
-            # Always enforce exchange minimum lots; fixed lot can only increase from this floor.
             fixed_lots = max(min_lot_size, fixed_lots)
             leverage = int(getattr(settings, "isolated_margin_leverage", 5) or 5)
             usdinr_rate = await self._get_usdinr_rate(state)
+            available_cash_inr = self._get_available_cash_inr(state)
+
+            specs = await get_contract_specs(symbol)
+            cv = float(specs.contract_value_btc)
+            tick_sz = float(specs.tick_size)
+            taker_rate = float(
+                specs.taker_commission_rate
+                if specs.taker_commission_rate is not None
+                else getattr(settings, "taker_fee_rate", 0.0005)
+            )
+            slip_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
+
+            try:
+                conf_f = float(confidence) if confidence is not None else 0.5
+            except (TypeError, ValueError):
+                conf_f = 0.5
+            conf_f = max(0.0, min(1.0, conf_f))
+
+            if getattr(settings, "use_notional_lot_sizing", False):
+                alloc_frac = max(
+                    0.01,
+                    min(
+                        1.0,
+                        float(getattr(settings, "max_position_size", 0.1) or 0.1) * max(0.1, conf_f),
+                    ),
+                )
+                margin_inr = available_cash_inr * alloc_frac
+                usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
+                max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
+                entry_lots = price_to_lots(
+                    usd_margin=usd_margin,
+                    btc_price=entry_price,
+                    leverage=leverage,
+                    contract_value_btc=cv,
+                    max_lots=max_lots,
+                    min_lots=min_lot_size,
+                )
+            else:
+                entry_lots = fixed_lots
+
             required_margin_inr = margin_required_inr(
-                lots=fixed_lots,
+                lots=entry_lots,
                 btc_price_usd=entry_price,
                 usdinr_rate=usdinr_rate,
                 leverage=leverage,
-                contract_value_btc=float(getattr(settings, "contract_value_btc", 0.001)),
+                contract_value_btc=cv,
             )
-            available_cash_inr = self._get_available_cash_inr(state)
-            if required_margin_inr <= 0 or available_cash_inr < required_margin_inr:
+            fee_mode = (getattr(settings, "fee_accounting_mode", "split") or "split").lower()
+            entry_fee_inr = 0.0
+            if fee_mode == "split":
+                entry_fee_usd = entry_leg_fees_usd(
+                    entry_price,
+                    float(entry_lots),
+                    cv,
+                    taker_rate,
+                    slip_bps,
+                )
+                entry_fee_inr = entry_fee_usd * usdinr_rate
+            required_total_inr = required_margin_inr + entry_fee_inr
+
+            if required_total_inr <= 0 or available_cash_inr < required_total_inr:
                 self._log_entry_rejected(
                     "insufficient_margin_inr",
                     symbol=symbol,
@@ -479,14 +566,19 @@ class TradingEventHandler:
                     event_id=event.event_id,
                     available_cash_inr=available_cash_inr,
                     required_margin_inr=required_margin_inr,
+                    required_total_inr=required_total_inr,
+                    entry_fee_inr=entry_fee_inr,
                     usdinr_rate=usdinr_rate,
                     leverage=leverage,
-                    fixed_lots=fixed_lots,
+                    entry_lots=entry_lots,
                     **diagnostics_base,
                 )
                 return
 
-            proposed_size = max(0.01, min(required_margin_inr / max(available_cash_inr, 1.0), settings.max_position_size))
+            proposed_size = max(
+                0.01,
+                min(required_margin_inr / max(available_cash_inr, 1.0), settings.max_position_size),
+            )
 
             # Validate trade with risk manager
             validation = await self.risk_manager.validate_trade(
@@ -785,7 +877,7 @@ class TradingEventHandler:
             opp_key = self._debounce_key(symbol, "SELL" if side == "BUY" else "BUY")
             self._last_risk_approved.pop(opp_key, None)
 
-            lots = fixed_lots
+            lots = entry_lots
             if lots < min_lot_size:
                 logger.warning(
                     "trading_handler_zero_quantity",
@@ -793,12 +885,63 @@ class TradingEventHandler:
                     entry_price=entry_price,
                     lots=lots,
                     min_lot_size=min_lot_size,
-                    contract_value_btc=float(getattr(settings, "contract_value_btc", 0.001)),
+                    contract_value_btc=cv,
                     event_id=event.event_id,
                 )
                 return
 
             quantity = float(lots)
+
+            is_v15 = any(
+                (p.get("context") or {}).get("format") == "v15_pipeline"
+                for p in model_predictions
+                if isinstance(p, dict)
+            )
+            if is_v15:
+                diag_tf = str(
+                    (v15_diag or {}).get("v15_timeframe")
+                    or getattr(settings, "agent_interval", "15m")
+                )
+                if bool(getattr(settings, "v15_min_trade_gap_enabled", True)):
+                    gap_bars = int(getattr(settings, "v15_min_trade_gap_bars", 3) or 3)
+                    need_s = gap_bars * _tf_bar_seconds(diag_tf)
+                    if self._last_trade_wall_time > 0 and (
+                        time.time() - self._last_trade_wall_time
+                    ) < need_s:
+                        self._log_entry_rejected(
+                            "min_trade_gap",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            min_seconds=need_s,
+                            **diagnostics_base,
+                        )
+                        return
+                if bool(getattr(settings, "v15_daily_trade_cap_enabled", True)):
+                    day = now_utc.strftime("%Y-%m-%d")
+                    if day != self._trades_day_key:
+                        self._trades_day_key = day
+                        self._trades_today_by_tf = {}
+                    dl = diag_tf.lower().strip()
+                    dkey = "5m" if dl.startswith("5") else "15m"
+                    cap_name = (
+                        "v15_max_trades_per_day_5m"
+                        if dkey == "5m"
+                        else "v15_max_trades_per_day_15m"
+                    )
+                    cap = int(getattr(settings, cap_name, 8 if dkey == "5m" else 4) or 0)
+                    used = self._trades_today_by_tf.get(dkey, 0)
+                    if cap > 0 and used >= cap:
+                        self._log_entry_rejected(
+                            "daily_trade_cap",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            timeframe=dkey,
+                            cap=cap,
+                            **diagnostics_base,
+                        )
+                        return
 
             # Publish RiskApprovedEvent to trigger execution
             risk_payload = {
@@ -814,6 +957,9 @@ class TradingEventHandler:
                 "usd_inr_rate": usdinr_rate,
                 "required_margin_inr": required_margin_inr,
                 "available_cash_inr": available_cash_inr,
+                "contract_value_btc": cv,
+                "tick_size": tick_sz,
+                "product_id": specs.product_id,
             }
             if v15_diag:
                 risk_payload["v15_diagnostics"] = v15_diag
@@ -826,6 +972,15 @@ class TradingEventHandler:
                 payload=risk_payload,
             )
             await event_bus.publish(risk_approved)
+            self._last_trade_wall_time = time.time()
+            if is_v15:
+                diag_tf = str(
+                    (v15_diag or {}).get("v15_timeframe")
+                    or getattr(settings, "agent_interval", "15m")
+                )
+                dl = diag_tf.lower().strip()
+                dkey = "5m" if dl.startswith("5") else "15m"
+                self._trades_today_by_tf[dkey] = self._trades_today_by_tf.get(dkey, 0) + 1
             if getattr(settings, "entry_signal_filter_enabled", True):
                 self._entry_signal_filter.record_trade()
 
@@ -838,6 +993,21 @@ class TradingEventHandler:
                 event_id=event.event_id,
                 **diagnostics_base,
             )
+            try:
+                from agent.core.signal_audit_md import append_risk_approved
+
+                append_risk_approved(
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    entry_price=entry_price,
+                    event_id=event.event_id,
+                    reasoning_chain_id=(payload.get("reasoning_chain") or {}).get("chain_id")
+                    if isinstance(payload.get("reasoning_chain"), dict)
+                    else None,
+                )
+            except Exception:
+                pass
 
         except Exception as e:
             logger.error(

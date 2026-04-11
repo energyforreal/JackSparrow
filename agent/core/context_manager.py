@@ -71,6 +71,10 @@ class AgentState:
         # Configuration
         self.config: Dict[str, Any] = {}
 
+        # Latest v15 model edge from the most recent decision (for edge-decay exit)
+        self.v15_live_edge: Optional[float] = None
+        self.v15_live_edge_ts: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert state to dictionary for serialization."""
         return {
@@ -102,7 +106,9 @@ class AgentState:
             "watched_symbols": self.watched_symbols,
             "market_regime": self.market_regime,
             "volatility_regime": self.volatility_regime,
-            "config": self.config
+            "config": self.config,
+            "v15_live_edge": self.v15_live_edge,
+            "v15_live_edge_ts": self.v15_live_edge_ts,
         }
 
     @classmethod
@@ -150,6 +156,8 @@ class AgentState:
 
         # Configuration
         state.config = data.get("config", state.config)
+        state.v15_live_edge = data.get("v15_live_edge", state.v15_live_edge)
+        state.v15_live_edge_ts = data.get("v15_live_edge_ts", state.v15_live_edge_ts)
 
         # Handle datetime fields
         if "startup_time" in data:

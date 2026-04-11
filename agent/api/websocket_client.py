@@ -211,6 +211,7 @@ class AgentWebSocketClient:
         try:
             self._websocket = await websockets.connect(  # type: ignore[call-arg]
                 self.url,
+                open_timeout=30.0,
                 ping_interval=30,
                 ping_timeout=10,
             )

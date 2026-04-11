@@ -19,7 +19,7 @@ from backend.core.redis import get_cache, set_cache
 logger = structlog.get_logger()
 
 USDINR_CACHE_KEY = "fx:usdinr:last"
-USDINR_TTL_SECONDS = 3600
+USDINR_TTL_SECONDS = 60
 DEFAULT_USDINR_FALLBACK = 83.0
 
 

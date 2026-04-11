@@ -17,6 +17,7 @@ from backend.core.config import settings
 from backend.core.redis import get_cache, set_cache, delete_cache
 from backend.services.time_service import time_service
 from backend.services.fx_rate_service import get_usdinr_rate
+from backend.utils.futures_contract import isolated_margin_usd, unrealized_pnl_usd
 
 logger = structlog.get_logger()
 
@@ -134,50 +135,26 @@ class PortfolioService:
                 # Get initial balance from config (defaults to 10000.0)
                 initial_balance = Decimal(str(getattr(settings, 'initial_balance', 10000.0)))
                 
-                # Use SQL aggregation for open positions calculations
-                # Calculate positions value (cost basis) and unrealized PnL using SQL
-                # positions_value should be entry_price * quantity (cost basis), not current_price * quantity
-                open_positions_agg = select(
-                    func.count(Position.id).label('position_count'),
-                    func.sum(
-                        case(
-                            ((Position.entry_price.isnot(None)) & (Position.quantity.isnot(None)),
-                             Position.entry_price * Position.quantity),
-                            else_=0
-                        )
-                    ).label('positions_value'),
-                    func.sum(
-                        case(
-                            (Position.unrealized_pnl.isnot(None), Position.unrealized_pnl),
-                            else_=case(
-                                (
-                                    (Position.current_price.isnot(None))
-                                    & (Position.quantity.isnot(None))
-                                    & (cast(Position.side, String) == TradeSide.BUY.value),
-                                 (Position.current_price - Position.entry_price) * Position.quantity),
-                                (
-                                    (Position.current_price.isnot(None))
-                                    & (Position.quantity.isnot(None))
-                                    & (cast(Position.side, String) == TradeSide.SELL.value),
-                                 (Position.entry_price - Position.current_price) * Position.quantity),
-                                else_=0
-                            )
-                        )
-                    ).label('total_unrealized_pnl')
-                ).where(cast(Position.status, String) == PositionStatus.OPEN.value)
-                
-                result = await db.execute(open_positions_agg)
-                agg_result = result.first()
-                
-                # Extract aggregated values
-                position_count = agg_result.position_count or 0
-                positions_value = Decimal(str(agg_result.positions_value or 0))
-                total_unrealized_pnl = Decimal(str(agg_result.total_unrealized_pnl or 0))
-                
-                # Get position details for response (still need individual positions)
+                cv = float(getattr(settings, "contract_value_btc", 0.001))
+                lev = int(getattr(settings, "isolated_margin_leverage", 5))
+
                 query = select(Position).where(Position.status == PositionStatus.OPEN)
                 result = await db.execute(query)
                 open_positions = result.scalars().all()
+                position_count = len(open_positions)
+
+                total_unrealized_pnl = Decimal("0.0")
+                margin_locked_usd = Decimal("0.0")
+                for pos in open_positions:
+                    ep = float(pos.entry_price)
+                    cp = float(pos.current_price) if pos.current_price is not None else ep
+                    q = float(pos.quantity)
+                    u = unrealized_pnl_usd(ep, cp, q, pos.side, cv)
+                    pos.unrealized_pnl = Decimal(str(u))
+                    total_unrealized_pnl += Decimal(str(u))
+                    margin_locked_usd += Decimal(
+                        str(isolated_margin_usd(ep, q, cv, lev))
+                    )
                 
                 positions_list = [
                     {
@@ -214,8 +191,10 @@ class PortfolioService:
                 total_realized_pnl = Decimal(str(agg_result.total_realized_pnl or 0))
                 
                 # NOTE: initial_balance is in INR (from config), positions/PnL are in USD
-                # Calculate available balance in INR: INR_balance + USD_PnL_in_INR - USD_positions_in_INR
-                available_balance_inr = initial_balance + (total_realized_pnl * usdinr_rate) - (positions_value * usdinr_rate)
+                # Available = initial + realized (USD->INR) - isolated margin locked (USD->INR)
+                available_balance_inr = initial_balance + (total_realized_pnl * usdinr_rate) - (
+                    margin_locked_usd * usdinr_rate
+                )
                 
                 # Ensure available balance doesn't go negative (shouldn't happen, but safety check)
                 if available_balance_inr < 0:
@@ -243,7 +222,7 @@ class PortfolioService:
                     # Add INR versions for display
                     pos["unrealized_pnl_inr"] = pos["unrealized_pnl"] * usdinr_rate
 
-                margin_used_inr = positions_value * usdinr_rate  # positions_value is in USD, convert to INR
+                margin_used_inr = margin_locked_usd * usdinr_rate
                 total_unrealized_pnl_inr = total_unrealized_pnl * usdinr_rate
                 total_realized_pnl_inr = total_realized_pnl * usdinr_rate
                 

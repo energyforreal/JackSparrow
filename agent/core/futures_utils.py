@@ -1,9 +1,18 @@
 """
 futures_utils.py
 Core calculation utilities for perpetual futures trading.
-All position sizing returns integer lots; all prices are in USD.
+
+Canonical semantics:
+- ``quantity`` / ``lots`` in the agent and DB are **contract lot counts** (integers).
+- **USD notional** for a position is ``lots * btc_price_usd * contract_value_btc``.
+- **USD PnL** is ``lots * (exit_price - entry_price) * contract_value_btc`` for long,
+  with the sign inverted for short. Always multiply by ``contract_value_btc``; do not
+  treat ``lots * price`` as notional without ``contract_value_btc``.
 """
 import math
+from typing import Literal
+
+Side = Literal["long", "short"]
 
 
 def price_to_lots(
@@ -26,6 +35,126 @@ def price_to_lots(
 def notional_value(lots: int, btc_price: float,
                    contract_value_btc: float = 0.001) -> float:
     return lots * btc_price * contract_value_btc
+
+
+def gross_pnl_usd(
+    entry_price: float,
+    exit_price: float,
+    lots: float,
+    side: str,
+    contract_value_btc: float = 0.001,
+) -> float:
+    """Price PnL in USD before fees (long: profit when exit > entry)."""
+    delta = (exit_price - entry_price) * float(lots) * contract_value_btc
+    s = (side or "").lower()
+    if s in ("short", "sell"):
+        return -delta
+    return delta
+
+
+def unrealized_pnl_usd(
+    entry_price: float,
+    mark_price: float,
+    lots: float,
+    side: str,
+    contract_value_btc: float = 0.001,
+) -> float:
+    """Unrealized PnL in USD using mark (or best bid/ask mid)."""
+    return gross_pnl_usd(entry_price, mark_price, lots, side, contract_value_btc)
+
+
+def per_leg_cost_rate(taker_fee_rate: float, slippage_bps: float) -> float:
+    """One-way cost as fraction of notional (taker + slippage)."""
+    return float(taker_fee_rate) + float(slippage_bps) / 10000.0
+
+
+def round_trip_fees_usd(
+    entry_price: float,
+    exit_price: float,
+    lots: float,
+    contract_value_btc: float,
+    taker_fee_rate: float,
+    slippage_bps: float,
+) -> float:
+    """Entry fee on entry notional + exit fee on exit notional (both legs)."""
+    leg = per_leg_cost_rate(taker_fee_rate, slippage_bps)
+    lf = float(lots)
+    n_in = lf * entry_price * contract_value_btc
+    n_out = lf * exit_price * contract_value_btc
+    return n_in * leg + n_out * leg
+
+
+def net_pnl_usd_after_fees(
+    entry_price: float,
+    exit_price: float,
+    lots: float,
+    side: str,
+    contract_value_btc: float,
+    taker_fee_rate: float,
+    slippage_bps: float,
+) -> tuple[float, float, float]:
+    """Returns (gross_pnl_usd, fees_usd, net_pnl_usd)."""
+    g = gross_pnl_usd(entry_price, exit_price, lots, side, contract_value_btc)
+    fees = round_trip_fees_usd(
+        entry_price, exit_price, lots, contract_value_btc, taker_fee_rate, slippage_bps
+    )
+    return g, fees, g - fees
+
+
+def entry_leg_fees_usd(
+    entry_price: float,
+    lots: float,
+    contract_value_btc: float,
+    taker_fee_rate: float,
+    slippage_bps: float,
+) -> float:
+    """One-way cost on entry notional (taker + slippage)."""
+    n_in = float(lots) * float(entry_price) * contract_value_btc
+    return n_in * per_leg_cost_rate(taker_fee_rate, slippage_bps)
+
+
+def exit_leg_fees_usd(
+    exit_price: float,
+    lots: float,
+    contract_value_btc: float,
+    taker_fee_rate: float,
+    slippage_bps: float,
+) -> float:
+    """One-way cost on exit notional (taker + slippage)."""
+    n_out = float(lots) * float(exit_price) * contract_value_btc
+    return n_out * per_leg_cost_rate(taker_fee_rate, slippage_bps)
+
+
+def net_pnl_usd_after_fees_split_legs(
+    entry_price: float,
+    exit_price: float,
+    lots: float,
+    side: str,
+    contract_value_btc: float,
+    taker_fee_rate: float,
+    slippage_bps: float,
+) -> tuple[float, float, float, float, float]:
+    """Returns (gross, fees_entry, fees_exit, fees_total, net).
+
+    Same economic net as round-trip; splits fees per leg for logging.
+    """
+    g = gross_pnl_usd(entry_price, exit_price, lots, side, contract_value_btc)
+    fe = entry_leg_fees_usd(
+        entry_price, lots, contract_value_btc, taker_fee_rate, slippage_bps
+    )
+    fx = exit_leg_fees_usd(
+        exit_price, lots, contract_value_btc, taker_fee_rate, slippage_bps
+    )
+    total = fe + fx
+    return g, fe, fx, total, g - total
+
+
+def isolated_equity_usd(
+    initial_margin_usd: float,
+    unrealized_pnl_usd: float,
+) -> float:
+    """Equity in isolated margin model (margin balance + mark PnL)."""
+    return float(initial_margin_usd) + float(unrealized_pnl_usd)
 
 
 def pct_to_price(entry_price: float, pct: float) -> float:

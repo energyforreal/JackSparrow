@@ -271,6 +271,17 @@ class Settings(BaseSettings):
             object.__setattr__(self, "paper_trading_mode", False)
         return self
 
+    contract_value_btc: float = Field(
+        default=0.001,
+        env="CONTRACT_VALUE_BTC",
+        description="BTC notional per contract lot (must match agent paper model)",
+    )
+    isolated_margin_leverage: int = Field(
+        default=5,
+        env="ISOLATED_MARGIN_LEVERAGE",
+        description="Leverage for isolated margin display (must match agent)",
+    )
+
     # Risk Management Settings (must match agent config)
     stop_loss_percentage: float = Field(
         default=0.01,

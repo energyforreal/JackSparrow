@@ -215,6 +215,44 @@ class Settings(BaseSettings):
         env="EDGE_DECAY_THRESHOLD",
         description="Exit when |edge| falls below this after min hold (v15).",
     )
+    v15_min_edge_cost_ratio: float = Field(
+        default=2.0,
+        env="V15_MIN_EDGE_COST_RATIO",
+        description=(
+            "Require abs(edge) >= per_leg_cost * ratio where per_leg_cost = taker + slippage "
+            "(matches notebook MIN_EDGE_COST_RATIO vs round-trip fee model)."
+        ),
+    )
+    v15_min_trade_gap_bars: int = Field(
+        default=3,
+        env="V15_MIN_TRADE_GAP_BARS",
+        description="Minimum completed bars between new entries (notebook MIN_GAP_CANDLES).",
+    )
+    v15_min_trade_gap_enabled: bool = Field(
+        default=True,
+        env="V15_MIN_TRADE_GAP_ENABLED",
+        description="When True, enforce min bar gap between paper entries.",
+    )
+    v15_max_trades_per_day_5m: int = Field(
+        default=8,
+        env="V15_MAX_TRADES_PER_DAY_5M",
+        description="Daily cap for 5m timeframe (notebook TF_MAX_TRADES_DAY).",
+    )
+    v15_max_trades_per_day_15m: int = Field(
+        default=4,
+        env="V15_MAX_TRADES_PER_DAY_15M",
+        description="Daily cap for 15m timeframe.",
+    )
+    v15_daily_trade_cap_enabled: bool = Field(
+        default=True,
+        env="V15_DAILY_TRADE_CAP_ENABLED",
+        description="When True, enforce per-timeframe daily trade caps for v15.",
+    )
+    position_restore_on_startup: bool = Field(
+        default=True,
+        env="POSITION_RESTORE_ON_STARTUP",
+        description="Load open DB positions into the execution engine after startup (paper).",
+    )
     volatility_filter_enabled: bool = Field(
         default=True,
         env="VOLATILITY_FILTER_ENABLED",
@@ -364,6 +402,21 @@ class Settings(BaseSettings):
     contract_type: str = Field("perpetual_futures", env="CONTRACT_TYPE")
     contract_value_btc: float = Field(0.001, env="CONTRACT_VALUE_BTC")
     tick_size: float = Field(0.50, env="TICK_SIZE")
+    use_live_product_specs: bool = Field(
+        True,
+        env="USE_LIVE_PRODUCT_SPECS",
+        description="Fetch contract_value and tick_size from Delta public /v2/products/{symbol}",
+    )
+    product_specs_cache_ttl_seconds: int = Field(
+        3600,
+        env="PRODUCT_SPECS_CACHE_TTL_SECONDS",
+        description="Redis TTL for cached product specs",
+    )
+    delta_public_http_timeout_seconds: float = Field(
+        15.0,
+        env="DELTA_PUBLIC_HTTP_TIMEOUT_SECONDS",
+        description="Timeout for unauthenticated Delta public API calls",
+    )
     taker_fee_rate: float = Field(0.0005, env="TAKER_FEE_RATE")
     maker_fee_rate: float = Field(0.0002, env="MAKER_FEE_RATE")
     funding_interval_hours: int = Field(8, env="FUNDING_INTERVAL_HOURS")
@@ -388,6 +441,11 @@ class Settings(BaseSettings):
         env="ENFORCE_FIXED_LOT_SIZE",
         description="When true, always trade the fixed lot size for new entries",
     )
+    use_notional_lot_sizing: bool = Field(
+        default=False,
+        env="USE_NOTIONAL_LOT_SIZING",
+        description="When true, size lots from USD notional (floor) instead of fixed_lot_size",
+    )
     isolated_margin_leverage: int = Field(
         default=5,
         env="ISOLATED_MARGIN_LEVERAGE",
@@ -397,6 +455,18 @@ class Settings(BaseSettings):
         default=83.0,
         env="USDINR_FALLBACK_RATE",
         description="Fallback USDINR conversion rate when live FX is unavailable",
+    )
+    maintenance_fraction_of_initial: float = Field(
+        0.5,
+        env="MAINTENANCE_FRACTION_OF_INITIAL",
+        ge=0.0,
+        le=1.0,
+        description="Paper liquidation when equity < initial_margin * this fraction (isolated)",
+    )
+    fee_accounting_mode: str = Field(
+        "split",
+        env="FEE_ACCOUNTING_MODE",
+        description="split: entry fee at open, exit fee at close; round_trip: fees in net at close only",
     )
 
     active_timeframes: str = Field(
@@ -925,6 +995,16 @@ class Settings(BaseSettings):
         default=["password", "token", "api_key", "secret", "private_key"],
         env="COMMUNICATION_SENSITIVE_FIELDS",
         description="Fields to sanitize in communication logs"
+    )
+    signal_audit_md_enabled: bool = Field(
+        default=True,
+        env="SIGNAL_AUDIT_MD_ENABLED",
+        description="Append AI signals and trade actions to realtime markdown under LOGS_ROOT",
+    )
+    signal_audit_md_subpath: str = Field(
+        default="signal_audit/live_audit.md",
+        env="SIGNAL_AUDIT_MD_SUBPATH",
+        description="Path under LOGS_ROOT for the live markdown audit file",
     )
     
     # Feature Server

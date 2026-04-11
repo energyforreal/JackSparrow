@@ -8,7 +8,8 @@ interface TimeInfo {
 }
 
 interface UseSystemClockReturn {
-  currentTime: Date
+  /** null before first client paint (avoids SSR epoch placeholder warnings). */
+  currentTime: Date | null
   isSynced: boolean
   syncError: Error | null
 }
@@ -25,13 +26,9 @@ interface UseSystemClockReturn {
 export function useSystemClock(): UseSystemClockReturn {
   // Initialize with current time to prevent showing epoch date
   // Will be synced with server after mount, but always show reasonable time
-  const [currentTime, setCurrentTime] = useState<Date>(() => {
-    // Use current time immediately to avoid showing epoch date
-    if (typeof window !== 'undefined') {
-      return new Date()
-    }
-    return new Date(0) // Fallback for SSR
-  })
+  // Same initial value on server and client so the first paint matches (hydration).
+  // useEffect below replaces this with real time immediately after mount.
+  const [currentTime, setCurrentTime] = useState<Date | null>(null)
   const [isSynced, setIsSynced] = useState(false)
   const [syncError, setSyncError] = useState<Error | null>(null)
   
@@ -101,11 +98,8 @@ export function useSystemClock(): UseSystemClockReturn {
 
   // Initial sync on mount (client-side only)
   useEffect(() => {
-    // Ensure we have a valid current time immediately
-    if (currentTime.getTime() === 0 || currentTime.getFullYear() < 2020) {
-      setCurrentTime(new Date())
-    }
-    
+    setCurrentTime(new Date())
+
     // Then sync with server (non-blocking)
     syncWithServer().catch(() => {
       // Error already handled in syncWithServer

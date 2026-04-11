@@ -8,6 +8,7 @@ and integration with trading venues.
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 import asyncio
+import math
 import random
 import time
 import uuid
@@ -17,6 +18,14 @@ from agent.events.event_bus import event_bus
 from agent.events.schemas import RiskApprovedEvent, OrderFillEvent, PositionClosedEvent, EventType
 from agent.core.config import settings
 from agent.core.context_manager import context_manager
+from agent.core.redis_config import get_cache
+from agent.core.futures_utils import (
+    net_pnl_usd_after_fees,
+    net_pnl_usd_after_fees_split_legs,
+    per_leg_cost_rate,
+    entry_leg_fees_usd,
+    isolated_equity_usd,
+)
 
 logger = structlog.get_logger()
 
@@ -112,6 +121,11 @@ class PositionManager:
                      position_extras: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Open a new position. Optionally store stop_loss and take_profit for monitoring."""
         contract_value_btc = float(getattr(settings, "contract_value_btc", 0.001))
+        if position_extras and position_extras.get("contract_value_btc") is not None:
+            try:
+                contract_value_btc = float(position_extras["contract_value_btc"])
+            except (TypeError, ValueError):
+                pass
 
         position = {
             "symbol": symbol,
@@ -130,6 +144,10 @@ class PositionManager:
         }
         if position_extras:
             position.update(position_extras)
+            if position_extras.get("paper_usdinr_entry") is not None:
+                position["paper_usdinr_entry"] = float(position_extras["paper_usdinr_entry"])
+        # Ensure contract_value wins over extras keys if both present
+        position["contract_value_btc"] = contract_value_btc
 
         self.positions[symbol] = position
 
@@ -267,6 +285,7 @@ class ExecutionEngine:
 
         # Mock exchange integration (would be replaced with real exchange API)
         self.exchange_connected = False
+        self._position_lock = asyncio.Lock()
 
     async def initialize(self, delta_client=None, risk_manager=None):
         """Initialize execution engine.
@@ -403,6 +422,40 @@ class ExecutionEngine:
                 if extras:
                     trade["position_extras"] = extras
 
+            pex = dict(trade.get("position_extras") or {})
+            if payload.get("contract_value_btc") is not None:
+                try:
+                    pex["contract_value_btc"] = float(payload["contract_value_btc"])
+                except (TypeError, ValueError):
+                    pass
+            if payload.get("tick_size") is not None:
+                try:
+                    pex["tick_size"] = float(payload["tick_size"])
+                except (TypeError, ValueError):
+                    pass
+            uir = payload.get("usd_inr_rate")
+            if uir is not None:
+                try:
+                    pex["paper_usdinr_entry"] = float(uir)
+                except (TypeError, ValueError):
+                    pass
+            if pex:
+                trade["position_extras"] = pex
+
+            try:
+                pf = float(price)
+            except (TypeError, ValueError):
+                pf = 0.0
+            if pf <= 0:
+                logger.warning(
+                    "execution_risk_approved_invalid_price",
+                    symbol=symbol,
+                    price=price,
+                    event_id=event.event_id,
+                )
+                return
+            trade["price"] = pf
+
             result = await self.execute_trade(trade)
 
             if not result.success:
@@ -422,6 +475,20 @@ class ExecutionEngine:
                 pos["model_predictions"] = payload.get("model_predictions")
                 pos["reasoning_chain_id"] = payload.get("reasoning_chain_id")
                 pos["predicted_signal"] = payload.get("side", "")
+                if settings.paper_trading_mode:
+                    cv_pf = float(
+                        pos.get("contract_value_btc")
+                        or getattr(settings, "contract_value_btc", 0.001)
+                    )
+                    taker_pf = float(getattr(settings, "taker_fee_rate", 0.0005) or 0.0005)
+                    slip_pf = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
+                    pos["entry_fee_usd"] = entry_leg_fees_usd(
+                        float(fill_price),
+                        float(quantity),
+                        cv_pf,
+                        taker_pf,
+                        slip_pf,
+                    )
             if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                 from agent.risk.risk_manager import Position as RMPosition
                 rm_pos = RMPosition(
@@ -463,8 +530,18 @@ class ExecutionEngine:
                     rate = float(usd_inr_rate) if usd_inr_rate is not None else float(getattr(settings, "usdinr_fallback_rate", 83.0))
                 except (TypeError, ValueError):
                     rate = float(getattr(settings, "usdinr_fallback_rate", 83.0))
-                contract_value_btc = float(getattr(settings, "contract_value_btc", 0.001))
+                contract_value_btc = float(
+                    (pos or {}).get("contract_value_btc")
+                    or getattr(settings, "contract_value_btc", 0.001)
+                )
                 trade_value_inr = float(quantity) * float(fill_price) * contract_value_btc * rate
+                mode = (getattr(settings, "fee_accounting_mode", "split") or "split").lower()
+                entry_fee_usd = float((pos or {}).get("entry_fee_usd") or 0.0)
+                fees_inr_open = (
+                    float(entry_fee_usd * rate)
+                    if mode == "split"
+                    else 0.0
+                )
                 paper_trade_logger.log_trade(
                     trade_id=trade_id,
                     symbol=symbol,
@@ -475,7 +552,7 @@ class ExecutionEngine:
                     reasoning_chain_id=payload.get("reasoning_chain_id"),
                     usd_inr_rate=rate,
                     trade_value_inr=trade_value_inr,
-                    fees_inr=0.0,
+                    fees_inr=fees_inr_open,
                 )
 
             logger.info(
@@ -598,13 +675,54 @@ class ExecutionEngine:
                         error=str(e))
             return ExecutionResult(False, error_message=f"Execution failed: {str(e)}")
 
+    async def _resolve_usdinr_paper(self) -> float:
+        """Live USDINR from Redis cache, else config fallback."""
+        try:
+            cached = await get_cache("fx:usdinr:last")
+            if isinstance(cached, dict):
+                val = cached.get("rate")
+                if val is not None and float(val) > 0:
+                    return float(val)
+        except Exception:
+            pass
+        return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+
     async def close_position(self, symbol: str, order_type: str = "market",
                            price: Optional[float] = None,
                            exit_reason: str = "market_close") -> ExecutionResult:
         """Close an existing position. exit_reason: market_close, stop_loss_hit, take_profit_hit, signal_reversal, time_limit."""
+        async with self._position_lock:
+            return await self._close_position_impl(symbol, order_type, price, exit_reason)
+
+    async def _close_position_impl(self, symbol: str, order_type: str = "market",
+                                   price: Optional[float] = None,
+                                   exit_reason: str = "market_close") -> ExecutionResult:
+        """Close position (caller must hold _position_lock via close_position)."""
         position = self.position_manager.get_position(symbol)
         if not position:
             return ExecutionResult(False, error_message=f"No open position for {symbol}")
+
+        try:
+            entry_px = float(position["entry_price"])
+        except (TypeError, ValueError):
+            entry_px = 0.0
+        lots = float(position.get("lots", position.get("quantity", 0)))
+        if (
+            entry_px <= 0
+            or not math.isfinite(entry_px)
+            or lots <= 0
+            or not math.isfinite(lots)
+        ):
+            logger.error(
+                "close_aborted_invalid_entry_state",
+                symbol=symbol,
+                entry_price=entry_px,
+                lots=lots,
+            )
+            return ExecutionResult(
+                False,
+                error_message="Invalid entry_price or quantity; close aborted without clearing state",
+            )
 
         model_predictions = position.get("model_predictions")
         reasoning_chain_id = position.get("reasoning_chain_id")
@@ -612,10 +730,8 @@ class ExecutionEngine:
         entry_time = position.get("entry_time")
 
         try:
-            # Determine close side (opposite of position side)
             close_side = "sell" if position["side"] == "long" else "buy"
 
-            # Execute close order
             order_result = await self._place_order(
                 symbol=symbol,
                 side=close_side,
@@ -625,7 +741,42 @@ class ExecutionEngine:
             )
 
             if order_result["success"] and order_result.get("filled_immediately", False):
-                exit_price = order_result["average_fill_price"]
+                exit_price = float(order_result["average_fill_price"])
+                if exit_price <= 0 or not math.isfinite(exit_price):
+                    logger.error("close_aborted_invalid_exit_price", symbol=symbol, exit_price=exit_price)
+                    return ExecutionResult(False, error_message="Invalid exit fill price")
+
+                cv = float(
+                    position.get("contract_value_btc")
+                    or getattr(settings, "contract_value_btc", 0.001)
+                )
+                taker = float(getattr(settings, "taker_fee_rate", 0.0005) or 0.0005)
+                slip_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
+                mode = (getattr(settings, "fee_accounting_mode", "split") or "split").lower()
+                if mode == "round_trip":
+                    gross_usd, fees_usd, net_usd = net_pnl_usd_after_fees(
+                        entry_px,
+                        exit_price,
+                        lots,
+                        position["side"],
+                        cv,
+                        taker,
+                        slip_bps,
+                    )
+                    fees_exit_usd = fees_usd
+                else:
+                    gross_usd, _fe_in, fees_exit_usd, fees_usd, net_usd = (
+                        net_pnl_usd_after_fees_split_legs(
+                            entry_px,
+                            exit_price,
+                            lots,
+                            position["side"],
+                            cv,
+                            taker,
+                            slip_bps,
+                        )
+                    )
+
                 closed_position = self.position_manager.close_position(
                     symbol=symbol,
                     exit_price=exit_price,
@@ -635,21 +786,38 @@ class ExecutionEngine:
                 if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                     self.risk_manager.portfolio.remove_position(symbol)
 
-                logger.info("position_closed_successfully",
-                           symbol=symbol,
-                           exit_price=exit_price,
-                           realized_pnl=closed_position["realized_pnl"])
+                logger.info(
+                    "position_closed_successfully",
+                    symbol=symbol,
+                    exit_price=exit_price,
+                    realized_pnl_gross_usd=gross_usd,
+                    fees_usd=fees_usd,
+                    realized_pnl_net_usd=net_usd,
+                )
 
-                # Publish PositionClosedEvent for backend persistence and paper trade log
                 position_id = f"pos_{closed_position.get('entry_order_id', order_result.get('order_id', ''))}"
-                payload_data = {
+                usdinr_exit = await self._resolve_usdinr_paper()
+                try:
+                    usdinr_entry = float(position.get("paper_usdinr_entry")) if position.get("paper_usdinr_entry") is not None else usdinr_exit
+                except (TypeError, ValueError):
+                    usdinr_entry = usdinr_exit
+
+                notional_usd_entry = lots * entry_px * cv
+                fx_pnl_inr = notional_usd_entry * (usdinr_exit - usdinr_entry)
+
+                payload_data: Dict[str, Any] = {
                     "position_id": position_id,
                     "symbol": symbol,
                     "side": position["side"],
                     "entry_price": position["entry_price"],
                     "exit_price": exit_price,
                     "quantity": position.get("lots", position.get("quantity", 0)),
-                    "pnl": closed_position["realized_pnl"],
+                    "pnl": net_usd,
+                    "gross_pnl_usd": gross_usd,
+                    "fees_usd": fees_usd,
+                    "usdinr_at_entry": usdinr_entry,
+                    "usdinr_at_exit": usdinr_exit,
+                    "fx_pnl_inr": fx_pnl_inr,
                     "exit_reason": exit_reason,
                     "timestamp": datetime.now(timezone.utc),
                 }
@@ -669,9 +837,23 @@ class ExecutionEngine:
 
                 if settings.paper_trading_mode:
                     from agent.core.paper_trade_logger import paper_trade_logger
-                    usd_inr_rate = float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
-                    fees_inr = 0.0
-                    net_pnl_inr = float(closed_position["realized_pnl"]) * usd_inr_rate - fees_inr
+                    from decimal import Decimal, ROUND_HALF_UP
+
+                    fees_for_close_inr = (
+                        fees_exit_usd * usdinr_exit
+                        if mode != "round_trip"
+                        else fees_usd * usdinr_exit
+                    )
+                    fees_inr = Decimal(str(fees_for_close_inr)).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    net_pnl_inr = Decimal(str(net_usd * usdinr_exit)).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    margin_usd = (lots * entry_px * cv) / max(
+                        1, int(getattr(settings, "isolated_margin_leverage", 5) or 5)
+                    )
+                    pnl_pct_margin = (net_usd / margin_usd) * 100.0 if margin_usd > 0 else 0.0
                     duration_seconds = None
                     if isinstance(position.get("entry_time"), datetime):
                         duration_seconds = (
@@ -684,17 +866,24 @@ class ExecutionEngine:
                         entry_price=position["entry_price"],
                         exit_price=exit_price,
                         quantity=position.get("lots", position.get("quantity", 0)),
-                        pnl=closed_position["realized_pnl"],
+                        pnl=net_usd,
                         exit_reason=exit_reason,
-                        fees_inr=fees_inr,
-                        net_pnl_inr=net_pnl_inr,
-                        usd_inr_rate=usd_inr_rate,
+                        fees_inr=float(fees_inr),
+                        net_pnl_inr=float(net_pnl_inr),
+                        usd_inr_rate=usdinr_exit,
                         duration_seconds=duration_seconds,
+                        gross_pnl_usd=gross_usd,
+                        usdinr_at_entry=usdinr_entry,
+                        fx_pnl_inr=float(
+                            Decimal(str(fx_pnl_inr)).quantize(
+                                Decimal("0.01"), rounding=ROUND_HALF_UP
+                            )
+                        ),
+                        pnl_pct_on_margin=pnl_pct_margin,
                     )
 
                 return ExecutionResult(True, order_id=order_result.get("order_id"))
 
-            # Close order failed or not filled - report failure so callers do not assume position closed
             return ExecutionResult(
                 False,
                 error_message=order_result.get("error", "Close order did not fill"),
@@ -718,19 +907,87 @@ class ExecutionEngine:
         if not position:
             return {"action": "none", "reason": "No position found"}
 
-        actions_taken = []
+        actions_taken: List[Dict[str, Any]] = []
 
         current_price = position.get("current_price", position["entry_price"])
         entry_price = position["entry_price"]
+
+        # Paper isolated margin: liquidate when equity falls below maintenance margin
+        if settings.paper_trading_mode and bool(
+            getattr(settings, "enable_paper_liquidation", True)
+        ):
+            try:
+                lev_pm = max(1, int(getattr(settings, "isolated_margin_leverage", 5) or 5))
+                cv_pm = float(
+                    position.get("contract_value_btc")
+                    or getattr(settings, "contract_value_btc", 0.001)
+                )
+                lots_pm = float(position.get("lots", position.get("quantity", 0)))
+                ep_pm = float(entry_price)
+                if (
+                    lots_pm > 0
+                    and ep_pm > 0
+                    and cv_pm > 0
+                    and math.isfinite(float(current_price))
+                ):
+                    notional_usd = lots_pm * ep_pm * cv_pm
+                    initial_margin_usd = notional_usd / lev_pm
+                    upl = float(position.get("unrealized_pnl", 0.0))
+                    eq = isolated_equity_usd(initial_margin_usd, upl)
+                    maint_frac = float(
+                        getattr(settings, "maintenance_fraction_of_initial", 0.5) or 0.5
+                    )
+                    maintenance_usd = initial_margin_usd * max(0.0, min(1.0, maint_frac))
+                    if eq < maintenance_usd:
+                        close_result = await self.close_position(
+                            position_symbol, exit_reason="liquidation"
+                        )
+                        if close_result.success:
+                            return {
+                                "symbol": position_symbol,
+                                "actions_taken": [
+                                    {
+                                        "action": "liquidation",
+                                        "symbol": position_symbol,
+                                        "exit_price": current_price,
+                                        "equity_usd": eq,
+                                        "maintenance_usd": maintenance_usd,
+                                    }
+                                ],
+                                "position_status": "closed",
+                            }
+            except Exception as e:
+                logger.warning(
+                    "paper_liquidation_check_failed",
+                    symbol=position_symbol,
+                    error=str(e),
+                )
         trail_pct = getattr(settings, "trailing_stop_percentage", 0.015) or 0.015
         act_pct = float(
             getattr(settings, "trailing_stop_activation_profit_pct", 0.0) or 0.0
         )
 
+        min_hold_until = position.get("v15_min_hold_until")
+        past_min_hold = True
+        if min_hold_until is not None:
+            now = datetime.now(timezone.utc)
+            if hasattr(min_hold_until, "tzinfo") and min_hold_until.tzinfo:
+                min_hold_dt = min_hold_until
+            else:
+                min_hold_dt = min_hold_until.replace(tzinfo=timezone.utc)
+            past_min_hold = now >= min_hold_dt
+            if not past_min_hold:
+                logger.debug(
+                    "min_hold_soft_exits_deferred",
+                    symbol=position_symbol,
+                    until=min_hold_until,
+                    now=now,
+                )
+
         v15_atr = position.get("v15_entry_atr")
         v15_mult = position.get("v15_trail_mult")
         v15_trail_active = False
-        if v15_atr is not None and v15_mult is not None:
+        if past_min_hold and v15_atr is not None and v15_mult is not None:
             try:
                 atr_v = float(v15_atr)
                 mult_v = float(v15_mult)
@@ -759,8 +1016,7 @@ class ExecutionEngine:
                             new_stop=new_sl,
                         )
 
-        # Trailing stop: ratchet stop_loss on favorable price moves (optional profit gate)
-        if not v15_trail_active and position["side"] == "long" and current_price > entry_price:
+        if past_min_hold and not v15_trail_active and position["side"] == "long" and current_price > entry_price:
             profit_pct = (current_price - entry_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 - trail_pct)
@@ -771,7 +1027,7 @@ class ExecutionEngine:
                         symbol=position_symbol,
                         new_stop=new_trail_stop,
                     )
-        elif not v15_trail_active and position["side"] == "short" and current_price < entry_price:
+        elif past_min_hold and not v15_trail_active and position["side"] == "short" and current_price < entry_price:
             profit_pct = (entry_price - current_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 + trail_pct)
@@ -784,28 +1040,45 @@ class ExecutionEngine:
                         new_stop=new_trail_stop,
                     )
 
-        # Check stop loss and take profit levels
         stop_loss = position.get("stop_loss")
         take_profit = position.get("take_profit")
 
-        # Check minimum hold time constraint
-        min_hold_until = position.get("v15_min_hold_until")
-        if min_hold_until is not None:
-            now = datetime.now(timezone.utc)
-            # Ensure comparison works regardless of naive/aware
-            if hasattr(min_hold_until, 'tzinfo') and min_hold_until.tzinfo:
-                min_hold_dt = min_hold_until
-            else:
-                # Assume naive datetime is UTC
-                min_hold_dt = min_hold_until.replace(tzinfo=timezone.utc)
-            
-            if now < min_hold_dt:
-                logger.debug("min_hold_not_reached", symbol=position_symbol, until=min_hold_until, now=now)
-                return {"symbol": position_symbol, "actions_taken": [], "position_status": position["status"]}
+        if (
+            past_min_hold
+            and bool(getattr(settings, "v15_signal_logic_enabled", True))
+            and position.get("v15_entry_atr") is not None
+        ):
+            st = context_manager.get_state()
+            edge = getattr(st, "v15_live_edge", None) if st else None
+            if edge is not None:
+                try:
+                    ef = float(edge)
+                    th = float(getattr(settings, "edge_decay_threshold", 0.05) or 0.05)
+                    if abs(ef) < th:
+                        close_result = await self.close_position(
+                            position_symbol, exit_reason="edge_decay"
+                        )
+                        if close_result.success:
+                            actions_taken.append(
+                                {
+                                    "action": "edge_decay_exit",
+                                    "symbol": position_symbol,
+                                    "exit_price": current_price,
+                                    "edge": ef,
+                                }
+                            )
+                            return {
+                                "symbol": position_symbol,
+                                "actions_taken": actions_taken,
+                                "position_status": "closed",
+                            }
+                except (TypeError, ValueError):
+                    pass
 
         if stop_loss:
-            should_stop = (position["side"] == "long" and current_price <= stop_loss) or \
-                         (position["side"] == "short" and current_price >= stop_loss)
+            should_stop = (position["side"] == "long" and current_price <= stop_loss) or (
+                position["side"] == "short" and current_price >= stop_loss
+            )
             if should_stop:
                 sl_reason = (
                     "atr_trail_stop"
@@ -814,29 +1087,40 @@ class ExecutionEngine:
                 )
                 close_result = await self.close_position(position_symbol, exit_reason=sl_reason)
                 if close_result.success:
-                    actions_taken.append({
-                        "action": "stop_loss_triggered",
+                    actions_taken.append(
+                        {
+                            "action": "stop_loss_triggered",
+                            "symbol": position_symbol,
+                            "exit_price": current_price,
+                        }
+                    )
+                    return {
                         "symbol": position_symbol,
-                        "exit_price": current_price
-                    })
-                    return {"symbol": position_symbol, "actions_taken": actions_taken, "position_status": "closed"}
+                        "actions_taken": actions_taken,
+                        "position_status": "closed",
+                    }
 
-        if take_profit:
-            should_tp = (position["side"] == "long" and current_price >= take_profit) or \
-                       (position["side"] == "short" and current_price <= take_profit)
+        if take_profit and past_min_hold:
+            should_tp = (position["side"] == "long" and current_price >= take_profit) or (
+                position["side"] == "short" and current_price <= take_profit
+            )
             if should_tp:
-                close_result = await self.close_position(position_symbol, exit_reason="take_profit_hit")
+                close_result = await self.close_position(
+                    position_symbol, exit_reason="take_profit_hit"
+                )
                 if close_result.success:
-                    actions_taken.append({
-                        "action": "take_profit_triggered",
-                        "symbol": position_symbol,
-                        "exit_price": current_price
-                    })
+                    actions_taken.append(
+                        {
+                            "action": "take_profit_triggered",
+                            "symbol": position_symbol,
+                            "exit_price": current_price,
+                        }
+                    )
 
         return {
             "symbol": position_symbol,
             "actions_taken": actions_taken,
-            "position_status": position["status"]
+            "position_status": position["status"],
         }
 
     async def update_position_price_and_check(self, symbol: str, price: float) -> None:
@@ -1000,10 +1284,12 @@ class ExecutionEngine:
             raise ValueError(
                 f"Stale ticker for {symbol}, age={age_s:.1f}s (max={max_age_s:.1f}s)"
             )
-        close = result.get("close") or result.get("mark_price")
-        if close is None:
-            raise ValueError(f"Ticker has no close/mark_price for {symbol}")
-        return float(close)
+        mark = result.get("mark_price")
+        close = result.get("close")
+        base = float(mark) if mark is not None else (float(close) if close is not None else None)
+        if base is None:
+            raise ValueError(f"Ticker has no mark_price/close for {symbol}")
+        return base
 
     def _get_context_price(self, symbol: str) -> Optional[float]:
         """Best-effort fallback to latest in-memory market price."""

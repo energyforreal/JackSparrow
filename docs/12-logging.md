@@ -511,6 +511,18 @@ Error summaries are also logged periodically (every 5 minutes) with the event `e
 
 ---
 
+## AI signal and action audit journal
+
+For a **markdown workbook** that records each AI signal, the action taken (approve / reject / hold), timestamps, and (when applicable) position size, PnL, and exit time—with field mapping from `logs/agent.log` and `logs/paper_trades/paper_trades.log`—see:
+
+- [`reference/ai-signal-action-audit-log.md`](../reference/ai-signal-action-audit-log.md)
+
+**Realtime audit**: while the agent runs, the same events are **appended automatically** to `{LOGS_ROOT}/signal_audit/live_audit.md` (implementation: `agent/core/signal_audit_md.py`). Toggle with `SIGNAL_AUDIT_MD_ENABLED` / `SIGNAL_AUDIT_MD_SUBPATH` (see `agent/.env.example`).
+
+Keep the reference template under `reference/` for manual summaries; the `logs/` tree is typically gitignored, so copy `live_audit.md` out if you need it in version control.
+
+---
+
 ## References
 
 - [Backend Documentation](06-backend.md) – update logging section with implementation specifics.

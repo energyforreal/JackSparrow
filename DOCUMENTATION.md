@@ -49,6 +49,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | Model bundles & `MODEL_DIR` | [ML models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults) |
 | WebSocket message shape | [Backend – WebSocket](docs/06-backend.md#websocket-protocol), [Frontend – WebSocket](docs/07-frontend.md#websocket-integration) |
 | Troubleshooting | [Debugging](docs/13-debugging.md), [Deployment – Troubleshooting](docs/10-deployment.md#troubleshooting) |
+| AI signal / trade audit (markdown workbook) | [reference/ai-signal-action-audit-log.md](reference/ai-signal-action-audit-log.md), [Logging – Audit journal](docs/12-logging.md#ai-signal-and-action-audit-journal) |
 
 ---
 
@@ -56,4 +57,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-04-07 (v15 docs merged; ad-hoc `files(4)/` removed)
+**Last updated**: 2026-04-12 (AI signal audit log reference)

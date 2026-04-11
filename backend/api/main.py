@@ -85,6 +85,31 @@ async def _migrate_database_schema() -> None:
                     "UPDATE positions SET realized_pnl = 0 WHERE realized_pnl IS NULL;"
                 )
             )
+            # Ensures agent-side prediction_audit inserts succeed if create_all missed this table.
+            await connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS prediction_audit (
+                        id SERIAL PRIMARY KEY,
+                        request_id VARCHAR(255) NOT NULL,
+                        model_version VARCHAR(64),
+                        symbol VARCHAR(50) NOT NULL,
+                        confidence NUMERIC(5, 4),
+                        latency_ms NUMERIC(12, 2),
+                        source VARCHAR(32),
+                        outcome_reference VARCHAR(255),
+                        metadata JSONB,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    );
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_prediction_audit_symbol_created "
+                    "ON prediction_audit (symbol, created_at);"
+                )
+            )
             logger.info("backend_database_schema_migrated", service="backend")
         except Exception as e:
             logger.warning(

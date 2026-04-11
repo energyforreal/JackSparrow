@@ -18,6 +18,8 @@ from backend.core.database import (
     Trade, Position, TradeStatus, PositionStatus, TradeSide, OrderType,
     AsyncSessionLocal
 )
+from backend.utils.futures_contract import unrealized_pnl_usd
+from backend.core.config import settings as backend_settings
 
 logger = structlog.get_logger()
 
@@ -439,13 +441,16 @@ class TradePersistenceService:
                 # Update current price
                 position.current_price = Decimal(str(current_price))
                 
-                # Recalculate unrealized PnL
-                if position.side == TradeSide.BUY:
-                    unrealized_pnl = (Decimal(str(current_price)) - position.entry_price) * position.quantity
-                else:  # SELL
-                    unrealized_pnl = (position.entry_price - Decimal(str(current_price))) * position.quantity
-                
-                position.unrealized_pnl = unrealized_pnl
+                # Recalculate unrealized PnL (quantity = lots; USD PnL with contract value)
+                cv = float(getattr(backend_settings, "contract_value_btc", 0.001))
+                u = unrealized_pnl_usd(
+                    float(position.entry_price),
+                    float(current_price),
+                    float(position.quantity),
+                    position.side,
+                    cv,
+                )
+                position.unrealized_pnl = Decimal(str(u))
                 
                 await session.commit()
                 return True

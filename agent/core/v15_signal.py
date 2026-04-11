@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from agent.core.config import settings
+from agent.core.futures_utils import per_leg_cost_rate
 
 _edge_buffers: Dict[str, collections.deque] = {
     "5m": collections.deque(maxlen=200),
@@ -114,6 +115,18 @@ def evaluate_v15_entry(
     }
 
     if not vol_ok or not ranging_ok:
+        return "HOLD", diag
+
+    taker = float(getattr(settings, "taker_fee_rate", 0.0005) or 0.0005)
+    slip = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
+    per_leg = per_leg_cost_rate(taker, slip)
+    ratio = float(getattr(settings, "v15_min_edge_cost_ratio", 2.0) or 2.0)
+    min_edge_vs_cost = per_leg * ratio
+    edge_cost_ok = abs(edge) >= min_edge_vs_cost
+    diag["_v15_filters"]["edge_vs_roundtrip_cost"] = edge_cost_ok
+    diag["min_edge_vs_cost"] = min_edge_vs_cost
+
+    if not edge_cost_ok:
         return "HOLD", diag
 
     if edge >= threshold and edge >= edge_floor:

@@ -27,6 +27,8 @@ from decimal import Decimal
 
 from backend.core.enums import SignalType
 from backend.services.fx_rate_service import update_usdinr_rate
+from backend.core.config import settings as backend_settings
+from backend.utils.futures_contract import unrealized_pnl_usd
 
 logger = structlog.get_logger()
 
@@ -1138,16 +1140,17 @@ class AgentEventSubscriber:
                     if not positions:
                         return
                     
+                    cv = float(getattr(backend_settings, "contract_value_btc", 0.001))
                     # Update each position within transaction
                     for position in positions:
                         position.current_price = Decimal(str(current_price))
-                        
-                        # Calculate unrealized PnL
-                        if position.side == TradeSide.BUY:
-                            unrealized_pnl = (current_price - float(position.entry_price)) * float(position.quantity)
-                        else:  # SELL
-                            unrealized_pnl = (float(position.entry_price) - current_price) * float(position.quantity)
-                        
+                        unrealized_pnl = unrealized_pnl_usd(
+                            float(position.entry_price),
+                            current_price,
+                            float(position.quantity),
+                            position.side,
+                            cv,
+                        )
                         position.unrealized_pnl = Decimal(str(unrealized_pnl))
                     
                     # Commit all updates atomically

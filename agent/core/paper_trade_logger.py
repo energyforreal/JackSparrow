@@ -105,6 +105,20 @@ class PaperTradeLogger:
                 f"fees_inr={fees_inr if fees_inr is not None else ''}\n"
             )
             py_logger.info(line.strip())
+            try:
+                from agent.core.signal_audit_md import append_paper_trade
+
+                append_paper_trade(
+                    trade_id=trade_id,
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    fill_price=fill_price,
+                    position_id=position_id,
+                    reasoning_chain_id=reasoning_chain_id,
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.warning(
                 "paper_trade_logger_write_failed",
@@ -127,6 +141,10 @@ class PaperTradeLogger:
         net_pnl_inr: Optional[float] = None,
         usd_inr_rate: Optional[float] = None,
         duration_seconds: Optional[float] = None,
+        gross_pnl_usd: Optional[float] = None,
+        usdinr_at_entry: Optional[float] = None,
+        fx_pnl_inr: Optional[float] = None,
+        pnl_pct_on_margin: Optional[float] = None,
     ) -> None:
         """Log a position close for P&L tracking.
 
@@ -150,10 +168,31 @@ class PaperTradeLogger:
                 f"{quantity}|{pnl}|{exit_reason}|local_time={local_ts}|"
                 f"fees_inr={fees_inr if fees_inr is not None else ''}|"
                 f"net_pnl_inr={net_pnl_inr if net_pnl_inr is not None else ''}|"
-                f"usd_inr_rate={usd_inr_rate if usd_inr_rate is not None else ''}|"
+                f"usd_inr_rate_exit={usd_inr_rate if usd_inr_rate is not None else ''}|"
+                f"usdinr_at_entry={usdinr_at_entry if usdinr_at_entry is not None else ''}|"
+                f"gross_pnl_usd={gross_pnl_usd if gross_pnl_usd is not None else ''}|"
+                f"fx_pnl_inr={fx_pnl_inr if fx_pnl_inr is not None else ''}|"
+                f"pnl_pct_on_margin={pnl_pct_on_margin if pnl_pct_on_margin is not None else ''}|"
                 f"duration_seconds={duration_seconds if duration_seconds is not None else ''}\n"
             )
             py_logger.info(line.strip())
+            try:
+                from agent.core.signal_audit_md import append_position_close
+
+                append_position_close(
+                    position_id=position_id,
+                    symbol=symbol,
+                    side=side,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    quantity=quantity,
+                    pnl=pnl,
+                    exit_reason=exit_reason,
+                    net_pnl_inr=net_pnl_inr,
+                    duration_seconds=duration_seconds,
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.warning(
                 "paper_trade_logger_close_failed",

@@ -93,7 +93,22 @@ class ReasoningEventHandler:
                 position_size=position_size,
                 event_id=event.event_id
             )
-            
+            rc = payload.get("reasoning_chain") if isinstance(payload.get("reasoning_chain"), dict) else {}
+            chain_id = rc.get("chain_id") if isinstance(rc, dict) else None
+            try:
+                from agent.core.signal_audit_md import append_decision_ready
+
+                append_decision_ready(
+                    symbol=symbol,
+                    signal=signal,
+                    confidence=float(confidence or 0.0),
+                    position_size=float(position_size or 0.0),
+                    event_id=event.event_id,
+                    reasoning_chain_id=chain_id,
+                )
+            except Exception:
+                pass
+
         except Exception as e:
             logger.error(
                 "decision_ready_handler_error",

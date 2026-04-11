@@ -290,9 +290,12 @@ export function formatClockDate(date: Date | string | null | undefined): string 
 }
 
 export function formatClockTime(date: Date | string | null | undefined): string {
-  if (!date || !isValidDate(date)) {
+  if (date === null || date === undefined) {
+    return '--:--:--'
+  }
+  if (!isValidDate(date)) {
     if (process.env.NODE_ENV === 'development') {
-      console.warn('[formatClockTime] Invalid or null date:', { date })
+      console.warn('[formatClockTime] Invalid date:', { date })
     }
     return '--:--:--'
   }

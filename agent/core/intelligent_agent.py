@@ -62,6 +62,7 @@ from agent.core.context_manager import ContextManager, context_manager
 from agent.core.mcp_orchestrator import MCPOrchestrator, mcp_orchestrator
 from agent.core.learning_system import LearningSystem
 from agent.core.execution import execution_module
+from agent.core.position_restore import restore_open_positions_from_db
 from agent.core.redis_config import get_redis
 from agent.models.model_discovery import ModelDiscovery
 from agent.risk.risk_manager import RiskManager
@@ -239,6 +240,16 @@ class IntelligentAgent:
         await self.state_machine.initialize()
         await self.risk_manager.initialize()
         await execution_module.initialize(delta_client=self.delta_client, risk_manager=self.risk_manager)
+        if bool(getattr(settings, "position_restore_on_startup", True)):
+            db_url = getattr(settings, "database_url", None)
+            if db_url:
+                n = await restore_open_positions_from_db(execution_module, str(db_url))
+                if n:
+                    logger.info(
+                        "agent_positions_restored_from_db",
+                        service="agent",
+                        count=n,
+                    )
         self.mcp_orchestrator.delta_client = self.delta_client  # For MTF trend_15m when enabled
         await self.learning_system.initialize()
         await self.market_data_service.initialize()
@@ -528,7 +539,9 @@ class IntelligentAgent:
                         ticker = await self.delta_client.get_ticker(symbol)
                         result = ticker.get("result") or ticker
                         if isinstance(result, dict):
-                            close = result.get("close") or result.get("mark_price")
+                            mp = result.get("mark_price")
+                            cl = result.get("close")
+                            close = mp if mp is not None else cl
                             if close is not None:
                                 current_price = float(close)
                                 execution_module.position_manager.update_position(symbol, current_price)
