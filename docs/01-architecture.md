@@ -340,6 +340,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - **Output**: Risk-adjusted position sizes, stop losses
 - **Portfolio sync**: ExecutionEngine syncs portfolio with RiskManager on order fill and position close (add_position/remove_position) so risk limits reflect actual exposure.
 - **Sizing path**: Active sizing is via `RiskManager.calculate_position_size()`; `agent/risk/position_sizer.py` is legacy and not in the runtime decision path.
+- **ATR vs lot sizing**: When `USE_ATR_SCALED_SL_TP` is enabled, stop distance uses `max(fixed % of entry, ATR × multiplier)`, which can widen stops in volatile regimes. Entry lot sizing (fixed lots or notional allocation in `TradingEventHandler`) is **not** recalculated from that wider stop distance, so dollar risk per trade is not a fixed “% of equity at the configured SL%” unless you add separate risk-from-stop sizing.
 
 #### Learning System
 - **Responsibility**: Learn from trade outcomes and adapt
@@ -932,6 +933,8 @@ The startup and configuration validation system implements comprehensive error h
 7. WebSocket → Broadcast trade execution
 8. Database → Store trade record
 ```
+
+**SL/TP pricing (entry):** `agent/core/sl_tp.py` (`compute_stop_take_prices`) is the single implementation for optional ATR scaling (`USE_ATR_SCALED_SL_TP`, `ATR_SL_DISTANCE_MULT`, `ATR_TP_DISTANCE_MULT`), fixed percentages, and **tick-size rounding** (`round_to_tick`). `RiskApprovedEvent` may include `atr_14` (from features) so execution can recompute matching levels if SL/TP are omitted. **`parse_risk_approved_side`** normalizes payload side (`BUY`/`SELL`, strip/whitespace). In **paper trading**, `execute_trade` **rebases** absolute SL/TP by `fill_price − planned_price` before opening the position so `manage_position` compares levels to the simulated fill.
 
 **Exit Flow (implemented):**
 - **Dual path**: (1) **Timer-based**: Position monitor loop (`IntelligentAgent._position_monitor_loop`) runs at `position_monitor_interval_seconds` (e.g. 15s) when no positions, or `min_monitor_interval_seconds` (e.g. 2s) when positions are open. (2) **WebSocket-driven** (when `websocket_sl_tp_enabled`): MarketDataService WebSocket ticker triggers `ExecutionEngine.update_position_price_and_check(symbol, price)` per symbol with a 200ms throttle.

@@ -974,6 +974,13 @@ Env names for the above are documented in root `.env.example`.
 - **`MCPOrchestrator`** passes per-model contexts (including `exit_signal`) in `market_context` for reasoning and downstream use.
 - **Position closes today**: signal reversal, stop-loss, take-profit, time limit, and risk logic in `execution` / risk components—not a standalone “force close” on `exit_signal` unless you add that rule in `trading_handler` or execution.
 
+## Stop loss / take profit (entry levels)
+
+- **Module**: `agent/core/sl_tp.py` — `compute_stop_take_prices()` implements the same formula as the former inline logic in `TradingEventHandler`: optional `max(entry × STOP_LOSS_PERCENTAGE, atr_14 × ATR_SL_DISTANCE_MULT)` (and TP analog), else pure percentage distances; outputs are rounded to the instrument **tick** when `tick_size` is passed.
+- **Events**: `TradingEventHandler` may attach `stop_loss`, `take_profit`, `tick_size`, and **`atr_14`** on `RiskApprovedEvent` so `ExecutionEngine._handle_risk_approved` can fall back consistently when levels are missing.
+- **Paper fills**: `rebase_sl_tp_to_fill()` shifts absolute SL/TP by the difference between the approval reference price and the **simulated** fill so exit monitoring matches economic distance from the filled entry.
+- **Sizing note**: Lot / notional entry sizing does not automatically adjust when ATR widens the stop; see [Architecture – Risk Manager](01-architecture.md#risk-manager).
+
 ## Related Documentation
 
 - [MCP Layer Documentation](02-mcp-layer.md) - MCP architecture and protocols

@@ -20,7 +20,7 @@ def test_parse_and_compute_paper_soak_metrics():
         "CLOSE|2026-03-20T01:00:00+00:00|pos2|BTCUSD|SELL|110|100|1|10|take_profit",
         "CLOSE|2026-03-20T02:00:00+00:00|pos3|BTCUSD|BUY|100|95|1|-5|stop_loss",
         # Non-close lines should be ignored
-        "TRADE|2026-03-20T00:00:00+00:00|trade1|BTCUSD|BUY|1|100|order_id=|position_id=pos1|reasoning_chain_id=",
+        "TRADE|2026-03-20T05:30:00+05:30|trade1|BTCUSD|BUY|1|100|order_id=|position_id=pos1|reasoning_chain_id=|utc_time=2026-03-20T00:00:00+00:00|",
     ]
 
     closes = parse_paper_trade_close_lines(lines)

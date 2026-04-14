@@ -28,7 +28,7 @@ class PaperTradeClose:
 
 
 def _parse_iso_datetime(ts: str) -> datetime:
-    # PaperTradeLogger uses datetime.now(timezone.utc).isoformat()
+    # PaperTradeLogger uses IST (Asia/Kolkata) as the primary field (ISO 8601).
     return datetime.fromisoformat(ts)
 
 
@@ -37,7 +37,7 @@ def parse_paper_trade_close_lines(lines: Iterable[str]) -> List[PaperTradeClose]
     Parse CLOSE|... lines emitted by agent/core/paper_trade_logger.py.
 
     Expected format:
-      CLOSE|{ts}|{position_id}|{symbol}|{side}|{entry_price}|{exit_price}|{quantity}|{pnl}|{exit_reason}
+      CLOSE|{ts_ist}|{position_id}|{symbol}|{side}|{entry_price}|{exit_price}|{quantity}|{pnl}|{exit_reason}|utc_time=...
     """
     closes: List[PaperTradeClose] = []
 

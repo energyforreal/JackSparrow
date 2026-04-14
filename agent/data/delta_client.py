@@ -754,7 +754,8 @@ class DeltaExchangeWebSocketClient:
 
     def __init__(self, api_key: str, api_secret: str, base_url: Optional[str] = None,
                  max_reconnect_attempts: int = 5, reconnect_delay: float = 5.0,
-                 heartbeat_interval: float = 30.0):
+                 heartbeat_interval: float = 30.0,
+                 on_connection_lost: Optional[Callable[[str], None]] = None):
         """Initialize WebSocket client.
 
         Args:
@@ -764,6 +765,7 @@ class DeltaExchangeWebSocketClient:
             max_reconnect_attempts: Maximum reconnection attempts
             reconnect_delay: Delay between reconnection attempts
             heartbeat_interval: Heartbeat interval in seconds
+            on_connection_lost: Optional callback(reason) when the socket drops or is closed
         """
         # Import settings here to avoid circular imports
         from agent.core.config import settings
@@ -787,9 +789,23 @@ class DeltaExchangeWebSocketClient:
         self.heartbeat_interval = heartbeat_interval
         self._last_heartbeat = time.time()
         self._circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60)
+        self.on_connection_lost = on_connection_lost
+        self._manual_disconnect = False
+
+    def _invoke_connection_lost(self, reason: str) -> None:
+        if self.on_connection_lost:
+            try:
+                self.on_connection_lost(reason)
+            except Exception as e:
+                logger.warning(
+                    "delta_websocket_connection_lost_callback_error",
+                    error=str(e),
+                    reason=reason,
+                )
 
     async def connect(self) -> None:
         """Establish WebSocket connection with authentication."""
+        self._manual_disconnect = False
         try:
             if not self._credentials_valid:
                 logger.warning(
@@ -848,7 +864,9 @@ class DeltaExchangeWebSocketClient:
 
     async def disconnect(self) -> None:
         """Close WebSocket connection and cleanup tasks."""
+        self._manual_disconnect = True
         self.connected = False
+        self._invoke_connection_lost("disconnect")
 
         # Cancel background tasks
         for task in [self._reconnect_task, self._heartbeat_task, self._message_task]:
@@ -1025,8 +1043,9 @@ class DeltaExchangeWebSocketClient:
                     continue
                 except (ConnectionClosedError, WebSocketException) as e:
                     logger.warning("delta_websocket_connection_lost", error=str(e))
-                    # Trigger reconnection
-                    if self.connected:  # Only reconnect if we haven't manually disconnected
+                    self.connected = False
+                    if not self._manual_disconnect:
+                        self._invoke_connection_lost("connection_closed")
                         asyncio.create_task(self._reconnect())
                     break
                 except json.JSONDecodeError as e:

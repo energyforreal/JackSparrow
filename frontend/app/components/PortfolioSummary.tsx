@@ -5,7 +5,12 @@ import { Badge } from '@/components/ui/badge'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { Portfolio } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatCurrency as formatInrCurrency } from '@/utils/formatters'
+import { formatCurrency as formatInrCurrency, formatPercent } from '@/utils/formatters'
+import { unrealizedPnlPercentOnMargin } from '@/utils/portfolioMetrics'
+
+/** Shown on ROE badge; margin is derived from ISOLATED_MARGIN_LEVERAGE in backend/agent config. */
+const ROE_MARGIN_TOOLTIP =
+  'Unrealized PnL as % of margin used (collateral ≈ notional ÷ leverage from app config). Not return on full trade notional. May differ from the exchange if you change leverage on the exchange manually.'
 
 interface PortfolioSummaryProps {
   portfolio?: Portfolio
@@ -72,6 +77,9 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
   const marginUsed = parseNumber(portfolio.margin_used)
   const totalEquity = totalValue  // Use backend-computed total_value directly
 
+  const roeRatio = unrealizedPnlPercentOnMargin(totalUnrealizedPnL, marginUsed)
+  const roePercentStr = roeRatio !== null ? formatPercent(roeRatio) : null
+
   return (
     <Card role="region" aria-label="Portfolio Summary">
       <CardHeader>
@@ -81,23 +89,39 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
         <div className="flex items-baseline justify-between">
           <div>
             <div className="text-3xl font-bold">{formatCurrency(totalValue)}</div>
-            <div className="flex items-center gap-2 mt-1">
-              <Badge
-                variant={isPositive ? 'default' : 'destructive'}
-                className={cn(
-                  'flex items-center gap-1',
-                  isPositive && 'bg-success text-white hover:bg-success/90',
-                  !isPositive && 'bg-error text-white hover:bg-error/90'
-                )}
-              >
-                {isPositive ? (
-                  <TrendingUp className="h-3 w-3" />
-                ) : (
-                  <TrendingDown className="h-3 w-3" />
-                )}
-                {isPositive ? 'PnL +' : 'PnL '}
-                {formatCurrency(totalPnL)}
-              </Badge>
+            <div className="flex flex-col gap-1 mt-1">
+              <span title={ROE_MARGIN_TOOLTIP}>
+                <Badge
+                  variant={isPositive ? 'default' : 'destructive'}
+                  className={cn(
+                    'flex items-center gap-1 max-w-full whitespace-normal text-left',
+                    isPositive && 'bg-success text-white hover:bg-success/90',
+                    !isPositive && 'bg-error text-white hover:bg-error/90'
+                  )}
+                  aria-label={
+                    roePercentStr
+                      ? `Total PnL ${formatCurrency(totalPnL)}, unrealized return on margin ${roePercentStr}. ${ROE_MARGIN_TOOLTIP}`
+                      : `Total PnL ${formatCurrency(totalPnL)}`
+                  }
+                >
+                  {isPositive ? (
+                    <TrendingUp className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <TrendingDown className="h-3 w-3 shrink-0" />
+                  )}
+                  <span>
+                    {isPositive ? 'PnL +' : 'PnL '}
+                    {formatCurrency(totalPnL)}
+                    {roePercentStr !== null && (
+                      <span className="opacity-95"> ({roePercentStr} ROE)</span>
+                    )}
+                  </span>
+                </Badge>
+              </span>
+              <p className="text-xs text-muted-foreground max-w-md">
+                ROE% = unrealized PnL ÷ margin used (leverage from app config; may differ from the
+                exchange).
+              </p>
             </div>
           </div>
         </div>

@@ -18,13 +18,18 @@ from agent.events.event_bus import event_bus
 from agent.events.schemas import RiskApprovedEvent, OrderFillEvent, PositionClosedEvent, EventType
 from agent.core.config import settings
 from agent.core.context_manager import context_manager
-from agent.core.redis_config import get_cache
 from agent.core.futures_utils import (
     net_pnl_usd_after_fees,
     net_pnl_usd_after_fees_split_legs,
     per_leg_cost_rate,
     entry_leg_fees_usd,
     isolated_equity_usd,
+    round_to_tick,
+)
+from agent.core.sl_tp import (
+    compute_stop_take_prices,
+    parse_risk_approved_side,
+    rebase_sl_tp_to_fill,
 )
 
 logger = structlog.get_logger()
@@ -179,11 +184,13 @@ class PositionManager:
 
     def close_position(self, symbol: str, exit_price: float,
                       exit_order_id: str) -> Optional[Dict[str, Any]]:
-        """Close an existing position."""
+        """Close an existing position and remove it from the open map (ledger elsewhere)."""
         if symbol not in self.positions:
             return None
 
         position = self.positions[symbol]
+        if position.get("status") != "open":
+            return None
 
         # Calculate realized P&L for perpetual futures using lot size
         contract_value_btc = position.get("contract_value_btc", float(getattr(settings, "contract_value_btc", 0.001)))
@@ -196,7 +203,8 @@ class PositionManager:
         else:  # short
             realized_pnl = entry_value - exit_value
 
-        # Update position
+        # Update position snapshot, then drop from in-memory map so stale closed
+        # rows cannot be mistaken for an open leg (execute_trade / monitors).
         position.update({
             "exit_price": exit_price,
             "exit_time": datetime.utcnow(),
@@ -205,12 +213,15 @@ class PositionManager:
             "status": "closed"
         })
 
+        closed_snapshot = position.copy()
+        del self.positions[symbol]
+
         logger.info("position_closed",
                    symbol=symbol,
                    realized_pnl=realized_pnl,
                    exit_price=exit_price)
 
-        return position.copy()
+        return closed_snapshot
 
     def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get position details."""
@@ -300,6 +311,11 @@ class ExecutionEngine:
         await self._connect_exchange()
         self._initialized = True
 
+        if getattr(settings, "paper_trading_mode", False):
+            seed = getattr(settings, "paper_trading_random_seed", None)
+            if seed is not None:
+                random.seed(int(seed))
+
         # Subscribe to RiskApprovedEvent for automatic trade execution
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
 
@@ -339,7 +355,24 @@ class ExecutionEngine:
         try:
             payload = event.payload
             symbol = payload.get("symbol")
-            side_raw = payload.get("side", "BUY").upper()
+            side_upper = parse_risk_approved_side(payload.get("side", "BUY"))
+            if side_upper is None:
+                logger.warning(
+                    "execution_risk_approved_invalid_side",
+                    raw_side=payload.get("side"),
+                    event_id=event.event_id,
+                )
+                logger.warning(
+                    "trading_execution_rejected",
+                    correlation_id=event.event_id,
+                    symbol=symbol,
+                    side=payload.get("side"),
+                    stage="invalid_side",
+                    reason="side_must_be_buy_or_sell",
+                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                )
+                return
+            side_raw = side_upper
             quantity = payload.get("quantity", 0)
             price = payload.get("price", 0)
 
@@ -350,40 +383,77 @@ class ExecutionEngine:
                     quantity=quantity,
                     event_id=event.event_id,
                 )
+                logger.warning(
+                    "trading_execution_rejected",
+                    correlation_id=event.event_id,
+                    symbol=symbol,
+                    side=side_raw,
+                    stage="invalid_payload",
+                    reason="missing_symbol_or_nonpositive_quantity",
+                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                )
                 return
 
-            # Enforce one open position per symbol in phase-1 runtime alignment.
-            # Skip for paper trading to allow multiple paper trades
-            if not getattr(settings, "paper_trading_mode", False):
-                existing = self.position_manager.get_position(symbol)
-                if existing and existing.get("status") == "open":
-                    logger.info(
-                        "execution_risk_approved_overlap_rejected",
-                        symbol=symbol,
-                        side=side_raw,
-                        existing_side=existing.get("side"),
-                        event_id=event.event_id,
-                        message="Open position exists for symbol; rejecting overlapping entry",
-                    )
-                    return
+            # Enforce one open position per symbol (same as _validate_trade / execute_trade).
+            # Sequential paper trades are still allowed after the prior position is closed.
+            existing = self.position_manager.get_position(symbol)
+            if existing and existing.get("status") == "open":
+                logger.info(
+                    "execution_risk_approved_overlap_rejected",
+                    symbol=symbol,
+                    side=side_raw,
+                    existing_side=existing.get("side"),
+                    event_id=event.event_id,
+                    message="Open position exists for symbol; rejecting overlapping entry",
+                )
+                logger.warning(
+                    "trading_execution_rejected",
+                    correlation_id=event.event_id,
+                    symbol=symbol,
+                    side=side_raw,
+                    stage="overlap_open_position",
+                    reason="open_position_exists_for_symbol",
+                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                )
+                return
 
             # Normalize side to lowercase for execute_trade
             side = "buy" if side_raw == "BUY" else "sell"
 
-            # Use payload stop_loss/take_profit when present (e.g. ATR-based), else config
+            # Use payload stop_loss/take_profit when present (e.g. ATR-based), else shared helper
             stop_loss = payload.get("stop_loss")
             take_profit = payload.get("take_profit")
             if stop_loss is None or take_profit is None:
-                if settings.stop_loss_percentage:
-                    if side == "buy":
-                        stop_loss = price * (1 - settings.stop_loss_percentage)
-                    else:
-                        stop_loss = price * (1 + settings.stop_loss_percentage)
-                if settings.take_profit_percentage:
-                    if side == "buy":
-                        take_profit = price * (1 + settings.take_profit_percentage)
-                    else:
-                        take_profit = price * (1 - settings.take_profit_percentage)
+                tick_fb = payload.get("tick_size")
+                tick_sz_opt: Optional[float] = None
+                if tick_fb is not None:
+                    try:
+                        tick_sz_opt = float(tick_fb)
+                    except (TypeError, ValueError):
+                        tick_sz_opt = None
+                atr_fb = payload.get("atr_14")
+                atr_14_opt: Optional[float] = None
+                if atr_fb is not None:
+                    try:
+                        atr_14_opt = float(atr_fb)
+                    except (TypeError, ValueError):
+                        atr_14_opt = None
+                try:
+                    pf = float(price)
+                except (TypeError, ValueError):
+                    pf = 0.0
+                stop_loss, take_profit = compute_stop_take_prices(
+                    pf,
+                    side_raw,
+                    float(settings.stop_loss_percentage),
+                    float(settings.take_profit_percentage),
+                    use_atr_scaled=bool(getattr(settings, "use_atr_scaled_sl_tp", False))
+                    and atr_14_opt is not None,
+                    atr_14=atr_14_opt,
+                    atr_sl_mult=float(getattr(settings, "atr_sl_distance_mult", 1.0) or 1.0),
+                    atr_tp_mult=float(getattr(settings, "atr_tp_distance_mult", 1.5) or 1.5),
+                    tick_size=tick_sz_opt,
+                )
 
             trade = {
                 "symbol": symbol,
@@ -453,8 +523,26 @@ class ExecutionEngine:
                     price=price,
                     event_id=event.event_id,
                 )
+                logger.warning(
+                    "trading_execution_rejected",
+                    correlation_id=event.event_id,
+                    symbol=symbol,
+                    side=side_raw,
+                    stage="invalid_price",
+                    reason="price_missing_or_nonpositive",
+                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                )
                 return
             trade["price"] = pf
+
+            rc_raw = payload.get("reasoning_chain_id")
+            eff_reasoning_chain_id = (
+                str(rc_raw).strip()
+                if rc_raw is not None and str(rc_raw).strip() != ""
+                else (str(event.event_id) if getattr(event, "event_id", None) else None)
+            )
+            if eff_reasoning_chain_id:
+                payload["reasoning_chain_id"] = eff_reasoning_chain_id
 
             result = await self.execute_trade(trade)
 
@@ -466,11 +554,26 @@ class ExecutionEngine:
                     error=result.error_message,
                     event_id=event.event_id,
                 )
+                logger.warning(
+                    "trading_execution_rejected",
+                    correlation_id=event.event_id,
+                    symbol=symbol,
+                    side=side_raw,
+                    stage="execute_trade",
+                    reason=result.error_message or "execute_trade_failed",
+                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                )
                 return
 
             fill_price = result.details.get("average_fill_price") or price
-            # Enrich position with metadata for learning and sync RiskManager portfolio
+            # SL/TP may have been rebased to fill inside execute_trade (paper mode)
             pos = self.position_manager.get_position(symbol)
+            if pos:
+                if pos.get("stop_loss") is not None:
+                    stop_loss = pos.get("stop_loss")
+                if pos.get("take_profit") is not None:
+                    take_profit = pos.get("take_profit")
+            # Enrich position with metadata for learning and sync RiskManager portfolio
             if pos:
                 pos["model_predictions"] = payload.get("model_predictions")
                 pos["reasoning_chain_id"] = payload.get("reasoning_chain_id")
@@ -525,22 +628,24 @@ class ExecutionEngine:
 
             if settings.paper_trading_mode:
                 from agent.core.paper_trade_logger import paper_trade_logger
-                usd_inr_rate = payload.get("usd_inr_rate")
-                try:
-                    rate = float(usd_inr_rate) if usd_inr_rate is not None else float(getattr(settings, "usdinr_fallback_rate", 83.0))
-                except (TypeError, ValueError):
-                    rate = float(getattr(settings, "usdinr_fallback_rate", 83.0))
+                from agent.core.paper_trade_entry import (
+                    compute_paper_entry_ledger,
+                    resolve_paper_usdinr_rate,
+                )
+
+                rate = await resolve_paper_usdinr_rate(payload.get("usd_inr_rate"))
                 contract_value_btc = float(
                     (pos or {}).get("contract_value_btc")
                     or getattr(settings, "contract_value_btc", 0.001)
                 )
-                trade_value_inr = float(quantity) * float(fill_price) * contract_value_btc * rate
-                mode = (getattr(settings, "fee_accounting_mode", "split") or "split").lower()
-                entry_fee_usd = float((pos or {}).get("entry_fee_usd") or 0.0)
-                fees_inr_open = (
-                    float(entry_fee_usd * rate)
-                    if mode == "split"
-                    else 0.0
+                ef_raw = (pos or {}).get("entry_fee_usd")
+                entry_fee_opt = float(ef_raw) if ef_raw is not None else None
+                trade_value_inr, fees_inr_open, _ = compute_paper_entry_ledger(
+                    quantity=float(quantity),
+                    fill_price=float(fill_price),
+                    contract_value_btc=contract_value_btc,
+                    usd_inr_rate=rate,
+                    entry_fee_usd=entry_fee_opt,
                 )
                 paper_trade_logger.log_trade(
                     trade_id=trade_id,
@@ -572,6 +677,12 @@ class ExecutionEngine:
                 error=str(e),
                 exc_info=True,
             )
+            logger.error(
+                "execution_failed",
+                correlation_id=event.event_id,
+                error=str(e),
+                paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+            )
 
     async def execute_trade(self, trade: Dict[str, Any]) -> ExecutionResult:
         """
@@ -597,10 +708,44 @@ class ExecutionEngine:
             price = trade.get("price")
             stop_loss = trade.get("stop_loss")
             take_profit = trade.get("take_profit")
+            pex_pre = trade.get("position_extras") or {}
+            tick_pre: Optional[float] = None
+            if pex_pre.get("tick_size") is not None:
+                try:
+                    tick_pre = float(pex_pre["tick_size"])
+                except (TypeError, ValueError):
+                    tick_pre = None
+            if (stop_loss is None or take_profit is None) and price is not None:
+                try:
+                    pf0 = float(price)
+                except (TypeError, ValueError):
+                    pf0 = 0.0
+                if pf0 > 0:
+                    sl_c, tp_c = compute_stop_take_prices(
+                        pf0,
+                        "BUY" if side == "buy" else "SELL",
+                        float(settings.stop_loss_percentage),
+                        float(settings.take_profit_percentage),
+                        use_atr_scaled=False,
+                        atr_14=None,
+                        atr_sl_mult=float(getattr(settings, "atr_sl_distance_mult", 1.0) or 1.0),
+                        atr_tp_mult=float(getattr(settings, "atr_tp_distance_mult", 1.5) or 1.5),
+                        tick_size=tick_pre,
+                    )
+                    if stop_loss is None:
+                        stop_loss = sl_c
+                    if take_profit is None:
+                        take_profit = tp_c
+                    trade["stop_loss"] = stop_loss
+                    trade["take_profit"] = take_profit
 
             # Check if we need to close existing position first (BEFORE validation)
             existing_position = self.position_manager.get_position(symbol)
-            if existing_position and existing_position["side"] != ("long" if side == "buy" else "short"):
+            if (
+                existing_position
+                and existing_position.get("status") == "open"
+                and existing_position["side"] != ("long" if side == "buy" else "short")
+            ):
                 # Close opposite position first
                 await self.close_position(symbol, order_type="market")
                 # In paper mode, allow a fresh ticker for the open leg so close and open use different fill prices
@@ -629,6 +774,25 @@ class ExecutionEngine:
             # If order was filled immediately, update position
             if order_result["filled_immediately"]:
                 fill_price = order_result["average_fill_price"]
+                pex = trade.get("position_extras") or {}
+                tick_sz: Optional[float] = None
+                if pex.get("tick_size") is not None:
+                    try:
+                        tick_sz = float(pex["tick_size"])
+                    except (TypeError, ValueError):
+                        tick_sz = None
+                if settings.paper_trading_mode and price is not None and fill_price is not None:
+                    try:
+                        pe = float(price)
+                        fp = float(fill_price)
+                        if pe > 0:
+                            stop_loss, take_profit = rebase_sl_tp_to_fill(
+                                pe, fp, stop_loss, take_profit, tick_sz
+                            )
+                            trade["stop_loss"] = stop_loss
+                            trade["take_profit"] = take_profit
+                    except (TypeError, ValueError):
+                        pass
                 position = self.position_manager.open_position(
                     symbol=symbol,
                     side="long" if side == "buy" else "short",
@@ -642,12 +806,24 @@ class ExecutionEngine:
 
                 # Place stop loss and take profit orders if specified
                 if stop_loss:
-                    await self._place_stop_order(symbol, "sell" if side == "buy" else "buy",
-                                               quantity, stop_loss, "stop_loss")
+                    await self._place_stop_order(
+                        symbol,
+                        "sell" if side == "buy" else "buy",
+                        quantity,
+                        stop_loss,
+                        "stop_loss",
+                        tick_size=tick_sz,
+                    )
 
                 if take_profit:
-                    await self._place_limit_order(symbol, "sell" if side == "buy" else "buy",
-                                                quantity, take_profit, "take_profit")
+                    await self._place_limit_order(
+                        symbol,
+                        "sell" if side == "buy" else "buy",
+                        quantity,
+                        take_profit,
+                        "take_profit",
+                        tick_size=tick_sz,
+                    )
 
             result = ExecutionResult(True, order_id=order_id)
             result.details = {
@@ -677,15 +853,9 @@ class ExecutionEngine:
 
     async def _resolve_usdinr_paper(self) -> float:
         """Live USDINR from Redis cache, else config fallback."""
-        try:
-            cached = await get_cache("fx:usdinr:last")
-            if isinstance(cached, dict):
-                val = cached.get("rate")
-                if val is not None and float(val) > 0:
-                    return float(val)
-        except Exception:
-            pass
-        return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+        from agent.core.paper_trade_entry import resolve_paper_usdinr_rate
+
+        return await resolve_paper_usdinr_rate(None)
 
     async def close_position(self, symbol: str, order_type: str = "market",
                            price: Optional[float] = None,
@@ -701,6 +871,15 @@ class ExecutionEngine:
         position = self.position_manager.get_position(symbol)
         if not position:
             return ExecutionResult(False, error_message=f"No open position for {symbol}")
+
+        if position.get("status") != "open":
+            logger.info(
+                "position_close_skipped_already_closed",
+                symbol=symbol,
+                status=position.get("status"),
+                exit_reason=exit_reason,
+            )
+            return ExecutionResult(False, error_message="already_closed")
 
         try:
             entry_px = float(position["entry_price"])
@@ -880,6 +1059,7 @@ class ExecutionEngine:
                             )
                         ),
                         pnl_pct_on_margin=pnl_pct_margin,
+                        reasoning_chain_id=reasoning_chain_id,
                     )
 
                 return ExecutionResult(True, order_id=order_result.get("order_id"))
@@ -904,8 +1084,11 @@ class ExecutionEngine:
             Management actions taken
         """
         position = self.position_manager.get_position(position_symbol)
-        if not position:
-            return {"action": "none", "reason": "No position found"}
+        if not position or position.get("status") != "open":
+            out: Dict[str, Any] = {"action": "none", "reason": "position_not_open"}
+            if position is not None:
+                out["status"] = position.get("status")
+            return out
 
         actions_taken: List[Dict[str, Any]] = []
 
@@ -1184,7 +1367,7 @@ class ExecutionEngine:
             if order_type == "market":
                 # Get fill price: paper mode uses ticker; live uses real order
                 if settings.paper_trading_mode:
-                    base_price = await self._get_fill_price_paper(symbol, price)
+                    base_price = await self._get_fill_price_paper(symbol, price_hint=price)
                     max_pct = self.execution_config["max_slippage_percent"] / 100.0
                     slippage_pct = random.uniform(0.1 * max_pct, max_pct)
                     half_spread = getattr(settings, "half_spread_pct", 0.0002)
@@ -1250,46 +1433,113 @@ class ExecutionEngine:
                 "error": f"Order placement failed: {str(e)}"
             }
 
-    async def _get_fill_price_paper(self, symbol: str, _price_hint: Optional[float] = None) -> float:
-        """Get current market price for paper trading from Delta ticker. Raises if unavailable or stale."""
-        if not self.delta_client:
-            raise ValueError("Delta client not configured; cannot get fill price for paper trade")
-        ticker = await self.delta_client.get_ticker(symbol)
-        result = ticker.get("result") or ticker
-        if not isinstance(result, dict):
-            raise ValueError(f"Ticker returned invalid data for {symbol}")
-        ticker_ts_raw = result.get("timestamp")
-        if ticker_ts_raw is None:
-            raise ValueError(f"Ticker for {symbol} has no timestamp; cannot validate freshness")
-        
-        # Detect whether timestamp is in milliseconds or seconds
-        ticker_ts = float(ticker_ts_raw)
-        if ticker_ts > 1e10:  # Timestamps >~year 2286 in seconds are future; ms values are present
-            ticker_ts /= 1000.0  # Convert ms to seconds
-        
-        max_age_s = float(getattr(settings, "paper_ticker_max_age_seconds", 10.0) or 10.0)
-        age_s = time.time() - ticker_ts
-        if age_s > max_age_s:
-            if getattr(settings, "paper_fill_price_fallback_enabled", True):
-                context_price = self._get_context_price(symbol)
-                if context_price is not None and context_price > 0:
-                    logger.warning(
-                        "paper_fill_price_fallback_used",
-                        symbol=symbol,
-                        ticker_age_s=round(age_s, 3),
-                        max_age_s=max_age_s,
-                        fallback_price=context_price,
-                    )
-                    return context_price
-            raise ValueError(
-                f"Stale ticker for {symbol}, age={age_s:.1f}s (max={max_age_s:.1f}s)"
+    def _anchor_paper_reference_mid(
+        self,
+        symbol: str,
+        ticker_mid: float,
+        price_hint: Optional[float],
+    ) -> float:
+        """Clamp ticker mid to within max_slippage_percent of approval/reference price (when hint set)."""
+        if price_hint is None:
+            return ticker_mid
+        try:
+            hint = float(price_hint)
+        except (TypeError, ValueError):
+            return ticker_mid
+        if hint <= 0 or not math.isfinite(hint) or not math.isfinite(ticker_mid):
+            return ticker_mid
+        max_frac = float(self.execution_config.get("max_slippage_percent", 0.5)) / 100.0
+        lo = hint * (1.0 - max_frac)
+        hi = hint * (1.0 + max_frac)
+        anchored = min(hi, max(lo, ticker_mid))
+        if abs(anchored - ticker_mid) > 1e-9:
+            logger.debug(
+                "paper_fill_reference_mid_clamped_to_hint_band",
+                symbol=symbol,
+                ticker_mid=ticker_mid,
+                price_hint=hint,
+                anchored_mid=anchored,
+                max_slippage_percent=self.execution_config.get("max_slippage_percent"),
             )
-        mark = result.get("mark_price")
-        close = result.get("close")
-        base = float(mark) if mark is not None else (float(close) if close is not None else None)
-        if base is None:
-            raise ValueError(f"Ticker has no mark_price/close for {symbol}")
-        return base
+        return anchored
+
+    async def _get_fill_price_paper(
+        self, symbol: str, price_hint: Optional[float] = None
+    ) -> float:
+        """Reference mid for paper fill: Delta ticker (freshness-checked), clamped to hint band.
+
+        If ticker cannot be used but ``price_hint`` is a valid positive price, returns the hint
+        and logs ``paper_fill_price_ticker_unavailable_using_hint`` (audit/reconciliation).
+        """
+        if not self.delta_client:
+            if price_hint is not None:
+                try:
+                    h = float(price_hint)
+                    if h > 0 and math.isfinite(h):
+                        logger.warning(
+                            "paper_fill_price_ticker_unavailable_using_hint",
+                            symbol=symbol,
+                            reason="no_delta_client",
+                            price_hint=h,
+                        )
+                        return h
+                except (TypeError, ValueError):
+                    pass
+            raise ValueError("Delta client not configured; cannot get fill price for paper trade")
+
+        try:
+            ticker = await self.delta_client.get_ticker(symbol)
+            result = ticker.get("result") or ticker
+            if not isinstance(result, dict):
+                raise ValueError(f"Ticker returned invalid data for {symbol}")
+            ticker_ts_raw = result.get("timestamp")
+            if ticker_ts_raw is None:
+                raise ValueError(f"Ticker for {symbol} has no timestamp; cannot validate freshness")
+
+            ticker_ts = float(ticker_ts_raw)
+            if ticker_ts > 1e10:
+                ticker_ts /= 1000.0
+
+            max_age_s = float(getattr(settings, "paper_ticker_max_age_seconds", 10.0) or 10.0)
+            age_s = time.time() - ticker_ts
+            if age_s > max_age_s:
+                if getattr(settings, "paper_fill_price_fallback_enabled", True):
+                    context_price = self._get_context_price(symbol)
+                    if context_price is not None and context_price > 0:
+                        logger.warning(
+                            "paper_fill_price_fallback_used",
+                            symbol=symbol,
+                            ticker_age_s=round(age_s, 3),
+                            max_age_s=max_age_s,
+                            fallback_price=context_price,
+                        )
+                        mid = float(context_price)
+                        return self._anchor_paper_reference_mid(symbol, mid, price_hint)
+                raise ValueError(
+                    f"Stale ticker for {symbol}, age={age_s:.1f}s (max={max_age_s:.1f}s)"
+                )
+            mark = result.get("mark_price")
+            close = result.get("close")
+            raw = float(mark) if mark is not None else (float(close) if close is not None else None)
+            if raw is None:
+                raise ValueError(f"Ticker has no mark_price/close for {symbol}")
+            mid = self._anchor_paper_reference_mid(symbol, raw, price_hint)
+            return mid
+        except Exception as exc:
+            if price_hint is not None:
+                try:
+                    h = float(price_hint)
+                    if h > 0 and math.isfinite(h):
+                        logger.warning(
+                            "paper_fill_price_ticker_unavailable_using_hint",
+                            symbol=symbol,
+                            reason=str(exc),
+                            price_hint=h,
+                        )
+                        return h
+                except (TypeError, ValueError):
+                    pass
+            raise
 
     def _get_context_price(self, symbol: str) -> Optional[float]:
         """Best-effort fallback to latest in-memory market price."""
@@ -1309,9 +1559,18 @@ class ExecutionEngine:
             return None
         return None
 
-    async def _place_stop_order(self, symbol: str, side: str, quantity: float,
-                               stop_price: float, label: str) -> Optional[str]:
+    async def _place_stop_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        stop_price: float,
+        label: str,
+        tick_size: Optional[float] = None,
+    ) -> Optional[str]:
         """Place a stop order."""
+        if tick_size is not None and tick_size > 0:
+            stop_price = round_to_tick(float(stop_price), float(tick_size))
         order_result = await self._place_order(
             symbol=symbol,
             side=side,
@@ -1330,9 +1589,18 @@ class ExecutionEngine:
 
         return None
 
-    async def _place_limit_order(self, symbol: str, side: str, quantity: float,
-                                limit_price: float, label: str) -> Optional[str]:
+    async def _place_limit_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        limit_price: float,
+        label: str,
+        tick_size: Optional[float] = None,
+    ) -> Optional[str]:
         """Place a limit order."""
+        if tick_size is not None and tick_size > 0:
+            limit_price = round_to_tick(float(limit_price), float(tick_size))
         order_result = await self._place_order(
             symbol=symbol,
             side=side,

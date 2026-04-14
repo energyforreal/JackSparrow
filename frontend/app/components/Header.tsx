@@ -6,12 +6,14 @@ import { Badge } from '@/components/ui/badge'
 import { SystemClock } from './SystemClock'
 import { cn } from '@/lib/utils'
 import { Wifi, WifiOff } from 'lucide-react'
+import { ResetPaperTradesButton } from './ResetPaperTradesButton'
 
 interface HeaderProps {
   isConnected?: boolean
+  onPaperPortfolioReset?: () => void
 }
 
-export function Header({ isConnected = false }: HeaderProps) {
+export function Header({ isConnected = false, onPaperPortfolioReset }: HeaderProps) {
   return (
     <header className="border-b bg-card">
       <div className="container mx-auto flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -34,6 +36,11 @@ export function Header({ isConnected = false }: HeaderProps) {
           </div>
         </div>
         <div className="flex w-full flex-col gap-3 sm:w-auto sm:items-end">
+          {onPaperPortfolioReset ? (
+            <div className="flex w-full justify-end">
+              <ResetPaperTradesButton onSuccess={onPaperPortfolioReset} />
+            </div>
+          ) : null}
           <SystemClock className="w-full sm:w-auto" />
           <Badge
             variant={isConnected ? 'default' : 'destructive'}

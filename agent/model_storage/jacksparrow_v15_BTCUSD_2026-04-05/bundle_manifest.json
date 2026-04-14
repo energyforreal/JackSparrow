@@ -1,0 +1,18 @@
+{
+  "bundle_id": "jacksparrow_v15_BTCUSD_2026-04-05",
+  "format": "v15_pipeline",
+  "loader": "agent.models.pipeline_v15_node.PipelineV15Node",
+  "timeframes": [
+    {
+      "id": "5m",
+      "metadata": "5m/metadata_BTCUSD_5m.json",
+      "pipeline": "5m/pipeline_5m_v14.pkl"
+    },
+    {
+      "id": "15m",
+      "metadata": "15m/metadata_BTCUSD_15m.json",
+      "pipeline": "15m/pipeline_15m_v14.pkl"
+    }
+  ],
+  "notes": "Set MODEL_DIR or AGENT_MODEL_DIR to this folder. Feature names must match feature_store/feature_registry.py V15_FEATURES_5M / V15_FEATURES_15M."
+}

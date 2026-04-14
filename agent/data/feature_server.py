@@ -210,8 +210,37 @@ class MCPFeatureServer:
             limit=280,
         )
         if not md or not md.get("candles"):
+            # Empty list breaks the v15 orchestrator path (mcp_orchestrator_v15_no_features) and
+            # yields no UI signal when Delta REST is flaky (502 / circuit breaker). Emit one
+            # degraded feature per requested name so inference can return a cautious HOLD-like
+            # output instead of aborting the pipeline.
+            logger.warning(
+                "feature_server_v15_no_candles",
+                symbol=request.symbol,
+                timeframe=tf,
+                message=(
+                    "No OHLCV candles from market data service; using degraded zero placeholders"
+                ),
+            )
+            degraded: List[MCPFeature] = []
+            for feature_name in request.feature_names:
+                degraded.append(
+                    MCPFeature(
+                        name=feature_name,
+                        version=self.feature_registry.get(feature_name, "1.0.0"),
+                        value=0.0,
+                        timestamp=timestamp,
+                        quality=FeatureQuality.DEGRADED,
+                        metadata={
+                            "symbol": request.symbol,
+                            "v15_tf": tf,
+                            "reason": "no_candles",
+                        },
+                        computation_time_ms=0.0,
+                    )
+                )
             return MCPFeatureResponse(
-                features=[],
+                features=degraded,
                 quality_score=0.0,
                 overall_quality=FeatureQuality.DEGRADED,
                 timestamp=timestamp,

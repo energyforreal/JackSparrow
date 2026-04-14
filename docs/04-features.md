@@ -51,7 +51,7 @@ For why many outcomes still look like **HOLD** at the UI, see [Logic & Reasoning
 
 When the registry runs **only** `xgboost_pipeline_v15` models, the feature server builds rows aligned to training metadata (not the full expanded v4 list):
 
-- **Registry**: `feature_store/feature_registry.py` — `V15_FEATURES_5M`, `V15_FEATURES_15M`, `V15_FEATURES_BY_TF`.
+- **Registry**: `feature_store/feature_registry.py` — `V15_FEATURES_5M`, `V15_FEATURES_15M`, `V15_FEATURES_BY_TF`. These lists must match the `features` field in each shipped `metadata_BTCUSD_*.json` (names and order) for the corresponding bundle; update the registry when you promote a new export whose selected feature set changed.
 - **Computation**: `feature_store/v15_feature_compute.py` — base indicators on the active timeframe; for **5m**, merges higher-timeframe fields from **15m** OHLCV (`*_15m` column names).
 - **Serving**: `agent/data/feature_server.py` — if the MCP request includes `candle_interval` matching a full v15 name set for that TF, the v15 path runs (including optional Redis caching of 15m candles for 5m requests; see [ML models – v15 pipeline](03-ml-models.md#jacksparrow-v15-pipeline-5m--15m-joblib)).
 - **Market data**: `agent/data/market_data_service.py` — resolution map includes **5m** and **15m** (and other intervals) for Delta candle fetches.
@@ -219,7 +219,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Maximum position: configurable `max_position_size` (e.g. 10% of portfolio per trade)
 - Risk-adjusted sizing based on signal strength and volatility regime
 - ADX ranging market filter: when `adx_14` is available and &lt; 20, BUY/SELL (mild) entries are blocked
-- ATR-based SL/TP at entry when `atr_14` is available (1.5× and 3× ATR distances); otherwise config-based percentages
+- **SL/TP at entry** (see `agent/core/sl_tp.py`): When `USE_ATR_SCALED_SL_TP` is true and `atr_14` is present, distance uses `max(entry × STOP_LOSS_PERCENTAGE, atr_14 × ATR_SL_DISTANCE_MULT)` for the stop leg and `max(entry × TAKE_PROFIT_PERCENTAGE, atr_14 × ATR_TP_DISTANCE_MULT)` for the take-profit leg; otherwise levels come from `STOP_LOSS_PERCENTAGE` / `TAKE_PROFIT_PERCENTAGE` alone. Prices are rounded to the contract `tick_size` when known.
 - Signal expiry: signals older than `max_signal_age_seconds` are rejected
 
 **Portfolio Heat Monitoring**:
@@ -229,10 +229,10 @@ The example illustrates how raw market context, historical success rate, and mod
 - Real-time risk metrics
 
 **Stop Loss Management**:
-- Volatility-adjusted stop losses
-- Dynamic stop loss levels
-- Tighter stops in high volatility
-- Position-specific risk limits
+- Centralized SL/TP math and tick rounding (`agent/core/sl_tp.py`) shared by `TradingEventHandler` and `ExecutionEngine`
+- Optional ATR-widened stops in volatile regimes (see `max(fixed %, ATR × mult)` above); entry lot sizing is not automatically scaled to that wider stop (see [Architecture – Risk Manager](01-architecture.md#risk-manager))
+- In **paper** mode, absolute SL/TP levels are **rebased** to the simulated fill price so monitor exits match intent vs actual entry
+- Position-specific risk limits and trailing / time-based exits in `ExecutionEngine.manage_position`
 
 **Circuit Breakers**:
 - Automatic trading halt after consecutive losses
@@ -411,6 +411,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Reasoning chain storage
 - Outcome recording
 - Performance attribution
+- Persistent **paper trade audit** files: rotating `paper_trades.log` (`TRADE|`/`CLOSE|`) and append-only `signal_audit/live_audit.md`, with **IST-primary** timestamps and UTC companion fields — see [Logging – AI signal and action audit journal](12-logging.md#ai-signal-and-action-audit-journal) and [`reference/ai-signal-action-audit-log.md`](../reference/ai-signal-action-audit-log.md)
 
 **Delta Exchange Integration**:
 - REST API integration
@@ -498,9 +499,10 @@ The example illustrates how raw market context, historical success rate, and mod
 
 **Portfolio Summary**:
 - Total portfolio value
-- Cash vs positions breakdown
+- Cash vs positions breakdown (available cash, margin used, open position count)
 - Unrealized PnL
 - Realized PnL
+- **ROE %** on the PnL badge when margin is in use: unrealized PnL ÷ margin used (INR), not return on full notional; uses the same leverage assumptions as the backend portfolio service (see [Frontend](07-frontend.md#portfoliosummary-component))
 - Performance metrics
 
 **Active Positions**:

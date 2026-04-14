@@ -988,7 +988,25 @@ class IntelligentAgent:
         await event_bus.publish(order_fill)
 
         if settings.paper_trading_mode:
+            from agent.core.paper_trade_entry import (
+                compute_paper_entry_ledger,
+                resolve_paper_usdinr_rate,
+            )
             from agent.core.paper_trade_logger import paper_trade_logger
+
+            try:
+                cv = float(getattr(settings, "contract_value_btc", 0.001))
+            except (TypeError, ValueError):
+                cv = 0.001
+            rate = await resolve_paper_usdinr_rate(None)
+            trade_value_inr, fees_inr_open, _ = compute_paper_entry_ledger(
+                quantity=float(quantity),
+                fill_price=float(fill_price),
+                contract_value_btc=cv,
+                usd_inr_rate=rate,
+                entry_fee_usd=None,
+            )
+
             paper_trade_logger.log_trade(
                 trade_id=trade_id,
                 symbol=symbol,
@@ -996,6 +1014,9 @@ class IntelligentAgent:
                 quantity=quantity,
                 fill_price=fill_price,
                 order_id=order_id,
+                usd_inr_rate=rate,
+                trade_value_inr=trade_value_inr,
+                fees_inr=fees_inr_open,
             )
 
         return {

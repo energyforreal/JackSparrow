@@ -46,10 +46,16 @@ All models must implement `MCPModelNode` interface:
 
 ## Training Authority and Parity Checklist
 
-- Prefer `notebooks/JackSparrow_Trading_Colab_v5.ipynb` for BTCUSD production-style training and exports.
-- Keep train-serve parity strict: `metadata_*.json` `features` and `features_required` must match `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in order and count.
-- Ensure runtime discovery points to the matching export directory via `MODEL_DIR`.
-- Run `tests/unit/test_feature_parity.py` after training and before promotion.
+- **v15 full pipeline (default Docker bundle)**: Train and export with `notebooks/JackSparrow_Training_Colab_v15.ipynb`. Artefacts are `pipeline_{5m|15m}_v14.pkl` plus `metadata_BTCUSD_*.json` beside it (`model_version` may still say `v14`; that is the export format label, not a different feature set).
+- **v4 / v5 / v6 bundles** (entry–exit joblibs or consolidated): Use `notebooks/JackSparrow_Trading_Colab_v6.ipynb` and/or `notebooks/JackSparrow_Trading_Colab_v5.ipynb` as appropriate.
+
+**Train–serve parity (pick the rule that matches your bundle):**
+
+- **Expanded-feature bundles (v5/v6/v4 ensemble path)**: `metadata_*.json` `features` / `features_required` must align with `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` (order and length as emitted by training).
+- **v15 pipeline path**: `metadata_*.json` `features` must match `V15_FEATURES_5M` or `V15_FEATURES_15M` in `feature_store/feature_registry.py` for that timeframe—same names and order as the export. Runtime rows are built in `feature_store/v15_feature_compute.py` and served when the MCP request matches a full v15 name set (`agent/data/feature_server.py`).
+
+- Point `MODEL_DIR` / `AGENT_MODEL_DIR` at the bundle root that contains the metadata files you trained.
+- Run `pytest tests/unit/test_feature_parity.py tests/unit/test_v15_feature_registry.py` after training and before promotion (plus `scripts/test_model_inference.py` against the bundle when practical).
 
 ## Model Versioning
 

@@ -405,3 +405,30 @@ async def get_performance(
             detail=f"Failed to get performance metrics: {str(e)}"
         )
 
+
+@router.delete("/portfolio/reset")
+async def reset_paper_portfolio(db: AsyncSession = Depends(get_db)):
+    """Clear all paper trades and positions, reset cached portfolio metrics.
+
+    Allowed only when ``PAPER_TRADING_MODE`` is enabled. Live trading must not use this.
+    """
+    if not settings.paper_trading_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Paper portfolio reset is only available when PAPER_TRADING_MODE is enabled.",
+        )
+    try:
+        await portfolio_service.delete_all_trades_and_positions(db)
+        await portfolio_service.invalidate_all_portfolio_caches()
+        return {"status": "ok", "message": "Paper portfolio state cleared"}
+    except Exception as e:
+        logger.error(
+            "portfolio_reset_failed",
+            error=str(e),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset paper portfolio: {str(e)}",
+        ) from e
+

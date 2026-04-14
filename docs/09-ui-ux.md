@@ -186,32 +186,33 @@ This combination provides:
 **Purpose**: Display portfolio overview with key metrics
 
 **Visual Design**:
-- Large total value display
-- Breakdown cards (Cash, Positions, PnL)
+- Large total value display (INR)
+- PnL badge: absolute total PnL in INR; optional **ROE %** in parentheses when margin is used (unrealized ÷ margin — not notional %)
+- Short disclaimer line under the badge (configured leverage vs exchange)
+- Breakdown grid: Available Cash, Margin Used (with open count), Unrealized / Realized PnL, Total Equity
 - Color-coded PnL (green/red)
-- Percentage changes
-- Trend indicators
+- Trend icons on the PnL badge
 
-**Layout**:
+**Layout** (conceptual):
 ```
 ┌─────────────────────────────────────────────────┐
 │  Portfolio Value                                │
-│  $100,500.00  ↗ +2.5%                           │
+│  ₹20,022.44                                     │
+│  [ PnL +₹22.44 (1.89% ROE) ]  ← ROE if margin>0 │
+│  ROE% = unrealized ÷ margin (app leverage)      │
 │                                                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │ Cash     │  │ Positions│  │ PnL      │    │
-│  │ $95,000  │  │ $5,000   │  │ +$500    │    │
-│  └──────────┘  └──────────┘  └──────────┘    │
+│  Available Cash │ Margin │ Unreal. │ …        │
 └─────────────────────────────────────────────────┘
 ```
 
 **Metrics Displayed**:
 - Total Portfolio Value
-- Cash Balance
-- Positions Value
+- Available Cash
+- Margin Used (and number of open positions)
 - Unrealized PnL
 - Realized PnL
-- Percentage Changes
+- Total Equity
+- **ROE %** (only when `margin_used > 0`): unrealized PnL as % of margin used
 
 ---
 
@@ -1042,44 +1043,14 @@ export function SignalIndicator({ signal, confidence, modelConsensus }: SignalIn
 ### PortfolioSummary Component
 
 **shadcn/ui Components Used**:
-- `Card` - Main container and metric cards
-- `Badge` - Trend indicators
+- `Card` - Main container
+- `Badge` - Total PnL and optional ROE % (unrealized ÷ margin when `margin_used > 0`)
 
-**Implementation**:
+**Implementation** (see source — [`frontend/app/components/PortfolioSummary.tsx`](../frontend/app/components/PortfolioSummary.tsx)):
 
-```tsx
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { TrendingUp, TrendingDown } from "lucide-react";
-
-export function PortfolioSummary({ portfolio }: PortfolioSummaryProps) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Portfolio Value</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="text-3xl font-bold">
-          ${portfolio.totalValue.toLocaleString()}
-          <Badge variant={portfolio.change >= 0 ? "default" : "destructive"} className="ml-2">
-            {portfolio.change >= 0 ? <TrendingUp /> : <TrendingDown />}
-            {Math.abs(portfolio.change)}%
-          </Badge>
-        </div>
-        <div className="grid grid-cols-3 gap-4 mt-4">
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-sm text-muted-foreground">Cash</div>
-              <div className="text-xl font-semibold">${portfolio.cash.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          {/* Similar cards for Positions and PnL */}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-```
+- Props: `portfolio` from `useTradingData` / REST (`total_value`, `available_balance`, `margin_used`, `total_unrealized_pnl`, `total_realized_pnl`, …) — amounts in **INR**.
+- PnL badge shows absolute total PnL; appends **`(X.XX% ROE)`** when margin is used, computed via `unrealizedPnlPercentOnMargin` in `utils/portfolioMetrics.ts` and `formatPercent` in `utils/formatters.ts`.
+- Tooltip / subtext: ROE uses app-configured leverage; may differ from the exchange.
 
 ### ActivePositions Component
 

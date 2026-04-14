@@ -46,7 +46,7 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
         <CardContent>
           <p className="text-sm text-muted-foreground">No signal available</p>
           <p className="text-xs text-muted-foreground mt-2">
-            Ensure models are loaded and agent service is running. Check System Health for model_nodes status.
+            Signals appear after a full prediction (market data → features → models). If the agent is connected but you still see this, check Delta/candles in logs or press <kbd className="px-1 rounded border border-border">P</kbd> for a manual prediction.
           </p>
         </CardContent>
       </Card>

@@ -15,8 +15,10 @@ from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
 from agent.core.futures_utils import margin_required_inr, price_to_lots, entry_leg_fees_usd
+from agent.core.sl_tp import compute_stop_take_prices
 from agent.core.product_specs import get_contract_specs
 from agent.core.v15_signal import apply_v15_entry_gate
+from agent.core.decision_timestamp import decision_payload_timestamp_epoch_seconds
 from agent.core.learning_system import LearningSystem
 from agent.core.signal_filter import EntrySignalFilter
 from agent.core.redis_config import get_cache
@@ -294,22 +296,18 @@ class TradingEventHandler:
             ts = payload.get("timestamp")
             if ts is not None:
                 try:
-                    if hasattr(ts, "timestamp"):
-                        ts_sec = ts.timestamp()
-                    elif isinstance(ts, (int, float)):
-                        ts_sec = float(ts)
-                    else:
-                        dt = datetime.fromisoformat(ts.replace("Z", "+00:00")) if isinstance(ts, str) else ts
-                        ts_sec = dt.timestamp() if hasattr(dt, "timestamp") else 0
+                    ts_sec = decision_payload_timestamp_epoch_seconds(ts)
+                    if ts_sec is None:
+                        raise ValueError("unparseable timestamp")
                     age = time.time() - ts_sec
-                    if age > getattr(settings, "max_signal_age_seconds", 10):
+                    if age > getattr(settings, "max_signal_age_seconds", 45):
                         self._log_entry_rejected(
                             "stale_signal_reject",
                             symbol=symbol,
                             signal=signal,
                             event_id=event.event_id,
                             age_seconds=round(age, 3),
-                            max_signal_age_seconds=getattr(settings, "max_signal_age_seconds", 10),
+                            max_signal_age_seconds=getattr(settings, "max_signal_age_seconds", 45),
                             **diagnostics_base,
                         )
                         return
@@ -633,16 +631,21 @@ class TradingEventHandler:
                     atr_f = float(atr)
                     sl_mult = float(getattr(settings, "atr_sl_distance_mult", 1.0))
                     tp_mult = float(getattr(settings, "atr_tp_distance_mult", 1.5))
-                    sl_dist = max(entry_price * stop_pct, atr_f * sl_mult)
-                    tp_dist = max(entry_price * take_pct, atr_f * tp_mult)
-                    if side == "BUY":
-                        stop_loss_price = entry_price - sl_dist
-                        take_profit_price = entry_price + tp_dist
-                    else:
-                        stop_loss_price = entry_price + sl_dist
-                        take_profit_price = entry_price - tp_dist
+                    stop_loss_price, take_profit_price = compute_stop_take_prices(
+                        entry_price,
+                        side,
+                        stop_pct,
+                        take_pct,
+                        use_atr_scaled=True,
+                        atr_14=atr_f,
+                        atr_sl_mult=sl_mult,
+                        atr_tp_mult=tp_mult,
+                        tick_size=tick_sz,
+                    )
                 except (TypeError, ValueError):
                     use_atr_sl_tp = False
+                    stop_loss_price = None
+                    take_profit_price = None
             if use_atr_sl_tp and stop_loss_price is not None and take_profit_price is not None:
                 sl_pct_eff = abs(entry_price - stop_loss_price) / entry_price
                 tp_pct_eff = abs(take_profit_price - entry_price) / entry_price
@@ -963,6 +966,12 @@ class TradingEventHandler:
             }
             if v15_diag:
                 risk_payload["v15_diagnostics"] = v15_diag
+            atr_out = features.get("atr_14")
+            if atr_out is not None:
+                try:
+                    risk_payload["atr_14"] = float(atr_out)
+                except (TypeError, ValueError):
+                    pass
             if stop_loss_price is not None and take_profit_price is not None:
                 risk_payload["stop_loss"] = stop_loss_price
                 risk_payload["take_profit"] = take_profit_price

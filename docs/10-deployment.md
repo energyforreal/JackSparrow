@@ -609,10 +609,11 @@ docker compose logs --tail=100    # Last 100 lines from all services
 For longer-term history and structured JSON logs, the recommended locations on the host are:
 
 - `logs/backend/` – backend service logs (FastAPI, health checks, WebSocket bridge)
-- `logs/agent/` – agent service logs (MCP orchestrator, model discovery, trading decisions)
+- `logs/agent/` – agent service logs (MCP orchestrator, model discovery, trading decisions); also contains **`signal_audit/live_audit.md`** when `LOGS_ROOT=/logs` (IST-primary audit stream; see [Logging – AI signal and action audit journal](12-logging.md#ai-signal-and-action-audit-journal))
+- `logs/paper_trades/` – **paper trade ledger** (`paper_trades.log`: `TRADE|` / `CLOSE|` lines for fills and PnL audit)
 - `logs/frontend/` – frontend server logs
 
-Each container writes to `/logs` internally, which is bind-mounted to these host directories by `docker-compose.yml`. When diagnosing issues, use `docker compose logs` for a quick snapshot and the files under `logs/` for full-session investigations.
+Each container writes to `/logs` internally, which is bind-mounted to these host directories by `docker-compose.yml`. The agent service additionally mounts `./logs/paper_trades` to `/logs/paper_trades` so the paper ledger has a dedicated host folder. When diagnosing issues, use `docker compose logs` for a quick snapshot and the files under `logs/` for full-session investigations. For paper/signal audit semantics and `docker cp` examples, see [`reference/ai-signal-action-audit-log.md`](../reference/ai-signal-action-audit-log.md).
 
 **Execute commands in containers:**
 ```bash

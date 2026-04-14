@@ -25,6 +25,7 @@ Logs must be reset whenever a new run (development session, deployment, or autom
 - [Security & Compliance](#security--compliance)
 - [Implementation Roadmap](#implementation-roadmap)
 - [References](#references)
+- [AI signal and action audit journal](#ai-signal-and-action-audit-journal)
 - [Change Log](#change-log)
 
 ---
@@ -99,6 +100,7 @@ The logging plan applies to:
 |--------------|-----------------------|----------------------------------|
 | Backend      | `structlog` + `logging` | JSON to STDOUT & rotating file   |
 | Agent Core   | `structlog` / `loguru` | JSON to STDOUT & rotating file   |
+| Agent (paper audit) | `paper_trade_logger` + `signal_audit_md` | `{LOGS_ROOT}/paper_trades/paper_trades.log`, `{LOGS_ROOT}/signal_audit/live_audit.md` (IST-primary; see [audit journal](#ai-signal-and-action-audit-journal)) |
 | Frontend     | `pino` or `winston`    | JSON to STDOUT; browser console  |
 | Scripts/CLI  | `structlog`            | JSON to STDOUT & optional file   |
 
@@ -441,6 +443,37 @@ print(f"Error rate: {summary.error_rate_per_minute} errors/minute")
 
 Error summaries are also logged periodically (every 5 minutes) with the event `error_summary_periodic`.
 
+### 4. Risk approval reconciliation (`tools/commands/reconcile_risk_approvals.py`)
+
+After a session, verify that every **`trading_handler_risk_approved_published`** record has a matching execution outcome in structured logs (fill, explicit rejection, or handler failure):
+
+```bash
+python tools/commands/reconcile_risk_approvals.py logs/agent/agent.log
+python tools/commands/reconcile_risk_approvals.py logs/agent/agent.log logs/paper_trades/paper_trades.log
+```
+
+The script collects `event_id` values from `trading_handler_risk_approved_published` and expects each to appear in at least one of:
+
+- **`execution_order_fill_published`** (same `event_id`), or  
+- **`trading_execution_rejected`** (`correlation_id` equals that approval `event_id`), or  
+- **`execution_failed`** (`correlation_id` equals that approval `event_id`).
+
+It prints approval IDs with no matching outcome (exit code `1`). When a second path argument is given, it also prints a count of **`TRADE|`** lines in the paper ledger for a quick sanity check.
+
+### 5. Execution engine events (agent — `agent/core/execution.py`)
+
+These structlog events support dashboards and the reconciliation script above:
+
+| Event | Level | Notes |
+|-------|-------|--------|
+| `trading_execution_rejected` | WARNING | `correlation_id`, `stage` (`invalid_payload`, `invalid_side`, `overlap_open_position`, `invalid_price`, `execute_trade`), `reason`, `symbol`, `side`, `paper_trading_mode`. Emitted when a `RiskApprovedEvent` does not result in a fill. |
+| `execution_failed` | ERROR | `correlation_id`, `error`, `paper_trading_mode`. Companion to `execution_handle_risk_approved_error` (which carries the stack trace). |
+| `execution_order_fill_published` | INFO | Successful path after fill; includes `event_id` for cross-reference to the approval. |
+| `execution_risk_approved_trade_failed` | WARNING | Detailed `error=` line; prefer `trading_execution_rejected` for alerting. |
+| `position_close_skipped_already_closed` | INFO | Second close attempt ignored (idempotent); avoids duplicate **`CLOSE|`** lines in the paper ledger. |
+| `paper_fill_price_ticker_unavailable_using_hint` | WARNING | Paper mode used the approval/reference price as the reference mid because the ticker call failed. |
+| `paper_fill_reference_mid_clamped_to_hint_band` | DEBUG | Raw ticker mid was clamped to the band around the approval price using `execution_config.max_slippage_percent`. |
+
 ## Testing the Logging System
 
 1. **Unit Tests**
@@ -513,13 +546,25 @@ Error summaries are also logged periodically (every 5 minutes) with the event `e
 
 ## AI signal and action audit journal
 
-For a **markdown workbook** that records each AI signal, the action taken (approve / reject / hold), timestamps, and (when applicable) position size, PnL, and exit time—with field mapping from `logs/agent.log` and `logs/paper_trades/paper_trades.log`—see:
+Operational analysis uses **three layers** (structlog is separate from the pipe/markdown audit files):
+
+| Layer | Role | Location / code |
+|-------|------|-----------------|
+| Pipe ledger | Fills, fees, realized PnL (`TRADE\|`, `CLOSE\|`) | `{LOGS_ROOT}/paper_trades/paper_trades.log` — [`agent/core/paper_trade_logger.py`](../agent/core/paper_trade_logger.py) |
+| Markdown stream | AI signal → gates → paper echo | `{LOGS_ROOT}/signal_audit/live_audit.md` — [`agent/core/signal_audit_md.py`](../agent/core/signal_audit_md.py) |
+| Timestamps | IST primary, UTC companion | [`agent/core/audit_time.py`](../agent/core/audit_time.py) (`ZoneInfo("Asia/Kolkata")`); Docker sets `TZ=Asia/Kolkata` on the agent service |
+
+With default Docker Compose, `LOGS_ROOT` is `/logs` in the agent container: **`signal_audit/`** and other agent files under the bind mount land on the host as **`logs/agent/...`**, while **`logs/paper_trades/`** is mounted separately to **`/logs/paper_trades`** (same `paper_trades.log` on the host either way).
+
+For field mapping from `logs/agent.log` / structlog, retrieval commands, and reconciliation tips, see the full runbook:
 
 - [`reference/ai-signal-action-audit-log.md`](../reference/ai-signal-action-audit-log.md)
 
-**Realtime audit**: while the agent runs, the same events are **appended automatically** to `{LOGS_ROOT}/signal_audit/live_audit.md` (implementation: `agent/core/signal_audit_md.py`). Toggle with `SIGNAL_AUDIT_MD_ENABLED` / `SIGNAL_AUDIT_MD_SUBPATH` (see `agent/.env.example`).
+**Realtime audit**: while the agent runs, events are **appended automatically** to `live_audit.md`. Toggle with `SIGNAL_AUDIT_MD_ENABLED` / `SIGNAL_AUDIT_MD_SUBPATH` (see `agent/.env.example`). **Timestamps in that file and in `paper_trades.log` use IST (Asia/Kolkata) as the primary clock**, with an explicit UTC companion for correlation (`utc=` in markdown, `utc_time=` in pipe lines).
 
-Keep the reference template under `reference/` for manual summaries; the `logs/` tree is typically gitignored, so copy `live_audit.md` out if you need it in version control.
+**Approval ↔ execution reconciliation**: after exporting JSON agent logs, run `python tools/commands/reconcile_risk_approvals.py <agent.log> [paper_trades.log]` to flag any `trading_handler_risk_approved_published` `event_id` with no matching `execution_order_fill_published`, `trading_execution_rejected`, or `execution_failed` — see [Risk approval reconciliation](#4-risk-approval-reconciliation-toolscommandsreconcile_risk_approvalspy) and [Execution engine events](#5-execution-engine-events-agent--agentcoreexecutionpy) above.
+
+Keep the reference under `reference/` for manual summaries; the `logs/` tree is typically gitignored, so copy `live_audit.md` or `paper_trades.log` out if you need them in version control.
 
 ---
 
@@ -536,6 +581,8 @@ Keep the reference template under `reference/` for manual summaries; the `logs/`
 
 | Date       | Version | Description                              |
 |------------|---------|------------------------------------------|
+| 2026-04-12 | 2.2.0   | Audit journal section (three-layer model, `audit_time.py`, host paths vs `LOGS_ROOT`); execution-engine structlog events and risk-approval reconciliation CLI (`reconcile_risk_approvals.py`); cross-links from this section. |
+| 2026-04-12 | 2.1.0   | Paper/signal audit logs document IST-primary timestamps and UTC companion fields (`reference/ai-signal-action-audit-log.md`). |
 | 2025-01-12 | 1.0.0   | Initial logging system documentation     |
 | 2025-01-XX | 2.0.0   | Comprehensive error logging system:
 |            |         | - Dedicated error/warning log files

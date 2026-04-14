@@ -12,6 +12,8 @@ import time
 import structlog
 
 from agent.data.candle_store import CandleStore
+from agent.data.delta_env import log_delta_env_mismatch_warnings
+from agent.data.symbols import normalize_symbol_for_delta_api
 from agent.data.delta_client import (
     DeltaExchangeClient,
     DeltaExchangeWebSocketClient,
@@ -32,14 +34,6 @@ class MarketDataService:
     def __init__(self):
         """Initialize market data service."""
         self.delta_client = DeltaExchangeClient()
-        self.websocket_client = DeltaExchangeWebSocketClient(
-            api_key=settings.delta_exchange_api_key,
-            api_secret=settings.delta_exchange_api_secret,
-            base_url=settings.websocket_url,
-            max_reconnect_attempts=settings.websocket_reconnect_attempts,
-            reconnect_delay=settings.websocket_reconnect_delay,
-            heartbeat_interval=settings.websocket_heartbeat_interval
-        )
         self._websocket_enabled = settings.websocket_enabled
         self.cache_ttl = 60  # Cache for 60 seconds
         self.ticker_cache_ttl = 10  # Shorter cache for ticker
@@ -64,6 +58,93 @@ class MarketDataService:
         self._candle_store = CandleStore()
         self._pipeline_direct_trigger: Optional[Any] = None
         self._ws_reconnect_backoff_seconds: float = 1.0
+        self._last_good_tick_monotonic: Dict[str, float] = {}
+        self._ws_ticker_subscription_ok: bool = False
+        self._last_rest_poll_log_mono: Dict[str, float] = {}
+
+        self.websocket_client = DeltaExchangeWebSocketClient(
+            api_key=settings.delta_exchange_api_key,
+            api_secret=settings.delta_exchange_api_secret,
+            base_url=settings.websocket_url,
+            max_reconnect_attempts=settings.websocket_reconnect_attempts,
+            reconnect_delay=settings.websocket_reconnect_delay,
+            heartbeat_interval=settings.websocket_heartbeat_interval,
+            on_connection_lost=self._on_delta_ws_connection_lost,
+        )
+
+    def _on_delta_ws_connection_lost(self, reason: str) -> None:
+        """Delta WSS dropped; invalidate subscription until re-subscribe succeeds."""
+        self._ws_ticker_subscription_ok = False
+        self._websocket_connected = False
+        logger.warning(
+            "market_data_delta_ws_connection_lost",
+            reason=reason,
+            rest_fallback_reason="ws_disconnected",
+            log_event="market_data_rest_fallback",
+        )
+
+    @staticmethod
+    def _price_from_delta_wss_message(message: Dict[str, Any]) -> float:
+        """mark_price > close (LTP) > spot_price for display and PnL consistency."""
+        for key in ("mark_price", "close", "spot_price"):
+            raw = message.get(key)
+            if raw is None:
+                continue
+            try:
+                v = float(raw)
+                if v > 0:
+                    return v
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    def _trusted_ws_ticker_feed(self) -> bool:
+        return (
+            self._websocket_enabled
+            and self._websocket_connected
+            and self._ws_ticker_subscription_ok
+        )
+
+    def _ticker_stale(self, symbol: str) -> bool:
+        threshold = float(settings.market_data_stale_rest_poll_seconds)
+        last = self._last_good_tick_monotonic.get(symbol)
+        if last is None:
+            return True
+        return (time.monotonic() - last) > threshold
+
+    def _rest_fallback_reason_code(self) -> str:
+        if not self._websocket_enabled:
+            return "websocket_disabled"
+        if not self._websocket_connected:
+            return "ws_disconnected"
+        if not self._ws_ticker_subscription_ok:
+            return "subscription_failed"
+        return "ws_stale"
+
+    def _maybe_log_rest_ticker_poll(self, reason_code: str, symbol: str) -> None:
+        key = f"{reason_code}:{symbol}"
+        now = time.monotonic()
+        if now - self._last_rest_poll_log_mono.get(key, 0.0) < 30.0:
+            return
+        self._last_rest_poll_log_mono[key] = now
+        stale_s = None
+        if symbol in self._last_good_tick_monotonic:
+            stale_s = round(now - self._last_good_tick_monotonic[symbol], 3)
+        logger.info(
+            "market_data_rest_ticker_poll",
+            reason=reason_code,
+            symbol=symbol,
+            stale_seconds=stale_s,
+        )
+
+    async def _poll_ticker_via_rest_if_needed(self, symbol: str) -> None:
+        trust = self._trusted_ws_ticker_feed()
+        stale = self._ticker_stale(symbol)
+        if trust and not stale:
+            return
+        reason_code = "ws_stale" if trust and stale else self._rest_fallback_reason_code()
+        await self._check_and_emit_ticker_with_fluctuation(symbol)
+        self._maybe_log_rest_ticker_poll(reason_code, symbol)
 
     def set_pipeline_direct_trigger(self, callback: Any) -> None:
         """Set callback for direct pipeline trigger when Redis is unavailable."""
@@ -71,6 +152,10 @@ class MarketDataService:
 
     async def initialize(self):
         """Initialize market data service."""
+        log_delta_env_mismatch_warnings(
+            settings.delta_exchange_base_url,
+            settings.websocket_url,
+        )
         # Set up WebSocket message handler for ticker updates if WebSocket is enabled
         if self._websocket_enabled:
             self.websocket_client.add_message_handler("ticker", self._handle_websocket_ticker)
@@ -105,14 +190,16 @@ class MarketDataService:
     async def _handle_websocket_ticker(self, message: Dict[str, Any]) -> None:
         """Handle incoming WebSocket ticker message."""
         try:
-            symbol = message.get("symbol")
-            if not symbol:
+            raw_sym = message.get("symbol")
+            if not raw_sym:
                 return
+            symbol = normalize_symbol_for_delta_api(str(raw_sym))
 
             # Convert WebSocket message to ticker format compatible with existing code
+            px = self._price_from_delta_wss_message(message)
             ticker_data = {
                 "symbol": symbol,
-                "price": float(message.get("mark_price", 0)),
+                "price": px,
                 "volume": float(message.get("volume", 0)),
                 "timestamp": message.get("timestamp", 0),
                 "bid": float(message.get("quotes", {}).get("best_bid", 0)),
@@ -138,7 +225,7 @@ class MarketDataService:
                     now = time.time()
                     if now - self._last_sl_tp_check.get(symbol, 0) >= 0.2:
                         self._last_sl_tp_check[symbol] = now
-                        price = float(message.get("mark_price", 0) or message.get("close", 0))
+                        price = self._price_from_delta_wss_message(message)
                         if price > 0:
                             await execution_module.update_position_price_and_check(symbol, price)
 
@@ -184,17 +271,23 @@ class MarketDataService:
             logger.warning("market_data_stream_already_running")
             return
 
-        self.streaming_symbols = symbols
+        self.streaming_symbols = [normalize_symbol_for_delta_api(s) for s in symbols]
         self.streaming_running = True
 
         # Subscribe to WebSocket if enabled and connected
         if self._websocket_enabled and self._websocket_connected:
             try:
-                await self.websocket_client.subscribe_ticker(symbols)
-                logger.info("market_data_websocket_subscribed", symbols=symbols)
+                await self.websocket_client.subscribe_ticker(self.streaming_symbols)
+                self._ws_ticker_subscription_ok = True
+                logger.info("market_data_websocket_subscribed", symbols=self.streaming_symbols)
             except Exception as e:
-                logger.warning("market_data_websocket_subscription_failed", error=str(e))
-                # Fall back to REST API polling
+                self._ws_ticker_subscription_ok = False
+                logger.warning(
+                    "market_data_websocket_subscription_failed",
+                    error=str(e),
+                    reason="subscription_failed",
+                    symbols=self.streaming_symbols,
+                )
 
         self._streaming_task = asyncio.create_task(self._stream_loop(interval))
 
@@ -243,6 +336,9 @@ class MarketDataService:
 
         while self.streaming_running:
             try:
+                if self._websocket_enabled:
+                    self._websocket_connected = self.websocket_client.connected
+
                 # Check WebSocket connection health and reconnect if needed
                 if self._websocket_enabled and not self._websocket_connected and websocket_reconnect_attempts < max_websocket_reconnect_attempts:
                     wait_s = min(self._ws_reconnect_backoff_seconds, 60.0)
@@ -263,8 +359,21 @@ class MarketDataService:
                         await self._connect_websocket()
                         if self._websocket_connected:
                             # Re-subscribe to symbols
-                            await self.websocket_client.subscribe_ticker(self.streaming_symbols)
-                            logger.info("market_data_websocket_reconnected_and_subscribed", symbols=self.streaming_symbols)
+                            try:
+                                await self.websocket_client.subscribe_ticker(self.streaming_symbols)
+                                self._ws_ticker_subscription_ok = True
+                                logger.info(
+                                    "market_data_websocket_reconnected_and_subscribed",
+                                    symbols=self.streaming_symbols,
+                                )
+                            except Exception as sub_e:
+                                self._ws_ticker_subscription_ok = False
+                                logger.warning(
+                                    "market_data_websocket_resubscribe_failed",
+                                    error=str(sub_e),
+                                    reason="subscription_failed",
+                                    symbols=self.streaming_symbols,
+                                )
                             websocket_reconnect_attempts = 0  # Reset on success
                             self._ws_reconnect_backoff_seconds = 1.0
                         else:
@@ -285,10 +394,7 @@ class MarketDataService:
                         )
 
                 for symbol in self.streaming_symbols:
-                    # Only poll tickers via REST API if WebSocket is not available or enabled
-                    if not (self._websocket_enabled and self._websocket_connected):
-                        # Continuously monitor tickers for price fluctuations (REST fallback)
-                        await self._check_and_emit_ticker_with_fluctuation(symbol)
+                    await self._poll_ticker_via_rest_if_needed(symbol)
 
                     # Keep candle monitoring via REST, but at a cadence independent from
                     # the ticker polling loop (especially important when WebSocket is connected).
@@ -609,6 +715,10 @@ class MarketDataService:
             )
             
             await event_bus.publish(event)
+
+            px_out = float(payload.get("price", 0.0))
+            if px_out > 0:
+                self._last_good_tick_monotonic[symbol] = time.monotonic()
             
             logger.debug(
                 "market_tick_event_emitted",
@@ -778,7 +888,8 @@ class MarketDataService:
         limit: int = 100
     ) -> Optional[Dict[str, Any]]:
         """Get market data (OHLCV candles)."""
-        
+        symbol = normalize_symbol_for_delta_api(symbol)
+
         # Check cache first
         cache_key = f"market_data:{symbol}:{interval}:{limit}"
         cached = await get_cache(cache_key)
@@ -890,7 +1001,8 @@ class MarketDataService:
     
     async def get_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get current ticker information."""
-        
+        symbol = normalize_symbol_for_delta_api(symbol)
+
         # Check cache first
         cache_key = f"ticker:{symbol}"
         cached = await get_cache(cache_key)
@@ -949,7 +1061,8 @@ class MarketDataService:
     
     async def get_orderbook(self, symbol: str, depth: int = 20) -> Optional[Dict[str, Any]]:
         """Get order book."""
-        
+        symbol = normalize_symbol_for_delta_api(symbol)
+
         try:
             # Fetch from Delta Exchange
             response = await self.delta_client.get_orderbook(symbol, depth=depth)

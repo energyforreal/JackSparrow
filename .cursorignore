@@ -34,8 +34,7 @@ out/
 .turbo/
 node_modules/
 
-# Logs
-logs/
+# Log files (logs/ directory not ignored for indexing)
 *.log
 *.log.*
 

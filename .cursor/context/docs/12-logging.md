@@ -441,6 +441,37 @@ print(f"Error rate: {summary.error_rate_per_minute} errors/minute")
 
 Error summaries are also logged periodically (every 5 minutes) with the event `error_summary_periodic`.
 
+### 4. Risk approval reconciliation (`tools/commands/reconcile_risk_approvals.py`)
+
+After a session, verify that every **`trading_handler_risk_approved_published`** record has a matching execution outcome in structured logs (fill, explicit rejection, or handler failure):
+
+```bash
+python tools/commands/reconcile_risk_approvals.py logs/agent/agent.log
+python tools/commands/reconcile_risk_approvals.py logs/agent/agent.log logs/paper_trades/paper_trades.log
+```
+
+The script collects `event_id` values from `trading_handler_risk_approved_published` and expects each to appear in at least one of:
+
+- **`execution_order_fill_published`** (same `event_id`), or  
+- **`trading_execution_rejected`** (`correlation_id` equals that approval `event_id`), or  
+- **`execution_failed`** (`correlation_id` equals that approval `event_id`).
+
+It prints approval IDs with no matching outcome (exit code `1`). When a second path argument is given, it also prints a count of **`TRADE|`** lines in the paper ledger for a quick sanity check.
+
+### 5. Execution engine events (agent — `agent/core/execution.py`)
+
+These structlog events support dashboards and the reconciliation script above:
+
+| Event | Level | Notes |
+|-------|-------|--------|
+| `trading_execution_rejected` | WARNING | `correlation_id`, `stage` (`invalid_payload`, `overlap_open_position`, `invalid_price`, `execute_trade`), `reason`, `symbol`, `side`, `paper_trading_mode`. Emitted when a `RiskApprovedEvent` does not result in a fill. |
+| `execution_failed` | ERROR | `correlation_id`, `error`, `paper_trading_mode`. Companion to `execution_handle_risk_approved_error` (which carries the stack trace). |
+| `execution_order_fill_published` | INFO | Successful path after fill; includes `event_id` for cross-reference to the approval. |
+| `execution_risk_approved_trade_failed` | WARNING | Detailed `error=` line; prefer `trading_execution_rejected` for alerting. |
+| `position_close_skipped_already_closed` | INFO | Second close attempt ignored (idempotent); avoids duplicate **`CLOSE|`** lines in the paper ledger. |
+| `paper_fill_price_ticker_unavailable_using_hint` | WARNING | Paper mode used the approval/reference price as the reference mid because the ticker call failed. |
+| `paper_fill_reference_mid_clamped_to_hint_band` | DEBUG | Raw ticker mid was clamped to the band around the approval price using `execution_config.max_slippage_percent`. |
+
 ## Testing the Logging System
 
 1. **Unit Tests**

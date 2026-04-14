@@ -1066,6 +1066,7 @@ class ModelPerformance(Base):
 **Currency contract (Phase 1)**:
 - BTCUSD market prices remain USD in market payloads (`price`, `entry_price`, `current_price`)
 - Portfolio balances/PnL are emitted in INR (`total_value`, `available_balance`, `margin_used`, `total_unrealized_pnl`, `total_realized_pnl`)
+- **Margin and ROE (frontend)**: `margin_used` is the sum of **isolated margin in USD** per open position (`notional_usd / leverage` using `contract_value_btc` and `isolated_margin_leverage` from settings), converted to INR with the **same** `get_usdinr_rate()` snapshot as unrealized PnL so **ROE ratios** (unrealized ÷ margin) are not distorted by mixing FX sources. Leverage is **config-based**, not necessarily the exchange UI — optional future reconciliation with Delta `GET /v2/positions`. Multi-asset: one global `contract_value_btc` in `get_portfolio_summary` assumes a single contract spec unless extended per symbol.
 
 ### Feature Service
 

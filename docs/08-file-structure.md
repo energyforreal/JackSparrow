@@ -78,6 +78,10 @@ JackSparrow/
 │   │   ├── intelligent_agent.py       # Main agent class
 │   │   ├── reasoning_engine.py        # MCP Reasoning Engine
 │   │   ├── execution.py                # Trade execution engine (now lot-based for futures)
+│   │   ├── sl_tp.py                    # Shared stop/take-profit pricing (ATR + fixed %, tick rounding, paper rebase helper)
+│   │   ├── audit_time.py               # IST/UTC helpers for paper + signal-audit logs
+│   │   ├── paper_trade_logger.py       # Rotating `paper_trades.log` (TRADE|/CLOSE|)
+│   │   ├── signal_audit_md.py          # Append-only `live_audit.md` (ai_signal, gates, paper echo)
 │   │   ├── config.py                   # Agent configuration includes perpetual futures parameters
 │   ├── data/
 │   │   ├── perpetual_data_fetcher.py   # Perpetual futures candles/orderbook loader and normalizer
@@ -182,6 +186,7 @@ JackSparrow/
 │   ├── utils/
 │   │   ├── formatters.ts              # Data formatting utilities (currency, percentages, timestamps)
 │   │   │                              # Includes UTC→IST time conversion and normalization
+│   │   ├── portfolioMetrics.ts        # ROE: unrealized PnL ÷ margin (PortfolioSummary badge)
 │   │   └── calculations.ts            # Calculation utilities
 │   ├── styles/
 │   │   └── globals.css                # Global styles

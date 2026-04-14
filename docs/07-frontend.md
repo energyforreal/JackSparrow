@@ -63,7 +63,8 @@ frontend/
 ├── types/
 │   └── index.ts                # TypeScript types
 ├── utils/
-│   ├── formatters.ts           # Data formatting
+│   ├── formatters.ts           # Data formatting (currency, percent, IST time)
+│   ├── portfolioMetrics.ts     # ROE helpers (e.g. unrealized PnL ÷ margin)
 │   └── calculations.ts         # Client-side calculations
 └── styles/
     └── globals.css              # Global styles
@@ -191,8 +192,11 @@ interface PortfolioSummaryProps {
 
 **Features**:
 - INR portfolio metrics: Available Cash, Margin Used, Unrealized PnL, Realized PnL, Total Equity
+- **PnL badge**: absolute total PnL (unrealized + realized) in INR; when **`margin_used > 0`**, also shows **ROE %** = `total_unrealized_pnl ÷ margin_used` (return on isolated margin implied by app config leverage — same INR FX snapshot as the API). Not return on trade notional (“Trade Value” in Recent Trades). Hidden when there is no margin (avoids divide-by-zero). Tooltip and subtext explain that leverage comes from **`ISOLATED_MARGIN_LEVERAGE`** / backend settings and may differ from the exchange if leverage is changed on the venue.
 - **Skeleton** UI when `isLoading`
 - **Empty state** when loaded but no portfolio object yet
+
+**Related**: [`utils/portfolioMetrics.ts`](../frontend/utils/portfolioMetrics.ts) (`unrealizedPnlPercentOnMargin`).
 
 ---
 

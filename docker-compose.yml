@@ -102,6 +102,10 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+      # Backend must accept /ws/agent before the agent client connects; backend
+      # warms up to the agent WebSocket separately (retries / reconnect loop).
+      backend:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -123,6 +127,7 @@ services:
       FEATURE_SERVER_PORT: 8002
       LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
       LOGS_ROOT: /logs
+      TZ: Asia/Kolkata
       BACKEND_WS_URL: ws://backend:8000/ws/agent
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
@@ -169,8 +174,6 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-      agent:
-        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -193,6 +196,8 @@ services:
       BACKEND_PORT: ${BACKEND_PORT:-8000}
       BACKEND_HOST: 0.0.0.0
       LOG_LEVEL: ${BACKEND_LOG_LEVEL:-INFO}
+      # false = keep paper trades/positions in Postgres across backend restarts (UI Recent Trades)
+      RESET_PAPER_STATE_ON_STARTUP: ${RESET_PAPER_STATE_ON_STARTUP:-false}
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_INTERNAL_ORIGINS: ${CORS_INTERNAL_ORIGINS:-http://frontend:3000}
       QDRANT_URL: http://qdrant:6333

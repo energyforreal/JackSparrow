@@ -52,12 +52,13 @@ export function Dashboard() {
     isLoading,
     isPortfolioLoading,
     error,
-    performanceData
+    performanceData,
+    resetLocalTradingState
   } = useTradingData()
 
   // Extract positions from portfolio - much simpler now!
   const positions = portfolio?.positions || []
-  const portfolioBlockLoading = !isConnected || isPortfolioLoading
+  const portfolioBlockLoading = isPortfolioLoading && !portfolio
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -87,7 +88,7 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header isConnected={isConnected} />
+      <Header isConnected={isConnected} onPaperPortfolioReset={resetLocalTradingState} />
       <div className="container mx-auto px-4 py-6 space-y-6">
         {error && (
           <Card className="border-destructive bg-destructive/5">

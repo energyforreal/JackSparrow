@@ -34,8 +34,10 @@ services:
       - ./logs/agent:/logs:rw
     environment:
       LOG_LEVEL: ${AGENT_LOG_LEVEL:-DEBUG}
-      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21}
+      # Keep default in sync with docker-compose.yml so dev stacks load the same v15 bundle unless AGENT_MODEL_DIR overrides.
+      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05}
       MAX_TRADES_PER_HOUR: 0
+      TZ: Asia/Kolkata
 
   frontend:
     build:

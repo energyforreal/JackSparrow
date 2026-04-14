@@ -11,7 +11,7 @@
  * - Consolidated data fetching and updates
  */
 
-import { useEffect, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
@@ -28,6 +28,9 @@ import type {
 export type Signal = SharedSignal
 export type Portfolio = SharedPortfolio
 export type Trade = SharedTrade
+
+/** Max trades kept in UI state (matches REST bootstrap limit). */
+export const RECENT_TRADES_MAX = 50
 
 export interface MarketData {
   symbol: string
@@ -107,6 +110,8 @@ type TradingDataAction =
   | { type: 'SET_CONNECTED'; payload: boolean }
   | { type: 'SET_LAST_UPDATE'; payload: Date }
   | { type: 'SET_DATA_SOURCE'; payload: 'websocket' | 'api' | 'none' }
+  | { type: 'HYDRATE_TRADES'; payload: { trades: Trade[]; merge?: boolean } }
+  | { type: 'RESET_LOCAL_TRADING_STATE' }
 
 // Initial state
 const initialState: TradingDataState = {
@@ -122,8 +127,32 @@ const initialState: TradingDataState = {
   lastUpdate: null,
   dataSource: 'none',
   isLoading: true,
-  isPortfolioLoading: false,
+  isPortfolioLoading: true,
   error: null,
+}
+
+function normalizeTradeRecord(raw: unknown): Trade | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = r.trade_id
+  if (id == null || id === '') return null
+  return {
+    ...(raw as Trade),
+    trade_id: String(id),
+    executed_at: (r.executed_at ?? r.timestamp) as Trade['executed_at'],
+    status: (r.status as string) ?? 'EXECUTED',
+    price: (r.price ?? r.fill_price) as Trade['price'],
+  }
+}
+
+function normalizeHealthFromRest(raw: unknown): HealthData | null {
+  if (!raw || typeof raw !== 'object') return null
+  const h = raw as HealthData & { overall_status?: string }
+  const next: HealthData = { ...h }
+  if (next.status === undefined && h.overall_status !== undefined) {
+    next.status = String(h.overall_status)
+  }
+  return next
 }
 
 // Reducer for state management
@@ -215,7 +244,7 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                 status: data.status ?? 'EXECUTED',
                 price: data.price ?? data.fill_price,
               }
-              const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, 10)
+              const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
               return {
                 ...state,
                 recentTrades: newTrades,
@@ -415,7 +444,7 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       if (messageType === 'trade_executed') {
         const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
         if (!existingTradeIds.has(data.trade_id)) {
-          const newTrades = [data, ...state.recentTrades].slice(0, 10)
+          const newTrades = [data, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
           return {
             ...state,
             recentTrades: newTrades,
@@ -477,7 +506,7 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         status: action.payload.status ?? 'EXECUTED',
         price: action.payload.price ?? action.payload.fill_price,
       }
-      const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, 10)
+      const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
       return {
         ...state,
         recentTrades: newTrades,
@@ -485,6 +514,55 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         dataSource: 'api'
       }
     }
+
+    case 'HYDRATE_TRADES': {
+      const { trades: rawList, merge } = action.payload
+      const normalized: Trade[] = []
+      const seen = new Set<string>()
+      for (const t of rawList) {
+        const n = normalizeTradeRecord(t)
+        if (!n) continue
+        const id = String(n.trade_id)
+        if (seen.has(id)) continue
+        seen.add(id)
+        normalized.push(n)
+      }
+
+      let combined: Trade[]
+      if (merge) {
+        const byId = new Map<string, Trade>()
+        for (const t of state.recentTrades) {
+          byId.set(String(t.trade_id), t)
+        }
+        for (const t of normalized) {
+          byId.set(String(t.trade_id), t)
+        }
+        combined = Array.from(byId.values()).sort((a, b) => {
+          const ta = new Date(a.executed_at ?? (a as { timestamp?: string }).timestamp ?? 0).getTime()
+          const tb = new Date(b.executed_at ?? (b as { timestamp?: string }).timestamp ?? 0).getTime()
+          return tb - ta
+        })
+      } else {
+        combined = normalized
+      }
+
+      return {
+        ...state,
+        recentTrades: combined.slice(0, RECENT_TRADES_MAX),
+        lastUpdate: new Date(),
+        dataSource: 'api',
+      }
+    }
+
+    case 'RESET_LOCAL_TRADING_STATE':
+      return {
+        ...state,
+        portfolio: null,
+        recentTrades: [],
+        performanceData: [],
+        lastUpdate: new Date(),
+        dataSource: 'api',
+      }
 
     case 'UPDATE_AGENT_STATE':
       return {
@@ -642,6 +720,8 @@ export function useTradingData() {
   const { isConnected, lastMessage, sendMessage, error: wsError } = useWebSocket(WS_URL)
   const lastMessageRef = useRef(lastMessage)
   const lastToastedTradeIdRef = useRef<string | null>(null)
+  /** True after first mount REST bootstrap completes (success or failure). */
+  const portfolioLoadSettledRef = useRef(false)
 
   // Keep lastMessageRef in sync with lastMessage (required for apiClient response polling)
   useEffect(() => {
@@ -722,13 +802,66 @@ export function useTradingData() {
     dispatch({ type: 'SET_ERROR', payload: wsError })
   }, [wsError])
 
+  // REST bootstrap (health, portfolio, trades) without waiting for WebSocket
+  useEffect(() => {
+    let cancelled = false
+    const base = getBackendProxyBase()
+    const run = async () => {
+      try {
+        const [hRes, pRes, tRes] = await Promise.all([
+          fetch(`${base}/api/v1/health`, { headers: { Accept: 'application/json' } }),
+          fetch(`${base}/api/v1/portfolio/summary`, { headers: { Accept: 'application/json' } }),
+          fetch(`${base}/api/v1/portfolio/trades?limit=${RECENT_TRADES_MAX}`, {
+            headers: { Accept: 'application/json' },
+          }),
+        ])
+        if (cancelled) return
+        if (hRes.ok) {
+          const j = await hRes.json()
+          const h = normalizeHealthFromRest(j)
+          if (h) dispatch({ type: 'UPDATE_HEALTH', payload: h })
+        }
+        if (pRes.ok) {
+          const data = (await pRes.json()) as Portfolio
+          if (data && typeof data === 'object') {
+            dispatch({ type: 'UPDATE_PORTFOLIO', payload: data })
+          }
+        }
+        if (tRes.ok) {
+          const arr = (await tRes.json()) as unknown
+          if (Array.isArray(arr)) {
+            dispatch({
+              type: 'HYDRATE_TRADES',
+              payload: { trades: arr as Trade[], merge: false },
+            })
+          }
+        }
+      } catch {
+        // Non-fatal: backend may be unreachable until later
+      } finally {
+        if (!cancelled) {
+          portfolioLoadSettledRef.current = true
+          dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
+          dispatch({ type: 'SET_LOADING', payload: false })
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Fetch initial data only when WebSocket is connected (sendCommand requires connection)
   useEffect(() => {
     if (!isConnected) return
 
     const fetchInitialData = async () => {
+      const showPortfolioSpinner = !portfolioLoadSettledRef.current
       dispatch({ type: 'SET_LOADING', payload: true })
-      dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: true })
+      if (showPortfolioSpinner) {
+        dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: true })
+      }
 
       try {
         const [
@@ -784,12 +917,17 @@ export function useTradingData() {
           }
         }
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
+        portfolioLoadSettledRef.current = true
 
         if (tradesResult.status === 'fulfilled') {
           const trades = tradesResult.value
           if (Array.isArray(trades)) {
-            trades.slice(0, 10).forEach((trade) => {
-              dispatch({ type: 'ADD_TRADE', payload: trade as Trade })
+            dispatch({
+              type: 'HYDRATE_TRADES',
+              payload: {
+                trades: trades as Trade[],
+                merge: true,
+              },
             })
           }
         }
@@ -856,12 +994,17 @@ export function useTradingData() {
           payload: error instanceof Error ? error : new Error('Unknown error'),
         })
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
+        portfolioLoadSettledRef.current = true
         dispatch({ type: 'SET_LOADING', payload: false })
       }
     }
 
     fetchInitialData()
   }, [isConnected])
+
+  const resetLocalTradingState = useCallback(() => {
+    dispatch({ type: 'RESET_LOCAL_TRADING_STATE' })
+  }, [])
 
   // Return unified interface
   return {
@@ -884,6 +1027,7 @@ export function useTradingData() {
     isLoading: state.isLoading,
     isPortfolioLoading: state.isPortfolioLoading,
     error: state.error,
+    resetLocalTradingState,
   }
 }
 

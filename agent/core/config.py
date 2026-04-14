@@ -470,9 +470,9 @@ class Settings(BaseSettings):
     )
 
     active_timeframes: str = Field(
-        default="5m,15m,30m,1h,2h",
+        default="1m,5m,15m,30m,1h,2h",
         env="ACTIVE_TIMEFRAMES",
-        description="Comma-separated list of active trading timeframes"
+        description="Comma-separated list of active trading timeframes (first = primary candle interval for ML triggers)"
     )
     
     # Trading Mode
@@ -481,7 +481,15 @@ class Settings(BaseSettings):
         env="PAPER_TRADING_MODE",
         description="Enable paper trading mode (default: True). Set to False for live trading."
     )
-    
+    paper_trading_random_seed: Optional[int] = Field(
+        default=None,
+        env="PAPER_TRADING_RANDOM_SEED",
+        description=(
+            "If set, seeds Python's random module once when the execution engine "
+            "initializes in paper mode (reproducible simulated slippage for tests)."
+        ),
+    )
+
     # Risk Management
     max_position_size: float = Field(
         default=0.1,
@@ -534,7 +542,7 @@ class Settings(BaseSettings):
         description="When True, require long trades above EMA200 and short trades below EMA200."
     )
     max_signal_age_seconds: int = Field(
-        default=10,
+        default=45,
         env="MAX_SIGNAL_AGE_SECONDS",
         description="Reject signals older than this (seconds)"
     )
@@ -1118,7 +1126,7 @@ class Settings(BaseSettings):
     timeframes: str = Field(
         default="3m,5m,15m",
         env="TIMEFRAMES",
-        description="Comma-separated list of timeframes (no 1m; 15m=trend, 5m=entry, 3m=optional filter)"
+        description="Comma-separated list of timeframes when ACTIVE_TIMEFRAMES is unset (15m=trend, 5m=entry, 3m=optional filter)"
     )
 
     # WebSocket Configuration
@@ -1151,6 +1159,16 @@ class Settings(BaseSettings):
         default=60.0,
         env="WEBSOCKET_FALLBACK_POLL_INTERVAL",
         description="REST API polling interval when WebSocket is unavailable (seconds)"
+    )
+    market_data_stale_rest_poll_seconds: float = Field(
+        default=15.0,
+        env="MARKET_DATA_STALE_REST_POLL_SECONDS",
+        ge=3.0,
+        le=300.0,
+        description=(
+            "If Delta WSS is connected but no good ticker arrived within this window, "
+            "poll REST GET /v2/tickers/{symbol} for the headline price (seconds)"
+        ),
     )
 
     # Candle monitoring cadence (REST calls) - can be different from ticker polling cadence.

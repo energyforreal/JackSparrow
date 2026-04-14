@@ -29,6 +29,7 @@ from backend.api.routes import health, trading, market, portfolio, admin, system
 from backend.api.websocket.unified_manager import unified_websocket_manager
 from backend.services.agent_event_subscriber import agent_event_subscriber
 from backend.services.health_poller import health_poller
+from backend.services.portfolio_service import portfolio_service
 
 
 def _configure_utf8_stdio() -> None:
@@ -125,13 +126,10 @@ async def _migrate_database_schema() -> None:
 async def _reset_paper_trade_state() -> None:
     """Clear positions and trades in DB so paper trade starts fresh on each backend load."""
     from backend.core.database import AsyncSessionLocal
-    from backend.core.database import Trade, Position
-    from sqlalchemy import delete
 
     async with AsyncSessionLocal() as session:
         try:
-            await session.execute(delete(Trade))
-            await session.execute(delete(Position))
+            await portfolio_service.delete_all_trades_and_positions(session)
             await session.commit()
             logger.info(
                 "paper_trade_state_reset",

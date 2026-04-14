@@ -25,10 +25,20 @@ Operational record for **model signals**, **risk / gate actions**, and **paper e
 |--------|----------|---------|
 | **Live audit (markdown)** | `{LOGS_ROOT}/signal_audit/live_audit.md` | Every decision / reject / paper TRADE/CLOSE while the agent runs (`agent/core/signal_audit_md.py`). Toggle: `SIGNAL_AUDIT_MD_ENABLED`, `SIGNAL_AUDIT_MD_SUBPATH`. |
 | **Paper ledger (pipe format)** | `{LOGS_ROOT}/paper_trades/paper_trades.log` | Each **`TRADE|`** and **`CLOSE|`** line; best for **trade_value_inr**, **fees**, **net_pnl_inr**, **exit_reason**, **duration_seconds**. |
-| **Structlog JSON** | `logs/agent.log` or `docker logs jacksparrow-agent` | **decision_ready_handled**, **trading_entry_rejected**, **trading_handler_risk_approved_published**, **trade_executed**, **position_closed_successfully**. |
+| **Structlog JSON** | `logs/agent.log` or `docker logs jacksparrow-agent` | **decision_ready_handled**, **trading_entry_rejected**, **trading_handler_risk_approved_published**, **execution_order_fill_published**, **trading_execution_rejected**, **execution_failed**, **trade_executed**, **position_closed_successfully**, **position_close_skipped_already_closed**. |
 | **This file (`reference/…`)** | Git-friendly summary | Refreshed snapshots; not realtime. |
 
-Timestamps are **UTC** unless a field explicitly says `local_time`.
+**Timestamp policy:** Audit files use **IST (Asia/Kolkata)** as the **primary** clock: the second field of each **`TRADE|`** / **`CLOSE|`** line, and the bold time on each **`live_audit.md`** row. The same instant is repeated in UTC as **`utc_time=`** (pipe log) or **`utc=`** (markdown) for tooling and cross-system correlation. The agent Docker image sets **`TZ=Asia/Kolkata`**; timestamps are also computed with `zoneinfo.ZoneInfo("Asia/Kolkata")` in code (`agent/core/audit_time.py`).
+
+### Artifact strategy (operational)
+
+The project keeps **three layers** (no separate unified JSONL file in-repo):
+
+1. **`paper_trades.log`** — quantitative truth for fills, fees, and realized PnL (`agent/core/paper_trade_logger.py`).
+2. **`live_audit.md`** — narrative of AI signal → gates → paper echo (`agent/core/signal_audit_md.py`).
+3. **Structlog** (`docker logs`, `agent.log`) — debugging and rich context.
+
+A **single append-only JSONL** journal was considered optional; if added later, prefer lines like `{"ts_ist":"...","ts_utc":"...","event":"ai_signal|risk_approved|...","event_id":"..."}` written from the same hooks (see plan). Current analysis joins the pipe log and markdown on **`reasoning_chain_id`**, **`event_id`**, and time.
 
 ---
 
@@ -38,6 +48,7 @@ Timestamps are **UTC** unless a field explicitly says `local_time`.
 |--|--|
 | **Path** | `{LOGS_ROOT}/signal_audit/live_audit.md` (default `LOGS_ROOT` = project `logs/`) |
 | **Implementation** | `agent/core/signal_audit_md.py` |
+| **Timestamps** | Bold time = **IST**; each line includes `` utc=`...` `` for the same instant in UTC |
 | **Line tags** | `ai_signal`, `entry_rejected`, `risk_approved`, `paper_trade`, `position_close` |
 
 ---
@@ -134,9 +145,15 @@ Illustrative **decision → action** pairs (reject path). Full history: grep `do
 
 ## Reconciling risk approvals with fills
 
-- **`trading_handler_risk_approved_published`** counts *risk layer acceptance*; execution may still fail or debounce before a **`TRADE|`** line appears.
-- In the sampled Docker window there were **4** risk approvals but only **two** `trade_executed` lines—earlier fills may sit **outside** `--tail 25000`, or some approvals did not reach a logged fill in that slice.
-- Always tie **fills** to **`paper_trades.log`**: `order_id` on **`TRADE|`** matches short ids in **`trade_executed`** (e.g. `d35355be`).
+- **`trading_handler_risk_approved_published`** counts *risk layer acceptance*; execution may still fail before a **`TRADE|`** line appears. Every approval should leave a trace in structlog: **`execution_order_fill_published`** (same `event_id` as the approval), or **`trading_execution_rejected`** / **`execution_failed`** with `correlation_id` equal to that `event_id`.
+- **Automated check (recommended):** from the repo root, after exporting `agent.log` JSON:
+
+  `python tools/commands/reconcile_risk_approvals.py path/to/agent.log [path/to/paper_trades.log]`
+
+  Exit code `1` lists approval `event_id`s with no matching outcome (orphan approvals). An optional second path prints a **`TRADE|`** count for sanity checks. See `docs/12-logging.md` (Error Analysis Tools).
+- In a sampled Docker window, counts can still differ when **`--tail N`** truncates the buffer, or when earlier fills sit outside the window.
+- Always tie **fills** to **`paper_trades.log`**: `order_id` on **`TRADE|`** matches short ids in **`trade_executed`** / **`execution_order_fill_published`** (e.g. `d35355be`).
+- **Double `CLOSE|` on one position** should not occur: a second close logs **`position_close_skipped_already_closed`** and does not append another **`CLOSE|`** line (idempotent close in `agent/core/execution.py`).
 
 ---
 
@@ -161,7 +178,7 @@ Use when you want a scratch pad not driven by automation.
 ## Per-entry checklist
 
 - [ ] **`decision_ready_handled`** (or WebSocket `signal_update`) matches signal and confidence.
-- [ ] If traded: **`TRADE|`** exists with **`reasoning_chain_id`**; optional match to **`trading_handler_risk_approved_published`** `event_id` via time/symbol.
+- [ ] If traded: **`TRADE|`** exists with **`reasoning_chain_id`**; confirm **`execution_order_fill_published`** (or rejection/failure events) for the same `event_id` as **`trading_handler_risk_approved_published`**, or run **`reconcile_risk_approvals.py`** on exported logs.
 - [ ] If flat: **`trading_entry_rejected`** reason documented (cap, debounce, hold, etc.).
 - [ ] On exit: **`CLOSE|`** with **`position_id`** matching opening **`TRADE`**’s `pos_<order_id>` pattern when present.
 
@@ -169,15 +186,29 @@ Use when you want a scratch pad not driven by automation.
 
 ## Sources and commands
 
+### Retrieval (Docker and host)
+
+- **Host (bind mounts):** `logs/paper_trades/paper_trades.log` and `logs/agent/signal_audit/live_audit.md` (when `LOGS_ROOT=/logs` in the agent container).
+- **Copy out of a running container:**  
+  `docker cp jacksparrow-agent:/logs/paper_trades/paper_trades.log ./backup/`  
+  `docker cp jacksparrow-agent:/logs/signal_audit/live_audit.md ./backup/`
+- **Print in container:**  
+  `docker exec jacksparrow-agent sh -c 'cat ${LOGS_ROOT:-/logs}/paper_trades/paper_trades.log'`
+- **Compose merge (dev):** `docker compose -f docker-compose.yml -f docker-compose.dev.yml config` — agent should list binds for `./logs/agent` → `/logs`, `./logs/paper_trades` → `/logs/paper_trades`, and source mounts.
+
 ### Structlog (`logs/agent.log` or Docker)
 
 | `event` | Use |
 |---------|-----|
 | `decision_ready_handled` | Signal, confidence, `position_size`, `event_id` |
-| `trading_handler_risk_approved_published` | Approved side, qty, entry price |
+| `trading_handler_risk_approved_published` | Approved side, qty, entry price, `event_id` (correlate to execution below) |
 | `trading_entry_rejected` | Gate reason and diagnostics |
+| `execution_order_fill_published` | Successful fill path; **`event_id`** matches the risk approval |
+| `trading_execution_rejected` | No fill: **`correlation_id`**, `stage`, `reason` (e.g. `execute_trade`, `invalid_price`) |
+| `execution_failed` | Handler exception; **`correlation_id`**, `error` |
 | `trade_executed` | Fill notification (short `order_id`) |
 | `position_closed` / `position_closed_successfully` | USD PnL components |
+| `position_close_skipped_already_closed` | Second close suppressed (idempotent) |
 
 **Docker:** `docker logs jacksparrow-agent --tail 50000` — JSON may span multiple lines; parse with a JSON stream decoder on the full string.
 
@@ -189,9 +220,9 @@ docker logs jacksparrow-agent --tail 10000 2>&1 | Select-String "trading_handler
 
 ### Paper ledger format (`paper_trade_logger`)
 
-**`TRADE|`** — UTC time, `trade_id`, symbol, side, quantity, fill price, `order_id`, `position_id`, `reasoning_chain_id`, `usd_inr_rate`, `trade_value_inr`, `fees_inr`.
+**`TRADE|`** — **IST** time (field 2), `trade_id`, symbol, side, quantity, fill price, then key=value fields: `order_id`, `position_id`, `reasoning_chain_id`, **`utc_time=`** (UTC ISO), `usd_inr_rate`, `trade_value_inr`, `fees_inr`.
 
-**`CLOSE|`** — exit UTC, `position_id`, symbol, side, entry/exit price, quantity, PnL (USD), `exit_reason`, `net_pnl_inr`, `fees_inr`, `gross_pnl_usd`, `duration_seconds`, `pnl_pct_on_margin`, FX fields when present.
+**`CLOSE|`** — **IST** time, `position_id`, symbol, side, entry/exit price, quantity, PnL (USD), `exit_reason`, **`utc_time=`**, `fees_inr`, `net_pnl_inr`, `usd_inr_rate_exit`, `usdinr_at_entry`, `gross_pnl_usd`, `fx_pnl_inr`, `pnl_pct_on_margin`, `duration_seconds`, etc., when present.
 
 ### Backend / DB (optional)
 
@@ -212,4 +243,4 @@ docker logs jacksparrow-agent --tail 10000 2>&1 | Select-String "trading_handler
 
 ---
 
-*Document version: 2026-04-12 — reorganized; paper tables fed from container `paper_trades.log` + Docker structlog snapshot.*
+*Document version: 2026-04-12 — Reconciliation CLI and execution structlog events (`trading_execution_rejected`, `execution_failed`, idempotent close); IST-primary audit timestamps (`audit_time.py`); Docker retrieval notes; artifact strategy (three layers; optional JSONL deferred).*

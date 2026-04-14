@@ -8,11 +8,12 @@ so logs persist under the mounted volume.
 
 import os
 from pathlib import Path
-from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import structlog
 import logging
 from logging.handlers import RotatingFileHandler
+
+from agent.core.audit_time import now_ist_iso, now_utc_iso
 
 logger = structlog.get_logger()
 
@@ -93,14 +94,13 @@ class PaperTradeLogger:
         """
         try:
             py_logger = self._ensure_logger()
-            now = datetime.now(timezone.utc)
-            ts = now.isoformat()
-            local_ts = datetime.now().astimezone().isoformat()
+            ts_ist = now_ist_iso()
+            ts_utc = now_utc_iso()
             line = (
-                f"TRADE|{ts}|{trade_id}|{symbol}|{side}|{quantity}|{fill_price}|"
+                f"TRADE|{ts_ist}|{trade_id}|{symbol}|{side}|{quantity}|{fill_price}|"
                 f"order_id={order_id or ''}|position_id={position_id or ''}|"
                 f"reasoning_chain_id={reasoning_chain_id or ''}|"
-                f"local_time={local_ts}|usd_inr_rate={usd_inr_rate if usd_inr_rate is not None else ''}|"
+                f"utc_time={ts_utc}|usd_inr_rate={usd_inr_rate if usd_inr_rate is not None else ''}|"
                 f"trade_value_inr={trade_value_inr if trade_value_inr is not None else ''}|"
                 f"fees_inr={fees_inr if fees_inr is not None else ''}\n"
             )
@@ -145,6 +145,7 @@ class PaperTradeLogger:
         usdinr_at_entry: Optional[float] = None,
         fx_pnl_inr: Optional[float] = None,
         pnl_pct_on_margin: Optional[float] = None,
+        reasoning_chain_id: Optional[str] = None,
     ) -> None:
         """Log a position close for P&L tracking.
 
@@ -160,12 +161,16 @@ class PaperTradeLogger:
         """
         try:
             py_logger = self._ensure_logger()
-            now = datetime.now(timezone.utc)
-            ts = now.isoformat()
-            local_ts = datetime.now().astimezone().isoformat()
+            ts_ist = now_ist_iso()
+            ts_utc = now_utc_iso()
+            chain_extra = (
+                f"|reasoning_chain_id={reasoning_chain_id}"
+                if reasoning_chain_id
+                else ""
+            )
             line = (
-                f"CLOSE|{ts}|{position_id}|{symbol}|{side}|{entry_price}|{exit_price}|"
-                f"{quantity}|{pnl}|{exit_reason}|local_time={local_ts}|"
+                f"CLOSE|{ts_ist}|{position_id}|{symbol}|{side}|{entry_price}|{exit_price}|"
+                f"{quantity}|{pnl}|{exit_reason}{chain_extra}|utc_time={ts_utc}|"
                 f"fees_inr={fees_inr if fees_inr is not None else ''}|"
                 f"net_pnl_inr={net_pnl_inr if net_pnl_inr is not None else ''}|"
                 f"usd_inr_rate_exit={usd_inr_rate if usd_inr_rate is not None else ''}|"

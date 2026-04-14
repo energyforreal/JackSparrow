@@ -8,13 +8,13 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, desc, select, case, cast, String
+from sqlalchemy import func, desc, select, case, cast, String, delete
 from sqlalchemy.types import Numeric
 import structlog
 
 from backend.core.database import Position, Trade, TradeStatus, PositionStatus, TradeSide
 from backend.core.config import settings
-from backend.core.redis import get_cache, set_cache, delete_cache
+from backend.core.redis import get_cache, set_cache, delete_cache, get_cache_keys
 from backend.services.time_service import time_service
 from backend.services.fx_rate_service import get_usdinr_rate
 from backend.utils.futures_contract import isolated_margin_usd, unrealized_pnl_usd
@@ -135,7 +135,11 @@ class PortfolioService:
                 # Get initial balance from config (defaults to 10000.0)
                 initial_balance = Decimal(str(getattr(settings, 'initial_balance', 10000.0)))
                 
+                # Single contract_value from settings for all open rows: OK for one symbol (e.g.
+                # BTCUSD). Multi-asset books should resolve contract_value per symbol (product specs).
                 cv = float(getattr(settings, "contract_value_btc", 0.001))
+                # Isolated margin uses config leverage, not exchange-reported leverage; optional
+                # future: reconcile margin with GET /v2/positions (per-position leverage).
                 lev = int(getattr(settings, "isolated_margin_leverage", 5))
 
                 query = select(Position).where(Position.status == PositionStatus.OPEN)
@@ -173,7 +177,8 @@ class PortfolioService:
                     for pos in open_positions
                 ]
                 
-                # FX conversion (USD -> INR): priority to cached live feed, fallback to last-good/static rate
+                # FX conversion (USD -> INR): one rate per summary for PnL and margin so ROE ratios
+                # in the UI are not distorted by mixing rates. Priority: cached live feed, fallback.
                 usdinr_rate = Decimal(str(await get_usdinr_rate()))
 
                 # Get realized PnL from closed positions using SQL aggregation
@@ -275,6 +280,23 @@ class PortfolioService:
         cache_key = "portfolio:summary"
         await delete_cache(cache_key)
         logger.debug("portfolio_summary_cache_invalidated", cache_key=cache_key)
+
+    async def invalidate_all_portfolio_caches(self) -> None:
+        """Clear portfolio summary and all cached performance metric keys."""
+        await delete_cache("portfolio:summary")
+        perf_keys = await get_cache_keys("portfolio:performance:*")
+        for key in perf_keys:
+            await delete_cache(key)
+        logger.debug(
+            "portfolio_all_caches_invalidated",
+            performance_keys=len(perf_keys),
+        )
+
+    async def delete_all_trades_and_positions(self, db: AsyncSession) -> None:
+        """Delete all trade and position rows. Caller session commits (e.g. FastAPI get_db)."""
+        await db.execute(delete(Trade))
+        await db.execute(delete(Position))
+        logger.info("portfolio_delete_all_trades_and_positions")
     
     def _serialize_for_cache(self, obj):
         """Recursively convert Decimal → float for JSON-serializable cache."""
