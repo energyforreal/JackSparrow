@@ -622,7 +622,20 @@ The reasoning engine maps consensus value (normalized [-1, 1]) to decisions as f
 - **SELL**: consensus < -0.3
 - **STRONG_SELL**: consensus < -0.7
 
-A separate confidence gate (min_confidence_threshold) is applied by the trading handler before execution.
+A separate confidence gate is applied by the trading handler before execution. In the **default** path, payload `confidence` is **calibrated** first, then compared to an **effective** minimum (`min_confidence_threshold` blended with Redis learning metadata, unless `PAPER_TRADE_VALIDATION_MODE` overrides — see [Deployment – Agent environment variables](10-deployment.md#agent-environment-variables)).
+
+### Trading handler: default vs minimal AI-entry gates
+
+For `DecisionReadyEvent` → `RiskApprovedEvent`, `agent/events/handlers/trading_handler.py` supports two shapes of entry gating:
+
+| Aspect | Default (`AI_SIGNAL_MINIMAL_ENTRY_GATES=false`) | Minimal (`AI_SIGNAL_MINIMAL_ENTRY_GATES=true`) |
+|--------|--------------------------------------------------|------------------------------------------------|
+| Confidence vs UI | Uses **calibrated** `confidence` vs Redis/metadata effective floor (`low_confidence_reject`). | Uses **raw** payload `confidence` vs `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` only (`low_ai_signal_confidence` if below floor). |
+| v15 / stale / filters | v15 entry gate, max signal age, vol/ATR floors, profit/R:R gate, MTF/ADX/EMA200/BB/SR, entry signal filter (rate limits), v15 gap and daily caps apply when configured. | Those checks are **skipped** (higher trade rate, weaker protection). |
+| Risk / debounce | `risk_manager.validate_trade` and debounce apply. | **Skipped** after margin is sufficient. |
+| Unchanged | `HOLD` / empty signal, signal-reversal exit, same-side **`open_position_blocks_entry`**, live **price**, **margin** and **min lots**, SL/TP levels (profit gate only enforced in default mode). |
+
+Restart the agent after changing these env vars. `AI_SIGNAL_MINIMAL_ENTRY_GATES` defaults to **false** so the full gate stack remains enabled until you opt in.
 
 ### Risk-Adjusted Execution
 
@@ -832,7 +845,7 @@ def calculate_consensus(predictions):
 - **SELL**: consensus value < -0.3
 - **STRONG_SELL**: consensus value < -0.7
 
-Execution also requires confidence ≥ min_confidence_threshold (separate from consensus value).
+Execution also requires a **confidence** check separate from consensus value: in the default handler path this is the calibrated score versus the **effective** minimum threshold; in **minimal AI-entry** mode it is raw payload `confidence` versus `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` only (see [Trading handler: default vs minimal AI-entry gates](#trading-handler-default-vs-minimal-ai-entry-gates)).
 
 ---
 

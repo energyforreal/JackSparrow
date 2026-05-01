@@ -101,6 +101,17 @@ The `start_parallel.py` script performs a comprehensive 4-step startup sequence:
 - **Live Trading Protection**: If live trading mode is detected, startup is blocked with clear warnings
 - **Safety Indicators**: The monitoring dashboard displays paper trading status throughout operation
 - **Configuration Verification**: All configuration is validated before services start
+- **Delta parity simulation**: Use `EXCHANGE_BACKEND=delta_paper_sim` with `PAPER_SIMULATE_DELTA_PRIVATE_APIS=true` to keep paper behavior aligned with Delta private account APIs (`positions`, `positions/margined`, `assets`, `change_margin`, `close_all`)
+
+**Migration-safe paper profile**:
+
+```bash
+PAPER_TRADING_MODE=true
+TRADING_MODE=paper
+EXCHANGE_BACKEND=delta_paper_sim
+PAPER_SIMULATE_DELTA_PRIVATE_APIS=true
+PAPER_MARGINED_VIEW_DELAY_SECONDS=10
+```
 
 ### Monitoring Dashboard
 
@@ -119,7 +130,7 @@ The monitoring dashboard updates every 2 seconds and provides immediate visibili
 
 All 24/7 services now run via Docker images orchestrated with Compose.
 
-1. Copy/create the root `.env` file: `cp .env.example .env` and set secrets consumed during build/test/deploy (minimum: `DELTA_EXCHANGE_API_KEY`, `DELTA_EXCHANGE_API_SECRET`, `JWT_SECRET_KEY`, `API_KEY`, `POSTGRES_PASSWORD`). All services read from this single root `.env` file.
+1. Copy/create the root `.env` file: `cp .env.example .env` and set secrets consumed during build/test/deploy (minimum: `DELTA_EXCHANGE_API_KEY`, `DELTA_EXCHANGE_API_SECRET`, `JWT_SECRET_KEY`, `API_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD` — keep `REDIS_URL` in sync so it includes the same password). All services read from this single root `.env` file.
 
 2. Prepare persistent host paths before the first deployment:
 
@@ -154,11 +165,13 @@ The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server
 
 ## Model Training
 
-The system uses **metadata-driven BTCUSD JackSparrow bundles** discovered from `MODEL_DIR` on agent startup. This checkout ships a slim operational bundle with **5m + 15m** metadata under `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/`. For full multi-timeframe bundles and `AGENT_MODEL_DIR`, see [ML Models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults).
+The system uses **metadata-driven BTCUSD JackSparrow bundles** discovered from `MODEL_DIR` on agent startup. Docker Compose and `.env.example` default to the **v15** pipeline bundle with **5m + 15m** metadata under `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/` (override `MODEL_DIR` / `AGENT_MODEL_DIR` to promote another dated export). Older **v5** slim bundles remain valid for rollback; see [ML Models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults).
 
-If you need to train or regenerate ML models, use the workspace’s training/export notebook (`notebooks/JackSparrow_Training_Colab_v6.ipynb` recommended, or `notebooks/JackSparrow_Trading_Colab_v5.ipynb` legacy) to produce a dated bundle under `agent/model_storage/` containing `metadata_BTCUSD_*.json` + joblib artifacts.
+If you need to train or regenerate ML models, use **`notebooks/JackSparrow_Training_Colab_v15.ipynb`** for the default **v15** pipeline bundle (`pipeline_{5m|15m}_v14.pkl` + `metadata_BTCUSD_*.json`), or the older v5/v6 notebooks under `notebooks/` for legacy ensemble bundles.
 
-See [ML Models Documentation](docs/03-ml-models.md) for discovery, bundles, and training.
+**Optional runtime adaptive retrain** (v15 only): KS drift + warm-start XGBoost with an F1 acceptance gate; writes `pipeline_{tf}_latest.pkl` beside metadata. Configure `ADAPTIVE_RETRAIN_*` in `.env` (see [.env.example](.env.example) and [ML models – adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional)).
+
+See [ML Models Documentation](docs/03-ml-models.md) for discovery, bundles, training, and adaptive retrain.
 
 ## Testing
 
@@ -225,7 +238,7 @@ GitHub Actions workflow [`cicd.yml`](.github/workflows/cicd.yml) runs backend/ag
 3. **Initialize database**: Follow the DB setup steps in [Build Guide](docs/11-build-guide.md) (this repo checkout does not include `scripts/setup_db.py`)
 4. See [Deployment Documentation](docs/10-deployment.md) for complete details
 
-**Note**: No service-specific `.env` files are needed. Backend reads via `ROOT_ENV_PATH`, agent reads via `ROOT_ENV_PATH`, and frontend reads via `loadRootEnv()` in `next.config.js`.
+**Note**: Use only the project root for environment files: copy root `.env.example` to root `.env`. Do not add `agent/.env`, `backend/.env`, or extra `.env.example` files under service folders. Backend and agent read via `ROOT_ENV_PATH`; the frontend reads via `loadRootEnv()` in `next.config.js`.
 
 ## Documentation
 

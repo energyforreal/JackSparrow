@@ -350,6 +350,79 @@ class TradeResponse(DecimalSerializerMixin, BaseModel):
     )
 
 
+class ClosedTradeResponse(DecimalSerializerMixin, BaseModel):
+    """Closed trade analytics response for Recent Trades UI."""
+    model_config = ConfigDict(from_attributes=True)
+
+    trade_id: str = Field(
+        ...,
+        description="Synthetic closed-trade row ID",
+        example="closed_pos_123456"
+    )
+    position_id: str = Field(
+        ...,
+        description="Underlying position ID",
+        example="pos_123456"
+    )
+    symbol: str = Field(
+        ...,
+        description="Trading symbol",
+        example="BTCUSD"
+    )
+    side: str = Field(
+        ...,
+        description="Position side",
+        example="BUY"
+    )
+    quantity: Decimal = Field(
+        ...,
+        description="Closed quantity",
+        example=0.1
+    )
+    entry_price: Decimal = Field(
+        ...,
+        description="Entry price",
+        example=50000.0
+    )
+    exit_price: Decimal = Field(
+        ...,
+        description="Exit price at close",
+        example=51250.0
+    )
+    pnl: Decimal = Field(
+        ...,
+        description="Realized PnL in INR",
+        example=1025.5
+    )
+    pnl_usd: Decimal = Field(
+        ...,
+        description="Realized PnL in USD",
+        example=12.35
+    )
+    status: str = Field(
+        ...,
+        description="Closed-trade status",
+        example="CLOSED"
+    )
+    entry_time: datetime = Field(
+        ...,
+        description="Position entry timestamp",
+    )
+    exit_time: datetime = Field(
+        ...,
+        description="Position exit timestamp",
+    )
+    duration_seconds: int = Field(
+        ...,
+        description="Trade duration in whole seconds",
+        example=845
+    )
+    executed_at: datetime = Field(
+        ...,
+        description="Alias of exit_time for compatibility with legacy trade consumers",
+    )
+
+
 class PositionResponse(DecimalSerializerMixin, BaseModel):
     """Position response."""
     model_config = ConfigDict(from_attributes=True)

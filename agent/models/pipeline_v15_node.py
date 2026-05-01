@@ -23,6 +23,27 @@ from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPMod
 logger = structlog.get_logger()
 
 
+def resolve_v15_pipeline_path(metadata_path: Path, timeframe: str) -> Path:
+    """Resolve active pipeline: ``pipeline_{tf}_active.json`` → artifact, else latest, else v14."""
+    parent = metadata_path.parent
+    active = parent / f"pipeline_{timeframe}_active.json"
+    if active.is_file():
+        try:
+            raw = json.loads(active.read_text(encoding="utf-8"))
+            art = raw.get("artifact")
+            if isinstance(art, str) and art.strip():
+                cand = parent / art.strip()
+                if cand.is_file():
+                    return cand
+        except Exception:
+            pass
+    latest = parent / f"pipeline_{timeframe}_latest.pkl"
+    legacy = parent / f"pipeline_{timeframe}_v14.pkl"
+    if latest.is_file():
+        return latest
+    return legacy
+
+
 def _load_pipeline(path: Path) -> Any:
     if joblib is None:
         raise RuntimeError("joblib is required to load v15 pipeline pickles")
@@ -47,8 +68,7 @@ class PipelineV15Node(MCPModelNode):
         self._timeframe = str(parsed_meta.get("timeframe", "15m"))
         self._feature_names: List[str] = list(parsed_meta.get("features") or [])
         self._train_median: Dict[str, float] = dict(parsed_meta.get("train_median") or {})
-        pip_name = f"pipeline_{self._timeframe}_v14.pkl"
-        self._pipeline_path = metadata_path.parent / pip_name
+        self._pipeline_path = resolve_v15_pipeline_path(metadata_path, self._timeframe)
         self._pipeline: Optional[Any] = None
         self._health = "loading"
         self._call_count = 0
@@ -223,5 +243,8 @@ def metadata_is_v15_pipeline(meta_path: Path, raw: Dict[str, Any]) -> bool:
     tf = raw.get("timeframe")
     if not tf:
         return False
-    pip = meta_path.parent / f"pipeline_{tf}_v14.pkl"
-    return pip.is_file()
+    parent = meta_path.parent
+    return (
+        (parent / f"pipeline_{tf}_latest.pkl").is_file()
+        or (parent / f"pipeline_{tf}_v14.pkl").is_file()
+    )

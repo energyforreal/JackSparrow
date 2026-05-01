@@ -31,6 +31,7 @@ from agent.core.sl_tp import (
     parse_risk_approved_side,
     rebase_sl_tp_to_fill,
 )
+from agent.core.exchange_gateway import ExchangeGateway
 
 logger = structlog.get_logger()
 
@@ -293,12 +294,15 @@ class ExecutionEngine:
         self._initialized = False
         self.delta_client = None  # Injected for paper/live trading
         self.risk_manager = None  # Injected for portfolio sync
+        self.exchange_gateway: Optional[ExchangeGateway] = None
 
         # Mock exchange integration (would be replaced with real exchange API)
         self.exchange_connected = False
         self._position_lock = asyncio.Lock()
+        self._inflight_lock = asyncio.Lock()
+        self._inflight_symbols: set[str] = set()
 
-    async def initialize(self, delta_client=None, risk_manager=None):
+    async def initialize(self, delta_client=None, risk_manager=None, exchange_gateway: Optional[ExchangeGateway] = None):
         """Initialize execution engine.
 
         Args:
@@ -307,6 +311,7 @@ class ExecutionEngine:
         """
         self.delta_client = delta_client
         self.risk_manager = risk_manager
+        self.exchange_gateway = exchange_gateway
         # Initialize mock exchange connection
         await self._connect_exchange()
         self._initialized = True
@@ -322,7 +327,12 @@ class ExecutionEngine:
         logger.info("execution_engine_initialized",
                    config=self.execution_config,
                    exchange_connected=self.exchange_connected,
-                   paper_trading_mode=settings.paper_trading_mode)
+                   paper_trading_mode=settings.paper_trading_mode,
+                   exchange_gateway_class=(
+                       self.exchange_gateway.__class__.__name__
+                       if self.exchange_gateway is not None
+                       else None
+                   ))
 
     async def shutdown(self):
         """Shutdown execution engine."""
@@ -700,8 +710,19 @@ class ExecutionEngine:
         if not self.exchange_connected:
             return ExecutionResult(False, error_message="Exchange not connected")
 
+        symbol = str(trade.get("symbol") or "").strip()
+        if not symbol:
+            return ExecutionResult(False, error_message="Missing required trade parameter: symbol")
+
+        async with self._inflight_lock:
+            if symbol in self._inflight_symbols:
+                return ExecutionResult(
+                    False,
+                    error_message=f"Trade already in progress for {symbol}",
+                )
+            self._inflight_symbols.add(symbol)
+
         try:
-            symbol = trade["symbol"]
             side = trade["side"]  # 'buy' or 'sell'
             quantity = trade["quantity"]
             order_type = trade.get("order_type", "market")
@@ -803,6 +824,11 @@ class ExecutionEngine:
                     take_profit=take_profit,
                     position_extras=trade.get("position_extras"),
                 )
+                if self.exchange_gateway and hasattr(self.exchange_gateway, "register_position_opened"):
+                    try:
+                        getattr(self.exchange_gateway, "register_position_opened")(position)
+                    except Exception as e:
+                        logger.debug("exchange_gateway_register_open_failed", error=str(e), symbol=symbol)
 
                 # Place stop loss and take profit orders if specified
                 if stop_loss:
@@ -850,6 +876,9 @@ class ExecutionEngine:
                         trade=trade,
                         error=str(e))
             return ExecutionResult(False, error_message=f"Execution failed: {str(e)}")
+        finally:
+            async with self._inflight_lock:
+                self._inflight_symbols.discard(symbol)
 
     async def _resolve_usdinr_paper(self) -> float:
         """Live USDINR from Redis cache, else config fallback."""
@@ -961,6 +990,11 @@ class ExecutionEngine:
                     exit_price=exit_price,
                     exit_order_id=order_result["order_id"]
                 )
+                if self.exchange_gateway and hasattr(self.exchange_gateway, "register_position_closed"):
+                    try:
+                        getattr(self.exchange_gateway, "register_position_closed")(symbol, net_usd)
+                    except Exception as e:
+                        logger.debug("exchange_gateway_register_close_failed", error=str(e), symbol=symbol)
 
                 if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                     self.risk_manager.portfolio.remove_position(symbol)
@@ -1076,6 +1110,64 @@ class ExecutionEngine:
                         error=str(e))
             return ExecutionResult(False, error_message=f"Close failed: {str(e)}")
 
+    async def get_positions_view(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """Return Delta-compatible position view via active exchange gateway."""
+        if self.exchange_gateway:
+            return await self.exchange_gateway.get_positions(symbol=symbol)
+        rows: List[Dict[str, Any]] = []
+        for sym, pos in self.position_manager.get_all_positions().items():
+            if symbol and sym != symbol:
+                continue
+            signed = float(pos.get("lots", pos.get("quantity", 0.0)) or 0.0)
+            if pos.get("side") == "short":
+                signed = -signed
+            rows.append(
+                {
+                    "product_symbol": sym,
+                    "size": signed,
+                    "entry_price": float(pos.get("entry_price", 0.0) or 0.0),
+                    "margin": 0.0,
+                    "liquidation_price": float(pos.get("entry_price", 0.0) or 0.0),
+                    "realized_pnl": 0.0,
+                    "realized_funding": 0.0,
+                    "adl_level": 1,
+                }
+            )
+        return {"success": True, "result": rows}
+
+    async def get_margined_positions_view(self) -> Dict[str, Any]:
+        """Return Delta-compatible margined portfolio view."""
+        if self.exchange_gateway:
+            return await self.exchange_gateway.get_margined_positions()
+        return await self.get_positions_view()
+
+    async def get_assets_view(self) -> Dict[str, Any]:
+        """Return assets metadata from active gateway."""
+        if self.exchange_gateway:
+            return await self.exchange_gateway.get_assets()
+        return {"success": True, "result": []}
+
+    async def change_position_margin(self, symbol: str, margin_delta: float) -> Dict[str, Any]:
+        """Change margin for a symbol using active gateway."""
+        if not self.exchange_gateway:
+            return {"success": False, "error": "Exchange gateway not configured"}
+        return await self.exchange_gateway.change_margin(product_symbol=symbol, margin=margin_delta)
+
+    async def close_all_positions(self, exit_reason: str = "emergency_exit") -> Dict[str, Any]:
+        """Close all open positions; uses gateway in paper/live parity mode."""
+        if self.exchange_gateway:
+            return await self.exchange_gateway.close_all_positions()
+        open_symbols = list(self.position_manager.get_all_positions().keys())
+        closed: List[str] = []
+        failed: Dict[str, str] = {}
+        for symbol in open_symbols:
+            res = await self.close_position(symbol, exit_reason=exit_reason)
+            if res.success:
+                closed.append(symbol)
+            else:
+                failed[symbol] = str(res.error_message or "close_failed")
+        return {"success": len(failed) == 0, "result": {"closed_symbols": closed, "failed": failed}}
+
     async def manage_position(self, position_symbol: str) -> Dict[str, Any]:
         """
         Manage an existing position (check stops, etc.).
@@ -1115,6 +1207,24 @@ class ExecutionEngine:
                 ):
                     notional_usd = lots_pm * ep_pm * cv_pm
                     initial_margin_usd = notional_usd / lev_pm
+                    if self.exchange_gateway:
+                        try:
+                            margined = await self.get_margined_positions_view()
+                            rows = margined.get("result", []) if isinstance(margined, dict) else []
+                            for row in rows:
+                                if (
+                                    isinstance(row, dict)
+                                    and str(row.get("product_symbol", "")) == str(position_symbol)
+                                    and row.get("margin") is not None
+                                ):
+                                    initial_margin_usd = float(row.get("margin"))
+                                    break
+                        except Exception as e:
+                            logger.debug(
+                                "paper_liquidation_margin_view_fallback",
+                                symbol=position_symbol,
+                                error=str(e),
+                            )
                     upl = float(position.get("unrealized_pnl", 0.0))
                     eq = isolated_equity_usd(initial_margin_usd, upl)
                     maint_frac = float(

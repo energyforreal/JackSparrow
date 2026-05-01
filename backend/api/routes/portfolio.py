@@ -15,7 +15,13 @@ import structlog
 from backend.core.database import get_db, Position, Trade, PositionStatus, TradeStatus
 from backend.core.config import settings
 from backend.api.models.requests import PortfolioRequest
-from backend.api.models.responses import PortfolioSummaryResponse, PositionResponse, TradeResponse, ErrorResponse
+from backend.api.models.responses import (
+    PortfolioSummaryResponse,
+    PositionResponse,
+    TradeResponse,
+    ClosedTradeResponse,
+    ErrorResponse,
+)
 from backend.services.portfolio_service import portfolio_service
 from backend.api.middleware.auth import require_auth
 
@@ -332,6 +338,30 @@ async def get_trades(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get trades: {str(e)}"
+        )
+
+
+@router.get("/portfolio/recent-closed-trades", response_model=List[ClosedTradeResponse])
+async def get_recent_closed_trades(
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    limit: int = Query(50, ge=1, le=1000, description="Maximum number of results"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get closed-trade analytics rows for the Recent Trades UI."""
+    try:
+        validated_symbol = validate_symbol(symbol)
+        rows = await portfolio_service.get_recent_closed_trades(
+            db=db,
+            symbol=validated_symbol,
+            limit=limit,
+            offset=offset,
+        )
+        return [ClosedTradeResponse(**row) for row in rows]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get recent closed trades: {str(e)}"
         )
 
 

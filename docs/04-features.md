@@ -149,7 +149,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Weighted voting based on model performance
 - Performance-adjusted weights (Sharpe ratio based)
 - Confidence-weighted aggregation
-- Decision synthesis uses consensus value thresholds: BUY when consensus > 0.3, STRONG_BUY when > 0.7; SELL when < -0.3, STRONG_SELL when < -0.7 (normalized [-1, 1] scale). A separate confidence gate (min_confidence_threshold) applies before execution.
+- Decision synthesis uses consensus value thresholds: BUY when consensus > 0.3, STRONG_BUY when > 0.7; SELL when < -0.3, STRONG_SELL when < -0.7 (normalized [-1, 1] scale). A separate **trading-handler** confidence gate applies before execution: by default the handler uses **calibrated** confidence versus an effective minimum (Redis/metadata); optional **`AI_SIGNAL_MINIMAL_ENTRY_GATES`** uses **raw** payload confidence versus `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` only and skips most other gates — see [Logic & reasoning – Trading handler: default vs minimal AI-entry gates](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates) and [Deployment – Agent environment variables](10-deployment.md#agent-environment-variables).
 - Handles model failures gracefully
 
 **Dynamic Weight Adjustment**:
@@ -420,6 +420,8 @@ The example illustrates how raw market context, historical success rate, and mod
 - Health monitoring
 - Error handling
 - Paper trading: fill price comes from Delta ticker; if ticker is unavailable, the trade is not executed (no synthetic fill).
+
+**Optional high-frequency paper path**: set `AI_SIGNAL_MINIMAL_ENTRY_GATES=true` (and optionally `AI_SIGNAL_MIN_ENTRY_CONFIDENCE`) so the agent can approve entries from strong AI confidence alone while skipping most model/feature gates — intended for controlled testing; see [Logic & reasoning – Trading handler: default vs minimal AI-entry gates](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates).
 
 ---
 

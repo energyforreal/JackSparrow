@@ -154,7 +154,14 @@ JackSparrow/
 │   │   ├── strategy_adapter.py        # Parameter adaptation from aggregate evaluated outcomes
 │   │   ├── dynamic_thresholds.py      # Redis threshold overrides with bounded clamps
 │   │   ├── threshold_adapter.py       # Periodic threshold nudging from recent trade_outcomes
-│   │   └── retraining_scheduler.py    # Trigger + execute retraining command with cooldown/state
+│   │   ├── retraining_scheduler.py    # Trigger + execute retraining command with cooldown/state
+│   │   └── adaptive/                  # Optional v15: KS drift, warm-start XGBoost, F1 gate, versioned saves
+│   │       ├── adaptive_controller.py # Orchestration + hot reload hook
+│   │       ├── drift_detector.py
+│   │       ├── retrain_engine.py
+│   │       ├── model_validator.py
+│   │       ├── model_registry.py
+│   │       └── labeled_data.py        # Parquet loader for labeled_{tf}.parquet
 │   └── requirements.txt               # Python dependencies
 │
 ├── frontend/                            # Frontend web application

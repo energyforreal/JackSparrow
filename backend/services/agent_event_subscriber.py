@@ -856,6 +856,34 @@ class AgentEventSubscriber:
             # Only broadcast full portfolio update - avoid partial update that would
             # briefly replace portfolio with {position_closed: {...}} on frontend
             await self._broadcast_portfolio_update()
+
+            # Publish a closed-trade row so Recent Trades (closed-only mode) updates immediately.
+            try:
+                from backend.core.database import AsyncSessionLocal, Position
+                from backend.services.portfolio_service import portfolio_service
+                from backend.services.fx_rate_service import get_usdinr_rate
+                from sqlalchemy import select
+
+                async with AsyncSessionLocal() as session:
+                    closed_row = await session.execute(
+                        select(Position).where(Position.position_id == position_id)
+                    )
+                    closed_position = closed_row.scalar_one_or_none()
+
+                if closed_position and closed_position.closed_at is not None:
+                    usdinr_rate = Decimal(str(await get_usdinr_rate()))
+                    closed_trade_data = portfolio_service.build_closed_trade_row(
+                        closed_position,
+                        usdinr_rate,
+                    )
+                    trade_message = create_trade_update(closed_trade_data)
+                    await unified_websocket_manager.broadcast(trade_message, channel="data_update")
+            except Exception as broadcast_error:
+                logger.warning(
+                    "agent_event_subscriber_closed_trade_broadcast_failed",
+                    error=str(broadcast_error),
+                    position_id=position_id,
+                )
             
         except Exception as e:
             log_error_with_context(

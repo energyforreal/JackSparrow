@@ -960,7 +960,28 @@ class MarketDataService:
                 "data_age_seconds": 0,  # Fresh data
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            
+
+            if bool(getattr(settings, "strict_candle_validation_enabled", True)) and formatted_candles:
+                try:
+                    from agent.data.candle_validation import validate_delta_candle_rows
+
+                    want = int(getattr(settings, "strict_candle_validation_min_rows", 50) or 50)
+                    mr = min(len(formatted_candles), max(2, want))
+                    validate_delta_candle_rows(
+                        formatted_candles,
+                        resolution,
+                        min_rows=mr,
+                        allow_last_irregular=True,
+                    )
+                except ValueError as e:
+                    logger.warning(
+                        "market_data_candle_validation_failed",
+                        symbol=symbol,
+                        interval=interval,
+                        error=str(e),
+                    )
+                    return None
+
             # Cache result
             await set_cache(cache_key, market_data, ttl=self.cache_ttl)
             

@@ -823,10 +823,15 @@ Per-model `model_consensus[]` entries may also include `p_buy`, `p_sell`, `p_hol
 {
   "type": "command",
   "request_id": "uuid",
-  "command": "predict|execute_trade|get_status|control",
+  "command": "predict|execute_trade|get_status|control|change_margin|close_all_positions",
   "parameters": {}
 }
 ```
+
+**Notes**:
+- `control` supports `start`, `stop`, and `emergency_stop` (which triggers a flatten-all flow).
+- `change_margin` expects `parameters.symbol` and `parameters.margin_delta`.
+- `close_all_positions` triggers emergency flattening of all open positions in the execution layer.
 
 **Ping**:
 ```json

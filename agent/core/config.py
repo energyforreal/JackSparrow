@@ -191,12 +191,12 @@ class Settings(BaseSettings):
         description="Which timeframe's feature snapshot to use for ADX/ATR entry filters (5m or 15m).",
     )
     confidence_percentile: float = Field(
-        default=90.0,
+        default=70.0,
         env="CONFIDENCE_PERCENTILE",
         description="Rolling percentile of |edge| for v15 entry gating (e.g. 90 = top 10%).",
     )
     edge_floor: float = Field(
-        default=0.15,
+        default=0.11,
         env="EDGE_FLOOR",
         description="Minimum |edge| for v15 directional entry.",
     )
@@ -216,7 +216,7 @@ class Settings(BaseSettings):
         description="Exit when |edge| falls below this after min hold (v15).",
     )
     v15_min_edge_cost_ratio: float = Field(
-        default=2.0,
+        default=1.2,
         env="V15_MIN_EDGE_COST_RATIO",
         description=(
             "Require abs(edge) >= per_leg_cost * ratio where per_leg_cost = taker + slippage "
@@ -229,7 +229,7 @@ class Settings(BaseSettings):
         description="Minimum completed bars between new entries (notebook MIN_GAP_CANDLES).",
     )
     v15_min_trade_gap_enabled: bool = Field(
-        default=True,
+        default=False,
         env="V15_MIN_TRADE_GAP_ENABLED",
         description="When True, enforce min bar gap between paper entries.",
     )
@@ -244,7 +244,7 @@ class Settings(BaseSettings):
         description="Daily cap for 15m timeframe.",
     )
     v15_daily_trade_cap_enabled: bool = Field(
-        default=True,
+        default=False,
         env="V15_DAILY_TRADE_CAP_ENABLED",
         description="When True, enforce per-timeframe daily trade caps for v15.",
     )
@@ -267,6 +267,14 @@ class Settings(BaseSettings):
         default=25.0,
         env="V15_ADX_RANGING_MAX",
         description="v15: only enter when ADX <= this (ranging regime).",
+    )
+    v15_adx_regime_filter_enabled: bool = Field(
+        default=True,
+        env="V15_ADX_REGIME_FILTER_ENABLED",
+        description=(
+            "When True, v15 entry gate requires ADX <= v15_adx_ranging_max. "
+            "When False, ADX is ignored for v15 entry (allows trend regimes)."
+        ),
     )
     htf_cache_ttl_seconds: int = Field(
         default=840,
@@ -362,6 +370,216 @@ class Settings(BaseSettings):
         env="RETRAINING_STATE_PATH",
         description="Path to retraining scheduler state (JSON).",
     )
+
+    # Adaptive drift + warm-start retrain (v15 pipeline bundles under MODEL_DIR)
+    adaptive_retrain_enabled: bool = Field(
+        default=False,
+        env="ADAPTIVE_RETRAIN_ENABLED",
+        description=(
+            "When True, periodically run KS drift check and optional warm-start "
+            "retrain with F1 validation gate; persists versioned pipelines and refreshes models."
+        ),
+    )
+    adaptive_retrain_check_interval_seconds: int = Field(
+        default=3600,
+        env="ADAPTIVE_RETRAIN_CHECK_INTERVAL_SECONDS",
+        ge=60,
+        description="How often to evaluate adaptive retrain (seconds).",
+    )
+    adaptive_retrain_cooldown_hours: float = Field(
+        default=12.0,
+        env="ADAPTIVE_RETRAIN_COOLDOWN_HOURS",
+        ge=0.0,
+        description="Minimum hours between adaptive retrains per timeframe.",
+    )
+    adaptive_drift_alpha: float = Field(
+        default=0.01,
+        env="ADAPTIVE_DRIFT_ALPHA",
+        description="KS two-sample p-value threshold (reject if p < alpha).",
+    )
+    adaptive_drift_stat_threshold: float = Field(
+        default=0.10,
+        env="ADAPTIVE_DRIFT_STAT_THRESHOLD",
+        description="Minimum KS statistic to count a feature as drifted.",
+    )
+    adaptive_drift_feature_limit: int = Field(
+        default=5,
+        env="ADAPTIVE_DRIFT_FEATURE_LIMIT",
+        ge=1,
+        description="Retrain when drifted feature count exceeds this limit.",
+    )
+    adaptive_drift_min_rows: int = Field(
+        default=40000,
+        env="ADAPTIVE_DRIFT_MIN_ROWS",
+        ge=1000,
+        description="Minimum labeled rows required before drift/retrain (matches notebook).",
+    )
+    adaptive_drift_recent_rows: int = Field(
+        default=20000,
+        env="ADAPTIVE_DRIFT_RECENT_ROWS",
+        ge=500,
+        description="Recent window row count for KS drift (tail).",
+    )
+    adaptive_drift_past_rows: int = Field(
+        default=20000,
+        env="ADAPTIVE_DRIFT_PAST_ROWS",
+        ge=500,
+        description="Past comparison window row count (immediately before recent).",
+    )
+    adaptive_retrain_window_rows_5m: int = Field(
+        default=80000,
+        env="ADAPTIVE_RETRAIN_WINDOW_ROWS_5M",
+        ge=1000,
+        description="Max training rows slice from tail for 5m adaptive retrain.",
+    )
+    adaptive_retrain_window_rows_15m: int = Field(
+        default=40000,
+        env="ADAPTIVE_RETRAIN_WINDOW_ROWS_15M",
+        ge=1000,
+        description="Max training rows slice from tail for 15m adaptive retrain.",
+    )
+    adaptive_rolling_days_train: int = Field(
+        default=60,
+        env="ADAPTIVE_ROLLING_DAYS_TRAIN",
+        ge=1,
+        description="If DataFrame has DatetimeIndex, restrict train slice to last N days.",
+    )
+    adaptive_num_boost_round_incremental: int = Field(
+        default=150,
+        env="ADAPTIVE_NUM_BOOST_ROUND_INCREMENTAL",
+        ge=1,
+        description="XGBoost trees to add per warm-start retrain.",
+    )
+    adaptive_validation_window_rows: int = Field(
+        default=10000,
+        env="ADAPTIVE_VALIDATION_WINDOW_ROWS",
+        ge=100,
+        description="Holdout tail rows for F1 acceptance gate.",
+    )
+    adaptive_min_f1_improvement: float = Field(
+        default=0.0,
+        env="ADAPTIVE_MIN_F1_IMPROVEMENT",
+        description="Require new_f1 >= old_f1 + this delta to accept.",
+    )
+    adaptive_class_weight_sell: float = Field(
+        default=1.3,
+        env="ADAPTIVE_CLASS_WEIGHT_SELL",
+        description="Sample weight for label 0 (SELL); must match training Cell 5.",
+    )
+    adaptive_class_weight_hold: float = Field(
+        default=0.5,
+        env="ADAPTIVE_CLASS_WEIGHT_HOLD",
+        description="Sample weight for label 1 (HOLD).",
+    )
+    adaptive_class_weight_buy: float = Field(
+        default=1.3,
+        env="ADAPTIVE_CLASS_WEIGHT_BUY",
+        description="Sample weight for label 2 (BUY).",
+    )
+    adaptive_retrain_timeframes: str = Field(
+        default="5m,15m",
+        env="ADAPTIVE_RETRAIN_TIMEFRAMES",
+        description="Comma-separated timeframes to run adaptive retrain for.",
+    )
+    adaptive_labeled_data_source: str = Field(
+        default="none",
+        env="ADAPTIVE_LABELED_DATA_SOURCE",
+        description="none | parquet — source for labeled feature+label DataFrames.",
+    )
+    adaptive_retrain_parquet_dir: str = Field(
+        default="",
+        env="ADAPTIVE_RETRAIN_PARQUET_DIR",
+        description=(
+            "Directory containing labeled_{tf}.parquet (e.g. labeled_5m.parquet) "
+            "with columns matching metadata features plus label."
+        ),
+    )
+    adaptive_retrain_state_path: str = Field(
+        default="adaptive_retrain_state.json",
+        env="ADAPTIVE_RETRAIN_STATE_PATH",
+        description="JSON path for per-TF last retrain timestamps (cooldown).",
+    )
+    adaptive_retrain_log_name: str = Field(
+        default="retrain_log.json",
+        env="ADAPTIVE_RETRAIN_LOG_NAME",
+        description="Audit log filename written next to each timeframe's metadata folder.",
+    )
+    adaptive_min_clean_rows: int = Field(
+        default=1000,
+        env="ADAPTIVE_MIN_CLEAN_ROWS",
+        ge=100,
+        description="Minimum rows after cleaning required to attempt retrain.",
+    )
+    adaptive_drift_metric: str = Field(
+        default="ks",
+        env="ADAPTIVE_DRIFT_METRIC",
+        description="ks | psi | both | either — feature drift detection mode.",
+    )
+    adaptive_drift_psi_threshold: float = Field(
+        default=0.25,
+        env="ADAPTIVE_DRIFT_PSI_THRESHOLD",
+        description="PSI above this counts as drifted for a feature (when PSI mode enabled).",
+    )
+    adaptive_drift_psi_bins: int = Field(
+        default=10,
+        env="ADAPTIVE_DRIFT_PSI_BINS",
+        ge=3,
+        description="Histogram bins for PSI.",
+    )
+    adaptive_performance_retrain_enabled: bool = Field(
+        default=False,
+        env="ADAPTIVE_PERFORMANCE_RETRAIN_ENABLED",
+        description="When True, poor live trade outcomes can trigger adaptive retrain (OR with drift).",
+    )
+    adaptive_performance_rolling_trades: int = Field(
+        default=50,
+        env="ADAPTIVE_PERFORMANCE_ROLLING_TRADES",
+        ge=10,
+        description="Recent closed trades to evaluate for performance trigger.",
+    )
+    adaptive_performance_min_trades: int = Field(
+        default=30,
+        env="ADAPTIVE_PERFORMANCE_MIN_TRADES",
+        ge=5,
+        description="Minimum trades required before performance trigger applies.",
+    )
+    adaptive_performance_win_rate_floor: float = Field(
+        default=0.40,
+        env="ADAPTIVE_PERFORMANCE_WIN_RATE_FLOOR",
+        description="Trigger retrain when rolling win rate falls below this.",
+    )
+    adaptive_performance_profit_factor_floor: float = Field(
+        default=0.85,
+        env="ADAPTIVE_PERFORMANCE_PROFIT_FACTOR_FLOOR",
+        description="Trigger retrain when rolling profit factor falls below this.",
+    )
+    adaptive_performance_max_drawdown_ceiling: float = Field(
+        default=0.35,
+        env="ADAPTIVE_PERFORMANCE_MAX_DD_CEILING",
+        description="Trigger retrain when rolling equity drawdown proxy exceeds this fraction.",
+    )
+    adaptive_validation_scorecard_enabled: bool = Field(
+        default=False,
+        env="ADAPTIVE_VALIDATION_SCORECARD_ENABLED",
+        description="When True, require val win-rate / PF / DD proxies not worse than previous model.",
+    )
+    feature_server_fail_closed_no_candles: bool = Field(
+        default=True,
+        env="FEATURE_SERVER_FAIL_CLOSED_NO_CANDLES",
+        description="When True, no candles yields UNAVAILABLE features (no zero placeholders).",
+    )
+    strict_candle_validation_enabled: bool = Field(
+        default=True,
+        env="STRICT_CANDLE_VALIDATION_ENABLED",
+        description="When True, validate spacing/OHLC on v15 feature path.",
+    )
+    strict_candle_validation_min_rows: int = Field(
+        default=50,
+        env="STRICT_CANDLE_VALIDATION_MIN_ROWS",
+        ge=2,
+        description="Minimum candle rows required after validation.",
+    )
+
     trade_outcomes_writes_enabled: bool = Field(
         default=True,
         env="TRADE_OUTCOMES_WRITES_ENABLED",
@@ -480,6 +698,26 @@ class Settings(BaseSettings):
         default=True,
         env="PAPER_TRADING_MODE",
         description="Enable paper trading mode (default: True). Set to False for live trading."
+    )
+    exchange_backend: str = Field(
+        default="delta_paper_sim",
+        env="EXCHANGE_BACKEND",
+        description="Exchange backend adapter: delta_live or delta_paper_sim",
+    )
+    delta_env: str = Field(
+        default="india_prod",
+        env="DELTA_ENV",
+        description="Delta target environment label (india_prod or india_testnet)",
+    )
+    paper_simulate_delta_private_apis: bool = Field(
+        default=True,
+        env="PAPER_SIMULATE_DELTA_PRIVATE_APIS",
+        description="When true, paper mode serves Delta-like private position/portfolio actions.",
+    )
+    paper_margined_view_delay_seconds: float = Field(
+        default=10.0,
+        env="PAPER_MARGINED_VIEW_DELAY_SECONDS",
+        description="Delay before paper /positions/margined reflects the latest position state.",
     )
     paper_trading_random_seed: Optional[int] = Field(
         default=None,
@@ -767,7 +1005,7 @@ class Settings(BaseSettings):
         description="Apply EntrySignalFilter (max trades/hour, breakout score) after SR/BB gates",
     )
     max_trades_per_hour: int = Field(
-        default=3,
+        default=0,
         env="MAX_TRADES_PER_HOUR",
         description="Cap approved entries per symbol per rolling hour (0 = unlimited)",
     )
@@ -1092,6 +1330,24 @@ class Settings(BaseSettings):
             "Temporary minimum confidence while PAPER_TRADE_VALIDATION_MODE is enabled."
         ),
     )
+    ai_signal_minimal_entry_gates: bool = Field(
+        default=False,
+        env="AI_SIGNAL_MINIMAL_ENTRY_GATES",
+        description=(
+            "When True, trading_handler approves from DecisionReady using only payload "
+            "AI confidence ≥ ai_signal_min_entry_confidence plus price, margin, min lots, and "
+            "open-position rules; skips v15 entry gate, stale-signal, feature/MTF/SR filters, "
+            "profit/R:R gate, Redis-blended confidence, validate_trade policy, debounce, and "
+            "v15 hourly/daily caps. Higher trade frequency and weaker protection — use with care."
+        ),
+    )
+    ai_signal_min_entry_confidence: float = Field(
+        default=0.70,
+        env="AI_SIGNAL_MIN_ENTRY_CONFIDENCE",
+        ge=0.0,
+        le=1.0,
+        description="Minimum payload confidence when AI_SIGNAL_MINIMAL_ENTRY_GATES is True.",
+    )
     xgb_binary_decision_midpoint: float = Field(
         default=0.5,
         env="XGB_BINARY_DECISION_MIDPOINT",
@@ -1214,6 +1470,24 @@ class Settings(BaseSettings):
             return normalized
         raise ValueError("TRADING_MODE must be a string")
 
+    @field_validator("exchange_backend", mode="before")
+    @classmethod
+    def normalize_exchange_backend(cls, value: Optional[str]) -> str:
+        """Normalize exchange backend selector."""
+        backend = (value or "delta_live").strip().lower()
+        if backend not in {"delta_live", "delta_paper_sim"}:
+            raise ValueError("EXCHANGE_BACKEND must be one of: delta_live, delta_paper_sim")
+        return backend
+
+    @field_validator("delta_env", mode="before")
+    @classmethod
+    def normalize_delta_env(cls, value: Optional[str]) -> str:
+        """Normalize Delta environment selector."""
+        env_name = (value or "india_prod").strip().lower()
+        if env_name not in {"india_prod", "india_testnet"}:
+            raise ValueError("DELTA_ENV must be one of: india_prod, india_testnet")
+        return env_name
+
     @field_validator("agent_start_mode", mode="before")
     @classmethod
     def validate_start_mode(cls, value: Optional[str]) -> str:
@@ -1298,7 +1572,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def sync_trading_flags(self) -> "Settings":
-        """Keep trading_mode and paper_trading_mode aligned."""
+        """Keep trading_mode and paper_trading_mode aligned and enforce Delta parity paper mode."""
         trading_mode_env = os.getenv("TRADING_MODE")
         paper_mode_env = os.getenv("PAPER_TRADING_MODE")
 
@@ -1322,6 +1596,15 @@ class Settings(BaseSettings):
             # Neither provided explicitly – derive bool from mode, defaulting to paper
             self.paper_trading_mode = derived_paper_flag
             self.trading_mode = normalized_mode
+
+        # Canonical migration behavior:
+        # - paper mode always uses Delta parity simulation adapter
+        # - live mode always uses live adapter
+        if self.paper_trading_mode:
+            self.exchange_backend = "delta_paper_sim"
+            self.paper_simulate_delta_private_apis = True
+        else:
+            self.exchange_backend = "delta_live"
 
         return self
 

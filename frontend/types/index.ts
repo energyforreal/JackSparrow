@@ -35,10 +35,18 @@ export interface Position {
 
 export interface Trade {
   trade_id: string
+  position_id?: string
   symbol: string
   side: string
   quantity: number | string
   price: number | string
+  entry_price?: number | string
+  exit_price?: number | string
+  pnl?: number | string
+  pnl_usd?: number | string
+  entry_time?: Date | string
+  exit_time?: Date | string
+  duration_seconds?: number
   price_inr?: number | string
   trade_value_inr?: number | string
   status: string

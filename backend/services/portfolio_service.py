@@ -24,6 +24,43 @@ logger = structlog.get_logger()
 
 class PortfolioService:
     """Service for portfolio calculations."""
+
+    @staticmethod
+    def _compute_duration_seconds(opened_at: Optional[datetime], closed_at: Optional[datetime]) -> int:
+        """Compute duration in seconds between open and close timestamps."""
+        if not opened_at or not closed_at:
+            return 0
+        delta = (closed_at - opened_at).total_seconds()
+        if delta < 0:
+            return 0
+        return int(delta)
+
+    def build_closed_trade_row(
+        self,
+        position: Position,
+        usdinr_rate: Decimal,
+    ) -> Dict[str, Any]:
+        """Map a closed Position row into the closed-trades response schema."""
+        pnl_usd = Decimal(str(position.realized_pnl or 0))
+        pnl_inr = pnl_usd * usdinr_rate
+        exit_time = position.closed_at or position.opened_at or datetime.now(timezone.utc)
+        entry_time = position.opened_at or exit_time
+        return {
+            "trade_id": f"closed_{position.position_id}",
+            "position_id": position.position_id,
+            "symbol": position.symbol,
+            "side": position.side.value,
+            "quantity": position.quantity,
+            "entry_price": position.entry_price,
+            "exit_price": position.current_price or position.entry_price,
+            "pnl": pnl_inr,
+            "pnl_usd": pnl_usd,
+            "status": PositionStatus.CLOSED.value,
+            "entry_time": entry_time,
+            "exit_time": exit_time,
+            "duration_seconds": self._compute_duration_seconds(entry_time, exit_time),
+            "executed_at": exit_time,
+        }
     
     def serialize_portfolio_summary(self, summary: Dict[str, Any]) -> Dict[str, Any]:
         """Serialize portfolio summary for consistent format across API and WebSocket.
@@ -499,6 +536,26 @@ class PortfolioService:
                 "to_date": None,
                 "error": str(e),
             }
+
+    async def get_recent_closed_trades(
+        self,
+        db: AsyncSession,
+        symbol: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Get closed-trade rows for Recent Trades UI."""
+        query = select(Position).where(
+            cast(Position.status, String) == PositionStatus.CLOSED.value
+        )
+        if symbol:
+            query = query.where(Position.symbol == symbol)
+        query = query.order_by(desc(Position.closed_at)).offset(offset).limit(limit)
+
+        result = await db.execute(query)
+        closed_positions = result.scalars().all()
+        usdinr_rate = Decimal(str(await get_usdinr_rate()))
+        return [self.build_closed_trade_row(pos, usdinr_rate) for pos in closed_positions]
 
 
 # Global portfolio service instance

@@ -136,12 +136,24 @@ function normalizeTradeRecord(raw: unknown): Trade | null {
   const r = raw as Record<string, unknown>
   const id = r.trade_id
   if (id == null || id === '') return null
+  const status = String(r.status ?? 'CLOSED').toUpperCase()
+  if (status !== 'CLOSED') return null
+  const exitTime = (r.exit_time ?? r.closed_at ?? r.executed_at ?? r.timestamp) as Trade['executed_at']
+  if (!exitTime) return null
   return {
     ...(raw as Trade),
     trade_id: String(id),
-    executed_at: (r.executed_at ?? r.timestamp) as Trade['executed_at'],
-    status: (r.status as string) ?? 'EXECUTED',
-    price: (r.price ?? r.fill_price) as Trade['price'],
+    executed_at: exitTime,
+    exit_time: (r.exit_time ?? r.closed_at ?? exitTime) as Trade['exit_time'],
+    entry_time: (r.entry_time ?? r.opened_at) as Trade['entry_time'],
+    status,
+    price: (r.price ?? r.exit_price ?? r.fill_price) as Trade['price'],
+    exit_price: (r.exit_price ?? r.price ?? r.fill_price) as Trade['exit_price'],
+    entry_price: (r.entry_price ?? r.price) as Trade['entry_price'],
+    duration_seconds:
+      typeof r.duration_seconds === 'number'
+        ? r.duration_seconds
+        : Number.parseInt(String(r.duration_seconds ?? 0), 10) || 0,
   }
 }
 
@@ -235,24 +247,21 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
               dataSource: 'websocket'
             }
           case 'trade':
-            // Add new trade to list, avoid duplicates, keep only recent 10
-            const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
-            if (!existingTradeIds.has(data.trade_id)) {
-              const normalizedTrade = {
-                ...data,
-                executed_at: data.executed_at ?? data.timestamp,
-                status: data.status ?? 'EXECUTED',
-                price: data.price ?? data.fill_price,
+            {
+              const normalizedTrade = normalizeTradeRecord(data)
+              if (!normalizedTrade) return state
+              const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
+              if (!existingTradeIds.has(normalizedTrade.trade_id)) {
+                const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
+                return {
+                  ...state,
+                  recentTrades: newTrades,
+                  lastUpdate: now,
+                  dataSource: 'websocket'
+                }
               }
-              const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
-              return {
-                ...state,
-                recentTrades: newTrades,
-                lastUpdate: now,
-                dataSource: 'websocket'
-              }
+              return state
             }
-            return state
           case 'market':
             {
               // Keep active positions visually real-time even if portfolio snapshots
@@ -442,9 +451,11 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       }
       
       if (messageType === 'trade_executed') {
+        const normalizedTrade = normalizeTradeRecord(data)
+        if (!normalizedTrade) return state
         const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
-        if (!existingTradeIds.has(data.trade_id)) {
-          const newTrades = [data, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
+        if (!existingTradeIds.has(normalizedTrade.trade_id)) {
+          const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
           return {
             ...state,
             recentTrades: newTrades,
@@ -498,14 +509,10 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       }
 
     case 'ADD_TRADE': {
+      const normalizedTrade = normalizeTradeRecord(action.payload)
+      if (!normalizedTrade) return state
       const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
-      if (existingTradeIds.has(action.payload.trade_id)) return state
-      const normalizedTrade = {
-        ...action.payload,
-        executed_at: action.payload.executed_at ?? action.payload.timestamp,
-        status: action.payload.status ?? 'EXECUTED',
-        price: action.payload.price ?? action.payload.fill_price,
-      }
+      if (existingTradeIds.has(normalizedTrade.trade_id)) return state
       const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
       return {
         ...state,
@@ -811,7 +818,7 @@ export function useTradingData() {
         const [hRes, pRes, tRes] = await Promise.all([
           fetch(`${base}/api/v1/health`, { headers: { Accept: 'application/json' } }),
           fetch(`${base}/api/v1/portfolio/summary`, { headers: { Accept: 'application/json' } }),
-          fetch(`${base}/api/v1/portfolio/trades?limit=${RECENT_TRADES_MAX}`, {
+          fetch(`${base}/api/v1/portfolio/recent-closed-trades?limit=${RECENT_TRADES_MAX}`, {
             headers: { Accept: 'application/json' },
           }),
         ])
@@ -873,7 +880,7 @@ export function useTradingData() {
         ] = await Promise.allSettled([
           apiClient.getHealth(),
           apiClient.getPortfolioSummary(),
-          apiClient.getTrades(),
+          apiClient.getRecentClosedTrades(RECENT_TRADES_MAX),
           apiClient.getPerformance(),
           apiClient.getAgentStatus(),
         ])

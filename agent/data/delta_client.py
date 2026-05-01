@@ -543,6 +543,36 @@ class DeltaExchangeClient:
             data["price"] = price
         
         return await self._make_request("POST", "/v2/orders", data=data)
+
+    async def get_positions(
+        self,
+        product_symbol: Optional[str] = None,
+        underlying_asset_symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get account positions with optional product/underlying filters."""
+        params: Dict[str, Any] = {}
+        if product_symbol:
+            params["product_symbol"] = product_symbol
+        if underlying_asset_symbol:
+            params["underlying_asset_symbol"] = underlying_asset_symbol
+        return await self._make_request("GET", "/v2/positions", params=params or None)
+
+    async def get_margined_positions(self) -> Dict[str, Any]:
+        """Get account margined positions (portfolio-level view)."""
+        return await self._make_request("GET", "/v2/positions/margined")
+
+    async def get_assets(self) -> Dict[str, Any]:
+        """Get exchange assets metadata."""
+        return await self._make_request("GET", "/v2/assets")
+
+    async def change_margin(self, product_symbol: str, margin: float) -> Dict[str, Any]:
+        """Adjust isolated position margin."""
+        data = {"product_symbol": product_symbol, "margin": margin}
+        return await self._make_request("POST", "/v2/positions/change_margin", data=data)
+
+    async def close_all_positions(self) -> Dict[str, Any]:
+        """Emergency close all open positions."""
+        return await self._make_request("POST", "/v2/positions/close_all", data={})
     
     def get_circuit_breaker_state(self) -> Dict[str, Any]:
         """Get circuit breaker state."""

@@ -196,6 +196,10 @@ The adaptive control loop under `agent/learning/` now uses bounded, production-s
 - `threshold_adapter.py`: threshold key updates are emitted in a single Redis transaction and adaptation runs are serialized per process.
 - `retraining_scheduler.py`: retrain subprocess execution is serialized per process, retrain triggers use sanitized PnL values, and cooldown/state is persisted with atomic file replace semantics.
 
+#### Runtime adaptive retrain (v15 pipeline, optional)
+
+The agent can run KS drift + warm-start XGBoost retrain with a macro-F1 gate (`agent/learning/adaptive/`). On success it writes `pipeline_{tf}_v_auto_<ts>.pkl`, `pipeline_{tf}_latest.pkl`, and `retrain_log.json` beside `metadata_BTCUSD_{tf}.json`; `PipelineV15Node` prefers `_latest`. Enable with `ADAPTIVE_RETRAIN_ENABLED=true`, `ADAPTIVE_LABELED_DATA_SOURCE=parquet`, and `ADAPTIVE_RETRAIN_PARQUET_DIR` (see repo root `.env.example` and canonical `docs/03-ml-models.md`).
+
 ---
 
 ## Model Training

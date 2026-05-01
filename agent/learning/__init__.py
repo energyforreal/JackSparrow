@@ -7,6 +7,8 @@ from agent.learning.retraining_scheduler import RetrainingScheduler
 from agent.learning.strategy_adapter import StrategyAdapter
 from agent.learning.threshold_adapter import ThresholdAdapter
 
+# Adaptive retrain (optional): ``from agent.learning.adaptive import ...``
+
 __all__ = [
     "ConfidenceCalibrator",
     "ModelWeightAdjuster",

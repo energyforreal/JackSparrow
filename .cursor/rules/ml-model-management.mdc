@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## Model File Organization
 
-- **Default Docker bundle (v15 pipeline)**: `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/` with `5m/` and `15m/` subfolders (`pipeline_*_v14.pkl` + metadata). Override with `AGENT_MODEL_DIR` / `MODEL_DIR`.
+- **Default Docker bundle (v15 pipeline)**: `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/` with `5m/` and `15m/` subfolders (`pipeline_*_v14.pkl` + metadata). Override with `AGENT_MODEL_DIR` / `MODEL_DIR`. Runtime **adaptive** retrain may add `pipeline_{tf}_latest.pkl`, `pipeline_{tf}_v_auto_*.pkl`, and `retrain_log.json` beside each `metadata_BTCUSD_{tf}.json` when `ADAPTIVE_RETRAIN_ENABLED=true` (see `agent/learning/adaptive/` and `docs/03-ml-models.md`).
 - **Legacy v5 bundle**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` (slim 5m+15m export; see metadata `artifacts`).
 - **Full multi-TF bundle (reference)**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` (five horizons; entry+exit per TF when exported).
 - **Discovery contract (v4 loader)**: `metadata_BTCUSD_*.json` is discovered under `MODEL_DIR`; with `MODEL_DISCOVERY_RECURSIVE=true` (default), subfolders such as `jacksparrow_v5_BTCUSD_*/` are scanned so `MODEL_DIR` may be `./agent/model_storage`.
@@ -63,3 +63,4 @@ All models must implement `MCPModelNode` interface:
 - Keep old versions for rollback capability
 - Document version changes in metadata
 - Test new versions before activation
+- **v15 adaptive exports**: keep timestamped `pipeline_{tf}_v_auto_*` files; `pipeline_{tf}_latest.pkl` is the active pointer loaded by `PipelineV15Node` when present. Roll back by overwriting `latest` with a known-good pickle and refreshing models.

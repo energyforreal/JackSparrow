@@ -14,6 +14,7 @@ import time
 import structlog
 
 from agent.core.config import settings
+from agent.core.log_context import EVENT_FEATURE_RESPONSE, KEY_FEATURE_QUALITY
 from agent.core.redis_config import get_redis
 from agent.data.feature_engineering import FeatureEngineering
 from agent.data.market_data_service import MarketDataService
@@ -36,6 +37,7 @@ class FeatureQuality(str, Enum):
     MEDIUM = "medium"
     LOW = "low"
     DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
 
 
 class MCPFeature(BaseModel):
@@ -210,10 +212,26 @@ class MCPFeatureServer:
             limit=280,
         )
         if not md or not md.get("candles"):
-            # Empty list breaks the v15 orchestrator path (mcp_orchestrator_v15_no_features) and
-            # yields no UI signal when Delta REST is flaky (502 / circuit breaker). Emit one
-            # degraded feature per requested name so inference can return a cautious HOLD-like
-            # output instead of aborting the pipeline.
+            fail_closed = bool(
+                getattr(settings, "feature_server_fail_closed_no_candles", True)
+            )
+            if fail_closed:
+                logger.warning(
+                    EVENT_FEATURE_RESPONSE,
+                    symbol=request.symbol,
+                    timeframe=tf,
+                    **{
+                        KEY_FEATURE_QUALITY: FeatureQuality.UNAVAILABLE.value,
+                        "reason": "no_candles_fail_closed",
+                    },
+                )
+                return MCPFeatureResponse(
+                    features=[],
+                    quality_score=0.0,
+                    overall_quality=FeatureQuality.UNAVAILABLE,
+                    timestamp=timestamp,
+                    request_id=request_id,
+                )
             logger.warning(
                 "feature_server_v15_no_candles",
                 symbol=request.symbol,
@@ -247,6 +265,29 @@ class MCPFeatureServer:
                 request_id=request_id,
             )
         candles = md["candles"]
+        if bool(getattr(settings, "strict_candle_validation_enabled", True)):
+            try:
+                from agent.data.candle_validation import validate_delta_candle_rows
+
+                validate_delta_candle_rows(
+                    candles,
+                    tf,
+                    min_rows=int(getattr(settings, "strict_candle_validation_min_rows", 50) or 50),
+                )
+            except ValueError as e:
+                logger.warning(
+                    "feature_server_v15_candle_validation_failed",
+                    symbol=request.symbol,
+                    timeframe=tf,
+                    error=str(e),
+                )
+                return MCPFeatureResponse(
+                    features=[],
+                    quality_score=0.0,
+                    overall_quality=FeatureQuality.UNAVAILABLE,
+                    timestamp=timestamp,
+                    request_id=request_id,
+                )
         candles_15 = None
         if tf == "5m":
             cache_key = f"jacksparrow:v15:htf15:{request.symbol}"
@@ -327,13 +368,20 @@ class MCPFeatureServer:
         )
         
         if not market_data or not market_data.get("candles"):
-            # Return degraded features if no market data
+            if bool(getattr(settings, "feature_server_fail_closed_no_candles", True)):
+                return MCPFeatureResponse(
+                    features=[],
+                    quality_score=0.0,
+                    overall_quality=FeatureQuality.UNAVAILABLE,
+                    timestamp=timestamp,
+                    request_id=request_id,
+                )
             return MCPFeatureResponse(
                 features=[],
                 quality_score=0.0,
                 overall_quality=FeatureQuality.DEGRADED,
                 timestamp=timestamp,
-                request_id=request_id
+                request_id=request_id,
             )
         
         candles = market_data.get("candles", []) if market_data else []
@@ -480,7 +528,8 @@ class MCPFeatureServer:
             FeatureQuality.HIGH: 1.0,
             FeatureQuality.MEDIUM: 0.7,
             FeatureQuality.LOW: 0.4,
-            FeatureQuality.DEGRADED: 0.1
+            FeatureQuality.DEGRADED: 0.1,
+            FeatureQuality.UNAVAILABLE: 0.0,
         }
         
         total_score = sum(quality_weights.get(f.quality, 0.0) for f in features)
@@ -495,8 +544,10 @@ class MCPFeatureServer:
             return FeatureQuality.MEDIUM
         elif quality_score >= 0.4:
             return FeatureQuality.LOW
-        else:
+        elif quality_score > 0.0:
             return FeatureQuality.DEGRADED
+        else:
+            return FeatureQuality.UNAVAILABLE
     
     async def get_health_status(self) -> Dict[str, Any]:
         """Get health status."""

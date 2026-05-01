@@ -669,6 +669,44 @@ class UnifiedWebSocketManager:
                 "data": trades_data,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+        if command == "get_recent_closed_trades":
+            from backend.core.database import AsyncSessionLocal
+            from backend.api.routes.portfolio import validate_symbol
+            from backend.services.portfolio_service import portfolio_service
+            from backend.api.models.responses import ClosedTradeResponse
+
+            symbol = parameters.get("symbol")
+            limit = int(parameters.get("limit", 50))
+            offset = int(parameters.get("offset", 0))
+
+            if limit < 1 or limit > 1000:
+                limit = 50
+            if offset < 0:
+                offset = 0
+
+            validated_symbol = validate_symbol(symbol)
+
+            async with AsyncSessionLocal() as db:
+                try:
+                    rows = await portfolio_service.get_recent_closed_trades(
+                        db=db,
+                        symbol=validated_symbol,
+                        limit=limit,
+                        offset=offset,
+                    )
+                    closed_trades_data = [
+                        ClosedTradeResponse(**row).model_dump(mode="json") for row in rows
+                    ]
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    raise
+            return {
+                "type": "response",
+                "success": True,
+                "data": closed_trades_data,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
         if command == "get_ticker":
             from backend.services.market_service import market_service
 

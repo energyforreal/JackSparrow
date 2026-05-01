@@ -205,6 +205,22 @@ The adaptive control loop under `agent/learning/` now uses bounded, production-s
 - `threshold_adapter.py`: threshold key updates are emitted in a single Redis transaction and adaptation runs are serialized per process.
 - `retraining_scheduler.py`: retrain subprocess execution is serialized per process, retrain triggers use sanitized PnL values, and cooldown/state is persisted with atomic file replace semantics.
 
+#### Runtime adaptive retrain (v15 pipeline, optional)
+
+The agent can run a **separate** path from trade-outcome retraining: KS drift on two recent windows, then **warm-start** `xgb.train(..., xgb_model=old_booster)` with class weights matching notebook Cell 5 (`SELL`/`HOLD`/`BUY` = 1.3 / 0.5 / 1.3), a **macro-F1** holdout gate (`new_f1 >= old_f1 + ADAPTIVE_MIN_F1_IMPROVEMENT`), and versioned artifacts next to each timeframe’s metadata.
+
+| Topic | Detail |
+|--------|--------|
+| **Code** | `agent/learning/adaptive/` (`drift_detector`, `retrain_engine`, `model_validator`, `model_registry`, `adaptive_controller`, `labeled_data`); tick from `agent/core/intelligent_agent.py` when `ADAPTIVE_RETRAIN_ENABLED=true`. |
+| **Inference load order** | `agent/models/pipeline_v15_node.py` resolves `pipeline_{tf}_latest.pkl` before `pipeline_{tf}_v14.pkl`; discovery treats either pickle as a valid v15 bundle. |
+| **Labeled data** | `ADAPTIVE_LABELED_DATA_SOURCE=parquet` and `ADAPTIVE_RETRAIN_PARQUET_DIR` → files `labeled_5m.parquet`, `labeled_15m.parquet` with the same **feature column names and order** as `metadata_BTCUSD_{tf}.json` plus integer `label` in `{0,1,2}`. Minimum row counts follow settings (default ≥ 40k rows for drift windows). |
+| **Artifacts** | On accept: `pipeline_{tf}_v_auto_<unix>.pkl` (archive), `pipeline_{tf}_latest.pkl` (pointer), `retrain_log.json` append next to metadata, and `metadata` JSON updated (`train_median`, `adaptive` audit fields). |
+| **Cooldown** | Per-TF timestamps in `ADAPTIVE_RETRAIN_STATE_PATH` (respects `LOGS_ROOT` when set). |
+| **Hot reload** | After any TF accepts in a tick, `await mcp_orchestrator.refresh_models()` reloads discovery without restarting the process. Programmatic use: `from agent.learning.adaptive.adaptive_controller import hot_reload_models`. |
+| **Rollback** | Copy a known-good `pipeline_{tf}_v14.pkl` or versioned pickle over `pipeline_{tf}_latest.pkl`, then trigger a refresh (restart agent or call `hot_reload_models` from an async context). Use `retrain_log.json` to pick a version. |
+| **Tests** | `tests/unit/test_adaptive_*.py`, `tests/unit/test_pipeline_v15_resolve_latest.py`. |
+| **Env reference** | Root [`.env.example`](../.env.example) and [Deployment – Agent env](10-deployment.md#agent-environment-variables). |
+
 ---
 
 ## Model Training
@@ -1270,7 +1286,7 @@ This is the **single full-pipeline** artefact path (one XGBoost/sklearn pipeline
 - **Bundle layout**: `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/{5m,15m}/` with `metadata_BTCUSD_*.json` and `pipeline_*_v14.pkl`. You can also keep the older flat `model_5m_v14/` style if discovery resolves the pickle path next to metadata (see `metadata_is_v15_pipeline()` in `agent/models/pipeline_v15_node.py`).
 - **Pickle shape**: Exports may be a bare estimator or a **`dict` with a `model` key** (Colab bundle). `PipelineV15Node` unwraps `dict["model"]` before `predict_proba`.
 - **`MODEL_FORMAT`**: `v15_pipeline` (v15-oriented scan), `v4_ensemble` (legacy), or `auto` (metadata + sibling `pipeline_{timeframe}_v14.pkl` detection).
-- **Code map**: `agent/models/pipeline_v15_node.py` (load/infer), `agent/models/model_discovery.py` (branching), `agent/models/mcp_model_registry.py` (`model_format` in health, per-model feature requests when all nodes are v15), `agent/core/mcp_orchestrator.py` (per-TF feature fetch for v15-only registry), `agent/core/v15_signal.py` + `agent/events/handlers/trading_handler.py` (entry gate), `agent/core/execution.py` (ATR trail, `v15_min_hold_until`, `atr_trail_stop` exit reason when applicable).
+- **Code map**: `agent/models/pipeline_v15_node.py` (load/infer), `agent/models/model_discovery.py` (branching), `agent/models/mcp_model_registry.py` (`model_format` in health, per-model feature requests when all nodes are v15), `agent/core/mcp_orchestrator.py` (per-TF feature fetch for v15-only registry), `agent/core/v15_signal.py` + `agent/events/handlers/trading_handler.py` (v15 entry gate; **skipped** when `AI_SIGNAL_MINIMAL_ENTRY_GATES=true` — see [Logic & reasoning](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates)), `agent/core/execution.py` (ATR trail, `v15_min_hold_until`, `atr_trail_stop` exit reason when applicable).
 - **Features**: Canonical name lists in `feature_store/feature_registry.py` (`V15_FEATURES_5M`, `V15_FEATURES_15M`, `V15_FEATURES_BY_TF`). Rows are built in `feature_store/v15_feature_compute.py`; the MCP path is selected in `agent/data/feature_server.py` when `candle_interval` matches a full v15 set. **5m** pulls **15m** OHLCV for `*_15m` columns; **15m** 15m candle cache uses Redis key `jacksparrow:v15:htf15:{symbol}` with `HTF_CACHE_TTL_SECONDS`.
 - **Train–serve checklist**: After each Colab export, confirm the `features` array in each `metadata_BTCUSD_*.json` equals the corresponding `V15_FEATURES_*` list in the repo (update `feature_registry.py` first if you intentionally changed the training feature set). The shipped `pipeline_*_v14.pkl` was fit on those columns in that order; do not reorder metadata without retraining.
 - **Environment** (see root `.env.example`): `CONFIDENCE_PERCENTILE`, `EDGE_FLOOR`, `ATR_TRAILING_MULT`, `MIN_HOLD_BARS`, `EDGE_DECAY_THRESHOLD`, `VOLATILITY_FILTER_ENABLED`, `V15_ATR_PCT_FLOOR`, `V15_ADX_RANGING_MAX`, `V15_SIGNAL_LOGIC_ENABLED`, `V15_DISABLE_MTF_SYNTHESIS`, `V15_FILTER_FEATURE_SOURCE_TF`, `HTF_CACHE_TTL_SECONDS`. Docker default `MODEL_DIR` / `AGENT_MODEL_DIR` targets the v15 bundle in `docker-compose.yml`.

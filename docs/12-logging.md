@@ -474,6 +474,26 @@ These structlog events support dashboards and the reconciliation script above:
 | `paper_fill_price_ticker_unavailable_using_hint` | WARNING | Paper mode used the approval/reference price as the reference mid because the ticker call failed. |
 | `paper_fill_reference_mid_clamped_to_hint_band` | DEBUG | Raw ticker mid was clamped to the band around the approval price using `execution_config.max_slippage_percent`. |
 
+### 6. Trading handler events (`agent/events/handlers/trading_handler.py`)
+
+Structured **`trading_entry_rejected`** lines (typically **INFO**) record why a `DecisionReadyEvent` did not become a `RiskApprovedEvent`. Filter on `event=trading_entry_rejected` (or the string in JSON logs) and the **`reason`** field. Common values include:
+
+| `reason` | Meaning (short) |
+|----------|-----------------|
+| `hold_at_synthesis` | Signal is `HOLD` or empty |
+| `low_ai_signal_confidence` | Minimal-entry mode: raw payload `confidence` below `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` |
+| `low_confidence_reject` | Default path: calibrated confidence below effective threshold |
+| `stale_signal_reject` | Decision payload older than `max_signal_age_seconds` |
+| `v15_entry_gate` / `v15_gate_hold` | v15 logic mapped signal to `HOLD` or non-trade |
+| `open_position_blocks_entry` | Same-direction position already open |
+| `no_price` / `insufficient_margin_inr` | Infrastructure / sizing |
+| `risk_rejected` | `validate_trade` did not approve |
+| `debounce` | Duplicate (symbol, side) inside debounce window |
+| `profit_gate` | Risk/reward below `min_risk_reward_ratio` |
+| `min_trade_gap` / `daily_trade_cap` | v15 pacing caps |
+
+Successful publishes log **`trading_handler_risk_approved_published`** with `ai_signal_minimal_entry_gates` set so you can tell whether the approval used minimal gates. Reject rows are also appended to `signal_audit/live_audit.md` when that module is available.
+
 ## Testing the Logging System
 
 1. **Unit Tests**
@@ -560,7 +580,7 @@ For field mapping from `logs/agent.log` / structlog, retrieval commands, and rec
 
 - [`reference/ai-signal-action-audit-log.md`](../reference/ai-signal-action-audit-log.md)
 
-**Realtime audit**: while the agent runs, events are **appended automatically** to `live_audit.md`. Toggle with `SIGNAL_AUDIT_MD_ENABLED` / `SIGNAL_AUDIT_MD_SUBPATH` (see `agent/.env.example`). **Timestamps in that file and in `paper_trades.log` use IST (Asia/Kolkata) as the primary clock**, with an explicit UTC companion for correlation (`utc=` in markdown, `utc_time=` in pipe lines).
+**Realtime audit**: while the agent runs, events are **appended automatically** to `live_audit.md`. Toggle with `SIGNAL_AUDIT_MD_ENABLED` / `SIGNAL_AUDIT_MD_SUBPATH` (see the root `.env.example`). **Timestamps in that file and in `paper_trades.log` use IST (Asia/Kolkata) as the primary clock**, with an explicit UTC companion for correlation (`utc=` in markdown, `utc_time=` in pipe lines).
 
 **Approval ↔ execution reconciliation**: after exporting JSON agent logs, run `python tools/commands/reconcile_risk_approvals.py <agent.log> [paper_trades.log]` to flag any `trading_handler_risk_approved_published` `event_id` with no matching `execution_order_fill_published`, `trading_execution_rejected`, or `execution_failed` — see [Risk approval reconciliation](#4-risk-approval-reconciliation-toolscommandsreconcile_risk_approvalspy) and [Execution engine events](#5-execution-engine-events-agent--agentcoreexecutionpy) above.
 

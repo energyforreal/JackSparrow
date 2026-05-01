@@ -67,6 +67,7 @@ from agent.core.redis_config import get_redis
 from agent.models.model_discovery import ModelDiscovery
 from agent.risk.risk_manager import RiskManager
 from agent.data.delta_client import DeltaExchangeClient
+from agent.core.exchange_gateway import build_exchange_gateway
 from agent.data.market_data_service import MarketDataService
 from agent.data.feature_server_api import FeatureServerAPI
 from agent.events.event_bus import event_bus
@@ -121,6 +122,7 @@ class IntelligentAgent:
         )
         self.risk_manager = RiskManager(config=settings)
         self.delta_client = DeltaExchangeClient()
+        self.exchange_gateway = None
         self.model_discovery = None  # Will be initialized after model_registry is set
         self.market_data_service = MarketDataService()
         # FeatureServerAPI is bound to the initialized MCP Feature Server in initialize().
@@ -128,6 +130,7 @@ class IntelligentAgent:
         self.running = False
         self._threshold_adapter_task: Optional[asyncio.Task] = None
         self._retraining_scheduler_task: Optional[asyncio.Task] = None
+        self._adaptive_retrain_task: Optional[asyncio.Task] = None
         self.command_queue = settings.agent_command_queue
         self.default_symbol = settings.trading_symbol or settings.agent_symbol
         timeframe_list = settings.resolved_agent_timeframes()
@@ -239,7 +242,39 @@ class IntelligentAgent:
         # Initialize all components with event handlers
         await self.state_machine.initialize()
         await self.risk_manager.initialize()
-        await execution_module.initialize(delta_client=self.delta_client, risk_manager=self.risk_manager)
+
+        async def _close_symbol_from_gateway(symbol: str):
+            return await execution_module.close_position(symbol, exit_reason="close_all")
+
+        self.exchange_gateway = build_exchange_gateway(
+            delta_client=self.delta_client,
+            position_reader=execution_module.position_manager.get_all_positions,
+            close_position_cb=_close_symbol_from_gateway,
+        )
+        gateway_name = self.exchange_gateway.__class__.__name__
+        effective_exchange_backend = (
+            "delta_paper_sim" if "PaperSim" in gateway_name else "delta_live"
+        )
+        logger.info(
+            "agent_exchange_backend_effective",
+            service="agent",
+            trading_mode=settings.trading_mode,
+            paper_trading_mode=settings.paper_trading_mode,
+            configured_exchange_backend=getattr(settings, "exchange_backend", None),
+            effective_exchange_backend=effective_exchange_backend,
+            exchange_gateway_class=gateway_name,
+            paper_simulate_delta_private_apis=getattr(
+                settings, "paper_simulate_delta_private_apis", None
+            ),
+            paper_margined_view_delay_seconds=getattr(
+                settings, "paper_margined_view_delay_seconds", None
+            ),
+        )
+        await execution_module.initialize(
+            delta_client=self.delta_client,
+            risk_manager=self.risk_manager,
+            exchange_gateway=self.exchange_gateway,
+        )
         if bool(getattr(settings, "position_restore_on_startup", True)):
             db_url = getattr(settings, "database_url", None)
             if db_url:
@@ -503,11 +538,57 @@ class IntelligentAgent:
                     exc_info=True,
                 )
 
+    async def _adaptive_retrain_loop(self) -> None:
+        """Hourly drift + warm-start retrain (parquet labeled data) with model refresh."""
+        from agent.learning.adaptive.adaptive_controller import run_adaptive_retrain_tick
+
+        interval = int(
+            getattr(settings, "adaptive_retrain_check_interval_seconds", 3600) or 3600
+        )
+        interval = max(60, interval)
+        while self.running:
+            try:
+                await asyncio.sleep(interval)
+                if not self.running:
+                    break
+                if not getattr(settings, "adaptive_retrain_enabled", False):
+                    continue
+                orch = getattr(self, "mcp_orchestrator", None)
+                summary = await run_adaptive_retrain_tick(orch)
+                if summary.get("ran"):
+                    logger.info(
+                        "adaptive_retrain_tick_complete",
+                        service="agent",
+                        summary=summary,
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(
+                    "adaptive_retrain_loop_tick_failed",
+                    service="agent",
+                    error=str(e),
+                    exc_info=True,
+                )
+
     async def _position_monitor_loop(self) -> None:
         """Background loop: update position prices and run manage_position for stop/take profit."""
         while self.running:
             try:
                 open_positions = execution_module.position_manager.get_all_positions()
+                if self.exchange_gateway is not None:
+                    try:
+                        positions_view = await execution_module.get_positions_view()
+                        rows = positions_view.get("result", []) if isinstance(positions_view, dict) else []
+                        open_positions = {
+                            str(row.get("product_symbol")): execution_module.position_manager.get_position(
+                                str(row.get("product_symbol"))
+                            )
+                            for row in rows
+                            if isinstance(row, dict) and row.get("product_symbol")
+                        }
+                    except Exception as e:
+                        logger.debug("position_monitor_gateway_view_failed", error=str(e), service="agent")
                 interval_seconds = (
                     getattr(settings, "min_monitor_interval_seconds", 2.0)
                     if open_positions
@@ -517,6 +598,19 @@ class IntelligentAgent:
                 if not self.running:
                     break
                 open_positions = execution_module.position_manager.get_all_positions()
+                if self.exchange_gateway is not None:
+                    try:
+                        positions_view = await execution_module.get_positions_view()
+                        rows = positions_view.get("result", []) if isinstance(positions_view, dict) else []
+                        open_positions = {
+                            str(row.get("product_symbol")): execution_module.position_manager.get_position(
+                                str(row.get("product_symbol"))
+                            )
+                            for row in rows
+                            if isinstance(row, dict) and row.get("product_symbol")
+                        }
+                    except Exception as e:
+                        logger.debug("position_monitor_gateway_view_failed", error=str(e), service="agent")
                 if not open_positions:
                     continue
                 max_hold_s = (getattr(settings, "max_position_hold_hours", 24) or 24) * 3600
@@ -587,6 +681,14 @@ class IntelligentAgent:
             except asyncio.CancelledError:
                 pass
             self._retraining_scheduler_task = None
+
+        if getattr(self, "_adaptive_retrain_task", None):
+            self._adaptive_retrain_task.cancel()
+            try:
+                await self._adaptive_retrain_task
+            except asyncio.CancelledError:
+                pass
+            self._adaptive_retrain_task = None
 
         # Cancel position monitoring loop
         if getattr(self, "_position_monitor_task", None):
@@ -832,6 +934,14 @@ class IntelligentAgent:
                 interval_seconds=getattr(settings, "retraining_scheduler_interval_seconds", 3600),
             )
 
+        if getattr(settings, "adaptive_retrain_enabled", False):
+            self._adaptive_retrain_task = asyncio.create_task(self._adaptive_retrain_loop())
+            logger.info(
+                "agent_adaptive_retrain_started",
+                service="agent",
+                interval_seconds=getattr(settings, "adaptive_retrain_check_interval_seconds", 3600),
+            )
+
         # Start command handler (for backward compatibility)
         logger.info("agent_creating_command_task")
         command_task = asyncio.create_task(self._command_handler())
@@ -898,9 +1008,16 @@ class IntelligentAgent:
                 result = await self._handle_execute_trade(params)
                 await self._send_response(request_id, result)
             elif cmd == "control":
-                await self._send_response(
-                    request_id, {"success": True, "message": "Control processed"}
-                )
+                result = await self._handle_control(params)
+                await self._send_response(request_id, result)
+            elif cmd == "change_margin":
+                symbol = str(params.get("symbol") or self.default_symbol)
+                margin_delta = float(params.get("margin_delta", 0.0) or 0.0)
+                result = await execution_module.change_position_margin(symbol, margin_delta)
+                await self._send_response(request_id, result)
+            elif cmd == "close_all_positions":
+                result = await execution_module.close_all_positions(exit_reason="emergency_exit")
+                await self._send_response(request_id, result)
             else:
                 await self._send_response(
                     request_id,
@@ -1304,6 +1421,17 @@ class IntelligentAgent:
             )
         elif action == "stop":
             self.running = False
+        elif action == "emergency_stop":
+            close_result = await execution_module.close_all_positions(exit_reason="emergency_exit")
+            self.running = False
+            return {
+                "success": bool(close_result.get("success", False)),
+                "data": {
+                    "state": self.state_machine.current_state.value,
+                    "message": "Emergency stop completed",
+                    "close_all_result": close_result.get("result", {}),
+                },
+            }
         
         return {
             "success": True,

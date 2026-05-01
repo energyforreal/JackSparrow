@@ -832,6 +832,8 @@ See [ML Models Documentation](03-ml-models.md#model-training) for detailed train
 
 **v15 pipeline** (when using `jacksparrow_v15_*` bundles): run `pytest tests/unit/test_v15_signal.py tests/unit/test_v15_feature_registry.py -q` in addition to the above; feature lists are `V15_FEATURES_*` in `feature_registry.py`, not `EXPANDED_FEATURE_LIST`.
 
+**Adaptive retrain** (if you enable `ADAPTIVE_RETRAIN_*`): run `pytest tests/unit/test_adaptive_*.py tests/unit/test_pipeline_v15_resolve_latest.py -q` after changing drift/retrain/registry code.
+
 ---
 
 ## Step 11: Run Tests (Optional)

@@ -279,7 +279,7 @@ curl http://localhost:6333/health
 
 **Important Notes:**
 
-- **No service-specific `.env` files needed**: All services share the same root `.env` file
+- **No service-specific `.env` files needed**: All services share the same root `.env` file. Do not maintain `agent/.env`, `backend/.env`, or `.env.example` copies under those directories — the root `.env.example` is the only template.
 - **For local development**: Database URLs should use `localhost` (e.g., `postgresql://user:pass@localhost:5432/db`)
 - **For Docker deployments**: Database URLs should use service names (e.g., `postgresql://user:pass@postgres:5432/db`)
 - See `.env.example` in the project root for a complete template with all available variables
@@ -318,7 +318,17 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 > **Agent Risk Controls**  
 > Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Current defaults are `INITIAL_BALANCE=20000`, `MIN_CONFIDENCE_THRESHOLD=0.70`, `MIN_LOT_SIZE=1`, and `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC on Delta BTCUSD perpetual).
 >
-> Phase-1 runtime alignment also enables fixed lot sizing and isolated margin checks via `ENFORCE_FIXED_LOT_SIZE=true`, `FIXED_LOT_SIZE=1`, `ISOLATED_MARGIN_LEVERAGE=5`, and `USDINR_FALLBACK_RATE` (used only when live/cached FX is unavailable).
+> **Optional execution overrides** (defaults live in `agent/core/config.py` if unset): `ENFORCE_FIXED_LOT_SIZE`, `FIXED_LOT_SIZE`, `ISOLATED_MARGIN_LEVERAGE`, and `USDINR_FALLBACK_RATE` (used when live/cached FX is unavailable). Uncomment or set these in `.env` only when you need to deviate from code defaults.
+
+> **Delta parity simulation toggles**  
+> For migration-safe paper runs that mirror Delta private account APIs, use:
+> - `EXCHANGE_BACKEND=delta_paper_sim` (paper adapter) or `delta_live` (live private API adapter)
+> - `DELTA_ENV=india_prod|india_testnet` (environment intent label)
+> - `PAPER_SIMULATE_DELTA_PRIVATE_APIS=true` (serve Delta-like private account views in paper mode)
+> - `PAPER_MARGINED_VIEW_DELAY_SECONDS=10` (simulate `/positions/margined` lag vs `/positions`)
+>
+> Recommended paper-parity baseline:
+> `PAPER_TRADING_MODE=true`, `TRADING_MODE=paper`, `EXCHANGE_BACKEND=delta_paper_sim`.
 
 ---
 
@@ -406,6 +416,7 @@ Docker deployment detail is in this document under [Docker Compose Deployment](#
   - `DELTA_EXCHANGE_API_KEY`, `DELTA_EXCHANGE_API_SECRET`
   - `JWT_SECRET_KEY`, `API_KEY`
   - `POSTGRES_PASSWORD` (and optionally `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PORT`)
+  - `REDIS_PASSWORD` (must match the password embedded in `REDIS_URL` when Redis uses `--requirepass`)
 
 ### Quick Start
 
@@ -421,7 +432,7 @@ touch kubera_pokisham.db
 cp .env.example .env
 
 # Edit .env with your configuration
-# Required: DELTA_EXCHANGE_API_KEY, DELTA_EXCHANGE_API_SECRET, JWT_SECRET_KEY, API_KEY, POSTGRES_PASSWORD
+# Required: DELTA_EXCHANGE_API_KEY, DELTA_EXCHANGE_API_SECRET, JWT_SECRET_KEY, API_KEY, POSTGRES_PASSWORD, REDIS_PASSWORD
 ```
 
 **3. Build and start services:**
@@ -897,6 +908,8 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `LOG_FORWARDING_ENDPOINT` | Remote logging endpoint | No | - |
 | `LOG_INCLUDE_STACKTRACE` | Include stack traces in production logs | No | false |
 | `FEATURE_SERVER_URL` | MCP Feature Server URL | No | http://localhost:8002 |
+| `AGENT_WS_URL` | Backend → agent command WebSocket URL | No | `ws://agent:8003` (Docker-oriented default in `backend/core/config.py`; use `ws://localhost:8003` for local agent on host) |
+| `USE_AGENT_WEBSOCKET` | Prefer WebSocket for agent commands (fallback to Redis when false or unavailable) | No | true |
 
 ### Agent Environment Variables
 
@@ -912,6 +925,14 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `MODEL_DIR` | Directory for model discovery (all models) | No | `./agent/model_storage` (local); Docker Compose defaults to the **v15** bundle under `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05` via `AGENT_MODEL_DIR` |
 | `AGENT_MODEL_DIR` | Docker-only override for in-container `MODEL_DIR` | No | See `docker-compose.yml` agent service |
 | `MODEL_FORMAT` | `auto`, `v4_ensemble`, or `v15_pipeline` — discovery / node selection | No | `auto` |
+| `ADAPTIVE_RETRAIN_ENABLED` | When `true`, agent runs periodic KS drift + optional warm-start retrain (v15 parquet path) | No | `false` |
+| `ADAPTIVE_RETRAIN_CHECK_INTERVAL_SECONDS` | Seconds between adaptive evaluations | No | `3600` |
+| `ADAPTIVE_RETRAIN_COOLDOWN_HOURS` | Minimum hours between successful retrains per TF | No | `12` |
+| `ADAPTIVE_LABELED_DATA_SOURCE` | Labeled frame source: `none` or `parquet` | No | `none` |
+| `ADAPTIVE_RETRAIN_PARQUET_DIR` | Directory with `labeled_5m.parquet` / `labeled_15m.parquet` (features + `label`) | No | *(empty)* |
+| `ADAPTIVE_RETRAIN_TIMEFRAMES` | Comma-separated TFs to evaluate | No | `5m,15m` |
+| `ADAPTIVE_RETRAIN_STATE_PATH` | JSON cooldown state filename (under `LOGS_ROOT` if set) | No | `adaptive_retrain_state.json` |
+| `ADAPTIVE_DRIFT_ALPHA` / `ADAPTIVE_DRIFT_STAT_THRESHOLD` / `ADAPTIVE_DRIFT_FEATURE_LIMIT` | KS drift gate (see [ML models – Learning](03-ml-models.md#learning-control-modules-agent-runtime)) | No | `0.01` / `0.10` / `5` |
 | `MODEL_PATH` | Specific model file path (optional, for direct model loading) | No | agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl |
 | `LOG_LEVEL` | Agent logging level | No | INFO |
 | `LOG_DIR` | Agent log directory | No | `./logs/agent` |
@@ -921,6 +942,24 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `LOG_FORWARDING_ENABLED` | Toggle remote log forwarding | No | false |
 | `LOG_FORWARDING_ENDPOINT` | Remote logging endpoint | No | - |
 | `LOG_INCLUDE_STACKTRACE` | Include stack traces in production logs | No | false |
+| `WEBSOCKET_URL` | Delta public WebSocket URL (must match REST cluster/region) | No | `wss://socket.india.delta.exchange` |
+| `WEBSOCKET_ENABLED` | Enable Delta market WebSocket stream | No | true |
+| `WEBSOCKET_RECONNECT_ATTEMPTS` | Max WebSocket reconnect attempts | No | 5 |
+| `WEBSOCKET_RECONNECT_DELAY` | Seconds between reconnect attempts | No | 5.0 |
+| `WEBSOCKET_HEARTBEAT_INTERVAL` | WebSocket heartbeat interval (seconds) | No | 30.0 |
+| `WEBSOCKET_FALLBACK_POLL_INTERVAL` | REST polling interval when WebSocket is unavailable (seconds) | No | 60.0 |
+| `BACKEND_WS_URL` | Agent → backend outbound WebSocket for events | No | `ws://localhost:8000/ws/agent` (Docker agent service: `ws://backend:8000/ws/agent`) |
+| `PRICE_FLUCTUATION_THRESHOLD_PCT` | Price move % from last anchor that can trigger ML pipeline (e.g. `0.5` = 0.5%) | No | 0.10 |
+| `FAST_POLL_INTERVAL` | Fast ticker poll interval (seconds) when driving REST cadence | No | 0.5 |
+| `PAPER_TRADE_VALIDATION_MODE` | Relaxed confidence gate for paper pipeline validation only | No | false |
+| `PAPER_TRADE_VALIDATION_MIN_CONFIDENCE` | Minimum confidence while `PAPER_TRADE_VALIDATION_MODE` is enabled | No | 0.45 |
+| `EXCHANGE_BACKEND` | Exchange adapter for private account operations (`delta_live` or `delta_paper_sim`) | No | `delta_live` |
+| `DELTA_ENV` | Delta environment label (`india_prod` or `india_testnet`) used for deployment/runtime intent | No | `india_prod` |
+| `PAPER_SIMULATE_DELTA_PRIVATE_APIS` | In paper mode, expose Delta-like private account behavior (`positions`, `positions/margined`, `assets`, `change_margin`, `close_all`) | No | true |
+| `PAPER_MARGINED_VIEW_DELAY_SECONDS` | Simulated delay before paper `positions/margined` reflects latest state (Delta parity) | No | 10.0 |
+| `AI_SIGNAL_MINIMAL_ENTRY_GATES` | When `true`, trading handler approves using **raw** payload AI `confidence` ≥ `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` plus price, margin, min lots, and open-position rules; skips v15 entry gate, stale-signal age, feature/MTF/SR filters, profit/R:R gate, Redis-blended confidence, `validate_trade`, debounce, and v15 gap/daily caps | No | false |
+| `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` | Minimum **raw** (uncalibrated) payload `confidence` when `AI_SIGNAL_MINIMAL_ENTRY_GATES` is enabled | No | 0.70 |
+| `V15_SIGNAL_LOGIC_ENABLED` | Apply v15 entry/exit filters when v15 models are active | No | true |
 
 ### Frontend Environment Variables
 
@@ -928,6 +967,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 |----------|-------------|----------|---------|
 | `NEXT_PUBLIC_API_URL` | Backend API URL | Yes | - |
 | `NEXT_PUBLIC_WS_URL` | WebSocket URL | Yes | - |
+| `NEXT_PUBLIC_BACKEND_PROXY_BASE` | Next.js server proxy path to the backend (browser calls `/api/backend/...`) | No | `/api/backend` |
 
 ---
 
@@ -1065,6 +1105,7 @@ The startup system includes comprehensive validation to ensure safe and reliable
 - **Validation Logic**: Blocks startup if live trading mode is detected
 - **Error Messages**: Clear warnings with configuration guidance
 - **Monitoring Integration**: Status displayed in monitoring dashboard
+- **Paper parity controls**: `EXCHANGE_BACKEND`, `PAPER_SIMULATE_DELTA_PRIVATE_APIS`, and `PAPER_MARGINED_VIEW_DELAY_SECONDS` tune simulation fidelity but do not override the live-trading safety gate.
 
 **Configuration Examples**:
 ```bash

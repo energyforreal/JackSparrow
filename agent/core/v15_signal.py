@@ -88,7 +88,11 @@ def evaluate_v15_entry(
     except (TypeError, ValueError):
         adx_f = None
     adx_max = float(getattr(settings, "v15_adx_ranging_max", 25.0) or 25.0)
-    ranging_ok = True if adx_f is None else adx_f <= adx_max
+    adx_regime_on = bool(getattr(settings, "v15_adx_regime_filter_enabled", True))
+    if adx_regime_on:
+        ranging_ok = True if adx_f is None else adx_f <= adx_max
+    else:
+        ranging_ok = True
 
     atr_14_raw = features.get("atr_14")
     try:
@@ -106,9 +110,11 @@ def evaluate_v15_entry(
         "v15_timeframe": tf,
         "volatility_filter_passed": vol_ok,
         "regime_filter_passed": ranging_ok,
+        "v15_adx_regime_filter_enabled": adx_regime_on,
         "_v15_filters": {
             "volatility_ok": vol_ok,
             "regime_ranging": ranging_ok,
+            "adx_regime_filter_on": adx_regime_on,
             "edge_above_floor": abs(edge) >= edge_floor,
             "edge_above_percentile": abs(edge) >= threshold,
         },

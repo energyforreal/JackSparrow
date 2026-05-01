@@ -334,6 +334,15 @@ class ApiClient {
     return Array.isArray(result) ? result : (result as { trades?: unknown[] })?.trades ?? []
   }
 
+  async getRecentClosedTrades(limit: number = 50): Promise<unknown[]> {
+    const result = await sendCommand('get_recent_closed_trades', { limit })
+    return Array.isArray(result)
+      ? result
+      : (result as { trades?: unknown[]; closed_trades?: unknown[] })?.closed_trades
+        ?? (result as { trades?: unknown[] })?.trades
+        ?? []
+  }
+
   async getAgentStatus(): Promise<{
     available: boolean
     state: string
@@ -636,6 +645,15 @@ class WebSocketApiClient {
   async getTrades(): Promise<unknown[]> {
     const result = await sendCommand('get_trades')
     return Array.isArray(result) ? result : (result as { trades?: unknown[] })?.trades ?? []
+  }
+
+  async getRecentClosedTrades(limit: number = 50): Promise<unknown[]> {
+    const result = await sendCommand('get_recent_closed_trades', { limit })
+    return Array.isArray(result)
+      ? result
+      : (result as { trades?: unknown[]; closed_trades?: unknown[] })?.closed_trades
+        ?? (result as { trades?: unknown[] })?.trades
+        ?? []
   }
 
   async getAgentStatus(): Promise<{

@@ -38,6 +38,11 @@ from agent.events.schemas import (
     EventType
 )
 from agent.core.config import settings
+from agent.core.log_context import (
+    EVENT_MODEL_PREDICTION,
+    KEY_FEATURE_QUALITY,
+    KEY_SYMBOL,
+)
 from feature_store.feature_registry import get_feature_list
 
 logger = structlog.get_logger()
@@ -273,6 +278,14 @@ class MCPOrchestrator:
                             candle_interval=tf,
                         )
                     )
+                    if fr.overall_quality == FeatureQuality.UNAVAILABLE or not fr.features:
+                        logger.warning(
+                            "mcp_orchestrator_v15_features_unavailable",
+                            symbol=symbol,
+                            timeframe=tf,
+                            feature_quality=fr.overall_quality.value,
+                        )
+                        return self._create_empty_prediction_response(symbol, context)
                     if first_fr is None:
                         first_fr = fr
                     snap = {f.name: float(f.value) for f in fr.features}
@@ -437,6 +450,20 @@ class MCPOrchestrator:
                     error_code="NO_MODEL_PREDICTIONS",
                     error_message=str(e),
                 )
+
+            logger.info(
+                EVENT_MODEL_PREDICTION,
+                **{
+                    KEY_SYMBOL: symbol,
+                    KEY_FEATURE_QUALITY: feature_response.overall_quality.value,
+                    "consensus_signal": getattr(
+                        model_response, "consensus_prediction", None
+                    ),
+                    "consensus_confidence": getattr(
+                        model_response, "consensus_confidence", None
+                    ),
+                },
+            )
 
             # Step 4: Generate reasoning chain via MCP Reasoning Engine
             # Build a rich market_context that can also be forwarded to

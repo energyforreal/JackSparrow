@@ -281,6 +281,19 @@ class TradingEventHandler:
             diagnostics_base["raw_confidence"] = raw_confidence
             diagnostics_base["calibrated_confidence"] = confidence
 
+            minimal_entry = bool(getattr(settings, "ai_signal_minimal_entry_gates", False))
+            try:
+                raw_ai_gate = max(0.0, min(1.0, float(payload.get("confidence", 0.0) or 0.0)))
+            except (TypeError, ValueError):
+                raw_ai_gate = 0.0
+            ai_floor = max(
+                0.0,
+                min(1.0, float(getattr(settings, "ai_signal_min_entry_confidence", 0.7) or 0.7)),
+            )
+            diagnostics_base["raw_ai_signal_confidence"] = raw_ai_gate
+            diagnostics_base["ai_signal_min_entry_confidence_floor"] = ai_floor
+            diagnostics_base["ai_signal_minimal_entry_gates"] = minimal_entry
+
             # Skip HOLD - no trade to execute
             if signal == "HOLD" or not signal:
                 self._log_entry_rejected(
@@ -292,9 +305,21 @@ class TradingEventHandler:
                 )
                 return
 
+            if minimal_entry and raw_ai_gate < ai_floor:
+                self._log_entry_rejected(
+                    "low_ai_signal_confidence",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    raw_ai_signal_confidence=raw_ai_gate,
+                    min_entry_confidence=ai_floor,
+                    **diagnostics_base,
+                )
+                return
+
             # Signal expiry: reject stale signals
             ts = payload.get("timestamp")
-            if ts is not None:
+            if not minimal_entry and ts is not None:
                 try:
                     ts_sec = decision_payload_timestamp_epoch_seconds(ts)
                     if ts_sec is None:
@@ -315,18 +340,21 @@ class TradingEventHandler:
                     pass
 
             v15_diag: Dict[str, Any] = {}
-            new_signal, v15_diag = apply_v15_entry_gate(signal, model_predictions, features)
-            if v15_diag.get("edge") is not None:
-                try:
-                    await self.context_manager.update_state(
-                        {
-                            "v15_live_edge": float(v15_diag["edge"]),
-                            "v15_live_edge_ts": now_utc.isoformat(),
-                        }
-                    )
-                except (TypeError, ValueError):
-                    pass
-            if new_signal == "HOLD" and signal not in ("HOLD", None, ""):
+            if minimal_entry:
+                new_signal = signal
+            else:
+                new_signal, v15_diag = apply_v15_entry_gate(signal, model_predictions, features)
+                if v15_diag.get("edge") is not None:
+                    try:
+                        await self.context_manager.update_state(
+                            {
+                                "v15_live_edge": float(v15_diag["edge"]),
+                                "v15_live_edge_ts": now_utc.isoformat(),
+                            }
+                        )
+                    except (TypeError, ValueError):
+                        pass
+            if not minimal_entry and new_signal == "HOLD" and signal not in ("HOLD", None, ""):
                 self._log_entry_rejected(
                     "v15_entry_gate",
                     symbol=symbol,
@@ -385,34 +413,49 @@ class TradingEventHandler:
                         )
                         await self.execution_module.close_position(symbol, exit_reason="signal_reversal")
                         return
+                    elif (pos_side == "long" and signal in ("BUY", "STRONG_BUY")) or (
+                        pos_side == "short" and signal in ("SELL", "STRONG_SELL")
+                    ):
+                        self._log_entry_rejected(
+                            "open_position_blocks_entry",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            position_side=pos_side,
+                            **diagnostics_base,
+                        )
+                        return
 
-            # Check confidence threshold (Redis learning layer may nudge within bounds)
-            eff_min_conf = await get_effective_min_confidence_threshold()
-            rec_threshold = resolve_metadata_recommended_threshold(
-                signal=signal,
-                model_predictions=model_predictions,
-            )
-            # Optional temporary validation mode for paper-trading pipeline checks.
-            if bool(getattr(settings, "paper_trade_validation_mode", False)):
-                eff_min_conf = float(
-                    getattr(settings, "paper_trade_validation_min_confidence", 0.45) or 0.45
-                )
-            elif rec_threshold is not None:
-                # Choose a conservative midpoint between global threshold and metadata recommendation.
-                eff_min_conf = max(0.0, min(1.0, (eff_min_conf + rec_threshold) / 2.0))
-            if confidence < eff_min_conf:
-                self._log_entry_rejected(
-                    "low_confidence_reject",
-                    symbol=symbol,
+            if minimal_entry:
+                confidence = raw_ai_gate
+            else:
+                # Check confidence threshold (Redis learning layer may nudge within bounds)
+                eff_min_conf = await get_effective_min_confidence_threshold()
+                rec_threshold = resolve_metadata_recommended_threshold(
                     signal=signal,
-                    event_id=event.event_id,
-                    confidence=confidence,
-                    threshold=eff_min_conf,
-                    metadata_recommended_threshold=rec_threshold,
-                    config_min_confidence_threshold=settings.min_confidence_threshold,
-                    **diagnostics_base,
+                    model_predictions=model_predictions,
                 )
-                return
+                # Optional temporary validation mode for paper-trading pipeline checks.
+                if bool(getattr(settings, "paper_trade_validation_mode", False)):
+                    eff_min_conf = float(
+                        getattr(settings, "paper_trade_validation_min_confidence", 0.45) or 0.45
+                    )
+                elif rec_threshold is not None:
+                    # Choose a conservative midpoint between global threshold and metadata recommendation.
+                    eff_min_conf = max(0.0, min(1.0, (eff_min_conf + rec_threshold) / 2.0))
+                if confidence < eff_min_conf:
+                    self._log_entry_rejected(
+                        "low_confidence_reject",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        confidence=confidence,
+                        threshold=eff_min_conf,
+                        metadata_recommended_threshold=rec_threshold,
+                        config_min_confidence_threshold=settings.min_confidence_threshold,
+                        **diagnostics_base,
+                    )
+                    return
 
             # Get portfolio value and current price from live market data
             state = self.context_manager.get_state()
@@ -432,65 +475,66 @@ class TradingEventHandler:
                 for p in model_predictions
                 if isinstance(p, dict)
             )
-            vol = features.get("volatility")
-            if vol is None and not is_v15_pred:
-                self._log_entry_rejected(
-                    "missing_volatility_reject",
-                    symbol=symbol,
-                    signal=signal,
-                    event_id=event.event_id,
-                    **diagnostics_base,
-                )
-                return
-            try:
-                vol_f = float(vol) if vol is not None else 0.0
-            except (TypeError, ValueError):
-                if not is_v15_pred:
+            if not minimal_entry:
+                vol = features.get("volatility")
+                if vol is None and not is_v15_pred:
                     self._log_entry_rejected(
-                        "invalid_volatility",
+                        "missing_volatility_reject",
                         symbol=symbol,
                         signal=signal,
                         event_id=event.event_id,
-                        volatility=vol,
                         **diagnostics_base,
                     )
                     return
-                vol_f = 0.0
-            min_vol = float(getattr(settings, "entry_min_volatility_for_trade", 0.0) or 0.0)
-            if min_vol > 0 and not is_v15_pred:
                 try:
-                    if vol_f < min_vol:
+                    vol_f = float(vol) if vol is not None else 0.0
+                except (TypeError, ValueError):
+                    if not is_v15_pred:
                         self._log_entry_rejected(
-                            "low_volatility",
+                            "invalid_volatility",
                             symbol=symbol,
                             signal=signal,
                             event_id=event.event_id,
-                            volatility=vol_f,
-                            min_volatility=min_vol,
+                            volatility=vol,
                             **diagnostics_base,
                         )
                         return
-                except Exception:
-                    pass
-            min_atr_pct = float(getattr(settings, "entry_min_atr_pct_of_price", 0.0) or 0.0)
-            if min_atr_pct > 0 and entry_price > 0:
-                atr_raw = features.get("atr_14")
-                if atr_raw is not None:
+                    vol_f = 0.0
+                min_vol = float(getattr(settings, "entry_min_volatility_for_trade", 0.0) or 0.0)
+                if min_vol > 0 and not is_v15_pred:
                     try:
-                        atr_f = float(atr_raw)
-                        if atr_f / entry_price < min_atr_pct:
+                        if vol_f < min_vol:
                             self._log_entry_rejected(
-                                "low_atr",
+                                "low_volatility",
                                 symbol=symbol,
                                 signal=signal,
                                 event_id=event.event_id,
-                                atr_pct=atr_f / entry_price,
-                                min_atr_pct=min_atr_pct,
+                                volatility=vol_f,
+                                min_volatility=min_vol,
                                 **diagnostics_base,
                             )
                             return
-                    except (TypeError, ValueError):
+                    except Exception:
                         pass
+                min_atr_pct = float(getattr(settings, "entry_min_atr_pct_of_price", 0.0) or 0.0)
+                if min_atr_pct > 0 and entry_price > 0:
+                    atr_raw = features.get("atr_14")
+                    if atr_raw is not None:
+                        try:
+                            atr_f = float(atr_raw)
+                            if atr_f / entry_price < min_atr_pct:
+                                self._log_entry_rejected(
+                                    "low_atr",
+                                    symbol=symbol,
+                                    signal=signal,
+                                    event_id=event.event_id,
+                                    atr_pct=atr_f / entry_price,
+                                    min_atr_pct=min_atr_pct,
+                                    **diagnostics_base,
+                                )
+                                return
+                        except (TypeError, ValueError):
+                            pass
             min_lot_size = max(1, int(getattr(settings, "min_lot_size", 1) or 1))
             fixed_lots = max(1, int(getattr(settings, "fixed_lot_size", 1) or 1))
             fixed_lots = max(min_lot_size, fixed_lots)
@@ -578,28 +622,30 @@ class TradingEventHandler:
                 min(required_margin_inr / max(available_cash_inr, 1.0), settings.max_position_size),
             )
 
-            # Validate trade with risk manager
-            validation = await self.risk_manager.validate_trade(
-                symbol=symbol,
-                side=risk_side,
-                proposed_size=proposed_size,
-                entry_price=entry_price,
-                stop_loss=None,  # Execution will compute from config
-            )
-
-            if not validation.get("approved", False):
-                self._log_entry_rejected(
-                    "risk_rejected",
+            # Validate trade with risk manager (skipped in minimal AI-entry mode after margin check)
+            if not minimal_entry:
+                validation = await self.risk_manager.validate_trade(
                     symbol=symbol,
-                    signal=signal,
-                    event_id=event.event_id,
-                    side=side,
-                    risk_reason=validation.get("reason", "Unknown"),
-                    **diagnostics_base,
+                    side=risk_side,
+                    proposed_size=proposed_size,
+                    entry_price=entry_price,
+                    stop_loss=None,  # Execution will compute from config
                 )
-                return
 
-            # Deduplicate: one RiskApproved per (symbol, side) per time window
+                if not validation.get("approved", False):
+                    self._log_entry_rejected(
+                        "risk_rejected",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        side=side,
+                        risk_reason=validation.get("reason", "Unknown"),
+                        **diagnostics_base,
+                    )
+                    return
+
+            # Deduplicate: one RiskApproved per (symbol, side) per time window.
+            # Keep this active even in minimal-entry mode to prevent burst duplicate fills.
             if self._should_skip_debounce(symbol, side):
                 self._log_entry_rejected(
                     "debounce",
@@ -649,7 +695,7 @@ class TradingEventHandler:
             if use_atr_sl_tp and stop_loss_price is not None and take_profit_price is not None:
                 sl_pct_eff = abs(entry_price - stop_loss_price) / entry_price
                 tp_pct_eff = abs(take_profit_price - entry_price) / entry_price
-                if not self._check_entry_profit_potential(
+                if not minimal_entry and not self._check_entry_profit_potential(
                     entry_price, side, sl_pct_eff, tp_pct_eff
                 ):
                     self._log_entry_rejected(
@@ -673,7 +719,9 @@ class TradingEventHandler:
                 take_profit_price = None
                 stop_pct = settings.stop_loss_percentage
                 take_pct = settings.take_profit_percentage
-                if not self._check_entry_profit_potential(entry_price, side, stop_pct, take_pct):
+                if not minimal_entry and not self._check_entry_profit_potential(
+                    entry_price, side, stop_pct, take_pct
+                ):
                     self._log_entry_rejected(
                         "profit_gate",
                         symbol=symbol,
@@ -692,7 +740,7 @@ class TradingEventHandler:
                     return
 
             # Multi-timeframe confirmation: block BUY if 15m trend bearish, SELL if 15m trend bullish
-            if getattr(settings, "mtf_confirmation_enabled", False):
+            if not minimal_entry and getattr(settings, "mtf_confirmation_enabled", False):
                 trend_15m = features.get("trend_15m")
                 if trend_15m is not None:
                     if signal in ("BUY", "STRONG_BUY") and trend_15m < 0:
@@ -717,7 +765,7 @@ class TradingEventHandler:
                         return
 
             # ADX ranging market filter: block mild BUY/SELL in very low trend strength
-            if not is_v15_pred:
+            if not minimal_entry and not is_v15_pred:
                 adx = features.get("adx_14")
                 adx_floor = float(
                     getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)
@@ -736,7 +784,7 @@ class TradingEventHandler:
                     return
 
             # EMA200 regime filter for trend conformity
-            if getattr(settings, "enforce_ema200_trend_filter", False):
+            if not minimal_entry and getattr(settings, "enforce_ema200_trend_filter", False):
                 ema200 = features.get("ema_200")
                 if ema200 is not None:
                     try:
@@ -767,7 +815,7 @@ class TradingEventHandler:
                         pass
 
             # Feature gate: near upper Bollinger band = resistance — avoid chasing BUY
-            if getattr(settings, "feature_filter_enabled", True) and signal in (
+            if not minimal_entry and getattr(settings, "feature_filter_enabled", True) and signal in (
                 "BUY",
                 "STRONG_BUY",
             ):
@@ -792,7 +840,7 @@ class TradingEventHandler:
                     except (TypeError, ValueError):
                         pass
 
-            if getattr(settings, "sr_strength_filter_enabled", True):
+            if not minimal_entry and getattr(settings, "sr_strength_filter_enabled", True):
                 if signal in ("BUY", "STRONG_BUY"):
                     sr_at_res = features.get("sr_at_resistance")
                     if bool(sr_at_res):
@@ -862,7 +910,7 @@ class TradingEventHandler:
                         except (TypeError, ValueError):
                             pass
 
-            if getattr(settings, "entry_signal_filter_enabled", True):
+            if not minimal_entry and getattr(settings, "entry_signal_filter_enabled", True):
                 filtered, filt_reason = self._entry_signal_filter.apply(signal, features)
                 if filtered == "HOLD" and signal != "HOLD":
                     self._log_entry_rejected(
@@ -900,7 +948,7 @@ class TradingEventHandler:
                 for p in model_predictions
                 if isinstance(p, dict)
             )
-            if is_v15:
+            if is_v15 and not minimal_entry:
                 diag_tf = str(
                     (v15_diag or {}).get("v15_timeframe")
                     or getattr(settings, "agent_interval", "15m")
@@ -982,7 +1030,7 @@ class TradingEventHandler:
             )
             await event_bus.publish(risk_approved)
             self._last_trade_wall_time = time.time()
-            if is_v15:
+            if is_v15 and not minimal_entry:
                 diag_tf = str(
                     (v15_diag or {}).get("v15_timeframe")
                     or getattr(settings, "agent_interval", "15m")
@@ -990,7 +1038,7 @@ class TradingEventHandler:
                 dl = diag_tf.lower().strip()
                 dkey = "5m" if dl.startswith("5") else "15m"
                 self._trades_today_by_tf[dkey] = self._trades_today_by_tf.get(dkey, 0) + 1
-            if getattr(settings, "entry_signal_filter_enabled", True):
+            if not minimal_entry and getattr(settings, "entry_signal_filter_enabled", True):
                 self._entry_signal_filter.record_trade()
 
             logger.info(
@@ -1000,6 +1048,7 @@ class TradingEventHandler:
                 quantity=quantity,
                 entry_price=entry_price,
                 event_id=event.event_id,
+                ai_signal_minimal_entry_gates=minimal_entry,
                 **diagnostics_base,
             )
             try:

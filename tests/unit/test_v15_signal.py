@@ -40,3 +40,41 @@ def test_apply_v15_entry_gate_noop_without_v15_models(monkeypatch) -> None:
     )
     assert sig == "BUY"
     assert diag == {}
+
+
+def test_evaluate_v15_entry_high_adx_holds_when_adx_regime_filter_on(monkeypatch) -> None:
+    """ADX above ranging max rejects entry when v15_adx_regime_filter_enabled is True."""
+    monkeypatch.setattr("agent.core.v15_signal.settings.volatility_filter_enabled", False)
+    monkeypatch.setattr("agent.core.v15_signal.settings.v15_adx_regime_filter_enabled", True)
+    monkeypatch.setattr("agent.core.v15_signal.settings.v15_adx_ranging_max", 25.0)
+    monkeypatch.setattr("agent.core.v15_signal.settings.edge_floor", 0.01)
+    monkeypatch.setattr("agent.core.v15_signal.settings.confidence_percentile", 50.0)
+    monkeypatch.setattr("agent.core.v15_signal.settings.v15_min_edge_cost_ratio", 0.001)
+    for _ in range(25):
+        _edge_buffers["5m"].append(0.2)
+    sig, diag = evaluate_v15_entry(
+        "5m",
+        0.5,
+        {"atr_pct": 0.01, "adx_14": 99.0, "close": 50000.0},
+    )
+    assert sig == "HOLD"
+    assert diag.get("regime_filter_passed") is False
+
+
+def test_evaluate_v15_entry_high_adx_allowed_when_adx_regime_filter_off(monkeypatch) -> None:
+    """With ADX regime filter disabled, high ADX does not force HOLD (edge still must pass)."""
+    monkeypatch.setattr("agent.core.v15_signal.settings.volatility_filter_enabled", False)
+    monkeypatch.setattr("agent.core.v15_signal.settings.v15_adx_regime_filter_enabled", False)
+    monkeypatch.setattr("agent.core.v15_signal.settings.edge_floor", 0.01)
+    monkeypatch.setattr("agent.core.v15_signal.settings.confidence_percentile", 50.0)
+    monkeypatch.setattr("agent.core.v15_signal.settings.v15_min_edge_cost_ratio", 0.001)
+    for _ in range(25):
+        _edge_buffers["5m"].append(0.2)
+    sig, diag = evaluate_v15_entry(
+        "5m",
+        0.5,
+        {"atr_pct": 0.01, "adx_14": 99.0, "close": 50000.0},
+    )
+    assert sig == "BUY"
+    assert diag.get("regime_filter_passed") is True
+    assert diag.get("v15_adx_regime_filter_enabled") is False
