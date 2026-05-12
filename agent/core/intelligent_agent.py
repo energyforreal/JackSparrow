@@ -64,7 +64,6 @@ from agent.core.learning_system import LearningSystem
 from agent.core.execution import execution_module
 from agent.core.position_restore import restore_open_positions_from_db
 from agent.core.redis_config import get_redis
-from agent.models.model_discovery import ModelDiscovery
 from agent.risk.risk_manager import RiskManager
 from agent.data.delta_client import DeltaExchangeClient
 from agent.core.exchange_gateway import build_exchange_gateway
@@ -123,7 +122,6 @@ class IntelligentAgent:
         self.risk_manager = RiskManager(config=settings)
         self.delta_client = DeltaExchangeClient()
         self.exchange_gateway = None
-        self.model_discovery = None  # Will be initialized after model_registry is set
         self.market_data_service = MarketDataService()
         # FeatureServerAPI is bound to the initialized MCP Feature Server in initialize().
         self.feature_server_api: FeatureServerAPI | None = None
@@ -237,7 +235,6 @@ class IntelligentAgent:
         # Model discovery and initialization is handled by MCP orchestrator
         self.model_registry = self.mcp_orchestrator.model_registry
         self.state_machine.model_registry = self.model_registry
-        self.model_discovery = ModelDiscovery(self.model_registry)
         
         # Initialize all components with event handlers
         await self.state_machine.initialize()

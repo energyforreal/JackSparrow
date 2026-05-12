@@ -72,22 +72,22 @@ class LearningSystemTestSuite(TestSuiteBase):
                 if tracking_methods.get("track_performance"):
                     try:
                         # Create test performance data
-                            test_performance = {
-                                "model_name": "test_model",
-                                "prediction": "BUY",
-                                "confidence": 75.0,
-                                "actual_outcome": "WIN",
-                                "pnl": 100.0
-                            }
-                            
-                            # Try to track performance
-                            await learning_system.track_performance(test_performance)
-                            result.details["performance_tracking_works"] = True
-                        except Exception as e:
-                            result.status = TestStatus.WARNING
-                            result.error = str(e)
-                            result.issues.append(f"Performance tracking call failed: {e}")
-                            result.solutions.append("Check performance tracking method signature")
+                        test_performance = {
+                            "model_name": "test_model",
+                            "prediction": "BUY",
+                            "confidence": 75.0,
+                            "actual_outcome": "WIN",
+                            "pnl": 100.0,
+                        }
+
+                        # Try to track performance
+                        await learning_system.track_performance(test_performance)
+                        result.details["performance_tracking_works"] = True
+                    except Exception as e:
+                        result.status = TestStatus.WARNING
+                        result.error = str(e)
+                        result.issues.append(f"Performance tracking call failed: {e}")
+                        result.solutions.append("Check performance tracking method signature")
                 else:
                     result.status = TestStatus.WARNING
                     result.issues.append("Performance tracking methods not found")

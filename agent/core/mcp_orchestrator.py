@@ -38,14 +38,104 @@ from agent.events.schemas import (
     EventType
 )
 from agent.core.config import settings
+from agent.core.v43_signal_gates import (
+    V43GateState,
+    apply_gate5_min_edge,
+    apply_gate5_min_edge_short,
+    apply_post_threshold_gates,
+    apply_post_threshold_gates_short,
+)
 from agent.core.log_context import (
     EVENT_MODEL_PREDICTION,
     KEY_FEATURE_QUALITY,
     KEY_SYMBOL,
 )
 from feature_store.feature_registry import get_feature_list
+from feature_store.jacksparrow_v43_contract import V43_FORWARD_TARGET_BARS
 
 logger = structlog.get_logger()
+
+
+def _v43_reasoning_portfolio_risk_overlay(symbol: str) -> Dict[str, Any]:
+    """Fields expected by reasoning step 4 (risk) from live AgentState.
+
+    ``context_manager.initialize()`` is not called by the runtime, so
+    ``current_state`` is ``None`` on every prediction cycle. We fall back to a
+    default :class:`AgentState` seeded with ``settings.initial_balance`` so
+    step-4 risk assessment can read portfolio fields and contribute its full
+    ~0.6 to calibration instead of being stuck at 0.2.
+    """
+    try:
+        from agent.core.context_manager import context_manager, AgentState as _AgentState
+
+        st = context_manager.get_state()
+    except Exception:
+        return {}
+    if st is None:
+        try:
+            st = _AgentState()
+            init_bal = float(getattr(settings, "initial_balance", 10000.0) or 10000.0)
+            st.portfolio_value = init_bal
+            st.cash_balance = init_bal
+        except Exception:
+            return {}
+    try:
+        pv = float(st.portfolio_value)
+        cash = float(st.cash_balance)
+    except (TypeError, ValueError):
+        return {}
+    overlay: Dict[str, Any] = {
+        "portfolio_value": pv,
+        "available_balance": cash,
+        "sharpe_ratio_rolling": float(getattr(st, "sharpe_ratio", 0.0) or 0.0),
+        "max_drawdown_current": float(getattr(st, "max_drawdown", 0.0) or 0.0),
+    }
+    try:
+        rl = st.risk_limits if isinstance(st.risk_limits, dict) else {}
+        lim = max(1, int(rl.get("max_open_positions", 5) or 5))
+        npos = len(getattr(st, "positions", None) or {})
+        overlay["portfolio_heat"] = float(npos) / float(lim)
+    except Exception:
+        pass
+    try:
+        positions = getattr(st, "positions", None) or {}
+        if symbol and symbol in positions:
+            overlay["has_open_position"] = True
+    except Exception:
+        pass
+    return overlay
+
+
+def _merge_prediction_context_with_agent_state(
+    symbol: str, context: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Caller context wins on key clashes; agent state fills portfolio / risk gaps."""
+    out = dict(context or {})
+    for k, v in _v43_reasoning_portfolio_risk_overlay(symbol).items():
+        if k not in out:
+            out[k] = v
+    return out
+
+
+def _decision_ws_metadata(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Extra fields on DecisionReadyEvent.payload for dashboard WebSocket consumers."""
+    if not result or not isinstance(result, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    lat = result.get("inference_latency_ms")
+    if lat is not None:
+        try:
+            out["inference_latency_ms"] = float(lat)
+        except (TypeError, ValueError):
+            pass
+    out["inference_source"] = "agent"
+    out["inference_mode"] = "primary"
+    mp = result.get("model_predictions") or []
+    if isinstance(mp, list) and mp and isinstance(mp[0], dict):
+        mv = mp[0].get("model_version")
+        if mv:
+            out["model_version"] = str(mv)
+    return out
 
 
 class MCPOrchestrator:
@@ -60,6 +150,7 @@ class MCPOrchestrator:
         self._required_feature_names_cache: List[str] = []
         self.delta_client = None  # Set by agent for 15m trend (MTF confirmation)
         self._initialized = False
+        self._v43_gate_state = V43GateState()
     
     async def initialize(self):
         """Initialize all MCP components."""
@@ -96,8 +187,8 @@ class MCPOrchestrator:
             # Enforce that at least one ML model is available before continuing
             # when strict mode is enabled. In non-strict (best-effort) mode the agent will
             # continue in monitoring mode without ML predictions.
-            # Default to best-effort (False) so v4-only deployments do not crash-loop
-            # when metadata/artifacts are temporarily unavailable.
+            # Default to best-effort (False) so monitoring deployments can start without
+            # a bundle and warm up when artifacts appear.
             require_models = bool(getattr(settings, "require_models_on_startup", False))
             if self.model_registry:
                 try:
@@ -122,25 +213,24 @@ class MCPOrchestrator:
                     logger.critical(
                         "mcp_orchestrator_no_models_loaded",
                         discovered_count=len(discovered_models),
-                        discovery_mode="v4_only",
+                        discovery_mode="jacksparrow_v43",
                         message=(
-                            "No ML models were loaded during initialization in v4-only mode and "
-                            "require_models_on_startup=True. Agent cannot run without v4 models."
+                            "No ML models loaded during initialization with "
+                            "require_models_on_startup=True (JackSparrow v43 bundle)."
                         ),
                     )
                     raise RuntimeError(
-                        "MCP Orchestrator initialization failed: no v4 ML models loaded."
+                        "MCP Orchestrator initialization failed: no v43 ML model loaded."
                     )
                 else:
                     logger.warning(
                         "mcp_orchestrator_no_models_loaded_monitoring_mode",
                         discovered_count=len(discovered_models),
-                         discovery_mode="v4_only",
+                        discovery_mode="jacksparrow_v43",
                         message=(
-                            "No v4 ML models were loaded during initialization in v4-only mode and "
+                            "No v43 ML model loaded during initialization and "
                             "require_models_on_startup=False. "
-                            "Agent will continue in monitoring mode without ML predictions until "
-                            "v4 metadata/artifacts are available."
+                            "Agent will continue in monitoring mode until MODEL_DIR bundle is valid."
                         ),
                     )
 
@@ -218,7 +308,289 @@ class MCPOrchestrator:
             "total_models": len(self.model_registry.models),
             "required_feature_count": len(self._required_feature_names_cache),
         }
-    
+
+    async def _process_jacksparrow_v43_prediction(
+        self,
+        symbol: str,
+        context: Dict[str, Any],
+        _t0: float,
+    ) -> Dict[str, Any]:
+        """Dedicated v43 path: multi-TF frames → model → five gates → reasoning."""
+        from agent.core.v43_market_frames import fetch_v43_market_frames
+
+        if not self.delta_client:
+            logger.warning(
+                "mcp_orchestrator_v43_no_delta_client",
+                symbol=symbol,
+                message="delta_client not set; cannot fetch v43 OHLCV frames",
+            )
+            return self._create_empty_prediction_response(symbol, context)
+
+        context = _merge_prediction_context_with_agent_state(symbol, context)
+
+        df5, df15, df1h, df_fund = await fetch_v43_market_frames(
+            self.delta_client, symbol
+        )
+        if df5.empty or len(df5) < 2:
+            return self._create_empty_prediction_response(symbol, context)
+
+        req_id = f"pred_v43_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        mctx = {
+            **context,
+            "v43_df5m": df5,
+            "v43_df15m": df15,
+            "v43_df1h": df1h,
+            "v43_df_funding": df_fund,
+            "current_price": context.get("current_price"),
+            "symbol": symbol,
+        }
+        model_request = MCPModelRequest(
+            request_id=req_id,
+            features=[],
+            context=mctx,
+            require_explanation=True,
+        )
+        try:
+            model_response = await self.model_registry.get_predictions(model_request)
+        except (NoModelsRegisteredError, NoHealthyModelPredictionsError) as e:
+            return self._create_model_error_prediction_response(
+                symbol=symbol,
+                context=context,
+                error_code=type(e).__name__,
+                error_message=str(e),
+            )
+
+        pred0 = model_response.predictions[0]
+        pctx = pred0.context if isinstance(pred0.context, dict) else {}
+        proba = float(pctx.get("expected_return", 0.0) or 0.0)
+        thr = float(pctx.get("threshold", 0.005) or 0.005)
+        regime = str(pctx.get("regime", "neutral") or "neutral")
+        u_scale = float(pctx.get("unc_scale", 1.0) or 1.0)
+        closed_feats = pctx.get("closed_bar_features") or {}
+        if not isinstance(closed_feats, dict):
+            closed_feats = {}
+
+        bar_idx = int(pctx.get("bar_index_hint", max(0, len(df5) - 1)))
+        has_open = bool(context.get("has_open_position", False))
+
+        eps = float(getattr(settings, "jacksparrow_v43_near_threshold_epsilon", 0.0) or 0.0)
+        raw_long = bool(proba > (thr - max(0.0, eps)))
+        short_enabled = bool(
+            getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
+        )
+        raw_short = bool(short_enabled and proba < -thr)
+        if raw_long and raw_short:
+            raw_long = raw_short = False
+
+        final_long = False
+        final_short = False
+        reject_tail = "below_threshold"
+
+        if raw_long:
+            gr2 = apply_post_threshold_gates(
+                raw_long=raw_long,
+                regime=regime,
+                current_bar_index=bar_idx,
+                has_open_position=has_open,
+                state=self._v43_gate_state,
+            )
+            reject_tail = gr2.reject_reason or "below_threshold"
+            if gr2.allow:
+                g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
+                final_long = bool(g5.allow)
+                if not final_long:
+                    reject_tail = g5.reject_reason or "min_edge_cost"
+            else:
+                reject_tail = gr2.reject_reason or "gate"
+        elif raw_short:
+            gr2s = apply_post_threshold_gates_short(
+                raw_short=raw_short,
+                regime=regime,
+                current_bar_index=bar_idx,
+                has_open_position=has_open,
+                state=self._v43_gate_state,
+            )
+            reject_tail = gr2s.reject_reason or "below_threshold_short"
+            if gr2s.allow:
+                g5s = apply_gate5_min_edge_short(proba, thr, self._v43_gate_state)
+                final_short = bool(g5s.allow)
+                if not final_short:
+                    reject_tail = g5s.reject_reason or "min_edge_cost"
+            else:
+                reject_tail = gr2s.reject_reason or "gate"
+        else:
+            if proba <= (thr - max(0.0, eps)):
+                reject_tail = "below_threshold"
+            elif eps > 0.0 and proba <= thr:
+                reject_tail = "near_threshold"
+            elif short_enabled and proba >= -thr:
+                reject_tail = "below_threshold_short"
+            else:
+                reject_tail = "below_threshold"
+
+        max_pct = float(getattr(settings, "jacksparrow_v43_max_position_pct", 0.2) or 0.2)
+        pos_hint = float(max(0.01, min(1.0, max_pct * u_scale)))
+
+        ai_entry_floor = float(getattr(settings, "ai_signal_min_entry_confidence", 0.7) or 0.7)
+        if final_long:
+            self._v43_gate_state.note_entry(bar_idx, datetime.now(timezone.utc))
+            conclusion = "BUY - JackSparrow v43 dedicated path (gates passed)"
+            step5_conf = max(float(pred0.confidence), min(1.0, ai_entry_floor * 0.96))
+        elif final_short:
+            self._v43_gate_state.note_entry(bar_idx, datetime.now(timezone.utc))
+            conclusion = "SELL - JackSparrow v43 dedicated path (gates passed)"
+            step5_conf = max(float(pred0.confidence), min(1.0, ai_entry_floor * 0.96))
+        else:
+            conclusion = f"HOLD - JackSparrow v43 ({reject_tail})"
+            # Raw edge cleared threshold but a later gate blocked — keep moderate step-5 weight.
+            step5_conf = 0.35 if (raw_long or raw_short) else float(pred0.confidence)
+
+        evidence_lines = [
+            f"expected_return={proba:.5f} thr={thr:.5f} eps={eps:.5f} regime={regime}",
+            f"gates final_long={final_long} final_short={final_short} reject={reject_tail}",
+            f"collapse_rate={self._v43_gate_state.counters.collapse_rate():.3f}",
+        ]
+        v43_decision = {
+            "enabled": True,
+            "conclusion": conclusion,
+            "confidence": step5_conf,
+            "evidence": evidence_lines,
+            "final_long": final_long,
+            "final_short": final_short,
+            "position_size_hint": pos_hint if (final_long or final_short) else 0.0,
+        }
+        v43_exec = {
+            "enabled": True,
+            "skip_legacy_entry_gate": True,
+            "skip_volatility_requirement": True,
+            "margin_cap_fraction": pos_hint if (final_long or final_short) else 0.0,
+            "unc_scale": u_scale,
+            "desired_side": ("long" if final_long else ("short" if final_short else None)),
+        }
+
+        ts = datetime.utcnow()
+        feat_list = [
+            MCPFeature(
+                name=str(k),
+                version="1.0.0",
+                value=float(v),
+                timestamp=ts,
+                quality=FeatureQuality.HIGH,
+                metadata={"v43": True},
+                computation_time_ms=0.0,
+            )
+            for k, v in sorted(closed_feats.items())[:80]
+        ]
+        if not feat_list:
+            feat_list = [
+                MCPFeature(
+                    name="v43_placeholder",
+                    version="1.0.0",
+                    value=0.0,
+                    timestamp=ts,
+                    quality=FeatureQuality.MEDIUM,
+                    metadata={},
+                    computation_time_ms=0.0,
+                )
+            ]
+        feature_response = MCPFeatureResponse(
+            features=feat_list,
+            quality_score=0.9,
+            overall_quality=FeatureQuality.HIGH,
+            timestamp=ts,
+            request_id=req_id,
+        )
+
+        model_predictions_payload: List[Dict[str, Any]] = [
+            self._serialize_model_prediction(p) for p in model_response.predictions
+        ]
+        features_dict: Dict[str, Any] = {str(k): float(v) for k, v in closed_feats.items()}
+        if "volatility" not in features_dict:
+            atr = features_dict.get("atr_pct")
+            if atr is not None:
+                features_dict["volatility"] = float(atr) * 100.0
+
+        market_context_for_reasoning: Dict[str, Any] = {
+            **(context or {}),
+            "symbol": symbol,
+            "features": features_dict,
+            "model_predictions": model_predictions_payload,
+            "consensus_signal": model_response.consensus_prediction,
+            "consensus_confidence": model_response.consensus_confidence,
+            "feature_quality": feature_response.overall_quality.value,
+            "quality_score": feature_response.quality_score,
+            "v43_dedicated_decision": v43_decision,
+            "v43_execution_profile": v43_exec,
+            "v43_gate_reject": None if (final_long or final_short) else reject_tail,
+            "v43_training_forward_bars": V43_FORWARD_TARGET_BARS,
+        }
+
+        reasoning_request = MCPReasoningRequest(
+            symbol=symbol,
+            market_context=market_context_for_reasoning,
+            use_memory=bool(self.vector_store),
+        )
+        reasoning_chain = await self.reasoning_engine.generate_reasoning(reasoning_request)
+
+        result = {
+            "symbol": symbol,
+            "timestamp": datetime.utcnow(),
+            "features": {
+                "data": [{"name": f.name, "value": f.value, "quality": f.quality.value}
+                       for f in feature_response.features],
+                "quality_score": feature_response.quality_score,
+                "overall_quality": feature_response.overall_quality.value,
+                "count": len(feature_response.features),
+            },
+            "models": {
+                "predictions": model_predictions_payload,
+                "consensus_prediction": model_response.consensus_prediction,
+                "consensus_confidence": model_response.consensus_confidence,
+                "healthy_models": model_response.healthy_models,
+                "total_models": model_response.total_models,
+            },
+            "model_predictions": model_predictions_payload,
+            "market_context": market_context_for_reasoning,
+            "reasoning": {
+                "chain_id": reasoning_chain.chain_id,
+                "steps": [
+                    {
+                        "step_number": step.step_number,
+                        "step_name": step.step_name,
+                        "description": step.description,
+                        "evidence": step.evidence,
+                        "confidence": step.confidence,
+                        "timestamp": step.timestamp.isoformat(),
+                    }
+                    for step in reasoning_chain.steps
+                ],
+                "conclusion": reasoning_chain.conclusion,
+                "final_confidence": reasoning_chain.final_confidence,
+            },
+            "decision": self._extract_decision_from_reasoning(reasoning_chain),
+        }
+        result["inference_latency_ms"] = (time.perf_counter() - _t0) * 1000.0
+        _gc = self._v43_gate_state.counters
+        logger.info(
+            "mcp_orchestrator_v43_prediction_complete",
+            symbol=symbol,
+            final_long=final_long,
+            final_short=final_short,
+            reject=reject_tail,
+            proba=proba,
+            thr=thr,
+            eps=eps,
+            v43_collapse_rate=_gc.collapse_rate(),
+            v43_cnt_signals_raw=_gc.signals_raw,
+            v43_cnt_rejected_pos_open=_gc.rejected_pos_open,
+            v43_cnt_rejected_debounce=_gc.rejected_debounce,
+            v43_cnt_rejected_freq_cap=_gc.rejected_freq_cap,
+            v43_cnt_rejected_regime=_gc.rejected_regime,
+            v43_cnt_rejected_edge=_gc.rejected_edge,
+            v43_cnt_trades_executed=_gc.trades_executed,
+        )
+        return result
+
     async def process_prediction_request(
         self,
         symbol: str,
@@ -250,355 +622,19 @@ class MCPOrchestrator:
 
             context = context or {}
 
-            def _all_v15_pipeline_models() -> bool:
-                if not self.model_registry or not self.model_registry.models:
-                    return False
-                return all(
-                    getattr(m, "model_type", "") == "xgboost_pipeline_v15"
-                    for m in self.model_registry.models.values()
-                )
-
-            use_v15_path = _all_v15_pipeline_models()
-            model_request: MCPModelRequest
-
-            if use_v15_path:
-                req_id = f"pred_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-                per_model_requests: Dict[str, MCPModelRequest] = {}
-                v15_feature_snapshots: Dict[str, Dict[str, float]] = {}
-                first_fr: Optional[MCPFeatureResponse] = None
-                for model_name, model in self.model_registry.models.items():
-                    info = model.get_model_info()
-                    names = list(info.get("features_required") or [])
-                    tf = str(info.get("timeframe", "15m"))
-                    fr = await self.feature_server.get_features(
-                        MCPFeatureRequest(
-                            feature_names=names,
-                            symbol=symbol,
-                            timestamp=context.get("timestamp"),
-                            candle_interval=tf,
-                        )
-                    )
-                    if fr.overall_quality == FeatureQuality.UNAVAILABLE or not fr.features:
-                        logger.warning(
-                            "mcp_orchestrator_v15_features_unavailable",
-                            symbol=symbol,
-                            timeframe=tf,
-                            feature_quality=fr.overall_quality.value,
-                        )
-                        return self._create_empty_prediction_response(symbol, context)
-                    if first_fr is None:
-                        first_fr = fr
-                    snap = {f.name: float(f.value) for f in fr.features}
-                    v15_feature_snapshots[tf] = snap
-                    vals = [f.value for f in fr.features]
-                    fnames = [f.name for f in fr.features]
-                    mctx = {
-                        **context,
-                        "features": vals,
-                        "feature_names": fnames,
-                        "feature_quality": fr.overall_quality.value,
-                        "current_price": context.get("current_price"),
-                        "v15_timeframe": tf,
-                        "v15_feature_snapshots": v15_feature_snapshots,
-                    }
-                    per_model_requests[model_name] = MCPModelRequest(
-                        request_id=req_id,
-                        features=vals,
-                        context=mctx,
-                        require_explanation=True,
-                    )
-                if not per_model_requests:
-                    return self._create_empty_prediction_response(symbol, context)
-                model_request = next(iter(per_model_requests.values()))
-                filter_tf = (
-                    getattr(settings, "v15_filter_feature_source_tf", "5m") or "5m"
-                ).strip().lower()
-                features_dict_merged: Dict[str, Any] = {}
-                if filter_tf in v15_feature_snapshots:
-                    features_dict_merged.update(v15_feature_snapshots[filter_tf])
-                for tf_k, snap in v15_feature_snapshots.items():
-                    if tf_k == filter_tf:
-                        continue
-                    for k, v in snap.items():
-                        features_dict_merged.setdefault(k, v)
-                ts = datetime.utcnow()
-                merged_list = [
-                    MCPFeature(
-                        name=k,
-                        version="1.0.0",
-                        value=float(v),
-                        timestamp=ts,
-                        quality=FeatureQuality.HIGH,
-                        metadata={"v15_merged": True},
-                        computation_time_ms=0.0,
-                    )
-                    for k, v in sorted(features_dict_merged.items())
-                ]
-                qsum = (
-                    sum(1.0 for _ in merged_list) / len(merged_list) if merged_list else 0.0
-                )
-                feature_response = MCPFeatureResponse(
-                    features=merged_list,
-                    quality_score=qsum,
-                    overall_quality=FeatureQuality.HIGH,
-                    timestamp=ts,
-                    request_id=req_id,
-                )
-                if not first_fr or not first_fr.features:
-                    logger.warning(
-                        "mcp_orchestrator_v15_no_features",
-                        symbol=symbol,
-                    )
-                    return self._create_empty_prediction_response(symbol, context)
-            else:
-                # Step 1: Get features via MCP Feature Server (legacy / v4 path)
-                feature_request = MCPFeatureRequest(
-                    feature_names=self._get_required_features(),
+            if not self.model_registry or not self.model_registry.models:
+                logger.warning(
+                    "mcp_orchestrator_prediction_no_models",
                     symbol=symbol,
-                    timestamp=context.get("timestamp"),
-                    require_quality=context.get("feature_quality", "medium"),
-                )
-
-                logger.debug(
-                    "mcp_orchestrator_requesting_features",
-                    symbol=symbol,
-                    feature_count=len(feature_request.feature_names),
-                )
-
-                feature_response = await self.feature_server.get_features(feature_request)
-
-                if not feature_response.features:
-                    logger.warning(
-                        "mcp_orchestrator_no_features_available",
-                        symbol=symbol,
-                        message="No features available for prediction",
-                    )
-                    try:
-                        basic_features = self._get_required_features()
-                        basic_feature_response = await self.get_features(
-                            basic_features, symbol
-                        )
-                        if basic_feature_response.features:
-                            feature_response = basic_feature_response
-                            logger.info(
-                                "mcp_orchestrator_basic_features_retrieved",
-                                symbol=symbol,
-                                feature_count=len(basic_feature_response.features),
-                            )
-                        else:
-                            return self._create_empty_prediction_response(symbol, context)
-                    except Exception as e:
-                        logger.warning(
-                            "mcp_orchestrator_basic_features_failed",
-                            symbol=symbol,
-                            error=str(e),
-                        )
-                        return self._create_empty_prediction_response(symbol, context)
-
-                model_context = {
-                    **context,
-                    "features": [feature.value for feature in feature_response.features],
-                    "feature_names": [feature.name for feature in feature_response.features],
-                    "feature_quality": feature_response.overall_quality.value,
-                    "current_price": context.get("current_price"),
-                }
-
-                model_request = MCPModelRequest(
-                    request_id=f"pred_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                    features=[feature.value for feature in feature_response.features],
-                    context=model_context,
-                    require_explanation=True,
-                )
-
-            logger.debug(
-                "mcp_orchestrator_requesting_predictions",
-                symbol=symbol,
-                model_request_id=model_request.request_id,
-            )
-
-            try:
-                if use_v15_path:
-                    model_response = await self.model_registry.get_predictions(
-                        model_request,
-                        per_model_requests=per_model_requests,
-                    )
-                else:
-                    model_response = await self.model_registry.get_predictions(model_request)
-            except NoModelsRegisteredError as e:
-                logger.error(
-                    "mcp_orchestrator_no_models_registered",
-                    symbol=symbol,
-                    error=str(e),
-                    message="Prediction request failed because no ML models are registered.",
                 )
                 return self._create_model_error_prediction_response(
                     symbol=symbol,
                     context=context,
                     error_code="NO_MODELS_REGISTERED",
-                    error_message=str(e),
-                )
-            except NoHealthyModelPredictionsError as e:
-                logger.error(
-                    "mcp_orchestrator_no_model_predictions",
-                    symbol=symbol,
-                    error=str(e),
-                    message="Prediction request failed because no acceptable model predictions are available.",
-                )
-                return self._create_model_error_prediction_response(
-                    symbol=symbol,
-                    context=context,
-                    error_code="NO_MODEL_PREDICTIONS",
-                    error_message=str(e),
+                    error_message="No ML models registered.",
                 )
 
-            logger.info(
-                EVENT_MODEL_PREDICTION,
-                **{
-                    KEY_SYMBOL: symbol,
-                    KEY_FEATURE_QUALITY: feature_response.overall_quality.value,
-                    "consensus_signal": getattr(
-                        model_response, "consensus_prediction", None
-                    ),
-                    "consensus_confidence": getattr(
-                        model_response, "consensus_confidence", None
-                    ),
-                },
-            )
-
-            # Step 4: Generate reasoning chain via MCP Reasoning Engine
-            # Build a rich market_context that can also be forwarded to
-            # downstream consumers (backend / frontend) for transparency.
-            # Start from raw feature values.
-            features_dict: Dict[str, Any] = {
-                f.name: f.value for f in feature_response.features
-            }
-            # Derive a generic volatility field when possible so the reasoning
-            # engine's risk assessment step can operate even if only
-            # volatility_10/volatility_20 are present.
-            if "volatility" not in features_dict:
-                derived_volatility = None
-                if "volatility_10" in features_dict:
-                    derived_volatility = features_dict["volatility_10"]
-                elif "volatility_20" in features_dict:
-                    derived_volatility = features_dict["volatility_20"]
-                if derived_volatility is not None:
-                    features_dict["volatility"] = derived_volatility
-
-            # Multi-timeframe trend (15m) when enabled
-            if getattr(settings, "mtf_confirmation_enabled", False) and getattr(self, "delta_client", None):
-                try:
-                    end_ts = int(datetime.now(timezone.utc).timestamp())
-                    start_ts = end_ts - 21 * 15 * 60  # 21 candles of 15m
-                    resp = await self.delta_client.get_candles(
-                        symbol=symbol, resolution="15m", start=start_ts, end=end_ts
-                    )
-                    result = resp.get("result") if isinstance(resp, dict) else resp
-                    candles = []
-                    if isinstance(result, dict):
-                        candles = result.get("candles", []) or []
-                    elif isinstance(result, list):
-                        candles = result
-                    if len(candles) >= 21:
-                        closes = []
-                        for c in candles[-21:]:
-                            close = c.get("close") or c.get("c")
-                            if close is not None:
-                                closes.append(float(close))
-                        if len(closes) >= 9:
-                            def _ema(vals: List[float], n: int) -> float:
-                                if not vals:
-                                    return 0.0
-                                k = 2.0 / (n + 1)
-                                ema = vals[0]
-                                for v in vals[1:]:
-                                    ema = k * v + (1 - k) * ema
-                                return ema
-                            ema9 = _ema(closes[-9:], 9)
-                            ema21 = _ema(closes, 21)
-                            if ema9 > ema21:
-                                features_dict["trend_15m"] = 1
-                            elif ema9 < ema21:
-                                features_dict["trend_15m"] = -1
-                            else:
-                                features_dict["trend_15m"] = 0
-                except Exception as e:
-                    logger.debug("mcp_orchestrator_trend_15m_failed", symbol=symbol, error=str(e))
-
-            model_predictions_payload: List[Dict[str, Any]] = [
-                self._serialize_model_prediction(pred)
-                for pred in model_response.predictions
-            ]
-
-            market_context_for_reasoning: Dict[str, Any] = {
-                **(context or {}),
-                "features": features_dict,
-                "model_predictions": model_predictions_payload,
-                "consensus_signal": model_response.consensus_prediction,
-                "consensus_confidence": model_response.consensus_confidence,
-                # Keep both the qualitative and quantitative quality scores so
-                # the reasoning engine and API consumers can use either.
-                "feature_quality": feature_response.overall_quality.value,
-                "quality_score": feature_response.quality_score,
-            }
-
-            reasoning_request = MCPReasoningRequest(
-                symbol=symbol,
-                market_context=market_context_for_reasoning,
-                use_memory=bool(self.vector_store),
-            )
-
-            reasoning_chain = await self.reasoning_engine.generate_reasoning(reasoning_request)
-
-            # Step 5: Compile complete response
-            result = {
-                "symbol": symbol,
-                "timestamp": datetime.utcnow(),
-                "features": {
-                    "data": [{"name": f.name, "value": f.value, "quality": f.quality.value}
-                           for f in feature_response.features],
-                    "quality_score": feature_response.quality_score,
-                    "overall_quality": feature_response.overall_quality.value,
-                    "count": len(feature_response.features)
-                },
-                "models": {
-                    "predictions": model_predictions_payload,
-                    "consensus_prediction": model_response.consensus_prediction,
-                    "consensus_confidence": model_response.consensus_confidence,
-                    "healthy_models": model_response.healthy_models,
-                    "total_models": model_response.total_models,
-                },
-                # Expose model_predictions and market_context at the top level
-                # so HTTP and event consumers can access them directly without
-                # re-deriving from nested structures.
-                "model_predictions": model_predictions_payload,
-                "market_context": market_context_for_reasoning,
-                "reasoning": {
-                    "chain_id": reasoning_chain.chain_id,
-                    "steps": [
-                        {
-                            "step_number": step.step_number,
-                            "step_name": step.step_name,
-                            "description": step.description,
-                            "evidence": step.evidence,
-                            "confidence": step.confidence,
-                            "timestamp": step.timestamp.isoformat()
-                        }
-                        for step in reasoning_chain.steps
-                    ],
-                    "conclusion": reasoning_chain.conclusion,
-                    "final_confidence": reasoning_chain.final_confidence
-                },
-                "decision": self._extract_decision_from_reasoning(reasoning_chain)
-            }
-
-            logger.info("mcp_orchestrator_prediction_complete",
-                       symbol=symbol,
-                       consensus_prediction=model_response.consensus_prediction,
-                       final_confidence=reasoning_chain.final_confidence,
-                       decision=result["decision"]["signal"])
-
-            result["inference_latency_ms"] = (time.perf_counter() - _t0) * 1000.0
-            return result
+            return await self._process_jacksparrow_v43_prediction(symbol, context, _t0)
 
         except Exception as e:
             logger.error("mcp_orchestrator_prediction_failed",
@@ -1180,17 +1216,20 @@ class MCPOrchestrator:
                     "market_context": result.get("market_context") or {},
                 }
 
-                decision_event = DecisionReadyEvent(
-                    source="mcp_orchestrator",
-                    correlation_id=event.event_id,
-                    payload={
+                decision_payload = {
                         "symbol": decision_symbol,
                         "signal": signal,
                         "confidence": confidence,
                         "position_size": position_size,
                         "reasoning_chain": reasoning_chain_payload,
                         "timestamp": timestamp,
-                    },
+                }
+                decision_payload.update(_decision_ws_metadata(result))
+
+                decision_event = DecisionReadyEvent(
+                    source="mcp_orchestrator",
+                    correlation_id=event.event_id,
+                    payload=decision_payload,
                 )
 
                 await event_bus.publish(decision_event)
@@ -1268,22 +1307,31 @@ class MCPOrchestrator:
                 payload={
                     "symbol": symbol,
                     "reasoning_chain": reasoning_chain_payload,
+                    "final_confidence": reasoning_chain.final_confidence,
+                    "timestamp": datetime.utcnow(),
                 },
             )
             await event_bus.publish(completion_event)
 
             # Emit decision ready event
             decision = self._extract_decision_from_reasoning(reasoning_chain)
-            decision_event = DecisionReadyEvent(
-                source="mcp_orchestrator",
-                correlation_id=event.event_id,
-                payload={
+            decision_payload = {
                     "symbol": symbol,
                     "signal": decision["signal"],
                     "confidence": decision["confidence"],
                     "position_size": decision["position_size"],
                     "reasoning_chain": reasoning_chain_payload,
-                },
+                    "timestamp": datetime.utcnow(),
+                }
+            decision_payload.update(
+                _decision_ws_metadata(
+                    {"model_predictions": model_predictions_for_reasoning}
+                )
+            )
+            decision_event = DecisionReadyEvent(
+                source="mcp_orchestrator",
+                correlation_id=event.event_id,
+                payload=decision_payload,
             )
             await event_bus.publish(decision_event)
 

@@ -77,6 +77,62 @@ def _mark_retrained(tf: str) -> None:
     _save_cooldown_state(st)
 
 
+def _failure_backoff_path() -> Path:
+    base = _state_path()
+    return base.parent / f"{base.stem}_failure_backoff.json"
+
+
+def _load_failure_backoff() -> Dict[str, Any]:
+    path = _failure_backoff_path()
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_failure_backoff(state: Dict[str, Any]) -> None:
+    path = _failure_backoff_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _failure_backoff_hours_remaining(tf: str) -> Optional[float]:
+    st = _load_failure_backoff()
+    ent = st.get(tf) or {}
+    until = ent.get("until_ts")
+    if until is None:
+        return None
+    try:
+        rem_s = float(until) - datetime.now(timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return None
+    return rem_s / 3600.0 if rem_s > 0 else None
+
+
+def _record_retrain_failure(tf: str) -> None:
+    base = float(getattr(settings, "adaptive_retrain_failure_cooldown_base_hours", 1.0) or 1.0)
+    max_h = float(getattr(settings, "adaptive_retrain_failure_cooldown_max_hours", 8.0) or 8.0)
+    st = _load_failure_backoff()
+    ent = st.get(tf) or {}
+    failures = int(ent.get("failures", 0)) + 1
+    hours = min(max_h, base * (2 ** max(0, failures - 1)))
+    until = datetime.now(timezone.utc).timestamp() + hours * 3600.0
+    st[tf] = {"failures": failures, "until_ts": until, "hours": hours}
+    _save_failure_backoff(st)
+
+
+def _clear_failure_backoff(tf: str) -> None:
+    st = _load_failure_backoff()
+    if tf in st:
+        del st[tf]
+        _save_failure_backoff(st)
+
+
 def _parsed_adaptive_timeframes() -> List[str]:
     raw = str(getattr(settings, "adaptive_retrain_timeframes", "5m,15m") or "5m,15m")
     return [x.strip() for x in raw.split(",") if x.strip()]
@@ -175,45 +231,52 @@ def maybe_retrain_timeframe(
 
     drift_metric = str(getattr(settings, "adaptive_drift_metric", "ks") or "ks").strip().lower()
     limit = int(getattr(settings, "adaptive_drift_feature_limit", 5) or 5)
+    min_consensus = int(getattr(settings, "adaptive_drift_consensus_min_count", 5) or 5)
+    require_consensus = bool(
+        getattr(settings, "adaptive_drift_require_ks_psi_consensus", True)
+    )
 
-    drifted_ks: list = []
-    drifted_psi: list = []
-    ks_triggers = False
-    psi_triggers = False
+    drifted_ks = drift_detector.detect_drift(
+        df_past,
+        df_recent,
+        feature_cols,
+        alpha=float(getattr(settings, "adaptive_drift_alpha", 0.01) or 0.01),
+        stat_threshold=float(getattr(settings, "adaptive_drift_stat_threshold", 0.10) or 0.10),
+    )
+    drifted_psi = drift_detector.detect_drift_psi(
+        df_past,
+        df_recent,
+        feature_cols,
+        psi_threshold=float(getattr(settings, "adaptive_drift_psi_threshold", 0.20) or 0.20),
+        bins=int(getattr(settings, "adaptive_drift_psi_bins", 10) or 10),
+    )
 
-    if drift_metric in ("ks", "both", "either", "all"):
-        drifted_ks = drift_detector.detect_drift(
-            df_past,
-            df_recent,
-            feature_cols,
-            alpha=float(getattr(settings, "adaptive_drift_alpha", 0.01) or 0.01),
-            stat_threshold=float(getattr(settings, "adaptive_drift_stat_threshold", 0.10) or 0.10),
-        )
+    consensus_names = drift_detector.consensus_drift_feature_names(
+        drifted_ks, drifted_psi
+    )
+    consensus_detail: Dict[str, Any] = {
+        "consensus_drift_count": len(consensus_names),
+        "consensus_features_sample": consensus_names[:25],
+    }
+
+    if require_consensus:
+        drift_triggers = len(consensus_names) >= min_consensus
+    else:
         ks_triggers = drift_detector.should_retrain_from_drift(drifted_ks, limit)
-
-    if drift_metric in ("psi", "both", "either", "all"):
-        drifted_psi = drift_detector.detect_drift_psi(
-            df_past,
-            df_recent,
-            feature_cols,
-            psi_threshold=float(getattr(settings, "adaptive_drift_psi_threshold", 0.25) or 0.25),
-            bins=int(getattr(settings, "adaptive_drift_psi_bins", 10) or 10),
-        )
         psi_triggers = drift_detector.should_retrain_from_psi(drifted_psi, limit)
+        if drift_metric == "either":
+            drift_triggers = ks_triggers or psi_triggers
+        elif drift_metric in ("both", "all"):
+            drift_triggers = ks_triggers and psi_triggers
+        elif drift_metric == "psi":
+            drift_triggers = psi_triggers
+        else:
+            drift_triggers = ks_triggers
 
     perf_triggers = False
     perf_detail: Dict[str, Any] = {}
     if bool(getattr(settings, "adaptive_performance_retrain_enabled", False)):
         perf_triggers, perf_detail = performance_trigger.performance_retrain_triggered()
-
-    if drift_metric == "either":
-        drift_triggers = ks_triggers or psi_triggers
-    elif drift_metric == "both" or drift_metric == "all":
-        drift_triggers = ks_triggers and psi_triggers
-    elif drift_metric == "psi":
-        drift_triggers = psi_triggers
-    else:
-        drift_triggers = ks_triggers
 
     if not drift_triggers and not perf_triggers:
         return {
@@ -225,16 +288,22 @@ def maybe_retrain_timeframe(
             "drifted_psi_count": len(drifted_psi),
             "limit": limit,
             "performance_trigger": perf_detail,
+            **consensus_detail,
         }
 
     cooldown_h = float(getattr(settings, "adaptive_retrain_cooldown_hours", 12.0) or 12.0)
-    rem = _cooldown_hours_remaining(timeframe, cooldown_h)
+    rem_cd = _cooldown_hours_remaining(timeframe, cooldown_h)
+    rem_fb = _failure_backoff_hours_remaining(timeframe)
+    rem_parts = [x for x in (rem_cd, rem_fb) if x is not None]
+    rem = max(rem_parts) if rem_parts else None
     if rem is not None:
         return {
             "action": "skip",
             "detail": "cooldown",
             "timeframe": timeframe,
             "hours_remaining": round(rem, 2),
+            "hours_remaining_success_cooldown": round(rem_cd, 2) if rem_cd else None,
+            "hours_remaining_failure_backoff": round(rem_fb, 2) if rem_fb else None,
         }
 
     df_train = _slice_retrain_tail(df, timeframe)
@@ -290,6 +359,7 @@ def maybe_retrain_timeframe(
             error=str(e),
             exc_info=True,
         )
+        _record_retrain_failure(timeframe)
         return {"action": "error", "detail": f"warm_start:{e}", "timeframe": timeframe}
 
     val_rows = int(getattr(settings, "adaptive_validation_window_rows", 10000) or 10000)
@@ -301,6 +371,7 @@ def maybe_retrain_timeframe(
 
     min_imp = float(getattr(settings, "adaptive_min_f1_improvement", 0.0) or 0.0)
     require_sc = bool(getattr(settings, "adaptive_validation_scorecard_enabled", False))
+    require_fg = bool(getattr(settings, "adaptive_v43_five_gates_enabled", False))
     accepted, val_detail = model_validator.validate_model_upgrade(
         old_bundle,
         new_model,
@@ -308,6 +379,7 @@ def maybe_retrain_timeframe(
         y_val,
         min_improvement=min_imp,
         require_scorecard=require_sc,
+        require_five_gates=require_fg,
     )
     old_f1 = float(val_detail.get("old_f1", 0.0))
     new_f1 = float(val_detail.get("new_f1", 0.0))
@@ -320,6 +392,7 @@ def maybe_retrain_timeframe(
             new_f1=new_f1,
             rejected_reason=val_detail.get("rejected_reason"),
         )
+        _record_retrain_failure(timeframe)
         return {
             "action": "rejected",
             "detail": val_detail.get("rejected_reason") or "validation_gate",
@@ -367,6 +440,7 @@ def maybe_retrain_timeframe(
             "old_scorecard": val_detail.get("old_scorecard"),
         },
     )
+    _clear_failure_backoff(timeframe)
     _mark_retrained(timeframe)
 
     logger.info(
@@ -388,10 +462,78 @@ def maybe_retrain_timeframe(
     }
 
 
+def _run_adaptive_retrain_subprocess(timeframe: str, parquet_dir: str) -> Dict[str, Any]:
+    """Run ``maybe_retrain_timeframe`` in an isolated process (stdout JSON result)."""
+    import json
+    import subprocess
+    import sys
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "agent.learning.adaptive.retrain_worker",
+        "--timeframe",
+        timeframe,
+        "--parquet-dir",
+        parquet_dir,
+    ]
+    timeout = int(
+        getattr(settings, "adaptive_retrain_subprocess_timeout_seconds", 7200) or 7200
+    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        _record_retrain_failure(timeframe)
+        return {"action": "error", "detail": "subprocess_timeout", "timeframe": timeframe}
+    lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    if not lines:
+        _record_retrain_failure(timeframe)
+        return {
+            "action": "error",
+            "detail": "subprocess_empty_stdout",
+            "timeframe": timeframe,
+            "exit_code": proc.returncode,
+            "stderr_tail": (proc.stderr or "")[-800:],
+        }
+    try:
+        return json.loads(lines[-1])
+    except Exception:
+        _record_retrain_failure(timeframe)
+        return {
+            "action": "error",
+            "detail": "subprocess_parse_failed",
+            "timeframe": timeframe,
+            "exit_code": proc.returncode,
+            "stderr_tail": (proc.stderr or "")[-800:],
+        }
+
+
 async def run_adaptive_retrain_tick(mcp_orchestrator: Optional[Any] = None) -> Dict[str, Any]:
     """Evaluate all configured timeframes once (intended hourly)."""
     if not bool(getattr(settings, "adaptive_retrain_enabled", False)):
         return {"ran": False, "reason": "disabled"}
+
+    model_dir = Path(str(getattr(settings, "model_dir", "") or "")).expanduser()
+    try:
+        resolved = model_dir.resolve()
+    except Exception:
+        resolved = model_dir
+    if any((resolved / name).is_file() for name in ("metadata_v43.json", "metadata_v44.json")):
+        logger.info(
+            "adaptive_retrain_incompatible_jacksparrow_v43",
+            model_dir=str(resolved),
+            message=(
+                "Adaptive warm-start targets legacy pipeline bundles (metadata_BTCUSD_*.json); "
+                "skipped when MODEL_DIR is JackSparrow v43/v44-named bundle."
+            ),
+        )
+        return {"ran": False, "reason": "jacksparrow_v43_model_dir"}
 
     source = (getattr(settings, "adaptive_labeled_data_source", "none") or "none").strip().lower()
     if source != "parquet":
@@ -403,9 +545,20 @@ async def run_adaptive_retrain_tick(mcp_orchestrator: Optional[Any] = None) -> D
 
     results: Dict[str, Any] = {}
     any_accepted = False
+    import asyncio
+
+    use_sub = bool(getattr(settings, "adaptive_retrain_subprocess_enabled", True))
+    pdir_abs = str(pdir.resolve())
     for tf in _parsed_adaptive_timeframes():
-        df = load_labeled_parquet(pdir, tf)
-        results[tf] = maybe_retrain_timeframe(tf, df)
+        if use_sub:
+            results[tf] = await asyncio.to_thread(
+                _run_adaptive_retrain_subprocess,
+                tf,
+                pdir_abs,
+            )
+        else:
+            df = load_labeled_parquet(pdir, tf)
+            results[tf] = maybe_retrain_timeframe(tf, df)
         if results[tf].get("action") == "accepted":
             any_accepted = True
     refresh: Dict[str, Any] = {}

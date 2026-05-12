@@ -105,6 +105,12 @@ export interface ModelConsensus {
   p_sell?: number
   p_hold?: number
   edge?: number
+  /** v43 ensemble: simple forward-return scale (preferred over tanh MCP score) */
+  expected_return?: number
+  threshold?: number
+  regime?: string
+  /** v43 MCP legacy normalized score (-1..1); ancillary to expected_return */
+  mcp_tanh_prediction?: number
   timeframe?: string
 }
 
@@ -123,7 +129,7 @@ export interface Signal {
   // Confidence is stored as percentage (0-100) for display,
   // but normalization helpers accept both 0-1 and 0-100.
   confidence: number
-  model_consensus: ModelConsensus[]
+  model_consensus?: ModelConsensus[]
   // WebSocket currently sends an array of reasoning steps only,
   // while HTTP predictions can provide full ReasoningChain metadata.
   reasoning_chain?: ReasoningStep[]
@@ -138,7 +144,21 @@ export interface Signal {
   inference_source?: InferenceSource
   inference_mode?: InferenceMode
   model_version?: string
-  /** v15: model edge p_buy − p_sell (optional) */
+  /** Reasoning chain id from agent (WebSocket). */
+  chain_id?: string
+  /** Reasoning engine final confidence, 0-1 (may differ from calibrated UI confidence). */
+  final_confidence?: number
+  /** v43 JackSparrow: regime label from model context when surfaced on signal. */
+  regime?: string
+  /** v43: expected return from model context. */
+  expected_return?: number
+  /** v43: decision threshold. */
+  threshold?: number
+  /** v43: orchestrator/post-threshold gate reason when HOLD. */
+  v43_gate_reject?: string
+  /** v43 MCP tanh-normalized prediction (avoid as primary economics signal). */
+  mcp_tanh_prediction?: number
+  /** v15: model edge p_buy − p_sell (optional); v43 WS may reuse for tanh ancillary */
   edge?: number
   p_buy?: number
   p_sell?: number
@@ -153,10 +173,15 @@ export interface HealthStatus {
   health_score?: number
   services: Record<string, ServiceStatus>
   degradation_reasons?: string[]
+  /** Overall rollup: healthy | degraded | unhealthy (from backend). */
   status?: string
   agent_state?: string
-  /** When false, paper trading is disabled (e.g. models unhealthy). */
+  /** When false, automated trading per health rules may be unavailable. */
   trading_ready?: boolean
+  /** Backend trading_mode setting: paper | live (lowercase). */
+  trading_mode?: string
+  /** Optional model inventory summary from backend health (v15/v43 bundles). */
+  ml_models?: Record<string, unknown>
   timestamp?: string | Date
 }
 

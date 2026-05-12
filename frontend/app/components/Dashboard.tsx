@@ -1,7 +1,8 @@
 'use client'
 import dynamic from 'next/dynamic'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import toast from 'react-hot-toast'
+import type { ReasoningChain, Signal } from '@/types'
 import { AgentStatus } from './AgentStatus'
 import { PortfolioSummary } from './PortfolioSummary'
 import { Header } from './Header'
@@ -38,6 +39,27 @@ const ReasoningChainView = dynamic(
   }
 )
 
+function reasoningChainMetaFromSignal(signal: Signal | null): ReasoningChain | undefined {
+  if (!signal) return undefined
+  if (signal.reasoning_chain_full) return signal.reasoning_chain_full
+  const steps = signal.reasoning_chain
+  if ((!steps || steps.length === 0) && !signal.conclusion) return undefined
+
+  let fc: number = signal.final_confidence ?? signal.confidence ?? 0
+  if (fc > 1) fc = fc / 100
+  fc = Math.min(1, Math.max(0, fc))
+
+  const ts = signal.timestamp != null ? signal.timestamp : new Date().toISOString()
+
+  return {
+    chain_id: signal.chain_id ?? '',
+    timestamp: ts,
+    steps: steps ?? [],
+    conclusion: signal.conclusion ?? '',
+    final_confidence: fc,
+  }
+}
+
 export function Dashboard() {
   // Use the unified trading data hook - replaces multiple specialized hooks
   const {
@@ -55,6 +77,8 @@ export function Dashboard() {
     performanceData,
     resetLocalTradingState
   } = useTradingData()
+
+  const reasoningChainMeta = useMemo(() => reasoningChainMetaFromSignal(signal), [signal])
 
   // Extract positions from portfolio - much simpler now!
   const positions = portfolio?.positions || []
@@ -236,7 +260,7 @@ export function Dashboard() {
             <ErrorBoundary>
               <ReasoningChainView
                 reasoningChain={signal?.reasoning_chain || []}
-                chainMeta={signal?.reasoning_chain_full}
+                chainMeta={reasoningChainMeta ?? signal?.reasoning_chain_full}
                 overallConfidence={signal?.confidence}
                 isLoading={isLoading}
                 modelConsensus={signal?.model_consensus}
@@ -244,6 +268,13 @@ export function Dashboard() {
                 modelVersion={signal?.model_version ?? modelData?.model_version}
                 inferenceLatencyMs={signal?.inference_latency_ms ?? modelData?.inference_latency_ms}
                 inferenceMode={signal?.inference_mode ?? modelData?.inference_mode}
+                v43ExpectedReturn={
+                  signal?.expected_return != null ? Number(signal.expected_return) : undefined
+                }
+                v43Threshold={
+                  signal?.threshold != null ? Number(signal.threshold) : undefined
+                }
+                v43GateReject={signal?.v43_gate_reject}
               />
             </ErrorBoundary>
           </TabsContent>

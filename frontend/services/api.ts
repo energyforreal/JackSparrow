@@ -150,6 +150,7 @@ class ApiClient {
   async getHealth(): Promise<{
     status: string
     health_score: number
+    score?: number
     services: Record<string, {
       status: string
       latency_ms?: number
@@ -158,11 +159,15 @@ class ApiClient {
     }>
     degradation_reasons?: string[]
     agent_state?: string
+    trading_ready?: boolean
+    trading_mode?: string
+    ml_models?: Record<string, unknown>
     timestamp?: string
   }> {
     return sendCommand('get_health') as Promise<{
       status: string
       health_score: number
+      score?: number
       services: Record<string, {
         status: string
         latency_ms?: number
@@ -171,6 +176,9 @@ class ApiClient {
       }>
       degradation_reasons?: string[]
       agent_state?: string
+      trading_ready?: boolean
+      trading_mode?: string
+      ml_models?: Record<string, unknown>
       timestamp?: string
     }>
   }

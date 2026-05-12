@@ -17,7 +17,6 @@ from agent.core.config import settings
 from agent.core.futures_utils import margin_required_inr, price_to_lots, entry_leg_fees_usd
 from agent.core.sl_tp import compute_stop_take_prices
 from agent.core.product_specs import get_contract_specs
-from agent.core.v15_signal import apply_v15_entry_gate
 from agent.core.decision_timestamp import decision_payload_timestamp_epoch_seconds
 from agent.core.learning_system import LearningSystem
 from agent.core.signal_filter import EntrySignalFilter
@@ -266,6 +265,13 @@ class TradingEventHandler:
             )
             if not isinstance(features, dict):
                 features = {}
+            mc = (
+                (payload.get("reasoning_chain") or {}).get("market_context", {})
+                if isinstance(payload.get("reasoning_chain"), dict)
+                else {}
+            )
+            v43_ex = mc.get("v43_execution_profile") if isinstance(mc, dict) else None
+            v43_exec_enabled = isinstance(v43_ex, dict) and bool(v43_ex.get("enabled"))
             entry_proba_summary = self._summarize_model_entry_proba(model_predictions)
             diagnostics_base: Dict[str, Any] = {
                 "hour_bucket_utc": hour_bucket_utc,
@@ -306,12 +312,12 @@ class TradingEventHandler:
                 return
 
             if minimal_entry and raw_ai_gate < ai_floor:
+                # diagnostics_base already includes raw_ai_signal_confidence (= raw_ai_gate)
                 self._log_entry_rejected(
                     "low_ai_signal_confidence",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
-                    raw_ai_signal_confidence=raw_ai_gate,
                     min_entry_confidence=ai_floor,
                     **diagnostics_base,
                 )
@@ -339,29 +345,21 @@ class TradingEventHandler:
                 except Exception:
                     pass
 
-            v15_diag: Dict[str, Any] = {}
+            signal_path_diag: Dict[str, Any] = {}
             if minimal_entry:
                 new_signal = signal
             else:
-                new_signal, v15_diag = apply_v15_entry_gate(signal, model_predictions, features)
-                if v15_diag.get("edge") is not None:
-                    try:
-                        await self.context_manager.update_state(
-                            {
-                                "v15_live_edge": float(v15_diag["edge"]),
-                                "v15_live_edge_ts": now_utc.isoformat(),
-                            }
-                        )
-                    except (TypeError, ValueError):
-                        pass
+                new_signal = signal
+                if v43_exec_enabled:
+                    signal_path_diag = {"v43_execution_profile": True}
             if not minimal_entry and new_signal == "HOLD" and signal not in ("HOLD", None, ""):
                 self._log_entry_rejected(
-                    "v15_entry_gate",
+                    "entry_signal_hold_after_synthesis",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
                     **diagnostics_base,
-                    **v15_diag,
+                    **signal_path_diag,
                 )
                 return
             signal = new_signal
@@ -373,7 +371,7 @@ class TradingEventHandler:
                 risk_side = "short"
             else:
                 self._log_entry_rejected(
-                    "v15_gate_hold",
+                    "unexpected_hold_signal",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
@@ -389,21 +387,6 @@ class TradingEventHandler:
                     if (pos_side == "long" and signal in ("STRONG_SELL", "SELL")) or (
                         pos_side == "short" and signal in ("STRONG_BUY", "BUY")
                     ):
-                        mh = open_pos.get("v15_min_hold_until")
-                        if mh is not None:
-                            now = datetime.now(timezone.utc)
-                            if isinstance(mh, datetime):
-                                mhu = mh if mh.tzinfo else mh.replace(tzinfo=timezone.utc)
-                                if now < mhu:
-                                    self._log_entry_rejected(
-                                        "v15_min_hold_blocks_reversal",
-                                        symbol=symbol,
-                                        signal=signal,
-                                        event_id=event.event_id,
-                                        min_hold_until=mhu.isoformat(),
-                                        **diagnostics_base,
-                                    )
-                                    return
                         logger.info(
                             "signal_reversal_exit",
                             symbol=symbol,
@@ -428,6 +411,11 @@ class TradingEventHandler:
 
             if minimal_entry:
                 confidence = raw_ai_gate
+            elif v43_exec_enabled:
+                confidence = max(
+                    float(confidence or 0.0),
+                    float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52) * 0.85,
+                )
             else:
                 # Check confidence threshold (Redis learning layer may nudge within bounds)
                 eff_min_conf = await get_effective_min_confidence_threshold()
@@ -470,14 +458,9 @@ class TradingEventHandler:
                 )
                 return
 
-            is_v15_pred = any(
-                (p.get("context") or {}).get("format") == "v15_pipeline"
-                for p in model_predictions
-                if isinstance(p, dict)
-            )
             if not minimal_entry:
                 vol = features.get("volatility")
-                if vol is None and not is_v15_pred:
+                if vol is None and not v43_exec_enabled:
                     self._log_entry_rejected(
                         "missing_volatility_reject",
                         symbol=symbol,
@@ -489,7 +472,7 @@ class TradingEventHandler:
                 try:
                     vol_f = float(vol) if vol is not None else 0.0
                 except (TypeError, ValueError):
-                    if not is_v15_pred:
+                    if not v43_exec_enabled:
                         self._log_entry_rejected(
                             "invalid_volatility",
                             symbol=symbol,
@@ -501,7 +484,7 @@ class TradingEventHandler:
                         return
                     vol_f = 0.0
                 min_vol = float(getattr(settings, "entry_min_volatility_for_trade", 0.0) or 0.0)
-                if min_vol > 0 and not is_v15_pred:
+                if min_vol > 0 and not v43_exec_enabled:
                     try:
                         if vol_f < min_vol:
                             self._log_entry_rejected(
@@ -517,7 +500,7 @@ class TradingEventHandler:
                     except Exception:
                         pass
                 min_atr_pct = float(getattr(settings, "entry_min_atr_pct_of_price", 0.0) or 0.0)
-                if min_atr_pct > 0 and entry_price > 0:
+                if min_atr_pct > 0 and entry_price > 0 and not v43_exec_enabled:
                     atr_raw = features.get("atr_14")
                     if atr_raw is not None:
                         try:
@@ -558,7 +541,26 @@ class TradingEventHandler:
                 conf_f = 0.5
             conf_f = max(0.0, min(1.0, conf_f))
 
-            if getattr(settings, "use_notional_lot_sizing", False):
+            if v43_exec_enabled and isinstance(v43_ex, dict):
+                alloc_frac = max(
+                    0.01,
+                    min(
+                        1.0,
+                        float(v43_ex.get("margin_cap_fraction", 0.2) or 0.2),
+                    ),
+                )
+                margin_inr = available_cash_inr * alloc_frac
+                usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
+                max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
+                entry_lots = price_to_lots(
+                    usd_margin=usd_margin,
+                    btc_price=entry_price,
+                    leverage=leverage,
+                    contract_value_btc=cv,
+                    max_lots=max_lots,
+                    min_lots=min_lot_size,
+                )
+            elif getattr(settings, "use_notional_lot_sizing", False):
                 alloc_frac = max(
                     0.01,
                     min(
@@ -765,7 +767,7 @@ class TradingEventHandler:
                         return
 
             # ADX ranging market filter: block mild BUY/SELL in very low trend strength
-            if not minimal_entry and not is_v15_pred:
+            if not minimal_entry and not v43_exec_enabled:
                 adx = features.get("adx_14")
                 adx_floor = float(
                     getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)
@@ -943,58 +945,6 @@ class TradingEventHandler:
 
             quantity = float(lots)
 
-            is_v15 = any(
-                (p.get("context") or {}).get("format") == "v15_pipeline"
-                for p in model_predictions
-                if isinstance(p, dict)
-            )
-            if is_v15 and not minimal_entry:
-                diag_tf = str(
-                    (v15_diag or {}).get("v15_timeframe")
-                    or getattr(settings, "agent_interval", "15m")
-                )
-                if bool(getattr(settings, "v15_min_trade_gap_enabled", True)):
-                    gap_bars = int(getattr(settings, "v15_min_trade_gap_bars", 3) or 3)
-                    need_s = gap_bars * _tf_bar_seconds(diag_tf)
-                    if self._last_trade_wall_time > 0 and (
-                        time.time() - self._last_trade_wall_time
-                    ) < need_s:
-                        self._log_entry_rejected(
-                            "min_trade_gap",
-                            symbol=symbol,
-                            signal=signal,
-                            event_id=event.event_id,
-                            min_seconds=need_s,
-                            **diagnostics_base,
-                        )
-                        return
-                if bool(getattr(settings, "v15_daily_trade_cap_enabled", True)):
-                    day = now_utc.strftime("%Y-%m-%d")
-                    if day != self._trades_day_key:
-                        self._trades_day_key = day
-                        self._trades_today_by_tf = {}
-                    dl = diag_tf.lower().strip()
-                    dkey = "5m" if dl.startswith("5") else "15m"
-                    cap_name = (
-                        "v15_max_trades_per_day_5m"
-                        if dkey == "5m"
-                        else "v15_max_trades_per_day_15m"
-                    )
-                    cap = int(getattr(settings, cap_name, 8 if dkey == "5m" else 4) or 0)
-                    used = self._trades_today_by_tf.get(dkey, 0)
-                    if cap > 0 and used >= cap:
-                        self._log_entry_rejected(
-                            "daily_trade_cap",
-                            symbol=symbol,
-                            signal=signal,
-                            event_id=event.event_id,
-                            timeframe=dkey,
-                            cap=cap,
-                            **diagnostics_base,
-                        )
-                        return
-
-            # Publish RiskApprovedEvent to trigger execution
             risk_payload = {
                 "symbol": symbol,
                 "side": side,
@@ -1012,8 +962,8 @@ class TradingEventHandler:
                 "tick_size": tick_sz,
                 "product_id": specs.product_id,
             }
-            if v15_diag:
-                risk_payload["v15_diagnostics"] = v15_diag
+            if signal_path_diag:
+                risk_payload["signal_path_diagnostics"] = signal_path_diag
             atr_out = features.get("atr_14")
             if atr_out is not None:
                 try:
@@ -1030,14 +980,6 @@ class TradingEventHandler:
             )
             await event_bus.publish(risk_approved)
             self._last_trade_wall_time = time.time()
-            if is_v15 and not minimal_entry:
-                diag_tf = str(
-                    (v15_diag or {}).get("v15_timeframe")
-                    or getattr(settings, "agent_interval", "15m")
-                )
-                dl = diag_tf.lower().strip()
-                dkey = "5m" if dl.startswith("5") else "15m"
-                self._trades_today_by_tf[dkey] = self._trades_today_by_tf.get(dkey, 0) + 1
             if not minimal_entry and getattr(settings, "entry_signal_filter_enabled", True):
                 self._entry_signal_filter.record_trade()
 

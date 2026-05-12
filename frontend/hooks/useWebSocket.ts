@@ -184,42 +184,6 @@ export function useWebSocket(url: string): UseWebSocketReturn {
             // Normalize message format - handle both new simplified format and legacy format
             const message = normalizeWebSocketMessage(rawMessage)
 
-            // Optional agent debug logging for selected messages
-            if (
-              process.env.NODE_ENV === 'development' &&
-              process.env.NEXT_PUBLIC_DEBUG_AGENT_LOGS === 'true'
-            ) {
-              try {
-                if (
-                  (message.type === 'data_update' && (message as any).resource === 'signal') ||
-                  message.type === 'agent_update'
-                ) {
-                  fetch('http://127.0.0.1:7242/ingest/7dea5b1b-57ff-4463-be90-44a6ac830f12', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'X-Debug-Session-Id': 'c0204f',
-                    },
-                    body: JSON.stringify({
-                      sessionId: 'c0204f',
-                      runId: 'pre-fix',
-                      hypothesisId: message.type === 'agent_update' ? 'H4' : 'H2_H5',
-                      location: 'frontend/hooks/useWebSocket.ts:onmessage',
-                      message: 'ws_inbound',
-                      data: {
-                        type: message.type,
-                        resource: (message as any).resource,
-                        hasData: !!(message as any).data,
-                      },
-                      timestamp: Date.now(),
-                    }),
-                  }).catch(() => {})
-                }
-              } catch {
-                // Logging must never affect WebSocket handling
-              }
-            }
-
             // Log inbound WebSocket message
             logWebSocketMessage(
               'inbound',

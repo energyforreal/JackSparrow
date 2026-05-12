@@ -70,6 +70,7 @@ class MCPModelRegistry:
             "failed_files": [],
             "last_error_messages": [],
             "last_attempt_at": None,
+            "model_integration": "jacksparrow_v43",
         }
     
     async def initialize(self):
@@ -167,6 +168,7 @@ class MCPModelRegistry:
             "last_attempt_at": datetime.utcnow().isoformat() if discovery_attempted else None,
             "pending_models": len(self._pending_models),
             "pending_model_names": list(self._pending_models.keys())[:10],
+            "model_integration": "jacksparrow_v43",
         }
     
     def _normalize_weights(self):
@@ -189,7 +191,7 @@ class MCPModelRegistry:
         """Get predictions from all healthy models.
 
         When ``per_model_requests`` is set, each model name maps to its own
-        MCPModelRequest (used for v15 per-timeframe feature vectors).
+        MCPModelRequest (optional per-timeframe feature vectors for legacy nodes).
         """
         
         if not self.models:
@@ -737,7 +739,8 @@ class MCPModelRegistry:
                     "prediction": pred.prediction,
                     "confidence": pred.confidence,
                     "reasoning": pred.reasoning,
-                    "health_status": pred.health_status
+                    "health_status": pred.health_status,
+                    "context": pred.context if isinstance(pred.context, dict) else pred.context,
                 }
                 for pred in response.predictions
             ]
@@ -909,7 +912,7 @@ class MCPModelRegistry:
             "model_statuses": health_statuses,
             "registry_health": registry_health,  # Keep for backward compatibility
             "discovery": self._discovery_summary,
-            "model_format": getattr(settings, "model_format", "auto"),
+            "model_format": str(getattr(settings, "model_format", "jacksparrow_v43") or "jacksparrow_v43"),
         }
     
     def _record_prediction_result(self, model_name: str, latency_ms: float, success: bool):

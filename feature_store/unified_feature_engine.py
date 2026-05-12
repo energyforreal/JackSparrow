@@ -40,6 +40,7 @@ V4_EXTRA_FEATURES = [
 FEATURE_ALIASES = {
     "macd_hist": "macd_histogram",
     "bb_pct": "bb_position",
+    "bb_pos": "bb_position",
     "vol_ratio": "volume_ratio",
     "volatility": "volatility_20",
 }

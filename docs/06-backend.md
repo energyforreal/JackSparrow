@@ -681,6 +681,20 @@ All WebSocket messages use a unified envelope format:
 
 Per-model `model_consensus[]` entries may also include `p_buy`, `p_sell`, `p_hold`, `edge`, and `timeframe` when `context.format === "v15_pipeline"`.
 
+**v43 extensions** (JackSparrow v43 regression bundle — primary stack today):
+
+| Field | Description |
+|-------|-------------|
+| `expected_return` | Model point estimate of forward return on the **v43** label horizon (when present, this is the canonical edge field for UI and logs). |
+| `threshold` | Dynamic score threshold used when the orchestrator compared the raw score to long/short rails. |
+| `regime` | Regime tag from model / context (string), when surfaced onto the top-level signal. |
+| `mcp_tanh_prediction` | Ancillary normalised score roughly in **[-1, 1]** derived from the same prediction (use when `expected_return` is missing). |
+| `v43_gate_reject` | Present on **HOLD**/blocked legs: short reason from post-threshold **`v43_signal_gates`** (`agent/core/v43_signal_gates.py`). |
+
+**Redis** (optional diagnostics): the backend appends recent v43 signal snapshots to **`jacksparrow:v43:signal_history:<symbol>`** (`backend/services/agent_event_subscriber.py`), including `expected_return` and `mcp_tanh_prediction` for drift of the last N bars.
+
+Per-model `model_consensus[]` rows for **`jacksparrow_v43`** may include the same keys when the agent forwards model context; the backend prefers the row with largest **|expected_return|** when consolidating.
+
 **Reasoning Chain Update** (`data_update` with `resource: "signal"`):
 ```json
 {

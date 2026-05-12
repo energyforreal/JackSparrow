@@ -33,11 +33,11 @@ from backend.utils.futures_contract import unrealized_pnl_usd
 logger = structlog.get_logger()
 
 
-def _v15_ws_fields_from_predictions(
+def _jacksparrow_ws_fields_from_predictions(
     model_predictions: Any,
     reasoning_chain: Any,
 ) -> Dict[str, Any]:
-    """Best-effort v15 fields for WebSocket signal payload (optional / backward compatible)."""
+    """JackSparrow v43 fields for WebSocket signal payloads."""
     out: Dict[str, Any] = {}
     preds = model_predictions
     if preds is None and isinstance(reasoning_chain, dict):
@@ -45,49 +45,81 @@ def _v15_ws_fields_from_predictions(
     if not isinstance(preds, list):
         return out
     best: Optional[tuple] = None
-    best_abs = -1.0
+    best_score = -1.0
     for p in preds:
         if not isinstance(p, dict):
             continue
         ctx = p.get("context") or {}
-        if not isinstance(ctx, dict) or ctx.get("format") != "v15_pipeline":
+        if not isinstance(ctx, dict) or ctx.get("format") != "jacksparrow_v43":
             continue
         try:
-            edge = float(p.get("prediction", 0.0))
+            tanh_score = float(p.get("prediction", 0.0))
         except (TypeError, ValueError):
-            edge = 0.0
-        if abs(edge) >= best_abs:
-            best_abs = abs(edge)
-            best = (edge, ctx)
+            tanh_score = 0.0
+        er_raw = ctx.get("expected_return")
+        try:
+            er_f = float(er_raw) if er_raw is not None else None
+        except (TypeError, ValueError):
+            er_f = None
+        rank = abs(er_f) if er_f is not None else abs(tanh_score)
+        if rank >= best_score:
+            best_score = rank
+            best = (tanh_score, er_f, ctx)
     if not best:
         return out
-    edge, ctx = best
-    out["edge"] = edge
-    if ctx.get("p_buy") is not None:
-        out["p_buy"] = ctx.get("p_buy")
-    if ctx.get("p_sell") is not None:
-        out["p_sell"] = ctx.get("p_sell")
-    if ctx.get("p_hold") is not None:
-        out["p_hold"] = ctx.get("p_hold")
-    if ctx.get("timeframe") is not None:
-        out["v15_timeframe"] = ctx.get("timeframe")
+    tanh_score, er_f, ctx = best
+    # Legacy MCP field: tanh-compressed score (avoid using as primary economic signal)
+    out["edge"] = tanh_score
+    out["mcp_tanh_prediction"] = tanh_score
+    if er_f is not None:
+        out["expected_return"] = er_f
+    elif ctx.get("expected_return") is not None:
+        try:
+            out["expected_return"] = float(ctx["expected_return"])
+        except (TypeError, ValueError):
+            pass
+    thr = ctx.get("threshold")
+    if thr is not None:
+        try:
+            out["threshold"] = float(thr)
+        except (TypeError, ValueError):
+            pass
+    if ctx.get("regime") is not None:
+        out["regime"] = ctx.get("regime")
     return out
 
 
-async def _append_v15_edge_history_redis(symbol: str, signal_data: Dict[str, Any]) -> None:
+def _v43_gate_reject_from_context(reasoning_chain: Any, market_context: Any) -> Optional[str]:
+    if isinstance(market_context, dict):
+        rj = market_context.get("v43_gate_reject")
+        if rj:
+            return str(rj)
+    if not isinstance(reasoning_chain, dict):
+        return None
+    mc = reasoning_chain.get("market_context")
+    if isinstance(mc, dict):
+        rj = mc.get("v43_gate_reject")
+        if rj:
+            return str(rj)
+    return None
+
+
+async def _append_signal_edge_history_redis(symbol: str, signal_data: Dict[str, Any]) -> None:
     if signal_data.get("edge") is None:
         return
     try:
         r = await get_redis(required=False)
         if not r:
             return
-        key = f"jacksparrow:v15:edge_history:{symbol}"
+        key = f"jacksparrow:v43:signal_history:{symbol}"
         entry = json.dumps(
             {
                 "ts": signal_data.get("timestamp"),
                 "edge": signal_data["edge"],
+                "mcp_tanh_prediction": signal_data.get("mcp_tanh_prediction"),
+                "expected_return": signal_data.get("expected_return"),
                 "signal": signal_data.get("signal"),
-                "timeframe": signal_data.get("v15_timeframe"),
+                "regime": signal_data.get("regime"),
             },
             default=str,
         )
@@ -111,16 +143,22 @@ def _model_consensus_row(
         "prediction": prediction_value,
     }
     pctx = pred.get("context") or {}
-    if isinstance(pctx, dict) and pctx.get("format") == "v15_pipeline":
-        if pctx.get("p_buy") is not None:
-            row["p_buy"] = pctx.get("p_buy")
-        if pctx.get("p_sell") is not None:
-            row["p_sell"] = pctx.get("p_sell")
-        if pctx.get("p_hold") is not None:
-            row["p_hold"] = pctx.get("p_hold")
-        if pctx.get("timeframe") is not None:
-            row["timeframe"] = pctx.get("timeframe")
+    if isinstance(pctx, dict) and pctx.get("format") == "jacksparrow_v43":
+        er = pctx.get("expected_return")
+        if er is not None:
+            try:
+                row["expected_return"] = float(er)
+            except (TypeError, ValueError):
+                pass
+        if pctx.get("threshold") is not None:
+            try:
+                row["threshold"] = float(pctx["threshold"])
+            except (TypeError, ValueError):
+                pass
+        if pctx.get("regime") is not None:
+            row["regime"] = pctx.get("regime")
         row["edge"] = prediction_value
+        row["mcp_tanh_prediction"] = prediction_value
     return row
 
 
@@ -143,6 +181,60 @@ def _map_consensus_signal_to_string(value: Any) -> str:
     if pred_value < -0.6:
         return "STRONG_SELL"
     return "SELL"
+
+
+def _normalize_model_prediction_complete_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Unify legacy registry payloads with orchestrator result dict (mcp_orchestrator).
+
+    Orchestrator uses model_predictions / models.predictions and nests consensus
+    under models; registry uses top-level predictions + consensus_*.
+    """
+    models_section = payload.get("models")
+    if not isinstance(models_section, dict):
+        models_section = {}
+
+    predictions = payload.get("predictions")
+    if predictions is None:
+        predictions = payload.get("model_predictions")
+    if predictions is None:
+        predictions = models_section.get("predictions")
+    if not isinstance(predictions, list):
+        predictions = []
+
+    consensus_signal = payload.get("consensus_signal")
+    if consensus_signal is None:
+        consensus_signal = models_section.get("consensus_prediction")
+
+    consensus_confidence = payload.get("consensus_confidence")
+    if consensus_confidence is None:
+        consensus_confidence = models_section.get("consensus_confidence")
+
+    market_context = payload.get("market_context")
+    if isinstance(market_context, dict):
+        if consensus_signal is None:
+            consensus_signal = market_context.get("consensus_signal")
+        if consensus_confidence is None:
+            consensus_confidence = market_context.get("consensus_confidence")
+
+    if consensus_signal is None:
+        consensus_signal = 0.0
+    if consensus_confidence is None:
+        consensus_confidence = 0.0
+
+    symbol = payload.get("symbol", "BTCUSD")
+    out: Dict[str, Any] = {
+        "symbol": symbol,
+        "predictions": predictions,
+        "consensus_signal": consensus_signal,
+        "consensus_confidence": float(consensus_confidence),
+    }
+    ts = payload.get("timestamp")
+    if ts is not None:
+        out["timestamp"] = ts
+    for key in ("inference_latency_ms", "inference_source", "inference_mode", "model_version"):
+        if key in payload and payload[key] is not None:
+            out[key] = payload[key]
+    return out
 
 
 class AgentEventSubscriber:
@@ -899,11 +991,12 @@ class AgentEventSubscriber:
             payload: ModelPredictionCompleteEvent payload
         """
         try:
-            symbol = payload.get("symbol", "")
-            predictions = payload.get("predictions", [])
-            consensus_signal = payload.get("consensus_signal", 0.0)
-            consensus_confidence = payload.get("consensus_confidence", 0.0)
-            timestamp = payload.get("timestamp")
+            norm = _normalize_model_prediction_complete_payload(payload)
+            symbol = norm.get("symbol", "")
+            predictions = norm.get("predictions", [])
+            consensus_signal = norm.get("consensus_signal", 0.0)
+            consensus_confidence = norm.get("consensus_confidence", 0.0)
+            timestamp = norm.get("timestamp", payload.get("timestamp"))
             
             # Extract individual model reasoning from predictions
             individual_reasoning = []
@@ -983,6 +1076,9 @@ class AgentEventSubscriber:
                 "model_predictions": predictions,
                 "timestamp": formatted_timestamp
             }
+            for key in ("inference_latency_ms", "inference_source", "inference_mode", "model_version"):
+                if norm.get(key) is not None:
+                    model_data[key] = norm[key]
             model_message = create_model_update(model_data)
             await unified_websocket_manager.broadcast(model_message, channel="data_update")
 
@@ -1011,7 +1107,11 @@ class AgentEventSubscriber:
         try:
             reasoning_chain = payload.get("reasoning_chain", {})
             symbol = payload.get("symbol", "BTCUSD")
-            final_confidence = payload.get("final_confidence", 0.0)
+            final_confidence = payload.get("final_confidence")
+            if final_confidence is None and isinstance(reasoning_chain, dict):
+                final_confidence = reasoning_chain.get("final_confidence", 0.0)
+            if final_confidence is None:
+                final_confidence = 0.0
             timestamp = payload.get("timestamp")
             
             # Extract reasoning chain steps
@@ -1056,8 +1156,26 @@ class AgentEventSubscriber:
                 "final_confidence": final_confidence,
                 "chain_id": chain_id,
                 "market_context": market_context,
-                "timestamp": formatted_timestamp
+                "timestamp": formatted_timestamp,
+                "reasoning_chain_full": {
+                    "chain_id": chain_id or "",
+                    "timestamp": formatted_timestamp,
+                    "steps": reasoning_steps,
+                    "conclusion": conclusion,
+                    "final_confidence": final_confidence,
+                },
             }
+            model_preds = (
+                market_context.get("model_predictions")
+                if isinstance(market_context, dict)
+                else None
+            )
+            reasoning_data.update(
+                _jacksparrow_ws_fields_from_predictions(model_preds, reasoning_chain)
+            )
+            rj = _v43_gate_reject_from_context(reasoning_chain, market_context)
+            if rj:
+                reasoning_data["v43_gate_reject"] = rj
             # Reasoning is part of signal data, so use signal update
             signal_message = create_signal_update(reasoning_data)
             await unified_websocket_manager.broadcast(signal_message, channel="data_update")
@@ -1405,6 +1523,23 @@ class AgentEventSubscriber:
             if avg_model > 0:
                 confidence = max(0.0, min(1.0, avg_model))
 
+        chain_id = reasoning_chain.get("chain_id", "") if isinstance(reasoning_chain, dict) else ""
+        final_from_chain = (
+            reasoning_chain.get("final_confidence") if isinstance(reasoning_chain, dict) else None
+        )
+        chain_final = confidence
+        if final_from_chain is not None:
+            chain_final = float(final_from_chain)
+            if chain_final > 1.0:
+                chain_final = chain_final / 100.0
+            chain_final = max(0.0, min(1.0, chain_final))
+
+        ts_raw = payload.get("timestamp", datetime.now(timezone.utc))
+        if hasattr(ts_raw, "isoformat"):
+            ts_str = ts_raw.isoformat()
+        else:
+            ts_str = str(ts_raw)
+
         # Create signal data for WebSocket
         signal_data = {
             "signal": signal,
@@ -1414,13 +1549,26 @@ class AgentEventSubscriber:
             "conclusion": conclusion,
             "individual_model_reasoning": individual_reasoning,
             "model_consensus": model_consensus,
-            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+            "chain_id": chain_id,
+            "final_confidence": chain_final,
+            "timestamp": ts_str,
+            "reasoning_chain_full": {
+                "chain_id": chain_id or "",
+                "timestamp": ts_str,
+                "steps": reasoning_steps,
+                "conclusion": conclusion,
+                "final_confidence": chain_final,
+            },
         }
         signal_data.update(
-            _v15_ws_fields_from_predictions(model_predictions, reasoning_chain)
+            _jacksparrow_ws_fields_from_predictions(model_predictions, reasoning_chain)
         )
+        for k in ("inference_latency_ms", "inference_source", "inference_mode", "model_version"):
+            v = payload.get(k)
+            if v is not None:
+                signal_data[k] = v
 
-        await _append_v15_edge_history_redis(symbol, signal_data)
+        await _append_signal_edge_history_redis(symbol, signal_data)
 
         # Broadcast signal update
         signal_message = create_signal_update(signal_data)
@@ -1480,17 +1628,19 @@ class AgentEventSubscriber:
 
     async def _handle_model_prediction_consolidated(self, payload: Dict[str, Any]):
         """Handle model_prediction_complete events with simplified logic."""
-        symbol = payload.get("symbol", "BTCUSD")
-        predictions = payload.get("predictions", [])
-        consensus_signal = payload.get("consensus_signal")
-        consensus_confidence = payload.get("consensus_confidence", 0.0)
+        norm = _normalize_model_prediction_complete_payload(payload)
+        symbol = norm.get("symbol", "BTCUSD")
+        predictions = norm.get("predictions", [])
+        consensus_signal = norm.get("consensus_signal", 0.0)
+        consensus_confidence = norm.get("consensus_confidence", 0.0)
 
         # Normalize confidence
         if consensus_confidence > 1.0:
             consensus_confidence = consensus_confidence / 100.0
+        consensus_confidence = max(0.0, min(1.0, consensus_confidence))
 
         # Map numeric consensus_signal to discrete string for frontend Signal type
-        signal_str = _map_consensus_signal_to_string(payload.get("consensus_signal"))
+        signal_str = _map_consensus_signal_to_string(consensus_signal)
 
         # Build per-model consensus and reasoning structures for frontend display
         individual_reasoning = []
@@ -1528,6 +1678,12 @@ class AgentEventSubscriber:
                     )
 
         # Create model data
+        ts = norm.get("timestamp", payload.get("timestamp", datetime.now(timezone.utc)))
+        if hasattr(ts, "isoformat"):
+            ts_str = ts.isoformat()
+        else:
+            ts_str = str(ts)
+
         model_data = {
             "symbol": symbol,
             "consensus_signal": signal_str,
@@ -1539,8 +1695,11 @@ class AgentEventSubscriber:
             "model_predictions": predictions,
             "individual_model_reasoning": individual_reasoning,
             "model_consensus": model_consensus,
-            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+            "timestamp": ts_str,
         }
+        for key in ("inference_latency_ms", "inference_source", "inference_mode", "model_version"):
+            if norm.get(key) is not None:
+                model_data[key] = norm[key]
 
         # Broadcast model update
         model_message = create_model_update(model_data)
@@ -1550,15 +1709,30 @@ class AgentEventSubscriber:
         """Handle reasoning_complete events with simplified logic."""
         symbol = payload.get("symbol", "BTCUSD")
         reasoning_chain = payload.get("reasoning_chain", {})
-        final_confidence = payload.get("final_confidence", 0.0)
+        final_confidence = payload.get("final_confidence")
+        if final_confidence is None and isinstance(reasoning_chain, dict):
+            final_confidence = reasoning_chain.get("final_confidence", 0.0)
+        if final_confidence is None:
+            final_confidence = 0.0
 
         # Normalize confidence
         if final_confidence > 1.0:
             final_confidence = final_confidence / 100.0
+        final_confidence = max(0.0, min(1.0, final_confidence))
 
         # Extract reasoning data
         steps = reasoning_chain.get("steps", []) if isinstance(reasoning_chain, dict) else []
         conclusion = reasoning_chain.get("conclusion", "") if isinstance(reasoning_chain, dict) else ""
+        chain_id = reasoning_chain.get("chain_id", "") if isinstance(reasoning_chain, dict) else ""
+        market_context_rc = (
+            reasoning_chain.get("market_context", {}) if isinstance(reasoning_chain, dict) else {}
+        )
+
+        ts_raw = payload.get("timestamp", datetime.now(timezone.utc))
+        if hasattr(ts_raw, "isoformat"):
+            ts_str = ts_raw.isoformat()
+        else:
+            ts_str = str(ts_raw)
 
         # Create reasoning data
         reasoning_data = {
@@ -1566,11 +1740,30 @@ class AgentEventSubscriber:
             "reasoning_chain": steps,
             "conclusion": conclusion,
             "final_confidence": final_confidence,
+            "chain_id": chain_id,
             # Expose final confidence under generic 'confidence' key so the
             # primary signal display always has a value to show.
             "confidence": final_confidence,
-            "timestamp": payload.get("timestamp", datetime.now(timezone.utc).isoformat())
+            "timestamp": ts_str,
+            "reasoning_chain_full": {
+                "chain_id": chain_id or "",
+                "timestamp": ts_str,
+                "steps": steps,
+                "conclusion": conclusion,
+                "final_confidence": final_confidence,
+            },
         }
+        model_preds_rc = (
+            market_context_rc.get("model_predictions")
+            if isinstance(market_context_rc, dict)
+            else None
+        )
+        reasoning_data.update(
+            _jacksparrow_ws_fields_from_predictions(model_preds_rc, reasoning_chain)
+        )
+        rj = _v43_gate_reject_from_context(reasoning_chain, market_context_rc)
+        if rj:
+            reasoning_data["v43_gate_reject"] = rj
 
         # Broadcast reasoning update (part of signal data)
         signal_message = create_signal_update(reasoning_data)

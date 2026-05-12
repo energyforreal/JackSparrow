@@ -1,9 +1,10 @@
 """Tests for Telegram notifier."""
 
-import importlib
+from __future__ import annotations
+
 import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -14,31 +15,56 @@ MODULE_PATH = PROJECT_ROOT / "backend" / "notifications" / "telegram.py"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-backend_module = ModuleType("backend")
-core_module = ModuleType("backend.core")
-config_module = ModuleType("backend.core.config")
-config_module.settings = SimpleNamespace(
-    telegram_bot_token=None,
-    telegram_chat_id=None,
-)
-backend_module.core = core_module
-core_module.config = config_module
-sys.modules["backend"] = backend_module
-sys.modules["backend.core"] = core_module
-sys.modules["backend.core.config"] = config_module
 
-SPEC = importlib.util.spec_from_file_location(
-    "project_backend.notifications.telegram", MODULE_PATH
-)
-telegram_module = importlib.util.module_from_spec(SPEC)
-assert SPEC and SPEC.loader
-SPEC.loader.exec_module(telegram_module)  # type: ignore[attr-defined]
-notifications_module = ModuleType("backend.notifications")
-notifications_module.telegram = telegram_module
-backend_module.notifications = notifications_module
-sys.modules["backend.notifications"] = notifications_module
-sys.modules.setdefault("backend.notifications.telegram", telegram_module)
-TelegramNotifier = telegram_module.TelegramNotifier
+def _stash_backend_modules() -> dict[str, object]:
+    saved: dict[str, object] = {}
+    for key in list(sys.modules):
+        if key == "backend" or key.startswith("backend."):
+            saved[key] = sys.modules.pop(key)
+    return saved
+
+
+def _restore_backend_modules(saved: dict[str, object]) -> None:
+    for key in list(sys.modules):
+        if key == "backend" or key.startswith("backend."):
+            sys.modules.pop(key, None)
+    sys.modules.update(saved)
+
+
+@pytest.fixture(scope="module")
+def telegram_notifier_cls():
+    """Load telegram helper with stub config; restore real ``backend`` package after."""
+    saved = _stash_backend_modules()
+    try:
+        backend_module = ModuleType("backend")
+        core_module = ModuleType("backend.core")
+        config_module = ModuleType("backend.core.config")
+        config_module.settings = SimpleNamespace(
+            telegram_bot_token=None,
+            telegram_chat_id=None,
+        )
+        backend_module.core = core_module
+        core_module.config = config_module
+        sys.modules["backend"] = backend_module
+        sys.modules["backend.core"] = core_module
+        sys.modules["backend.core.config"] = config_module
+
+        spec = importlib.util.spec_from_file_location(
+            "backend.notifications.telegram", MODULE_PATH
+        )
+        telegram_module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(telegram_module)  # type: ignore[attr-defined]
+
+        notifications_module = ModuleType("backend.notifications")
+        notifications_module.telegram = telegram_module
+        backend_module.notifications = notifications_module
+        sys.modules["backend.notifications"] = notifications_module
+        sys.modules["backend.notifications.telegram"] = telegram_module
+
+        yield telegram_module.TelegramNotifier
+    finally:
+        _restore_backend_modules(saved)
 
 
 class MockResponse:
@@ -73,9 +99,9 @@ def patch_http_client(monkeypatch, response: MockResponse):
 
 
 @pytest.mark.asyncio
-async def test_send_message_disabled():
+async def test_send_message_disabled(telegram_notifier_cls):
     """Sending a message without configuration should short-circuit."""
-    notifier = TelegramNotifier(bot_token=None, chat_id=None)
+    notifier = telegram_notifier_cls(bot_token=None, chat_id=None)
     assert notifier.enabled is False
 
     result = await notifier.send_message("hello world")
@@ -83,34 +109,34 @@ async def test_send_message_disabled():
 
 
 @pytest.mark.asyncio
-async def test_send_message_success(monkeypatch):
+async def test_send_message_success(telegram_notifier_cls, monkeypatch):
     """Successful HTTP call returns True."""
     patch_http_client(monkeypatch, MockResponse(status_code=200, payload={"ok": True}))
 
-    notifier = TelegramNotifier(bot_token="token", chat_id="123")
+    notifier = telegram_notifier_cls(bot_token="token", chat_id="123")
     result = await notifier.send_message("hello")
 
     assert result is True
 
 
 @pytest.mark.asyncio
-async def test_send_message_failure(monkeypatch):
+async def test_send_message_failure(telegram_notifier_cls, monkeypatch):
     """HTTP errors are handled and return False."""
     patch_http_client(
         monkeypatch,
         MockResponse(status_code=400, payload={"ok": False, "description": "bad"}),
     )
 
-    notifier = TelegramNotifier(bot_token="token", chat_id="123")
+    notifier = telegram_notifier_cls(bot_token="token", chat_id="123")
     result = await notifier.send_message("hello")
 
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_notify_trade_execution(monkeypatch):
+async def test_notify_trade_execution(telegram_notifier_cls, monkeypatch):
     """Trade execution notification delegates to send_message."""
-    notifier = TelegramNotifier(bot_token="token", chat_id="123")
+    notifier = telegram_notifier_cls(bot_token="token", chat_id="123")
     mocked = AsyncMock(return_value=True)
     monkeypatch.setattr(notifier, "send_message", mocked)
 
@@ -133,4 +159,3 @@ async def test_notify_trade_execution(monkeypatch):
     mocked.assert_awaited_once()
     args, kwargs = mocked.await_args
     assert "Trade Executed" in args[0]
-

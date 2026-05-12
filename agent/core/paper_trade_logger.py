@@ -41,10 +41,34 @@ class PaperTradeLogger:
         self._handler: Optional[RotatingFileHandler] = None
         self._py_logger: Optional[logging.Logger] = None
 
+    @staticmethod
+    def _reset_paper_logs_env_enabled() -> bool:
+        """Aligned with backend ``reset_paper_state_on_startup`` (same env name)."""
+        raw = os.environ.get("RESET_PAPER_STATE_ON_STARTUP")
+        if raw is None:
+            return True
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+
+    def _remove_existing_rotated_logs(self) -> None:
+        """Delete prior paper trade log files before opening a new handler."""
+        if not self._reset_paper_logs_env_enabled():
+            return
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            for p in self.log_dir.glob(f"{self.log_file}*"):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass
+
     def _ensure_logger(self) -> logging.Logger:
         """Ensure file handler and logger are set up."""
         if self._py_logger is not None:
             return self._py_logger
+
+        self._remove_existing_rotated_logs()
 
         self.log_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.log_dir / self.log_file

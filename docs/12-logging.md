@@ -474,6 +474,14 @@ These structlog events support dashboards and the reconciliation script above:
 | `paper_fill_price_ticker_unavailable_using_hint` | WARNING | Paper mode used the approval/reference price as the reference mid because the ticker call failed. |
 | `paper_fill_reference_mid_clamped_to_hint_band` | DEBUG | Raw ticker mid was clamped to the band around the approval price using `execution_config.max_slippage_percent`. |
 
+### 5b. JackSparrow v43 gate 5 (`agent/core/v43_signal_gates.py`)
+
+| Event | Level | Notes |
+|-------|-------|--------|
+| `v43_gate5_rejected` | INFO | Gate 5 failed: TP-scaled `edge_pct` × `tp` (`lhs`) below `ratio` × round-trip cost (`rhs`). Fields: `side` (`long` / `short`), `proba`, `thr`, `edge_pct`, `tp`, `ratio`, `rtc`, `lhs`, `rhs`. |
+
+Roll up counts with [`scripts/analyze_v43_gate_rejects.py`](../scripts/analyze_v43_gate_rejects.py) and [v43 trade execution runbook](v43_trade_execution_runbook.md) (Phase 5).
+
 ### 6. Trading handler events (`agent/events/handlers/trading_handler.py`)
 
 Structured **`trading_entry_rejected`** lines (typically **INFO**) record why a `DecisionReadyEvent` did not become a `RiskApprovedEvent`. Filter on `event=trading_entry_rejected` (or the string in JSON logs) and the **`reason`** field. Common values include:

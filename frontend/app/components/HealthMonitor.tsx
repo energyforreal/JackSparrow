@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { HealthStatus } from '@/types'
 import { cn } from '@/lib/utils'
+import { coerceOverallSystemStatus } from '@/lib/healthNormalize'
 import { CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
 
 interface HealthMonitorProps {
@@ -88,10 +89,39 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
     ? (health.score > 1 ? health.score : Math.round(health.score * 100))
     : 0
 
+  const rollup = coerceOverallSystemStatus(
+    typeof health.status === 'string' ? health.status : 'degraded'
+  )
+  const rollupLabel = rollup.charAt(0).toUpperCase() + rollup.slice(1)
+  const rollupVariant =
+    rollup === 'healthy' ? 'default' : rollup === 'degraded' ? 'secondary' : 'destructive'
+
+  const ml = health.ml_models
+  const mlLoaded =
+    ml && typeof (ml as { loaded_count?: unknown }).loaded_count === 'number'
+      ? (ml as { loaded_count: number }).loaded_count
+      : null
+  const mlHealthy =
+    ml && typeof (ml as { healthy_count?: unknown }).healthy_count === 'number'
+      ? (ml as { healthy_count: number }).healthy_count
+      : null
+
+  const modeLabel =
+    health.trading_mode === 'live'
+      ? 'Live trading'
+      : health.trading_mode === 'paper'
+        ? 'Paper trading'
+        : 'Trading'
+
   return (
     <Card role="region" aria-label="System Health Status">
       <CardHeader>
-        <CardTitle>System Health</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>System Health</CardTitle>
+          <Badge variant={rollupVariant} className="text-xs capitalize">
+            {rollupLabel}
+          </Badge>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
@@ -104,7 +134,17 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
 
         {typeof health.trading_ready === 'boolean' && (
           <p className="text-sm text-muted-foreground">
-            Paper trading: {health.trading_ready ? 'Ready' : 'Unavailable (models not ready)'}
+            {modeLabel}:{' '}
+            {health.trading_ready ? 'Ready' : 'Unavailable (requirements not met)'}
+          </p>
+        )}
+
+        {mlLoaded != null && (
+          <p className="text-xs text-muted-foreground">
+            Models:{' '}
+            <span className="font-medium text-foreground tabular-nums">
+              {mlHealthy != null ? `${mlHealthy}/${mlLoaded} healthy` : `${mlLoaded} loaded`}
+            </span>
           </p>
         )}
 
@@ -116,9 +156,13 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
             const totalModels =
               typeof details.total_models === 'number' ? details.total_models : undefined
             const note = typeof details.note === 'string' ? details.note : undefined
+            const hasModelCounts =
+              healthyModels !== undefined && totalModels !== undefined
             const shouldShowDetails =
-              service.status === 'unknown' &&
-              (note || (healthyModels !== undefined && totalModels !== undefined))
+              Boolean(note || hasModelCounts) &&
+              (service.status === 'unknown' ||
+                service.status === 'degraded' ||
+                (service.name === 'model_nodes' && note))
 
             return (
               <div

@@ -760,15 +760,13 @@ Always bootstrap logging before running the commands (see [Logging Documentation
 ### Model File Organization
 
 **Directory Structure**:
-- **All models**: Stored under `agent/model_storage/` (discovered automatically; dated bundles often live in subfolders such as `jacksparrow_v15_BTCUSD_<date>/`).
-- **Default pipeline bundle (typical Docker)**: `agent/model_storage/jacksparrow_v15_BTCUSD_<date>/{5m,15m}/` — `metadata_BTCUSD_*.json` + `pipeline_*_v14.pkl`; see [ML models](03-ml-models.md#bundle-profiles-and-docker-defaults).
-- XGBoost models may also live under `agent/model_storage/xgboost/` (examples in docs).
-- User-uploaded models go in `agent/model_storage/custom/`.
-- Model-specific directories for organized storage (xgboost/, lstm/, transformer/) as needed.
+- **All models**: Stored under `agent/model_storage/`; **runtime discovery** pins **`MODEL_DIR`** to the **v43 bundle directory** (**`JackSparrow_v43_models_BTCUSD/`** unless `AGENT_MODEL_DIR` overrides).
+- **Archived bundles**: Dated **`jacksparrow_v15_*`**, **`jacksparrow_v5_*`**, etc. may coexist for experimentation and parquet retrain—not loaded by **`agent/models/model_discovery.py`** without custom code.
+- **`agent/model_storage/custom/`** remains the conventional place for uploaded experiments; **`xgboost/`** / **`lstm/`** / **`transformer/`** example dirs are illustrative only unless your deployment uses them.
 
 **Environment Variables**:
-- `MODEL_DIR` / `AGENT_MODEL_DIR`: Root or bundle folder for discovery (e.g. `./agent/model_storage` or a specific `jacksparrow_v15_BTCUSD_<date>` path).
-- `MODEL_FORMAT`: `auto`, `v15_pipeline`, or `v4_ensemble` — selects how `metadata_BTCUSD_*.json` maps to a loader (`PipelineV15Node` vs `V4EnsembleNode`). See [ML models](03-ml-models.md#jacksparrow-v15-pipeline-5m--15m-joblib).
+- `MODEL_DIR` / `AGENT_MODEL_DIR`: Folder that **contains `metadata_v43.json`** end-to-end (Docker default: **`/app/agent/model_storage/JackSparrow_v43_models_BTCUSD`** unless overridden).
+- `MODEL_FORMAT`: Defaults to **`jacksparrow_v43`** (surfaced via health payloads). Alternate values are legacy/historical; see **[ML models](03-ml-models.md#runtime-discovery-jacksparrow-v43--current-branch)**.
 
 **File Naming**:
 - Use semantic versioning: `model_name_v1.0.0.pkl`

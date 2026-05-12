@@ -17,11 +17,13 @@ import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
 import { getBackendProxyBase } from '@/lib/backendProxy'
 import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
+import { mergeHealthPreserveFields, normalizeHealthPayload } from '@/lib/healthNormalize'
 import type {
   Signal as SharedSignal,
   Portfolio as SharedPortfolio,
   Trade as SharedTrade,
   HealthStatus,
+  SignalType,
 } from '@/types'
 
 // Local types that extend shared domain models where needed
@@ -44,8 +46,10 @@ export interface MarketData {
 
 export interface ModelData {
   symbol: string
-  consensus_signal?: number
+  consensus_signal?: SignalType
   consensus_confidence?: number
+  /** Aggregate confidence; WebSocket model payload may expose this alongside consensus_confidence. */
+  confidence?: number
   individual_model_reasoning?: any[]
   model_consensus?: any[]
   model_predictions?: any[]
@@ -158,13 +162,7 @@ function normalizeTradeRecord(raw: unknown): Trade | null {
 }
 
 function normalizeHealthFromRest(raw: unknown): HealthData | null {
-  if (!raw || typeof raw !== 'object') return null
-  const h = raw as HealthData & { overall_status?: string }
-  const next: HealthData = { ...h }
-  if (next.status === undefined && h.overall_status !== undefined) {
-    next.status = String(h.overall_status)
-  }
-  return next
+  return normalizeHealthPayload(raw)
 }
 
 // Reducer for state management
@@ -221,10 +219,11 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                 }
 
                 if (isFresh) {
-                  const modelConf = (modelData as any).consensus_confidence ?? (modelData as any).confidence
+                  const modelConf =
+                    modelData.consensus_confidence ?? modelData.confidence
                   if (modelConf != null && modelConf > 0) {
                     mergedSignal.confidence = modelConf
-                    const consensusSignal = (modelData as any).consensus_signal
+                    const consensusSignal = modelData.consensus_signal
                     if (consensusSignal != null) {
                       mergedSignal.signal = consensusSignal
                     }
@@ -406,15 +405,16 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
           case 'health': {
             const healthPayload = data && typeof data === 'object' ? data : state.health
             if (healthPayload && typeof healthPayload === 'object') {
-              const normalized = { ...healthPayload }
-              if (normalized.status === undefined && (normalized as any).overall_status !== undefined) {
-                normalized.status = (normalized as any).overall_status
-              }
-              return {
-                ...state,
-                health: normalized,
-                lastUpdate: now,
-                dataSource: 'websocket'
+              const n = normalizeHealthPayload(healthPayload)
+              const merged =
+                n && mergeHealthPreserveFields(state.health, n)
+              if (merged) {
+                return {
+                  ...state,
+                  health: merged,
+                  lastUpdate: now,
+                  dataSource: 'websocket'
+                }
               }
             }
             return { ...state, lastUpdate: now, dataSource: 'websocket' }
@@ -488,9 +488,11 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       }
       
       if (messageType === 'health_update') {
+        const n = normalizeHealthPayload(data)
+        const merged = n ? mergeHealthPreserveFields(state.health, n) : null
         return {
           ...state,
-          health: data,
+          health: merged ?? state.health,
           lastUpdate: now,
           dataSource: 'websocket'
         }
@@ -579,13 +581,18 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         dataSource: 'api'
       }
 
-    case 'UPDATE_HEALTH':
+    case 'UPDATE_HEALTH': {
+      const n = normalizeHealthPayload(action.payload)
+      const merged =
+        n && mergeHealthPreserveFields(state.health, n)
+      if (!merged) return state
       return {
         ...state,
-        health: action.payload,
+        health: merged,
         lastUpdate: new Date(),
         dataSource: 'api',
       }
+    }
 
     case 'SET_PERFORMANCE_DATA':
       return {
@@ -750,42 +757,6 @@ export function useTradingData() {
   // Handle WebSocket messages
   useEffect(() => {
     if (lastMessage) {
-      // #region agent log
-      if (
-        process.env.NODE_ENV === 'development' &&
-        process.env.NEXT_PUBLIC_DEBUG_AGENT_LOGS === 'true'
-      ) {
-        try {
-          if (
-            (lastMessage.type === 'data_update' && (lastMessage as any).resource === 'signal') ||
-            lastMessage.type === 'agent_update'
-          ) {
-            fetch('http://127.0.0.1:7242/ingest/7dea5b1b-57ff-4463-be90-44a6ac830f12', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Debug-Session-Id': 'c0204f',
-              },
-              body: JSON.stringify({
-                sessionId: 'c0204f',
-                runId: 'pre-fix',
-                hypothesisId: lastMessage.type === 'agent_update' ? 'H4' : 'H2_H5',
-                location: 'frontend/hooks/useTradingData.ts:useEffect[lastMessage]',
-                message: 'ws_message_dispatch',
-                data: {
-                  type: lastMessage.type,
-                  resource: (lastMessage as any).resource,
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {})
-          }
-        } catch {
-          // Logging must not interfere with state updates
-        }
-      }
-      // #endregion
-
       dispatch({ type: 'WEBSOCKET_MESSAGE', payload: lastMessage })
     }
   }, [lastMessage])
@@ -960,35 +931,6 @@ export function useTradingData() {
           const agentStatus = agentStatusResult.value
           if (agentStatus?.state) {
             dispatch({ type: 'UPDATE_AGENT_STATE', payload: agentStatus.state })
-
-            if (
-              process.env.NODE_ENV === 'development' &&
-              process.env.NEXT_PUBLIC_DEBUG_AGENT_LOGS === 'true'
-            ) {
-              try {
-                fetch('http://127.0.0.1:7242/ingest/7dea5b1b-57ff-4463-be90-44a6ac830f12', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'X-Debug-Session-Id': 'c0204f',
-                  },
-                  body: JSON.stringify({
-                    sessionId: 'c0204f',
-                    runId: 'pre-fix',
-                    hypothesisId: 'H5',
-                    location: 'frontend/hooks/useTradingData.ts:fetchInitialData',
-                    message: 'agent_status_api_fallback',
-                    data: {
-                      state: agentStatus.state,
-                      available: agentStatus.available,
-                    },
-                    timestamp: Date.now(),
-                  }),
-                }).catch(() => {})
-              } catch {
-                // Ignore logging errors entirely
-              }
-            }
           }
         }
 

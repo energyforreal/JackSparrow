@@ -783,6 +783,14 @@ class WebSocketManager:
                     await db.rollback()
                     raise
 
+            if isinstance(health_data, dict):
+                hd = dict(health_data)
+                if isinstance(hd.get("timestamp"), datetime):
+                    hd["timestamp"] = hd["timestamp"].isoformat()
+                sc = float(hd.get("health_score", 0) or 0)
+                hd["score"] = max(0.0, min(1.0, sc))
+                health_data = hd
+
             return {
                 "type": "response",
                 "success": True,
@@ -1005,153 +1013,27 @@ class WebSocketManager:
                     continue
                 
                 try:
-                    from backend.api.routes.health import (
-                        check_database_health,
-                        redis_health_check,
-                        check_agent_health,
-                        check_feature_server_health,
-                        check_model_nodes_health,
-                        check_delta_exchange_health,
-                        check_reasoning_engine_health,
-                    )
-                    from backend.services.agent_service import agent_service
+                    from backend.api.routes.health import check_overall_health
                     from backend.core.database import AsyncSessionLocal
-                    from backend.api.models.responses import HealthServiceStatus
-                    from datetime import datetime
-                    
+                    from backend.core.websocket_messages import create_health_update
+
                     async with AsyncSessionLocal() as db:
-                        degradation_reasons = []
-                        health_scores = []
-                        
-                        # Check database
-                        db_health = await check_database_health(db)
-                        if db_health.status == "up":
-                            health_scores.append(0.05)
-                        else:
-                            degradation_reasons.append("Database is down")
-                            health_scores.append(0.0)
-                        
-                        # Check Redis
-                        redis_health_dict = await redis_health_check()
-                        redis_health = HealthServiceStatus(**redis_health_dict)
-                        if redis_health.status == "up":
-                            health_scores.append(0.05)
-                        else:
-                            degradation_reasons.append("Redis is down")
-                            health_scores.append(0.0)
-                        
-                        # Check agent (fetch status once and share with dependent checks)
-                        agent_status = await agent_service.get_agent_status(
-                            timeout=settings.agent_status_command_timeout_seconds
-                        )
-                        agent_health = await check_agent_health(agent_status)
-                        agent_weight = 0.15
-                        if agent_health.status == "up":
-                            health_scores.append(agent_weight)
-                            agent_state = agent_health.details.get("state") if agent_health.details else None
-                        else:
-                            degradation_reasons.append("Agent service is down")
-                            health_scores.append(0.0)
-                            agent_state = None
-                        
-                        # Check feature server
-                        feature_health = await check_feature_server_health(agent_status)
-                        feature_weight = 0.20
-                        if feature_health.status == "up":
-                            health_scores.append(feature_weight)
-                        elif feature_health.status != "unknown":
-                            degradation_reasons.append("Feature server is down")
-                            health_scores.append(0.0)
-                        else:
-                            health_scores.append(0.0)
-                        
-                        # Check model nodes
-                        model_health = await check_model_nodes_health(agent_status)
-                        model_weight = 0.25
-                        if model_health.status == "up":
-                            if model_health.details:
-                                healthy_count = model_health.details.get("healthy_models", 0)
-                                total_count = model_health.details.get("total_models", 0)
-                                if total_count > 0 and healthy_count < total_count:
-                                    degradation_reasons.append(f"Only {healthy_count}/{total_count} models are healthy")
-                                health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
-                            else:
-                                health_scores.append(model_weight)
-                        elif model_health.status == "degraded":
-                            # Models loaded but 0 healthy (e.g. no predictions yet) - partial score, softer message
-                            if model_health.details:
-                                total_count = model_health.details.get("total_models", 0)
-                                health_scores.append(model_weight * 0.5 if total_count > 0 else 0.0)
-                                if total_count > 0:
-                                    degradation_reasons.append(f"Model nodes degraded (0/{total_count} healthy; run predictions to refresh)")
-                            else:
-                                health_scores.append(0.0)
-                                degradation_reasons.append("Model nodes degraded")
-                        elif model_health.status != "unknown":
-                            degradation_reasons.append("No model nodes are healthy")
-                            health_scores.append(0.0)
-                        else:
-                            health_scores.append(0.0)
-                        
-                        # Check Delta Exchange
-                        delta_health = await check_delta_exchange_health(agent_status)
-                        delta_weight = 0.15
-                        if delta_health.status == "up":
-                            health_scores.append(delta_weight)
-                        elif delta_health.status != "unknown":
-                            degradation_reasons.append("Delta Exchange API is down")
-                            health_scores.append(0.0)
-                        else:
-                            health_scores.append(0.0)
-                        
-                        # Check reasoning engine
-                        reasoning_health = await check_reasoning_engine_health(agent_status)
-                        reasoning_weight = 0.15
-                        if reasoning_health.status == "up":
-                            health_scores.append(reasoning_weight)
-                        elif reasoning_health.status != "unknown":
-                            degradation_reasons.append("Reasoning engine is down")
-                            health_scores.append(0.0)
-                        else:
-                            health_scores.append(0.0)
-                        
-                        # Calculate overall health score
-                        health_score = sum(health_scores)
-                        
-                        # Determine status
-                        if health_score >= 0.9:
-                            status = "healthy"
-                        elif health_score >= 0.6:
-                            status = "degraded"
-                        else:
-                            status = "unhealthy"
-                        
-                        # Keep health_score in 0.0-1.0 range (consistent with API)
-                        # Frontend will handle conversion to percentage for display
-                        health_score_normalized = max(0.0, min(1.0, health_score))
-                        
-                        health_data = {
-                            "status": status,
-                            "health_score": health_score_normalized,  # 0.0-1.0 range
-                            "score": health_score_normalized,  # Alias for backward compatibility
-                            "services": {
-                                "database": db_health.dict(),
-                                "redis": redis_health.dict(),
-                                "agent": agent_health.dict(),
-                                "feature_server": feature_health.dict(),
-                                "model_nodes": model_health.dict(),
-                                "delta_exchange": delta_health.dict(),
-                                "reasoning_engine": reasoning_health.dict()
-                            },
-                            "agent_state": agent_state,
-                            "degradation_reasons": degradation_reasons,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
-                        
-                        # Use simplified message format for health updates
-                        from backend.core.websocket_messages import create_health_update
-                        health_message = create_health_update(health_data)
-                        await self.broadcast(health_message, channel="system_update")
+                        health_data = await check_overall_health(db)
+
+                    if not health_data:
+                        continue
+
+                    if isinstance(health_data.get("timestamp"), datetime):
+                        health_data = dict(health_data)
+                        health_data["timestamp"] = health_data["timestamp"].isoformat()
+
+                    # Match REST/WebSocket ``get_health`` payload (same shape as UnifiedWebSocketManager).
+                    score = float(health_data.get("health_score", 0) or 0)
+                    health_broadcast = dict(health_data)
+                    health_broadcast["score"] = max(0.0, min(1.0, score))
+
+                    health_message = create_health_update(health_broadcast)
+                    await self.broadcast(health_message, channel="system_update")
                         
                 except Exception as health_error:
                     logger.warning(

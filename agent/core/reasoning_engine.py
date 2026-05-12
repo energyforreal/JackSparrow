@@ -292,18 +292,36 @@ class MCPReasoningEngine:
 
             # Extract signal from conclusion
             conclusion = reasoning_chain.conclusion
+            mc = (
+                reasoning_chain.market_context
+                if isinstance(reasoning_chain.market_context, dict)
+                else {}
+            )
+            v43_dec = mc.get("v43_dedicated_decision") if isinstance(mc, dict) else None
+            position_size = 0.0
+            if isinstance(v43_dec, dict) and v43_dec.get("enabled"):
+                hint = v43_dec.get("position_size_hint")
+                if hint is not None:
+                    try:
+                        position_size = float(hint)
+                    except (TypeError, ValueError):
+                        position_size = 0.0
             if "STRONG_BUY" in conclusion:
                 signal = "STRONG_BUY"
-                position_size = 0.1  # Max position size
+                if position_size <= 0.0:
+                    position_size = 0.1  # Max position size
             elif "BUY" in conclusion:
                 signal = "BUY"
-                position_size = 0.05
+                if position_size <= 0.0:
+                    position_size = 0.05
             elif "STRONG_SELL" in conclusion:
                 signal = "STRONG_SELL"
-                position_size = 0.1
+                if position_size <= 0.0:
+                    position_size = 0.1
             elif "SELL" in conclusion:
                 signal = "SELL"
-                position_size = 0.05
+                if position_size <= 0.0:
+                    position_size = 0.05
             else:
                 signal = "HOLD"
                 position_size = 0.0
@@ -415,7 +433,7 @@ class MCPReasoningEngine:
         feature_context = request.market_context.get("features", {})
 
         # Step 6: Confidence Calibration
-        step6 = await self._step6_confidence_calibration(steps, model_predictions)
+        step6 = await self._step6_confidence_calibration(request, steps, model_predictions)
         steps.append(step6)
         
         return MCPReasoningChain(
@@ -737,7 +755,26 @@ class MCPReasoningEngine:
         """Step 5: Synthesize final decision."""
         
         model_predictions = request.market_context.get("model_predictions", [])
-        
+
+        v43_dec = request.market_context.get("v43_dedicated_decision")
+        if isinstance(v43_dec, dict) and v43_dec.get("enabled"):
+            conclusion = str(v43_dec.get("conclusion", "HOLD - v43"))
+            avg_confidence = float(v43_dec.get("confidence", 0.5))
+            evidence = list(v43_dec.get("evidence") or [])
+            evidence.append("v43 dedicated path — MTF synthesis skipped")
+            data_freshness_seconds = self._compute_data_freshness_seconds(
+                request.market_context.get("timestamp")
+            )
+            return ReasoningStep(
+                step_number=5,
+                step_name="Decision Synthesis",
+                description=conclusion,
+                evidence=evidence,
+                confidence=max(0.0, min(1.0, avg_confidence)),
+                timestamp=datetime.utcnow(),
+                data_freshness_seconds=data_freshness_seconds,
+            )
+
         if not model_predictions:
             conclusion = "HOLD - Insufficient signal strength"
             evidence = ["No model predictions available"]
@@ -757,15 +794,14 @@ class MCPReasoningEngine:
                     message="Step 5 produced HOLD due to missing model predictions.",
                 )
         else:
-            # Multi-timeframe decision layer (trend + entry ± filter) is bypassed in
-            # single-model mode, where one consolidated model already encodes MTF context.
+            # Skip MTF synthesis when predictions already encode regime/context (JackSparrow v43).
             mtf_out = None
-            all_v15 = model_predictions and all(
+            all_jacksparrow_v43 = model_predictions and all(
                 isinstance(p, dict)
-                and (p.get("context") or {}).get("format") == "v15_pipeline"
+                and (p.get("context") or {}).get("format") == "jacksparrow_v43"
                 for p in model_predictions
             )
-            if all_v15 and bool(getattr(settings, "v15_disable_mtf_synthesis", True)):
+            if all_jacksparrow_v43:
                 mtf_out = None
             elif not bool(getattr(settings, "single_model_mode_enabled", False)):
                 mtf_out = synthesize_mtf_trading_decision(
@@ -1006,7 +1042,12 @@ class MCPReasoningEngine:
             data_freshness_seconds=data_freshness_seconds
         )
     
-    async def _step6_confidence_calibration(self, steps: List[ReasoningStep], model_predictions: List[Dict[str, Any]]) -> ReasoningStep:
+    async def _step6_confidence_calibration(
+        self,
+        request: MCPReasoningRequest,
+        steps: List[ReasoningStep],
+        model_predictions: List[Dict[str, Any]],
+    ) -> ReasoningStep:
         """Step 6: Calibrate final confidence using weighted average and consistency adjustment.
 
         When learning is disabled, calibration uses only step confidences and a consistency
@@ -1084,6 +1125,18 @@ class MCPReasoningEngine:
             if margin_mean > 0.10 and not is_hold:
                 # Cap boost so confidence remains conservative.
                 final_confidence += min(0.08, (margin_mean - 0.10) * 0.4)
+
+        # v43 dedicated path: actionable BUY/SELL must clear AI minimal entry confidence
+        # after weighted calibration (single-model + step weights cap below 0.7 otherwise).
+        mc = request.market_context or {}
+        v43_dec = mc.get("v43_dedicated_decision")
+        if (
+            isinstance(v43_dec, dict)
+            and v43_dec.get("enabled")
+            and (v43_dec.get("final_long") or v43_dec.get("final_short"))
+        ):
+            ai_floor = float(getattr(settings, "ai_signal_min_entry_confidence", 0.7) or 0.7)
+            final_confidence = max(final_confidence, min(1.0, ai_floor * 0.985))
 
         # Detect fallback scenario for logging/diagnostics
         is_fallback_scenario = not model_predictions or all(

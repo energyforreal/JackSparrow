@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, roc_auc_score
 
 from agent.learning.adaptive.retrain_engine import _unwrap_classifier
 
@@ -90,6 +90,103 @@ def validation_scorecard(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, fl
     }
 
 
+def validate_v43_style_five_gates(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    proba: Optional[np.ndarray] = None,
+    *,
+    min_auc: float = 0.55,
+    min_ic: float = 0.03,
+    min_win_rate: float = 0.74,
+    min_sharpe: float = 1.0,
+) -> Tuple[bool, Dict[str, Any]]:
+    """Five validation checks on a holdout slice (classification).
+
+    Uses macro OvR AUC when ``predict_proba`` matrix is provided, Spearman IC
+    between max class probability and hit indicator, accuracy vs ``min_win_rate``,
+    hit-rate excess over random 1/3 baseline, and Sharpe on +/-1 per-row outcomes.
+    """
+    detail: Dict[str, Any] = {}
+    yt = np.asarray(y_true, dtype=np.int64).ravel()
+    yp = np.asarray(y_pred, dtype=np.int64).ravel()
+    n = int(yt.size)
+    if n < 30:
+        detail["rejected_reason"] = "five_gates_insufficient_rows"
+        return False, detail
+
+    classes = sorted(int(x) for x in np.unique(yt).tolist())
+    try:
+        if proba is not None and isinstance(proba, np.ndarray):
+            pr = np.asarray(proba, dtype=np.float64)
+            if pr.ndim == 2 and pr.shape[0] == n and pr.shape[1] >= 2:
+                auc = float(
+                    roc_auc_score(yt, pr, multi_class="ovr", average="macro", labels=classes)
+                )
+            else:
+                auc = float(val_win_rate(yt, yp))
+        else:
+            auc = float(val_win_rate(yt, yp))
+    except Exception:
+        auc = float(val_win_rate(yt, yp))
+
+    hit = (yt == yp).astype(np.float64)
+    win_rate = float(val_win_rate(yt, yp))
+    try:
+        from scipy.stats import spearmanr
+
+        if proba is not None and isinstance(proba, np.ndarray):
+            pr = np.asarray(proba, dtype=np.float64)
+            if pr.ndim == 2 and pr.shape[0] == n:
+                score = np.max(pr, axis=1)
+            else:
+                score = hit
+        else:
+            score = hit
+        if float(np.std(score)) < 1e-12:
+            ic = 1.0 if win_rate >= 0.99 else 0.0
+        else:
+            ic_raw = spearmanr(score, hit).correlation
+            if ic_raw is None or (isinstance(ic_raw, float) and np.isnan(ic_raw)):
+                ic = 1.0 if win_rate >= 0.99 else 0.0
+            else:
+                ic = float(abs(ic_raw))
+    except Exception:
+        ic = 1.0 if win_rate >= 0.99 else 0.0
+
+    excess = float(np.mean(hit) - (1.0 / max(len(classes), 3)))
+    per = 2.0 * hit - 1.0
+    std = float(np.std(per))
+    if std <= 1e-9 and abs(float(np.mean(per))) >= 1.0 - 1e-9:
+        sharpe = float(min(10.0, np.sqrt(n)))
+    else:
+        sharpe = float(np.mean(per) / std * np.sqrt(n)) if std > 1e-9 else 0.0
+
+    gates = {
+        "auc_macro_ovr": auc,
+        "ic_abs": ic,
+        "win_rate": win_rate,
+        "oos_return_proxy": excess,
+        "sharpe_proxy": sharpe,
+    }
+    detail["five_gates"] = gates
+    ok1 = auc >= min_auc
+    ok2 = ic >= min_ic
+    ok3 = win_rate >= min_win_rate
+    ok4 = excess >= 0.0
+    ok5 = sharpe >= min_sharpe
+    ok = ok1 and ok2 and ok3 and ok4 and ok5
+    if not ok:
+        detail["rejected_reason"] = "five_gates"
+        detail["five_gate_failures"] = {
+            "auc": ok1,
+            "ic": ok2,
+            "win_rate": ok3,
+            "return_proxy": ok4,
+            "sharpe": ok5,
+        }
+    return ok, detail
+
+
 def validate_model_upgrade(
     old_model: Any,
     new_model: Any,
@@ -98,6 +195,7 @@ def validate_model_upgrade(
     *,
     min_improvement: float = 0.0,
     require_scorecard: bool = False,
+    require_five_gates: bool = False,
 ) -> Tuple[bool, Dict[str, Any]]:
     """F1 gate plus optional scorecard dominance (new not worse on key proxies).
 
@@ -109,6 +207,13 @@ def validate_model_upgrade(
     new_c = _unwrap_classifier(new_model)
     old_pred = old_c.predict(X_val)
     new_pred = new_c.predict(X_val)
+    new_proba = None
+    pred_proba = getattr(new_c, "predict_proba", None)
+    if callable(pred_proba):
+        try:
+            new_proba = pred_proba(X_val)
+        except Exception:
+            new_proba = None
     old_f1 = macro_f1(y_val, old_pred)
     new_f1 = macro_f1(y_val, new_pred)
     f1_ok = new_f1 >= old_f1 + float(min_improvement)
@@ -127,6 +232,11 @@ def validate_model_upgrade(
         return False, detail
 
     if not require_scorecard:
+        if require_five_gates:
+            fg_ok, fg_detail = validate_v43_style_five_gates(y_val, new_pred, new_proba)
+            detail.update(fg_detail)
+            if not fg_ok:
+                return False, detail
         detail["rejected_reason"] = None
         return True, detail
 
@@ -139,6 +249,11 @@ def validate_model_upgrade(
     dd_ok = new_sc["val_max_drawdown_proxy"] <= old_sc["val_max_drawdown_proxy"] + tol_dd
 
     if wr_ok and pf_ok and dd_ok:
+        if require_five_gates:
+            fg_ok, fg_detail = validate_v43_style_five_gates(y_val, new_pred, new_proba)
+            detail.update(fg_detail)
+            if not fg_ok:
+                return False, detail
         detail["rejected_reason"] = None
         return True, detail
 

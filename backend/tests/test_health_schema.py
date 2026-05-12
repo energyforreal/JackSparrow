@@ -25,12 +25,14 @@ def test_health_response_model_has_trading_ready_and_status():
         },
         "degradation_reasons": [],
         "trading_ready": True,
+        "trading_mode": "paper",
         "timestamp": "2025-01-01T00:00:00Z",
     }
     resp = HealthResponse(**payload)
     assert resp.status == "healthy"
     assert resp.health_score == 0.95
     assert resp.trading_ready is True
+    assert resp.trading_mode == "paper"
     assert resp.degradation_reasons == []
 
 
@@ -45,4 +47,5 @@ def test_health_response_trading_ready_optional():
     }
     resp = HealthResponse(**payload)
     assert resp.trading_ready is None
+    assert resp.trading_mode is None
     assert resp.status == "degraded"

@@ -37,6 +37,10 @@ interface ReasoningChainViewProps {
   inferenceLatencyMs?: number
   /** primary | fallback | degraded */
   inferenceMode?: string
+  /** JackSparrow v43 regression economics (simple-return scale) */
+  v43ExpectedReturn?: number
+  v43Threshold?: number
+  v43GateReject?: string
 }
 
 export function ReasoningChainView({
@@ -49,6 +53,9 @@ export function ReasoningChainView({
   modelVersion,
   inferenceLatencyMs,
   inferenceMode,
+  v43ExpectedReturn,
+  v43Threshold,
+  v43GateReject,
 }: ReasoningChainViewProps) {
   if (isLoading) {
     return (
@@ -129,6 +136,26 @@ export function ReasoningChainView({
     const normalized = Math.max(0, Math.min(1, 1 - stdDev / 50))
     consistencyScore = normalized * 100
   }
+
+  const step6ForEvidence = sortedSteps.find((s) => s.step_number === 6)
+  const fallbackScenarioFromEvidence =
+    step6ForEvidence?.evidence?.some((e) =>
+      /fallback scenario:\s*true/i.test(String(e))
+    ) ?? false
+  const steps345 = sortedSteps.filter((s) => [3, 4, 5].includes(s.step_number))
+  const avgStep345Confidence =
+    steps345.length > 0
+      ? steps345.reduce(
+          (acc, s) => acc + normalizeConfidenceToPercent(s.confidence),
+          0
+        ) / steps345.length
+      : 0
+  const showConfidenceCalibFallbackBanner =
+    fallbackScenarioFromEvidence ||
+    (finalConfidencePercent >= 49 &&
+      finalConfidencePercent <= 51 &&
+      avgStep345Confidence < 1 &&
+      steps345.length >= 1)
 
   const STEP_TITLES: Record<number, string> = {
     1: 'Situational Assessment',
@@ -268,8 +295,36 @@ export function ReasoningChainView({
           Structured 6-step reasoning from situational assessment to calibrated confidence,
           using market context, historical memories, model consensus, and risk analysis.
         </p>
+        {(v43ExpectedReturn != null ||
+          v43Threshold != null ||
+          (v43GateReject != null && v43GateReject !== '')) && (
+          <div className="mt-2 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground tabular-nums">
+            <span className="font-medium text-foreground">v43 </span>
+            {v43ExpectedReturn != null && Number.isFinite(v43ExpectedReturn) && (
+              <span>E[R]={v43ExpectedReturn.toFixed(5)} </span>
+            )}
+            {v43Threshold != null && Number.isFinite(v43Threshold) && (
+              <span>thr={v43Threshold.toFixed(5)} </span>
+            )}
+            {v43GateReject != null && v43GateReject !== '' && (
+              <span className="text-amber-700 dark:text-amber-500">
+                gate: {v43GateReject}
+              </span>
+            )}
+          </div>
+        )}
       </CardHeader>
       <CardContent>
+        {showConfidenceCalibFallbackBanner && (
+          <div
+            role="status"
+            className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-muted-foreground"
+          >
+            <span className="font-medium text-foreground">Confidence calibration fallback:</span>{' '}
+            Steps 3–5 near 0% while overall stays ~50% usually means model predictions had zero confidence and the agent applied its neutral floor (not stronger evidence). Check model inference and{' '}
+            <span className="font-medium text-foreground">model_nodes</span> health if this repeats.
+          </div>
+        )}
         <Accordion type="single" collapsible className="w-full" aria-label="Reasoning steps">
           {sortedSteps.map((step) => {
             const stepConfidence = normalizeConfidenceToPercent(step.confidence)
@@ -370,7 +425,10 @@ export function ReasoningChainView({
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <span>Model Reasoning Details</span>
                     <Badge variant="outline" className="text-xs">
-                      {Array.isArray(modelConsensus) ? modelConsensus.length : 0} Models
+                      {(() => {
+                        const n = Array.isArray(modelConsensus) ? modelConsensus.length : 0
+                        return `${n} ${n === 1 ? 'Model' : 'Models'}`
+                      })()}
                     </Badge>
                   </div>
                 </AccordionTrigger>

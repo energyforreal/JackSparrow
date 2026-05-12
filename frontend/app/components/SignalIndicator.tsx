@@ -63,17 +63,39 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
   const inferenceMode = signal.inference_mode ?? modelData?.inference_mode
   const inferenceSource = signal.inference_source ?? modelData?.inference_source
 
+  let inferenceBadgeText: string | null = null
+  if (inferenceMode === 'fallback') inferenceBadgeText = 'Agent fallback'
+  else if (inferenceMode === 'degraded') inferenceBadgeText = 'Degraded'
+  else if (inferenceMode === 'primary' && inferenceSource === 'model_service')
+    inferenceBadgeText = 'Model service'
+  else if (!inferenceMode && inferenceSource === 'agent') inferenceBadgeText = 'Agent'
+  else if (inferenceSource) inferenceBadgeText = inferenceSource.replace(/_/g, ' ')
+  else if (inferenceMode === 'primary') inferenceBadgeText = 'Primary'
+  else if (inferenceMode) inferenceBadgeText = inferenceMode
+
+  const showInferenceBadge =
+    inferenceMode === 'fallback' ||
+    inferenceMode === 'degraded' ||
+    Boolean(inferenceSource) ||
+    Boolean(inferenceBadgeText)
+
+  /** Agent step 6 floors final confidence to ~50% when all model confidences are zero (see reasoning_engine). */
+  const modelsAllNearZeroConfidence =
+    modelConsensus.length > 0 &&
+    modelConsensus.every((m) => normalizeConfidenceToPercent(m.confidence) < 1)
+  const overallNearCalibrationFloor =
+    overallConfidence >= 49 && overallConfidence <= 51
+  const showConfidenceCalibFallback =
+    modelsAllNearZeroConfidence && overallNearCalibrationFloor
+
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>AI Signal</CardTitle>
-          {(inferenceMode === 'fallback' || inferenceMode === 'degraded' || inferenceSource) && (
+          {(showInferenceBadge && inferenceBadgeText) && (
             <Badge variant="outline" className="text-xs font-normal">
-              {inferenceMode === 'fallback' && 'Agent fallback'}
-              {inferenceMode === 'degraded' && 'Degraded'}
-              {inferenceMode === 'primary' && inferenceSource === 'model_service' && 'Model service'}
-              {!inferenceMode && inferenceSource === 'agent' && 'Agent'}
+              {inferenceBadgeText}
             </Badge>
           )}
         </div>
@@ -125,6 +147,74 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
           </div>
         </div>
 
+        {showConfidenceCalibFallback && (
+          <div
+            role="status"
+            className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-muted-foreground"
+          >
+            <span className="font-medium text-foreground">Calibration fallback active:</span>{' '}
+            Top confidence reflects the agent&apos;s neutral floor because every model row shows ~0%
+            (often after an inference error or failed consensus weights). Use{' '}
+            <span className="font-medium text-foreground">System Health → model_nodes</span> and agent logs if this persists.
+          </div>
+        )}
+
+        {(signal.expected_return != null ||
+          signal.threshold != null ||
+          signal.regime != null ||
+          Boolean(signal.v43_gate_reject) ||
+          signal.mcp_tanh_prediction != null ||
+          signal.edge != null) && (
+          <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground">JackSparrow v43</p>
+            <p className="text-[10px] leading-tight italic">
+              Primary economics: expected return vs threshold on simple-return scale (~120×5m forward in
+              training).
+            </p>
+            <ul className="list-inside list-disc space-y-0.5 tabular-nums">
+              {signal.expected_return != null && Number.isFinite(Number(signal.expected_return)) && (
+                <li>
+                  Expected return:{' '}
+                  <span className="text-foreground font-medium">
+                    {Number(signal.expected_return).toFixed(5)}
+                  </span>
+                </li>
+              )}
+              {signal.threshold != null && Number.isFinite(Number(signal.threshold)) && (
+                <li>
+                  Threshold:{' '}
+                  <span className="text-foreground">{Number(signal.threshold).toFixed(5)}</span>
+                </li>
+              )}
+              {signal.regime != null && signal.regime !== '' && (
+                <li>
+                  Regime: <span className="text-foreground">{String(signal.regime)}</span>
+                </li>
+              )}
+              {signal.v43_gate_reject != null && signal.v43_gate_reject !== '' && (
+                <li>
+                  Gate reject:{' '}
+                  <span className="text-foreground">{String(signal.v43_gate_reject)}</span>
+                </li>
+              )}
+              {((signal.mcp_tanh_prediction != null &&
+                Number.isFinite(Number(signal.mcp_tanh_prediction))) ||
+                (signal.edge != null && Number.isFinite(signal.edge))) && (
+                <li className="text-[10px] list-none -ml-0.5 mt-1 text-muted-foreground/90">
+                  MCP tanh (legacy):{' '}
+                  <span className="font-mono">
+                    {(signal.mcp_tanh_prediction != null &&
+                    Number.isFinite(Number(signal.mcp_tanh_prediction))
+                      ? Number(signal.mcp_tanh_prediction)
+                      : Number(signal.edge)
+                    ).toFixed(5)}
+                  </span>
+                </li>
+              )}
+            </ul>
+          </div>
+        )}
+
         {modelConsensus.length > 0 && (
           <div className="pt-2 border-t">
             <Accordion type="single" collapsible defaultValue="models">
@@ -150,6 +240,16 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
                             <div className="text-sm font-medium truncate">
                               {model.model_name}
                             </div>
+                            {model.expected_return != null &&
+                              Number.isFinite(Number(model.expected_return)) && (
+                                <div className="text-[10px] text-muted-foreground tabular-nums mt-0.5">
+                                  E[R] simple: {Number(model.expected_return).toFixed(5)}
+                                  {model.threshold != null &&
+                                    Number.isFinite(Number(model.threshold)) && (
+                                      <> | thr {Number(model.threshold).toFixed(5)}</>
+                                    )}
+                                </div>
+                              )}
                             <div className="mt-1 flex items-center gap-3">
                               <span className="relative inline-flex rounded-md">
                                 {(model.signal === 'STRONG_BUY' ||

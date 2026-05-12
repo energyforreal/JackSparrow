@@ -2,13 +2,11 @@
 
 import io
 import platform
-import sys
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 import pytest
 
-# Import the modules we're testing
 from tools.commands.health_check import HealthChecker, Symbols, _symbols
 from tools.commands.start_parallel import ParallelProcessManager, ServiceConfig, Colors
 

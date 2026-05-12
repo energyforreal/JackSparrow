@@ -8,18 +8,18 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, ConfigDict
-import json
-import uuid
 import time
+import uuid
 import structlog
 
 from agent.core.config import settings
 from agent.core.log_context import EVENT_FEATURE_RESPONSE, KEY_FEATURE_QUALITY
-from agent.core.redis_config import get_redis
 from agent.data.feature_engineering import FeatureEngineering
 from agent.data.market_data_service import MarketDataService
-from feature_store.feature_registry import V15_FEATURES_BY_TF
-from feature_store.v15_feature_compute import build_v15_feature_dict_for_tf
+from feature_store.jacksparrow_v43_mcp_row import (
+    V43_MCP_FEATURE_NAMES,
+    build_v43_last_row,
+)
 from agent.events.event_bus import event_bus
 from agent.events.schemas import FeatureRequestEvent, FeatureComputedEvent, EventType
 
@@ -29,6 +29,9 @@ logger = structlog.get_logger()
 MIN_CANDLES_FOR_PATTERNS = 100
 CANDLES_FOR_PATTERNS = 200
 PATTERN_FEATURE_PREFIXES = ("cdl_", "chp_", "sr_", "tl_", "bo_")
+
+V43_MCP_CANDLE_LIMIT = 400
+V43_PRIMARY_INTERVAL = "5m"
 
 
 class FeatureQuality(str, Enum):
@@ -197,199 +200,96 @@ class MCPFeatureServer:
                 error=str(e),
                 exc_info=True
             )
-    
-    async def _get_v15_feature_response(
-        self,
-        request: MCPFeatureRequest,
-        tf: str,
-        request_id: str,
-        timestamp: datetime,
-    ) -> MCPFeatureResponse:
-        """Compute full v15 feature row for one timeframe (5m includes 15m HTF)."""
-        md = await self.market_data_service.get_market_data(
-            symbol=request.symbol,
-            interval=tf,
-            limit=280,
-        )
-        if not md or not md.get("candles"):
-            fail_closed = bool(
-                getattr(settings, "feature_server_fail_closed_no_candles", True)
-            )
-            if fail_closed:
-                logger.warning(
-                    EVENT_FEATURE_RESPONSE,
-                    symbol=request.symbol,
-                    timeframe=tf,
-                    **{
-                        KEY_FEATURE_QUALITY: FeatureQuality.UNAVAILABLE.value,
-                        "reason": "no_candles_fail_closed",
-                    },
-                )
-                return MCPFeatureResponse(
-                    features=[],
-                    quality_score=0.0,
-                    overall_quality=FeatureQuality.UNAVAILABLE,
-                    timestamp=timestamp,
-                    request_id=request_id,
-                )
-            logger.warning(
-                "feature_server_v15_no_candles",
-                symbol=request.symbol,
-                timeframe=tf,
-                message=(
-                    "No OHLCV candles from market data service; using degraded zero placeholders"
-                ),
-            )
-            degraded: List[MCPFeature] = []
-            for feature_name in request.feature_names:
-                degraded.append(
-                    MCPFeature(
-                        name=feature_name,
-                        version=self.feature_registry.get(feature_name, "1.0.0"),
-                        value=0.0,
-                        timestamp=timestamp,
-                        quality=FeatureQuality.DEGRADED,
-                        metadata={
-                            "symbol": request.symbol,
-                            "v15_tf": tf,
-                            "reason": "no_candles",
-                        },
-                        computation_time_ms=0.0,
-                    )
-                )
-            return MCPFeatureResponse(
-                features=degraded,
-                quality_score=0.0,
-                overall_quality=FeatureQuality.DEGRADED,
-                timestamp=timestamp,
-                request_id=request_id,
-            )
-        candles = md["candles"]
-        if bool(getattr(settings, "strict_candle_validation_enabled", True)):
-            try:
-                from agent.data.candle_validation import validate_delta_candle_rows
-
-                validate_delta_candle_rows(
-                    candles,
-                    tf,
-                    min_rows=int(getattr(settings, "strict_candle_validation_min_rows", 50) or 50),
-                )
-            except ValueError as e:
-                logger.warning(
-                    "feature_server_v15_candle_validation_failed",
-                    symbol=request.symbol,
-                    timeframe=tf,
-                    error=str(e),
-                )
-                return MCPFeatureResponse(
-                    features=[],
-                    quality_score=0.0,
-                    overall_quality=FeatureQuality.UNAVAILABLE,
-                    timestamp=timestamp,
-                    request_id=request_id,
-                )
-        candles_15 = None
-        if tf == "5m":
-            cache_key = f"jacksparrow:v15:htf15:{request.symbol}"
-            ttl = int(getattr(settings, "htf_cache_ttl_seconds", 840) or 840)
-            r = await get_redis()
-            if r:
-                try:
-                    raw = await r.get(cache_key)
-                    if raw:
-                        candles_15 = json.loads(raw)
-                except Exception:
-                    candles_15 = None
-            if candles_15 is None:
-                md15 = await self.market_data_service.get_market_data(
-                    symbol=request.symbol,
-                    interval="15m",
-                    limit=280,
-                )
-                if md15:
-                    candles_15 = md15.get("candles")
-                if r and candles_15:
-                    try:
-                        await r.setex(cache_key, ttl, json.dumps(candles_15[-280:]))
-                    except Exception:
-                        pass
-        fmap = build_v15_feature_dict_for_tf(candles, tf, candles_15m=candles_15)
-        features: List[MCPFeature] = []
-        for feature_name in request.feature_names:
-            t0 = time.time()
-            val = float(fmap.get(feature_name, 0.0))
-            features.append(
-                MCPFeature(
-                    name=feature_name,
-                    version=self.feature_registry.get(feature_name, "1.0.0"),
-                    value=val,
-                    timestamp=timestamp,
-                    quality=FeatureQuality.HIGH,
-                    metadata={"symbol": request.symbol, "v15_tf": tf},
-                    computation_time_ms=(time.time() - t0) * 1000,
-                )
-            )
-        qs = self._calculate_quality_score(features)
-        return MCPFeatureResponse(
-            features=features,
-            quality_score=qs,
-            overall_quality=self._determine_overall_quality(qs),
-            timestamp=datetime.utcnow(),
-            request_id=request_id,
-        )
 
     async def get_features(self, request: MCPFeatureRequest) -> MCPFeatureResponse:
-        """Get features according to MCP Feature Protocol."""
-        
+        """Compute MCP features for REST/event request paths."""
         request_id = str(uuid.uuid4())
         timestamp = request.timestamp or datetime.utcnow()
 
-        if request.candle_interval:
-            tf = request.candle_interval.strip().lower()
-            expected = V15_FEATURES_BY_TF.get(tf)
-            if expected and set(request.feature_names) == set(expected):
-                return await self._get_v15_feature_response(
-                    request, tf, request_id, timestamp
-                )
-        
         features: List[MCPFeature] = []
-        
-        # Get market data - use 200 candles when pattern features requested
-        has_pattern_features = any(
-            name.startswith(PATTERN_FEATURE_PREFIXES) for name in request.feature_names
-        )
-        has_regime_features = any(
-            name.startswith("regime_") for name in request.feature_names
-        )
-        limit = CANDLES_FOR_PATTERNS if (has_pattern_features or has_regime_features) else 100
-        market_data = await self.market_data_service.get_market_data(
-            symbol=request.symbol,
-            limit=limit,
-        )
-        
-        if not market_data or not market_data.get("candles"):
-            if bool(getattr(settings, "feature_server_fail_closed_no_candles", True)):
-                return MCPFeatureResponse(
-                    features=[],
-                    quality_score=0.0,
-                    overall_quality=FeatureQuality.UNAVAILABLE,
-                    timestamp=timestamp,
-                    request_id=request_id,
-                )
-            return MCPFeatureResponse(
-                features=[],
-                quality_score=0.0,
-                overall_quality=FeatureQuality.DEGRADED,
-                timestamp=timestamp,
-                request_id=request_id,
+        names = list(request.feature_names)
+        wants_v43 = any(n in V43_MCP_FEATURE_NAMES for n in names)
+        wants_other = any(n not in V43_MCP_FEATURE_NAMES for n in names)
+
+        v43_row: Dict[str, float] = {}
+        if wants_v43:
+            md43 = await self.market_data_service.get_market_data(
+                symbol=request.symbol,
+                interval=V43_PRIMARY_INTERVAL,
+                limit=V43_MCP_CANDLE_LIMIT,
             )
-        
+            if md43 and md43.get("candles"):
+                v43_row = build_v43_last_row(
+                    md43["candles"],
+                    primary_interval=V43_PRIMARY_INTERVAL,
+                    funding_zscore=None,
+                )
+            else:
+                logger.warning(
+                    "feature_server_v43_no_candles",
+                    symbol=request.symbol,
+                    message="v43 MCP features degraded: no 5m OHLCV",
+                )
+
+        has_pattern_features = any(
+            name.startswith(PATTERN_FEATURE_PREFIXES) for name in names
+        )
+        has_regime_features = any(name.startswith("regime_") for name in names)
+        limit = CANDLES_FOR_PATTERNS if (has_pattern_features or has_regime_features) else 100
+
+        market_data: Optional[Dict[str, Any]] = None
+        if wants_other:
+            market_data = await self.market_data_service.get_market_data(
+                symbol=request.symbol,
+                limit=limit,
+            )
+            if not market_data or not market_data.get("candles"):
+                if bool(getattr(settings, "feature_server_fail_closed_no_candles", True)):
+                    if not wants_v43:
+                        return MCPFeatureResponse(
+                            features=[],
+                            quality_score=0.0,
+                            overall_quality=FeatureQuality.UNAVAILABLE,
+                            timestamp=timestamp,
+                            request_id=request_id,
+                        )
+                elif not wants_v43:
+                    return MCPFeatureResponse(
+                        features=[],
+                        quality_score=0.0,
+                        overall_quality=FeatureQuality.DEGRADED,
+                        timestamp=timestamp,
+                        request_id=request_id,
+                    )
+
         candles = market_data.get("candles", []) if market_data else []
         candle_count = len(candles)
 
         # Compute each feature
-        for feature_name in request.feature_names:
+        for feature_name in names:
             start_time = time.time()
+
+            if feature_name in V43_MCP_FEATURE_NAMES:
+                feature_value = float(v43_row.get(feature_name, 0.0))
+                computation_time_ms = (time.time() - start_time) * 1000
+                quality = self._assess_quality(feature_value, market_data or {})
+                version = self.feature_registry.get(feature_name, "1.0.0")
+                features.append(
+                    MCPFeature(
+                        name=feature_name,
+                        version=version,
+                        value=feature_value,
+                        timestamp=timestamp,
+                        quality=quality,
+                        metadata={
+                            "symbol": request.symbol,
+                            "computation_method": "jacksparrow_v43_mcp_row",
+                            "primary_interval": V43_PRIMARY_INTERVAL,
+                        },
+                        computation_time_ms=computation_time_ms,
+                    )
+                )
+                continue
 
             # Candle count guard for pattern features
             if any(feature_name.startswith(p) for p in PATTERN_FEATURE_PREFIXES):
@@ -411,6 +311,18 @@ class MCPFeatureServer:
                         computation_time_ms=0.0
                     ))
                     continue
+
+            if not market_data or not candles:
+                features.append(MCPFeature(
+                    name=feature_name,
+                    version=self.feature_registry.get(feature_name, "1.0.0"),
+                    value=0.0,
+                    timestamp=timestamp,
+                    quality=FeatureQuality.DEGRADED,
+                    metadata={"reason": "no_market_data_for_non_v43_features"},
+                    computation_time_ms=0.0,
+                ))
+                continue
 
             try:
                 # Compute feature
@@ -490,12 +402,26 @@ class MCPFeatureServer:
         candles = market_data.get("candles", [])
         if not candles:
             raise ValueError("No market data available")
-        
+        interval = str(market_data.get("interval") or "1h")
+        rm = FeatureServer._interval_to_resolution_minutes(interval)
+
         # Use feature engineering service
         return await self.feature_engineering.compute_feature(
             feature_name=feature_name,
-            candles=candles
+            candles=candles,
+            resolution_minutes=rm,
         )
+
+    @staticmethod
+    def _interval_to_resolution_minutes(interval: str) -> int:
+        s = (interval or "1h").strip().lower()
+        if s.endswith("m"):
+            return max(1, int(s[:-1]))
+        if s.endswith("h"):
+            return max(1, int(s[:-1]) * 60)
+        if s.endswith("d"):
+            return max(1, int(s[:-1]) * 1440)
+        return 60
     
     def _assess_quality(self, value: float, market_data: Dict[str, Any]) -> FeatureQuality:
         """Assess feature quality."""

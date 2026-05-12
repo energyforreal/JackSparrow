@@ -14,7 +14,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 |---|----------|--------|
 | 01 | [Architecture](docs/01-architecture.md) | System design, tiers, communication, startup |
 | 02 | [MCP layer](docs/02-mcp-layer.md) | Feature / model / reasoning protocols |
-| 03 | [ML models](docs/03-ml-models.md) | Discovery, v4/v5/v6 + **v15 pipeline** bundles, training notebooks (`JackSparrow_Training_Colab_v15`), train–serve parity, Docker `MODEL_DIR` / `MODEL_FORMAT`, optional **adaptive retrain** (`agent/learning/adaptive/`, `pipeline_*_latest.pkl`) |
+| 03 | [ML models](docs/03-ml-models.md) | Discovery (**JackSparrow v43** `metadata_v43.json`), training notebooks (`JackSparrow_v44_all_fixes(1).ipynb`), **`feature_store/jacksparrow_v43_contract.py`** parity, optional **SHORT execution** gate, Docker **`MODEL_DIR` / `AGENT_MODEL_DIR`**, optional **adaptive retrain** (v15 parquet only) |
 | 04 | [Features](docs/04-features.md) | Product capabilities, signal triggers |
 | 05 | [Logic & reasoning](docs/05-logic-reasoning.md) | Six-step chain, consensus, HOLD/MTF/exit behavior, optional **minimal AI-entry gates** (`AI_SIGNAL_MINIMAL_ENTRY_GATES`) |
 | 06 | [Backend](docs/06-backend.md) | FastAPI, REST, WebSocket contract, services |
@@ -27,6 +27,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 13 | [Debugging](docs/13-debugging.md) | Diagnostics, Windows/local issues |
 | 14 | [Project rules](docs/14-project-rules.md) | Standards and contribution |
 | 15 | [Audit report](docs/15-audit-report.md) | Audit workflow, gaps, remediation, ML confidence checks |
+| 16 | [v43 trade execution runbook](docs/v43_trade_execution_runbook.md) | v43 gate tuning, metrics, rollback, log analysis script |
 
 ---
 
@@ -46,7 +47,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 |------|----------------|
 | Start / validate stack | [Build guide – Project commands](docs/11-build-guide.md#project-commands), [Deployment – Validation](docs/10-deployment.md#validation-and-monitoring-commands) |
 | Docker runtime ports & paths | [Deployment – Docker runtime topology](docs/10-deployment.md#docker-runtime-topology-reference) |
-| Model bundles & `MODEL_DIR` | [ML models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults) |
+| Model bundles & `MODEL_DIR` | [ML models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults), [Smoke – jacksparrow v43](docs/jacksparrow_v43_smoke.md) |
 | Adaptive drift / warm-start retrain (v15) | [ML models – Runtime adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional), [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), [.env.example](.env.example) |
 | WebSocket message shape | [Backend – WebSocket](docs/06-backend.md#websocket-protocol), [Frontend – WebSocket](docs/07-frontend.md#websocket-integration) |
 | Troubleshooting | [Debugging](docs/13-debugging.md), [Deployment – Troubleshooting](docs/10-deployment.md#troubleshooting) |
@@ -58,4 +59,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-04-14 (adaptive retrain: ML models, deployment agent env table, file structure, README, index)
+**Last updated**: 2026-05-10 — JackSparrow v43 docs: `03`/`06`/`07`/`08`/`10`/`11`/`14`, smoke checklist, `README`, this index.

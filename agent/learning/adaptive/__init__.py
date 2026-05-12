@@ -1,4 +1,4 @@
-"""Adaptive drift detection and warm-start retraining for v15 pipeline bundles."""
+"""Adaptive drift detection and warm-start retraining (legacy pipeline bundles only)."""
 
 from agent.learning.adaptive.adaptive_controller import (
     hot_reload_models,

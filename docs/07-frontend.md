@@ -78,9 +78,9 @@ frontend/
 
 The dashboard reads all trading-related state from a single hook backed by a `useReducer` and one WebSocket connection (see [WebSocket Integration](#websocket-integration)). `Dashboard.tsx` does **not** implement a local `switch` on `lastMessage`; message handling lives in the reducer.
 
-### v15 signal fields (optional)
+### v15 & v43 signal fields (optional)
 
-`frontend/types/index.ts` extends **`Signal`** and **`ModelConsensus`** with optional `edge`, `p_buy`, `p_sell`, `p_hold`, `v15_timeframe`, etc. WebSocket `data_update` / `resource: "signal"` merges these when the backend forwards v15 metadata (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
+`frontend/types/index.ts` extends **`Signal`** and **`ModelConsensus`** with optional **`edge`**, **`p_buy`**, **`p_sell`**, **`p_hold`**, **`v15_timeframe`** (v15 pipeline), and—with **JackSparrow v43**—**`expected_return`**, **`threshold`**, **`regime`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`**. WebSocket `data_update` / `resource: "signal"` merges these when the backend forwards agent metadata (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
 
 **Components** (under `app/components/v15/`):
 
@@ -261,6 +261,7 @@ interface SignalIndicatorProps {
 **Features**:
 - Main signal uses **`signal.signal`** (`SignalType`: BUY, SELL, HOLD, STRONG_BUY, STRONG_SELL)
 - **STRONG_BUY** / **STRONG_SELL**: extra **animate-ping** ring on the badge (and on strong per-model badges)
+- **v43 strip** (when **`expected_return`** or **`mcp_tanh_prediction`** is present): shows forward edge, dynamic **`threshold`**, **`regime`**, and **`v43_gate_reject`** when trading is blocked after gates
 - Reasoning confidence bar, model consensus accordion, agent decision text, freshness indicator
 
 ---

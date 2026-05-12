@@ -127,10 +127,12 @@ async def _reset_paper_trade_state() -> None:
     """Clear positions and trades in DB so paper trade starts fresh on each backend load."""
     from backend.core.database import AsyncSessionLocal
 
+    cleared = False
     async with AsyncSessionLocal() as session:
         try:
             await portfolio_service.delete_all_trades_and_positions(session)
             await session.commit()
+            cleared = True
             logger.info(
                 "paper_trade_state_reset",
                 service="backend",
@@ -143,6 +145,15 @@ async def _reset_paper_trade_state() -> None:
                 service="backend",
                 error=str(e),
                 message="Could not reset paper trade state",
+            )
+    if cleared:
+        try:
+            await portfolio_service.invalidate_all_portfolio_caches()
+        except Exception as e:
+            logger.warning(
+                "paper_trade_reset_cache_invalidate_failed",
+                service="backend",
+                error=str(e),
             )
 
 

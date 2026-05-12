@@ -353,9 +353,8 @@ cp .env.example .env
 These variables can be added to the root `.env` file if you need to customize agent behavior:
 
 ```bash
-# Model Configuration
-# Use model discovery for models in agent/model_storage/
-MODEL_DIR=./agent/model_storage
+# Model Configuration — JackSparrow v43 bundle (must contain metadata_v43.json)
+MODEL_DIR=./agent/model_storage/JackSparrow_v43_models_BTCUSD
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 
@@ -816,21 +815,26 @@ python scripts/train_models.py --symbol BTCUSD --timeframes 15m 1h 4h
 # Validate all models
 python scripts/validate_model_files.py
 
-# Or run pre-deployment validation (v15 pipeline bundles: 5m/15m metadata + pkl)
+# Or run pre-deployment validation (legacy v15 pipeline bundles: 5m/15m metadata + pkl)
 python scripts/validate_models_before_deployment.py
 
-# With backend running — REST smoke (health, models/status, edge-history)
+# Primary v43 smoke — requires closed-bar feature path + metadata_v43.json bundle
+python scripts/smoke_test_v43.py
+
+# With backend running — REST smoke (health, models/status) for historical v15 tooling
 python scripts/smoke_test_v15.py
 ```
 
 See [ML Models Documentation](03-ml-models.md#model-training) for detailed training guide.
 
 **Post-train parity checklist (required before deployment)**:
-1. Confirm `MODEL_DIR` points to the exact export folder that contains `metadata_BTCUSD_*.json`.
-2. Confirm `metadata_*` includes `features` and `features_required` matching `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in order and count.
-3. Run `pytest tests/unit/test_feature_parity.py -q`.
+1. **`MODEL_DIR`** must be the **JackSparrow v43** bundle directory containing **`metadata_v43.json`** and the pickle artefacts.
+2. Confirm **`metadata_v43.json`** lists **`features`** in the same order/count as **`V43_CANONICAL_FEATURES`** and includes **`training_forward_bars`: 120**.
+3. Run `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py -q` (plus `test_jacksparrow_v43_inference.py` / `test_jack_sparrow_v43_node_ctx.py` as needed).
 
-**v15 pipeline** (when using `jacksparrow_v15_*` bundles): run `pytest tests/unit/test_v15_signal.py tests/unit/test_v15_feature_registry.py -q` in addition to the above; feature lists are `V15_FEATURES_*` in `feature_registry.py`, not `EXPANDED_FEATURE_LIST`.
+**Historical v5 / expanded bundles** (when validating archived exports): confirm `metadata_*` includes `features` / `features_required` matching **`feature_store/feature_registry.py`** **`EXPANDED_FEATURE_LIST`** order and count where applicable; run `pytest tests/unit/test_feature_parity.py -q`.
+
+**v15 pipeline** (when using `jacksparrow_v15_*` bundles for adaptive retrain validation): run `pytest tests/unit/test_v15_signal.py tests/unit/test_v15_feature_registry.py -q` in addition to the above; feature lists are `V15_FEATURES_*` in `feature_registry.py`, not `EXPANDED_FEATURE_LIST`.
 
 **Adaptive retrain** (if you enable `ADAPTIVE_RETRAIN_*`): run `pytest tests/unit/test_adaptive_*.py tests/unit/test_pipeline_v15_resolve_latest.py -q` after changing drift/retrain/registry code.
 

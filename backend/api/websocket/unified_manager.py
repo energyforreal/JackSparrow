@@ -869,9 +869,13 @@ class UnifiedWebSocketManager:
                 except Exception:
                     await db.rollback()
                     raise
-            if health_data and "timestamp" in health_data and hasattr(health_data["timestamp"], "isoformat"):
-                health_data = dict(health_data)
-                health_data["timestamp"] = health_data["timestamp"].isoformat()
+            if isinstance(health_data, dict):
+                hd = dict(health_data)
+                if "timestamp" in hd and hasattr(hd["timestamp"], "isoformat"):
+                    hd["timestamp"] = hd["timestamp"].isoformat()
+                sc = float(hd.get("health_score", 0) or 0)
+                hd["score"] = max(0.0, min(1.0, sc))
+                health_data = hd
             return {
                 "type": "response",
                 "success": True,
@@ -1041,9 +1045,15 @@ class UnifiedWebSocketManager:
                     from backend.core.database import AsyncSessionLocal
                     async with AsyncSessionLocal() as db:
                         health_data = await check_overall_health(db)
-                    if health_data and "timestamp" in health_data and hasattr(health_data["timestamp"], "isoformat"):
+                    if not health_data:
+                        continue
+                    if "timestamp" in health_data and hasattr(health_data["timestamp"], "isoformat"):
                         health_data = dict(health_data)
                         health_data["timestamp"] = health_data["timestamp"].isoformat()
+                    hd = dict(health_data)
+                    sc = float(hd.get("health_score", 0) or 0)
+                    hd["score"] = max(0.0, min(1.0, sc))
+                    health_data = hd
                     health_message = create_health_update(health_data)
                     await self.broadcast(health_message, channel="system_update")
                 except Exception as health_error:

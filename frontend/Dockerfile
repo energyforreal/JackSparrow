@@ -48,12 +48,13 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME="0.0.0.0"
+    HOSTNAME="0.0.0.0" \
+    NPM_CONFIG_CACHE=/tmp/npm-cache
 
 # Create non-root user
 RUN groupadd -r frontend && useradd -r -g frontend frontend && \
-    mkdir -p /app /logs && \
-    chown -R frontend:frontend /app /logs
+    mkdir -p /app /logs /tmp/npm-cache && \
+    chown -R frontend:frontend /app /logs /tmp/npm-cache
 
 # Copy production dependencies from deps stage
 COPY --from=deps --chown=frontend:frontend /app/node_modules ./node_modules

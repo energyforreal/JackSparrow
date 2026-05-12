@@ -122,16 +122,19 @@ class Settings(BaseSettings):
         description="Path to production model file"
     )
     model_dir: str = Field(
-        default="./agent/model_storage",
+        default="./agent/model_storage/JackSparrow_v43_models_BTCUSD",
         env="MODEL_DIR",
-        description="Directory for model discovery"
+        description=(
+            "JackSparrow v43 bundle directory (supports metadata_v43.json or "
+            "metadata_v44.json + model_artifact_v43*/v44*.pkl)."
+        ),
     )
     model_discovery_recursive: bool = Field(
-        default=True,
+        default=False,
         env="MODEL_DISCOVERY_RECURSIVE",
         description=(
-            "When true, discover metadata_BTCUSD_*.json recursively under MODEL_DIR "
-            "(e.g. jacksparrow_v5_BTCUSD_*/ subfolders). When false, only the top-level MODEL_DIR."
+            "JackSparrow v43 uses a flat bundle root (metadata_v43.json or metadata_v44.json). "
+            "Recursive scan is legacy; leave false unless you mirror old multi-folder layouts."
         ),
     )
     model_discovery_enabled: bool = Field(
@@ -143,25 +146,19 @@ class Settings(BaseSettings):
         default=False,
         env="SINGLE_MODEL_MODE_ENABLED",
         description=(
-            "When True, load only one consolidated BTCUSD model artifact and bypass "
-            "timeframe-indexed runtime decision synthesis."
+            "DEPRECATED: v43-only agent ignores this flag — use MODEL_DIR with "
+            "metadata_v43.json or metadata_v44.json."
         ),
     )
     consolidated_model_metadata_glob: str = Field(
         default="metadata_BTCUSD_consolidated*.json",
         env="CONSOLIDATED_MODEL_METADATA_GLOB",
-        description=(
-            "Glob used by model discovery to locate the consolidated model metadata "
-            "artifact when SINGLE_MODEL_MODE_ENABLED is true."
-        ),
+        description="DEPRECATED: unused with v43-only discovery.",
     )
     single_model_strict_startup: bool = Field(
         default=False,
         env="SINGLE_MODEL_STRICT_STARTUP",
-        description=(
-            "When True in single-model mode, fail startup if no consolidated model "
-            "metadata artifact is found."
-        ),
+        description="DEPRECATED: unused with v43-only discovery.",
     )
     model_auto_register: bool = Field(
         default=True,
@@ -169,16 +166,16 @@ class Settings(BaseSettings):
         description="Auto-register discovered models"
     )
     model_format: str = Field(
-        default="auto",
+        default="jacksparrow_v43",
         env="MODEL_FORMAT",
         description=(
-            "Model bundle format: auto (detect per metadata), v4_ensemble, v15_pipeline"
+            "Integration label (health/API). Runtime is always JackSparrow v43 bundle discovery."
         ),
     )
     v15_signal_logic_enabled: bool = Field(
-        default=True,
+        default=False,
         env="V15_SIGNAL_LOGIC_ENABLED",
-        description="When True and v15 models are active, apply v15 entry/exit filters.",
+        description="DEPRECATED: v15 pipeline integration removed; keep False.",
     )
     v15_disable_mtf_synthesis: bool = Field(
         default=True,
@@ -516,9 +513,9 @@ class Settings(BaseSettings):
         description="ks | psi | both | either — feature drift detection mode.",
     )
     adaptive_drift_psi_threshold: float = Field(
-        default=0.25,
+        default=0.20,
         env="ADAPTIVE_DRIFT_PSI_THRESHOLD",
-        description="PSI above this counts as drifted for a feature (when PSI mode enabled).",
+        description="PSI above this counts as drifted for a feature (v43 consensus default 0.20).",
     )
     adaptive_drift_psi_bins: int = Field(
         default=10,
@@ -563,6 +560,55 @@ class Settings(BaseSettings):
         env="ADAPTIVE_VALIDATION_SCORECARD_ENABLED",
         description="When True, require val win-rate / PF / DD proxies not worse than previous model.",
     )
+    adaptive_retrain_subprocess_enabled: bool = Field(
+        default=True,
+        env="ADAPTIVE_RETRAIN_SUBPROCESS_ENABLED",
+        description=(
+            "When True, run adaptive warm-start retrain in a separate Python process "
+            "so CPU-bound training does not block the agent asyncio loop."
+        ),
+    )
+    adaptive_retrain_subprocess_timeout_seconds: int = Field(
+        default=7200,
+        env="ADAPTIVE_RETRAIN_SUBPROCESS_TIMEOUT_SECONDS",
+        ge=60,
+        description="Hard timeout for adaptive retrain worker subprocess.",
+    )
+    adaptive_drift_require_ks_psi_consensus: bool = Field(
+        default=True,
+        env="ADAPTIVE_DRIFT_REQUIRE_KS_PSI_CONSENSUS",
+        description=(
+            "When True, a feature counts toward drift only if both KS (p<alpha, stat>thr) "
+            "and PSI (>threshold) flag the same feature; retrain when consensus count "
+            "meets adaptive_drift_feature_limit."
+        ),
+    )
+    adaptive_drift_consensus_min_count: int = Field(
+        default=5,
+        env="ADAPTIVE_DRIFT_CONSENSUS_MIN_COUNT",
+        ge=1,
+        description="Minimum number of KS+PSI consensus drift features to trigger retrain.",
+    )
+    adaptive_retrain_failure_cooldown_base_hours: float = Field(
+        default=1.0,
+        env="ADAPTIVE_RETRAIN_FAILURE_COOLDOWN_BASE_HOURS",
+        ge=0.0,
+        description="Base cooldown hours after a rejected/failed adaptive retrain (doubles up to max).",
+    )
+    adaptive_retrain_failure_cooldown_max_hours: float = Field(
+        default=8.0,
+        env="ADAPTIVE_RETRAIN_FAILURE_COOLDOWN_MAX_HOURS",
+        ge=0.0,
+        description="Maximum exponential-backoff cooldown after adaptive retrain failures.",
+    )
+    adaptive_v43_five_gates_enabled: bool = Field(
+        default=True,
+        env="ADAPTIVE_V43_FIVE_GATES_ENABLED",
+        description=(
+            "When True, adaptive model promotion also requires the five v43-style validation gates "
+            "(macro AUC, IC proxy, win rate, return proxy, Sharpe proxy) on the holdout slice."
+        ),
+    )
     feature_server_fail_closed_no_candles: bool = Field(
         default=True,
         env="FEATURE_SERVER_FAIL_CLOSED_NO_CANDLES",
@@ -578,6 +624,145 @@ class Settings(BaseSettings):
         env="STRICT_CANDLE_VALIDATION_MIN_ROWS",
         ge=2,
         description="Minimum candle rows required after validation.",
+    )
+
+    # JackSparrow v43 dedicated bundle (metadata_v43.json + model_artifact_v43.pkl)
+    jacksparrow_v43_mode_enabled: bool = Field(
+        default=True,
+        env="JACKSPARROW_V43_MODE_ENABLED",
+        description=(
+            "DEPRECATED: v43 is the only integration path; discovery always loads the v43 "
+            "bundle under MODEL_DIR. Kept for env compat."
+        ),
+    )
+    jacksparrow_v43_artifact_basename: str = Field(
+        default="model_artifact_v43_patched.pkl",
+        env="JACKSPARROW_V43_ARTIFACT_BASENAME",
+        description=(
+            "Primary v43 artifact filename when present in MODEL_DIR; "
+            "falls back to v43/v44 artifact aliases when missing."
+        ),
+    )
+    jacksparrow_v43_metadata_glob: str = Field(
+        default="**/metadata_v43.json",
+        env="JACKSPARROW_V43_METADATA_GLOB",
+        description="Glob under MODEL_DIR to locate v43 metadata (unused when MODEL_DIR is bundle root).",
+    )
+    jacksparrow_v43_candles_5m: int = Field(
+        default=600,
+        env="JACKSPARROW_V43_CANDLES_5M",
+        ge=50,
+        description="Number of 5m candles to fetch for v43 feature_engineer.transform.",
+    )
+    jacksparrow_v43_candles_15m: int = Field(
+        default=400,
+        env="JACKSPARROW_V43_CANDLES_15M",
+        ge=50,
+        description="Number of 15m candles for v43.",
+    )
+    jacksparrow_v43_candles_1h: int = Field(
+        default=300,
+        env="JACKSPARROW_V43_CANDLES_1H",
+        ge=48,
+        description="Number of 1h candles for v43 (OHLCV + funding alignment).",
+    )
+    jacksparrow_v43_trade_debounce_bars: int = Field(
+        default=3,
+        env="JACKSPARROW_V43_TRADE_DEBOUNCE_BARS",
+        ge=1,
+        description="Minimum 5m bars between v43 entries (default 3 ≈ 15 min; set 6 for ~30 min).",
+    )
+    jacksparrow_v43_max_trades_per_hour: int = Field(
+        default=2,
+        env="JACKSPARROW_V43_MAX_TRADES_PER_HOUR",
+        ge=1,
+        description="Gate 3: max entries per rolling hour.",
+    )
+    jacksparrow_v43_max_trades_per_day: int = Field(
+        default=6,
+        env="JACKSPARROW_V43_MAX_TRADES_PER_DAY",
+        ge=1,
+        description="Gate 3: max entries per UTC day.",
+    )
+    jacksparrow_v43_min_edge_cost_ratio: float = Field(
+        default=0.75,
+        env="JACKSPARROW_V43_MIN_EDGE_COST_RATIO",
+        ge=0.0,
+        description=(
+            "Gate 5: min multiple of round-trip cost vs edge (TP-scaled). "
+            "Default 0.75 balances small expected_return magnitudes vs fees; "
+            "raise toward 1.0–1.5 to tighten entries (see docs/v43_trade_execution_runbook.md)."
+        ),
+    )
+    jacksparrow_v43_block_trending_entries: bool = Field(
+        default=True,
+        env="JACKSPARROW_V43_BLOCK_TRENDING_ENTRIES",
+        description="When True, skip entries when regime_label is trending.",
+    )
+    jacksparrow_v43_threshold_oof_percentile: float = Field(
+        default=75.0,
+        env="JACKSPARROW_V43_THRESHOLD_OOF_PERCENTILE",
+        ge=1.0,
+        le=99.0,
+        description="OOF percentile hint for diagnostics / collapse tuning (75 default).",
+    )
+    jacksparrow_v43_signal_threshold_floor: float = Field(
+        default=0.005,
+        env="JACKSPARROW_V43_SIGNAL_THRESHOLD_FLOOR",
+        ge=0.0,
+        description=(
+            "Soft floor for threshold resolution; must stay below OOF P75 (~0.011) so "
+            "it does not block patched calibrations."
+        ),
+    )
+    jacksparrow_v43_near_threshold_epsilon: float = Field(
+        default=0.0,
+        env="JACKSPARROW_V43_NEAR_THRESHOLD_EPSILON",
+        ge=0.0,
+        description=(
+            "Optional near-threshold band for v43: treat expected_return within "
+            "`threshold - epsilon` as a raw signal candidate. Keep 0.0 for strict gating."
+        ),
+    )
+    jacksparrow_v43_max_position_pct: float = Field(
+        default=0.20,
+        env="JACKSPARROW_V43_MAX_POSITION_PCT",
+        ge=0.01,
+        le=1.0,
+        description="Fraction of capital for v43 notional sizing before uncertainty scale.",
+    )
+    jacksparrow_v43_leverage_assumption: int = Field(
+        default=3,
+        env="JACKSPARROW_V43_LEVERAGE_ASSUMPTION",
+        ge=1,
+        description="Leverage used in v43 edge-cost and sizing formulas (match training notebook).",
+    )
+    jacksparrow_v43_take_profit_pct: float = Field(
+        default=0.015,
+        env="JACKSPARROW_V43_TAKE_PROFIT_PCT",
+        ge=0.0,
+        description="TP fraction for gate 5 edge check (do not change without retrain).",
+    )
+    jacksparrow_v43_maker_fee_rate: float = Field(
+        default=0.0005,
+        env="JACKSPARROW_V43_MAKER_FEE_RATE",
+        ge=0.0,
+        description="Per-leg maker fee for v43 round-trip cost estimate.",
+    )
+    jacksparrow_v43_slippage_pct: float = Field(
+        default=0.0003,
+        env="JACKSPARROW_V43_SLIPPAGE_PCT",
+        ge=0.0,
+        description="Per-leg slippage fraction for v43 round-trip cost estimate.",
+    )
+
+    jacksparrow_v43_short_execution_enabled: bool = Field(
+        default=False,
+        env="JACKSPARROW_V43_SHORT_EXECUTION_ENABLED",
+        description=(
+            "When True, symmetric short entries fire when expected_return < -threshold "
+            "(same gates/cost model as long)."
+        ),
     )
 
     trade_outcomes_writes_enabled: bool = Field(

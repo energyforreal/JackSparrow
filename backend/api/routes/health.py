@@ -647,6 +647,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
         "status": status_str,
         "health_score": round(health_score, 3),
         "ml_models": ml_models_summary,
+        "trading_mode": str(getattr(settings, "trading_mode", "paper")).lower(),
         "services": {
             "database": _to_dict(db_health),
             "redis": _to_dict(redis_status),
@@ -711,7 +712,10 @@ async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
     import structlog
     logger = structlog.get_logger()
     user_agent = (request.headers.get("user-agent") or "").lower()
-    if not any(marker in user_agent for marker in ("curl", "healthcheck", "docker")):
+    if not any(
+        marker in user_agent
+        for marker in ("curl", "healthcheck", "docker", "python-urllib", "urllib")
+    ):
         logger.warning(
             "health_endpoint_deprecated",
             message="REST API /health endpoint is deprecated. Use WebSocket command 'get_health' instead.",

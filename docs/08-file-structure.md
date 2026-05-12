@@ -90,6 +90,8 @@ JackSparrow/
 ├── feature_store/                      # Per-feature engineering layer
 │   ├── feature_registry.py            # Canonical and perpetual feature lists
 │   ├── unified_feature_engine.py      # Batch/single feature computation including perpetual markets
+│   ├── jacksparrow_v43_contract.py   # v43 training contract: `V43_CANONICAL_FEATURES`, horizon constant
+│   ├── jacksparrow_v43_mcp_row.py     # Ordered MCP feature row builder for v43 inference
 │   ├── perpetual_features.py          # Perpetual-specific feature computation
 │   └── ...
 │   │   ├── mcp_orchestrator.py         # MCP Orchestrator (NEW - complete implementation)
@@ -106,7 +108,8 @@ JackSparrow/
 │   │   ├── __init__.py
 │   │   ├── mcp_model_node.py          # Base MCP model node interface
 │   │   ├── mcp_model_registry.py      # MCP Model Registry
-│   │   ├── model_discovery.py          # Automatic model discovery
+│   │   ├── model_discovery.py          # JackSparrow v43 bundle discovery (metadata_v43.json)
+│   │   ├── jack_sparrow_v43_node.py   # v43 MCP model node (+ inference + pickle shims used at load time)
 │   │   ├── xgboost_node.py            # XGBoost implementation
 │   │   ├── lstm_node.py               # LSTM implementation
 │   │   ├── transformer_node.py        # Transformer implementation
@@ -894,14 +897,25 @@ pydantic==2.5.0
 
 ### Model Storage Location
 
-JackSparrow stores trained ML bundles under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (and **`AGENT_MODEL_DIR`** in Docker). Discovery is metadata-driven (`metadata_BTCUSD_*.json`); the loader depends on **`MODEL_FORMAT`** (`auto` | `v4_ensemble` | `v15_pipeline`).
+JackSparrow ships trained ML artefacts under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (**`AGENT_MODEL_DIR`** in Docker). **Current discovery loads a single JackSparrow v43 bundle**: path must contain **`metadata_v43.json`**. Older layouts with **`metadata_BTCUSD_*.json`** remain in the tree as **historical** exports; **`MODEL_FORMAT` defaults to `jacksparrow_v43`** (health/integration label—not a loader switch).
 
 **Typical layouts**:
 
-- **v5 / v4 ensemble** (entry + exit joblibs per timeframe), e.g. `jacksparrow_v5_BTCUSD_2026-03-19/` — multiple TFs, `V4EnsembleNode`.
-- **v15 pipeline** (single `pipeline_{tf}_v14.pkl` per TF), e.g. `jacksparrow_v15_BTCUSD_2026-04-05/5m/` and `.../15m/` — `PipelineV15Node`. Docker Compose in this repo defaults the agent image to the v15 bundle path unless overridden.
+- **v43 regression (Compose default)**: **`JackSparrow_v43_models_BTCUSD/`** — flat folder: **`metadata_v43.json`** + **`model_artifact_v43*.pkl`** (+ optional `feature_engineer.pkl`, `regime_models_v43.pkl`) — **`JackSparrowV43Node`**.
+- **Historical v5 / v4 ensemble** (entry + exit joblibs per timeframe), e.g. `jacksparrow_v5_BTCUSD_2026-03-19/` — **`V4EnsembleNode`** in forks only.
+- **Historical v15 pipeline** (single `pipeline_{tf}_v14.pkl` per TF), e.g. `jacksparrow_v15_BTCUSD_2026-04-05/{5m,15m}/` — retained for parquet **adaptive retrain**, not paired with today's v43 **`ModelDiscovery`**.
 
-Example v5 tree:
+Example v43 tree:
+
+```
+agent/model_storage/JackSparrow_v43_models_BTCUSD/
+├── metadata_v43.json
+├── model_artifact_v43.pkl
+├── feature_engineer.pkl
+└── regime_models_v43.pkl   # optional
+```
+
+Example legacy v5 tree:
 
 ```
 agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/
@@ -923,9 +937,8 @@ agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/
 
 ### Model Discovery
 
-- Scans under `MODEL_DIR` (recursive when enabled) for `metadata_BTCUSD_*.json`.
-- Registers **`V4EnsembleNode`** or **`PipelineV15Node`** per file format (see [ML Models](03-ml-models.md)).
-- Models are registered with the MCP Model Registry for predictions on startup.
+- **`agent/models/model_discovery.py`** resolves **`MODEL_DIR/metadata_v43.json`** and registers **`JackSparrowV43Node`** (`MODEL_AUTO_REGISTER=true` by default). **`MODEL_PATH` is ignored.**
+- Legacy recursive scans for **`metadata_BTCUSD_*.json`** apply only when running an older checkout or patched discovery—see **[ML Models](03-ml-models.md#historical-multi-node-flow-forks-only)**.
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

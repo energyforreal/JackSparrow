@@ -22,6 +22,7 @@ JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 - **INR portfolio defaults**: `INITIAL_BALANCE=20000` (displayed as `₹20,000`)
 - **Currency split**: BTCUSD market prices render in `USD ($)` while portfolio/PnL render in `INR (₹)`
 - **Entry confidence gate**: trades execute only when confidence is `>= 70%` (`MIN_CONFIDENCE_THRESHOLD=0.70`)
+- **v43 execution tuning**: see [docs/v43_trade_execution_runbook.md](docs/v43_trade_execution_runbook.md) (gate 5 ratio, debounce, shorts, trending trial, log analysis)
 - **Delta BTCUSD lot semantics**: `MIN_LOT_SIZE=1` lot with `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC)
 - **Runtime execution controls**: fixed `1` lot entries, isolated margin assumption `5x`, INR margin sufficiency checks
 - **Real-time price monitoring** with instant BTCUSD price updates in frontend
@@ -165,13 +166,13 @@ The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server
 
 ## Model Training
 
-The system uses **metadata-driven BTCUSD JackSparrow bundles** discovered from `MODEL_DIR` on agent startup. Docker Compose and `.env.example` default to the **v15** pipeline bundle with **5m + 15m** metadata under `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/` (override `MODEL_DIR` / `AGENT_MODEL_DIR` to promote another dated export). Older **v5** slim bundles remain valid for rollback; see [ML Models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults).
+Inference loads a **JackSparrow v43 regression bundle**: point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (must contain **`metadata_v43.json`** plus the pickled artefacts). Docker Compose defaults **`MODEL_DIR`** from **`AGENT_MODEL_DIR`** to **`/app/agent/model_storage/JackSparrow_v43_models_BTCUSD`** unless you override it. Export / retrain from **`notebooks/JackSparrow_v44_all_fixes(1).ipynb`**; keep **`features`** order aligned with **`feature_store/jacksparrow_v43_contract.py`**. Historical **v15** / **v5** bundles may still exist under **`agent/model_storage/`** for archival tests and **v15 parquet adaptive retrain**, but they are **not** multi-node discovery peers in this checkout—see **[ML models](docs/03-ml-models.md#runtime-discovery-jacksparrow-v43--current-branch)** and **[Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults)**.
 
-If you need to train or regenerate ML models, use **`notebooks/JackSparrow_Training_Colab_v15.ipynb`** for the default **v15** pipeline bundle (`pipeline_{5m|15m}_v14.pkl` + `metadata_BTCUSD_*.json`), or the older v5/v6 notebooks under `notebooks/` for legacy ensemble bundles.
+**Optional runtime adaptive retrain (v15 parquet only)**: KS drift + warm-start XGBoost beside **`metadata_BTCUSD_*.json`**; does **not** mutate the v43 weights. Configure **`ADAPTIVE_RETRAIN_*`** in `.env` (see [.env.example](.env.example) and [ML models – adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional)).
 
-**Optional runtime adaptive retrain** (v15 only): KS drift + warm-start XGBoost with an F1 acceptance gate; writes `pipeline_{tf}_latest.pkl` beside metadata. Configure `ADAPTIVE_RETRAIN_*` in `.env` (see [.env.example](.env.example) and [ML models – adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional)).
+See [ML Models Documentation](docs/03-ml-models.md) for contracts, discovery, training, and adaptive retrain.
 
-See [ML Models Documentation](docs/03-ml-models.md) for discovery, bundles, training, and adaptive retrain.
+If you need legacy pipeline exports, **`notebooks/JackSparrow_Training_Colab_v15.ipynb`** (v15) and **`notebooks/JackSparrow_Training_Colab_v6.ipynb`** / **`JackSparrow_Trading_Colab_v5.ipynb`** (expanded ensembles) remain documented there.
 
 ## Testing
 

@@ -475,33 +475,6 @@ class ExecutionEngine:
                 "take_profit": take_profit,
             }
 
-            vd = payload.get("v15_diagnostics") or {}
-            if vd and bool(getattr(settings, "v15_signal_logic_enabled", True)):
-                extras: Dict[str, Any] = {}
-                atr_raw = vd.get("atr_14")
-                if atr_raw is not None:
-                    try:
-                        atr_f = float(atr_raw)
-                        if atr_f > 0:
-                            extras["v15_entry_atr"] = atr_f
-                            extras["v15_trail_mult"] = float(
-                                getattr(settings, "atr_trailing_mult", 2.0) or 2.0
-                            )
-                    except (TypeError, ValueError):
-                        pass
-                tf = str(vd.get("v15_timeframe") or "15m")
-                bars = int(getattr(settings, "min_hold_bars", 0) or 0)
-                if bars > 0:
-                    tf_l = tf.strip().lower()
-                    bar_sec = 900
-                    if tf_l.endswith("m") and tf_l[:-1].isdigit():
-                        bar_sec = int(tf_l[:-1]) * 60
-                    extras["v15_min_hold_until"] = datetime.now(timezone.utc) + timedelta(
-                        seconds=bars * bar_sec
-                    )
-                if extras:
-                    trade["position_extras"] = extras
-
             pex = dict(trade.get("position_extras") or {})
             if payload.get("contract_value_btc") is not None:
                 try:
@@ -1260,56 +1233,9 @@ class ExecutionEngine:
             getattr(settings, "trailing_stop_activation_profit_pct", 0.0) or 0.0
         )
 
-        min_hold_until = position.get("v15_min_hold_until")
         past_min_hold = True
-        if min_hold_until is not None:
-            now = datetime.now(timezone.utc)
-            if hasattr(min_hold_until, "tzinfo") and min_hold_until.tzinfo:
-                min_hold_dt = min_hold_until
-            else:
-                min_hold_dt = min_hold_until.replace(tzinfo=timezone.utc)
-            past_min_hold = now >= min_hold_dt
-            if not past_min_hold:
-                logger.debug(
-                    "min_hold_soft_exits_deferred",
-                    symbol=position_symbol,
-                    until=min_hold_until,
-                    now=now,
-                )
 
-        v15_atr = position.get("v15_entry_atr")
-        v15_mult = position.get("v15_trail_mult")
-        v15_trail_active = False
-        if past_min_hold and v15_atr is not None and v15_mult is not None:
-            try:
-                atr_v = float(v15_atr)
-                mult_v = float(v15_mult)
-            except (TypeError, ValueError):
-                atr_v = 0.0
-                mult_v = 0.0
-            if atr_v > 0 and mult_v > 0:
-                v15_trail_active = True
-                if position["side"] == "long":
-                    new_sl = current_price - mult_v * atr_v
-                    if position.get("stop_loss") is None or new_sl > position["stop_loss"]:
-                        position["stop_loss"] = new_sl
-                        logger.info(
-                            "v15_atr_trailing_stop_updated",
-                            symbol=position_symbol,
-                            new_stop=new_sl,
-                        )
-                elif position["side"] == "short":
-                    new_sl = current_price + mult_v * atr_v
-                    cur_sl = position.get("stop_loss")
-                    if cur_sl is None or new_sl < cur_sl:
-                        position["stop_loss"] = new_sl
-                        logger.info(
-                            "v15_atr_trailing_stop_updated",
-                            symbol=position_symbol,
-                            new_stop=new_sl,
-                        )
-
-        if past_min_hold and not v15_trail_active and position["side"] == "long" and current_price > entry_price:
+        if past_min_hold and position["side"] == "long" and current_price > entry_price:
             profit_pct = (current_price - entry_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 - trail_pct)
@@ -1320,7 +1246,7 @@ class ExecutionEngine:
                         symbol=position_symbol,
                         new_stop=new_trail_stop,
                     )
-        elif past_min_hold and not v15_trail_active and position["side"] == "short" and current_price < entry_price:
+        elif past_min_hold and position["side"] == "short" and current_price < entry_price:
             profit_pct = (entry_price - current_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 + trail_pct)
@@ -1336,48 +1262,12 @@ class ExecutionEngine:
         stop_loss = position.get("stop_loss")
         take_profit = position.get("take_profit")
 
-        if (
-            past_min_hold
-            and bool(getattr(settings, "v15_signal_logic_enabled", True))
-            and position.get("v15_entry_atr") is not None
-        ):
-            st = context_manager.get_state()
-            edge = getattr(st, "v15_live_edge", None) if st else None
-            if edge is not None:
-                try:
-                    ef = float(edge)
-                    th = float(getattr(settings, "edge_decay_threshold", 0.05) or 0.05)
-                    if abs(ef) < th:
-                        close_result = await self.close_position(
-                            position_symbol, exit_reason="edge_decay"
-                        )
-                        if close_result.success:
-                            actions_taken.append(
-                                {
-                                    "action": "edge_decay_exit",
-                                    "symbol": position_symbol,
-                                    "exit_price": current_price,
-                                    "edge": ef,
-                                }
-                            )
-                            return {
-                                "symbol": position_symbol,
-                                "actions_taken": actions_taken,
-                                "position_status": "closed",
-                            }
-                except (TypeError, ValueError):
-                    pass
-
         if stop_loss:
             should_stop = (position["side"] == "long" and current_price <= stop_loss) or (
                 position["side"] == "short" and current_price >= stop_loss
             )
             if should_stop:
-                sl_reason = (
-                    "atr_trail_stop"
-                    if position.get("v15_entry_atr") is not None
-                    else "stop_loss_hit"
-                )
+                sl_reason = "stop_loss_hit"
                 close_result = await self.close_position(position_symbol, exit_reason=sl_reason)
                 if close_result.success:
                     actions_taken.append(

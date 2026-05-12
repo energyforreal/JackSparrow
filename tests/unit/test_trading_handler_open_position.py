@@ -25,10 +25,6 @@ class _FakeExecutionModule:
 @pytest.mark.asyncio
 async def test_open_position_blocks_same_side_long_buys(monkeypatch) -> None:
     """Long + BUY should reject before risk/price path (open_position_blocks_entry)."""
-    monkeypatch.setattr(
-        "agent.events.handlers.trading_handler.apply_v15_entry_gate",
-        lambda sig, preds, feats: (sig, {}),
-    )
 
     published: list = []
 
@@ -81,10 +77,6 @@ async def test_open_position_blocks_same_side_long_buys(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_signal_reversal_still_closes_when_opposite_signal(monkeypatch) -> None:
     """Long + SELL should call close_position (reversal path), not same-side block."""
-    monkeypatch.setattr(
-        "agent.events.handlers.trading_handler.apply_v15_entry_gate",
-        lambda sig, preds, feats: (sig, {}),
-    )
 
     published: list = []
 

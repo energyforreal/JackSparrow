@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: timescale/timescaledb:2.25.1-pg15
+    image: timescale/timescaledb:2.26.3-pg15
     container_name: jacksparrow-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -102,10 +102,6 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-      # Backend must accept /ws/agent before the agent client connects; backend
-      # warms up to the agent WebSocket separately (retries / reconnect loop).
-      backend:
-        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -117,7 +113,7 @@ services:
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://api.india.delta.exchange}
       # In-container path; override with AGENT_MODEL_DIR in root .env if bundle folder name changes
-      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05}
+      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_v43_models_BTCUSD}
       REQUIRE_MODELS_ON_STARTUP: ${REQUIRE_MODELS_ON_STARTUP:-true}
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}
@@ -131,7 +127,13 @@ services:
       BACKEND_WS_URL: ws://backend:8000/ws/agent
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      # Compose-time only (ignored if unset): fresh paper trades per stack start. Host .env
+      # may set RESET_PAPER_STATE_ON_STARTUP=false for bare-metal; Docker uses DOCKER_* here.
+      RESET_PAPER_STATE_ON_STARTUP: ${DOCKER_RESET_PAPER_ON_START:-true}
     volumes:
+      # Source bind mounts: pick up local code without rebuilding the image (models still from model_storage mount)
+      - ./agent:/app/agent
+      - ./feature_store:/app/feature_store
       - ./agent/model_storage:/app/agent/model_storage
       - ./logs/agent:/logs
       - ./logs/paper_trades:/logs/paper_trades
@@ -174,6 +176,9 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+      # Agent command WebSocket (:8003) must accept connections before backend warms up outbound WS.
+      agent:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -197,7 +202,8 @@ services:
       BACKEND_HOST: 0.0.0.0
       LOG_LEVEL: ${BACKEND_LOG_LEVEL:-INFO}
       # false = keep paper trades/positions in Postgres across backend restarts (UI Recent Trades)
-      RESET_PAPER_STATE_ON_STARTUP: ${RESET_PAPER_STATE_ON_STARTUP:-false}
+      # Compose default: wipe paper trades/positions each `docker compose up`.
+      RESET_PAPER_STATE_ON_STARTUP: ${DOCKER_RESET_PAPER_ON_START:-true}
       CORS_ORIGINS: ${CORS_ORIGINS}
       CORS_INTERNAL_ORIGINS: ${CORS_INTERNAL_ORIGINS:-http://frontend:3000}
       QDRANT_URL: http://qdrant:6333

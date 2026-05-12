@@ -1,4 +1,4 @@
-"""Trading handler: AI_SIGNAL_MINIMAL_ENTRY_GATES bypasses v15 and other signal gates."""
+"""Trading handler: AI_SIGNAL_MINIMAL_ENTRY_GATES relaxed entry path."""
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -35,13 +35,8 @@ def _minimal_settings(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_minimal_entry_publishes_despite_v15_hold(monkeypatch, _minimal_settings) -> None:
-    """With minimal gates, synthesis BUY + raw confidence 0.71 is not blocked by v15 HOLD."""
-    monkeypatch.setattr(
-        "agent.events.handlers.trading_handler.apply_v15_entry_gate",
-        lambda sig, preds, feats: ("HOLD", {"edge": 0.01}),
-    )
-
+async def test_minimal_entry_publishes_above_floor(monkeypatch, _minimal_settings) -> None:
+    """With minimal gates, synthesis BUY + raw confidence 0.71 reaches publish path."""
     published: list = []
 
     async def capture_publish(event):
@@ -151,10 +146,6 @@ async def test_minimal_entry_rejects_below_floor(monkeypatch, _minimal_settings)
 
 @pytest.mark.asyncio
 async def test_minimal_entry_same_side_open_still_blocks(monkeypatch, _minimal_settings) -> None:
-    monkeypatch.setattr(
-        "agent.events.handlers.trading_handler.apply_v15_entry_gate",
-        lambda sig, preds, feats: (sig, {}),
-    )
 
     published: list = []
 
@@ -198,10 +189,6 @@ async def test_minimal_entry_same_side_open_still_blocks(monkeypatch, _minimal_s
 @pytest.mark.asyncio
 async def test_minimal_entry_still_applies_debounce(monkeypatch, _minimal_settings) -> None:
     monkeypatch.setattr(settings, "trade_signal_debounce_seconds", 60)
-    monkeypatch.setattr(
-        "agent.events.handlers.trading_handler.apply_v15_entry_gate",
-        lambda sig, preds, feats: (sig, {}),
-    )
 
     published: list = []
 

@@ -82,6 +82,10 @@ class HealthResponse(BaseModel):
         default=None,
         description="True if paper trading can execute (models healthy); False in degraded mode"
     )
+    trading_mode: Optional[str] = Field(
+        default=None,
+        description="Configured trading mode from backend settings (e.g. paper, live)",
+    )
     ml_models: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional v15 / per-timeframe model summary from agent model_nodes details",

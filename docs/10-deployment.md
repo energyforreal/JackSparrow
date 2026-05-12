@@ -922,9 +922,11 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | https://api.india.delta.exchange |
 | `QDRANT_URL` | Qdrant vector database URL | No | http://localhost:6333 |
 | `QDRANT_API_KEY` | Qdrant API key | No | - |
-| `MODEL_DIR` | Directory for model discovery (all models) | No | `./agent/model_storage` (local); Docker Compose defaults to the **v15** bundle under `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05` via `AGENT_MODEL_DIR` |
+| `MODEL_DIR` | Directory for JackSparrow **v43** bundle — must contain **`metadata_v43.json`** | No | `./agent/model_storage/JackSparrow_v43_models_BTCUSD` (local); Docker Compose sets in-container default to **`/app/agent/model_storage/JackSparrow_v43_models_BTCUSD`** via `AGENT_MODEL_DIR` |
 | `AGENT_MODEL_DIR` | Docker-only override for in-container `MODEL_DIR` | No | See `docker-compose.yml` agent service |
-| `MODEL_FORMAT` | `auto`, `v4_ensemble`, or `v15_pipeline` — discovery / node selection | No | `auto` |
+| `MODEL_FORMAT` | Integration label for health payloads (`jacksparrow_v43` default); does **not** swap discovery loaders | No | `jacksparrow_v43` |
+| `JACKSPARROW_V43_ARTIFACT_BASENAME` | Optional artefact filename inside the v43 bundle when not using default `model_artifact_v43.pkl` | No | *(unset — default basename in metadata)* |
+| `JACKSPARROW_V43_SHORT_EXECUTION_ENABLED` | When `true`, allow symmetric **SELL** entries when strong negative edge passes v43 gates | No | `false` |
 | `ADAPTIVE_RETRAIN_ENABLED` | When `true`, agent runs periodic KS drift + optional warm-start retrain (v15 parquet path) | No | `false` |
 | `ADAPTIVE_RETRAIN_CHECK_INTERVAL_SECONDS` | Seconds between adaptive evaluations | No | `3600` |
 | `ADAPTIVE_RETRAIN_COOLDOWN_HOURS` | Minimum hours between successful retrains per TF | No | `12` |
@@ -933,7 +935,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `ADAPTIVE_RETRAIN_TIMEFRAMES` | Comma-separated TFs to evaluate | No | `5m,15m` |
 | `ADAPTIVE_RETRAIN_STATE_PATH` | JSON cooldown state filename (under `LOGS_ROOT` if set) | No | `adaptive_retrain_state.json` |
 | `ADAPTIVE_DRIFT_ALPHA` / `ADAPTIVE_DRIFT_STAT_THRESHOLD` / `ADAPTIVE_DRIFT_FEATURE_LIMIT` | KS drift gate (see [ML models – Learning](03-ml-models.md#learning-control-modules-agent-runtime)) | No | `0.01` / `0.10` / `5` |
-| `MODEL_PATH` | Specific model file path (optional, for direct model loading) | No | agent/model_storage/xgboost/xgboost_BTCUSD_15m.pkl |
+| `MODEL_PATH` | **Ignored** with v43-only discovery — use `MODEL_DIR` | No | *(unused)* |
 | `LOG_LEVEL` | Agent logging level | No | INFO |
 | `LOG_DIR` | Agent log directory | No | `./logs/agent` |
 | `LOG_RETENTION_DAYS` | Days to retain agent logs | No | 7 |
@@ -1481,7 +1483,7 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 **Problem**: Models fail to load
 
 **Solutions**:
-1. Verify model files exist (check MODEL_DIR for model discovery or MODEL_PATH for specific model file)
+1. Verify **`metadata_v43.json`** and pickle artefacts exist under **`MODEL_DIR`** (see [ML models](03-ml-models.md#bundle-profiles-and-docker-defaults)); **`MODEL_PATH` is ignored**.
 2. Check model file permissions
 3. Verify model format compatibility
 4. Check available memory

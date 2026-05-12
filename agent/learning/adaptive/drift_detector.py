@@ -114,3 +114,13 @@ def should_retrain_from_psi(
 ) -> bool:
     """True when high-PSI feature count exceeds the configured limit."""
     return len(list(drifted_psi)) > int(feature_limit)
+
+
+def consensus_drift_feature_names(
+    drifted_ks: Sequence[Tuple[str, float, float]],
+    drifted_psi: Sequence[Tuple[str, float]],
+) -> List[str]:
+    """Features flagged by both KS and PSI (same column name)."""
+    ks_names = {t[0] for t in drifted_ks}
+    psi_names = {t[0] for t in drifted_psi}
+    return sorted(ks_names & psi_names)

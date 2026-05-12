@@ -52,6 +52,9 @@ export const HealthResponseSchema = z.object(
     degradation_reasons: z
       .array(z.string(), { description: 'Reasons for degraded status' })
       .default([]),
+    trading_ready: z.boolean().optional(),
+    trading_mode: z.string().optional(),
+    ml_models: z.record(z.unknown()).optional(),
     timestamp: DateSchema,
   },
   { description: 'Health response' },
@@ -249,7 +252,7 @@ const LegacyWebSocketMessageSchema = z.union([
   z.object({
     type: z.literal('model_prediction_update'),
     data: z.object({
-      consensus_signal: z.number().optional(),
+      consensus_signal: z.union([SignalTypeSchema, z.number()]).optional(),
       consensus_confidence: z.number().optional(),
       individual_model_reasoning: z.array(z.unknown()).optional(),
       model_consensus: z.array(z.unknown()).optional(),

@@ -1,12 +1,13 @@
-"""Regression tests for model prediction context propagation."""
+"""Regression tests for model prediction context propagation (JackSparrow v43 path)."""
 
 import os
 import sys
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import pandas as pd
 import pytest
 
 # Ensure project root is on path (for agent imports).
@@ -37,28 +38,14 @@ async def test_process_prediction_request_preserves_model_context():
     """Per-model context (including exit_signal) is preserved in orchestrator output."""
     orchestrator = MCPOrchestrator()
     orchestrator._initialized = True
-
-    feature_response = SimpleNamespace(
-        features=[
-            SimpleNamespace(
-                name="ema_9",
-                value=1.23,
-                quality=SimpleNamespace(value="high"),
-            )
-        ],
-        overall_quality=SimpleNamespace(value="high"),
-        quality_score=0.97,
-    )
-    orchestrator.feature_server = SimpleNamespace(
-        get_features=AsyncMock(return_value=feature_response)
-    )
+    orchestrator.delta_client = object()
 
     prediction = MCPModelPrediction(
         model_name="jacksparrow_BTCUSD_15m",
         model_version="4.0.0",
         prediction=0.4,
         confidence=0.8,
-        reasoning="v4 ensemble 15m",
+        reasoning="v43 ensemble 15m",
         features_used=["ema_9"],
         feature_importance={},
         computation_time_ms=12.5,
@@ -88,7 +75,13 @@ async def test_process_prediction_request_preserves_model_context():
         generate_reasoning=AsyncMock(return_value=reasoning_chain)
     )
 
-    result = await orchestrator.process_prediction_request("BTCUSD", {})
+    df_stub = pd.DataFrame({"close": [1.0, 2.0, 3.0]})
+    with patch(
+        "agent.core.v43_market_frames.fetch_v43_market_frames",
+        new_callable=AsyncMock,
+        return_value=(df_stub, df_stub, df_stub, df_stub),
+    ):
+        result = await orchestrator.process_prediction_request("BTCUSD", {})
 
     top_level_ctx = result["model_predictions"][0]["context"]
     market_ctx = result["market_context"]["model_predictions"][0]["context"]

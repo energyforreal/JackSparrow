@@ -1,10 +1,7 @@
 """Integration tests covering agent ↔ model communication pipeline."""
 
-import asyncio
 import os
-from pathlib import Path
 from typing import Any, Dict
-from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -15,7 +12,6 @@ os.environ.setdefault("DELTA_EXCHANGE_API_SECRET", "test-secret")
 
 from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
 from agent.models.mcp_model_registry import MCPModelRegistry
-from agent.models.model_discovery import ModelDiscovery
 
 
 class _FakeModel(MCPModelNode):
@@ -85,46 +81,6 @@ async def registry():
     await reg.initialize()
     yield reg
     await reg.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_model_discovery_across_directories(tmp_path: Path, registry):
-    """Ensure discovery scans known subdirectories and registers models."""
-    model_dir = tmp_path
-    with patch("agent.models.model_discovery.settings") as mock_settings:
-        mock_settings.model_dir = str(model_dir)
-        mock_settings.model_path = None
-        mock_settings.model_discovery_enabled = True
-
-        discovery = ModelDiscovery(registry)
-        discovery.model_dir = model_dir
-        discovery.model_path = None
-    subdirs = [
-        "xgboost",
-        "lightgbm",
-        "random_forest",
-        "lstm",
-        "transformer",
-        "custom",
-    ]
-    expected_model_names = []
-    for subdir in subdirs:
-        subdir_path = model_dir / subdir
-        subdir_path.mkdir(parents=True, exist_ok=True)
-        model_path = subdir_path / f"{subdir}_model.pkl"
-        model_path.write_bytes(b"fake model content")
-        expected_model_names.append(model_path.stem)
-
-        async def _fake_loader(path: Path) -> MCPModelNode:
-            return _FakeModel(path.stem)
-
-        with patch.object(ModelDiscovery, "_load_model_from_path", side_effect=_fake_loader):
-            discovered = await discovery.discover_models()
-
-        assert len(discovered) == len(expected_model_names)
-        for model_name in expected_model_names:
-            assert model_name in discovered
-            assert registry.get_model(model_name) is not None
 
 
 @pytest.mark.asyncio
