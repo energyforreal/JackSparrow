@@ -29,6 +29,9 @@ class FakeRedis:
         self._expiry = {}
         self._lists = defaultdict(deque)
 
+    async def llen(self, key: str) -> int:
+        return len(self._lists[key])
+
     async def lpush(self, key: str, value: str):
         self._lists[key].appendleft(value)
 
@@ -82,9 +85,12 @@ def fake_redis(monkeypatch):
     monkeypatch.setattr("backend.core.redis._redis_connection_failed", False)
     monkeypatch.setattr("backend.core.redis.get_redis", _get_backend)
 
-    # Agent patches
-    monkeypatch.setattr("agent.core.redis._redis_client", redis)
-    monkeypatch.setattr("agent.core.redis.get_redis", _get_agent)
+    # Agent patches (Redis lives in ``agent.core.redis_config``, not ``agent.core.redis``)
+    monkeypatch.setattr("agent.core.redis_config._redis_client", redis)
+    monkeypatch.setattr("agent.core.redis_config._redis_connection_failed", False)
+    monkeypatch.setattr("agent.core.redis_config.get_redis", _get_agent)
+    # ``IntelligentAgent`` binds ``get_redis`` at import time; patch the agent module too.
+    monkeypatch.setattr("agent.core.intelligent_agent.get_redis", _get_agent)
 
     return redis
 

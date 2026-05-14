@@ -2,9 +2,16 @@
 
 Feature order must match exported ``metadata_v*.json`` ``features`` array and
 notebook ``FEATURE_COLS_V25``. Target horizon: 120×5m bars (~10h simple return).
+
+Train/serve map: see ``docs/feature_entrypoints_audit.md``.
 """
 
 from __future__ import annotations
+
+from typing import Any, Mapping
+
+# Bump when ``V43_CANONICAL_FEATURES`` or semantics change (retrain + re-export metadata).
+V43_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v1"
 
 # Forward return label in training: close[t+h]/close[t] - 1 on 5m bars
 V43_FORWARD_TARGET_BARS = 120
@@ -54,3 +61,31 @@ V43_CANONICAL_FEATURES: tuple[str, ...] = (
 )
 
 V43_EXPECTED_FEATURE_COUNT = len(V43_CANONICAL_FEATURES)
+
+
+def validate_v43_metadata_compatibility(meta: Mapping[str, Any]) -> None:
+    """Reject loads when feature list or optional ``compatible_feature_version`` disagrees with agent.
+
+    Args:
+        meta: Parsed ``metadata_v*.json`` for a JackSparrow v43 bundle.
+
+    Raises:
+        ValueError: On missing features, order mismatch, or incompatible version tag.
+    """
+    feats = meta.get("features")
+    if not isinstance(feats, list) or not feats:
+        raise ValueError("v43 metadata missing non-empty features list")
+    ordered = tuple(str(x) for x in feats)
+    if ordered != V43_CANONICAL_FEATURES:
+        raise ValueError(
+            "v43 metadata features[] does not match V43_CANONICAL_FEATURES "
+            "(train-serve order-sensitive contract)"
+        )
+    ver = meta.get("compatible_feature_version")
+    if ver is None or (isinstance(ver, str) and not ver.strip()):
+        return
+    if str(ver).strip() != V43_COMPATIBLE_FEATURE_VERSION:
+        raise ValueError(
+            f"v43 metadata compatible_feature_version={ver!r} incompatible with "
+            f"agent {V43_COMPATIBLE_FEATURE_VERSION!r}; re-export metadata or align contract"
+        )

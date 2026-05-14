@@ -302,7 +302,7 @@ Each directory has a clear, single responsibility:
 - `agent/scripts/dev_watcher.py` is active in Docker development flow (`Dockerfile.dev`), so it should be retained.
 - `backend/api/websocket/manager.py` is not used by `backend/api/main.py` runtime paths (which use `unified_manager.py`); treat it as legacy until removed.
 - `backend/services/feature_service.py` is currently not imported by backend runtime code paths; remove or wire it explicitly.
-- `notebooks/` was consolidated to authoritative training notebooks (`JackSparrow_Training_Colab_v6.ipynb`, `JackSparrow_Trading_Colab_v5.ipynb`) plus dedicated template notebooks; legacy v3/v4/duplicate training notebooks were removed.
+- `notebooks/` holds **`jacksparrow_v43_delta_india_training.ipynb`** (v43 Delta India training, contract-aligned export). Legacy multi-notebook sets were removed; see `docs/03-ml-models.md` for archival bundle notes.
 
 ### Module Boundaries
 

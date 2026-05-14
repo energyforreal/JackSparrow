@@ -567,6 +567,22 @@ Emergency stop - immediately halt all trading.
 
 **Authentication**: Token-based (optional for development)
 
+### Wire versioning and tuning
+
+All outbound WebSocket payloads to **dashboard** clients (not the agent control socket) are stamped with:
+
+- `schema_version` — integer (default `1`, override with `WS_SCHEMA_VERSION`)
+- `server_timestamp` / `server_timestamp_ms` — when absent, filled from the backend time service
+
+Optional controls (see `backend/core/config.py`):
+
+| Env | Purpose |
+|-----|---------|
+| `WS_MARKET_BROADCAST_MIN_INTERVAL_MS` | Minimum milliseconds between `data_update` / `market` broadcasts **per symbol** (`0` = off) |
+| `WS_BROADCAST_METRICS_INTERVAL` | Emit structured log `ws_broadcast_volume` every N broadcasts (`0` = off) |
+
+If Redis is unavailable at startup **and** `UVICORN_WORKERS` or `WEB_CONCURRENCY` suggests more than one worker, the unified WebSocket manager logs `unified_websocket_redis_required_for_multi_worker` because cross-replica fan-out depends on Redis pub/sub (`websocket:broadcast`).
+
 ### Simplified Message Format
 
 All WebSocket messages use a unified envelope format:
@@ -575,10 +591,11 @@ All WebSocket messages use a unified envelope format:
 {
   "type": "data_update" | "agent_update" | "system_update",
   "resource": "signal" | "portfolio" | "trade" | "market" | "model" | "agent" | "health" | "time",
-  "data": { ... },
+  "data": { },
   "timestamp": "2025-01-12T10:30:00Z",
   "sequence": 12345,
   "source": "agent" | "system",
+  "schema_version": 1,
   "server_timestamp_ms": 1706356800123
 }
 ```
@@ -1249,9 +1266,9 @@ Refer to [Logging Documentation](12-logging.md) for rotation policy, retention s
 
 ### Environment Variables
 
-**Single Root `.env` File**: The backend reads environment variables from the **root `.env` file** in the project root directory via `ROOT_ENV_PATH` in `backend/core/config.py`. No service-specific `.env` files are needed.
+**Layered Root Env Files**: The backend reads `.env.example` first then `.env` from the project root via Pydantic's `SettingsConfigDict(env_file=(<root>/.env.example, <root>/.env), ...)` in `backend/core/config.py`. Real `os.environ` always wins over either file. No service-specific `.env` files are used.
 
-**Setup**: Copy `.env.example` to `.env` in the project root and configure your values. See `.env.example` for the complete list of all available variables.
+**Split**: `.env.example` (committed) holds non-secret defaults; `.env` (gitignored) holds secrets only — `DATABASE_URL`/`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `DELTA_EXCHANGE_API_KEY`/`_SECRET`, `JWT_SECRET_KEY`, `API_KEY`, optional `QDRANT_API_KEY`/`TELEGRAM_BOT_TOKEN`. See `.env.example` for the complete list of variables.
 
 **Key Backend Variables:**
 

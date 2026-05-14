@@ -31,14 +31,14 @@ _struct_logger: Optional[structlog.BoundLoggerBase] = None
 
 
 def _get_config_value(name: str, default: Any) -> Any:
-    """Get configuration value from settings or use default."""
+    """Get configuration value from Settings (Python field name) or use default."""
     return getattr(settings, name, default)
 
 
 def _sanitize_payload(payload: Any, sensitive_fields: set = None) -> Any:
     """Sanitize payload by removing or masking sensitive fields."""
     if sensitive_fields is None:
-        sensitive_fields = _get_config_value("COMMUNICATION_SENSITIVE_FIELDS", DEFAULT_SENSITIVE_FIELDS)
+        sensitive_fields = _get_config_value("communication_sensitive_fields", DEFAULT_SENSITIVE_FIELDS)
 
     if isinstance(payload, dict):
         sanitized = {}
@@ -57,7 +57,7 @@ def _sanitize_payload(payload: Any, sensitive_fields: set = None) -> Any:
 def _truncate_payload(payload: Any, max_size: int = None) -> Any:
     """Truncate payload if it exceeds maximum size."""
     if max_size is None:
-        max_size = _get_config_value("COMMUNICATION_MAX_PAYLOAD_SIZE", DEFAULT_MAX_PAYLOAD_SIZE)
+        max_size = _get_config_value("max_log_payload_size", DEFAULT_MAX_PAYLOAD_SIZE)
 
     payload_str = json.dumps(payload, default=str)
     if len(payload_str) > max_size:
@@ -173,7 +173,7 @@ def log_communication(
         **extra_fields: Additional fields to include in log
     """
     # Check if communication logging is enabled
-    if not _get_config_value("ENABLE_COMMUNICATION_LOGGING", True):
+    if not _get_config_value("enable_communication_logging", True):
         return
 
     logger = _get_logger()
@@ -189,6 +189,9 @@ def log_communication(
         "target": target,
         "connection_id": connection_id,
     }
+
+    if isinstance(payload, dict) and payload.get("request_id") is not None:
+        log_entry["request_id"] = payload.get("request_id")
 
     # Add optional fields
     if latency_ms is not None:
@@ -304,5 +307,5 @@ def generate_correlation_id(prefix: str = "corr") -> str:
 
 
 def extract_correlation_id(message: Dict[str, Any]) -> Optional[str]:
-    """Extract correlation ID from message."""
+    """Extract correlation / trace id from message (request_id or correlation_id)."""
     return message.get("correlation_id") or message.get("request_id")

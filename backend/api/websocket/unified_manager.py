@@ -14,6 +14,7 @@ from datetime import datetime, date, timezone
 from decimal import Decimal
 import json
 import asyncio
+import os
 import time
 import uuid
 import structlog
@@ -70,6 +71,18 @@ def _envelope_to_legacy_dict(message: Union[Dict[str, Any], WebSocketEnvelope]) 
     return message
 
 
+def _parallel_worker_count_hint() -> int:
+    """Best-effort worker/replica count from common hosting env vars."""
+    for key in ("UVICORN_WORKERS", "WEB_CONCURRENCY"):
+        raw = os.environ.get(key)
+        if raw:
+            try:
+                return max(int(raw), 1)
+            except ValueError:
+                continue
+    return 1
+
+
 class UnifiedWebSocketManager:
     """
     Single WebSocket manager with legacy-compatible envelope.
@@ -95,6 +108,38 @@ class UnifiedWebSocketManager:
         self._last_signal: Optional[Dict[str, Any]] = None
         self._last_market_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_agent_state: Optional[Dict[str, Any]] = None
+        self._ws_last_market_sent_ms: Dict[str, float] = {}
+        self._ws_broadcast_volume_total: int = 0
+
+    def _apply_frontend_wire_metadata(self, msg: Dict[str, Any]) -> None:
+        """Stamp schema_version and server timestamps on messages sent to dashboard clients."""
+        msg["schema_version"] = int(getattr(settings, "ws_schema_version", 1) or 1)
+        if "server_timestamp" not in msg:
+            time_info = time_service.get_time_info()
+            msg["server_timestamp"] = time_info["server_time"]
+            msg["server_timestamp_ms"] = time_info["timestamp_ms"]
+
+    def _should_skip_throttled_market_broadcast(self, message_dict: Dict[str, Any]) -> bool:
+        """Drop redundant market ticks when WS_MARKET_BROADCAST_MIN_INTERVAL_MS > 0."""
+        min_ms = int(getattr(settings, "ws_market_broadcast_min_interval_ms", 0) or 0)
+        if min_ms <= 0:
+            return False
+        if message_dict.get("type") != "data_update":
+            return False
+        if message_dict.get("resource") != "market":
+            return False
+        data = message_dict.get("data")
+        if not isinstance(data, dict):
+            return False
+        sym = data.get("symbol")
+        if not sym:
+            return False
+        now_ms = time.time() * 1000.0
+        last = self._ws_last_market_sent_ms.get(str(sym), 0.0)
+        if now_ms - last < float(min_ms):
+            return True
+        self._ws_last_market_sent_ms[str(sym)] = now_ms
+        return False
 
     async def initialize(self) -> None:
         """Initialize Redis pub/sub and background sync tasks."""
@@ -105,6 +150,13 @@ class UnifiedWebSocketManager:
                     "unified_websocket_redis_unavailable",
                     message="Redis unavailable, WebSocket pub/sub disabled",
                 )
+                workers = _parallel_worker_count_hint()
+                if workers > 1:
+                    logger.warning(
+                        "unified_websocket_redis_required_for_multi_worker",
+                        workers=workers,
+                        message="Broadcasts will not fan out across instances without Redis pub/sub",
+                    )
                 return
             self._redis_publisher = await get_redis()
             self._redis_subscriber = await aioredis.from_url(
@@ -130,6 +182,13 @@ class UnifiedWebSocketManager:
                 exc_info=True,
                 message="WebSocket pub/sub disabled, using local broadcasting only",
             )
+            workers = _parallel_worker_count_hint()
+            if workers > 1:
+                logger.warning(
+                    "unified_websocket_redis_required_for_multi_worker",
+                    workers=workers,
+                    message="Broadcasts will not fan out across instances without Redis pub/sub",
+                )
             if self._redis_subscriber:
                 try:
                     await self._redis_subscriber.close()
@@ -211,7 +270,7 @@ class UnifiedWebSocketManager:
             self._last_agent_state = dict(state_data)
             await self.send_personal_message(
                 websocket,
-                {"type": "agent_update", "data": state_data},
+                _envelope_to_legacy_dict(create_agent_state_update(state_data)),
             )
             if self._last_signal:
                 # Only send cached signal if it is still fresh to avoid
@@ -337,8 +396,11 @@ class UnifiedWebSocketManager:
     ) -> None:
         """Send legacy-format message to one client."""
         try:
-            safe = _sanitize_for_json(message)
-            correlation_id = extract_correlation_id(message)
+            out = dict(message)
+            if not is_agent:
+                self._apply_frontend_wire_metadata(out)
+            safe = _sanitize_for_json(out)
+            correlation_id = extract_correlation_id(safe)
             log_websocket_message(
                 direction="outbound",
                 message_type=message.get("type", "unknown"),
@@ -366,10 +428,7 @@ class UnifiedWebSocketManager:
             logger.warning("unified_websocket_ignoring_empty_broadcast")
             return
         message_dict = _envelope_to_legacy_dict(message)
-        if "server_timestamp" not in message_dict:
-            time_info = time_service.get_time_info()
-            message_dict["server_timestamp"] = time_info["server_time"]
-            message_dict["server_timestamp_ms"] = time_info["timestamp_ms"]
+        self._apply_frontend_wire_metadata(message_dict)
         try:
             msg_type = message_dict.get("type")
             resource = message_dict.get("resource")
@@ -385,6 +444,17 @@ class UnifiedWebSocketManager:
                 self._last_agent_state = dict(data)
         except Exception as e:
             logger.debug("unified_websocket_cache_update_failed", error=str(e))
+        if self._should_skip_throttled_market_broadcast(message_dict):
+            return
+        self._ws_broadcast_volume_total += 1
+        metrics_n = int(getattr(settings, "ws_broadcast_metrics_interval", 0) or 0)
+        if metrics_n > 0 and self._ws_broadcast_volume_total % metrics_n == 0:
+            logger.info(
+                "ws_broadcast_volume",
+                total_broadcasts=self._ws_broadcast_volume_total,
+                last_type=message_dict.get("type"),
+                last_resource=message_dict.get("resource"),
+            )
         safe_message = _sanitize_for_json(message_dict)
         correlation_id = extract_correlation_id(message_dict)
         log_websocket_message(
@@ -526,6 +596,7 @@ class UnifiedWebSocketManager:
                 price=parameters.get("price"),
                 stop_loss=parameters.get("stop_loss"),
                 take_profit=parameters.get("take_profit"),
+                manual_trade_audit_reason=parameters.get("manual_trade_audit_reason"),
             )
             return {
                 "type": "response",
@@ -949,7 +1020,7 @@ class UnifiedWebSocketManager:
                         )
                         await self.send_personal_message(
                             websocket,
-                            {"type": "agent_update", "data": state_data},
+                            _envelope_to_legacy_dict(create_agent_state_update(state_data)),
                         )
                     except Exception as e:
                         logger.warning("unified_websocket_get_agent_state_error", error=str(e))

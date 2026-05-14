@@ -2,7 +2,7 @@
 
 ## Purpose
 
-- **Notebook** ([`notebooks/JackSparrow_v44_all_fixes(1).ipynb`](../../notebooks/JackSparrow_v44_all_fixes(1).ipynb)): train, validate, optionally retrain gated models, export joblib + metadata.
+- **Notebook** ([`notebooks/jacksparrow_v43_delta_india_training.ipynb`](../../notebooks/jacksparrow_v43_delta_india_training.ipynb)): train on Delta India candles, export v43 joblib + metadata.
 - **Repo**: load artifacts, rebuild the same feature vector on live candles (+ funding), run ensemble inference, expose **explainable scalars**, apply **gates** consistent with TP/SL/fee/leverage assumptions, emit decisions for execution.
 
 Naming note: filename says “v44”, but the notebook exports **`MODEL_VERSION = 'v43'`** (`model_artifact_v43.pkl`, `metadata_v43.json`). Production uses **`JackSparrowV43Node`** — there is **no separate v44 discovery path** until you intentionally add one.
@@ -110,7 +110,7 @@ These are the **authoritative definitions** Colab fixes to when debugging “mod
 
 | Role | Path |
 |------|------|
-| Training notebook | [`notebooks/JackSparrow_v44_all_fixes(1).ipynb`](../../notebooks/JackSparrow_v44_all_fixes(1).ipynb) |
+| Training notebook | [`notebooks/jacksparrow_v43_delta_india_training.ipynb`](../../notebooks/jacksparrow_v43_delta_india_training.ipynb) |
 | v43 MCP row (HTTP parity) | [`feature_store/jacksparrow_v43_mcp_row.py`](../../feature_store/jacksparrow_v43_mcp_row.py) |
 | Inference node | [`agent/models/jack_sparrow_v43_node.py`](../../agent/models/jack_sparrow_v43_node.py) |
 | Threshold resolution | [`agent/models/jacksparrow_v43_inference.py`](../../agent/models/jacksparrow_v43_inference.py) |

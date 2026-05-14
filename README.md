@@ -10,9 +10,9 @@
 
 JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 
-1. **Autonomously analyzes** market data using ML models
-2. **Makes intelligent decisions** based on multi-model consensus
-3. **Executes trades** with proper risk management
+1. **Autonomously analyzes** market data using ML models (as **supporting evidence**, not sole authority)
+2. **Decides under agent policy** — ML consensus and gates inform an explicit policy verdict before any `DECISION_READY` trade intent
+3. **Executes trades** only after risk validation and execution gates
 4. **Learns and adapts** from trading outcomes
 5. **Communicates status** clearly through integrated interfaces
 
@@ -166,13 +166,13 @@ The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server
 
 ## Model Training
 
-Inference loads a **JackSparrow v43 regression bundle**: point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (must contain **`metadata_v43.json`** plus the pickled artefacts). Docker Compose defaults **`MODEL_DIR`** from **`AGENT_MODEL_DIR`** to **`/app/agent/model_storage/JackSparrow_v43_models_BTCUSD`** unless you override it. Export / retrain from **`notebooks/JackSparrow_v44_all_fixes(1).ipynb`**; keep **`features`** order aligned with **`feature_store/jacksparrow_v43_contract.py`**. Historical **v15** / **v5** bundles may still exist under **`agent/model_storage/`** for archival tests and **v15 parquet adaptive retrain**, but they are **not** multi-node discovery peers in this checkout—see **[ML models](docs/03-ml-models.md#runtime-discovery-jacksparrow-v43--current-branch)** and **[Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults)**.
+Inference loads a **JackSparrow v43 regression bundle**: point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (must contain **`metadata_v43.json`** plus the pickled artefacts). Docker Compose defaults **`MODEL_DIR`** from **`AGENT_MODEL_DIR`** to **`/app/agent/model_storage/JackSparrow_v43_models_BTCUSD`** unless you override it. Train and export v43 bundles from **`notebooks/jacksparrow_v43_delta_india_training.ipynb`** (Google Colab or local Jupyter); keep **`features`** order aligned with **`feature_store/jacksparrow_v43_contract.py`**. Historical **v15** / **v5** bundles may still exist under **`agent/model_storage/`** for archival tests and **v15 parquet adaptive retrain**, but they are **not** multi-node discovery peers in this checkout—see **[ML models](docs/03-ml-models.md#runtime-discovery-jacksparrow-v43--current-branch)** and **[Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults)**.
 
 **Optional runtime adaptive retrain (v15 parquet only)**: KS drift + warm-start XGBoost beside **`metadata_BTCUSD_*.json`**; does **not** mutate the v43 weights. Configure **`ADAPTIVE_RETRAIN_*`** in `.env` (see [.env.example](.env.example) and [ML models – adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional)).
 
 See [ML Models Documentation](docs/03-ml-models.md) for contracts, discovery, training, and adaptive retrain.
 
-If you need legacy pipeline exports, **`notebooks/JackSparrow_Training_Colab_v15.ipynb`** (v15) and **`notebooks/JackSparrow_Training_Colab_v6.ipynb`** / **`JackSparrow_Trading_Colab_v5.ipynb`** (expanded ensembles) remain documented there.
+Legacy v15 / v5 / v6 Colab flows are described in **[ML models](docs/03-ml-models.md)**; older training notebooks were removed from the repo in favour of **`notebooks/jacksparrow_v43_delta_india_training.ipynb`**.
 
 ## Testing
 
@@ -227,19 +227,19 @@ GitHub Actions workflow [`cicd.yml`](.github/workflows/cicd.yml) runs backend/ag
 ### Environment Setup
 
 1. **Create root `.env` file**:
-   - Copy `.env.example` to `.env` in the project root: `cp .env.example .env`
-   - Edit `.env` with your actual values
-   - **All services (backend, agent, frontend) read from this single root `.env` file**
-2. **Configure required variables** in the root `.env`:
-   - `DATABASE_URL` - PostgreSQL connection string
-   - `DELTA_EXCHANGE_API_KEY` and `DELTA_EXCHANGE_API_SECRET` - Delta Exchange credentials
-   - `JWT_SECRET_KEY` and `API_KEY` - Security keys
-   - `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` - Frontend API endpoints
-   - *(Optional)* `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` - Enable Telegram trade alerts
-3. **Initialize database**: Follow the DB setup steps in [Build Guide](docs/11-build-guide.md) (this repo checkout does not include `scripts/setup_db.py`)
-4. See [Deployment Documentation](docs/10-deployment.md) for complete details
+   - `.env.example` (committed) holds **non-secret defaults**: ports, thresholds, feature flags, public URLs, model paths.
+   - Create a root `.env` with **secrets only** (gitignored): DB password, Delta API key/secret, `JWT_SECRET_KEY`, `API_KEY`, `REDIS_PASSWORD`, optional Qdrant/Telegram tokens, and any personal overrides.
+   - Loaders merge them as `.env.example` first, then `.env` on top (real OS env wins over both). All services (backend, agent, frontend, Docker Compose) read the same two root files.
+2. **Required secrets** in root `.env`:
+   - `DATABASE_URL` (PostgreSQL URL with real password) and `POSTGRES_PASSWORD`
+   - `REDIS_PASSWORD` (and full `REDIS_URL` if you want non-default Redis auth)
+   - `DELTA_EXCHANGE_API_KEY` and `DELTA_EXCHANGE_API_SECRET`
+   - `JWT_SECRET_KEY` and `API_KEY` (>= 32 chars each)
+   - *(Optional)* `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `QDRANT_API_KEY`
+3. **Initialize database**: Follow the DB setup steps in [Build Guide](docs/11-build-guide.md).
+4. See [Deployment Documentation](docs/10-deployment.md) for complete details.
 
-**Note**: Use only the project root for environment files: copy root `.env.example` to root `.env`. Do not add `agent/.env`, `backend/.env`, or extra `.env.example` files under service folders. Backend and agent read via `ROOT_ENV_PATH`; the frontend reads via `loadRootEnv()` in `next.config.js`.
+**Note**: Use only the project root for environment files. Do **not** add `agent/.env`, `backend/.env`, or `frontend/.env(.local)`. Python services read via Pydantic's `env_file=(.env.example, .env)` tuple in `agent/core/config.py` and `backend/core/config.py`; the frontend reads both via `loadRootEnv()` in `next.config.js`; Docker Compose lists both files under each service's `env_file:`.
 
 ## Documentation
 

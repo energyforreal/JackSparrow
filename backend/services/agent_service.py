@@ -528,13 +528,11 @@ class AgentService:
         order_type: str = "MARKET",
         price: Optional[float] = None,
         stop_loss: Optional[float] = None,
-        take_profit: Optional[float] = None
+        take_profit: Optional[float] = None,
+        manual_trade_audit_reason: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Execute trade via agent."""
-        
-        response = await self._send_command(
-            "execute_trade",
-            parameters={
+        parameters: Dict[str, Any] = {
                 "symbol": symbol,
                 "side": side,
                 "quantity": quantity,
@@ -542,7 +540,13 @@ class AgentService:
                 "price": price,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit
-            },
+        }
+        if manual_trade_audit_reason is not None:
+            parameters["manual_trade_audit_reason"] = manual_trade_audit_reason
+
+        response = await self._send_command(
+            "execute_trade",
+            parameters=parameters,
             timeout=30
         )
         

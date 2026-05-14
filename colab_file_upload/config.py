@@ -11,59 +11,56 @@ from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator, model_validator
 
-# Determine ROOT_ENV_PATH with Colab compatibility
-def _get_root_env_path() -> Path:
-    """Get path to .env file, handling both Colab and local execution."""
-    # Try using __file__ first (works in local execution)
+# Env-file split (matches agent/backend):
+#   - .env.example (committed): non-secret defaults / thresholds.
+#   - .env          (gitignored): secrets only.
+def _get_project_root() -> Path:
+    """Return repo root (directory containing both ``agent/`` and ``backend/``)."""
     try:
-        if __file__:
-            config_path = Path(__file__).resolve()
-            # agent/core/config.py -> project root (2 levels up)
-            potential_root = config_path.parents[2]
-            env_path = potential_root / ".env"
-            if env_path.exists() or (potential_root / "agent").exists():
-                return env_path
+        start = Path(__file__).resolve().parent
+        for candidate in (start, *start.parents):
+            if (candidate / "agent").is_dir() and (candidate / "backend").is_dir():
+                return candidate
     except (NameError, AttributeError):
-        # __file__ not available (e.g., in some Colab environments)
         pass
-    
-    # Fallback: search from current working directory
+
     cwd = Path.cwd()
-    
-    # Check if .env exists in current directory
-    if (cwd / ".env").exists():
-        return cwd / ".env"
-    
-    # Check if we're in project root
-    if (cwd / "agent").exists():
-        return cwd / ".env"
-    
-    # Search upward from current directory
+    if (cwd / "agent").is_dir() and (cwd / "backend").is_dir():
+        return cwd
     current = cwd
-    for _ in range(5):  # Limit search depth
-        if (current / "agent").exists():
-            return current / ".env"
+    for _ in range(5):
+        if (current / "agent").is_dir() and (current / "backend").is_dir():
+            return current
         if current == current.parent:
             break
         current = current.parent
-    
-    # Last resort: return a path that may not exist (will be handled by pydantic)
-    return cwd / ".env"
+    return cwd
 
-ROOT_ENV_PATH = _get_root_env_path()
+
+ROOT_PROJECT_ROOT = _get_project_root()
+ROOT_ENV_PATH = ROOT_PROJECT_ROOT / ".env"
+ROOT_ENV_EXAMPLE_PATH = ROOT_PROJECT_ROOT / ".env.example"
+
+
+def _root_env_files() -> tuple[str, ...] | None:
+    """Return existing env files in load order (.env.example, then .env)."""
+    paths: list[str] = []
+    if ROOT_ENV_EXAMPLE_PATH.exists():
+        paths.append(str(ROOT_ENV_EXAMPLE_PATH))
+    if ROOT_ENV_PATH.exists():
+        paths.append(str(ROOT_ENV_PATH))
+    return tuple(paths) if paths else None
 
 
 class Settings(BaseSettings):
     """Agent settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
-        # Make env_file optional - if it doesn't exist, use environment variables only
-        env_file=str(ROOT_ENV_PATH) if ROOT_ENV_PATH.exists() else None,
+        env_file=_root_env_files(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="allow",
         protected_namespaces=("settings_",),
-        # In Colab, environment variables are preferred over .env file
         env_ignore_empty=True,
     )
     
@@ -362,8 +359,8 @@ except Exception as e:
     # This is acceptable for startup errors that prevent the application from starting
     import sys
     
-    # Check if .env file exists to provide more specific guidance
-    env_exists = ROOT_ENV_PATH.exists()
+    # Check if either env file exists to provide more specific guidance.
+    env_exists = ROOT_ENV_PATH.exists() or ROOT_ENV_EXAMPLE_PATH.exists()
     
     # Try to extract which field failed from Pydantic error
     error_str = str(e)
@@ -385,7 +382,9 @@ Error: {error_str}
     
     if env_exists:
         error_msg += f"""
-The .env file exists at: {ROOT_ENV_PATH}
+Env files in use (later overrides earlier):
+  - defaults : {ROOT_ENV_EXAMPLE_PATH} ({'present' if ROOT_ENV_EXAMPLE_PATH.exists() else 'MISSING'})
+  - secrets  : {ROOT_ENV_PATH} ({'present' if ROOT_ENV_PATH.exists() else 'MISSING'})
 
 However, there are issues with the configuration:
 """
@@ -393,49 +392,36 @@ However, there are issues with the configuration:
             error_msg += f"  - Missing or invalid: {missing_field}\n"
         else:
             error_msg += "  - One or more required variables are missing or invalid\n"
-        
-        error_msg += f"""
-Required environment variables (check your .env file):
-  - DATABASE_URL (PostgreSQL connection URL, e.g., postgresql://user:pass@localhost:5432/dbname)
-  - DELTA_EXCHANGE_API_KEY (Delta Exchange API key from your account)
-  - DELTA_EXCHANGE_API_SECRET (Delta Exchange API secret from your account)
 
-Optional environment variables:
-  - MODEL_PATH (Path to specific model file, e.g., models/xgboost_BTCUSD_15m.pkl)
-  - MODEL_DIR (Directory for model discovery, default: ./agent/model_storage)
-  - AGENT_SYMBOL (Trading symbol, default: BTCUSD)
-  - AGENT_INTERVAL (Analysis interval, default: 15m)
+        error_msg += """
+Required secrets (must be in root .env):
+  - DATABASE_URL, DELTA_EXCHANGE_API_KEY, DELTA_EXCHANGE_API_SECRET
+
+Non-secret defaults live in .env.example (MODEL_DIR, AGENT_SYMBOL, thresholds, ...).
 
 To fix:
-  1. Open the .env file: {ROOT_ENV_PATH}
-  2. Ensure all required variables are set (no empty values)
-  3. Verify variable formats are correct
-  4. Run validation: python scripts/validate-env.py
-  5. Ensure database is initialized: python scripts/setup_db.py
-  6. See docs/13-debugging.md for detailed help
+  1. Ensure root .env contains the required secrets above.
+  2. Ensure .env.example is present in the project root for non-secret defaults.
+  3. Verify variable formats are correct.
+  4. See docs/13-debugging.md for detailed help.
 """
     else:
         error_msg += f"""
-The .env file was not found at: {ROOT_ENV_PATH}
+No env files found in the project root:
+  - {ROOT_ENV_EXAMPLE_PATH}
+  - {ROOT_ENV_PATH}
 
-Required environment variables:
-  - DATABASE_URL (PostgreSQL connection URL)
-  - DELTA_EXCHANGE_API_KEY (Delta Exchange API key)
-  - DELTA_EXCHANGE_API_SECRET (Delta Exchange API secret)
+Required secrets (place in root .env):
+  - DATABASE_URL, DELTA_EXCHANGE_API_KEY, DELTA_EXCHANGE_API_SECRET
 
-Optional environment variables:
-  - MODEL_PATH (Path to specific model file)
-  - MODEL_DIR (Directory for model discovery, default: ./agent/model_storage)
-  - AGENT_SYMBOL (Trading symbol, default: BTCUSD)
-  - AGENT_INTERVAL (Analysis interval, default: 15m)
+Non-secret defaults (place in committed .env.example):
+  - MODEL_PATH / MODEL_DIR / AGENT_SYMBOL / AGENT_INTERVAL / thresholds.
 
 To fix:
-  1. Copy .env.example to .env in the project root (if .env.example exists)
-  2. Or create .env file manually with all required variables
-  3. Fill in all required values
-  4. Run validation: python scripts/validate-env.py
-  5. Initialize database: python scripts/setup_db.py
-  6. See docs/11-build-guide.md for setup instructions
+  1. Keep .env.example committed for non-secret defaults.
+  2. Create root .env with secrets only (or export them via the shell in Colab).
+  3. Fill in all required values.
+  4. See docs/11-build-guide.md for setup instructions.
 """
     
     error_msg += f"""

@@ -464,7 +464,8 @@ async def execute_trade(
             order_type=request.order_type,
             price=float(request.price) if request.price else None,
             stop_loss=float(request.stop_loss) if request.stop_loss else None,
-            take_profit=float(request.take_profit) if request.take_profit else None
+            take_profit=float(request.take_profit) if request.take_profit else None,
+            manual_trade_audit_reason=request.manual_trade_audit_reason,
         )
         
         if not trade_result:

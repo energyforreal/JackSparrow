@@ -2,7 +2,7 @@ from pathlib import Path
 import nbformat
 import re
 
-in_path = Path('notebooks/JackSparrow_Training_Colab_v6.ipynb')
+in_path = Path("notebooks/jacksparrow_delta_india_training.ipynb")
 raw_text = in_path.read_text(encoding='utf-8')
 cell_matches = re.findall(r'<VSCode\.Cell[^>]*language="python">\n(.*?)</VSCode\.Cell>', raw_text, flags=re.S)
 if not cell_matches:

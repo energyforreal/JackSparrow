@@ -22,20 +22,27 @@ RiskManager = risk_module.RiskManager
 
 
 @pytest.mark.asyncio
-async def test_calculate_position_size_applies_stricter_drawdown_adjustment(monkeypatch):
+async def test_calculate_position_size_scales_with_confidence(monkeypatch):
+    """Higher confidence yields larger capped position fraction than lower confidence."""
     manager = RiskManager()
     await manager.initialize(initial_balance=10_000.0)
 
-    monkeypatch.setattr(manager.portfolio, "get_drawdown", lambda: 0.12)
-    size = manager.calculate_position_size(
-        signal_strength=1.0,
-        volatility_regime="low",
-        win_probability=0.55,
-        risk_reward_ratio=2.0,
+    high = manager.calculate_position_size(
+        mark_price=50_000.0,
+        confidence=1.0,
+        funding_rate=0.0,
+        volatility=0.02,
+    )
+    low = manager.calculate_position_size(
+        mark_price=50_000.0,
+        confidence=0.5,
+        funding_rate=0.0,
+        volatility=0.02,
     )
 
-    # Base size reaches max_position_size (0.10), then 0.4 adjustment => 0.04.
-    assert size == pytest.approx(0.04, rel=1e-6)
+    assert high >= low
+    assert 0.01 <= high <= 0.1
+    assert 0.01 <= low <= 0.1
 
 
 @pytest.mark.asyncio

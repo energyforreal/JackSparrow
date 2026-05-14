@@ -14,7 +14,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 |---|----------|--------|
 | 01 | [Architecture](docs/01-architecture.md) | System design, tiers, communication, startup |
 | 02 | [MCP layer](docs/02-mcp-layer.md) | Feature / model / reasoning protocols |
-| 03 | [ML models](docs/03-ml-models.md) | Discovery (**JackSparrow v43** `metadata_v43.json`), training notebooks (`JackSparrow_v44_all_fixes(1).ipynb`), **`feature_store/jacksparrow_v43_contract.py`** parity, optional **SHORT execution** gate, Docker **`MODEL_DIR` / `AGENT_MODEL_DIR`**, optional **adaptive retrain** (v15 parquet only) |
+| 03 | [ML models](docs/03-ml-models.md) | Discovery (**JackSparrow v43** `metadata_v43.json`), training notebook (`jacksparrow_v43_delta_india_training.ipynb`), **`feature_store/jacksparrow_v43_contract.py`** parity, optional **SHORT execution** gate, Docker **`MODEL_DIR` / `AGENT_MODEL_DIR`**, optional **adaptive retrain** (v15 parquet only) |
 | 04 | [Features](docs/04-features.md) | Product capabilities, signal triggers |
 | 05 | [Logic & reasoning](docs/05-logic-reasoning.md) | Six-step chain, consensus, HOLD/MTF/exit behavior, optional **minimal AI-entry gates** (`AI_SIGNAL_MINIMAL_ENTRY_GATES`) |
 | 06 | [Backend](docs/06-backend.md) | FastAPI, REST, WebSocket contract, services |
@@ -59,4 +59,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-05-10 — JackSparrow v43 docs: `03`/`06`/`07`/`08`/`10`/`11`/`14`, smoke checklist, `README`, this index.
+**Last updated**: 2026-05-13 — v43 training doc sync: notebook path, metadata promotion notes, optional HTF frames in `JackSparrowV43Node`.

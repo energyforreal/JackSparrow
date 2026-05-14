@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import agent.events.handlers.trading_handler as trading_handler_mod
 from agent.events.handlers.trading_handler import TradingEventHandler
 from agent.events.schemas import DecisionReadyEvent, EventType
 
@@ -31,10 +32,7 @@ async def test_open_position_blocks_same_side_long_buys(monkeypatch) -> None:
     async def capture_publish(event):
         published.append(event)
 
-    monkeypatch.setattr(
-        "agent.events.handlers.trading_handler.event_bus.publish",
-        capture_publish,
-    )
+    monkeypatch.setattr(trading_handler_mod.event_bus, "publish", capture_publish)
 
     risk = MagicMock()
     risk.validate_trade = AsyncMock(
@@ -83,10 +81,7 @@ async def test_signal_reversal_still_closes_when_opposite_signal(monkeypatch) ->
     async def capture_publish(event):
         published.append(event)
 
-    monkeypatch.setattr(
-        "agent.events.handlers.trading_handler.event_bus.publish",
-        capture_publish,
-    )
+    monkeypatch.setattr(trading_handler_mod.event_bus, "publish", capture_publish)
 
     close_mock = AsyncMock(return_value=MagicMock(success=True))
 

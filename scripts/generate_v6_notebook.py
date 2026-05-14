@@ -17,5 +17,7 @@ def compute_all_features(df: pd.DataFrame) -> pd.DataFrame:\n    out = df.copy()
 
 nb = nbformat.v4.new_notebook()
 nb['cells'] = [nbformat.v4.new_code_cell(src) for src in sources]
-Path('notebooks/JackSparrow_Training_Colab_v6.ipynb').write_text(nbformat.writes(nb), encoding='utf-8')
-print('Notebook created with', len(sources), 'cells')
+Path("notebooks/generated_v6_unified_placeholder.ipynb").write_text(
+    nbformat.writes(nb), encoding="utf-8"
+)
+print("Notebook created with", len(sources), "cells -> notebooks/generated_v6_unified_placeholder.ipynb")

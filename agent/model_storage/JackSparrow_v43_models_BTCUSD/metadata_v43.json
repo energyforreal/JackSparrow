@@ -1,5 +1,6 @@
 {
   "version": "v43",
+  "compatible_feature_version": "jacksparrow_v43_features_v1",
   "symbol": "BTCUSD",
   "model_name": "jacksparrow_v43_BTCUSD",
   "exported_at": "2026-05-09T08:09:08.810872",
@@ -47,5 +48,13 @@
     "bull_bar"
   ],
   "training_forward_bars": 120,
-  "agent_load": "artifact = joblib.load(MODEL_ARTIFACT_PATH)\nmodel    = artifact[\"model\"]\nfeatures = artifact[\"features\"]\nfe       = artifact[\"feature_engineer\"]\ndf_feat  = fe.transform(df5, df15, df1h, df_funding, include_target=False)\nassert len(df_feat) >= 2, \"Need at least 2 rows to use the last closed bar\"\nX        = df_feat[features].iloc[[-2]].values\nX_df     = df_feat[features].iloc[[-2]]\nproba    = model.predict(X, X_df=X_df)"
+  "target_definition": "simple_forward_return",
+  "split": {
+    "split_method": "chronological_embargo",
+    "validation_fraction": 0.15,
+    "embargo_bars": 120,
+    "_note": "Stub — populated with actual timestamps when exported from training notebook"
+  },
+  "validation_metrics": null,
+  "agent_load": "artifact = joblib.load(MODEL_ARTIFACT_PATH)\nmodel    = artifact[\"model\"]\nfeatures = artifact[\"features\"]\nfe       = artifact[\"feature_engineer\"]\ndf_feat  = fe.transform(df5, df15, df1h, df_funding, include_target=False)\nassert len(df_feat) >= 2, \"Need at least 2 rows to use the last closed bar\"\nX              = df_feat[features].iloc[[-2]].values\nX_df           = df_feat[features].iloc[[-2]]\nexpected_return = model.predict(X, X_df=X_df)"
 }

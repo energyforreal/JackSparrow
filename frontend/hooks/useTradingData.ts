@@ -16,6 +16,7 @@ import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
 import { getBackendProxyBase } from '@/lib/backendProxy'
+import { resolveWebSocketUrl } from '@/lib/websocketUrl'
 import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
 import { mergeHealthPreserveFields, normalizeHealthPayload } from '@/lib/healthNormalize'
 import type {
@@ -623,44 +624,6 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
     default:
       return state
   }
-}
-
-// Get WebSocket URL with robust defaults for Docker/remote deployments
-const resolveWebSocketUrl = (): string => {
-  // 1) Explicit env always wins if set and non-empty
-  if (process.env.NEXT_PUBLIC_WS_URL) {
-    return process.env.NEXT_PUBLIC_WS_URL
-  }
-
-  // 2) In development, fall back to localhost backend
-  if (process.env.NODE_ENV === 'development') {
-    return 'ws://localhost:8000/ws'
-  }
-
-  // 3) In production (Docker, remote clients), derive from API URL or window origin
-  try {
-    // Prefer API URL if configured so WS follows same host
-    if (process.env.NEXT_PUBLIC_API_URL) {
-      const api = new URL(process.env.NEXT_PUBLIC_API_URL)
-      const wsProtocol = api.protocol === 'https:' ? 'wss:' : 'ws:'
-      return `${wsProtocol}//${api.host}/ws`
-    }
-
-    // Fallback: derive from current browser location
-    if (typeof window !== 'undefined') {
-      const { protocol, host } = window.location
-      const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:'
-      // Assume backend is exposed on same host/port 8000 in Docker compose
-      const hostOnly = host.split(':')[0]
-      const port = '8000'
-      return `${wsProtocol}//${hostOnly}:${port}/ws`
-    }
-  } catch {
-    // Ignore and fall through to empty string
-  }
-
-  // 4) Final fallback – empty string will be caught by useWebSocket validation
-  return ''
 }
 
 const WS_URL = resolveWebSocketUrl()

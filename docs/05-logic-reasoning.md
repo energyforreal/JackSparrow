@@ -632,7 +632,7 @@ For `DecisionReadyEvent` → `RiskApprovedEvent`, `agent/events/handlers/trading
 |--------|--------------------------------------------------|------------------------------------------------|
 | Confidence vs UI | Uses **calibrated** `confidence` vs Redis/metadata effective floor (`low_confidence_reject`). | Uses **raw** payload `confidence` vs `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` only (`low_ai_signal_confidence` if below floor). |
 | v15 / stale / filters | v15 entry gate, max signal age, vol/ATR floors, profit/R:R gate, MTF/ADX/EMA200/BB/SR, entry signal filter (rate limits), v15 gap and daily caps apply when configured. | Those checks are **skipped** (higher trade rate, weaker protection). |
-| Risk / debounce | `risk_manager.validate_trade` and debounce apply. | **Skipped** after margin is sufficient. |
+| Risk / debounce | `risk_manager.validate_trade` and debounce apply. | `risk_manager.validate_trade` and debounce **always** apply (agent-first); other handler filters are relaxed/skipped as in the left column. |
 | Unchanged | `HOLD` / empty signal, signal-reversal exit, same-side **`open_position_blocks_entry`**, live **price**, **margin** and **min lots**, SL/TP levels (profit gate only enforced in default mode). |
 
 Restart the agent after changing these env vars. `AI_SIGNAL_MINIMAL_ENTRY_GATES` defaults to **false** so the full gate stack remains enabled until you opt in.

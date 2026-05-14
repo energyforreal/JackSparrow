@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from agent.core.v43_signal_gates import (
     V43GateState,
     apply_gate5_min_edge_short,
@@ -32,6 +34,27 @@ def test_gate5_metrics_matches_edge_ok() -> None:
     proba, thr = 0.0105, 0.01
     assert gate5_edge_ok(proba, thr) == gate5_long_edge_metrics(proba, thr).passes
     assert gate5_short_edge_ok(-0.011, thr) == gate5_short_edge_metrics(-0.011, thr).passes
+
+
+def test_gate5_long_compares_expected_return_edge_to_cost() -> None:
+    metrics = gate5_long_edge_metrics(0.014, 0.011)
+    assert metrics.edge_pct == pytest.approx(0.003)
+    assert metrics.lhs == pytest.approx(0.003)
+    assert metrics.rhs == pytest.approx(metrics.ratio * metrics.rtc)
+    assert metrics.passes is False
+
+
+def test_gate5_long_representative_edge_passes_default_cost() -> None:
+    metrics = gate5_long_edge_metrics(0.015, 0.011)
+    assert metrics.edge_pct == pytest.approx(0.004)
+    assert metrics.passes is True
+
+
+def test_gate5_short_compares_expected_return_edge_to_cost() -> None:
+    metrics = gate5_short_edge_metrics(-0.015, 0.011)
+    assert metrics.edge_pct == pytest.approx(0.004)
+    assert metrics.lhs == pytest.approx(0.004)
+    assert metrics.passes is True
 
 
 def test_debounce_blocks_second_entry() -> None:

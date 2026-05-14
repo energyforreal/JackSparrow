@@ -35,11 +35,36 @@ Define hard stops before changing config (e.g. “if paper PnL drawdown exceeds 
 
 ---
 
+## Model promotion gate
+
+Before swapping in a newly exported v43 regression bundle, confirm the notebook
+metadata describes the export as a tradable expected-return model:
+
+1. **Embargoed split**: `metadata_v43.json` includes `split.split_method =
+   chronological_embargo`, `split.embargo_bars = 120`, and train/validation
+   timestamp ranges.
+2. **Validation metrics**: `validation_metrics` includes ensemble RMSE, MAE,
+   correlation, directional accuracy, validation prediction threshold, long/short
+   candidate counts, hit rates, and net returns after the runtime fee/slippage
+   assumptions.
+3. **Runtime smoke**: `JackSparrowV43Node.predict()` emits `expected_return`,
+   `threshold`, `regime`, `uncertainty`, `unc_scale`, and `closed_bar_features`
+   for the exported artifact.
+4. **Paper first**: run the bundle in paper mode and compare `below_threshold`,
+   `min_edge_cost`, debounce/cap, and regime rejects before moving any execution
+   knobs.
+
+The v43 model predicts **simple forward return** over the 120-bar horizon. It is
+not a probability, so all gate tuning should compare expected-return units to
+costs and realized returns.
+
+---
+
 ## Phase 1 — Edge vs cost (primary lever)
 
 **Action**: Adjust `JACKSPARROW_V43_MIN_EDGE_COST_RATIO` in steps (e.g. `1.5` → `1.0` → `0.75` → `0.5`). Code default is now **`0.75`**.
 
-**Verify**: Log lines with event **`v43_gate5_rejected`** include `edge_pct`, `lhs` (= edge × TP), `rhs` (= ratio × round-trip cost). Expect fewer `min_edge_cost` rejects when lowering the ratio (see [`scripts/analyze_v43_gate_rejects.py`](../scripts/analyze_v43_gate_rejects.py)).
+**Verify**: Log lines with event **`v43_gate5_rejected`** include `edge_pct`, `lhs` (= expected-return edge over threshold), `rhs` (= ratio × round-trip cost). Expect fewer `min_edge_cost` rejects when lowering the ratio (see [`scripts/analyze_v43_gate_rejects.py`](../scripts/analyze_v43_gate_rejects.py)).
 
 **Rollback**: If edge quality degrades vs Phase 0 metrics, restore the previous ratio only.
 
@@ -78,7 +103,7 @@ Start small (e.g. `0.00010` = 1 bp in expected_return units) and roll back if qu
 
 Prefer Phases 1–3 before lowering **`AI_SIGNAL_MIN_ENTRY_CONFIDENCE`** (default `0.70`).
 
-**Paper-only validation**: `AI_SIGNAL_MINIMAL_ENTRY_GATES=true` bypasses most legacy filters in the trading handler — use **only in paper** to measure raw throughput; not a live risk posture without review. See [Logic & reasoning](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates).
+**Paper-only validation**: `AI_SIGNAL_MINIMAL_ENTRY_GATES=true` bypasses most legacy filters in the trading handler — use **only in paper** to measure raw throughput; not a live risk posture without review. `risk_manager.validate_trade` still runs on every entry. See [Logic & reasoning](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates).
 
 Optional paper override: `PAPER_TRADE_VALIDATION_MODE=true` with `PAPER_TRADE_VALIDATION_MIN_CONFIDENCE` (see `config.py`).
 

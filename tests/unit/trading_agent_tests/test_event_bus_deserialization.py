@@ -15,12 +15,40 @@ os.environ.setdefault("DELTA_EXCHANGE_API_SECRET", "test-secret")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from agent.events.event_bus import EventBus
-from agent.events.schemas import (
-    BaseEvent,
-    AgentCommandEvent,
-    MarketTickEvent,
-    EventType
-)
+from agent.events.schemas import AgentCommandEvent, BaseEvent, EventType, MarketTickEvent
+
+
+def _agent_command_event(
+    *,
+    source: str = "unit_test",
+    command: str = "get_status",
+    parameters: dict | None = None,
+    request_id: str = "req-1",
+) -> AgentCommandEvent:
+    return AgentCommandEvent(
+        source=source,
+        payload={
+            "command": command,
+            "parameters": parameters or {},
+            "request_id": request_id,
+        },
+    )
+
+
+def _market_tick_event(
+    *,
+    source: str = "unit_test",
+    symbol: str = "BTCUSD",
+    price: float = 50000.0,
+) -> MarketTickEvent:
+    return MarketTickEvent(
+        source=source,
+        payload={
+            "symbol": symbol,
+            "price": price,
+            "timestamp": datetime.now().isoformat(),
+        },
+    )
 
 
 class MockRedis:
@@ -96,10 +124,7 @@ def event_bus(mock_redis):
 async def test_deserialize_event_with_bytes_key(event_bus, mock_redis):
     """Test deserialization with bytes key format."""
     # Create test event
-    event = AgentCommandEvent(
-        command="get_status",
-        payload={"test": "data"}
-    )
+    event = _agent_command_event(parameters={"test": "data"})
     
     # Serialize event
     event_data = event.model_dump()
@@ -124,18 +149,14 @@ async def test_deserialize_event_with_bytes_key(event_bus, mock_redis):
     # Verify handler was called
     assert len(handler_called) == 1
     assert isinstance(handler_called[0], AgentCommandEvent)
-    assert handler_called[0].command == "get_status"
+    assert handler_called[0].payload["command"] == "get_status"
     assert mock_redis.acks == [("test_stream", "test_group", "test-msg-1")]
 
 
 @pytest.mark.asyncio
 async def test_deserialize_event_with_string_key(event_bus, mock_redis):
     """Test deserialization with string key format."""
-    event = MarketTickEvent(
-        symbol="BTCUSD",
-        price=50000.0,
-        timestamp=datetime.now()
-    )
+    event = _market_tick_event()
     
     event_data = event.model_dump()
     event_data["_event_class"] = "MarketTickEvent"
@@ -156,7 +177,7 @@ async def test_deserialize_event_with_string_key(event_bus, mock_redis):
     
     assert len(handler_called) == 1
     assert isinstance(handler_called[0], MarketTickEvent)
-    assert handler_called[0].symbol == "BTCUSD"
+    assert handler_called[0].payload["symbol"] == "BTCUSD"
     assert mock_redis.acks == [("test_stream", "test_group", "test-msg-2")]
 
 
@@ -225,19 +246,14 @@ async def test_deserialize_event_instantiation_failure(event_bus, mock_redis):
     # Create event data with invalid field values
     invalid_data = {
         "event_id": "test-id",
-        "event_type": "agent_command",
+        "event_type": "not_a_valid_event_type",
         "source": "test",
         "timestamp": datetime.now().isoformat(),
-        "_event_class": "AgentCommandEvent",
-        "command": "get_status",
-        "payload": {"invalid": "data"},
-        # Add invalid field that would cause instantiation to fail
-        "invalid_field": object()  # This can't be serialized properly
+        "payload": {},
     }
-    
-    # Manually serialize to avoid validation errors
+
     event_json = json.dumps(invalid_data, default=str)
-    
+
     message_data = {
         b"event": event_json.encode("utf-8")
     }
@@ -251,10 +267,7 @@ async def test_deserialize_event_instantiation_failure(event_bus, mock_redis):
 @pytest.mark.asyncio
 async def test_deserialize_with_retry_count(event_bus, mock_redis):
     """Test deserialization with retry count metadata."""
-    event = AgentCommandEvent(
-        command="get_status",
-        payload={"test": "data"}
-    )
+    event = _agent_command_event(parameters={"test": "data"})
     
     event_data = event.model_dump()
     event_data["_event_class"] = "AgentCommandEvent"
@@ -280,10 +293,7 @@ async def test_deserialize_with_retry_count(event_bus, mock_redis):
 @pytest.mark.asyncio
 async def test_deserialize_single_key_value_pair(event_bus, mock_redis):
     """Test deserialization when message_data has single key-value pair."""
-    event = AgentCommandEvent(
-        command="get_status",
-        payload={"test": "data"}
-    )
+    event = _agent_command_event(parameters={"test": "data"})
     
     event_data = event.model_dump()
     event_data["_event_class"] = "AgentCommandEvent"
@@ -320,9 +330,8 @@ async def test_deserialize_empty_message_data(event_bus, mock_redis):
 @pytest.mark.asyncio
 async def test_deserialize_unicode_characters(event_bus, mock_redis):
     """Test deserialization with Unicode characters in event data."""
-    event = AgentCommandEvent(
-        command="get_status",
-        payload={"message": "Test with Unicode: ✓ ⚠ ✗ ✅"}
+    event = _agent_command_event(
+        parameters={"message": "Test with Unicode: ✓ ⚠ ✗ ✅"},
     )
     
     event_data = event.model_dump()
@@ -342,5 +351,5 @@ async def test_deserialize_unicode_characters(event_bus, mock_redis):
     await event_bus._process_message("test-msg-11", message_data, mock_redis)
     
     assert len(handler_called) == 1
-    assert "✓ ⚠ ✗ ✅" in handler_called[0].payload["message"]
+    assert "✓ ⚠ ✗ ✅" in handler_called[0].payload["parameters"]["message"]
 

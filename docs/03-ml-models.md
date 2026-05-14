@@ -70,21 +70,23 @@ Operational guidance:
 There are **three** training/export families documented here. **Deployed inference loads family C** (see Runtime discovery).
 
 **A — v15 full pipeline (5m / 15m, XGBoost sklearn pipeline per TF)**  
-- **Notebook**: `notebooks/JackSparrow_Training_Colab_v15.ipynb`  
+- **Notebook**: removed from `notebooks/` (archival); parity rules below still apply if you keep v15 artefacts under `agent/model_storage/`.  
 - **Typical bundle**: `agent/model_storage/jacksparrow_v15_BTCUSD_<date>/{5m,15m}/` with `metadata_BTCUSD_*.json` and `pipeline_{timeframe}_v14.pkl` (filename still uses `_v14`; `model_version` in JSON may also read `v14`).  
 - **Features**: Exactly **20** names per timeframe, frozen at export (training sorts the stability-passed set for deterministic order).  
 - **Parity**: `metadata_*.json` `features` must match `V15_FEATURES_5M` / `V15_FEATURES_15M` in `feature_store/feature_registry.py` for that TF—same names and order. Inference builds rows in `feature_store/v15_feature_compute.py` and the feature server’s v15 path in `agent/data/feature_server.py`.  
 - **Checks**: `pytest tests/unit/test_v15_feature_registry.py`; `pytest tests/unit/test_feature_parity.py` (UnifiedFeatureEngine guardrails); `python scripts/test_model_inference.py --model-dir <bundle>` when possible.
 
 **B — v4 / v5 / v6 expanded-feature bundles (joblib entry/exit or consolidated)**  
-- **Notebooks**: `notebooks/JackSparrow_Training_Colab_v6.ipynb` (v6 unified model + integrated backtest), `notebooks/JackSparrow_Trading_Colab_v5.ipynb` (legacy v5 flow).  
+- **Notebooks**: historical Colab flows were removed from `notebooks/`; expanded-feature parity remains documented here if you revive old bundles.  
 - These use `UnifiedFeatureEngine`, validate coverage against `EXPANDED_FEATURE_LIST` / registry, fee-aware TP/SL labeling, and export timeframe artefacts (`entry_*`, `exit_*`, scaler files, `features_*.json`, `metadata_*.json`) per bundle style.
 
 **C — JackSparrow v43 regression bundle (Compose default)**  
-- **Notebook / export**: `notebooks/JackSparrow_v44_all_fixes(1).ipynb` (Colab naming uses `v44`; shipped metadata/artefacts are **v43** in this repo).  
+- **Notebook / export**: `notebooks/jacksparrow_v43_delta_india_training.ipynb` (Delta Exchange India historical candles, `V43_CANONICAL_FEATURES` + contract-aligned export).  
 - **Typical bundle**: `agent/model_storage/JackSparrow_v43_models_BTCUSD/` — flat folder with **`metadata_v43.json`**, **`model_artifact_v43.pkl`** (basename override **`JACKSPARROW_V43_ARTIFACT_BASENAME`**), optional `feature_engineer.pkl`, **`regime_models_v43.pkl`**.  
 - **Training label**: Simple forward return on **5m** candles (see contract module) with horizon **`training_forward_bars`: 120** (≈10 h wall clock). **`metadata.features`** matches **`V43_CANONICAL_FEATURES`** (**40** names, fixed order) in **`feature_store/jacksparrow_v43_contract.py`**; MCP alignment in **`feature_store/jacksparrow_v43_mcp_row.py`**.  
-- **Runtime**: **`JackSparrowV43Node`**, gated path in **`agent/core/mcp_orchestrator.py`** + **`agent/core/v43_signal_gates.py`**. Optional **`JACKSPARROW_V43_SHORT_EXECUTION_ENABLED=true`** allows symmetric SHORT firing when negatives pass gates (see `.env.example`). Operational tuning: [v43 trade execution runbook](v43_trade_execution_runbook.md) and **`scripts/analyze_v43_gate_rejects.py`**.  
+- **Promotion metadata**: new exports should include `split` (chronological embargo with **120 bars**), `validation_metrics` (ensemble RMSE/MAE/correlation, directional accuracy, threshold-conditioned long/short candidate stats, fee/slippage-aware net returns), `data` ranges, and `provenance` package versions / git commit when available. A checked-in bundle may carry **`validation_metrics`: `null`** and a minimal **`split`** stub only to satisfy structural smoke checks; replace with a full training export before production promotion.  
+- **Training notebook hardening** (same notebook): Delta candle `GET` uses **retry with exponential backoff** on transient failures; **XGBoost** is fit with **`early_stopping_rounds`** on the embargoed validation slice; an optional **walk-forward** cell scores the trained ensemble across rolling time windows and reports **P75 threshold stability** (coefficient of variation) so you can spot unstable calibration before shipping.  
+- **Runtime**: **`JackSparrowV43Node`**, gated path in **`agent/core/mcp_orchestrator.py`** + **`agent/core/v43_signal_gates.py`**. **`v43_df5m`** and **`v43_df_funding`** must be real `pandas.DataFrame` instances; **`v43_df15m`** / **`v43_df1h`** may be omitted or **`None`** (normalized to empty frames)—`build_v43_feature_matrix` resamples higher timeframes from **5m** only, so those frames are optional for inference. Optional **`JACKSPARROW_V43_SHORT_EXECUTION_ENABLED=true`** allows symmetric SHORT firing when negatives pass gates (see `.env.example`). Operational tuning: [v43 trade execution runbook](v43_trade_execution_runbook.md) and **`scripts/analyze_v43_gate_rejects.py`**.  
 - **Checks**: `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py tests/unit/test_jacksparrow_v43_inference.py tests/unit/test_jack_sparrow_v43_node_ctx.py`; `python scripts/smoke_test_v43.py`; manual [`jacksparrow_v43_smoke.md`](jacksparrow_v43_smoke.md).
 
 Parity requirements before deployment (family **B**, historical artefacts):
@@ -178,7 +180,7 @@ This means:
 
 ### Operational Workflow (bundle-first)
 
-1. Train/export **`metadata_v43.json`** (+ pickles) via `notebooks/JackSparrow_v44_all_fixes(1).ipynb`; copy artefacts into **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (or your target folder).
+1. Train/export **`metadata_v43.json`** (+ pickles) via `notebooks/jacksparrow_v43_delta_india_training.ipynb`; copy artefacts into **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (or your target folder). Confirm the metadata includes the 120-bar embargo split, validation metrics, fee/slippage assumptions, data ranges, and provenance before promotion. Do **not** ship **`validation_metrics`: `null`** or placeholder **`split`** to production—those are structural placeholders only until you copy a full notebook export.
 2. Set **`MODEL_DIR`** / **`AGENT_MODEL_DIR`** to that folder; optionally set **`JACKSPARROW_V43_ARTIFACT_BASENAME`** and **`JACKSPARROW_V43_SHORT_EXECUTION_ENABLED`** (OFF by default — see [.env.example](../.env.example)).
 3. Start the agent and confirm **`model_discovered_v43`** in logs; validate with `python scripts/smoke_test_v43.py`.
 4. Run **`pytest tests/unit/test_jacksparrow_v43_*.py tests/unit/test_jack_sparrow_v43_*.py -q`** and follow [`jacksparrow_v43_smoke.md`](jacksparrow_v43_smoke.md).
@@ -186,7 +188,7 @@ This means:
 
 ### Single consolidated model mode (optional cutover — historical)
 
-**Not compatible with v43-only discovery** in [`agent/models/model_discovery.py`](../agent/models/model_discovery.py). Documented here for forks that revive multi-node loaders. If you export a consolidated artefact from `notebooks/JackSparrow_Trading_Colab_v5.ipynb`, enable single-model mode explicitly in `.env`:
+**Not compatible with v43-only discovery** in [`agent/models/model_discovery.py`](../agent/models/model_discovery.py). Documented here for forks that revive multi-node loaders. If you export a consolidated artefact from a legacy v5 flow, enable single-model mode explicitly in `.env`:
 
 ```bash
 MODEL_DIR=./agent/model_storage/jacksparrow_v5_BTCUSD_YYYY-MM-DD
@@ -233,7 +235,7 @@ The agent can run a **separate** path from trade-outcome retraining: KS drift on
 
 ### Training (this workspace)
 
-Production **inference** artefacts are **`JackSparrow_v43_models_BTCUSD/`** exported from **`notebooks/JackSparrow_v44_all_fixes(1).ipynb`** and loaded by **`agent/models/model_discovery.py`**. Older v5/v6/v15 bundles may still exist under `agent/model_storage/` for reference, regression tests, or **v15-only** adaptive parquet retrain—**not** for multi-node discovery alongside v43 unless you restore legacy discovery code locally.
+Production **inference** artefacts are **`JackSparrow_v43_models_BTCUSD/`** (train/export via **`notebooks/jacksparrow_v43_delta_india_training.ipynb`**) and loaded by **`agent/models/model_discovery.py`**. Older v5/v6/v15 bundles may still exist under `agent/model_storage/` for reference, regression tests, or **v15-only** adaptive parquet retrain—**not** for multi-node discovery alongside v43 unless you restore legacy discovery code locally.
 
 ### Prerequisites
 
@@ -245,9 +247,8 @@ Before training models, ensure:
 ### Training Process
 
 1. **Run the training/export notebook** for your target bundle type:
-   - **v43 runtime bundle**: `notebooks/JackSparrow_v44_all_fixes(1).ipynb`
-   - **Historical v15 pipeline**: `notebooks/JackSparrow_Training_Colab_v15.ipynb`
-   - **Historical v6 / v5 expanded bundles**: `notebooks/JackSparrow_Training_Colab_v6.ipynb` or `notebooks/JackSparrow_Trading_Colab_v5.ipynb`
+   - **v43 runtime bundle**: `notebooks/jacksparrow_v43_delta_india_training.ipynb`
+   - **Historical v15 / v6 / v5**: training notebooks removed from `notebooks/`; see family **A** / **B** sections above for artefact layout if you maintain archival bundles.
 
 2. **Notebook export will** (high level):
    - Fetch historical candles per timeframe (or multi-interval inputs as defined in the notebook)
@@ -560,8 +561,8 @@ probabilities = model.predict(sequence)  # [P(SELL), P(HOLD), P(BUY)]
 
 ### Google Colab Training
 
-- **v15 pipeline (5m / 15m)**: `notebooks/JackSparrow_Training_Colab_v15.ipynb` — full sklearn/XGBoost pipeline export, 20 features per TF, `metadata_*.json` + `pipeline_*_v14.pkl`.
-- **Expanded v5 / v6 bundles**: `notebooks/JackSparrow_Trading_Colab_v6.ipynb` or `notebooks/JackSparrow_Trading_Colab_v5.ipynb` — Delta API pagination, `UnifiedFeatureEngine`, metadata + joblib per timeframe.
+- **v15 pipeline (5m / 15m)**: archival — full sklearn/XGBoost pipeline export, 20 features per TF, `metadata_*.json` + `pipeline_*_v14.pkl` (see family **A**).
+- **Expanded v5 / v6 bundles**: archival — Delta API pagination, `UnifiedFeatureEngine`, metadata + joblib per timeframe (see family **B**).
 
 See [Training Authority and Train-Serve Parity](#training-authority-and-train-serve-parity) and [Training, parity, and promotion](#training-parity-and-promotion).
 
@@ -1273,13 +1274,13 @@ Override **`AGENT_MODEL_DIR`** when you duplicate the v43 folder under a differe
 
 Older branches scanned **`metadata_BTCUSD_*.json`** and registered **`PipelineV15Node`** or **`V4EnsembleNode`** per timeframe. Restore that scanner in `agent/models/model_discovery.py` if you deliberately run those bundles again.
 
-**Entry vs exit at execution**: Consensus still flows through the registry/trading handler; **`exit_signal`** semantics from ensemble-era nodes do not apply verbatim to **`JackSparrowV43Node`**. Position closes follow risk rules—see [Logic & Reasoning](05-logic-reasoning.md#entry-vs-exit-signals-and-position-closes).
+**Entry vs exit at execution**: ML output is packaged as **evidence** (`EVIDENCE_READY`); the **AgentPolicyEngine** emits `DECISION_READY` with `policy_authority=agent_policy` before the trading handler and risk manager. **`exit_signal`** semantics from ensemble-era nodes do not apply verbatim to **`JackSparrowV43Node`**. Position closes follow risk rules—see [Logic & Reasoning](05-logic-reasoning.md#entry-vs-exit-signals-and-position-closes).
 
 ## Training, parity, and promotion
 
-- **v43 bundle (Compose default)** — **`notebooks/JackSparrow_v44_all_fixes(1).ipynb`** → **`metadata_v43.json`**: align **`features`** order/count with **`V43_CANONICAL_FEATURES`**; **`training_forward_bars`**: **120**. **Smoke**: **`python scripts/smoke_test_v43.py`**; **Tests**: **`pytest tests/unit/test_jacksparrow_v43_contract.py ...`** (family **C** list under Training Authority above); **Operational**: **`docs/jacksparrow_v43_smoke.md`**.
-- **Historical v15 pipeline**: Train with `notebooks/JackSparrow_Training_Colab_v15.ipynb`. After export, `metadata_*.json` `features` must match `V15_FEATURES_5M` / `V15_FEATURES_15M` in `feature_store/feature_registry.py` (names and order). **Checks**: `pytest tests/unit/test_v15_feature_registry.py -q`, `pytest tests/unit/test_feature_parity.py -q`, `python scripts/test_model_inference.py --model-dir <bundle_path>` when available, `python scripts/validate_models_before_deployment.py <bundle_root>`.
-- **Historical v5 / v6 expanded bundles**: `notebooks/JackSparrow_Trading_Colab_v6.ipynb` or `notebooks/JackSparrow_Trading_Colab_v5.ipynb` (UnifiedFeatureEngine, `EXPANDED_FEATURE_LIST` / `feature_store/feature_registry.py`, fee-aware TP/SL labeling, metadata + joblib per timeframe).
+- **v43 bundle (Compose default)** — **`notebooks/jacksparrow_v43_delta_india_training.ipynb`** → **`metadata_v43.json`**: align **`features`** order/count with **`V43_CANONICAL_FEATURES`**; **`training_forward_bars`**: **120**; include chronological embargo split metadata, validation metrics, threshold-conditioned candidate stats, fee-aware net-return checks, package versions, and git commit when available. Run the notebook’s **walk-forward** cell before promotion if you need evidence that the validation **P75** threshold is stable across time slices. **Smoke**: **`python scripts/smoke_test_v43.py`** plus runtime-node test coverage; **Tests**: **`pytest tests/unit/test_jacksparrow_v43_contract.py ...`** (family **C** list under Training Authority above); **Operational**: **`docs/jacksparrow_v43_smoke.md`**.
+- **Historical v15 pipeline**: archival notebook removed; after export, `metadata_*.json` `features` must match `V15_FEATURES_5M` / `V15_FEATURES_15M` in `feature_store/feature_registry.py` (names and order). **Checks**: `pytest tests/unit/test_v15_feature_registry.py -q`, `pytest tests/unit/test_feature_parity.py -q`, `python scripts/test_model_inference.py --model-dir <bundle_path>` when available, `python scripts/validate_models_before_deployment.py <bundle_root>`.
+- **Historical v5 / v6 expanded bundles**: archival notebooks removed (UnifiedFeatureEngine, `EXPANDED_FEATURE_LIST` / `feature_store/feature_registry.py`, fee-aware TP/SL labeling, metadata + joblib per timeframe).
 - **Learning DB**: apply `prediction_audit` / `trade_outcomes` migrations (`scripts/migrate_model_governance.py`) when using learning features.
 
 ### Single-model (consolidated) mode (historical)

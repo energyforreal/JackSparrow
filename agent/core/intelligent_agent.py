@@ -1053,12 +1053,74 @@ class IntelligentAgent:
         price = float(params["price"]) if params.get("price") is not None else None
         stop_loss = float(params["stop_loss"]) if params.get("stop_loss") is not None else None
         take_profit = float(params["take_profit"]) if params.get("take_profit") is not None else None
+        audit_reason = (
+            params.get("manual_trade_audit_reason")
+            or params.get("override_audit_reason")
+            or ""
+        )
+        if isinstance(audit_reason, str):
+            audit_reason = audit_reason.strip()
+        else:
+            audit_reason = str(audit_reason).strip() if audit_reason is not None else ""
 
         if quantity <= 0:
             return {
                 "success": False,
                 "data": None,
                 "error": "Invalid quantity"
+            }
+
+        trading_mode = (getattr(settings, "trading_mode", "paper") or "paper").lower()
+        require_audit = bool(
+            getattr(settings, "manual_execute_requires_audit_reason_live", True)
+        )
+        if trading_mode == "live" and require_audit and not audit_reason:
+            return {
+                "success": False,
+                "data": None,
+                "error": (
+                    "manual_trade_audit_reason is required for execute_trade when "
+                    "TRADING_MODE=live (agent-first policy)."
+                ),
+            }
+
+        entry_price: Optional[float] = price
+        state = self.context_manager.get_state()
+        if (entry_price is None or entry_price <= 0) and state is not None:
+            cfg = getattr(state, "config", None) or {}
+            if isinstance(cfg, dict):
+                md = cfg.get("market_data") or {}
+                if isinstance(md, dict) and md.get("price") is not None:
+                    try:
+                        entry_price = float(md["price"])
+                    except (TypeError, ValueError):
+                        entry_price = entry_price
+
+        if entry_price is None or entry_price <= 0:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Cannot validate manual trade: missing entry price (pass price or seed agent state)",
+            }
+
+        proposed_size = float(
+            params.get("proposed_portfolio_fraction")
+            or getattr(settings, "max_position_size", 0.1)
+            or 0.1
+        )
+        risk_side = "long" if side in ("buy", "long") else "short"
+        validation = await self.risk_manager.validate_trade(
+            symbol=symbol,
+            side=risk_side,
+            proposed_size=max(0.001, min(1.0, proposed_size)),
+            entry_price=float(entry_price),
+            stop_loss=stop_loss,
+        )
+        if not validation.get("approved", False):
+            return {
+                "success": False,
+                "data": None,
+                "error": validation.get("reason") or "Trade rejected by risk manager",
             }
 
         trade = {
@@ -1069,7 +1131,18 @@ class IntelligentAgent:
             "price": price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
+            "execution_authority": "manual_client",
+            "manual_trade_audit_reason": audit_reason or None,
         }
+
+        logger.info(
+            "manual_execute_trade_risk_ok",
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            trading_mode=trading_mode,
+            audit_reason_present=bool(audit_reason),
+        )
 
         result = await execution_module.execute_trade(trade)
 

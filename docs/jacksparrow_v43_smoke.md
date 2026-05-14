@@ -6,12 +6,11 @@ Run with **`MODEL_DIR`** set to **`agent/model_storage/JackSparrow_v43_models_BT
 
 The shipped `model_artifact_v43.pkl`, `feature_engineer.pkl`, and `regime_models_v43.pkl` reference `__main__.EnsembleModel`, `__main__.LGBMModel`, and `__main__.FeatureEngineer` — classes that only existed in the Colab training scope. The agent installs minimal stubs via `agent.models.v43_pickle_shims` (auto-imported by `JackSparrowV43Node`) so `joblib.load` succeeds and `EnsembleModel.predict(...)` / `predict_uncertainty(...)` work end-to-end via the stored `_ens_scaler` + `xgb` + `rf` (+ inner `lgbm_model`).
 
-Two known limitations require the **bundle to be re-exported** from the training notebook before full v43 inference is possible:
+The hardened training notebook exports the `FeatureEngineer` as a column contract and relies on the runtime-registered `build_v43_feature_matrix` path. If you are validating an older artifact, check these historical limitations:
 
-1. **`feature_engineer.pkl` only stores `self.columns`.** The actual `transform()` body calls `build_feature_matrix(df_5m, df_15m, df_1h, df_funding, for_training=...)` — a notebook-level function that `joblib.dump` does **not** capture. Without it, `fe.transform(...)` raises a clear `RuntimeError`. Fix one of:
-   - **Re-export with cloudpickle** (recommended, one line in Colab): `import cloudpickle; cloudpickle.dump({"model": ensemble, "feature_engineer": fe, "features": features, "regime_models": regime_models, "metadata": meta}, open("model_artifact_v43.pkl", "wb"))`. This captures the closure for `FeatureEngineer.transform` and friends.
-   - **Or** register the v43 `build_feature_matrix` at agent startup: `from agent.models.v43_pickle_shims import set_v43_build_feature_matrix; set_v43_build_feature_matrix(your_v43_build_feature_matrix)`. The shim's `FeatureEngineer.transform` will delegate to it.
+1. **`feature_engineer.pkl` only stores `self.columns`.** This is expected for hardened exports. `JackSparrowV43Node` registers the repository v43 feature matrix at import time, and the shim's `FeatureEngineer.transform` delegates to it. If an older artifact still pickles notebook-local closures, prefer re-exporting with the current notebook rather than relying on those closures.
 2. **scikit-learn version skew.** The artifact was trained on scikit-learn `1.6.1`; in newer environments the pickled `LGBMRegressor` calls the obsolete `check_array(force_all_finite=...)` kwarg (renamed `ensure_all_finite` in `1.8`). The shim degrades gracefully (skips the failing head, keeps `xgb`+`rf`), but for parity with training, pin `scikit-learn==1.6.*` in `requirements.txt` or retrain with current versions.
+3. **v43 predict context frames.** `JackSparrowV43Node` requires **`v43_df5m`** and **`v43_df_funding`** as non-empty `pandas.DataFrame` objects. **`v43_df15m`** and **`v43_df1h`** may be omitted or set to `None`; the node substitutes empty frames because `build_v43_feature_matrix` derives HTF columns from the 5m grid only.
 
 ## Runtime smoke checklist
 

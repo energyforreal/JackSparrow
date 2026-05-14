@@ -113,24 +113,22 @@ async def test_load_valid_model(valid_xgboost_model):
 
 @pytest.mark.asyncio
 async def test_load_empty_file(empty_model_file):
-    """Test handling of empty model file."""
+    """Test handling of empty model file (graceful degradation, no raise)."""
     node = XGBoostNode(empty_model_file)
-    
-    with pytest.raises(ValueError, match="Model file is empty"):
-        await node.initialize()
-    
+
+    await node.initialize()
+
     assert node.health_status == "unhealthy"
     assert node.model is None
 
 
 @pytest.mark.asyncio
 async def test_load_corrupted_file(corrupted_model_file):
-    """Test handling of corrupted model file."""
+    """Test handling of corrupted model file (graceful degradation, no raise)."""
     node = XGBoostNode(corrupted_model_file)
-    
-    with pytest.raises(ValueError, match="corrupted"):
-        await node.initialize()
-    
+
+    await node.initialize()
+
     assert node.health_status == "unhealthy"
     assert node.model is None
 
@@ -168,12 +166,11 @@ async def test_load_invalid_format_file(invalid_format_file):
 
 @pytest.mark.asyncio
 async def test_load_nonexistent_file(non_existent_model):
-    """Test handling of non-existent model file."""
+    """Test handling of non-existent model file (graceful degradation)."""
     node = XGBoostNode(non_existent_model)
-    
-    with pytest.raises(FileNotFoundError):
-        await node.initialize()
-    
+
+    await node.initialize()
+
     assert node.health_status == "unhealthy"
     assert node.model is None
 
@@ -202,20 +199,25 @@ async def test_xgboost_compatibility_warning(valid_xgboost_model):
 
 
 @pytest.mark.asyncio
-async def test_predict_with_valid_model(valid_xgboost_model):
+async def test_predict_with_valid_model(valid_xgboost_model, monkeypatch):
     """Test prediction with a valid model."""
+    monkeypatch.setattr(
+        "agent.models.xgboost_node.EXPECTED_FEATURE_COUNT",
+        2,
+        raising=False,
+    )
     node = XGBoostNode(valid_xgboost_model)
     await node.initialize()
-    
+
     request = MCPModelRequest(
         request_id="test-1",
         features=[1.0, 2.0],
         context={},
         require_explanation=True
     )
-    
+
     prediction = await node.predict(request)
-    
+
     assert prediction is not None
     assert prediction.model_name == "valid_model"
     assert -1.0 <= prediction.prediction <= 1.0
@@ -226,25 +228,19 @@ async def test_predict_with_valid_model(valid_xgboost_model):
 
 @pytest.mark.asyncio
 async def test_predict_with_unhealthy_model(valid_xgboost_model):
-    """Test prediction when model is unhealthy."""
+    """Test prediction when model is not loaded raises ``ValueError``."""
     node = XGBoostNode(valid_xgboost_model)
     # Don't initialize, so model is None
-    
+
     request = MCPModelRequest(
         request_id="test-2",
         features=[1.0, 2.0],
         context={},
         require_explanation=True
     )
-    
-    prediction = await node.predict(request)
-    
-    # Should return degraded prediction
-    assert prediction is not None
-    assert prediction.prediction == 0.0
-    assert prediction.confidence == 0.0
-    assert prediction.health_status == "degraded"
-    assert "failed" in prediction.reasoning.lower() or "not loaded" in prediction.reasoning.lower()
+
+    with pytest.raises(ValueError, match="Model not loaded"):
+        await node.predict(request)
 
 
 @pytest.mark.asyncio
@@ -303,26 +299,24 @@ async def test_get_health_status(valid_xgboost_model):
 
 @pytest.mark.asyncio
 async def test_error_categorization_corrupted(corrupted_model_file):
-    """Test that corrupted files are properly categorized."""
+    """Corrupted files mark the node unhealthy after ``initialize``."""
     node = XGBoostNode(corrupted_model_file)
-    
-    with pytest.raises(ValueError) as exc_info:
-        await node.initialize()
-    
-    error_msg = str(exc_info.value)
-    assert "corrupted" in error_msg.lower() or "incompatible format" in error_msg.lower()
+
+    await node.initialize()
+
+    assert node.health_status == "unhealthy"
+    assert node.model is None
 
 
 @pytest.mark.asyncio
 async def test_error_categorization_empty(empty_model_file):
-    """Test that empty files are properly categorized."""
+    """Empty files mark the node unhealthy after ``initialize``."""
     node = XGBoostNode(empty_model_file)
-    
-    with pytest.raises(ValueError) as exc_info:
-        await node.initialize()
-    
-    error_msg = str(exc_info.value)
-    assert "empty" in error_msg.lower()
+
+    await node.initialize()
+
+    assert node.health_status == "unhealthy"
+    assert node.model is None
 
 
 @pytest.mark.asyncio

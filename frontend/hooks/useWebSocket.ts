@@ -8,6 +8,8 @@ import {
   LatencyTimer
 } from '../utils/communicationLogger'
 import { handleWebSocketResponse } from '@/services/api'
+import { parseWebSocketInbound } from '@/schemas/websocketMessages.zod'
+import { warnIfWebSocketSchemaUnsupported } from '@/lib/wsSchemaVersion'
 
 interface WebSocketMessage {
   type: string
@@ -176,10 +178,37 @@ export function useWebSocket(url: string): UseWebSocketReturn {
           // WS MESSAGE: Debug log for message tracking
           console.log('WS MESSAGE:', event.data)
 
+          let rawParsed: unknown
           try {
-            const rawMessage = JSON.parse(event.data) as WebSocketMessage & {
+            rawParsed = JSON.parse(event.data) as unknown
+          } catch (parseErr) {
+            const parseError = parseErr instanceof Error ? parseErr : new Error('WebSocket JSON parse failed')
+            setError(parseError)
+            console.error('Error parsing WebSocket message JSON:', parseError)
+            return
+          }
+
+          const validated = parseWebSocketInbound(rawParsed)
+          if (!validated.ok) {
+            const msg = validated.error.message
+            const parseError = new Error(`Invalid WebSocket message: ${msg}`)
+            setError(parseError)
+            if (process.env.NODE_ENV === 'development') {
+              console.error('[useWebSocket] Zod validation failed', validated.error.flatten())
+            }
+            return
+          }
+
+          try {
+            const rawMessage = validated.data as WebSocketMessage & {
               server_timestamp_ms?: number
             }
+
+            warnIfWebSocketSchemaUnsupported(
+              typeof rawMessage === 'object' && rawMessage !== null && 'schema_version' in rawMessage
+                ? (rawMessage as { schema_version?: number }).schema_version
+                : undefined
+            )
 
             // Normalize message format - handle both new simplified format and legacy format
             const message = normalizeWebSocketMessage(rawMessage)

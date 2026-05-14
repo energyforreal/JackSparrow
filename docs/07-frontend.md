@@ -1103,28 +1103,40 @@ class ErrorBoundary extends React.Component {
 
 ### Environment Variables
 
-The frontend reads environment variables from the **root `.env` file** in the project root directory. The `frontend/next.config.js` file includes a `loadRootEnv()` function that automatically reads from `../.env` (project root).
+The frontend reads from the **two root env files**: `.env.example` (committed, non-secret defaults) and `.env` (gitignored, secrets only). `frontend/next.config.js`'s `loadRootEnv()` reads `../.env.example` first, then `../.env` on top. Real `process.env` values (shell / CI / Docker) always win over both.
 
-**Required Frontend Variables:**
+**Frontend-relevant variables (live in `.env.example`):**
 
 ```bash
-# Backend API URL
 NEXT_PUBLIC_API_URL=http://localhost:8000
-
-# WebSocket URL
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
-
-# Backend API key (inherited from API_KEY)
-NEXT_PUBLIC_BACKEND_API_KEY=your_api_key
+NEXT_PUBLIC_BACKEND_PROXY_BASE=/api/backend
 ```
+
+The browser must never see `API_KEY`. The Next.js `/api/backend` proxy reads `BACKEND_API_KEY` (or `API_KEY`) from server-side env only.
 
 **How It Works:**
 
-- **Local Development**: The `loadRootEnv()` function in `next.config.js` reads variables from the root `.env` file at build time and runtime
-- **Docker Deployment**: Variables are passed through the `environment:` section in `docker-compose.yml`, which reads from root `.env`
-- **No `frontend/.env.local` needed**: All frontend environment variables are configured in the root `.env` file
+- **Local Development**: `loadRootEnv()` in `next.config.js` merges root `.env.example` + `.env` at build time and runtime.
+- **Docker Deployment**: `docker-compose.yml` lists both env files under each service's `env_file:`, and overrides container networking values via `environment:`.
+- **No per-service env files**: do not add `frontend/.env`, `frontend/.env.local`, or `backend/.env`.
 
-**Note**: See `.env.example` in the project root for the complete list of all available environment variables. All services (backend, agent, frontend) share the same root `.env` file.
+**Note**: See `.env.example` in the project root for the complete list of all supported variables.
+
+---
+
+### Deployment: REST proxy and WebSocket URLs
+
+| Variable | Local dev (typical) | Docker / remote |
+|----------|---------------------|-------------------|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Public API base URL (often `https://…`) |
+| `NEXT_PUBLIC_WS_URL` | Often unset (dev falls back to `ws://localhost:8000/ws` via `frontend/lib/websocketUrl.ts`) | `wss://<api-host>/ws` aligned with the API host |
+| `NEXT_PUBLIC_BACKEND_PROXY_BASE` | `/api/backend` | Same; Next.js route handler proxies to FastAPI |
+| `BACKEND_INTERNAL_URL` | `http://127.0.0.1:8000` | `http://backend:8000` (compose service name) |
+| `BACKEND_API_KEY` | Optional; appended as `X-API-Key` by the proxy | Set when the backend enforces API key auth |
+| Agent ↔ backend | Not used by the browser | `AGENT_WS_URL` (e.g. `ws://agent:8003`); see [Architecture](01-architecture.md) |
+
+Inbound WebSocket frames are validated in `useWebSocket` using Zod (`frontend/schemas/websocketMessages.zod.ts`). If the backend sends `schema_version` greater than `WS_SCHEMA_VERSION_SUPPORTED_MAX` in `frontend/lib/wsSchemaVersion.ts`, the client logs a one-time warning in development.
 
 ---
 

@@ -1,7 +1,7 @@
 import nbformat
 from pathlib import Path
 
-p = Path('notebooks/JackSparrow_Training_Colab_v6.ipynb')
+p = Path("notebooks/jacksparrow_delta_india_training.ipynb")
 nb = nbformat.read(p, as_version=4)
 nb.metadata['kernelspec'] = {
     'name': 'python3',

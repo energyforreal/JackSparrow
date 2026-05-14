@@ -11,59 +11,61 @@ from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator, model_validator
 
-# Determine ROOT_ENV_PATH with Colab compatibility
-def _get_root_env_path() -> Path:
-    """Get path to .env file, handling both Colab and local execution."""
-    # Try using __file__ first (works in local execution)
+# Determine project root and env file paths, with Colab fallback.
+#
+# Env-file split:
+#   - .env.example (committed): non-secret defaults, thresholds, feature flags.
+#   - .env          (gitignored): secrets / credentials only (DB password, Delta keys, JWT, etc.).
+# Pydantic Settings loads the tuple in order and lets later files override earlier ones,
+# so .env values win over .env.example values when both define the same key.
+def _get_project_root() -> Path:
+    """Return repo root (directory containing both ``agent/`` and ``backend/``)."""
     try:
-        if __file__:
-            config_path = Path(__file__).resolve()
-            # agent/core/config.py -> project root (2 levels up)
-            potential_root = config_path.parents[2]
-            env_path = potential_root / ".env"
-            if env_path.exists() or (potential_root / "agent").exists():
-                return env_path
+        start = Path(__file__).resolve().parent
+        for candidate in (start, *start.parents):
+            if (candidate / "agent").is_dir() and (candidate / "backend").is_dir():
+                return candidate
     except (NameError, AttributeError):
-        # __file__ not available (e.g., in some Colab environments)
         pass
-    
-    # Fallback: search from current working directory
+
     cwd = Path.cwd()
-    
-    # Check if .env exists in current directory
-    if (cwd / ".env").exists():
-        return cwd / ".env"
-    
-    # Check if we're in project root
-    if (cwd / "agent").exists():
-        return cwd / ".env"
-    
-    # Search upward from current directory
+    if (cwd / "agent").is_dir() and (cwd / "backend").is_dir():
+        return cwd
     current = cwd
-    for _ in range(5):  # Limit search depth
-        if (current / "agent").exists():
-            return current / ".env"
+    for _ in range(5):
+        if (current / "agent").is_dir() and (current / "backend").is_dir():
+            return current
         if current == current.parent:
             break
         current = current.parent
-    
-    # Last resort: return a path that may not exist (will be handled by pydantic)
-    return cwd / ".env"
+    return cwd
 
-ROOT_ENV_PATH = _get_root_env_path()
+
+ROOT_PROJECT_ROOT = _get_project_root()
+ROOT_ENV_PATH = ROOT_PROJECT_ROOT / ".env"
+ROOT_ENV_EXAMPLE_PATH = ROOT_PROJECT_ROOT / ".env.example"
+
+
+def _root_env_files() -> tuple[str, ...] | None:
+    """Return existing env files in load order (.env.example, then .env)."""
+    paths: list[str] = []
+    if ROOT_ENV_EXAMPLE_PATH.exists():
+        paths.append(str(ROOT_ENV_EXAMPLE_PATH))
+    if ROOT_ENV_PATH.exists():
+        paths.append(str(ROOT_ENV_PATH))
+    return tuple(paths) if paths else None
 
 
 class Settings(BaseSettings):
     """Agent settings loaded from environment variables."""
-    
+
     model_config = SettingsConfigDict(
-        # Make env_file optional - if it doesn't exist, use environment variables only
-        env_file=str(ROOT_ENV_PATH) if ROOT_ENV_PATH.exists() else None,
+        env_file=_root_env_files(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="allow",
         protected_namespaces=("settings_",),
-        # In Colab, environment variables are preferred over .env file
+        # In Colab / containers, process env wins over file contents.
         env_ignore_empty=True,
     )
     
@@ -689,7 +691,7 @@ class Settings(BaseSettings):
         env="JACKSPARROW_V43_MIN_EDGE_COST_RATIO",
         ge=0.0,
         description=(
-            "Gate 5: min multiple of round-trip cost vs edge (TP-scaled). "
+            "Gate 5: min multiple of round-trip cost vs expected-return edge. "
             "Default 0.75 balances small expected_return magnitudes vs fees; "
             "raise toward 1.0–1.5 to tighten entries (see docs/v43_trade_execution_runbook.md)."
         ),
@@ -741,7 +743,7 @@ class Settings(BaseSettings):
         default=0.015,
         env="JACKSPARROW_V43_TAKE_PROFIT_PCT",
         ge=0.0,
-        description="TP fraction for gate 5 edge check (do not change without retrain).",
+        description="TP fraction retained in v43 diagnostics and execution tuning metadata.",
     )
     jacksparrow_v43_maker_fee_rate: float = Field(
         default=0.0005,
@@ -1522,8 +1524,9 @@ class Settings(BaseSettings):
             "When True, trading_handler approves from DecisionReady using only payload "
             "AI confidence ≥ ai_signal_min_entry_confidence plus price, margin, min lots, and "
             "open-position rules; skips v15 entry gate, stale-signal, feature/MTF/SR filters, "
-            "profit/R:R gate, Redis-blended confidence, validate_trade policy, debounce, and "
-            "v15 hourly/daily caps. Higher trade frequency and weaker protection — use with care."
+            "profit/R:R gate, Redis-blended confidence floor path, and "
+            "v15 hourly/daily caps. RiskManager.validate_trade still runs for every entry. "
+            "Higher trade frequency — use with care."
         ),
     )
     ai_signal_min_entry_confidence: float = Field(
@@ -1532,6 +1535,22 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Minimum payload confidence when AI_SIGNAL_MINIMAL_ENTRY_GATES is True.",
+    )
+    agent_policy_force_hold: bool = Field(
+        default=False,
+        env="AGENT_POLICY_FORCE_HOLD",
+        description=(
+            "When True, AgentPolicyEngine vetoes all autonomous entries (DecisionReady stays HOLD). "
+            "ML evidence is still emitted on EvidenceReady for audit/UI."
+        ),
+    )
+    manual_execute_requires_audit_reason_live: bool = Field(
+        default=True,
+        env="MANUAL_EXECUTE_REQUIRES_AUDIT_REASON_LIVE",
+        description=(
+            "When TRADING_MODE=live, WebSocket/API execute_trade must include "
+            "non-empty manual_trade_audit_reason in parameters or the agent rejects the command."
+        ),
     )
     xgb_binary_decision_midpoint: float = Field(
         default=0.5,
@@ -1815,8 +1834,8 @@ except Exception as e:
     # This is acceptable for startup errors that prevent the application from starting
     import sys
     
-    # Check if .env file exists to provide more specific guidance
-    env_exists = ROOT_ENV_PATH.exists()
+    # Check if either env file exists to provide more specific guidance.
+    env_exists = ROOT_ENV_PATH.exists() or ROOT_ENV_EXAMPLE_PATH.exists()
     
     # Try to extract which field failed from Pydantic error
     error_str = str(e)
@@ -1838,7 +1857,9 @@ Error: {error_str}
     
     if env_exists:
         error_msg += f"""
-The .env file exists at: {ROOT_ENV_PATH}
+Env files in use (later overrides earlier):
+  - defaults : {ROOT_ENV_EXAMPLE_PATH} ({'present' if ROOT_ENV_EXAMPLE_PATH.exists() else 'MISSING'})
+  - secrets  : {ROOT_ENV_PATH} ({'present' if ROOT_ENV_PATH.exists() else 'MISSING'})
 
 However, there are issues with the configuration:
 """
@@ -1846,49 +1867,43 @@ However, there are issues with the configuration:
             error_msg += f"  - Missing or invalid: {missing_field}\n"
         else:
             error_msg += "  - One or more required variables are missing or invalid\n"
-        
-        error_msg += f"""
-Required environment variables (check your .env file):
-  - DATABASE_URL (PostgreSQL connection URL, e.g., postgresql://user:pass@localhost:5432/dbname)
+
+        error_msg += """
+Required secrets (must be in root .env):
+  - DATABASE_URL (PostgreSQL connection URL with password)
   - DELTA_EXCHANGE_API_KEY (Delta Exchange API key from your account)
   - DELTA_EXCHANGE_API_SECRET (Delta Exchange API secret from your account)
 
-Optional environment variables:
-  - MODEL_PATH (Path to specific model file, e.g., models/xgboost_BTCUSD_15m.pkl)
-  - MODEL_DIR (Directory for model discovery, default: ./agent/model_storage)
-  - AGENT_SYMBOL (Trading symbol, default: BTCUSD)
-  - AGENT_INTERVAL (Analysis interval, default: 15m)
+Non-secret defaults live in .env.example (MODEL_DIR, AGENT_SYMBOL, AGENT_INTERVAL,
+thresholds, feature flags, ports, etc.). Edit values there, not in .env.
 
 To fix:
-  1. Open the .env file: {ROOT_ENV_PATH}
-  2. Ensure all required variables are set (no empty values)
-  3. Verify variable formats are correct
-  4. Run validation: python scripts/validate-env.py
-  5. Ensure database is initialized: python scripts/setup_db.py
-  6. See docs/13-debugging.md and docs/10-deployment.md for detailed help
+  1. Ensure root .env contains the required secrets above (no empty values).
+  2. Ensure .env.example is present in the project root (non-secret defaults).
+  3. Verify variable formats are correct.
+  4. Ensure database is initialized: python scripts/setup_db.py
+  5. See docs/13-debugging.md and docs/10-deployment.md for detailed help.
 """
     else:
         error_msg += f"""
-The .env file was not found at: {ROOT_ENV_PATH}
+No env files found in the project root:
+  - {ROOT_ENV_EXAMPLE_PATH}
+  - {ROOT_ENV_PATH}
 
-Required environment variables:
-  - DATABASE_URL (PostgreSQL connection URL)
+Required secrets (place in root .env):
+  - DATABASE_URL (PostgreSQL connection URL with password)
   - DELTA_EXCHANGE_API_KEY (Delta Exchange API key)
   - DELTA_EXCHANGE_API_SECRET (Delta Exchange API secret)
 
-Optional environment variables:
-  - MODEL_PATH (Path to specific model file)
-  - MODEL_DIR (Directory for model discovery, default: ./agent/model_storage)
-  - AGENT_SYMBOL (Trading symbol, default: BTCUSD)
-  - AGENT_INTERVAL (Analysis interval, default: 15m)
+Non-secret defaults (place in committed .env.example):
+  - MODEL_PATH / MODEL_DIR / AGENT_SYMBOL / AGENT_INTERVAL / thresholds / flags
 
 To fix:
-  1. Copy .env.example to .env in the project root (if .env.example exists)
-  2. Or create .env file manually with all required variables
-  3. Fill in all required values
-  4. Run validation: python scripts/validate-env.py
-  5. Initialize database: python scripts/setup_db.py
-  6. See docs/11-build-guide.md for setup instructions
+  1. Keep .env.example committed for non-secret defaults.
+  2. Create root .env with secrets only (DB password, Delta keys, JWT, API_KEY).
+  3. Or export required variables in the process environment (e.g. Colab/CI).
+  4. Initialize database: python scripts/setup_db.py
+  5. See docs/11-build-guide.md for setup instructions.
 """
     
     error_msg += f"""

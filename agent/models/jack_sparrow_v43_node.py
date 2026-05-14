@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -32,6 +33,7 @@ from agent.models.jacksparrow_v43_inference import (
     uncertainty_scale,
 )
 from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
+from feature_store.jacksparrow_v43_contract import validate_v43_metadata_compatibility
 
 logger = structlog.get_logger()
 
@@ -154,11 +156,14 @@ class JackSparrowV43Node(MCPModelNode):
         self._health = "unknown"
         self._call_count = 0
         self._error_count = 0
+        # Serialize inference: sklearn/LGBM on one node are not safe under concurrent predict.
+        self._predict_lock = asyncio.Lock()
 
     @classmethod
     def from_metadata_path(cls, metadata_path: Path) -> "JackSparrowV43Node":
         with metadata_path.open("r", encoding="utf-8") as f:
             meta = json.load(f)
+        validate_v43_metadata_compatibility(meta)
         name = str(meta.get("model_name") or "jacksparrow_v43_BTCUSD")
         ver = str(meta.get("version") or meta.get("version_tag") or "v43")
         feats = list(meta.get("features") or [])
@@ -284,6 +289,144 @@ class JackSparrowV43Node(MCPModelNode):
             raise last_err
         raise RuntimeError("active model predict raised no value")
 
+    def _sync_predict_impl(self, ctx: Dict[str, Any]) -> MCPModelPrediction:
+        """Transform + predict on worker thread (keeps asyncio event loop responsive)."""
+        t0 = time.perf_counter()
+        df5 = _ctx_dataframe(ctx, "v43_df5m", "df5m")
+        df15 = _ctx_dataframe(ctx, "v43_df15m", "df15m")
+        df1h = _ctx_dataframe(ctx, "v43_df1h", "df1h")
+        df_fund = _ctx_dataframe(ctx, "v43_df_funding", "df_funding")
+        if not isinstance(df5, pd.DataFrame):
+            raise ValueError("v43 predict requires v43_df5m as pd.DataFrame")
+        if not isinstance(df_fund, pd.DataFrame):
+            raise ValueError("v43 predict requires v43_df_funding as pd.DataFrame")
+        # df15m and df1h are accepted as None — build_v43_feature_matrix resamples HTF
+        # from 5m internally and silently discards these arguments.
+        if df15 is None:
+            df15 = pd.DataFrame()
+        if df1h is None:
+            df1h = pd.DataFrame()
+
+        transform = getattr(self._fe, "transform", None)
+        if not callable(transform):
+            raise RuntimeError("feature_engineer missing transform()")
+
+        df_feat = transform(
+            df5,
+            df15,
+            df1h,
+            df_fund,
+            include_target=False,
+        )
+        if df_feat is None or len(df_feat) < 2:
+            raise ValueError("feature transform returned < 2 rows")
+
+        cols = [c for c in self._feature_names if c in df_feat.columns]
+        if len(cols) < len(self._feature_names) * 0.9:
+            missing = set(self._feature_names) - set(df_feat.columns)
+            logger.warning(
+                "v43_feature_columns_partial",
+                missing_sample=sorted(missing)[:12],
+                found=len(cols),
+                expected=len(self._feature_names),
+            )
+
+        use_cols = [c for c in self._feature_names if c in df_feat.columns]
+        if not use_cols:
+            raise ValueError("no model feature columns present after transform")
+
+        X_df = df_feat[use_cols].iloc[[-2]]
+        X = X_df.values.astype(np.float64, copy=False)
+        closed_row = df_feat.iloc[-2]
+        closed_feats: Dict[str, float] = {}
+        for k in df_feat.columns:
+            try:
+                v = closed_row[k]
+                if pd.isna(v):
+                    continue
+                fv = float(v)
+                if np.isfinite(fv):
+                    closed_feats[str(k)] = fv
+            except (TypeError, ValueError):
+                continue
+
+        regime = "neutral"
+        if "regime_label" in df_feat.columns:
+            try:
+                regime = str(df_feat["regime_label"].iloc[-2])
+            except Exception:
+                regime = "neutral"
+
+        active = get_regime_model(regime, self._regime_models, self._ensemble)
+        floor = float(getattr(settings, "jacksparrow_v43_signal_threshold_floor", 0.005))
+        thr = get_signal_threshold(
+            regime,
+            self._ensemble,
+            active,
+            floor=floor,
+        )
+
+        if active is None:
+            proba0 = 0.0
+            unc = 1.0
+            u_scale = uncertainty_scale(unc)
+            pred_val = 0.0
+            conf = 0.0
+            reasoning = "v43 crisis regime — forced flat (no sub-model)"
+        else:
+            try:
+                proba_arr = self._predict_active(active, X, X_df)
+            except Exception as active_exc:
+                if active is self._ensemble:
+                    raise
+                logger.warning(
+                    "v43_active_regime_model_failed_fallback_global",
+                    model_name=self._model_name,
+                    regime=regime,
+                    active_type=type(active).__name__,
+                    error=str(active_exc),
+                )
+                active = self._ensemble
+                proba_arr = self._predict_active(active, X, X_df)
+            proba0 = float(proba_arr[0]) if proba_arr.size else 0.0
+            unc = ensemble_predict_uncertainty(self._ensemble, X_df)
+            u_scale = uncertainty_scale(unc)
+            edge = float(proba0) - float(thr)
+            pred_val = float(np.tanh(edge * 80.0))
+            conf = float(min(1.0, max(0.0, abs(edge) / 0.015 + 0.25) * u_scale))
+            reasoning = (
+                f"v43 regime={regime} expected_ret={proba0:.5f} thr={thr:.5f} "
+                f"unc={unc:.4f} u_scale={u_scale:.3f}"
+            )
+
+        out_ctx: Dict[str, Any] = {
+            "format": "jacksparrow_v43",
+            "expected_return": float(proba0),
+            "threshold": float(thr),
+            "regime": regime,
+            "uncertainty": float(unc),
+            "unc_scale": float(u_scale),
+            "bar_index_hint": int(len(df5) - 1),
+            "feature_names_used": use_cols,
+            "RECOMMENDED_LONG_THRESHOLD": float(thr),
+            "closed_bar_features": closed_feats,
+        }
+
+        ms = (time.perf_counter() - t0) * 1000.0
+        self._health = "healthy"
+        return MCPModelPrediction(
+            model_name=self._model_name,
+            model_version=self._model_version,
+            prediction=pred_val,
+            confidence=conf,
+            reasoning=reasoning,
+            features_used=list(use_cols),
+            feature_importance={},
+            computation_time_ms=ms,
+            health_status="healthy",
+            context=out_ctx,
+        )
+
     async def predict(self, request: MCPModelRequest) -> MCPModelPrediction:
         await self.initialize()
         await self._reload_if_stale()
@@ -296,119 +439,10 @@ class JackSparrowV43Node(MCPModelNode):
         thr = float(getattr(settings, "jacksparrow_v43_signal_threshold_floor", 0.005))
         regime = "neutral"
         try:
-            df5 = _ctx_dataframe(ctx, "v43_df5m", "df5m")
-            df15 = _ctx_dataframe(ctx, "v43_df15m", "df15m")
-            df1h = _ctx_dataframe(ctx, "v43_df1h", "df1h")
-            df_fund = _ctx_dataframe(ctx, "v43_df_funding", "df_funding")
-            if not all(isinstance(x, pd.DataFrame) for x in (df5, df15, df1h, df_fund)):
-                raise ValueError("v43 predict requires v43_df5m/v43_df15m/v43_df1h/v43_df_funding")
-
-            transform = getattr(self._fe, "transform", None)
-            if not callable(transform):
-                raise RuntimeError("feature_engineer missing transform()")
-
-            df_feat = transform(
-                df5,
-                df15,
-                df1h,
-                df_fund,
-                include_target=False,
-            )
-            if df_feat is None or len(df_feat) < 2:
-                raise ValueError("feature transform returned < 2 rows")
-
-            cols = [c for c in self._feature_names if c in df_feat.columns]
-            if len(cols) < len(self._feature_names) * 0.9:
-                missing = set(self._feature_names) - set(df_feat.columns)
-                logger.warning(
-                    "v43_feature_columns_partial",
-                    missing_sample=sorted(missing)[:12],
-                    found=len(cols),
-                    expected=len(self._feature_names),
-                )
-
-            use_cols = [c for c in self._feature_names if c in df_feat.columns]
-            if not use_cols:
-                raise ValueError("no model feature columns present after transform")
-
-            X_df = df_feat[use_cols].iloc[[-2]]
-            X = X_df.values.astype(np.float64, copy=False)
-            closed_row = df_feat.iloc[-2]
-            closed_feats: Dict[str, float] = {}
-            for k in df_feat.columns:
-                try:
-                    v = closed_row[k]
-                    if pd.isna(v):
-                        continue
-                    fv = float(v)
-                    if np.isfinite(fv):
-                        closed_feats[str(k)] = fv
-                except (TypeError, ValueError):
-                    continue
-
-            regime = "neutral"
-            if "regime_label" in df_feat.columns:
-                try:
-                    regime = str(df_feat["regime_label"].iloc[-2])
-                except Exception:
-                    regime = "neutral"
-
-            active = get_regime_model(regime, self._regime_models, self._ensemble)
-            floor = float(getattr(settings, "jacksparrow_v43_signal_threshold_floor", 0.005))
-            thr = get_signal_threshold(
-                regime,
-                self._ensemble,
-                active,
-                floor=floor,
-            )
-
-            if active is None:
-                proba0 = 0.0
-                unc = 1.0
-                u_scale = uncertainty_scale(unc)
-                pred_val = 0.0
-                conf = 0.0
-                reasoning = "v43 crisis regime — forced flat (no sub-model)"
-            else:
-                proba_arr = self._predict_active(active, X, X_df)
-                proba0 = float(proba_arr[0]) if proba_arr.size else 0.0
-                unc = ensemble_predict_uncertainty(self._ensemble, X_df)
-                u_scale = uncertainty_scale(unc)
-                edge = float(proba0) - float(thr)
-                pred_val = float(np.tanh(edge * 80.0))
-                conf = float(min(1.0, max(0.0, abs(edge) / 0.015 + 0.25) * u_scale))
-                reasoning = (
-                    f"v43 regime={regime} expected_ret={proba0:.5f} thr={thr:.5f} "
-                    f"unc={unc:.4f} u_scale={u_scale:.3f}"
-                )
-
-            out_ctx: Dict[str, Any] = {
-                "format": "jacksparrow_v43",
-                "expected_return": float(proba0),
-                "threshold": float(thr),
-                "regime": regime,
-                "uncertainty": float(unc),
-                "unc_scale": float(u_scale),
-                "bar_index_hint": int(len(df5) - 1),
-                "feature_names_used": use_cols,
-                "RECOMMENDED_LONG_THRESHOLD": float(thr),
-                "closed_bar_features": closed_feats,
-            }
-
-            ms = (time.perf_counter() - t0) * 1000.0
-            self._health = "healthy"
-            return MCPModelPrediction(
-                model_name=self._model_name,
-                model_version=self._model_version,
-                prediction=pred_val,
-                confidence=conf,
-                reasoning=reasoning,
-                features_used=list(use_cols),
-                feature_importance={},
-                computation_time_ms=ms,
-                health_status="healthy",
-                context=out_ctx,
-            )
+            async with self._predict_lock:
+                pred = await asyncio.to_thread(self._sync_predict_impl, ctx)
+            wall_ms = (time.perf_counter() - t0) * 1000.0
+            return pred.model_copy(update={"computation_time_ms": wall_ms})
         except Exception as e:
             self._error_count += 1
             self._health = "degraded"

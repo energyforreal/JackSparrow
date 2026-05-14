@@ -67,11 +67,23 @@ class MockRedisStreams:
         """Acknowledge message."""
         self.acks.append((stream_name, group_name, message_id))
     
-    async def xgroup_create(self, stream_name: str, group_name: str, id: str = "0", mkstream: bool = True):
-        """Create consumer group."""
-        if stream_name not in self.groups:
-            self.groups[stream_name] = set()
-        self.groups[stream_name].add(group_name)
+    async def xgroup_create(
+        self,
+        name: str | None = None,
+        groupname: str | None = None,
+        stream_name: str | None = None,
+        group_name: str | None = None,
+        id: str = "0",
+        mkstream: bool = True,
+    ):
+        """Create consumer group (matches redis ``name=`` / ``groupname=`` kwargs)."""
+        sn = name or stream_name
+        gn = groupname or group_name
+        if not sn or not gn:
+            return
+        if sn not in self.groups:
+            self.groups[sn] = set()
+        self.groups[sn].add(gn)
     
     async def close(self):
         """Close connection."""
@@ -88,28 +100,32 @@ def mock_redis():
     return MockRedisStreams()
 
 
-@pytest.fixture
-def event_bus(mock_redis):
-    """Create event bus with mock Redis."""
-    bus = EventBus(stream_name="test_stream", consumer_group="test_group")
-    
-    # Patch get_redis to return mock_redis
-    async def get_redis():
+@pytest_asyncio.fixture
+async def redis_event_bus(mock_redis, monkeypatch):
+    """Create event bus with mock Redis and patched ``get_redis``."""
+    async def _get_redis():
         return mock_redis
-    
-    # Create consumer group
-    asyncio.create_task(mock_redis.xgroup_create("test_stream", "test_group"))
-    
-    return bus
+
+    monkeypatch.setattr("agent.core.redis_config.get_redis", _get_redis)
+    import importlib
+
+    event_bus_module = importlib.import_module("agent.events.event_bus")
+    monkeypatch.setattr(event_bus_module, "get_redis", _get_redis)
+    await mock_redis.xgroup_create(name="test_stream", groupname="test_group", id="0", mkstream=True)
+    return EventBus(stream_name="test_stream", consumer_group="test_group")
 
 
 @pytest.mark.asyncio
-async def test_event_publish_consume_cycle(event_bus, mock_redis):
+async def test_event_publish_consume_cycle(redis_event_bus, mock_redis):
     """Test complete event publish and consume cycle."""
     # Create test event
     event = AgentCommandEvent(
-        command="get_status",
-        payload={"test": "data"}
+        source="integration_test",
+        payload={
+            "command": "get_status",
+            "parameters": {"test": "data"},
+            "request_id": "req-1",
+        },
     )
     
     # Subscribe handler
@@ -118,10 +134,10 @@ async def test_event_publish_consume_cycle(event_bus, mock_redis):
     async def handler(evt):
         received_events.append(evt)
     
-    event_bus.subscribe(EventType.AGENT_COMMAND, handler)
+    redis_event_bus.subscribe(EventType.AGENT_COMMAND, handler)
     
     # Publish event
-    published = await event_bus.publish(event)
+    published = await redis_event_bus.publish(event)
     assert published is True
     
     # Verify event was added to stream
@@ -129,14 +145,8 @@ async def test_event_publish_consume_cycle(event_bus, mock_redis):
     stream_name, fields = mock_redis.xadd_calls[0]
     assert stream_name == "test_stream"
     assert "event" in fields
-    
-    # Start consuming
-    await event_bus.start_consuming()
-    
-    # Give it time to process
-    await asyncio.sleep(0.1)
-    
-    # Process messages manually (simulating consume loop)
+
+    # Process messages manually (simulating consume loop) — avoid ``start_consuming`` tight loop in tests.
     messages = await mock_redis.xreadgroup(
         groupname="test_group",
         consumername="test_consumer",
@@ -147,23 +157,26 @@ async def test_event_publish_consume_cycle(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for message_id, message_data in stream_messages:
-            await event_bus._process_message(message_id.decode("utf-8"), message_data, mock_redis)
+            await redis_event_bus._process_message(message_id.decode("utf-8"), message_data, mock_redis)
     
     # Verify event was received
     assert len(received_events) == 1
     assert isinstance(received_events[0], AgentCommandEvent)
-    assert received_events[0].command == "get_status"
-    assert received_events[0].payload == {"test": "data"}
+    assert received_events[0].payload["command"] == "get_status"
+    assert received_events[0].payload["parameters"] == {"test": "data"}
 
 
 @pytest.mark.asyncio
-async def test_event_deserialization_from_redis(event_bus, mock_redis):
+async def test_event_deserialization_from_redis(redis_event_bus, mock_redis):
     """Test event deserialization from Redis Stream format."""
     # Create event and serialize it
     event = MarketTickEvent(
-        symbol="BTCUSD",
-        price=50000.0,
-        timestamp=datetime.now()
+        source="integration_test",
+        payload={
+            "symbol": "BTCUSD",
+            "price": 50000.0,
+            "timestamp": datetime.now().isoformat(),
+        },
     )
     
     event_data = event.model_dump()
@@ -179,7 +192,7 @@ async def test_event_deserialization_from_redis(event_bus, mock_redis):
     async def handler(evt):
         received_events.append(evt)
     
-    event_bus.subscribe(EventType.MARKET_TICK, handler)
+    redis_event_bus.subscribe(EventType.MARKET_TICK, handler)
     
     # Read and process message
     messages = await mock_redis.xreadgroup(
@@ -192,21 +205,25 @@ async def test_event_deserialization_from_redis(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for msg_id, msg_data in stream_messages:
-            await event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
+            await redis_event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
     
     # Verify event was deserialized correctly
     assert len(received_events) == 1
     assert isinstance(received_events[0], MarketTickEvent)
-    assert received_events[0].symbol == "BTCUSD"
-    assert received_events[0].price == 50000.0
+    assert received_events[0].payload["symbol"] == "BTCUSD"
+    assert received_events[0].payload["price"] == 50000.0
 
 
 @pytest.mark.asyncio
-async def test_event_with_unicode_characters(event_bus, mock_redis):
+async def test_event_with_unicode_characters(redis_event_bus, mock_redis):
     """Test event pipeline with Unicode characters."""
     event = AgentCommandEvent(
-        command="get_status",
-        payload={"message": "Test with Unicode: ✓ ⚠ ✗ ✅"}
+        source="integration_test",
+        payload={
+            "command": "get_status",
+            "parameters": {"message": "Test with Unicode: ✓ ⚠ ✗ ✅"},
+            "request_id": "req-unicode",
+        },
     )
     
     received_events = []
@@ -214,10 +231,10 @@ async def test_event_with_unicode_characters(event_bus, mock_redis):
     async def handler(evt):
         received_events.append(evt)
     
-    event_bus.subscribe(EventType.AGENT_COMMAND, handler)
+    redis_event_bus.subscribe(EventType.AGENT_COMMAND, handler)
     
     # Publish event
-    await event_bus.publish(event)
+    await redis_event_bus.publish(event)
     
     # Process message
     messages = await mock_redis.xreadgroup(
@@ -230,20 +247,41 @@ async def test_event_with_unicode_characters(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for msg_id, msg_data in stream_messages:
-            await event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
+            await redis_event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
     
     # Verify Unicode characters are preserved
     assert len(received_events) == 1
-    assert "✓ ⚠ ✗ ✅" in received_events[0].payload["message"]
+    assert "✓ ⚠ ✗ ✅" in received_events[0].payload["parameters"]["message"]
 
 
 @pytest.mark.asyncio
-async def test_multiple_events_pipeline(event_bus, mock_redis):
+async def test_multiple_events_pipeline(redis_event_bus, mock_redis):
     """Test processing multiple events through pipeline."""
     events = [
-        AgentCommandEvent(command="get_status", payload={"id": 1}),
-        AgentCommandEvent(command="get_status", payload={"id": 2}),
-        AgentCommandEvent(command="get_status", payload={"id": 3}),
+        AgentCommandEvent(
+            source="integration_test",
+            payload={
+                "command": "get_status",
+                "parameters": {"id": 1},
+                "request_id": "r1",
+            },
+        ),
+        AgentCommandEvent(
+            source="integration_test",
+            payload={
+                "command": "get_status",
+                "parameters": {"id": 2},
+                "request_id": "r2",
+            },
+        ),
+        AgentCommandEvent(
+            source="integration_test",
+            payload={
+                "command": "get_status",
+                "parameters": {"id": 3},
+                "request_id": "r3",
+            },
+        ),
     ]
     
     received_events = []
@@ -251,11 +289,11 @@ async def test_multiple_events_pipeline(event_bus, mock_redis):
     async def handler(evt):
         received_events.append(evt)
     
-    event_bus.subscribe(EventType.AGENT_COMMAND, handler)
+    redis_event_bus.subscribe(EventType.AGENT_COMMAND, handler)
     
     # Publish all events
     for event in events:
-        await event_bus.publish(event)
+        await redis_event_bus.publish(event)
     
     # Process all messages
     messages = await mock_redis.xreadgroup(
@@ -268,29 +306,33 @@ async def test_multiple_events_pipeline(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for msg_id, msg_data in stream_messages:
-            await event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
+            await redis_event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
     
     # Verify all events were received
     assert len(received_events) == 3
     assert all(isinstance(evt, AgentCommandEvent) for evt in received_events)
-    assert [evt.payload["id"] for evt in received_events] == [1, 2, 3]
+    assert [evt.payload["parameters"]["id"] for evt in received_events] == [1, 2, 3]
 
 
 @pytest.mark.asyncio
-async def test_event_acknowledgment(event_bus, mock_redis):
+async def test_event_acknowledgment(redis_event_bus, mock_redis):
     """Test that events are properly acknowledged after processing."""
     event = AgentCommandEvent(
-        command="get_status",
-        payload={"test": "data"}
+        source="integration_test",
+        payload={
+            "command": "get_status",
+            "parameters": {"test": "data"},
+            "request_id": "req-ack",
+        },
     )
     
     async def handler(evt):
         pass  # Do nothing
     
-    event_bus.subscribe(EventType.AGENT_COMMAND, handler)
+    redis_event_bus.subscribe(EventType.AGENT_COMMAND, handler)
     
     # Publish and process
-    await event_bus.publish(event)
+    await redis_event_bus.publish(event)
     
     messages = await mock_redis.xreadgroup(
         groupname="test_group",
@@ -302,7 +344,7 @@ async def test_event_acknowledgment(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for msg_id, msg_data in stream_messages:
-            await event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
+            await redis_event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
     
     # Verify message was acknowledged
     assert len(mock_redis.acks) > 0
@@ -310,7 +352,7 @@ async def test_event_acknowledgment(event_bus, mock_redis):
 
 
 @pytest.mark.asyncio
-async def test_empty_event_handling(event_bus, mock_redis):
+async def test_empty_event_handling(redis_event_bus, mock_redis):
     """Test handling of empty events."""
     # Manually add empty event to stream
     await mock_redis.xadd("test_stream", {"event": "{}"})
@@ -320,7 +362,7 @@ async def test_empty_event_handling(event_bus, mock_redis):
     async def handler(evt):
         received_events.append(evt)
     
-    event_bus.subscribe(EventType.AGENT_COMMAND, handler)
+    redis_event_bus.subscribe(EventType.AGENT_COMMAND, handler)
     
     # Process message
     messages = await mock_redis.xreadgroup(
@@ -333,7 +375,7 @@ async def test_empty_event_handling(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for msg_id, msg_data in stream_messages:
-            await event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
+            await redis_event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
     
     # Empty event should be skipped, not processed
     assert len(received_events) == 0
@@ -342,7 +384,7 @@ async def test_empty_event_handling(event_bus, mock_redis):
 
 
 @pytest.mark.asyncio
-async def test_corrupted_event_handling(event_bus, mock_redis):
+async def test_corrupted_event_handling(redis_event_bus, mock_redis):
     """Test handling of corrupted events."""
     # Add corrupted event data
     await mock_redis.xadd("test_stream", {"event": "{invalid json"})
@@ -352,7 +394,7 @@ async def test_corrupted_event_handling(event_bus, mock_redis):
     async def handler(evt):
         received_events.append(evt)
     
-    event_bus.subscribe(EventType.AGENT_COMMAND, handler)
+    redis_event_bus.subscribe(EventType.AGENT_COMMAND, handler)
     
     # Process message
     messages = await mock_redis.xreadgroup(
@@ -365,7 +407,7 @@ async def test_corrupted_event_handling(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for msg_id, msg_data in stream_messages:
-            await event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
+            await redis_event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
     
     # Corrupted event should be skipped
     assert len(received_events) == 0
@@ -374,11 +416,15 @@ async def test_corrupted_event_handling(event_bus, mock_redis):
 
 
 @pytest.mark.asyncio
-async def test_event_retry_count_handling(event_bus, mock_redis):
+async def test_event_retry_count_handling(redis_event_bus, mock_redis):
     """Test handling of events with retry count metadata."""
     event = AgentCommandEvent(
-        command="get_status",
-        payload={"test": "data"}
+        source="integration_test",
+        payload={
+            "command": "get_status",
+            "parameters": {"test": "data"},
+            "request_id": "req-retry",
+        },
     )
     
     event_data = event.model_dump()
@@ -396,7 +442,7 @@ async def test_event_retry_count_handling(event_bus, mock_redis):
     async def handler(evt):
         received_events.append(evt)
     
-    event_bus.subscribe(EventType.AGENT_COMMAND, handler)
+    redis_event_bus.subscribe(EventType.AGENT_COMMAND, handler)
     
     # Process message
     messages = await mock_redis.xreadgroup(
@@ -409,7 +455,7 @@ async def test_event_retry_count_handling(event_bus, mock_redis):
     
     for stream, stream_messages in messages:
         for msg_id, msg_data in stream_messages:
-            await event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
+            await redis_event_bus._process_message(msg_id.decode("utf-8"), msg_data, mock_redis)
     
     # Event should be processed despite retry count
     assert len(received_events) == 1

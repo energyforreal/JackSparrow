@@ -35,7 +35,14 @@ from agent.events.schemas import (
     ReasoningRequestEvent,
     ReasoningCompleteEvent,
     DecisionReadyEvent,
-    EventType
+    EvidenceReadyEvent,
+    EventType,
+    PolicyAuthority,
+)
+from agent.core.agent_policy_engine import (
+    agent_policy_engine,
+    build_ml_evidence_from_orchestrator_result,
+    build_ml_evidence_from_reasoning_context,
 )
 from agent.core.config import settings
 from agent.core.v43_signal_gates import (
@@ -1193,10 +1200,32 @@ class MCPOrchestrator:
             if isinstance(decision, dict) and decision.get("signal") is not None:
                 reasoning = result.get("reasoning") or {}
                 decision_symbol = result.get("symbol") or symbol
-                signal = decision.get("signal")
-                position_size = decision.get("position_size", 0.0)
-                confidence = decision.get("confidence", reasoning.get("final_confidence", 0.0))
                 timestamp = result.get("timestamp") or datetime.utcnow()
+
+                ml_evidence = build_ml_evidence_from_orchestrator_result(result)
+                verdict = agent_policy_engine.evaluate(
+                    ml_evidence=ml_evidence,
+                    conclusion=str(reasoning.get("conclusion") or ""),
+                    market_context=result.get("market_context")
+                    if isinstance(result.get("market_context"), dict)
+                    else {},
+                )
+
+                evidence_event = EvidenceReadyEvent(
+                    source="agent_policy_engine",
+                    correlation_id=event.event_id,
+                    payload={
+                        "symbol": decision_symbol,
+                        "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
+                        "timestamp": timestamp,
+                        "correlation_id": event.event_id,
+                    },
+                )
+                await event_bus.publish(evidence_event)
+
+                signal = verdict.signal
+                position_size = verdict.position_size
+                confidence = verdict.confidence
 
                 # Normalize per-model predictions so backend and frontend can
                 # consistently build model_consensus and reasoning views.
@@ -1223,11 +1252,15 @@ class MCPOrchestrator:
                         "position_size": position_size,
                         "reasoning_chain": reasoning_chain_payload,
                         "timestamp": timestamp,
+                        "policy_authority": PolicyAuthority.AGENT_POLICY.value,
+                        "policy_reason_codes": list(verdict.reason_codes),
+                        "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
+                        "policy_verdict": verdict.model_dump(mode="json"),
                 }
                 decision_payload.update(_decision_ws_metadata(result))
 
                 decision_event = DecisionReadyEvent(
-                    source="mcp_orchestrator",
+                    source="agent_policy_engine",
                     correlation_id=event.event_id,
                     payload=decision_payload,
                 )
@@ -1313,41 +1346,77 @@ class MCPOrchestrator:
             )
             await event_bus.publish(completion_event)
 
-            # Emit decision ready event
-            decision = self._extract_decision_from_reasoning(reasoning_chain)
+            # ML candidate from reasoning conclusion (text-derived); agent policy ratifies/vetoes.
+            decision_ml = self._extract_decision_from_reasoning(reasoning_chain)
+            ml_evidence = build_ml_evidence_from_reasoning_context(
+                str(symbol or settings.trading_symbol or "BTCUSD"),
+                market_context if isinstance(market_context, dict) else {},
+                str(decision_ml.get("signal") or "HOLD"),
+                float(decision_ml.get("confidence") or reasoning_chain.final_confidence or 0.0),
+                float(decision_ml.get("position_size") or 0.0),
+                model_predictions_for_reasoning,
+            )
+            verdict = agent_policy_engine.evaluate(
+                ml_evidence=ml_evidence,
+                conclusion=reasoning_chain.conclusion,
+                market_context=market_context if isinstance(market_context, dict) else {},
+            )
+            ts_decision = datetime.utcnow()
+
+            evidence_event = EvidenceReadyEvent(
+                source="agent_policy_engine",
+                correlation_id=event.event_id,
+                payload={
+                    "symbol": symbol,
+                    "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
+                    "timestamp": ts_decision,
+                    "correlation_id": event.event_id,
+                },
+            )
+            await event_bus.publish(evidence_event)
+
             decision_payload = {
                     "symbol": symbol,
-                    "signal": decision["signal"],
-                    "confidence": decision["confidence"],
-                    "position_size": decision["position_size"],
+                    "signal": verdict.signal,
+                    "confidence": verdict.confidence,
+                    "position_size": verdict.position_size,
                     "reasoning_chain": reasoning_chain_payload,
-                    "timestamp": datetime.utcnow(),
-                }
+                    "timestamp": ts_decision,
+                    "policy_authority": PolicyAuthority.AGENT_POLICY.value,
+                    "policy_reason_codes": list(verdict.reason_codes),
+                    "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
+                    "policy_verdict": verdict.model_dump(mode="json"),
+            }
             decision_payload.update(
                 _decision_ws_metadata(
                     {"model_predictions": model_predictions_for_reasoning}
                 )
             )
             decision_event = DecisionReadyEvent(
-                source="mcp_orchestrator",
+                source="agent_policy_engine",
                 correlation_id=event.event_id,
                 payload=decision_payload,
             )
             await event_bus.publish(decision_event)
 
             # Store decision context for future historical similarity search (Step 2)
+            decision_for_store = {
+                "signal": verdict.signal,
+                "confidence": verdict.confidence,
+                "position_size": verdict.position_size,
+            }
             await self._store_decision_context(
                 symbol=symbol,
-                decision=decision,
+                decision=decision_for_store,
                 market_context=reasoning_chain_payload.get("market_context", {}),
                 chain_id=reasoning_chain.chain_id,
-                timestamp=datetime.utcnow(),
+                timestamp=ts_decision,
             )
 
             self._schedule_prediction_audit(
                 correlation_id=event.event_id,
                 symbol=symbol,
-                confidence=float(decision.get("confidence", 0.0) or 0.0),
+                confidence=float(verdict.confidence or 0.0) or 0.0,
                 decision_payload=decision_event.payload,
                 latency_ms=None,
             )

@@ -261,28 +261,31 @@ curl http://localhost:6333/health
 
 ### Step 8: Environment Variables
 
-**Single Root `.env` File**: All services (backend, agent, frontend) read from a **single root `.env` file** in the project root directory. This is the only environment file you need to configure.
+**Two-File Layered Setup at the Project Root**:
+
+- **`.env.example`** (committed) — non-secret defaults: ports, thresholds, feature flags, model paths, public URLs.
+- **`.env`** (gitignored, secrets only) — DB password, Delta API key/secret, `JWT_SECRET_KEY`, `API_KEY`, `REDIS_PASSWORD`, optional Qdrant/Telegram tokens, and any personal overrides.
+
+Loaders read `.env.example` first, then `.env` on top, so secrets override placeholders. Real OS environment variables (shell / CI / Docker Compose `environment:`) override both files.
 
 **Setup Instructions:**
 
-1. Copy the example template: `cp .env.example .env`
-2. Edit `.env` with your actual values
-3. Fill in all **REQUIRED** variables (marked in `.env.example`)
-4. Optionally configure **OPTIONAL** variables as needed
+1. Keep the repo's `.env.example` in place — do not delete or copy it under service folders.
+2. Create a root `.env` containing only the secret values listed below (use `.env.example` placeholders to know which keys are expected).
+3. Verify no per-service env files exist: there must be **no** `agent/.env`, `backend/.env`, `frontend/.env`, or `frontend/.env.local`.
 
-**How Components Read the Root `.env` File:**
+**How Components Read These Files:**
 
-- **Backend**: Reads via `ROOT_ENV_PATH` in `backend/core/config.py` (points to root `.env`)
-- **Agent**: Reads via `ROOT_ENV_PATH` in `agent/core/config.py` (points to root `.env`)
-- **Frontend**: Reads via `loadRootEnv()` function in `frontend/next.config.js` (reads `../.env`)
-- **Docker**: Docker Compose automatically loads root `.env` via `env_file: - .env` directive
+- **Backend** & **Agent**: Pydantic `SettingsConfigDict(env_file=(<root>/.env.example, <root>/.env), ...)` in `backend/core/config.py` and `agent/core/config.py`.
+- **Frontend**: `loadRootEnv()` in `frontend/next.config.js` reads `../.env.example` first, then `../.env` (real `process.env` always wins).
+- **Docker Compose**: each service lists both files via `env_file: [.env.example, .env]`. Compose-time `${VAR}` interpolation still only reads the host shell + `.env`; non-secret vars used in interpolation (`POSTGRES_USER`, `POSTGRES_DB`, `CORS_ORIGINS`) have safe defaults in `docker-compose.yml`.
 
 **Important Notes:**
 
-- **No service-specific `.env` files needed**: All services share the same root `.env` file. Do not maintain `agent/.env`, `backend/.env`, or `.env.example` copies under those directories — the root `.env.example` is the only template.
-- **For local development**: Database URLs should use `localhost` (e.g., `postgresql://user:pass@localhost:5432/db`)
-- **For Docker deployments**: Database URLs should use service names (e.g., `postgresql://user:pass@postgres:5432/db`)
-- See `.env.example` in the project root for a complete template with all available variables
+- **Single source of truth**: do not maintain `agent/.env`, `backend/.env`, `frontend/.env`, or `frontend/.env.local`. Add overrides to root `.env` only.
+- **For local development**: Database URLs default to `localhost`; secrets in root `.env` keep the real password.
+- **For Docker deployments**: `docker-compose.yml` rewrites `DATABASE_URL`/`REDIS_URL` etc. to use the `postgres`/`redis`/`agent` service hostnames; secrets still come from root `.env`.
+- See `.env.example` in the project root for the complete list of every supported variable.
 
 **Required Variables (Minimum Setup):**
 

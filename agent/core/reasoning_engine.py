@@ -18,7 +18,7 @@ from agent.models.mcp_model_registry import (
 )
 from agent.memory.vector_store import VectorMemoryStore
 from agent.events.event_bus import event_bus
-from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, DecisionReadyEvent, EventType
+from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, DecisionReadyEvent
 from agent.core.config import settings
 from agent.core.mtf_decision_engine import synthesize_mtf_trading_decision
 from agent.learning.dynamic_thresholds import apply_redis_hold_band_overrides
@@ -176,8 +176,9 @@ class MCPReasoningEngine:
         """Initialize reasoning engine."""
         if self.vector_store:
             await self.vector_store.initialize()
-        # Register event handler
-        event_bus.subscribe(EventType.REASONING_REQUEST, self._handle_reasoning_request_event)
+        # ReasoningRequestEvent is handled exclusively by MCPOrchestrator to avoid
+        # duplicate reasoning passes and duplicate DecisionReadyEvent emissions.
+        # See agent/core/mcp_orchestrator.py::_handle_reasoning_request.
     
     async def shutdown(self):
         """Shutdown reasoning engine."""
@@ -185,48 +186,12 @@ class MCPReasoningEngine:
             await self.vector_store.shutdown()
     
     async def _handle_reasoning_request_event(self, event: ReasoningRequestEvent):
-        """Handle reasoning request event.
-        
-        Args:
-            event: Reasoning request event
-        """
-        try:
-            payload = event.payload
-            symbol = payload.get("symbol")
-            market_context = payload.get("market_context", {})
-            use_memory = payload.get("use_memory", True)
-            
-            # Create reasoning request
-            request = MCPReasoningRequest(
-                symbol=symbol,
-                market_context=market_context,
-                use_memory=use_memory
-            )
-            
-            # Generate reasoning chain
-            reasoning_chain = await self.generate_reasoning(request)
-            
-            # Emit reasoning complete event
-            await self._emit_reasoning_complete_event(event, reasoning_chain)
-            
-            # Emit decision ready event
-            await self._emit_decision_ready_event(event, reasoning_chain)
-            
-        except NoHealthyModelPredictionsError:
-            # Race: reasoning requested before model_predictions in context; skip gracefully
-            logger.debug(
-                "reasoning_request_skipped_no_predictions",
-                event_id=event.event_id,
-                symbol=payload.get("symbol"),
-                message="Skipping reasoning - no model_predictions in market_context (decision may already be emitted).",
-            )
-        except Exception as e:
-            logger.error(
-                "reasoning_request_event_handler_error",
-                event_id=event.event_id,
-                error=str(e),
-                exc_info=True
-            )
+        """Deprecated: REASONING_REQUEST is handled by MCPOrchestrator only."""
+        logger.warning(
+            "reasoning_request_event_unexpected",
+            event_id=event.event_id,
+            message="ReasoningRequest should be processed by mcp_orchestrator; ignoring.",
+        )
     
     async def _emit_reasoning_complete_event(self, request_event: ReasoningRequestEvent, reasoning_chain: MCPReasoningChain):
         """Emit reasoning complete event.

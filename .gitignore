@@ -34,11 +34,9 @@ out/
 build/
 .turbo/
 
-# Environment variables
-.env
-.env.local
-.env.*.local
-.env.production
+# Environment variables (secrets-only). .env.example is the only committed env file.
+.env*
+!.env.example
 
 # IDE
 .vscode/

@@ -9,8 +9,10 @@ import pytest
 
 from feature_store.jacksparrow_v43_contract import (
     V43_CANONICAL_FEATURES,
+    V43_COMPATIBLE_FEATURE_VERSION,
     V43_EXPECTED_FEATURE_COUNT,
     V43_FORWARD_TARGET_BARS,
+    validate_v43_metadata_compatibility,
 )
 
 
@@ -43,6 +45,51 @@ def test_v43_metadata_features_match_contract(metadata_v43):
     assert len(feats) == V43_EXPECTED_FEATURE_COUNT
     assert metadata_v43.get("feature_count") in (V43_EXPECTED_FEATURE_COUNT, len(feats))
     assert tuple(feats) == V43_CANONICAL_FEATURES
+    assert metadata_v43.get("compatible_feature_version") == V43_COMPATIBLE_FEATURE_VERSION
+
+
+def test_validate_v43_metadata_accepts_legacy_without_version_field() -> None:
+    meta = {"features": list(V43_CANONICAL_FEATURES)}
+    validate_v43_metadata_compatibility(meta)
+
+
+def test_validate_v43_metadata_accepts_matching_version() -> None:
+    meta = {
+        "features": list(V43_CANONICAL_FEATURES),
+        "compatible_feature_version": V43_COMPATIBLE_FEATURE_VERSION,
+    }
+    validate_v43_metadata_compatibility(meta)
+
+
+def test_validate_v43_metadata_rejects_incompatible_version() -> None:
+    meta = {
+        "features": list(V43_CANONICAL_FEATURES),
+        "compatible_feature_version": "legacy_wrong_tag",
+    }
+    with pytest.raises(ValueError, match="incompatible"):
+        validate_v43_metadata_compatibility(meta)
+
+
+def test_validate_v43_metadata_rejects_feature_order_mismatch() -> None:
+    feats = list(V43_CANONICAL_FEATURES)
+    feats[0], feats[1] = feats[1], feats[0]
+    with pytest.raises(ValueError, match="does not match"):
+        validate_v43_metadata_compatibility({"features": feats})
+
+
+def test_jacksparrow_v43_node_rejects_bad_metadata(tmp_path) -> None:
+    from agent.models.jack_sparrow_v43_node import JackSparrowV43Node
+
+    bad = {
+        "model_name": "x",
+        "version": "v43",
+        "features": list(V43_CANONICAL_FEATURES),
+        "compatible_feature_version": "nope",
+    }
+    p = tmp_path / "metadata.json"
+    p.write_text(json.dumps(bad), encoding="utf-8")
+    with pytest.raises(ValueError, match="incompatible"):
+        JackSparrowV43Node.from_metadata_path(p)
 
 
 def test_metadata_training_forward_bars(metadata_v43):

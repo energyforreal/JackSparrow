@@ -5,8 +5,8 @@ Trading inference uses pickled ``feature_engineer.transform()``; this module
 reimplements the exported v43 feature *names* for per-feature HTTP/MCP requests
 when only OHLCV candles are available (5m primary + resampled HTF).
 
-Formulas follow ``notebooks/JackSparrow_v39_fixed_final(1).ipynb`` (v39 stack)
-which matches ``metadata_v43.json`` feature names.
+Formulas match :mod:`feature_store.jacksparrow_v43_build_matrix` and
+``metadata_v43.json`` / :data:`feature_store.jacksparrow_v43_contract.V43_CANONICAL_FEATURES`.
 """
 
 from __future__ import annotations

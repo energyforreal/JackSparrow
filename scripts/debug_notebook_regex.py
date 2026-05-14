@@ -1,6 +1,6 @@
 from pathlib import Path
 import re
-raw = Path('notebooks/JackSparrow_Training_Colab_v6.ipynb').read_text(encoding='utf-8')
+raw = Path("notebooks/jacksparrow_delta_india_training.ipynb").read_text(encoding="utf-8")
 print('len', len(raw))
 print('contains marker', '<VSCode.Cell' in raw)
 print('first index', raw.find('<VSCode.Cell'))

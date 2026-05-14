@@ -218,22 +218,24 @@ pip install -r requirements.txt
 
 ### 5.3 Configure Environment Variables
 
-**Single Root `.env` File**: All services (backend, agent, frontend) read from a **single root `.env` file** in the project root directory. The backend reads from this file via `ROOT_ENV_PATH` in `backend/core/config.py`.
+**Two-File Root Env Setup**: All services read from `.env.example` (committed defaults) and `.env` (gitignored, secrets only) at the project root. Pydantic loaders in `backend/core/config.py` and `agent/core/config.py` use `env_file=(<root>/.env.example, <root>/.env)`, so secrets in `.env` override placeholders.
 
 **Setup Instructions:**
 
 ```bash
-# From project root directory
-# Copy the example template
-cp .env.example .env
+# 1. Keep .env.example as-is (it is the committed source of non-secret defaults).
+# 2. Create a root .env containing ONLY the secrets below. Do not commit it.
 
-# Edit .env with your actual values
-# Required variables:
-#   - DATABASE_URL
-#   - DELTA_EXCHANGE_API_KEY
-#   - DELTA_EXCHANGE_API_SECRET
-#   - JWT_SECRET_KEY
-#   - API_KEY
+cat > .env <<'EOF'
+DATABASE_URL=postgresql://jacksparrow:<your_postgres_password>@localhost:5432/trading_agent
+POSTGRES_PASSWORD=<your_postgres_password>
+REDIS_PASSWORD=<your_redis_password>
+REDIS_URL=redis://:<your_redis_password>@localhost:6379/0
+DELTA_EXCHANGE_API_KEY=<your_delta_api_key>
+DELTA_EXCHANGE_API_SECRET=<your_delta_api_secret>
+JWT_SECRET_KEY=<>=32-chars-random>
+API_KEY=<>=32-chars-random>
+EOF
 ```
 
 **Minimum Required Variables:**
@@ -333,11 +335,11 @@ mkdir -p agent/model_storage/transformer
 
 ### 6.4 Configure Environment Variables
 
-**Single Root `.env` File**: The agent reads from the **same root `.env` file** used by the backend. The agent reads from this file via `ROOT_ENV_PATH` in `agent/core/config.py`.
+**Same Two-File Root Setup**: The agent reads `.env.example` then `.env` from the project root via `agent/core/config.py` (`env_file=(<root>/.env.example, <root>/.env)`). No `agent/.env`.
 
 **Setup Instructions:**
 
-If you haven't already created the root `.env` file (from Step 5.3), do so now:
+If you haven't already created the root `.env` (secrets only — see Step 5.3), do so now:
 
 ```bash
 # From project root directory
@@ -797,8 +799,7 @@ Check logs for model discovery messages.
 
 If you need to train new models or regenerate corrupted models, use the authoritative Colab notebook path for production-style BTCUSD artefacts:
 
-- `notebooks/JackSparrow_Training_Colab_v6.ipynb` (recommended)
-- `notebooks/JackSparrow_Trading_Colab_v5.ipynb` (legacy)
+- `notebooks/jacksparrow_v43_delta_india_training.ipynb` (v43 Delta India / Colab-oriented, contract-aligned export)
 
 **Prerequisites**: Ensure Delta Exchange API credentials are configured in `.env`
 

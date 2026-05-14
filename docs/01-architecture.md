@@ -88,6 +88,10 @@ The Intelligence Layer contains the "brain" of the trading agent:
 - Volatility-adjusted stop losses
 - Portfolio heat monitoring
 
+**Decision authority (agent-first)**
+
+Trade *intent* on the event bus is issued only after the **Agent Policy** stage (`AgentPolicyEngine` in code): ML outputs are packaged as **evidence** (`EVIDENCE_READY` / `MLEvidenceSnapshot`), then the policy layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation; in `TRADING_MODE=live`, a non-empty `manual_trade_audit_reason` is required unless disabled via settings.
+
 **Learning Module**
 - Performance tracking per model
 - Dynamic model weight adjustment

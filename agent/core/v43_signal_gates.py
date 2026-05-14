@@ -63,7 +63,7 @@ def round_trip_cost_pct() -> float:
 
 @dataclass(frozen=True)
 class Gate5EdgeMetrics:
-    """Numeric breakdown for gate 5 (TP-scaled edge vs round-trip cost multiple)."""
+    """Numeric breakdown for gate 5 (expected-return edge vs round-trip cost multiple)."""
 
     edge_pct: float
     tp: float
@@ -78,13 +78,13 @@ class Gate5EdgeMetrics:
 
 
 def gate5_long_edge_metrics(proba: float, thr: float) -> Gate5EdgeMetrics:
-    """Long-side gate 5 inputs (``edge_pct * tp`` vs ``ratio * rtc``)."""
+    """Long-side gate 5 inputs (expected-return edge vs cost multiple)."""
     tp = float(getattr(settings, "jacksparrow_v43_take_profit_pct", 0.015) or 0.015)
     ratio = float(getattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.75) or 0.75)
     rtc = round_trip_cost_pct()
     thr_f = float(thr)
-    edge_pct = (float(proba) - thr_f) / (1.0 - thr_f + 1e-9)
-    lhs = edge_pct * tp
+    edge_pct = float(proba) - thr_f
+    lhs = edge_pct
     rhs = ratio * rtc
     return Gate5EdgeMetrics(
         edge_pct=edge_pct, tp=tp, ratio=ratio, rtc=rtc, lhs=lhs, rhs=rhs
@@ -97,8 +97,8 @@ def gate5_short_edge_metrics(proba: float, thr: float) -> Gate5EdgeMetrics:
     ratio = float(getattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.75) or 0.75)
     rtc = round_trip_cost_pct()
     thr_f = float(thr)
-    edge_pct = (-float(proba) - thr_f) / (1.0 - thr_f + 1e-9)
-    lhs = edge_pct * tp
+    edge_pct = -float(proba) - thr_f
+    lhs = edge_pct
     rhs = ratio * rtc
     return Gate5EdgeMetrics(
         edge_pct=edge_pct, tp=tp, ratio=ratio, rtc=rtc, lhs=lhs, rhs=rhs

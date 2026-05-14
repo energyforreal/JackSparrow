@@ -2,13 +2,19 @@
 
 import io
 import platform
-from unittest.mock import patch, MagicMock
+import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tools.commands.health_check import HealthChecker, Symbols, _symbols
-from tools.commands.start_parallel import ParallelProcessManager, ServiceConfig, Colors
+from tools.commands.start_parallel import (
+    Colors,
+    ParallelProcessManager,
+    ServiceConfig,
+    ServiceManager,
+)
 
 
 class TestSymbols:
@@ -121,7 +127,7 @@ class TestStartParallelUnicode:
         )
         
         manager = ParallelProcessManager(Path.cwd())
-        service = manager._create_service(config)
+        service = ServiceManager(config, Path.cwd())
         service.process = mock_process
         
         # Test that _stream_logs handles Unicode
@@ -190,20 +196,16 @@ class TestStartParallelUnicode:
         
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix='.log') as f:
             log_file_path = Path(f.name)
-            try:
-                # Write Unicode content
-                for line in unicode_content:
-                    f.write(line)
-                    f.flush()
-                
-                # Read back and verify
-                with open(log_file_path, 'r', encoding='utf-8', errors='replace') as read_file:
-                    content = read_file.read()
-                    assert "Test line 1" in content
-                    assert "Unicode" in content
-            finally:
-                # Cleanup
-                log_file_path.unlink()
+            for line in unicode_content:
+                f.write(line)
+                f.flush()
+
+        try:
+            content = log_file_path.read_text(encoding='utf-8', errors='replace')
+            assert "Test line 1" in content
+            assert "Unicode" in content
+        finally:
+            log_file_path.unlink(missing_ok=True)
     
     def test_console_output_unicode_safe(self):
         """Test that console output handles Unicode safely."""

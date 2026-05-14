@@ -294,42 +294,29 @@ class AutoFixer:
         env_file = self.project_root / ".env"
         if not env_file.exists():
             try:
-                # Create a basic .env file
-                env_content = """# JackSparrow Trading Agent Configuration
-# Copy this file and update with your actual values
+                # .env now holds secrets only. Non-secret defaults live in .env.example.
+                env_content = """# JackSparrow Trading Agent — SECRETS ONLY
+# Non-secret defaults / thresholds / feature flags live in .env.example.
+# Fill in real values below; do NOT commit this file.
 
-# Database
-DATABASE_URL=postgresql://jacksparrow:jacksparrow@localhost:5432/trading_agent
+# Database (must contain real password)
+DATABASE_URL=postgresql://jacksparrow:change-me-use-strong-password@localhost:5432/trading_agent
+POSTGRES_PASSWORD=change-me-use-strong-password
 
-# Redis
-REDIS_URL=redis://localhost:6379/0
+# Redis password (referenced by REDIS_URL in .env.example)
+REDIS_PASSWORD=change-me-redis-password
 
-# Delta Exchange API (Paper Trading)
+# Delta Exchange API credentials
 DELTA_EXCHANGE_API_KEY=your_api_key_here
 DELTA_EXCHANGE_API_SECRET=your_api_secret_here
-DELTA_EXCHANGE_BASE_URL=https://api.india.delta.exchange
 
-# JWT Security
-JWT_SECRET_KEY=your_jwt_secret_key_here
+# Backend auth secrets (>= 32 chars random)
+JWT_SECRET_KEY=use-a-long-random-secret-min-32-chars
+API_KEY=use-a-long-random-api-key-min-32-chars
 
-# API Key
-API_KEY=your_api_key_here
-
-# Trading Mode (PAPER_TRADING_MODE=true for safe paper trading)
-PAPER_TRADING_MODE=true
-TRADING_MODE=live
-
-# Logging
-AGENT_LOG_LEVEL=INFO
-BACKEND_LOG_LEVEL=INFO
-
-# Feature Server
-FEATURE_SERVER_PORT=8001
-
-# Frontend
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
-NEXT_PUBLIC_BACKEND_API_KEY=your_api_key_here
+# Optional secrets
+# QDRANT_API_KEY=
+# TELEGRAM_BOT_TOKEN=
 """
 
                 with open(env_file, 'w', encoding='utf-8') as f:

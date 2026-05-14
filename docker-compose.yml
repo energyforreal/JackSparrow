@@ -3,9 +3,10 @@ services:
     image: timescale/timescaledb:2.26.3-pg15
     container_name: jacksparrow-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
+      # Non-secret values default from .env.example; password must be set in root .env.
+      POSTGRES_USER: ${POSTGRES_USER:-jacksparrow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB:-trading_agent}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 10s
@@ -102,12 +103,15 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
+    # Containers load non-secret defaults from .env.example first, then secrets from .env on top.
+    # Note: compose-time ${VAR} interpolation below still reads only the host `.env` / shell.
     env_file:
+      - .env.example
       - .env
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-jacksparrow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trading_agent}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}
@@ -179,14 +183,17 @@ services:
       # Agent command WebSocket (:8003) must accept connections before backend warms up outbound WS.
       agent:
         condition: service_healthy
+    # Containers load non-secret defaults from .env.example first, then secrets from .env on top.
+    # Note: compose-time ${VAR} interpolation below still reads only the host `.env` / shell.
     env_file:
+      - .env.example
       - .env
     environment:
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       BACKEND_RELOAD: "false"
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-jacksparrow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trading_agent}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       FEATURE_SERVER_URL: http://agent:8002
       # Always use container listen port (right side of ports mapping); do not use
@@ -204,7 +211,7 @@ services:
       # false = keep paper trades/positions in Postgres across backend restarts (UI Recent Trades)
       # Compose default: wipe paper trades/positions each `docker compose up`.
       RESET_PAPER_STATE_ON_STARTUP: ${DOCKER_RESET_PAPER_ON_START:-true}
-      CORS_ORIGINS: ${CORS_ORIGINS}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000}
       CORS_INTERNAL_ORIGINS: ${CORS_INTERNAL_ORIGINS:-http://frontend:3000}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}

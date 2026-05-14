@@ -655,7 +655,8 @@ class WebSocketManager:
                 order_type=parameters.get("order_type", "MARKET"),
                 price=parameters.get("price"),
                 stop_loss=parameters.get("stop_loss"),
-                take_profit=parameters.get("take_profit")
+                take_profit=parameters.get("take_profit"),
+                manual_trade_audit_reason=parameters.get("manual_trade_audit_reason"),
             )
 
             return {
@@ -1090,23 +1091,6 @@ class WebSocketManager:
                             state=state_data.get("state"),
                             connections=len(self.active_connections)
                         )
-
-                        # region agent log
-                        try:
-                            with open("debug-c0204f.log", "a", encoding="utf-8") as f:
-                                f.write(json.dumps({
-                                    "sessionId": "c0204f",
-                                    "runId": "pre-fix",
-                                    "hypothesisId": "H4",
-                                    "location": "backend/api/websocket/manager.py:_agent_state_sync_loop",
-                                    "message": "agent_state_broadcast",
-                                    "data": state_data,
-                                    "timestamp": int(time.time() * 1000)
-                                }) + "\n")
-                        except Exception:
-                            # Logging must never break websocket loop
-                            pass
-                        # endregion
                 except Exception as e:
                     logger.warning(
                         "websocket_agent_state_sync_error",

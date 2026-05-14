@@ -32,6 +32,8 @@ export interface WebSocketEnvelope {
   sequence?: number
   source: string
   request_id?: string
+  /** Backend wire format version (see WS_SCHEMA_VERSION). */
+  schema_version?: number
 }
 
 // Legacy message types (for backward compatibility during transition)

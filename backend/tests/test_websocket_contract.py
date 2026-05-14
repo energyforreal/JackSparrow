@@ -60,3 +60,17 @@ def test_create_agent_state_update_produces_legacy_shape():
     out = _envelope_to_legacy_dict(env)
     assert out["type"] == "agent_update"
     assert out["data"]["state"] == "MONITORING"
+    assert out.get("resource") == "agent"
+
+
+def test_apply_frontend_wire_metadata_stamps_schema_and_time():
+    """Dashboard-bound messages get schema_version and server timestamps."""
+    from backend.api.websocket.unified_manager import UnifiedWebSocketManager
+
+    mgr = UnifiedWebSocketManager.__new__(UnifiedWebSocketManager)
+    msg: dict = {"type": "data_update", "resource": "signal", "data": {"x": 1}}
+    UnifiedWebSocketManager._apply_frontend_wire_metadata(mgr, msg)
+    sv = msg.get("schema_version")
+    assert isinstance(sv, int) and sv >= 1
+    assert "server_timestamp" in msg
+    assert "server_timestamp_ms" in msg

@@ -624,27 +624,27 @@ class TradingEventHandler:
                 min(required_margin_inr / max(available_cash_inr, 1.0), settings.max_position_size),
             )
 
-            # Validate trade with risk manager (skipped in minimal AI-entry mode after margin check)
-            if not minimal_entry:
-                validation = await self.risk_manager.validate_trade(
-                    symbol=symbol,
-                    side=risk_side,
-                    proposed_size=proposed_size,
-                    entry_price=entry_price,
-                    stop_loss=None,  # Execution will compute from config
-                )
+            # Validate trade with risk manager (always — agent-first authority; no bypass in live/paper)
+            validation = await self.risk_manager.validate_trade(
+                symbol=symbol,
+                side=risk_side,
+                proposed_size=proposed_size,
+                entry_price=entry_price,
+                stop_loss=None,  # Execution will compute from config
+            )
 
-                if not validation.get("approved", False):
-                    self._log_entry_rejected(
-                        "risk_rejected",
-                        symbol=symbol,
-                        signal=signal,
-                        event_id=event.event_id,
-                        side=side,
-                        risk_reason=validation.get("reason", "Unknown"),
-                        **diagnostics_base,
-                    )
-                    return
+            if not validation.get("approved", False):
+                self._log_entry_rejected(
+                    "risk_rejected",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    side=side,
+                    risk_reason=validation.get("reason", "Unknown"),
+                    minimal_entry=minimal_entry,
+                    **diagnostics_base,
+                )
+                return
 
             # Deduplicate: one RiskApproved per (symbol, side) per time window.
             # Keep this active even in minimal-entry mode to prevent burst duplicate fills.

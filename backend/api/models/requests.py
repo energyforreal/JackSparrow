@@ -69,6 +69,11 @@ class ExecuteTradeRequest(BaseModel):
         description="Take profit price",
         example=None
     )
+    manual_trade_audit_reason: Optional[str] = Field(
+        default=None,
+        description="Required for live manual execution policy; forwarded to the agent.",
+        example="operator_ui_close_hedge",
+    )
     
     @validator('side')
     def validate_side(cls, v):

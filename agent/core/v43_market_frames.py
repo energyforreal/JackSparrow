@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -70,6 +71,28 @@ async def _fetch_ohlcv_df(
     return dataframe_from_delta_candles(formatted)
 
 
+async def _fetch_funding_series(
+    delta_client: Any,
+    symbol: str,
+    n1h: int,
+) -> pd.DataFrame:
+    """Fetch hourly funding proxy series; returns empty on failure."""
+    fund_symbol = f"FUNDING:{symbol}"
+    try:
+        df_raw = await _fetch_ohlcv_df(
+            delta_client, fund_symbol, "1h", 3600, min(n1h, 500)
+        )
+        if not df_raw.empty and "close" in df_raw.columns:
+            return df_raw.rename(columns={"close": "funding_rate"}).copy()
+    except Exception as e:
+        logger.warning(
+            "v43_funding_fetch_failed",
+            symbol=symbol,
+            error=str(e),
+        )
+    return pd.DataFrame()
+
+
 async def fetch_v43_market_frames(
     delta_client: Any,
     symbol: str,
@@ -88,24 +111,12 @@ async def fetch_v43_market_frames(
     n15 = int(getattr(settings, "jacksparrow_v43_candles_15m", 400) or 400)
     n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 300) or 300)
 
-    df5m = await _fetch_ohlcv_df(delta_client, symbol, "5m", 300, n5)
-    df15m = await _fetch_ohlcv_df(delta_client, symbol, "15m", 900, n15)
-    df1h = await _fetch_ohlcv_df(delta_client, symbol, "1h", 3600, n1h)
-
-    df_funding = pd.DataFrame()
-    fund_symbol = f"FUNDING:{symbol}"
-    try:
-        df_raw = await _fetch_ohlcv_df(
-            delta_client, fund_symbol, "1h", 3600, min(n1h, 500)
-        )
-        if not df_raw.empty and "close" in df_raw.columns:
-            df_funding = df_raw.rename(columns={"close": "funding_rate"}).copy()
-    except Exception as e:
-        logger.warning(
-            "v43_funding_fetch_failed",
-            symbol=symbol,
-            error=str(e),
-        )
+    df5m, df15m, df1h, df_funding = await asyncio.gather(
+        _fetch_ohlcv_df(delta_client, symbol, "5m", 300, n5),
+        _fetch_ohlcv_df(delta_client, symbol, "15m", 900, n15),
+        _fetch_ohlcv_df(delta_client, symbol, "1h", 3600, n1h),
+        _fetch_funding_series(delta_client, symbol, n1h),
+    )
 
     if df_funding.empty and not df1h.empty:
         df_funding = pd.DataFrame(

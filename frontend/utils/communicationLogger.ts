@@ -20,6 +20,7 @@ interface CommunicationLogEntry {
   message_type: string;
   resource?: string;
   correlation_id?: string;
+  request_id?: string;
   target: 'backend';
   payload_summary: {
     type: string;
@@ -210,6 +211,8 @@ export function logCommunication(
 
   if (options.resource) entry.resource = options.resource;
   if (options.correlationId) entry.correlation_id = options.correlationId;
+  const rid = options.extra?.request_id as string | undefined
+  if (rid) entry.request_id = rid
   if (options.latencyMs !== undefined) entry.latency_ms = options.latencyMs;
   if (options.error) entry.error = options.error;
 
@@ -219,6 +222,7 @@ export function logCommunication(
     type: messageType,
     resource: options.resource,
     correlationId: options.correlationId,
+    requestId: entry.request_id,
     payload: entry.payload_summary.payload,
     latencyMs: options.latencyMs,
     error: options.error
@@ -240,9 +244,16 @@ export function logWebSocketMessage(
     correlationId?: string;
   } = {}
 ): void {
+  const requestId =
+    payload && typeof payload === 'object' && payload !== null && 'request_id' in payload
+      ? (payload as { request_id?: unknown }).request_id
+      : undefined
+  const requestIdStr =
+    requestId != null && String(requestId) !== '' ? String(requestId) : ''
   logCommunication(direction, messageType, payload, {
     resource: options.resource,
-    correlationId: options.correlationId
+    correlationId: options.correlationId,
+    extra: requestIdStr ? { request_id: requestIdStr } : undefined
   });
 }
 

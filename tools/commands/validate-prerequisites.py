@@ -207,36 +207,40 @@ class PrerequisiteValidator:
         except Exception:
             return False
     
+    def _read_env_var_from_files(self, key: str) -> str:
+        """Read a variable from root .env.example then .env (later overrides earlier)."""
+        script_path = Path(__file__).resolve()
+        project_root = script_path.parent.parent.parent
+        result = ""
+        for filename in (".env.example", ".env"):
+            env_path = project_root / filename
+            if not env_path.exists():
+                continue
+            try:
+                with env_path.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith(f"{key}="):
+                            result = line.split("=", 1)[1].strip().strip('"').strip("'")
+            except Exception:
+                continue
+        return result
+
     def check_postgres_running(self) -> bool:
         """Check if PostgreSQL is running.
-        
+
         Returns:
             True if PostgreSQL is accessible, False otherwise
         """
-        # Try to get DATABASE_URL from environment
+        # Try to get DATABASE_URL from environment, then root .env.example/.env.
         database_url = os.environ.get("DATABASE_URL", "")
-        
         if not database_url:
-            # Try to load from .env file
-            script_path = Path(__file__).resolve()
-            project_root = script_path.parent.parent.parent
-            env_path = project_root / ".env"
-            
-            if env_path.exists():
-                try:
-                    with env_path.open("r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("DATABASE_URL="):
-                                database_url = line.split("=", 1)[1].strip().strip('"').strip("'")
-                                break
-                except Exception:
-                    pass
-        
+            database_url = self._read_env_var_from_files("DATABASE_URL")
+
         if not database_url:
             self.errors.append(
                 "DATABASE_URL not found. Cannot check PostgreSQL connection. "
-                "Please set DATABASE_URL in .env file."
+                "Set DATABASE_URL in root .env (secrets) — defaults live in .env.example."
             )
             return False
         
@@ -341,25 +345,12 @@ class PrerequisiteValidator:
         Returns:
             True if Redis is accessible, False otherwise
         """
-        # Try to get REDIS_URL from environment
-        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
-        
-        # Try to load from .env file if not in environment
-        if redis_url == "redis://localhost:6379":
-            script_path = Path(__file__).resolve()
-            project_root = script_path.parent.parent.parent
-            env_path = project_root / ".env"
-            
-            if env_path.exists():
-                try:
-                    with env_path.open("r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line.startswith("REDIS_URL="):
-                                redis_url = line.split("=", 1)[1].strip().strip('"').strip("'")
-                                break
-                except Exception:
-                    pass
+        # Try process env first, then merged root .env.example/.env.
+        redis_url = os.environ.get("REDIS_URL", "")
+        if not redis_url:
+            redis_url = self._read_env_var_from_files("REDIS_URL")
+        if not redis_url:
+            redis_url = "redis://localhost:6379"
         
         try:
             parsed = urlparse(redis_url)

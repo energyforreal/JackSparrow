@@ -47,10 +47,10 @@ def test_build_headers_generates_expected_signature(monkeypatch):
     )
 
     assert headers["api-key"] == "test-key"
-    assert headers["timestamp"] == "1700000000000"
+    assert headers["timestamp"] == "1700000000"
 
-    payload = json.dumps({"symbol": "BTCUSD"}, separators=(",", ":"), sort_keys=True)
-    expected_message = f"{headers['timestamp']}GET/v2/tickers/BTCUSD{payload}"
+    query = client._build_query_string({"symbol": "BTCUSD"})
+    expected_message = f"GET1700000000/v2/tickers/BTCUSD{query}"
     expected_signature = hmac.new(
         b"test-secret", expected_message.encode("utf-8"), hashlib.sha256
     ).hexdigest()

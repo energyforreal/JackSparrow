@@ -46,8 +46,9 @@ All models must implement `MCPModelNode` interface:
 
 ## Training Authority and Parity Checklist
 
-- **v15 full pipeline (default Docker bundle)**: Train and export with `notebooks/JackSparrow_Training_Colab_v15.ipynb`. Artefacts are `pipeline_{5m|15m}_v14.pkl` plus `metadata_BTCUSD_*.json` beside it (`model_version` may still say `v14`; that is the export format label, not a different feature set).
-- **v4 / v5 / v6 bundles** (entry–exit joblibs or consolidated): Use `notebooks/JackSparrow_Trading_Colab_v6.ipynb` and/or `notebooks/JackSparrow_Trading_Colab_v5.ipynb` as appropriate.
+- **JackSparrow v43 (current discovery)**: Train and export with `notebooks/jacksparrow_v43_delta_india_training.ipynb` (Delta Exchange India candles, `build_v43_feature_matrix` in `feature_store/jacksparrow_v43_build_matrix.py`, `FeatureEngineer` / ensemble shims in `agent/models/v43_pickle_shims.py`; optional alternate helpers in `feature_store/jacksparrow_v43_feature_engineer.py`). Artefacts: `metadata_v43.json` + `model_artifact_v43.pkl` under your bundle directory.
+- **v15 full pipeline (archival / adaptive retrain)**: Artefacts are `pipeline_{5m|15m}_v14.pkl` plus `metadata_BTCUSD_*.json`; the old Colab notebook was removed from `notebooks/`—see `docs/03-ml-models.md` for parity rules if you revive a v15 bundle under `agent/model_storage/`.
+- **v4 / v5 / v6 expanded bundles** (archival): parity rules in `docs/03-ml-models.md`; training notebooks no longer live in `notebooks/`.
 
 **Train–serve parity (pick the rule that matches your bundle):**
 

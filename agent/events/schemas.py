@@ -2,13 +2,21 @@
 Event schemas for trading agent.
 
 Defines all event types used in the event-driven architecture.
+See ``docs/canonical_events.md`` for handler wiring and pipeline overview.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 import uuid
+
+
+class PolicyAuthority(str, Enum):
+    """Who issued the trade intent carried on DecisionReadyEvent."""
+
+    AGENT_POLICY = "agent_policy"
+    ML_EVIDENCE_ONLY = "ml_evidence_only"  # legacy / diagnostics — not used for live emits
 
 
 class EventType(str, Enum):
@@ -31,6 +39,7 @@ class EventType(str, Enum):
     # Reasoning events
     REASONING_REQUEST = "reasoning_request"
     REASONING_COMPLETE = "reasoning_complete"
+    EVIDENCE_READY = "evidence_ready"
     DECISION_READY = "decision_ready"
     
     # Risk events
@@ -206,6 +215,60 @@ class ReasoningCompleteEvent(BaseEvent):
         timestamp: datetime
 
 
+class MLEvidenceSnapshot(BaseModel):
+    """Structured ML output and gates — advisory evidence for the agent policy layer."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    evidence_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    symbol: str
+    source: Literal["v43_orchestrator", "reasoning_path", "unknown"] = "unknown"
+    ml_candidate_signal: str = Field(
+        ...,
+        description="Discrete label proposed from ML+gates / reasoning before agent policy.",
+    )
+    ml_candidate_confidence: float = 0.0
+    ml_candidate_position_size: float = 0.0
+    consensus_signal: Optional[float] = None
+    consensus_confidence: Optional[float] = None
+    model_predictions: List[Dict[str, Any]] = Field(default_factory=list)
+    v43_gate_reject: Optional[str] = None
+    v43_regime: Optional[str] = None
+    market_context_excerpt: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Small excerpt (e.g. v43 flags) for audit — not full OHLCV.",
+    )
+
+
+class PolicyVerdict(BaseModel):
+    """Agent policy output: sole authority for trade intent on the event bus."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    authority: Literal["agent_policy"] = "agent_policy"
+    signal: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
+    confidence: float
+    position_size: float
+    reason_codes: List[str] = Field(default_factory=list)
+    ml_evidence_id: Optional[str] = None
+    adopted_ml_candidate: bool = Field(
+        default=False,
+        description="True when policy chose to align with the ML candidate after evaluation.",
+    )
+
+
+class EvidenceReadyEvent(BaseEvent):
+    """ML evidence computed; downstream policy may emit DecisionReady."""
+
+    event_type: EventType = EventType.EVIDENCE_READY
+
+    class Payload(BaseModel):
+        symbol: str
+        ml_evidence_snapshot: Dict[str, Any]
+        timestamp: datetime
+        correlation_id: Optional[str] = None
+
+
 class DecisionReadyEvent(BaseEvent):
     """Trading decision ready for execution."""
     
@@ -218,6 +281,13 @@ class DecisionReadyEvent(BaseEvent):
         position_size: float
         reasoning_chain: Dict[str, Any]
         timestamp: datetime
+        policy_authority: str = Field(
+            default=PolicyAuthority.AGENT_POLICY.value,
+            description="Must be agent_policy for autonomous pipeline emits.",
+        )
+        policy_reason_codes: List[str] = Field(default_factory=list)
+        ml_evidence_snapshot: Optional[Dict[str, Any]] = None
+        policy_verdict: Optional[Dict[str, Any]] = None
 
 
 # Risk Events

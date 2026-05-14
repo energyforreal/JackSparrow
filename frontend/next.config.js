@@ -4,13 +4,18 @@ const path = require('path')
 
 const LOGO_FILENAME = 'logo.png'
 
-function loadRootEnv() {
-  const rootEnvPath = path.resolve(__dirname, '..', '.env')
-  if (!fs.existsSync(rootEnvPath)) {
+// Env-file split (matches agent/backend Pydantic loaders):
+//   - .env.example (committed): non-secret defaults / thresholds / public URLs.
+//   - .env          (gitignored): secrets only.
+// Load order: .env.example first, then .env on top.
+// Real process.env values (CI / Docker / shell exports) always win over either file.
+function applyEnvFile(filePath, externalKeys, { trustOverFiles }) {
+  if (!fs.existsSync(filePath)) {
     return
   }
 
-  const lines = fs.readFileSync(rootEnvPath, 'utf-8').split(/\r?\n/)
+  const seenInThisFile = new Set()
+  const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/)
   lines.forEach((rawLine) => {
     const line = rawLine.trim()
     if (!line || line.startsWith('#') || !line.includes('=')) {
@@ -18,20 +23,39 @@ function loadRootEnv() {
     }
     const [rawKey, ...rawValueParts] = line.split('=')
     const key = rawKey.trim()
-    if (!key || process.env[key] !== undefined) {
+    if (!key) {
       return
     }
     const value = rawValueParts.join('=').trim().replace(/^['"]|['"]$/g, '')
-    process.env[key] = value
 
-    if (key === 'DELTA_API_KEY') {
-      process.env.DELTA_EXCHANGE_API_KEY ||= value
-    } else if (key === 'DELTA_API_SECRET') {
-      process.env.DELTA_EXCHANGE_API_SECRET ||= value
-    } else if (key === 'DELTA_API_URL') {
-      process.env.DELTA_EXCHANGE_BASE_URL ||= value
+    // Skip keys already provided by the real environment (shell/CI/Docker).
+    if (externalKeys.has(key)) {
+      return
+    }
+
+    // Within this file pass, allow override of values written by earlier file(s).
+    // First time we touch this key in this load order, write it.
+    if (!seenInThisFile.has(key) || trustOverFiles) {
+      process.env[key] = value
+      seenInThisFile.add(key)
+    }
+
+    if (key === 'DELTA_API_KEY' && !externalKeys.has('DELTA_EXCHANGE_API_KEY')) {
+      process.env.DELTA_EXCHANGE_API_KEY = value
+    } else if (key === 'DELTA_API_SECRET' && !externalKeys.has('DELTA_EXCHANGE_API_SECRET')) {
+      process.env.DELTA_EXCHANGE_API_SECRET = value
+    } else if (key === 'DELTA_API_URL' && !externalKeys.has('DELTA_EXCHANGE_BASE_URL')) {
+      process.env.DELTA_EXCHANGE_BASE_URL = value
     }
   })
+}
+
+function loadRootEnv() {
+  const rootDir = path.resolve(__dirname, '..')
+  // Snapshot external env so file values never clobber shell/CI/Docker exports.
+  const externalKeys = new Set(Object.keys(process.env))
+  applyEnvFile(path.join(rootDir, '.env.example'), externalKeys, { trustOverFiles: false })
+  applyEnvFile(path.join(rootDir, '.env'), externalKeys, { trustOverFiles: true })
 }
 
 function ensurePublicLogoAsset() {

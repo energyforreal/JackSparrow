@@ -86,23 +86,17 @@ class TestStartupScripts:
     def test_log_file_unicode_handling(self):
         """Test Unicode handling when writing to log files."""
         import tempfile
-        
+
         unicode_content = "Test with Unicode: ✓ ⚠ ✗ ✅\n"
-        
+
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix='.log') as f:
             log_file_path = Path(f.name)
-            try:
-                # Write Unicode content
-                f.write(unicode_content)
-                f.flush()
-                
-                # Read back and verify
-                with open(log_file_path, 'r', encoding='utf-8', errors='replace') as read_file:
-                    content = read_file.read()
-                    assert "Unicode" in content
-            finally:
-                # Cleanup
-                log_file_path.unlink()
+            f.write(unicode_content)
+            f.flush()
+
+        content = log_file_path.read_text(encoding='utf-8', errors='replace')
+        assert "Unicode" in content
+        log_file_path.unlink(missing_ok=True)
     
     def test_encoding_configuration_windows(self):
         """Test UTF-8 encoding configuration on Windows."""
@@ -166,8 +160,8 @@ class TestStartupScriptErrorHandling:
     
     def test_log_streaming_error_recovery(self):
         """Test error recovery in log streaming."""
-        from tools.commands.start_parallel import ParallelProcessManager, ServiceConfig, Colors
-        
+        from tools.commands.start_parallel import ParallelProcessManager, ServiceConfig, Colors, ServiceManager
+
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = ParallelProcessManager(Path(tmpdir))
             
@@ -182,7 +176,7 @@ class TestStartupScriptErrorHandling:
             )
             
             # Should not raise error during initialization
-            service = manager._create_service(config)
+            service = ServiceManager(config, Path(tmpdir))
             assert service is not None
     
     def test_unicode_error_fallback(self):

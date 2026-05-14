@@ -69,37 +69,46 @@ def get_safe_symbol(symbol: str, fallback: str) -> str:
 
 
 def load_root_env(project_root: Path):
-    """Load environment variables from project-level .env, if present."""
-    env_path = project_root / ".env"
-    if not env_path.exists():
-        return
-    print(f"{Colors.BOLD}Loading environment from .env{Colors.RESET}")
-    try:
-        with env_path.open("r", encoding="utf-8") as env_file:
-            for raw_line in env_file:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                # Do not override explicitly set environment variables
-                if key and key not in os.environ:
-                    os.environ[key] = value
+    """Load environment from root .env.example then .env (later overrides earlier).
 
-                # Backward compatible aliases
-                if key == "DELTA_API_KEY":
-                    os.environ.setdefault("DELTA_EXCHANGE_API_KEY", value)
-                elif key == "DELTA_API_SECRET":
-                    os.environ.setdefault("DELTA_EXCHANGE_API_SECRET", value)
-                elif key == "DELTA_API_URL":
-                    os.environ.setdefault("DELTA_EXCHANGE_BASE_URL", value)
-    except Exception as exc:
-        print(f"{Colors.ERROR}Failed to load .env: {exc}{Colors.RESET}")
-        print(f"{Colors.ERROR}Startup cannot continue without valid .env file.{Colors.RESET}")
-        # Don't exit here - let validation scripts handle it, but make it clear this is an error
+    Real process.env values always win over file contents.
+    """
+    external_keys = set(os.environ.keys())
+
+    def _apply(path: Path, *, allow_override_file_values: bool) -> bool:
+        if not path.exists():
+            return False
+        print(f"{Colors.BOLD}Loading environment from {path.name}{Colors.RESET}")
+        try:
+            with path.open("r", encoding="utf-8") as env_file:
+                for raw_line in env_file:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if not key or key in external_keys:
+                        continue
+                    if allow_override_file_values or key not in os.environ:
+                        os.environ[key] = value
+
+                    if key == "DELTA_API_KEY" and "DELTA_EXCHANGE_API_KEY" not in external_keys:
+                        os.environ["DELTA_EXCHANGE_API_KEY"] = value
+                    elif key == "DELTA_API_SECRET" and "DELTA_EXCHANGE_API_SECRET" not in external_keys:
+                        os.environ["DELTA_EXCHANGE_API_SECRET"] = value
+                    elif key == "DELTA_API_URL" and "DELTA_EXCHANGE_BASE_URL" not in external_keys:
+                        os.environ["DELTA_EXCHANGE_BASE_URL"] = value
+            return True
+        except Exception as exc:
+            print(f"{Colors.ERROR}Failed to load {path.name}: {exc}{Colors.RESET}")
+            return False
+
+    example_loaded = _apply(project_root / ".env.example", allow_override_file_values=False)
+    env_loaded = _apply(project_root / ".env", allow_override_file_values=True)
+    if not example_loaded and not env_loaded:
+        print(f"{Colors.ERROR}No .env or .env.example found at {project_root}.{Colors.RESET}")
+        print(f"{Colors.ERROR}Validation scripts may fail without env files.{Colors.RESET}")
 
 
 def get_python_executable(venv_path: Path) -> str:
