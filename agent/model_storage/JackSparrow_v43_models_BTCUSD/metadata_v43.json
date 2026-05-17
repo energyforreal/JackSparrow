@@ -3,7 +3,7 @@
   "compatible_feature_version": "jacksparrow_v43_features_v1",
   "symbol": "BTCUSD",
   "model_name": "jacksparrow_v43_BTCUSD",
-  "exported_at": "2026-05-14T18:36:04.652996+00:00",
+  "exported_at": "2026-05-17T17:51:24.081683+00:00",
   "feature_count": 40,
   "features": [
     "ret_1",
@@ -49,6 +49,15 @@
   ],
   "training_forward_bars": 120,
   "target_definition": "simple_forward_return",
+  "model_architecture": {
+    "base_estimators": [
+      "lgbm_regressor",
+      "xgb_regressor",
+      "rf_regressor"
+    ],
+    "meta_learner": "lgbm_classifier",
+    "calibrator": "ridge"
+  },
   "split": {
     "split_method": "chronological_embargo",
     "validation_fraction": 0.15,
@@ -57,27 +66,30 @@
     "rows_train": 50778,
     "rows_embargo": 120,
     "rows_validation": 8982,
-    "train_start": "2025-10-18T10:30:00+00:00",
-    "train_end": "2026-04-12T17:55:00+00:00",
-    "embargo_start": "2026-04-12T18:00:00+00:00",
-    "embargo_end": "2026-04-13T03:55:00+00:00",
-    "validation_start": "2026-04-13T04:00:00+00:00",
-    "validation_end": "2026-05-14T08:25:00+00:00"
+    "train_start": "2025-10-21T09:50:00+00:00",
+    "train_end": "2026-04-15T17:15:00+00:00",
+    "embargo_start": "2026-04-15T17:20:00+00:00",
+    "embargo_end": "2026-04-16T03:15:00+00:00",
+    "validation_start": "2026-04-16T03:20:00+00:00",
+    "validation_end": "2026-05-17T07:45:00+00:00"
   },
   "validation_metrics": {
     "model_family": "jacksparrow_v43_regression",
     "target": "simple_forward_return",
-    "threshold_source": "validation_prediction_percentile",
+    "inference_path": "meta_calibrator",
+    "threshold_source": "validation_meta_prediction_percentile",
     "threshold_percentile": 75.0,
-    "dynamic_threshold": 0.00046881779138921583,
-    "validation_rmse": 0.011513291826392618,
-    "validation_mae": 0.00848843215041016,
-    "validation_corr": -0.04055817121099327,
-    "directional_accuracy": 0.4667557634480454,
-    "prediction_mean": -0.001206838998247052,
-    "prediction_std": 0.0029486957174317237,
-    "target_mean": 0.0017268778709452182,
-    "target_std": 0.010616732026613375,
+    "short_threshold_percentile": 25.0,
+    "dynamic_threshold": 0.000904796094824906,
+    "short_threshold": 1e-06,
+    "validation_rmse": 0.010159121958864516,
+    "validation_mae": 0.007695937319370809,
+    "validation_corr": 0.03560690435721812,
+    "directional_accuracy": 0.5217730259494375,
+    "prediction_mean": 0.0006506699262327573,
+    "prediction_std": 0.00027061463393804005,
+    "target_mean": 0.000650669926232757,
+    "target_std": 0.010165157377677411,
     "runtime_cost_assumptions": {
       "maker_fee_rate": 0.0005,
       "slippage_pct": 0.0003,
@@ -87,26 +99,59 @@
       "round_trip_cost_pct": 0.0048
     },
     "long_candidates": {
-      "count": 2246,
-      "coverage": 0.2500556668893342,
-      "gross_mean_return": 0.0009726539696446869,
-      "net_mean_return": -0.0038273460303553113,
-      "net_median_return": -0.004071158642095369,
-      "hit_rate_gross_positive": 0.5391807658058771,
-      "hit_rate_net_positive": 0.30632235084594833,
-      "max_drawdown_proxy": -10.516906300258341
+      "count": 1819,
+      "coverage": 0.2025161433979069,
+      "gross_mean_return": 0.0007667088533946613,
+      "net_mean_return": -0.004033291146605338,
+      "net_median_return": -0.005081756882231976,
+      "hit_rate_gross_positive": 0.4876305662451897,
+      "hit_rate_net_positive": 0.30951072017592085,
+      "max_drawdown_proxy": -8.571967451777343
     },
     "short_candidates": {
-      "count": 5413,
-      "coverage": 0.6026497439323091,
-      "gross_mean_return": -0.0022017871542636654,
-      "net_mean_return": -0.007001787154263664,
-      "net_median_return": -0.006326917371956981,
-      "hit_rate_gross_positive": 0.4328468501755034,
-      "hit_rate_net_positive": 0.24792167005357474,
-      "max_drawdown_proxy": -37.88829261061282
+      "count": 0,
+      "coverage": 0.0,
+      "gross_mean_return": null,
+      "net_mean_return": null,
+      "net_median_return": null,
+      "hit_rate_gross_positive": null,
+      "hit_rate_net_positive": null,
+      "max_drawdown_proxy": 0.0
     },
-    "train_lgb_inner_rmse": 0.004735307831535363
+    "train_lgb_inner_rmse": 0.006003947699032514,
+    "regressor_baseline": {
+      "inference_path": "regressor_mean",
+      "dynamic_threshold": 0.0007229299226604122,
+      "short_threshold": 0.002579602098258359,
+      "validation_rmse": 0.010593021881826285,
+      "validation_mae": 0.008074851431076667,
+      "validation_corr": 0.011757126666820793,
+      "directional_accuracy": 0.4839068938634592,
+      "long_candidates": {
+        "count": 2246,
+        "coverage": 0.2500556668893342,
+        "gross_mean_return": 0.00015629065454052395,
+        "net_mean_return": -0.004643709345459474,
+        "net_median_return": -0.004625906660833707,
+        "hit_rate_gross_positive": 0.5084594835262689,
+        "hit_rate_net_positive": 0.29073909171861084,
+        "max_drawdown_proxy": -12.176199108655965
+      },
+      "short_candidates": {
+        "count": 2246,
+        "coverage": 0.2500556668893342,
+        "gross_mean_return": -0.0003821257354522246,
+        "net_mean_return": -0.005182125735452223,
+        "net_median_return": -0.004500490563565136,
+        "hit_rate_gross_positive": 0.5155832591273375,
+        "hit_rate_net_positive": 0.26936776491540515,
+        "max_drawdown_proxy": -11.658401891833543
+      }
+    },
+    "validation_corr_meta": 0.03560690435721812,
+    "meta_auc": 0.4984964814994651,
+    "meta_log_loss": 0.6959600432950084,
+    "prediction_mean_meta": 0.0006506699262327573
   },
   "data": {
     "delta_base_url": "https://api.india.delta.exchange",
@@ -115,13 +160,13 @@
     "target_candles_5m": 60000,
     "funding_lookback_hours": 8000,
     "candles_5m_rows": 60000,
-    "funding_rows": 7988,
-    "candles_5m_start": "2025-10-18T10:30:00+00:00",
-    "candles_5m_end": "2026-05-14T18:25:00+00:00"
+    "funding_rows": 7987,
+    "candles_5m_start": "2025-10-21T09:50:00+00:00",
+    "candles_5m_end": "2026-05-17T17:45:00+00:00"
   },
   "provenance": {
     "repo_root": "/content/trading-agent",
-    "git_commit": "531b770ab192b7a3c606b85b21e7dead04bc0158",
+    "git_commit": "fd2d6d6f72610d0606c3f0eb361a23a4d093c91d",
     "python": "3.12.13",
     "platform": "Linux-6.6.122+-x86_64-with-glibc2.35",
     "packages": {
