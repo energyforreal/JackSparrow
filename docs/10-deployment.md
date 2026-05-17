@@ -323,15 +323,11 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 >
 > **Optional execution overrides** (defaults live in `agent/core/config.py` if unset): `ENFORCE_FIXED_LOT_SIZE`, `FIXED_LOT_SIZE`, `ISOLATED_MARGIN_LEVERAGE`, and `USDINR_FALLBACK_RATE` (used when live/cached FX is unavailable). Uncomment or set these in `.env` only when you need to deviate from code defaults.
 
-> **Delta parity simulation toggles**  
-> For migration-safe paper runs that mirror Delta private account APIs, use:
-> - `EXCHANGE_BACKEND=delta_paper_sim` (paper adapter) or `delta_live` (live private API adapter)
-> - `DELTA_ENV=india_prod|india_testnet` (environment intent label)
-> - `PAPER_SIMULATE_DELTA_PRIVATE_APIS=true` (serve Delta-like private account views in paper mode)
-> - `PAPER_MARGINED_VIEW_DELAY_SECONDS=10` (simulate `/positions/margined` lag vs `/positions`)
->
-> Recommended paper-parity baseline:
-> `PAPER_TRADING_MODE=true`, `TRADING_MODE=paper`, `EXCHANGE_BACKEND=delta_paper_sim`.
+> **Delta testnet trading (required)**  
+> Runtime places **real orders on Delta Exchange India testnet**; local paper simulation is removed.
+> - `TRADING_MODE=testnet`, `EXCHANGE_BACKEND=delta_live`, `DELTA_ENV=india_testnet`
+> - `DELTA_EXCHANGE_BASE_URL` and `WEBSOCKET_URL` must point at India testnet (see `.env.example`)
+> - Do **not** set `PAPER_TRADING_MODE` or `EXCHANGE_BACKEND=delta_paper_sim` (startup fails)
 
 ---
 
@@ -352,7 +348,7 @@ The startup system uses a Python-based parallel process manager that performs a 
 The `start_parallel.py` script executes a 4-step validation and startup process:
 
 1. **Environment Loading**: Loads and validates the root `.env` configuration file
-2. **Paper Trading Validation**: Verifies safe paper trading mode (blocks live trading startup)
+2. **Testnet validation**: Verifies `TRADING_MODE=testnet`, testnet URLs, and rejects removed paper-sim flags
 3. **Redis Availability**: Checks Redis service and attempts auto-startup if available
 4. **Configuration Validation**: Runs comprehensive validation including:
    - Environment variables (`validate-env.py`)
@@ -465,7 +461,7 @@ Before running `docker compose up` (or the deployment scripts) on a new host:
 1. Prepare host directories and configuration:
    - Create `logs/backend`, `logs/agent`, `logs/frontend`, and `agent/model_storage/`.
    - Copy `.env.example` to `.env` and configure all required values.
-   - For paper trading, set `PAPER_TRADING_MODE=true` and `TRADING_MODE=paper`.
+   - For testnet trading, set `TRADING_MODE=testnet`, `DELTA_ENV=india_testnet`, and Delta testnet API URLs/keys.
 2. Run the Docker diagnostic script from the project root:
    ```bash
    python scripts/docker_diagnostic.py
@@ -503,15 +499,12 @@ All application containers load the root `.env` via `env_file: - .env` and then 
 > **Note**  
 > Keep using `localhost` URLs in `.env` for local development. Docker Compose automatically replaces hostnames with service names (e.g. `postgres`, `redis`, `agent`, `backend`) through the `environment:` blocks in `docker-compose.yml`.
 
-#### Trading modes in Docker
+#### Trading mode in Docker
 
-- The same root `.env` file controls trading modes for both local and Docker deployments via `PAPER_TRADING_MODE` and `TRADING_MODE`.
-- For **paper trading on a Docker host**, prefer the explicitly safe configuration:
-  - `PAPER_TRADING_MODE=true`
-  - `TRADING_MODE=paper`
-- If you set `TRADING_MODE=live` or disable paper mode (`PAPER_TRADING_MODE=false`), both the Python startup validator and `scripts/docker_diagnostic.py` will treat this as a potential **live trading** configuration.
-  - Only use this on an approved live-trading machine.
-  - Always double-check the `.env` file and run `python scripts/docker_diagnostic.py` before deploying or restarting the stack.
+- The same root `.env` controls trading for local and Docker via `TRADING_MODE=testnet` and `DELTA_ENV=india_testnet`.
+- Runtime places **real orders on Delta testnet** (`EXCHANGE_BACKEND=delta_live`); local paper simulation is removed.
+- Compose defaults `DELTA_EXCHANGE_BASE_URL` to `https://cdn-ind.testnet.deltaex.org` when unset.
+- Removed: `PAPER_TRADING_MODE`, `RESET_PAPER_STATE_ON_STARTUP`, and `EXCHANGE_BACKEND=delta_paper_sim`.
 
 ### Frontend URLs (Docker vs Local)
 
@@ -958,10 +951,8 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `FAST_POLL_INTERVAL` | Fast ticker poll interval (seconds) when driving REST cadence | No | 0.5 |
 | `PAPER_TRADE_VALIDATION_MODE` | Relaxed confidence gate for paper pipeline validation only | No | false |
 | `PAPER_TRADE_VALIDATION_MIN_CONFIDENCE` | Minimum confidence while `PAPER_TRADE_VALIDATION_MODE` is enabled | No | 0.45 |
-| `EXCHANGE_BACKEND` | Exchange adapter for private account operations (`delta_live` or `delta_paper_sim`) | No | `delta_live` |
-| `DELTA_ENV` | Delta environment label (`india_prod` or `india_testnet`) used for deployment/runtime intent | No | `india_prod` |
-| `PAPER_SIMULATE_DELTA_PRIVATE_APIS` | In paper mode, expose Delta-like private account behavior (`positions`, `positions/margined`, `assets`, `change_margin`, `close_all`) | No | true |
-| `PAPER_MARGINED_VIEW_DELAY_SECONDS` | Simulated delay before paper `positions/margined` reflects latest state (Delta parity) | No | 10.0 |
+| `EXCHANGE_BACKEND` | Exchange adapter (`delta_live` only; `delta_paper_sim` removed) | No | `delta_live` |
+| `DELTA_ENV` | Delta environment label (`india_testnet` only at runtime) | No | `india_testnet` |
 | `AI_SIGNAL_MINIMAL_ENTRY_GATES` | When `true`, trading handler approves using **raw** payload AI `confidence` ≥ `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` plus price, margin, min lots, and open-position rules; skips v15 entry gate, stale-signal age, feature/MTF/SR filters, profit/R:R gate, Redis-blended confidence, `validate_trade`, debounce, and v15 gap/daily caps | No | false |
 | `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` | Minimum **raw** (uncalibrated) payload `confidence` when `AI_SIGNAL_MINIMAL_ENTRY_GATES` is enabled | No | 0.70 |
 | `V15_SIGNAL_LOGIC_ENABLED` | Apply v15 entry/exit filters when v15 models are active | No | true |
@@ -1102,24 +1093,20 @@ brew services start grafana
 
 The startup system includes comprehensive validation to ensure safe and reliable operation:
 
-### Paper Trading Validation
+### Testnet Trading Validation
 
-**Safety Feature**: Prevents accidental live trading by validating environment variables before startup.
+**Safety feature**: Enforces Delta Exchange India testnet before startup (real testnet orders; no local paper simulation).
 
-- **Environment Variables Checked**: `PAPER_TRADING_MODE`, `TRADING_MODE`
-- **Validation Logic**: Blocks startup if live trading mode is detected
-- **Error Messages**: Clear warnings with configuration guidance
-- **Monitoring Integration**: Status displayed in monitoring dashboard
-- **Paper parity controls**: `EXCHANGE_BACKEND`, `PAPER_SIMULATE_DELTA_PRIVATE_APIS`, and `PAPER_MARGINED_VIEW_DELAY_SECONDS` tune simulation fidelity but do not override the live-trading safety gate.
+- **Environment variables checked**: `TRADING_MODE`, `DELTA_ENV`, `EXCHANGE_BACKEND`, `DELTA_EXCHANGE_BASE_URL`, `PAPER_TRADING_MODE`
+- **Validation logic**: Rejects `PAPER_TRADING_MODE`, `EXCHANGE_BACKEND=delta_paper_sim`, production Delta hosts, and `DELTA_ENV=india_prod`
+- **Required profile**: `TRADING_MODE=testnet`, `EXCHANGE_BACKEND=delta_live`, `DELTA_ENV=india_testnet`, testnet REST/WS URLs
 
-**Configuration Examples**:
+**Configuration example**:
 ```bash
-# Safe paper trading (default)
-PAPER_TRADING_MODE=true
-TRADING_MODE=paper
-
-# Live trading (blocks startup with warnings)
-TRADING_MODE=live
+TRADING_MODE=testnet
+EXCHANGE_BACKEND=delta_live
+DELTA_ENV=india_testnet
+DELTA_EXCHANGE_BASE_URL=https://cdn-ind.testnet.deltaex.org
 ```
 
 ### Environment Variable Validation

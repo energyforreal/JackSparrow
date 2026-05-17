@@ -151,13 +151,6 @@ class Settings(BaseSettings):
         description="Default analysis interval"
     )
     
-    # Trading Mode
-    paper_trading_mode: bool = Field(
-        default=True,
-        env="PAPER_TRADING_MODE",
-        description="Enable paper trading mode (default: True). Set to False for live trading."
-    )
-    
     # Risk Management
     max_position_size: float = Field(
         default=0.1,
@@ -258,9 +251,9 @@ class Settings(BaseSettings):
         description="Initial trading balance"
     )
     trading_mode: str = Field(
-        default="paper",
+        default="testnet",
         env="TRADING_MODE",
-        description="Trading mode (paper/live)"
+        description="Trading mode (testnet only for Colab upload parity)",
     )
     trading_symbol: str = Field(
         default="BTCUSD",
@@ -288,11 +281,13 @@ class Settings(BaseSettings):
     def normalize_trading_mode(cls, value: Optional[str]) -> str:
         """Normalize trading mode string."""
         if value is None:
-            return "paper"
+            return "testnet"
         if isinstance(value, str):
             normalized = value.strip().lower()
-            if normalized not in {"paper", "live"}:
-                raise ValueError("TRADING_MODE must be either 'paper' or 'live'")
+            if normalized in {"paper", "live"}:
+                return "testnet"
+            if normalized != "testnet":
+                raise ValueError("TRADING_MODE must be 'testnet'")
             return normalized
         raise ValueError("TRADING_MODE must be a string")
 
@@ -320,32 +315,9 @@ class Settings(BaseSettings):
         raise ValueError("TIMEFRAMES must be a comma-separated string")
 
     @model_validator(mode="after")
-    def sync_trading_flags(self) -> "Settings":
-        """Keep trading_mode and paper_trading_mode aligned."""
-        trading_mode_env = os.getenv("TRADING_MODE")
-        paper_mode_env = os.getenv("PAPER_TRADING_MODE")
-
-        normalized_mode = (self.trading_mode or "paper").lower()
-        derived_paper_flag = normalized_mode != "live"
-
-        if trading_mode_env is not None:
-            # TRADING_MODE takes precedence – update boolean flag accordingly
-            if paper_mode_env and self.paper_trading_mode != derived_paper_flag:
-                print(
-                    "Warning: PAPER_TRADING_MODE overrides are ignored when TRADING_MODE is set. "
-                    "Keeping values in sync.",
-                    file=sys.stderr,
-                )
-            self.paper_trading_mode = derived_paper_flag
-            self.trading_mode = normalized_mode
-        elif paper_mode_env is not None:
-            # Only PAPER_TRADING_MODE provided – update string representation
-            self.trading_mode = "paper" if self.paper_trading_mode else "live"
-        else:
-            # Neither provided explicitly – derive bool from mode, defaulting to paper
-            self.paper_trading_mode = derived_paper_flag
-            self.trading_mode = normalized_mode
-
+    def enforce_testnet_runtime(self) -> "Settings":
+        """Align Colab config with testnet-only runtime."""
+        self.trading_mode = "testnet"
         return self
 
     def parsed_timeframes(self) -> List[str]:

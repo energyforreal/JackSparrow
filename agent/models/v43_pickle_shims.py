@@ -242,13 +242,17 @@ class EnsembleModel(_StateDictMixin):
       ``xgb`` (XGBRegressor), ``rf`` (RandomForestRegressor),
       ``feature_cols`` (List[str]), ``threshold`` (float), ``_is_fitted`` (bool).
 
-    All base estimators are *regressors* returning expected return directly
-    (so we use ``predict``, not ``predict_proba``). The ensemble averages the
-    three predictions; no meta-learner / calibrator was trained.
+    **Default path (no meta):** base regressors are averaged; output is expected
+    return on the simple-forward-return scale.
 
-    For backward compatibility with v27/v28-style classifiers (kept as legacy
-    fallback), the shim also handles ``scaler``/``meta``/``calibrator`` if they
-    are present in older artifacts.
+    **Pattern 3 meta-stacking (when ``meta`` + ``calibrator`` are set):**
+      1. ``_base_predictions`` stacks LGBM/XGB/RF regressor outputs.
+      2. ``meta.predict_proba(stack)[:, 1]`` yields direction probability in [0, 1].
+      3. ``calibrator.predict(proba)`` maps probability back to expected-return scale
+         so gate-5 edge-vs-cost math remains valid.
+
+    ``predict()`` always returns values clipped to [-0.10, 0.10] as a safety backstop
+    if the calibrator is missing or misconfigured.
     """
 
     def __init__(self) -> None:
@@ -264,6 +268,7 @@ class EnsembleModel(_StateDictMixin):
         self.feature_cols: Optional[List[str]] = None
         self.threshold: Optional[float] = None
         self.dynamic_threshold: Optional[float] = None
+        self.short_threshold: Optional[float] = None
         self._regime_scaler = None
         self._regime_cols: List[str] = []
         self._is_fitted: bool = False
@@ -364,7 +369,9 @@ class EnsembleModel(_StateDictMixin):
                 out = cal.predict(out)
             except Exception as exc:  # pragma: no cover
                 _logger.warning("v43_shim_calibrator_failed", err=str(exc))
-        return np.asarray(out, dtype=np.float64)
+        # Safety: clamp to sane expected-return range regardless of meta/calibrator state.
+        out = np.clip(np.asarray(out, dtype=np.float64), -0.10, 0.10)
+        return out
 
     def predict_proba(self, X: np.ndarray, X_df: Optional[pd.DataFrame] = None) -> np.ndarray:
         return self.predict(X, X_df=X_df)

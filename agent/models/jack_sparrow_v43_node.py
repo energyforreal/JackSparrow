@@ -26,9 +26,11 @@ except Exception:  # pragma: no cover
 
 from agent.models import v43_pickle_shims as _v43_shims  # noqa: F401  ensures __main__ aliases
 from agent.core.config import settings
+from agent.core.v43_market_frames import closed_5m_bar_index
 from agent.models.jacksparrow_v43_inference import (
     ensemble_predict_uncertainty,
     get_regime_model,
+    get_short_signal_threshold,
     get_signal_threshold,
     uncertainty_scale,
 )
@@ -365,6 +367,13 @@ class JackSparrowV43Node(MCPModelNode):
             active,
             floor=floor,
         )
+        short_thr = get_short_signal_threshold(
+            regime,
+            self._ensemble,
+            active,
+            floor=floor,
+            long_threshold=thr,
+        )
 
         if active is None:
             proba0 = 0.0
@@ -403,10 +412,11 @@ class JackSparrowV43Node(MCPModelNode):
             "format": "jacksparrow_v43",
             "expected_return": float(proba0),
             "threshold": float(thr),
+            "short_threshold": float(short_thr),
             "regime": regime,
             "uncertainty": float(unc),
             "unc_scale": float(u_scale),
-            "bar_index_hint": int(len(df5) - 1),
+            "bar_index_hint": int(closed_5m_bar_index(df5)),
             "feature_names_used": use_cols,
             "RECOMMENDED_LONG_THRESHOLD": float(thr),
             "closed_bar_features": closed_feats,

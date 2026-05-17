@@ -897,7 +897,7 @@ pydantic==2.5.0
 
 ### Model Storage Location
 
-JackSparrow ships trained ML artefacts under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (**`AGENT_MODEL_DIR`** in Docker). **Current discovery loads a single JackSparrow v43 bundle**: path must contain **`metadata_v43.json`**. Older layouts with **`metadata_BTCUSD_*.json`** remain in the tree as **historical** exports; **`MODEL_FORMAT` defaults to `jacksparrow_v43`** (health/integration label—not a loader switch).
+JackSparrow ships trained ML artefacts under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (**`AGENT_MODEL_DIR`** in Docker). **Current discovery loads a single JackSparrow v43 bundle**: path must contain **`metadata_v43.json`**. The checked-in default bundle root is **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`**; promote Colab exports (`metadata_v43.json`, `model_artifact_v43.pkl`) there unless you point **`MODEL_DIR`** at another folder. Older layouts with **`metadata_BTCUSD_*.json`** remain in the tree as **historical** exports; **`MODEL_FORMAT` defaults to `jacksparrow_v43`** (health/integration label—not a loader switch).
 
 **Typical layouts**:
 

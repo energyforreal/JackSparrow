@@ -7,7 +7,8 @@ Handles environment variable loading, validation, and default values.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
+from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import os
 from pydantic import Field, field_validator, model_validator
@@ -20,6 +21,13 @@ from pydantic import Field, field_validator, model_validator
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ROOT_ENV_PATH = _PROJECT_ROOT / ".env"
 ROOT_ENV_EXAMPLE_PATH = _PROJECT_ROOT / ".env.example"
+
+DELTA_TESTNET_ALLOWED_HOSTS: Tuple[str, ...] = (
+    "cdn-ind.testnet.deltaex.org",
+    "testnet.delta.exchange",
+    "api.testnet.delta.exchange",
+)
+DELTA_TESTNET_BASE_URL_DEFAULT = "https://cdn-ind.testnet.deltaex.org"
 
 
 def _root_env_files() -> tuple[str, ...] | None:
@@ -79,9 +87,34 @@ class Settings(BaseSettings):
         description="Delta Exchange API secret"
     )
     delta_exchange_base_url: str = Field(
-        default="https://api.india.delta.exchange",
+        default=DELTA_TESTNET_BASE_URL_DEFAULT,
         env=("DELTA_EXCHANGE_BASE_URL", "DELTA_API_URL", "delta_api_url"),
-        description="Delta Exchange API base URL"
+        description="Delta Exchange API base URL (must be India testnet)",
+    )
+    trading_mode: str = Field(
+        default="testnet",
+        env="TRADING_MODE",
+        description="Trading mode (testnet only)",
+    )
+    agent_only_delta_orders: bool = Field(
+        default=True,
+        env="AGENT_ONLY_DELTA_ORDERS",
+        description="When True, only autonomous agent decisions may place Delta orders.",
+    )
+    block_manual_execute_trade: bool = Field(
+        default=True,
+        env="BLOCK_MANUAL_EXECUTE_TRADE",
+        description="When True, reject manual execute_trade API/WebSocket commands.",
+    )
+    delta_environment: str = Field(
+        default="testnet",
+        env="DELTA_ENVIRONMENT",
+        description="Exchange environment label for health/API",
+    )
+    delta_env: str = Field(
+        default="india_testnet",
+        env="DELTA_ENV",
+        description="Delta environment (india_testnet only)",
     )
     
     # Agent Communication
@@ -265,20 +298,7 @@ class Settings(BaseSettings):
     initial_balance: float = Field(
         default=20000.0,
         env="INITIAL_BALANCE",
-        description="Initial balance for paper trading (in INR)"
-    )
-    paper_trading_mode: bool = Field(
-        default=True,
-        env="PAPER_TRADING_MODE",
-        description="When True, paper trading (no real orders); when False, live trading. Also set by TRADING_MODE=paper|live."
-    )
-    reset_paper_state_on_startup: bool = Field(
-        default=True,
-        env="RESET_PAPER_STATE_ON_STARTUP",
-        description=(
-            "When True in paper mode, backend clears positions/trades on startup. "
-            "Set False to preserve paper portfolio across restarts."
-        ),
+        description="Fallback portfolio baseline when exchange balance is unavailable (INR)"
     )
     agent_status_timeout_grace_seconds: int = Field(
         default=30,
@@ -298,14 +318,47 @@ class Settings(BaseSettings):
         ),
     )
 
+    @field_validator("trading_mode", mode="before")
+    @classmethod
+    def normalize_trading_mode(cls, value: Optional[str]) -> str:
+        if value is None:
+            return "testnet"
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"paper", "live"}:
+                return "testnet"
+            if normalized != "testnet":
+                raise ValueError("TRADING_MODE must be 'testnet'")
+            return normalized
+        raise ValueError("TRADING_MODE must be a string")
+
     @model_validator(mode="after")
-    def sync_paper_trading_with_trading_mode(self):
-        """Align paper_trading_mode with TRADING_MODE env if set."""
-        trading_mode = os.environ.get("TRADING_MODE", "").strip().lower()
-        if trading_mode == "paper":
-            object.__setattr__(self, "paper_trading_mode", True)
-        elif trading_mode == "live":
-            object.__setattr__(self, "paper_trading_mode", False)
+    def enforce_testnet_runtime(self) -> "Settings":
+        """Reject removed local paper mode and enforce Delta testnet URLs."""
+        paper_mode_env = os.environ.get("PAPER_TRADING_MODE", "").strip().lower()
+        if paper_mode_env in ("true", "1", "yes"):
+            raise ValueError(
+                "PAPER_TRADING_MODE is removed. Use TRADING_MODE=testnet with Delta testnet credentials."
+            )
+        reset_paper = os.environ.get("RESET_PAPER_STATE_ON_STARTUP", "").strip().lower()
+        if reset_paper in ("true", "1", "yes"):
+            raise ValueError(
+                "RESET_PAPER_STATE_ON_STARTUP is removed; portfolio state is exchange-backed."
+            )
+
+        object.__setattr__(self, "trading_mode", "testnet")
+        object.__setattr__(self, "delta_environment", "testnet")
+        object.__setattr__(self, "delta_env", "india_testnet")
+
+        parsed = urlparse((self.delta_exchange_base_url or "").strip())
+        host = (parsed.hostname or "").lower()
+        if not host:
+            raise ValueError("DELTA_EXCHANGE_BASE_URL must include a valid hostname")
+        if host not in DELTA_TESTNET_ALLOWED_HOSTS:
+            raise ValueError(
+                f"DELTA_EXCHANGE_BASE_URL host '{host}' is not an allowed Delta testnet host. "
+                f"Allowed: {', '.join(DELTA_TESTNET_ALLOWED_HOSTS)}"
+            )
         return self
 
     contract_value_btc: float = Field(

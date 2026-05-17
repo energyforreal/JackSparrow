@@ -70,6 +70,38 @@ def get_signal_threshold(
     return float(max(floor_f, thr))
 
 
+def get_short_signal_threshold(
+    regime: str,
+    ensemble_model: Any,
+    active_model: Any,
+    *,
+    floor: float = 0.005,
+    long_threshold: Optional[float] = None,
+) -> float:
+    """Resolve short-side threshold (positive magnitude for ``proba < -thr``).
+
+    When the artifact exports ``short_threshold`` (notebook P25 magnitude), use it.
+    Otherwise fall back to the long threshold for backward-compatible symmetric gating.
+    """
+    floor_f = float(floor)
+    m = active_model if active_model is not None else ensemble_model
+    short_thr: Optional[float] = None
+    for obj in (m, ensemble_model):
+        if obj is None:
+            continue
+        v = _float_attr(obj, "short_threshold")
+        if v is not None and v > 0:
+            short_thr = abs(float(v))
+            break
+    if short_thr is None:
+        short_thr = long_threshold
+    if short_thr is None:
+        short_thr = get_signal_threshold(
+            regime, ensemble_model, active_model, floor=floor_f
+        )
+    return float(max(floor_f, short_thr))
+
+
 def get_regime_model(
     regime: str,
     regime_models: Optional[Dict[str, Any]],

@@ -38,6 +38,10 @@ build/
 .env*
 !.env.example
 
+# Local credential files (never commit)
+demo keys delta.txt
+*delta*keys*.txt
+
 # IDE
 .vscode/
 .idea/
@@ -54,6 +58,8 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+data/.suppress_recent_trades
+data/agent_closed_trades.jsonl
 
 # Model files (large)
 *.pkl

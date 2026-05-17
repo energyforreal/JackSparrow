@@ -11,6 +11,9 @@
  * @see backend/services/agent_event_subscriber.py (valid_signals list)
  * @see backend/api/routes/trading.py (signal mapping logic)
  */
+export const TRADING_MODE_VALUES = ['testnet'] as const;
+export type TradingMode = typeof TRADING_MODE_VALUES[number];
+
 export const SIGNAL_TYPE_VALUES = ['STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL'] as const;
 export type SignalType = typeof SIGNAL_TYPE_VALUES[number];
 

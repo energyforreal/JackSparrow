@@ -197,29 +197,6 @@ async def lifespan(app: FastAPI):
                 "(set AUTO_CREATE_DB_SCHEMA=false only if tables are managed externally)"
             ) from e
 
-    if (
-        getattr(settings, "paper_trading_mode", True)
-        and getattr(settings, "reset_paper_state_on_startup", True)
-    ):
-        try:
-            await _reset_paper_trade_state()
-        except Exception as reset_err:
-            logger.warning(
-                "paper_trade_reset_skipped",
-                service="backend",
-                error=str(reset_err),
-                message="Paper trade state reset failed; continuing startup",
-            )
-    elif getattr(settings, "paper_trading_mode", True):
-        logger.info(
-            "paper_trade_state_reset_disabled",
-            service="backend",
-            message=(
-                "Paper trade reset on startup is disabled "
-                "(RESET_PAPER_STATE_ON_STARTUP=false)."
-            ),
-        )
-
     # Initialize Redis
     try:
         redis_client = await get_redis()

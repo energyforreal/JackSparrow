@@ -1,6 +1,6 @@
 # JackSparrow
 
-> **AI-Powered Trading Agent for Delta Exchange India Paper Trading**
+> **AI-Powered Trading Agent for Delta Exchange India Testnet**
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -18,7 +18,7 @@ JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 
 ## Key Requirements
 
-- **Paper trading only** on Delta Exchange India (BTCUSD initially)
+- **Delta testnet trading only** (real testnet orders on Delta Exchange India; BTCUSD initially)
 - **INR portfolio defaults**: `INITIAL_BALANCE=20000` (displayed as `₹20,000`)
 - **Currency split**: BTCUSD market prices render in `USD ($)` while portfolio/PnL render in `INR (₹)`
 - **Entry confidence gate**: trades execute only when confidence is `>= 70%` (`MIN_CONFIDENCE_THRESHOLD=0.70`)
@@ -94,24 +94,22 @@ The `start_parallel.py` script performs a comprehensive 4-step startup sequence:
 
 **Note**: The startup system uses a Python-based parallel process manager that starts all services (backend, agent, frontend) simultaneously, providing faster initialization and real-time log streaming. See [Deployment Documentation](docs/10-deployment.md) for details.
 
-### Paper Trading Validation
+### Delta Testnet Validation
 
-**JackSparrow** includes built-in safety mechanisms to prevent accidental live trading:
+**JackSparrow** runs exclusively on **Delta Exchange India testnet** (real testnet orders; local paper simulation removed):
 
-- **Startup Validation**: The startup script validates `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
-- **Live Trading Protection**: If live trading mode is detected, startup is blocked with clear warnings
-- **Safety Indicators**: The monitoring dashboard displays paper trading status throughout operation
-- **Configuration Verification**: All configuration is validated before services start
-- **Delta parity simulation**: Use `EXCHANGE_BACKEND=delta_paper_sim` with `PAPER_SIMULATE_DELTA_PRIVATE_APIS=true` to keep paper behavior aligned with Delta private account APIs (`positions`, `positions/margined`, `assets`, `change_margin`, `close_all`)
+- **Startup validation**: `TRADING_MODE=testnet`, `DELTA_ENV=india_testnet`, and testnet REST/WebSocket URLs are enforced
+- **Rejected settings**: `PAPER_TRADING_MODE`, `EXCHANGE_BACKEND=delta_paper_sim`, and production Delta hosts fail fast at startup
+- **Safety indicators**: The monitoring dashboard shows testnet mode and exchange health
 
-**Migration-safe paper profile**:
+**Required testnet profile** (see `.env.example`):
 
 ```bash
-PAPER_TRADING_MODE=true
-TRADING_MODE=paper
-EXCHANGE_BACKEND=delta_paper_sim
-PAPER_SIMULATE_DELTA_PRIVATE_APIS=true
-PAPER_MARGINED_VIEW_DELAY_SECONDS=10
+TRADING_MODE=testnet
+DELTA_ENV=india_testnet
+EXCHANGE_BACKEND=delta_live
+DELTA_EXCHANGE_BASE_URL=https://cdn-ind.testnet.deltaex.org
+WEBSOCKET_URL=wss://socket-ind.testnet.deltaex.org
 ```
 
 ### Monitoring Dashboard
@@ -119,7 +117,7 @@ PAPER_MARGINED_VIEW_DELAY_SECONDS=10
 The startup system includes a real-time monitoring dashboard that provides:
 
 - **Service Status**: Real-time health monitoring of backend, agent, and frontend services
-- **Paper Trading Status**: Clear indicators showing safe paper trading mode
+- **Testnet Status**: Clear indicators showing Delta testnet trading mode
 - **WebSocket Monitoring**: Automatic connection monitoring and message freshness tracking
 - **Data Freshness**: Per-message type freshness scores and stale message detection
 - **Signal Generation Statistics**: Frequency analysis and last signal tracking
@@ -213,7 +211,7 @@ See [Build Guide](docs/11-build-guide.md) and [Debugging](docs/13-debugging.md) 
 
 The startup script provides clear error messages for common issues:
 
-- **Paper Trading Validation Failed**: Check `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
+- **Testnet Validation Failed**: Check `TRADING_MODE=testnet`, `DELTA_ENV=india_testnet`, and testnet Delta API URLs/keys
 - **Environment Validation Failed**: Re-run `python tools/commands/validate-prerequisites.py` and review startup logs for missing `.env` values
 - **Prerequisite Validation Failed**: Run `python tools/commands/validate-prerequisites.py` to check Python, Node.js, PostgreSQL, Redis
 - **Model Validation Failed**: Check ML model files or disable with `VALIDATE_MODELS_ON_STARTUP=false`

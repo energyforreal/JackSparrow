@@ -136,50 +136,61 @@ class ServiceConfig:
 
 
 class PaperTradingValidator:
-    """Validates paper trading mode configuration."""
-    
+    """Validates Delta testnet trading configuration (legacy class name retained)."""
+
     def __init__(self, project_root: Path):
         self.project_root = project_root
-        self.is_paper_mode = True
+        self.is_testnet_mode = True
         self.verification_time: Optional[datetime] = None
         self.status_message = ""
-        
+
     def validate_startup(self) -> Tuple[bool, str]:
-        """Validate paper trading mode during startup.
-        
-        Returns:
-            Tuple of (is_valid: bool, status_message: str)
-        """
-        # Check environment variable
-        paper_mode_env = os.environ.get("PAPER_TRADING_MODE", "").lower()
-        trading_mode_env = os.environ.get("TRADING_MODE", "").lower()
-        
-        # Determine paper trading mode
-        if trading_mode_env:
-            self.is_paper_mode = trading_mode_env != "live"
-        elif paper_mode_env:
-            self.is_paper_mode = paper_mode_env in ("true", "1", "yes")
-        else:
-            # Default to paper trading
-            self.is_paper_mode = True
-        
-        self.verification_time = datetime.now()
-        
-        if self.is_paper_mode:
-            self.status_message = "PAPER TRADING (Safe)"
-            return True, self.status_message
-        else:
-            self.status_message = "LIVE TRADING (WARNING: Real trades will be executed!)"
+        """Validate testnet trading mode during startup."""
+        trading_mode_env = os.environ.get("TRADING_MODE", "testnet").strip().lower()
+        paper_mode_env = os.environ.get("PAPER_TRADING_MODE", "").strip().lower()
+        base_url = (
+            os.environ.get("DELTA_EXCHANGE_BASE_URL")
+            or os.environ.get("DELTA_API_URL")
+            or ""
+        ).lower()
+
+        if paper_mode_env in ("true", "1", "yes"):
+            self.is_testnet_mode = False
+            self.status_message = (
+                "PAPER_TRADING_MODE is removed — use TRADING_MODE=testnet with Delta testnet keys"
+            )
+            self.verification_time = datetime.now()
             return False, self.status_message
-    
+
+        if trading_mode_env in ("paper", "live"):
+            trading_mode_env = "testnet"
+
+        self.is_testnet_mode = trading_mode_env == "testnet"
+        self.verification_time = datetime.now()
+
+        if not self.is_testnet_mode:
+            self.status_message = "TRADING_MODE must be testnet"
+            return False, self.status_message
+
+        if "testnet" not in base_url and "deltaex.org" not in base_url:
+            self.status_message = (
+                "DELTA_EXCHANGE_BASE_URL must point at Delta India testnet "
+                "(e.g. https://cdn-ind.testnet.deltaex.org)"
+            )
+            return False, self.status_message
+
+        self.status_message = "DELTA TESTNET (real testnet orders)"
+        return True, self.status_message
+
+    @property
+    def is_paper_mode(self) -> bool:
+        """Backward-compatible alias for monitoring reports."""
+        return self.is_testnet_mode
+
     def get_status(self) -> Dict[str, Any]:
-        """Get current paper trading status.
-        
-        Returns:
-            Dictionary with status information
-        """
         return {
-            "is_paper_mode": self.is_paper_mode,
+            "is_testnet_mode": self.is_testnet_mode,
+            "is_paper_mode": self.is_testnet_mode,
             "status_message": self.status_message,
             "verification_time": self.verification_time.isoformat() if self.verification_time else None,
         }
@@ -648,8 +659,13 @@ class ValidationReporter:
         report = {
             "timestamp": datetime.now().isoformat(),
             "paper_trading": {
-                "validated": True,
-                "mode": "paper" if paper_validator.is_paper_mode else "live",
+                "validated": paper_validator.is_testnet_mode,
+                "mode": "testnet" if paper_validator.is_testnet_mode else "invalid",
+                "status": paper_validator.status_message,
+            },
+            "testnet_trading": {
+                "validated": paper_validator.is_testnet_mode,
+                "mode": "testnet" if paper_validator.is_testnet_mode else "invalid",
                 "status": paper_validator.status_message,
             },
             "data_freshness": {
@@ -707,8 +723,10 @@ class ValidationReporter:
                 }
         
         # Recommendations
-        if not paper_validator.is_paper_mode:
-            report["recommendations"].append("WARNING: Live trading mode detected. Ensure this is intentional.")
+        if not paper_validator.is_testnet_mode:
+            report["recommendations"].append(
+                "WARNING: TRADING_MODE is not testnet or Delta URL is not testnet. Fix .env before trading."
+            )
         
         if ws_monitor and ws_monitor.connected:
             if stats["overall_freshness"] < 80:
@@ -757,16 +775,16 @@ class ValidationReporter:
         print(f"{Colors.BOLD}Validation Report{Colors.RESET}")
         print(f"{Colors.BOLD}{'='*60}{Colors.RESET}\n")
         
-        # Paper Trading
-        paper = report["paper_trading"]
-        if paper["validated"] and paper["mode"] == "paper":
+        # Delta testnet trading
+        tn = report.get("testnet_trading") or report["paper_trading"]
+        if tn["validated"] and tn["mode"] == "testnet":
             symbol = get_safe_symbol("✓", "OK")
         else:
             symbol = get_safe_symbol("✗", "X")
-        color = Colors.GREEN if paper["mode"] == "paper" else Colors.ERROR
-        print(f"Paper Trading: {color}{symbol}{Colors.RESET} {'VALIDATED' if paper['validated'] else 'WARNING'}")
-        print(f"  Mode: {paper['mode'].title()} Trading")
-        print(f"  Status: {paper['status']}\n")
+        color = Colors.GREEN if tn["mode"] == "testnet" else Colors.ERROR
+        print(f"Delta Testnet: {color}{symbol}{Colors.RESET} {'VALIDATED' if tn['validated'] else 'WARNING'}")
+        print(f"  Mode: {tn['mode'].title()}")
+        print(f"  Status: {tn['status']}\n")
         
         # Data Freshness
         freshness = report["data_freshness"]

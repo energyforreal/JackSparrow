@@ -7,6 +7,7 @@ import { TrendingUp, TrendingDown, Minus, AlertTriangle, TrendingDown as LossIco
 import { cn } from '@/lib/utils'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { usePositionImpact } from '@/hooks/usePositionImpact'
+import type { MarketData } from '@/hooks/useTradingData'
 import { Position, EnhancedTickerData } from '@/types'
 import { formatCurrency, formatUsdCurrency } from '@/utils/formatters'
 import { apiClient } from '@/services/api'
@@ -17,14 +18,27 @@ interface RealTimePriceProps {
   className?: string
   positions?: Position[]
   showPositionImpact?: boolean
+  /** When provided, reuse dashboard WebSocket market ticks instead of opening a second connection */
+  sharedMarketTick?: MarketData | null
+  sharedConnected?: boolean
 }
 
 const WS_URL = resolveWebSocketUrl()
 
 const DEFAULT_DOCUMENT_TITLE = 'JackSparrow Trading Agent'
 
-export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], showPositionImpact = true }: RealTimePriceProps) {
-  const { isConnected, lastMessage } = useWebSocket(WS_URL)
+export function RealTimePrice({
+  symbol = 'BTCUSD',
+  className,
+  positions = [],
+  showPositionImpact = true,
+  sharedMarketTick,
+  sharedConnected,
+}: RealTimePriceProps) {
+  const usingSharedFeed = sharedConnected !== undefined
+  const { isConnected: ownConnected, lastMessage: ownLastMessage } = useWebSocket(WS_URL)
+  const isConnected = usingSharedFeed ? Boolean(sharedConnected) : ownConnected
+  const lastMessage = usingSharedFeed ? null : ownLastMessage
   const [ticker, setTicker] = useState<EnhancedTickerData | null>(null)
   const [priceChange, setPriceChange] = useState<number>(0)
   const [isLoading, setIsLoading] = useState(true)
@@ -135,8 +149,24 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
     }
   }, [ticker, lastPrice])
 
+  useEffect(() => {
+    if (!usingSharedFeed || !sharedMarketTick) return
+    if (sharedMarketTick.symbol && sharedMarketTick.symbol !== symbol) return
+    const price = Number(sharedMarketTick.price)
+    if (!Number.isFinite(price)) return
+    const tick: EnhancedTickerData = {
+      symbol,
+      price,
+      timestamp: sharedMarketTick.timestamp ?? new Date().toISOString(),
+    }
+    setTicker(tick)
+    setLastPrice(price)
+    setIsLoading(false)
+  }, [usingSharedFeed, sharedMarketTick, symbol])
+
   // Handle WebSocket market tick updates - legacy market_tick and unified data_update + resource market
   useEffect(() => {
+    if (usingSharedFeed) return
     const isMarketTick =
       lastMessage?.type === 'market_tick' ||
       (lastMessage?.type === 'data_update' && (lastMessage as { resource?: string }).resource === 'market')
@@ -252,7 +282,9 @@ export function RealTimePrice({ symbol = 'BTCUSD', className, positions = [], sh
     <Card className={cn('relative overflow-hidden', className)} role="region" aria-label={`Real-time price for ${symbol}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg font-semibold">{symbol}</CardTitle>
+          <CardTitle className="text-lg font-semibold">
+            Testnet mark price ({symbol})
+          </CardTitle>
           <div className="flex items-center gap-2">
             <Badge
             variant={connectionStatus === 'connected' ? 'default' : 'secondary'}

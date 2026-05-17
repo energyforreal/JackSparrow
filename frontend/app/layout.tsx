@@ -2,8 +2,8 @@ import './globals.css'
 import { Providers } from './providers'
 
 export const metadata = {
-  title: 'JackSparrow Trading Agent',
-  description: 'AI-Powered Trading Agent for Delta Exchange India Paper Trading',
+  title: 'JackSparrow — Delta Testnet',
+  description: 'AI-Powered Trading Agent for Delta Exchange India Testnet',
 }
 
 export default function RootLayout({

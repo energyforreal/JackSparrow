@@ -59,7 +59,7 @@ def test_gate5_short_compares_expected_return_edge_to_cost() -> None:
 
 def test_debounce_blocks_second_entry() -> None:
     st = V43GateState()
-    st.note_entry(10, datetime.now(timezone.utc))
+    st.note_signal_decision(10)
     gr = apply_post_threshold_gates(
         raw_long=True,
         regime="neutral",
@@ -99,7 +99,7 @@ def test_post_threshold_short_not_raw() -> None:
 
 def test_post_threshold_short_debounce_same_as_long() -> None:
     st = V43GateState()
-    st.note_entry(10, datetime.now(timezone.utc))
+    st.note_signal_decision(10)
     gr = apply_post_threshold_gates_short(
         raw_short=True,
         regime="neutral",

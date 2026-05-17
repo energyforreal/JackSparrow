@@ -588,6 +588,21 @@ class UnifiedWebSocketManager:
             }
         if command == "execute_trade":
             from backend.services.agent_service import agent_service
+            from backend.services.portfolio_fetch import (
+                TestnetExchangeUnavailableError,
+                require_testnet_exchange,
+            )
+
+            try:
+                await require_testnet_exchange()
+            except TestnetExchangeUnavailableError as exc:
+                return {
+                    "type": "response",
+                    "success": False,
+                    "error": exc.message,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+
             trade_result = await agent_service.execute_trade(
                 symbol=parameters.get("symbol"),
                 side=parameters.get("side"),
@@ -606,40 +621,42 @@ class UnifiedWebSocketManager:
             }
         if command == "get_portfolio":
             from backend.services.portfolio_service import portfolio_service
+            from backend.services.portfolio_fetch import (
+                TestnetExchangeUnavailableError,
+                fetch_portfolio_summary,
+            )
             from backend.core.database import AsyncSessionLocal
-            from backend.core.config import settings
-            async with AsyncSessionLocal() as db:
-                try:
-                    portfolio_data = await portfolio_service.get_portfolio_summary(db)
-                    await db.commit()
-                except Exception:
-                    await db.rollback()
-                    raise
-            if portfolio_data:
-                try:
-                    portfolio_data = portfolio_service.serialize_portfolio_summary(portfolio_data)
-                except ValueError:
-                    initial_balance = float(getattr(settings, "initial_balance", 10000.0))
-                    portfolio_data = {
-                        "total_value": initial_balance,
-                        "available_balance": initial_balance,
-                        "open_positions": 0,
-                        "total_unrealized_pnl": 0,
-                        "total_realized_pnl": 0,
-                        "positions": [],
-                        "timestamp": time_service.get_time_info()["server_time"],
-                    }
-            else:
-                initial_balance = float(getattr(settings, "initial_balance", 10000.0))
-                portfolio_data = {
-                    "total_value": initial_balance,
-                    "available_balance": initial_balance,
-                    "open_positions": 0,
-                    "total_unrealized_pnl": 0,
-                    "total_realized_pnl": 0,
-                    "positions": [],
-                    "timestamp": time_service.get_time_info()["server_time"],
+
+            try:
+                async with AsyncSessionLocal() as db:
+                    try:
+                        portfolio_data = await fetch_portfolio_summary(db)
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
+                        raise
+            except TestnetExchangeUnavailableError as exc:
+                return {
+                    "type": "response",
+                    "success": False,
+                    "error": exc.message,
+                    "data": {
+                        "sync_status": "error",
+                        "data_source": "delta_testnet",
+                        "testnet_connected": False,
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
+
+            if not portfolio_data:
+                return {
+                    "type": "response",
+                    "success": False,
+                    "error": "Delta testnet connection is down",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+
+            portfolio_data = portfolio_service.serialize_portfolio_summary(portfolio_data)
             return {
                 "type": "response",
                 "success": True,
@@ -651,6 +668,11 @@ class UnifiedWebSocketManager:
             from sqlalchemy import select, desc
             from backend.api.models.responses import PositionResponse
             from backend.api.routes.portfolio import validate_symbol, validate_status
+            from backend.services.portfolio_fetch import (
+                TestnetExchangeUnavailableError,
+                is_testnet_trading_mode,
+            )
+            from backend.services.testnet_portfolio_service import testnet_portfolio_service
 
             symbol = parameters.get("symbol")
             status = parameters.get("status")
@@ -668,6 +690,50 @@ class UnifiedWebSocketManager:
                 status,
                 [s.value for s in PositionStatus],
             )
+
+            if is_testnet_trading_mode():
+                try:
+                    exchange_rows = await testnet_portfolio_service.list_open_positions(
+                        symbol=validated_symbol
+                    )
+                except TestnetExchangeUnavailableError as exc:
+                    return {
+                        "type": "response",
+                        "success": False,
+                        "error": exc.message,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                if validated_status and validated_status != PositionStatus.OPEN.value:
+                    exchange_rows = []
+                sliced = exchange_rows[offset : offset + limit]
+                positions_data = [
+                    PositionResponse(
+                        position_id=str(pos["position_id"]),
+                        symbol=str(pos["symbol"]),
+                        side=str(pos["side"]),
+                        quantity=pos["quantity"],
+                        lots=pos.get("lots"),
+                        entry_price=pos["entry_price"],
+                        mark_price=pos.get("mark_price"),
+                        liquidation_price=pos.get("liquidation_price"),
+                        unrealized_pnl=pos.get("unrealized_pnl"),
+                        leverage=pos.get("leverage"),
+                        notional_usd=pos.get("notional_usd"),
+                        exchange_position_id=pos.get("exchange_position_id"),
+                        product_id=pos.get("product_id"),
+                        status=str(pos.get("status", "OPEN")),
+                        opened_at=pos.get("opened_at") or datetime.now(timezone.utc),
+                        stop_loss=pos.get("stop_loss"),
+                        take_profit=pos.get("take_profit"),
+                    ).model_dump(mode="json")
+                    for pos in sliced
+                ]
+                return {
+                    "type": "response",
+                    "success": True,
+                    "data": positions_data,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
 
             async with AsyncSessionLocal() as db:
                 try:
@@ -696,8 +762,13 @@ class UnifiedWebSocketManager:
         if command == "get_trades":
             from backend.core.database import Trade, TradeStatus, AsyncSessionLocal
             from sqlalchemy import select, desc
-            from backend.api.models.responses import TradeResponse
+            from backend.api.models.responses import TradeResponse, ClosedTradeResponse
             from backend.api.routes.portfolio import validate_symbol, validate_status
+            from backend.services.portfolio_fetch import (
+                TestnetExchangeUnavailableError,
+                fetch_recent_closed_trades,
+                is_testnet_trading_mode,
+            )
 
             symbol = parameters.get("symbol")
             status = parameters.get("status")
@@ -715,6 +786,32 @@ class UnifiedWebSocketManager:
                 status,
                 [s.value for s in TradeStatus],
             )
+
+            if is_testnet_trading_mode():
+                try:
+                    async with AsyncSessionLocal() as db:
+                        rows = await fetch_recent_closed_trades(
+                            db,
+                            symbol=validated_symbol,
+                            limit=limit,
+                            offset=offset,
+                        )
+                except TestnetExchangeUnavailableError as exc:
+                    return {
+                        "type": "response",
+                        "success": False,
+                        "error": exc.message,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                trades_data = [
+                    ClosedTradeResponse(**row).model_dump(mode="json") for row in rows
+                ]
+                return {
+                    "type": "response",
+                    "success": True,
+                    "data": trades_data,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
 
             async with AsyncSessionLocal() as db:
                 try:
@@ -743,8 +840,11 @@ class UnifiedWebSocketManager:
         if command == "get_recent_closed_trades":
             from backend.core.database import AsyncSessionLocal
             from backend.api.routes.portfolio import validate_symbol
-            from backend.services.portfolio_service import portfolio_service
             from backend.api.models.responses import ClosedTradeResponse
+            from backend.services.portfolio_fetch import (
+                TestnetExchangeUnavailableError,
+                fetch_recent_closed_trades,
+            )
 
             symbol = parameters.get("symbol")
             limit = int(parameters.get("limit", 50))
@@ -759,7 +859,7 @@ class UnifiedWebSocketManager:
 
             async with AsyncSessionLocal() as db:
                 try:
-                    rows = await portfolio_service.get_recent_closed_trades(
+                    rows = await fetch_recent_closed_trades(
                         db=db,
                         symbol=validated_symbol,
                         limit=limit,
@@ -769,6 +869,14 @@ class UnifiedWebSocketManager:
                         ClosedTradeResponse(**row).model_dump(mode="json") for row in rows
                     ]
                     await db.commit()
+                except TestnetExchangeUnavailableError as exc:
+                    await db.rollback()
+                    return {
+                        "type": "response",
+                        "success": False,
+                        "error": exc.message,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
                 except Exception:
                     await db.rollback()
                     raise

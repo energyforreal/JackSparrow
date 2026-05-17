@@ -6,7 +6,7 @@ Provides portfolio status, positions, and performance metrics.
 
 import re
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import desc, select, text
 from typing import Optional, List
@@ -23,6 +23,13 @@ from backend.api.models.responses import (
     ErrorResponse,
 )
 from backend.services.portfolio_service import portfolio_service
+from backend.services.portfolio_fetch import (
+    TestnetExchangeUnavailableError,
+    fetch_portfolio_summary,
+    fetch_recent_closed_trades,
+    is_testnet_trading_mode,
+)
+from backend.services.testnet_portfolio_service import testnet_portfolio_service
 from backend.api.middleware.auth import require_auth
 
 logger = structlog.get_logger()
@@ -132,8 +139,14 @@ async def get_portfolio_summary(
     """
     
     try:
-        summary = await portfolio_service.get_portfolio_summary(db)
-        
+        summary = await fetch_portfolio_summary(db)
+
+        if not summary and is_testnet_trading_mode():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Delta testnet connection is down. Trading is halted until the exchange is reachable.",
+            )
+
         if not summary:
             # Get initial balance from config for fallback
             initial_balance = float(getattr(settings, 'initial_balance', 10000.0))
@@ -192,6 +205,11 @@ async def get_portfolio_summary(
         # Convert serialized summary to PortfolioSummaryResponse (Pydantic handles float to Decimal)
         return PortfolioSummaryResponse(**serialized_summary)
         
+    except TestnetExchangeUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=e.message,
+        )
     except HTTPException:
         # Re-raise HTTP exceptions (like the 503 above)
         raise
@@ -223,13 +241,42 @@ async def get_positions(
     """
     
     try:
-        # Validate and sanitize input parameters
         validated_symbol = validate_symbol(symbol)
         validated_status = validate_status(
             status,
             [s.value for s in PositionStatus]
         )
-        
+
+        if is_testnet_trading_mode():
+            exchange_rows = await testnet_portfolio_service.list_open_positions(
+                symbol=validated_symbol
+            )
+            if validated_status and validated_status != PositionStatus.OPEN.value:
+                exchange_rows = []
+            sliced = exchange_rows[offset : offset + limit]
+            return [
+                PositionResponse(
+                    position_id=str(pos["position_id"]),
+                    symbol=str(pos["symbol"]),
+                    side=str(pos["side"]),
+                    quantity=pos["quantity"],
+                    lots=pos.get("lots"),
+                    entry_price=pos["entry_price"],
+                    mark_price=pos.get("mark_price"),
+                    liquidation_price=pos.get("liquidation_price"),
+                    unrealized_pnl=pos.get("unrealized_pnl"),
+                    leverage=pos.get("leverage"),
+                    notional_usd=pos.get("notional_usd"),
+                    exchange_position_id=pos.get("exchange_position_id"),
+                    product_id=pos.get("product_id"),
+                    status=str(pos.get("status", "OPEN")),
+                    opened_at=pos.get("opened_at") or datetime.now(timezone.utc),
+                    stop_loss=pos.get("stop_loss"),
+                    take_profit=pos.get("take_profit"),
+                )
+                for pos in sliced
+            ]
+
         # Build query
         query = select(Position)
         
@@ -271,7 +318,12 @@ async def get_positions(
         ]
         
         return position_responses
-        
+
+    except TestnetExchangeUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=e.message,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -351,13 +403,18 @@ async def get_recent_closed_trades(
     """Get closed-trade analytics rows for the Recent Trades UI."""
     try:
         validated_symbol = validate_symbol(symbol)
-        rows = await portfolio_service.get_recent_closed_trades(
+        rows = await fetch_recent_closed_trades(
             db=db,
             symbol=validated_symbol,
             limit=limit,
             offset=offset,
         )
         return [ClosedTradeResponse(**row) for row in rows]
+    except TestnetExchangeUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=e.message,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -437,28 +494,13 @@ async def get_performance(
 
 
 @router.delete("/portfolio/reset")
-async def reset_paper_portfolio(db: AsyncSession = Depends(get_db)):
-    """Clear all paper trades and positions, reset cached portfolio metrics.
-
-    Allowed only when ``PAPER_TRADING_MODE`` is enabled. Live trading must not use this.
-    """
-    if not settings.paper_trading_mode:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Paper portfolio reset is only available when PAPER_TRADING_MODE is enabled.",
-        )
-    try:
-        await portfolio_service.delete_all_trades_and_positions(db)
-        await portfolio_service.invalidate_all_portfolio_caches()
-        return {"status": "ok", "message": "Paper portfolio state cleared"}
-    except Exception as e:
-        logger.error(
-            "portfolio_reset_failed",
-            error=str(e),
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reset paper portfolio: {str(e)}",
-        ) from e
+async def reset_portfolio_removed():
+    """Local paper portfolio reset was removed; positions live on Delta testnet."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Portfolio reset is not available. Trading runs on Delta testnet; "
+            "clear positions via the exchange or agent close flows."
+        ),
+    )
 

@@ -39,6 +39,18 @@ def metadata_v43():
         return json.load(f)
 
 
+def test_repo_metadata_v43_must_exist() -> None:
+    """CI guard: shipped bundle metadata must be present (no silent skip)."""
+    p = _default_metadata_path()
+    assert p.is_file(), (
+        f"Required metadata missing at {p}. "
+        "Ship JackSparrow v43 bundle before merge."
+    )
+    with p.open(encoding="utf-8") as f:
+        meta = json.load(f)
+    validate_v43_metadata_compatibility(meta)
+
+
 def test_v43_metadata_features_match_contract(metadata_v43):
     feats = metadata_v43.get("features")
     assert isinstance(feats, list), "metadata must include features array"

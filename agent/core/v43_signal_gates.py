@@ -34,9 +34,14 @@ class V43GateState:
     """Mutable bar index / trade history for gates 2–3."""
 
     last_entry_bar_index: Optional[int] = None
+    last_signal_bar_index: Optional[int] = None
     trade_timestamps_utc: List[datetime] = field(default_factory=list)
     trades_by_date: Dict[str, int] = field(default_factory=dict)
     counters: V43GateCounters = field(default_factory=V43GateCounters)
+
+    def note_signal_decision(self, bar_index: int) -> None:
+        """Stamp debounce after a gated BUY/SELL signal (before fill)."""
+        self.last_signal_bar_index = int(bar_index)
 
     def note_entry(self, bar_index: int, ts: datetime) -> None:
         self.last_entry_bar_index = int(bar_index)
@@ -136,9 +141,16 @@ def apply_post_threshold_gates_short(
         return V43GateResult(allow=False, reject_reason="open_position")
 
     debounce_bars = int(getattr(settings, "jacksparrow_v43_trade_debounce_bars", 3) or 3)
+    debounce_ref = state.last_signal_bar_index
+    bar_delta = (
+        (current_bar_index - debounce_ref)
+        if debounce_ref is not None
+        else None
+    )
     if (
-        state.last_entry_bar_index is not None
-        and (current_bar_index - state.last_entry_bar_index) < debounce_bars
+        debounce_ref is not None
+        and bar_delta is not None
+        and bar_delta < debounce_bars
     ):
         state.counters.rejected_debounce += 1
         return V43GateResult(allow=False, reject_reason="debounce")
@@ -227,9 +239,16 @@ def apply_post_threshold_gates(
         return V43GateResult(allow=False, reject_reason="open_position")
 
     debounce_bars = int(getattr(settings, "jacksparrow_v43_trade_debounce_bars", 3) or 3)
+    debounce_ref = state.last_signal_bar_index
+    bar_delta = (
+        (current_bar_index - debounce_ref)
+        if debounce_ref is not None
+        else None
+    )
     if (
-        state.last_entry_bar_index is not None
-        and (current_bar_index - state.last_entry_bar_index) < debounce_bars
+        debounce_ref is not None
+        and bar_delta is not None
+        and bar_delta < debounce_bars
     ):
         state.counters.rejected_debounce += 1
         return V43GateResult(allow=False, reject_reason="debounce")

@@ -19,6 +19,15 @@ import { getBackendProxyBase } from '@/lib/backendProxy'
 import { resolveWebSocketUrl } from '@/lib/websocketUrl'
 import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
 import { mergeHealthPreserveFields, normalizeHealthPayload } from '@/lib/healthNormalize'
+import {
+  isTestnetTradingMode,
+  resolveContractValueBtc,
+  resolveUsdInrRate,
+} from '@/utils/tradingDisplay'
+import {
+  PortfolioSummaryResponseSchema,
+  validateResponse,
+} from '@/schemas/api.validation'
 import type {
   Signal as SharedSignal,
   Portfolio as SharedPortfolio,
@@ -280,69 +289,72 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                 Number.isFinite(marketPrice) &&
                 Array.isArray(nextPortfolio.positions)
               ) {
-                const usdInrRateRaw =
-                  typeof (nextPortfolio as any).usd_inr_rate === 'number'
-                    ? (nextPortfolio as any).usd_inr_rate
-                    : parseFloat(String((nextPortfolio as any).usd_inr_rate ?? 0))
-                const usdInrRate = Number.isFinite(usdInrRateRaw) && usdInrRateRaw > 0 ? usdInrRateRaw : 83
-                const contractValueBtc = 0.001
+                const usdInrRate = resolveUsdInrRate((nextPortfolio as Portfolio).usd_inr_rate)
+                const contractValueBtc =
+                  resolveContractValueBtc((nextPortfolio as Portfolio).contract_value_btc) ?? 0.001
                 const symbol = data?.symbol
-                const updatedPositions = nextPortfolio.positions.map((pos: any) => {
-                  if (!symbol || pos?.symbol !== symbol) return pos
-                  const qty =
-                    typeof pos.quantity === 'number'
-                      ? pos.quantity
-                      : parseFloat(String(pos.quantity ?? 0))
-                  const entry =
-                    typeof pos.entry_price_usd === 'number'
-                      ? pos.entry_price_usd
-                      : typeof pos.entry_price === 'number'
-                        ? pos.entry_price
-                        : parseFloat(String(pos.entry_price_usd ?? pos.entry_price ?? 0))
-                  const side = String(pos.side ?? '').toUpperCase()
-                  const isLong = side === 'BUY' || side === 'LONG'
-                  const pnl =
-                    isLong
-                      ? (marketPrice - entry) * qty * contractValueBtc * usdInrRate
-                      : (entry - marketPrice) * qty * contractValueBtc * usdInrRate
-                  return {
-                    ...pos,
-                    current_price: marketPrice,
-                    current_price_usd: marketPrice,
-                    unrealized_pnl: Number.isFinite(pnl) ? pnl : pos.unrealized_pnl,
-                    unrealized_pnl_inr: Number.isFinite(pnl) ? pnl : pos.unrealized_pnl_inr,
+                if (usdInrRate !== null) {
+                  const updatedPositions = nextPortfolio.positions.map((pos: any) => {
+                    if (!symbol || pos?.symbol !== symbol) return pos
+                    const qty =
+                      typeof pos.quantity === 'number'
+                        ? pos.quantity
+                        : parseFloat(String(pos.quantity ?? 0))
+                    const entry =
+                      typeof pos.entry_price_usd === 'number'
+                        ? pos.entry_price_usd
+                        : typeof pos.entry_price === 'number'
+                          ? pos.entry_price
+                          : parseFloat(String(pos.entry_price_usd ?? pos.entry_price ?? 0))
+                    const side = String(pos.side ?? '').toUpperCase()
+                    const isLong = side === 'BUY' || side === 'LONG'
+                    const pnl =
+                      isLong
+                        ? (marketPrice - entry) * qty * contractValueBtc * usdInrRate
+                        : (entry - marketPrice) * qty * contractValueBtc * usdInrRate
+                    return {
+                      ...pos,
+                      current_price: marketPrice,
+                      current_price_usd: marketPrice,
+                      unrealized_pnl: Number.isFinite(pnl) ? pnl : pos.unrealized_pnl,
+                      unrealized_pnl_inr: Number.isFinite(pnl) ? pnl : pos.unrealized_pnl_inr,
+                    }
+                  })
+
+                  const totalUnrealized = updatedPositions.reduce((acc: number, pos: any) => {
+                    const v =
+                      typeof pos.unrealized_pnl === 'number'
+                        ? pos.unrealized_pnl
+                        : parseFloat(String(pos.unrealized_pnl ?? 0))
+                    return acc + (Number.isFinite(v) ? v : 0)
+                  }, 0)
+
+                  const totalRealized =
+                    typeof nextPortfolio.total_realized_pnl === 'number'
+                      ? nextPortfolio.total_realized_pnl
+                      : parseFloat(String(nextPortfolio.total_realized_pnl ?? 0))
+                  const previousUnrealized =
+                    typeof nextPortfolio.total_unrealized_pnl === 'number'
+                      ? nextPortfolio.total_unrealized_pnl
+                      : parseFloat(String(nextPortfolio.total_unrealized_pnl ?? 0))
+                  const previousTotalValue =
+                    typeof nextPortfolio.total_value === 'number'
+                      ? nextPortfolio.total_value
+                      : parseFloat(String(nextPortfolio.total_value ?? 0))
+                  const unrealizedDelta =
+                    totalUnrealized - (Number.isFinite(previousUnrealized) ? previousUnrealized : 0)
+                  const totalValue =
+                    (Number.isFinite(previousTotalValue) ? previousTotalValue : 0) + unrealizedDelta
+
+                  nextPortfolio = {
+                    ...nextPortfolio,
+                    positions: updatedPositions,
+                    total_unrealized_pnl: totalUnrealized,
+                    total_realized_pnl: Number.isFinite(totalRealized)
+                      ? totalRealized
+                      : nextPortfolio.total_realized_pnl,
+                    total_value: Number.isFinite(totalValue) ? totalValue : nextPortfolio.total_value,
                   }
-                })
-
-                const totalUnrealized = updatedPositions.reduce((acc: number, pos: any) => {
-                  const v =
-                    typeof pos.unrealized_pnl === 'number'
-                      ? pos.unrealized_pnl
-                      : parseFloat(String(pos.unrealized_pnl ?? 0))
-                  return acc + (Number.isFinite(v) ? v : 0)
-                }, 0)
-
-                const totalRealized =
-                  typeof nextPortfolio.total_realized_pnl === 'number'
-                    ? nextPortfolio.total_realized_pnl
-                    : parseFloat(String(nextPortfolio.total_realized_pnl ?? 0))
-                const previousUnrealized =
-                  typeof nextPortfolio.total_unrealized_pnl === 'number'
-                    ? nextPortfolio.total_unrealized_pnl
-                    : parseFloat(String(nextPortfolio.total_unrealized_pnl ?? 0))
-                const previousTotalValue =
-                  typeof nextPortfolio.total_value === 'number'
-                    ? nextPortfolio.total_value
-                    : parseFloat(String(nextPortfolio.total_value ?? 0))
-                const unrealizedDelta = totalUnrealized - (Number.isFinite(previousUnrealized) ? previousUnrealized : 0)
-                const totalValue = (Number.isFinite(previousTotalValue) ? previousTotalValue : 0) + unrealizedDelta
-
-                nextPortfolio = {
-                  ...nextPortfolio,
-                  positions: updatedPositions,
-                  total_unrealized_pnl: totalUnrealized,
-                  total_realized_pnl: Number.isFinite(totalRealized) ? totalRealized : nextPortfolio.total_realized_pnl,
-                  total_value: Number.isFinite(totalValue) ? totalValue : nextPortfolio.total_value,
                 }
               }
 
@@ -628,6 +640,13 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
 
 const WS_URL = resolveWebSocketUrl()
 
+export class TestnetConnectionError extends Error {
+  constructor(message = 'Delta testnet connection is down. Trading is halted.') {
+    super(message)
+    this.name = 'TestnetConnectionError'
+  }
+}
+
 async function fetchPortfolioSummaryViaRestProxy(): Promise<Portfolio | null> {
   try {
     const base = getBackendProxyBase()
@@ -637,11 +656,23 @@ async function fetchPortfolioSummaryViaRestProxy(): Promise<Portfolio | null> {
         Accept: 'application/json',
       },
     })
+    if (res.status === 503) {
+      let detail = 'Delta testnet connection is down. Trading is halted.'
+      try {
+        const body = await res.json()
+        if (body && typeof body.detail === 'string') detail = body.detail
+      } catch {
+        /* ignore */
+      }
+      throw new TestnetConnectionError(detail)
+    }
     if (!res.ok) return null
-    const data = (await res.json()) as Portfolio
+    const raw = await res.json()
+    const data = validateResponse(PortfolioSummaryResponseSchema, raw) as Portfolio | null
     if (!data || typeof data !== 'object') return null
     return data
-  } catch {
+  } catch (err) {
+    if (err instanceof TestnetConnectionError) throw err
     return null
   }
 }
@@ -827,10 +858,19 @@ export function useTradingData() {
         }
 
         if (portfolioResult.status === 'fulfilled') {
+          const portfolioPayload = portfolioResult.value as Portfolio
           dispatch({
             type: 'UPDATE_PORTFOLIO',
-            payload: portfolioResult.value as Portfolio,
+            payload: portfolioPayload,
           })
+          if (portfolioPayload?.sync_status === 'error') {
+            dispatch({
+              type: 'SET_ERROR',
+              payload: new TestnetConnectionError(
+                'Delta testnet connection is down. Trading is halted until the exchange is reachable.'
+              ),
+            })
+          }
         } else {
           console.warn('Portfolio summary fetch failed:', portfolioResult.reason)
           // Robust fallback path: retry WS command, then fallback to REST proxy.
@@ -863,11 +903,17 @@ export function useTradingData() {
         if (tradesResult.status === 'fulfilled') {
           const trades = tradesResult.value
           if (Array.isArray(trades)) {
+            const healthPayload =
+              healthResult.status === 'fulfilled' ? (healthResult.value as HealthData) : state.health
+            const mergeTrades = !isTestnetTradingMode(
+              healthPayload?.trading_mode,
+              healthPayload?.delta_environment
+            )
             dispatch({
               type: 'HYDRATE_TRADES',
               payload: {
                 trades: trades as Trade[],
-                merge: true,
+                merge: mergeTrades,
               },
             })
           }
@@ -901,9 +947,18 @@ export function useTradingData() {
         dispatch({ type: 'SET_DATA_SOURCE', payload: 'api' })
       } catch (error) {
         console.error('Error fetching initial trading data:', error)
+        const err =
+          error instanceof TestnetConnectionError
+            ? error
+            : error instanceof Error
+              ? error
+              : new Error('Unknown error')
+        if (error instanceof TestnetConnectionError) {
+          toast.error(err.message)
+        }
         dispatch({
           type: 'SET_ERROR',
-          payload: error instanceof Error ? error : new Error('Unknown error'),
+          payload: err,
         })
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
         portfolioLoadSettledRef.current = true
@@ -934,6 +989,7 @@ export function useTradingData() {
     isConnected: state.isConnected,
     lastUpdate: state.lastUpdate,
     dataSource: state.dataSource,
+    syncStatus: state.portfolio?.sync_status ?? null,
 
     // State
     isLoading: state.isLoading,

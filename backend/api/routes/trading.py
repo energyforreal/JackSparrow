@@ -445,10 +445,25 @@ async def execute_trade(
     }
     ```
     
-    **Note:** In paper trading mode, orders are simulated and not executed on the exchange.
+    **Note:** Orders are placed on Delta Exchange India testnet (real testnet execution, not local simulation).
     """
     
     try:
+        from backend.services.portfolio_fetch import TestnetExchangeUnavailableError, require_testnet_exchange
+
+        await require_testnet_exchange()
+
+        if bool(getattr(settings, "agent_only_delta_orders", True)) and bool(
+            getattr(settings, "block_manual_execute_trade", True)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Manual trade execution is disabled; only autonomous agent decisions "
+                    "may place Delta orders (AGENT_ONLY_DELTA_ORDERS)."
+                ),
+            )
+
         # Validate order
         if request.order_type == "LIMIT" and request.price is None:
             raise HTTPException(
@@ -484,6 +499,7 @@ async def execute_trade(
         # Invalidate portfolio cache when trade is executed
         from backend.core.redis import delete_cache
         await delete_cache("portfolio:summary")
+        await delete_cache("portfolio:testnet:summary")
         await delete_cache(f"portfolio:performance:30")  # Invalidate common performance cache
         logger.debug("portfolio_cache_invalidated", reason="trade_executed")
         
@@ -511,7 +527,12 @@ async def execute_trade(
             )
 
         return response_payload
-        
+
+    except TestnetExchangeUnavailableError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=e.message,
+        )
     except HTTPException:
         raise
     except Exception as e:

@@ -78,13 +78,33 @@ class HealthResponse(BaseModel):
         default_factory=list,
         description="Reasons for degraded status"
     )
+    policy_mode: Optional[str] = Field(
+        default=None,
+        description="Agent policy fusion mode (ml_only, ml_or_thesis, etc.)",
+    )
+    current_regime: Optional[str] = Field(
+        default=None,
+        description="Latest v43/thesis regime label from agent status",
+    )
+    active_thesis_strategy: Optional[str] = Field(
+        default=None,
+        description="Active thesis rule family on last bar (breakout, trend_continuation, flat, ...)",
+    )
+    thesis_fires_this_bar: Optional[bool] = Field(
+        default=None,
+        description="Whether rule-based thesis produced an entry signal on the last evaluation",
+    )
     trading_ready: Optional[bool] = Field(
         default=None,
-        description="True if paper trading can execute (models healthy); False in degraded mode"
+        description="True if testnet trading can execute (agent + models healthy)"
     )
     trading_mode: Optional[str] = Field(
         default=None,
-        description="Configured trading mode from backend settings (e.g. paper, live)",
+        description="Configured trading mode (testnet)",
+    )
+    delta_environment: Optional[str] = Field(
+        default=None,
+        description="Delta cluster label (testnet)",
     )
     ml_models: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -352,6 +372,14 @@ class TradeResponse(DecimalSerializerMixin, BaseModel):
         description="Associated reasoning chain ID",
         example="chain_123456"
     )
+    exchange_order_id: Optional[str] = Field(
+        default=None,
+        description="Delta exchange order id",
+    )
+    fill_id: Optional[str] = Field(
+        default=None,
+        description="Delta fill id when available",
+    )
 
 
 class ClosedTradeResponse(DecimalSerializerMixin, BaseModel):
@@ -424,6 +452,14 @@ class ClosedTradeResponse(DecimalSerializerMixin, BaseModel):
     executed_at: datetime = Field(
         ...,
         description="Alias of exit_time for compatibility with legacy trade consumers",
+    )
+    exchange_order_id: Optional[str] = Field(
+        default=None,
+        description="Delta exchange order id",
+    )
+    fill_id: Optional[str] = Field(
+        default=None,
+        description="Delta fill id when available",
     )
 
 
@@ -510,6 +546,14 @@ class PositionResponse(DecimalSerializerMixin, BaseModel):
         description="Take profit price",
         example=52000.0
     )
+    exchange_position_id: Optional[str] = Field(
+        default=None,
+        description="Delta exchange position identifier",
+    )
+    product_id: Optional[int] = Field(
+        default=None,
+        description="Delta product id",
+    )
 
 
 class PortfolioSummaryResponse(DecimalSerializerMixin, BaseModel):
@@ -553,6 +597,22 @@ class PortfolioSummaryResponse(DecimalSerializerMixin, BaseModel):
     positions: List[PositionResponse] = Field(
         default_factory=list,
         description="Open positions"
+    )
+    data_source: Optional[str] = Field(
+        default=None,
+        description="Portfolio data origin (delta_testnet)",
+    )
+    sync_status: Optional[str] = Field(
+        default=None,
+        description="Exchange sync state: live, stale, or error",
+    )
+    exchange_synced_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of last successful exchange sync",
+    )
+    contract_value_btc: Optional[float] = Field(
+        default=None,
+        description="BTC contract size used for notional calculations",
     )
 
 

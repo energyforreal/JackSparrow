@@ -107,10 +107,10 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
       : null
 
   const modeLabel =
-    health.trading_mode === 'live'
-      ? 'Live trading'
-      : health.trading_mode === 'paper'
-        ? 'Paper trading'
+    health.trading_mode === 'testnet' || health.delta_environment === 'testnet'
+      ? 'Delta testnet'
+      : health.trading_mode
+        ? `${health.trading_mode} trading`
         : 'Trading'
 
   return (

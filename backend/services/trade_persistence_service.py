@@ -20,6 +20,7 @@ from backend.core.database import (
 )
 from backend.utils.futures_contract import unrealized_pnl_usd
 from backend.core.config import settings as backend_settings
+from backend.services.portfolio_fetch import is_testnet_trading_mode
 
 logger = structlog.get_logger()
 
@@ -42,6 +43,8 @@ class TradePersistenceService:
         executed_at: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """Create Trade and Position records in database.
+
+        Testnet mode uses Delta exchange as the ledger; local DB rows are not written.
         
         Args:
             trade_id: Unique trade identifier
@@ -69,6 +72,20 @@ class TradePersistenceService:
             order_type=order_type,
             message="TradePersistenceService.create_trade_and_position called"
         )
+
+        if is_testnet_trading_mode():
+            logger.debug(
+                "trade_persistence_skipped_testnet",
+                trade_id=trade_id,
+                symbol=symbol,
+                message="Local DB ledger disabled; portfolio reads Delta testnet",
+            )
+            return {
+                "trade_id": trade_id,
+                "position_id": trade_id,
+                "skipped": True,
+                "reason": "testnet_exchange_ledger",
+            }
         
         # Validate inputs
         if not trade_id:
@@ -105,7 +122,7 @@ class TradePersistenceService:
                 from backend.core.config import settings
                 
                 # For BUY trades, validate we have sufficient available balance
-                if trade_side == TradeSide.BUY and not bool(getattr(settings, "paper_trading_mode", True)):
+                if trade_side == TradeSide.BUY:
                     required_balance_usd = Decimal(str(quantity * fill_price))
                     initial_balance_inr = Decimal(str(getattr(settings, 'initial_balance', 20000.0)))
                     
@@ -170,11 +187,11 @@ class TradePersistenceService:
                     )
                 elif trade_side == TradeSide.BUY:
                     logger.debug(
-                        "trade_persistence_budget_check_skipped_paper_mode",
+                        "trade_persistence_budget_check_skipped_testnet",
                         symbol=symbol,
                         quantity=quantity,
                         fill_price=fill_price,
-                        message="Skipping duplicate balance check in paper mode; agent risk/margin gates already validated entry",
+                        message="Skipping duplicate balance check in testnet mode; agent risk/margin gates already validated entry",
                     )
                 
                 logger.debug(
@@ -279,7 +296,7 @@ class TradePersistenceService:
         quantity: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Close a position and record exit details.
-        
+
         Args:
             position_id: Position identifier
             exit_price: Exit price
@@ -290,6 +307,20 @@ class TradePersistenceService:
         Returns:
             Dictionary with updated position details
         """
+        if is_testnet_trading_mode():
+            logger.debug(
+                "trade_persistence_close_skipped_testnet",
+                position_id=position_id,
+                symbol=symbol,
+                message="Local DB ledger disabled; portfolio reads Delta testnet",
+            )
+            return {
+                "success": True,
+                "position_id": position_id,
+                "skipped": True,
+                "reason": "testnet_exchange_ledger",
+            }
+
         async with AsyncSessionLocal() as session:
             try:
                 closed_at = closed_at or datetime.utcnow()

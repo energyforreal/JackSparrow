@@ -22,7 +22,7 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
     return (
       <Card role="status" aria-label="Loading portfolio summary">
         <CardHeader>
-          <CardTitle>Portfolio Value</CardTitle>
+          <CardTitle>Testnet Account</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 animate-pulse">
           <div className="h-4 bg-muted rounded-md w-28" />
@@ -46,12 +46,12 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Portfolio Value</CardTitle>
+          <CardTitle>Testnet Account</CardTitle>
         </CardHeader>
         <CardContent className="rounded-xl border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">No portfolio data yet</p>
+          <p className="text-sm text-muted-foreground">No testnet portfolio data yet</p>
           <p className="text-xs mt-2 text-muted-foreground/80">
-            Connect to the agent and wait for the first portfolio snapshot over the WebSocket.
+            Waiting for testnet portfolio sync from Delta via the agent.
           </p>
         </CardContent>
       </Card>
@@ -79,11 +79,23 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
 
   const roeRatio = unrealizedPnlPercentOnMargin(totalUnrealizedPnL, marginUsed)
   const roePercentStr = roeRatio !== null ? formatPercent(roeRatio) : null
+  const syncStatus = portfolio.sync_status
+  const showSyncWarning = syncStatus && syncStatus !== 'live'
 
   return (
-    <Card role="region" aria-label="Portfolio Summary">
+    <Card role="region" aria-label="Testnet Account Summary">
       <CardHeader>
-        <CardTitle>Portfolio Value</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <CardTitle>Testnet Account</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">Balances from Delta testnet</p>
+          </div>
+          {showSyncWarning && (
+            <Badge variant="destructive" className="text-xs">
+              {syncStatus === 'error' ? 'Testnet offline' : 'Sync delayed'}
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-baseline justify-between">

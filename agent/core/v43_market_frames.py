@@ -158,3 +158,24 @@ async def fetch_v43_market_frames(
 def v43_frames_summary(dfs: Dict[str, pd.DataFrame]) -> Dict[str, int]:
     """Row counts for logging."""
     return {k: len(v) for k, v in dfs.items() if isinstance(v, pd.DataFrame)}
+
+
+def closed_5m_bar_index(ohlcv: pd.DataFrame, bar_seconds: int = 300) -> int:
+    """Monotonic UTC bar slot for the last *closed* 5m candle (``iloc[-2]``).
+
+    Uses candle open time in epoch seconds, not ``len(df)-1`` inside a fixed rolling
+    window (which stays ~599 and breaks v43 debounce).
+    """
+    if ohlcv is None or len(ohlcv) < 2 or "timestamp" not in ohlcv.columns:
+        return 0
+    ts = ohlcv["timestamp"].iloc[-2]
+    try:
+        t = pd.Timestamp(ts)
+        if t.tzinfo is None:
+            t = t.tz_localize("UTC")
+        else:
+            t = t.tz_convert("UTC")
+        epoch = int(t.timestamp())
+    except (TypeError, ValueError, AttributeError):
+        return 0
+    return epoch // max(1, int(bar_seconds))

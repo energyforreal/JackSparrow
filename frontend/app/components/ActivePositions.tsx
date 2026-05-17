@@ -13,13 +13,25 @@ import { Badge } from '@/components/ui/badge'
 import { Position } from '@/types'
 import { cn } from '@/lib/utils'
 import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
+import { sideBadgeVariant } from '@/utils/tradingDisplay'
 
 interface ActivePositionsProps {
   positions?: Position[]
   isLoading?: boolean
+  /** When set, show banner if exchange reports open positions but list is empty */
+  expectedOpenCount?: number
 }
 
-export function ActivePositions({ positions, isLoading = false }: ActivePositionsProps) {
+function truncateId(id: string, len = 8): string {
+  if (id.length <= len) return id
+  return `${id.slice(0, len)}…`
+}
+
+export function ActivePositions({
+  positions,
+  isLoading = false,
+  expectedOpenCount = 0,
+}: ActivePositionsProps) {
   if (isLoading) {
     return (
       <Card role="status" aria-label="Loading active positions">
@@ -75,16 +87,30 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
   }
 
   if (!positions || positions.length === 0) {
+    const syncDelayed = expectedOpenCount > 0
     return (
       <Card>
         <CardHeader>
           <CardTitle>Active Positions</CardTitle>
         </CardHeader>
-        <CardContent className="rounded-xl border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">No active positions</p>
-          <p className="text-xs mt-2 text-muted-foreground/80">
-            The agent is monitoring — no open trades right now.
-          </p>
+        <CardContent className="rounded-xl border border-dashed p-8 text-center space-y-2">
+          {syncDelayed ? (
+            <>
+              <p className="text-sm text-amber-700 dark:text-amber-300 font-medium">
+                Exchange sync delayed
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Testnet reports {expectedOpenCount} open position(s); refreshing positions…
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">No active positions on testnet</p>
+              <p className="text-xs mt-2 text-muted-foreground/80">
+                The agent is monitoring — no open trades right now.
+              </p>
+            </>
+          )}
         </CardContent>
       </Card>
     )
@@ -141,9 +167,10 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
               <TableRow>
                 <TableHead>Symbol</TableHead>
                 <TableHead>Side</TableHead>
-                <TableHead>Quantity</TableHead>
-                <TableHead>Entry Price</TableHead>
-                <TableHead>Current Price</TableHead>
+                <TableHead>Lots</TableHead>
+                <TableHead>Entry</TableHead>
+                <TableHead>Mark</TableHead>
+                <TableHead>Liq.</TableHead>
                 <TableHead>PnL</TableHead>
                 <TableHead>Duration</TableHead>
               </TableRow>
@@ -153,17 +180,23 @@ export function ActivePositions({ positions, isLoading = false }: ActivePosition
                 <TableRow key={position.position_id}>
                   <TableCell className="font-medium">{position.symbol}</TableCell>
                   <TableCell>
-                    <Badge
-                      variant={position.side === 'BUY' ? 'default' : 'destructive'}
-                    >
-                      {position.side}
-                    </Badge>
+                    <Badge variant={sideBadgeVariant(position.side)}>{position.side}</Badge>
                   </TableCell>
                   <TableCell>
-                    {formatQuantity(position.quantity)}
+                    {formatQuantity(position.lots ?? position.quantity)}
                   </TableCell>
                   <TableCell>{formatPrice(position.entry_price_usd ?? position.entry_price)}</TableCell>
-                  <TableCell>{formatPrice(position.current_price_usd ?? position.current_price)}</TableCell>
+                  <TableCell>
+                    {formatPrice(position.current_price_usd ?? position.entry_price_usd)}
+                  </TableCell>
+                  <TableCell>
+                    {position.liquidation_price != null ||
+                    position.liquidation_price_usd != null
+                      ? formatPrice(
+                          position.liquidation_price_usd ?? position.liquidation_price
+                        )
+                      : '—'}
+                  </TableCell>
                   <TableCell>
                     {(position.unrealized_pnl_inr !== undefined && position.unrealized_pnl_inr !== null) ||
                     (position.unrealized_pnl !== undefined && position.unrealized_pnl !== null) ? (

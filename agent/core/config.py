@@ -7,7 +7,8 @@ Handles environment variable loading, validation, and default values.
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
+from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator, model_validator
 
@@ -44,6 +45,16 @@ def _get_project_root() -> Path:
 ROOT_PROJECT_ROOT = _get_project_root()
 ROOT_ENV_PATH = ROOT_PROJECT_ROOT / ".env"
 ROOT_ENV_EXAMPLE_PATH = ROOT_PROJECT_ROOT / ".env.example"
+
+# Delta India testnet hosts allowed for REST/WebSocket (runtime refuses prod URLs).
+DELTA_TESTNET_ALLOWED_HOSTS: Tuple[str, ...] = (
+    "cdn-ind.testnet.deltaex.org",
+    "socket-ind.testnet.deltaex.org",
+    "testnet.delta.exchange",
+    "api.testnet.delta.exchange",
+)
+DELTA_TESTNET_BASE_URL_DEFAULT = "https://cdn-ind.testnet.deltaex.org"
+DELTA_TESTNET_WEBSOCKET_URL_DEFAULT = "wss://cdn-ind.testnet.deltaex.org"
 
 
 def _root_env_files() -> tuple[str, ...] | None:
@@ -100,9 +111,9 @@ class Settings(BaseSettings):
         description="Delta Exchange API secret"
     )
     delta_exchange_base_url: str = Field(
-        default="https://api.india.delta.exchange",
+        default=DELTA_TESTNET_BASE_URL_DEFAULT,
         env=("DELTA_EXCHANGE_BASE_URL", "DELTA_API_URL", "delta_api_url"),
-        description="Delta Exchange API base URL"
+        description="Delta Exchange API base URL (must be India testnet)",
     )
     
     # Vector Database (Optional)
@@ -251,6 +262,72 @@ class Settings(BaseSettings):
         default=True,
         env="POSITION_RESTORE_ON_STARTUP",
         description="Load open DB positions into the execution engine after startup (paper).",
+    )
+    exchange_position_reconcile_enabled: bool = Field(
+        default=True,
+        env="EXCHANGE_POSITION_RECONCILE_ENABLED",
+        description=(
+            "When True, sync position_manager with Delta margined positions on startup "
+            "and during the position monitor loop."
+        ),
+    )
+    require_ml_signal_for_orders: bool = Field(
+        default=True,
+        env="REQUIRE_ML_SIGNAL_FOR_ORDERS",
+        description=(
+            "When True, entry orders on Delta require validated ML model predictions "
+            "(v43 gates passed and policy adopted ML evidence)."
+        ),
+    )
+    require_ml_consensus_alignment: bool = Field(
+        default=True,
+        env="REQUIRE_ML_CONSENSUS_ALIGNMENT",
+        description=(
+            "When True (non-v43 path), trade side must align with model consensus_signal."
+        ),
+    )
+    require_v43_gates_for_entry: bool = Field(
+        default=True,
+        env="REQUIRE_V43_GATES_FOR_ENTRY",
+        description=(
+            "When True, JackSparrow v43 entries require final_long/final_short gates passed."
+        ),
+    )
+    agent_only_delta_orders: bool = Field(
+        default=True,
+        env="AGENT_ONLY_DELTA_ORDERS",
+        description=(
+            "When True, only agent-decision execution may place Delta orders; manual "
+            "execute_trade is blocked and unattributed exchange fills are flattened."
+        ),
+    )
+    block_manual_execute_trade: bool = Field(
+        default=True,
+        env="BLOCK_MANUAL_EXECUTE_TRADE",
+        description=(
+            "When True, reject execute_trade commands that are not from the autonomous "
+            "agent decision pipeline (RiskApproved → execution)."
+        ),
+    )
+    agent_order_attribution_window_seconds: float = Field(
+        default=3600.0,
+        ge=60.0,
+        env="AGENT_ORDER_ATTRIBUTION_WINDOW_SECONDS",
+        description="Seconds to treat a recent agent js_ order as attributable to an exchange position.",
+    )
+    exchange_position_reconcile_orphan_mode: str = Field(
+        default="close_orphan",
+        env="EXCHANGE_POSITION_RECONCILE_ORPHAN_MODE",
+        description=(
+            "How to handle exchange legs missing locally when not agent-attributed: "
+            "'close_orphan' (flatten) or 'adopt' (only used when agent attribution matches)."
+        ),
+    )
+    exchange_position_reconcile_interval_seconds: float = Field(
+        default=30.0,
+        ge=5.0,
+        env="EXCHANGE_POSITION_RECONCILE_INTERVAL_SECONDS",
+        description="Minimum seconds between exchange reconciliation passes.",
     )
     volatility_filter_enabled: bool = Field(
         default=True,
@@ -880,39 +957,16 @@ class Settings(BaseSettings):
         description="Comma-separated list of active trading timeframes (first = primary candle interval for ML triggers)"
     )
     
-    # Trading Mode
-    paper_trading_mode: bool = Field(
-        default=True,
-        env="PAPER_TRADING_MODE",
-        description="Enable paper trading mode (default: True). Set to False for live trading."
-    )
+    # Trading runtime (Delta testnet only — real orders, no local simulation)
     exchange_backend: str = Field(
-        default="delta_paper_sim",
+        default="delta_live",
         env="EXCHANGE_BACKEND",
-        description="Exchange backend adapter: delta_live or delta_paper_sim",
+        description="Exchange adapter (only delta_live is supported)",
     )
     delta_env: str = Field(
-        default="india_prod",
+        default="india_testnet",
         env="DELTA_ENV",
-        description="Delta target environment label (india_prod or india_testnet)",
-    )
-    paper_simulate_delta_private_apis: bool = Field(
-        default=True,
-        env="PAPER_SIMULATE_DELTA_PRIVATE_APIS",
-        description="When true, paper mode serves Delta-like private position/portfolio actions.",
-    )
-    paper_margined_view_delay_seconds: float = Field(
-        default=10.0,
-        env="PAPER_MARGINED_VIEW_DELAY_SECONDS",
-        description="Delay before paper /positions/margined reflects the latest position state.",
-    )
-    paper_trading_random_seed: Optional[int] = Field(
-        default=None,
-        env="PAPER_TRADING_RANDOM_SEED",
-        description=(
-            "If set, seeds Python's random module once when the execution engine "
-            "initializes in paper mode (reproducible simulated slippage for tests)."
-        ),
+        description="Delta environment label (only india_testnet is supported)",
     )
 
     # Risk Management
@@ -1488,9 +1542,14 @@ class Settings(BaseSettings):
         description="Initial trading balance"
     )
     trading_mode: str = Field(
-        default="paper",
+        default="testnet",
         env="TRADING_MODE",
-        description="Trading mode (paper/live)"
+        description="Trading mode (testnet only — real orders on Delta testnet)",
+    )
+    delta_environment: str = Field(
+        default="testnet",
+        env="DELTA_ENVIRONMENT",
+        description="Exchange environment label exposed to health/API (testnet)",
     )
     trading_symbol: str = Field(
         default="BTCUSD",
@@ -1544,6 +1603,72 @@ class Settings(BaseSettings):
             "ML evidence is still emitted on EvidenceReady for audit/UI."
         ),
     )
+    agent_policy_mode: str = Field(
+        default="ml_only",
+        env="AGENT_POLICY_MODE",
+        description=(
+            "Signal fusion: ml_only | thesis_only | ml_or_thesis | ml_and_thesis | thesis_veto_ml"
+        ),
+    )
+    agent_thesis_breakout_enabled: bool = Field(
+        default=True,
+        env="AGENT_THESIS_BREAKOUT_ENABLED",
+    )
+    agent_thesis_trend_enabled: bool = Field(
+        default=True,
+        env="AGENT_THESIS_TREND_ENABLED",
+    )
+    agent_thesis_crisis_veto: bool = Field(
+        default=True,
+        env="AGENT_THESIS_CRISIS_VETO",
+    )
+    agent_thesis_mean_reversion_enabled: bool = Field(
+        default=False,
+        env="AGENT_THESIS_MEAN_REVERSION_ENABLED",
+    )
+    agent_thesis_squeeze_veto_threshold: float = Field(
+        default=0.5,
+        env="AGENT_THESIS_SQUEEZE_VETO_THRESHOLD",
+        ge=0.0,
+        le=1.0,
+    )
+    agent_thesis_breakout_adx_min: float = Field(
+        default=25.0,
+        env="AGENT_THESIS_BREAKOUT_ADX_MIN",
+    )
+    agent_thesis_breakout_di_min: float = Field(
+        default=5.0,
+        env="AGENT_THESIS_BREAKOUT_DI_MIN",
+    )
+    agent_thesis_breakout_vol_regime_min: float = Field(
+        default=1.1,
+        env="AGENT_THESIS_BREAKOUT_VOL_REGIME_MIN",
+    )
+    agent_thesis_trend_rsi_lo: float = Field(
+        default=40.0,
+        env="AGENT_THESIS_TREND_RSI_LO",
+    )
+    agent_thesis_trend_rsi_hi: float = Field(
+        default=65.0,
+        env="AGENT_THESIS_TREND_RSI_HI",
+    )
+    agent_thesis_trend_hurst_min: float = Field(
+        default=0.52,
+        env="AGENT_THESIS_TREND_HURST_MIN",
+    )
+    agent_thesis_mr_rsi_max: float = Field(
+        default=32.0,
+        env="AGENT_THESIS_MR_RSI_MAX",
+    )
+    agent_thesis_mr_bb_pos_max: float = Field(
+        default=0.15,
+        env="AGENT_THESIS_MR_BB_POS_MAX",
+    )
+    agent_decision_idempotency_ttl_seconds: float = Field(
+        default=300.0,
+        env="AGENT_DECISION_IDEMPOTENCY_TTL_SECONDS",
+        description="TTL for duplicate decision_event_id execution guard.",
+    )
     manual_execute_requires_audit_reason_live: bool = Field(
         default=True,
         env="MANUAL_EXECUTE_REQUIRES_AUDIT_REASON_LIVE",
@@ -1596,9 +1721,9 @@ class Settings(BaseSettings):
         description="Enable WebSocket streaming for real-time data (default: True)"
     )
     websocket_url: str = Field(
-        default="wss://socket.india.delta.exchange",
+        default=DELTA_TESTNET_WEBSOCKET_URL_DEFAULT,
         env="WEBSOCKET_URL",
-        description="Delta Exchange WebSocket URL"
+        description="Delta Exchange WebSocket URL (must match testnet REST cluster)",
     )
     websocket_reconnect_attempts: int = Field(
         default=5,
@@ -1664,13 +1789,19 @@ class Settings(BaseSettings):
     @field_validator("trading_mode", mode="before")
     @classmethod
     def normalize_trading_mode(cls, value: Optional[str]) -> str:
-        """Normalize trading mode string."""
+        """Normalize trading mode string (testnet-only runtime)."""
         if value is None:
-            return "paper"
+            return "testnet"
         if isinstance(value, str):
             normalized = value.strip().lower()
-            if normalized not in {"paper", "live"}:
-                raise ValueError("TRADING_MODE must be either 'paper' or 'live'")
+            if normalized in {"paper", "live"}:
+                print(
+                    "Warning: TRADING_MODE=paper|live is deprecated; using testnet.",
+                    file=sys.stderr,
+                )
+                return "testnet"
+            if normalized != "testnet":
+                raise ValueError("TRADING_MODE must be 'testnet'")
             return normalized
         raise ValueError("TRADING_MODE must be a string")
 
@@ -1679,17 +1810,25 @@ class Settings(BaseSettings):
     def normalize_exchange_backend(cls, value: Optional[str]) -> str:
         """Normalize exchange backend selector."""
         backend = (value or "delta_live").strip().lower()
-        if backend not in {"delta_live", "delta_paper_sim"}:
-            raise ValueError("EXCHANGE_BACKEND must be one of: delta_live, delta_paper_sim")
+        if backend == "delta_paper_sim":
+            raise ValueError(
+                "EXCHANGE_BACKEND=delta_paper_sim is removed; use delta_live against Delta testnet"
+            )
+        if backend != "delta_live":
+            raise ValueError("EXCHANGE_BACKEND must be delta_live")
         return backend
 
     @field_validator("delta_env", mode="before")
     @classmethod
     def normalize_delta_env(cls, value: Optional[str]) -> str:
         """Normalize Delta environment selector."""
-        env_name = (value or "india_prod").strip().lower()
-        if env_name not in {"india_prod", "india_testnet"}:
-            raise ValueError("DELTA_ENV must be one of: india_prod, india_testnet")
+        env_name = (value or "india_testnet").strip().lower()
+        if env_name == "india_prod":
+            raise ValueError(
+                "DELTA_ENV=india_prod is not allowed; runtime requires india_testnet"
+            )
+        if env_name != "india_testnet":
+            raise ValueError("DELTA_ENV must be india_testnet")
         return env_name
 
     @field_validator("agent_start_mode", mode="before")
@@ -1775,40 +1914,37 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def sync_trading_flags(self) -> "Settings":
-        """Keep trading_mode and paper_trading_mode aligned and enforce Delta parity paper mode."""
-        trading_mode_env = os.getenv("TRADING_MODE")
-        paper_mode_env = os.getenv("PAPER_TRADING_MODE")
+    def enforce_testnet_runtime(self) -> "Settings":
+        """Enforce Delta testnet URLs and reject removed local paper-simulation flags."""
+        paper_mode_env = os.getenv("PAPER_TRADING_MODE", "").strip().lower()
+        if paper_mode_env in ("true", "1", "yes"):
+            raise ValueError(
+                "PAPER_TRADING_MODE is removed. Use TRADING_MODE=testnet with Delta testnet API keys."
+            )
 
-        normalized_mode = (self.trading_mode or "paper").lower()
-        derived_paper_flag = normalized_mode != "live"
+        self.trading_mode = "testnet"
+        self.delta_environment = "testnet"
+        self.exchange_backend = "delta_live"
+        self.delta_env = "india_testnet"
 
-        if trading_mode_env is not None:
-            # TRADING_MODE takes precedence – update boolean flag accordingly
-            if paper_mode_env and self.paper_trading_mode != derived_paper_flag:
+        parsed = urlparse((self.delta_exchange_base_url or "").strip())
+        host = (parsed.hostname or "").lower()
+        if not host:
+            raise ValueError("DELTA_EXCHANGE_BASE_URL must include a valid hostname")
+        if host not in DELTA_TESTNET_ALLOWED_HOSTS:
+            raise ValueError(
+                f"DELTA_EXCHANGE_BASE_URL host '{host}' is not an allowed Delta testnet host. "
+                f"Allowed: {', '.join(DELTA_TESTNET_ALLOWED_HOSTS)}"
+            )
+
+        ws_parsed = urlparse((self.websocket_url or "").strip())
+        ws_host = (ws_parsed.hostname or "").lower()
+        if ws_host and ws_host not in DELTA_TESTNET_ALLOWED_HOSTS:
+            if "testnet" not in ws_host and "deltaex.org" not in ws_host:
                 print(
-                    "Warning: PAPER_TRADING_MODE overrides are ignored when TRADING_MODE is set. "
-                    "Keeping values in sync.",
+                    f"Warning: WEBSOCKET_URL host '{ws_host}' may not match testnet cluster.",
                     file=sys.stderr,
                 )
-            self.paper_trading_mode = derived_paper_flag
-            self.trading_mode = normalized_mode
-        elif paper_mode_env is not None:
-            # Only PAPER_TRADING_MODE provided – update string representation
-            self.trading_mode = "paper" if self.paper_trading_mode else "live"
-        else:
-            # Neither provided explicitly – derive bool from mode, defaulting to paper
-            self.paper_trading_mode = derived_paper_flag
-            self.trading_mode = normalized_mode
-
-        # Canonical migration behavior:
-        # - paper mode always uses Delta parity simulation adapter
-        # - live mode always uses live adapter
-        if self.paper_trading_mode:
-            self.exchange_backend = "delta_paper_sim"
-            self.paper_simulate_delta_private_apis = True
-        else:
-            self.exchange_backend = "delta_live"
 
         return self
 

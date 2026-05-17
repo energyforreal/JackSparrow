@@ -11,20 +11,35 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Trade } from '@/types'
-import { formatClockTime, formatCurrency } from '@/utils/formatters'
+import { formatClockTime, formatCurrency, formatUsdCurrency } from '@/utils/formatters'
+import {
+  computeTradeDurationSeconds,
+  formatTradeDuration,
+  isLongSide,
+  parseFiniteNumber,
+  resolveContractValueBtc,
+  resolveUsdInrRate,
+  sideBadgeVariant,
+} from '@/utils/tradingDisplay'
 
 interface RecentTradesProps {
   trades?: Trade[]
   isLoading?: boolean
   usdInrRate?: number | string
+  contractValueBtc?: number | string
 }
 
-export function RecentTrades({ trades, isLoading = false, usdInrRate }: RecentTradesProps) {
+export function RecentTrades({
+  trades,
+  isLoading = false,
+  usdInrRate,
+  contractValueBtc,
+}: RecentTradesProps) {
   if (isLoading) {
     return (
       <Card role="status" aria-label="Loading recent trades">
         <CardHeader>
-          <CardTitle>Recent Trades</CardTitle>
+          <CardTitle>Agent trades</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto -mx-6 px-6 animate-pulse">
@@ -47,34 +62,34 @@ export function RecentTrades({ trades, isLoading = false, usdInrRate }: RecentTr
                 {[1, 2, 3, 4, 5].map((row) => (
                   <TableRow key={row}>
                     <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-14" />
+                      <motionSkeletonBar className="h-4 w-14" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-14" />
+                      <motionSkeletonBar className="h-4 w-14" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-10" />
+                      <motionSkeletonBar className="h-4 w-10" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-6 bg-muted rounded-md w-12" />
+                      <motionSkeletonBar className="h-6 w-12" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-16" />
+                      <motionSkeletonBar className="h-4 w-16" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-10" />
+                      <motionSkeletonBar className="h-4 w-10" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-16" />
+                      <motionSkeletonBar className="h-4 w-16" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-16" />
+                      <motionSkeletonBar className="h-4 w-16" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-6 bg-muted rounded-md w-16" />
+                      <motionSkeletonBar className="h-6 w-16" />
                     </TableCell>
                     <TableCell>
-                      <div className="h-6 bg-muted rounded-md w-16" />
+                      <motionSkeletonBar className="h-6 w-16" />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -90,72 +105,51 @@ export function RecentTrades({ trades, isLoading = false, usdInrRate }: RecentTr
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Recent Trades</CardTitle>
+          <CardTitle>Agent trades</CardTitle>
         </CardHeader>
         <CardContent className="rounded-xl border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">No closed trades yet</p>
+          <p className="text-sm text-muted-foreground">No agent-executed closed trades yet</p>
           <p className="text-xs mt-2 text-muted-foreground/80">
-            Completed trades with entry/exit analytics will appear here.
+            Round-trip trades closed by Jack Sparrow will appear here with entry, exit, and PnL.
           </p>
         </CardContent>
       </Card>
     )
   }
 
-  const parseNumber = (value: number | string | undefined): number | null => {
-    if (value === undefined || value === null) return null
-    const parsed = typeof value === 'number' ? value : parseFloat(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-
-  const usdInr = (() => {
-    const parsed = parseNumber(usdInrRate)
-    return parsed && parsed > 0 ? parsed : 83
-  })()
-
-  const contractValueBtc = 0.001
-
-  const formatDuration = (durationSeconds: number | undefined): string => {
-    if (!durationSeconds || durationSeconds < 0) return '0s'
-    const hours = Math.floor(durationSeconds / 3600)
-    const minutes = Math.floor((durationSeconds % 3600) / 60)
-    const seconds = durationSeconds % 60
-    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
-    if (minutes > 0) return `${minutes}m ${seconds}s`
-    return `${seconds}s`
-  }
+  const usdInr = resolveUsdInrRate(usdInrRate)
+  const contractBtc = resolveContractValueBtc(contractValueBtc) ?? 0.001
 
   const formatQuantity = (quantity: number | string | undefined) => {
-    if (quantity === undefined || quantity === null) return 'N/A'
-    const parsed = typeof quantity === 'number' ? quantity : parseFloat(quantity)
-    if (!Number.isFinite(parsed)) return 'N/A'
+    const parsed = parseFiniteNumber(quantity)
+    if (parsed === null) return 'N/A'
     return parsed.toLocaleString('en-IN', { maximumFractionDigits: 6 })
   }
 
-  const formatDate = (date: Date | string) => {
-    return formatClockTime(date)
-  }
+  const formatDate = (date: Date | string) => formatClockTime(date)
 
-  const formatPriceInr = (price: number | string | undefined) => {
-    const parsed = parseNumber(price)
+  const formatPriceUsd = (price: number | string | undefined) => {
+    const parsed = parseFiniteNumber(price)
     if (parsed === null) return 'N/A'
-    return formatCurrency(parsed * contractValueBtc * usdInr)
+    return formatUsdCurrency(parsed)
   }
 
-  const formatPnl = (trade: Trade) => {
-    const directPnl = parseNumber(trade.pnl)
+  const formatPnl = (trade: Trade): number | null => {
+    const directPnl = parseFiniteNumber(trade.pnl)
     if (directPnl !== null) return directPnl
-    const pnlUsd = parseNumber(trade.pnl_usd)
-    if (pnlUsd !== null) return pnlUsd * usdInr
-    const entry = parseNumber(trade.entry_price)
-    const exit = parseNumber(trade.exit_price ?? trade.price)
-    const quantity = parseNumber(trade.quantity)
-    if (entry === null || exit === null || quantity === null) return null
-    const side = String(trade.side || '').toUpperCase()
-    const gross = side === 'SELL' || side === 'SHORT'
-      ? (entry - exit) * quantity
-      : (exit - entry) * quantity
-    return gross * contractValueBtc * usdInr
+    const pnlUsd = parseFiniteNumber(trade.pnl_usd)
+    if (pnlUsd !== null) {
+      if (usdInr === null) return null
+      return pnlUsd * usdInr
+    }
+    const entry = parseFiniteNumber(trade.entry_price)
+    const exit = parseFiniteNumber(trade.exit_price ?? trade.price)
+    const quantity = parseFiniteNumber(trade.quantity)
+    if (entry === null || exit === null || quantity === null || usdInr === null) return null
+    const gross = isLongSide(trade.side)
+      ? (exit - entry) * quantity
+      : (entry - exit) * quantity
+    return gross * contractBtc * usdInr
   }
 
   const getStatusVariant = (status: string) => {
@@ -175,7 +169,7 @@ export function RecentTrades({ trades, isLoading = false, usdInrRate }: RecentTr
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Recent Trades</CardTitle>
+        <CardTitle>Agent trades</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto -mx-6 px-6">
@@ -191,47 +185,60 @@ export function RecentTrades({ trades, isLoading = false, usdInrRate }: RecentTr
                 <TableHead>Entry Price</TableHead>
                 <TableHead>Exit Price</TableHead>
                 <TableHead>PnL</TableHead>
+                <TableHead>Order ID</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {trades.slice(0, 10).map((trade) => (
-                <TableRow key={trade.trade_id}>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate((trade.entry_time ?? trade.executed_at ?? trade.timestamp) as Date | string)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate((trade.exit_time ?? trade.executed_at ?? trade.timestamp) as Date | string)}
-                  </TableCell>
-                  <TableCell>{formatDuration(trade.duration_seconds)}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={trade.side === 'BUY' ? 'default' : 'destructive'}
-                    >
-                      {trade.side}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-medium">{trade.symbol}</TableCell>
-                  <TableCell>
-                    {formatQuantity(trade.quantity)}
-                  </TableCell>
-                  <TableCell>{formatPriceInr(trade.entry_price)}</TableCell>
-                  <TableCell>{formatPriceInr(trade.exit_price ?? trade.price)}</TableCell>
-                  <TableCell>
-                    {(() => {
-                      const pnl = formatPnl(trade)
-                      if (pnl === null) return 'N/A'
-                      const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-red-600'
-                      return <span className={`font-medium ${pnlClass}`}>{formatCurrency(pnl)}</span>
-                    })()}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={getStatusVariant(trade.status ?? 'CLOSED')}>
-                      {trade.status ?? 'CLOSED'}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {trades.slice(0, 10).map((trade) => {
+                const entryTime = (trade.entry_time ?? trade.executed_at ?? trade.timestamp) as
+                  | Date
+                  | string
+                const exitTime = (trade.exit_time ?? trade.executed_at ?? trade.timestamp) as
+                  | Date
+                  | string
+                const durationSec = computeTradeDurationSeconds(
+                  trade.duration_seconds,
+                  entryTime,
+                  exitTime
+                )
+                return (
+                  <TableRow key={trade.trade_id}>
+                    <TableCell className="text-muted-foreground">{formatDate(entryTime)}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatDate(exitTime)}</TableCell>
+                    <TableCell>{formatTradeDuration(durationSec)}</TableCell>
+                    <TableCell>
+                      <Badge variant={sideBadgeVariant(trade.side)}>{trade.side}</Badge>
+                    </TableCell>
+                    <TableCell className="font-medium">{trade.symbol}</TableCell>
+                    <TableCell>{formatQuantity(trade.quantity)}</TableCell>
+                    <TableCell>{formatPriceUsd(trade.entry_price)}</TableCell>
+                    <TableCell>{formatPriceUsd(trade.exit_price ?? trade.price)}</TableCell>
+                    <TableCell>
+                      {(() => {
+                        const pnl = formatPnl(trade)
+                        if (pnl === null) return '—'
+                        const pnlClass = pnl >= 0 ? 'text-emerald-600' : 'text-red-600'
+                        return (
+                          <span className={`font-medium ${pnlClass}`}>{formatCurrency(pnl)}</span>
+                        )
+                      })()}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {trade.exchange_order_id
+                        ? trade.exchange_order_id.length > 10
+                          ? `${trade.exchange_order_id.slice(0, 10)}…`
+                          : trade.exchange_order_id
+                        : '—'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusVariant(trade.status ?? 'CLOSED')}>
+                        {trade.status ?? 'CLOSED'}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
@@ -240,3 +247,6 @@ export function RecentTrades({ trades, isLoading = false, usdInrRate }: RecentTr
   )
 }
 
+function motionSkeletonBar({ className }: { className: string }) {
+  return <div className={`bg-muted rounded-md ${className}`} aria-hidden />
+}

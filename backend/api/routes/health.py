@@ -570,10 +570,10 @@ async def check_overall_health(db: AsyncSession) -> dict:
         health_scores.append(model_weight * 0.5)
     else:
         if model_health.status != "unknown":
-            is_paper_mode = str(getattr(settings, "trading_mode", "paper")).lower() == "paper"
-            if is_paper_mode:
+            is_testnet_mode = str(getattr(settings, "trading_mode", "testnet")).lower() == "testnet"
+            if is_testnet_mode:
                 degradation_reasons.append(
-                    "Model nodes are degraded; paper mode remains available via agent fallback."
+                    "Model nodes are degraded; testnet trading may use agent fallback paths."
                 )
             else:
                 degradation_reasons.append("No model nodes are healthy")
@@ -614,21 +614,20 @@ async def check_overall_health(db: AsyncSession) -> dict:
     def _to_dict(obj):
         return obj.model_dump() if hasattr(obj, "model_dump") else obj
 
-    # Trading readiness:
-    # - In paper mode, system can operate via agent fallback even when model health is degraded.
-    # - In live mode, keep stricter requirement on model availability.
+    # Trading readiness: require healthy models for testnet order flow.
     model_status = getattr(model_health, "status", "unknown")
     details = getattr(model_health, "details", None) or {}
     healthy_models = details.get("healthy_models", 0)
     total_models = details.get("total_models", 0)
-    is_paper_mode = str(getattr(settings, "trading_mode", "paper")).lower() == "paper"
-    if is_paper_mode:
-        trading_ready = agent_health.status in {"up", "unknown"}
-    else:
-        trading_ready = (
-            model_status == "up"
-            and (total_models == 0 or (healthy_models is not None and healthy_models > 0))
-        )
+    delta_status = getattr(delta_health, "status", "unknown")
+    trading_ready = (
+        agent_health.status in {"up", "unknown"}
+        and model_status == "up"
+        and (total_models == 0 or (healthy_models is not None and healthy_models > 0))
+        and delta_status == "up"
+    )
+    if str(getattr(settings, "trading_mode", "testnet")).lower() == "testnet" and delta_status != "up":
+        degradation_reasons.append("Delta testnet connection is down; trading halted")
 
     ml_models_summary: Optional[Dict[str, Any]] = None
     try:
@@ -643,11 +642,22 @@ async def check_overall_health(db: AsyncSession) -> dict:
     except Exception:
         ml_models_summary = None
 
+    agent_data = {}
+    if isinstance(raw_agent_status, dict):
+        agent_data = raw_agent_status.get("data") or raw_agent_status
+        if not isinstance(agent_data, dict):
+            agent_data = {}
+
     result = {
         "status": status_str,
         "health_score": round(health_score, 3),
         "ml_models": ml_models_summary,
-        "trading_mode": str(getattr(settings, "trading_mode", "paper")).lower(),
+        "trading_mode": str(getattr(settings, "trading_mode", "testnet")).lower(),
+        "delta_environment": str(getattr(settings, "delta_environment", "testnet")).lower(),
+        "policy_mode": agent_data.get("policy_mode"),
+        "current_regime": agent_data.get("current_regime"),
+        "active_thesis_strategy": agent_data.get("active_thesis_strategy"),
+        "thesis_fires_this_bar": agent_data.get("thesis_fires_this_bar"),
         "services": {
             "database": _to_dict(db_health),
             "redis": _to_dict(redis_status),

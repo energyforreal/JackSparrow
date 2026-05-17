@@ -54,6 +54,7 @@ export const HealthResponseSchema = z.object(
       .default([]),
     trading_ready: z.boolean().optional(),
     trading_mode: z.string().optional(),
+    delta_environment: z.string().optional(),
     ml_models: z.record(z.unknown()).optional(),
     timestamp: DateSchema,
   },
@@ -143,6 +144,8 @@ export const TradeResponseSchema = z.object({
   status: TradeStatusSchema.describe('Trade status'),
   executed_at: DateSchema.describe('Execution timestamp'),
   reasoning_chain_id: z.string().optional().describe('Associated reasoning chain ID'),
+  exchange_order_id: z.string().optional(),
+  fill_id: z.string().optional(),
 });
 
 // Position response
@@ -158,6 +161,12 @@ export const PositionResponseSchema = z.object({
   opened_at: DateSchema.describe('Position open timestamp'),
   stop_loss: DecimalSchema.optional().describe('Stop loss price'),
   take_profit: DecimalSchema.optional().describe('Take profit price'),
+  exchange_position_id: z.string().optional(),
+  product_id: z.number().optional(),
+  lots: z.number().optional(),
+  mark_price: DecimalSchema.optional(),
+  liquidation_price: DecimalSchema.optional(),
+  leverage: z.number().optional(),
 });
 
 // Portfolio summary response
@@ -168,6 +177,12 @@ export const PortfolioSummaryResponseSchema = z.object({
   total_unrealized_pnl: DecimalSchema.describe('Total unrealized profit/loss'),
   total_realized_pnl: DecimalSchema.describe('Total realized profit/loss'),
   positions: z.array(PositionResponseSchema).default([]).describe('Open positions'),
+  margin_used: DecimalSchema.optional(),
+  usd_inr_rate: DecimalSchema.optional(),
+  data_source: z.literal('delta_testnet').optional(),
+  sync_status: z.enum(['live', 'stale', 'error']).optional(),
+  exchange_synced_at: z.string().optional(),
+  contract_value_btc: z.number().optional(),
   timestamp: DateSchema.optional().describe('Response timestamp'),
 });
 

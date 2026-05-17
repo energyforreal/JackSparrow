@@ -667,51 +667,48 @@ class WebSocketManager:
             }
 
         elif command == "get_portfolio":
-            # Get portfolio summary (replaces GET /api/v1/portfolio/summary)
             from backend.services.portfolio_service import portfolio_service
+            from backend.services.portfolio_fetch import (
+                TestnetExchangeUnavailableError,
+                fetch_portfolio_summary,
+            )
             from backend.core.database import AsyncSessionLocal
-            from backend.core.config import settings
 
-            async with AsyncSessionLocal() as db:
-                try:
-                    portfolio_data = await portfolio_service.get_portfolio_summary(db)
-                    await db.commit()
-                except Exception:
-                    await db.rollback()
-                    raise
-
-            # Use serialize_portfolio_summary for consistent format (matches REST API and broadcasts)
-            if portfolio_data:
-                try:
-                    portfolio_data = portfolio_service.serialize_portfolio_summary(portfolio_data)
-                except ValueError:
-                    initial_balance = float(getattr(settings, 'initial_balance', 10000.0))
-                    portfolio_data = {
-                        "total_value": initial_balance,
-                        "available_balance": initial_balance,
-                        "open_positions": 0,
-                        "total_unrealized_pnl": 0,
-                        "total_realized_pnl": 0,
-                        "positions": [],
-                        "timestamp": time_service.get_time_info()["server_time"],
-                    }
-            else:
-                initial_balance = float(getattr(settings, 'initial_balance', 10000.0))
-                portfolio_data = {
-                    "total_value": initial_balance,
-                    "available_balance": initial_balance,
-                    "open_positions": 0,
-                    "total_unrealized_pnl": 0,
-                    "total_realized_pnl": 0,
-                    "positions": [],
-                    "timestamp": time_service.get_time_info()["server_time"],
+            try:
+                async with AsyncSessionLocal() as db:
+                    try:
+                        portfolio_data = await fetch_portfolio_summary(db)
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
+                        raise
+            except TestnetExchangeUnavailableError as exc:
+                return {
+                    "type": "response",
+                    "success": False,
+                    "error": exc.message,
+                    "data": {
+                        "sync_status": "error",
+                        "data_source": "delta_testnet",
+                        "testnet_connected": False,
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
 
+            if not portfolio_data:
+                return {
+                    "type": "response",
+                    "success": False,
+                    "error": "Delta testnet connection is down",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+
+            portfolio_data = portfolio_service.serialize_portfolio_summary(portfolio_data)
             return {
                 "type": "response",
                 "success": True,
                 "data": portfolio_data,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         elif command == "get_positions":

@@ -298,11 +298,11 @@ class DeltaExchangeTester:
         # API might return {"result": {"candles": [...]}} or {"result": [...]} or just [...]
         candles = []
         if isinstance(response, dict):
-            result = response.get("result")
-            if isinstance(result, dict):
-                candles = result.get("candles", [])
-            elif isinstance(result, list):
-                candles = result
+            payload = response.get("result")
+            if isinstance(payload, dict):
+                candles = payload.get("candles", [])
+            elif isinstance(payload, list):
+                candles = payload
         elif isinstance(response, list):
             candles = response
         

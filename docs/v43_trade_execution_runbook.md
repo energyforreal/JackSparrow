@@ -10,9 +10,9 @@ Operational guide for tuning v43 entry frequency while keeping rollback discipli
 
 | Item | Where to verify | Notes |
 |------|-----------------|--------|
-| `TRADING_MODE` | `.env` / compose | `paper` vs `live` must match intent. |
-| `EXCHANGE_BACKEND` | `.env` | `delta_paper_sim` vs `delta_live` aligned with `TRADING_MODE`. |
-| Delta cluster | `DELTA_EXCHANGE_BASE_URL`, `WEBSOCKET_URL` | India prod vs testnet must match the same cluster (see `.env.example`). |
+| `TRADING_MODE` | `.env` / compose | Must be `testnet` (local paper simulation removed). |
+| `EXCHANGE_BACKEND` | `.env` | Must be `delta_live` (orders hit Delta testnet APIs). |
+| Delta cluster | `DELTA_EXCHANGE_BASE_URL`, `WEBSOCKET_URL` | Must both point at India testnet (see `.env.example`). |
 | Model bundle | `MODEL_DIR`, `AGENT_MODEL_DIR` | Must contain `metadata_v43.json` and the artifact basename below. |
 | v43 artifact | `JACKSPARROW_V43_ARTIFACT_BASENAME` | Default in code: `model_artifact_v43_patched.pkl`. Confirm file exists under `MODEL_DIR`. |
 | Threshold patch | Agent startup logs | When using an unpatched artifact, runtime may still apply a patch — watch for `v43_threshold_patch_applied` or related model-load logs in [`jack_sparrow_v43_node.py`](../agent/models/jack_sparrow_v43_node.py). |
@@ -50,13 +50,42 @@ metadata describes the export as a tradable expected-return model:
 3. **Runtime smoke**: `JackSparrowV43Node.predict()` emits `expected_return`,
    `threshold`, `regime`, `uncertainty`, `unc_scale`, and `closed_bar_features`
    for the exported artifact.
-4. **Paper first**: run the bundle in paper mode and compare `below_threshold`,
+4. **Testnet first**: run the bundle on Delta testnet and compare `below_threshold`,
    `min_edge_cost`, debounce/cap, and regime rejects before moving any execution
    knobs.
 
 The v43 model predicts **simple forward return** over the 120-bar horizon. It is
 not a probability, so all gate tuning should compare expected-return units to
 costs and realized returns.
+
+### Model promotion gate — Pattern 3 (meta-stacking)
+
+When the Colab notebook §4c meta-stacking path is used, the exported bundle includes
+`ensemble.meta` (LGBMClassifier) and `ensemble.calibrator` (Ridge). Confirm in
+`metadata_v43.json`:
+
+| Field | Required value | Notes |
+|-------|----------------|-------|
+| `model_architecture.meta_learner` | `"lgbm_classifier"` | Absent = regressor-mean only (legacy path) |
+| `model_architecture.calibrator` | `"ridge"` | **Must** be present whenever `meta_learner` is set |
+| `validation_metrics.meta_auc` | > 0.50 | Meta direction classifier better than random |
+
+**Why calibrator is mandatory:** `meta.predict_proba` returns values in **[0, 1]**.
+Without the Ridge calibrator, gate-5 compares probability to expected-return thresholds
+and **passes on almost every bar** (signal flood). The shim clips output to **[-0.10, 0.10]**
+as a backstop, but promotion should never ship meta without calibrator.
+
+**Startup checks after deploy:**
+
+1. First prediction cycle: agent logs must **not** contain `v43_shim_meta_failed` or
+   `v43_shim_calibrator_failed`.
+2. Run `python scripts/analyze_v43_gate_rejects.py` — expect a mix of
+   `gates_passed_long` / `gates_passed_short`, not 100% `gates_passed_long`.
+3. Compare `expected_return` in `mcp_orchestrator_v43_prediction_complete` events — values
+   should be small magnitudes (typically |x| < 0.02), not 0.5–0.9.
+
+**Rollback:** set `JACKSPARROW_V43_ARTIFACT_BASENAME=model_artifact_v43.pkl` (pre-meta
+artifact) and restart the agent.
 
 ---
 
@@ -103,9 +132,7 @@ Start small (e.g. `0.00010` = 1 bp in expected_return units) and roll back if qu
 
 Prefer Phases 1–3 before lowering **`AI_SIGNAL_MIN_ENTRY_CONFIDENCE`** (default `0.70`).
 
-**Paper-only validation**: `AI_SIGNAL_MINIMAL_ENTRY_GATES=true` bypasses most legacy filters in the trading handler — use **only in paper** to measure raw throughput; not a live risk posture without review. `risk_manager.validate_trade` still runs on every entry. See [Logic & reasoning](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates).
-
-Optional paper override: `PAPER_TRADE_VALIDATION_MODE=true` with `PAPER_TRADE_VALIDATION_MIN_CONFIDENCE` (see `config.py`).
+**High-throughput validation (testnet only)**: `AI_SIGNAL_MINIMAL_ENTRY_GATES=true` bypasses most legacy filters in the trading handler — use **only on testnet** to measure raw throughput; not a production risk posture without review. `risk_manager.validate_trade` still runs on every entry. See [Logic & reasoning](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates).
 
 ---
 

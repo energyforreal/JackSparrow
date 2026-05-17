@@ -35,8 +35,8 @@ TEST_ENV_VARS = {
     'NEXT_PUBLIC_WS_URL': 'ws://localhost:8000/ws',
     'NEXT_PUBLIC_API_URL': 'http://localhost:8000',
 
-    # Paper Trading Mode
-    'TRADING_MODE': 'PAPER',
+    # Trading runtime (testnet-only; matches agent config enforcement)
+    'TRADING_MODE': 'testnet',
 
     # Logging
     'LOG_LEVEL': 'INFO',

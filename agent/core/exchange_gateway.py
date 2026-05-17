@@ -32,6 +32,10 @@ class ExchangeGateway(ABC):
         """Return Delta-like assets payload."""
 
     @abstractmethod
+    async def get_wallet_balances(self) -> Dict[str, Any]:
+        """Return Delta-like wallet balances payload."""
+
+    @abstractmethod
     async def change_margin(self, product_symbol: str, margin: float) -> Dict[str, Any]:
         """Apply a margin adjustment for a position."""
 
@@ -47,13 +51,23 @@ class DeltaLiveExchangeGateway(ExchangeGateway):
         self._delta_client = delta_client
 
     async def get_positions(self, symbol: Optional[str] = None) -> Dict[str, Any]:
-        return await self._delta_client.get_positions(product_symbol=symbol)
+        if symbol:
+            product_id = await self._delta_client.resolve_product_id(symbol)
+            return await self._delta_client.get_positions(product_id=product_id)
+        return await self._delta_client.get_margined_positions(
+            contract_types="perpetual_futures"
+        )
 
     async def get_margined_positions(self) -> Dict[str, Any]:
-        return await self._delta_client.get_margined_positions()
+        return await self._delta_client.get_margined_positions(
+            contract_types="perpetual_futures"
+        )
 
     async def get_assets(self) -> Dict[str, Any]:
         return await self._delta_client.get_assets()
+
+    async def get_wallet_balances(self) -> Dict[str, Any]:
+        return await self._delta_client.get_wallet_balances()
 
     async def change_margin(self, product_symbol: str, margin: float) -> Dict[str, Any]:
         return await self._delta_client.change_margin(product_symbol=product_symbol, margin=margin)
@@ -198,6 +212,9 @@ class DeltaPaperSimExchangeGateway(ExchangeGateway):
             self._state.set_margined_snapshot(list(current.get("result", [])))
         return {"success": True, "result": self._state.get_margined_snapshot()}
 
+    async def get_wallet_balances(self) -> Dict[str, Any]:
+        return {"success": True, "result": []}
+
     async def get_assets(self) -> Dict[str, Any]:
         base_symbol = str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD")
         asset_code = "".join([ch for ch in base_symbol if ch.isalpha()])[:3] or "BTC"
@@ -275,22 +292,10 @@ def build_exchange_gateway(
     position_reader: Callable[[], Dict[str, Dict[str, Any]]],
     close_position_cb: Callable[[str], Awaitable[Any]],
 ) -> ExchangeGateway:
-    """Construct exchange gateway from config flags."""
-    backend = str(getattr(settings, "exchange_backend", "delta_paper_sim") or "delta_paper_sim").lower()
-    paper_mode = bool(getattr(settings, "paper_trading_mode", True))
-    if paper_mode:
-        return DeltaPaperSimExchangeGateway(
-            position_reader=position_reader,
-            close_position_cb=close_position_cb,
-            margined_view_delay_seconds=float(
-                getattr(settings, "paper_margined_view_delay_seconds", 10.0) or 10.0
-            ),
-        )
-    if backend == "delta_paper_sim":
-        logger.warning(
-            "exchange_backend_paper_sim_ignored_in_live_mode",
-            backend=backend,
-            trading_mode=getattr(settings, "trading_mode", "live"),
-            message="Live mode forces Delta live adapter.",
-        )
+    """Construct Delta live gateway (testnet-only runtime; paper sim removed)."""
+    _ = position_reader
+    _ = close_position_cb
+    backend = str(getattr(settings, "exchange_backend", "delta_live") or "delta_live").lower()
+    if backend != "delta_live":
+        raise ValueError(f"Unsupported EXCHANGE_BACKEND={backend}; only delta_live is allowed")
     return DeltaLiveExchangeGateway(delta_client)

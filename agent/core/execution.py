@@ -7,6 +7,7 @@ and integration with trading venues.
 
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import asyncio
 import math
 import random
@@ -17,7 +18,6 @@ import structlog
 from agent.events.event_bus import event_bus
 from agent.events.schemas import RiskApprovedEvent, OrderFillEvent, PositionClosedEvent, EventType
 from agent.core.config import settings
-from agent.core.context_manager import context_manager
 from agent.core.futures_utils import (
     net_pnl_usd_after_fees,
     net_pnl_usd_after_fees_split_legs,
@@ -29,9 +29,17 @@ from agent.core.futures_utils import (
 from agent.core.sl_tp import (
     compute_stop_take_prices,
     parse_risk_approved_side,
-    rebase_sl_tp_to_fill,
 )
 from agent.core.exchange_gateway import ExchangeGateway
+from agent.core.agent_order_registry import (
+    AGENT_DECISION_AUTHORITY,
+    is_agent_controlled_authority,
+    is_decision_already_executed,
+    record_agent_order_fill,
+    record_agent_order_intent,
+    record_decision_execution,
+)
+from agent.core.ml_signal_guard import validate_ml_entry_signal
 
 logger = structlog.get_logger()
 
@@ -41,13 +49,15 @@ class Order:
 
     def __init__(self, order_id: str, symbol: str, side: str, order_type: str,
                  quantity: float, price: Optional[float] = None,
-                 stop_price: Optional[float] = None, time_in_force: str = "GTC"):
+                 stop_price: Optional[float] = None, time_in_force: str = "GTC",
+                 exchange_order_id: Optional[int] = None):
         self.order_id = order_id
         self.symbol = symbol
         self.side = side  # 'buy' or 'sell'
         self.order_type = order_type  # 'market', 'limit', 'stop', 'stop_limit'
         self.quantity = quantity
         self.price = price  # Limit price for limit orders
+        self.exchange_order_id = exchange_order_id
         self.stop_price = stop_price  # Stop price for stop orders
         self.time_in_force = time_in_force  # 'GTC', 'IOC', 'FOK'
         self.status = "pending"  # 'pending', 'open', 'filled', 'cancelled', 'rejected'
@@ -152,6 +162,21 @@ class PositionManager:
             position.update(position_extras)
             if position_extras.get("paper_usdinr_entry") is not None:
                 position["paper_usdinr_entry"] = float(position_extras["paper_usdinr_entry"])
+            et_override = position_extras.get("entry_time")
+            if et_override is not None:
+                if isinstance(et_override, datetime):
+                    position["entry_time"] = (
+                        et_override.replace(tzinfo=timezone.utc)
+                        if et_override.tzinfo is None
+                        else et_override
+                    )
+                elif isinstance(et_override, str):
+                    try:
+                        position["entry_time"] = datetime.fromisoformat(
+                            et_override.replace("Z", "+00:00")
+                        )
+                    except ValueError:
+                        pass
         # Ensure contract_value wins over extras keys if both present
         position["contract_value_btc"] = contract_value_btc
 
@@ -316,18 +341,14 @@ class ExecutionEngine:
         await self._connect_exchange()
         self._initialized = True
 
-        if getattr(settings, "paper_trading_mode", False):
-            seed = getattr(settings, "paper_trading_random_seed", None)
-            if seed is not None:
-                random.seed(int(seed))
-
         # Subscribe to RiskApprovedEvent for automatic trade execution
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
 
         logger.info("execution_engine_initialized",
                    config=self.execution_config,
                    exchange_connected=self.exchange_connected,
-                   paper_trading_mode=settings.paper_trading_mode,
+                   trading_mode=settings.trading_mode,
+                   delta_env=settings.delta_env,
                    exchange_gateway_class=(
                        self.exchange_gateway.__class__.__name__
                        if self.exchange_gateway is not None
@@ -341,12 +362,15 @@ class ExecutionEngine:
         logger.info("execution_engine_shutdown")
 
     async def _connect_exchange(self):
-        """Connect to trading exchange (mock implementation)."""
+        """Verify Delta testnet connectivity via wallet balances API."""
         try:
-            # Simulate connection delay
-            await asyncio.sleep(0.1)
-            self.exchange_connected = True
-            logger.info("exchange_connected")
+            if self.delta_client:
+                await self.delta_client.get_wallet_balances()
+                self.exchange_connected = True
+                logger.info("exchange_connected", source="delta_wallet_ping")
+            else:
+                self.exchange_connected = False
+                logger.warning("exchange_connection_skipped", reason="no_delta_client")
         except Exception as e:
             logger.error("exchange_connection_failed", error=str(e))
             self.exchange_connected = False
@@ -379,7 +403,7 @@ class ExecutionEngine:
                     side=payload.get("side"),
                     stage="invalid_side",
                     reason="side_must_be_buy_or_sell",
-                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                    trading_mode=str(getattr(settings, "trading_mode", "testnet")),
                 )
                 return
             side_raw = side_upper
@@ -400,7 +424,7 @@ class ExecutionEngine:
                     side=side_raw,
                     stage="invalid_payload",
                     reason="missing_symbol_or_nonpositive_quantity",
-                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                    trading_mode=str(getattr(settings, "trading_mode", "testnet")),
                 )
                 return
 
@@ -423,7 +447,7 @@ class ExecutionEngine:
                     side=side_raw,
                     stage="overlap_open_position",
                     reason="open_position_exists_for_symbol",
-                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                    trading_mode=str(getattr(settings, "trading_mode", "testnet")),
                 )
                 return
 
@@ -471,11 +495,15 @@ class ExecutionEngine:
                 "quantity": quantity,
                 "order_type": "market",
                 "price": price,
+                "reference_price": price,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
+                "execution_authority": AGENT_DECISION_AUTHORITY,
+                "decision_event_id": event.correlation_id or event.event_id,
             }
 
             pex = dict(trade.get("position_extras") or {})
+            pex["agent_controlled"] = True
             if payload.get("contract_value_btc") is not None:
                 try:
                     pex["contract_value_btc"] = float(payload["contract_value_btc"])
@@ -513,7 +541,7 @@ class ExecutionEngine:
                     side=side_raw,
                     stage="invalid_price",
                     reason="price_missing_or_nonpositive",
-                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                    trading_mode=str(getattr(settings, "trading_mode", "testnet")),
                 )
                 return
             trade["price"] = pf
@@ -526,6 +554,46 @@ class ExecutionEngine:
             )
             if eff_reasoning_chain_id:
                 payload["reasoning_chain_id"] = eff_reasoning_chain_id
+                trade["reasoning_chain_id"] = eff_reasoning_chain_id
+
+            if not payload.get("ml_signal_validated"):
+                model_preds = payload.get("model_predictions") or []
+                ml_ok, ml_reason = validate_ml_entry_signal(
+                    signal=side_raw,
+                    side=side_raw,
+                    model_predictions=model_preds,
+                    market_context=payload.get("market_context")
+                    if isinstance(payload.get("market_context"), dict)
+                    else {},
+                    ml_evidence_snapshot=payload.get("ml_evidence_snapshot")
+                    if isinstance(payload.get("ml_evidence_snapshot"), dict)
+                    else None,
+                    policy_verdict=payload.get("policy_verdict")
+                    if isinstance(payload.get("policy_verdict"), dict)
+                    else None,
+                )
+                if not ml_ok:
+                    logger.warning(
+                        "execution_risk_approved_ml_signal_rejected",
+                        symbol=symbol,
+                        side=side_raw,
+                        reason=ml_reason,
+                        event_id=event.event_id,
+                    )
+                    logger.warning(
+                        "trading_execution_rejected",
+                        correlation_id=event.event_id,
+                        symbol=symbol,
+                        side=side_raw,
+                        stage="ml_signal_guard",
+                        reason=ml_reason,
+                        trading_mode=str(getattr(settings, "trading_mode", "testnet")),
+                    )
+                    return
+            trade["ml_signal_validated"] = True
+            trade["ml_signal_source"] = payload.get("ml_signal_source") or "ml_models"
+            if payload.get("model_predictions"):
+                trade["model_predictions"] = payload.get("model_predictions")
 
             result = await self.execute_trade(trade)
 
@@ -544,7 +612,7 @@ class ExecutionEngine:
                     side=side_raw,
                     stage="execute_trade",
                     reason=result.error_message or "execute_trade_failed",
-                    paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                    trading_mode=str(getattr(settings, "trading_mode", "testnet")),
                 )
                 return
 
@@ -561,20 +629,6 @@ class ExecutionEngine:
                 pos["model_predictions"] = payload.get("model_predictions")
                 pos["reasoning_chain_id"] = payload.get("reasoning_chain_id")
                 pos["predicted_signal"] = payload.get("side", "")
-                if settings.paper_trading_mode:
-                    cv_pf = float(
-                        pos.get("contract_value_btc")
-                        or getattr(settings, "contract_value_btc", 0.001)
-                    )
-                    taker_pf = float(getattr(settings, "taker_fee_rate", 0.0005) or 0.0005)
-                    slip_pf = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
-                    pos["entry_fee_usd"] = entry_leg_fees_usd(
-                        float(fill_price),
-                        float(quantity),
-                        cv_pf,
-                        taker_pf,
-                        slip_pf,
-                    )
             if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                 from agent.risk.risk_manager import Position as RMPosition
                 rm_pos = RMPosition(
@@ -592,6 +646,9 @@ class ExecutionEngine:
             order_id = result.order_id or str(uuid.uuid4())[:8]
             trade_id = f"trade_{order_id}_{datetime.now(timezone.utc).timestamp()}"
 
+            ex_raw = result.details.get("exchange_order_id")
+            exchange_order_id = str(ex_raw) if ex_raw is not None else None
+
             order_fill = OrderFillEvent(
                 source="execution_engine",
                 correlation_id=event.event_id,
@@ -605,43 +662,21 @@ class ExecutionEngine:
                     "stop_loss": stop_loss,
                     "take_profit": take_profit,
                     "timestamp": datetime.now(timezone.utc),
+                    "exchange_order_id": exchange_order_id,
+                    "client_order_id": f"js_{order_id}",
+                    "reasoning_chain_id": payload.get("reasoning_chain_id"),
                 },
             )
             await event_bus.publish(order_fill)
 
-            if settings.paper_trading_mode:
-                from agent.core.paper_trade_logger import paper_trade_logger
-                from agent.core.paper_trade_entry import (
-                    compute_paper_entry_ledger,
-                    resolve_paper_usdinr_rate,
-                )
+            v43_bar = payload.get("v43_closed_bar_index")
+            if v43_bar is not None:
+                try:
+                    from agent.core.mcp_orchestrator import mcp_orchestrator
 
-                rate = await resolve_paper_usdinr_rate(payload.get("usd_inr_rate"))
-                contract_value_btc = float(
-                    (pos or {}).get("contract_value_btc")
-                    or getattr(settings, "contract_value_btc", 0.001)
-                )
-                ef_raw = (pos or {}).get("entry_fee_usd")
-                entry_fee_opt = float(ef_raw) if ef_raw is not None else None
-                trade_value_inr, fees_inr_open, _ = compute_paper_entry_ledger(
-                    quantity=float(quantity),
-                    fill_price=float(fill_price),
-                    contract_value_btc=contract_value_btc,
-                    usd_inr_rate=rate,
-                    entry_fee_usd=entry_fee_opt,
-                )
-                paper_trade_logger.log_trade(
-                    trade_id=trade_id,
-                    symbol=symbol,
-                    side=side_raw,
-                    quantity=quantity,
-                    fill_price=fill_price,
-                    order_id=order_id,
-                    reasoning_chain_id=payload.get("reasoning_chain_id"),
-                    usd_inr_rate=rate,
-                    trade_value_inr=trade_value_inr,
-                    fees_inr=fees_inr_open,
-                )
+                    mcp_orchestrator.record_v43_trade_executed(int(v43_bar))
+                except Exception:
+                    pass
 
             logger.info(
                 "execution_order_fill_published",
@@ -664,7 +699,7 @@ class ExecutionEngine:
                 "execution_failed",
                 correlation_id=event.event_id,
                 error=str(e),
-                paper_trading_mode=bool(getattr(settings, "paper_trading_mode", False)),
+                trading_mode=str(getattr(settings, "trading_mode", "testnet")),
             )
 
     async def execute_trade(self, trade: Dict[str, Any]) -> ExecutionResult:
@@ -681,11 +716,65 @@ class ExecutionEngine:
             return ExecutionResult(False, error_message="Execution engine not initialized")
 
         if not self.exchange_connected:
-            return ExecutionResult(False, error_message="Exchange not connected")
+            return ExecutionResult(
+                False,
+                error_message="Delta testnet connection is down; trading halted",
+            )
 
         symbol = str(trade.get("symbol") or "").strip()
         if not symbol:
             return ExecutionResult(False, error_message="Missing required trade parameter: symbol")
+
+        execution_authority = trade.get("execution_authority")
+        agent_only = bool(getattr(settings, "agent_only_delta_orders", True))
+        block_manual = bool(getattr(settings, "block_manual_execute_trade", True))
+        if agent_only and block_manual and not is_agent_controlled_authority(execution_authority):
+            logger.warning(
+                "trade_execution_rejected_non_agent_authority",
+                symbol=symbol,
+                execution_authority=execution_authority,
+            )
+            return ExecutionResult(
+                False,
+                error_message=(
+                    "Only autonomous agent decisions may place Delta orders "
+                    "(AGENT_ONLY_DELTA_ORDERS)."
+                ),
+            )
+
+        if bool(getattr(settings, "require_ml_signal_for_orders", True)):
+            if not trade.get("ml_signal_validated"):
+                logger.warning(
+                    "trade_execution_rejected_no_ml_signal",
+                    symbol=symbol,
+                    execution_authority=execution_authority,
+                )
+                return ExecutionResult(
+                    False,
+                    error_message=(
+                        "Entry orders require a validated ML model signal "
+                        "(REQUIRE_ML_SIGNAL_FOR_ORDERS)."
+                    ),
+                )
+
+        if is_agent_controlled_authority(execution_authority):
+            pex_auth = dict(trade.get("position_extras") or {})
+            pex_auth["agent_controlled"] = True
+            trade["position_extras"] = pex_auth
+
+        decision_event_id = trade.get("decision_event_id")
+        if is_agent_controlled_authority(execution_authority) and is_decision_already_executed(
+            decision_event_id
+        ):
+            logger.warning(
+                "duplicate_decision_entry_blocked",
+                symbol=symbol,
+                decision_event_id=decision_event_id,
+            )
+            return ExecutionResult(
+                False,
+                error_message=f"Duplicate decision_event_id: {decision_event_id}",
+            )
 
         async with self._inflight_lock:
             if symbol in self._inflight_symbols:
@@ -694,6 +783,8 @@ class ExecutionEngine:
                     error_message=f"Trade already in progress for {symbol}",
                 )
             self._inflight_symbols.add(symbol)
+
+        trade["submitted_at_monotonic"] = time.perf_counter()
 
         try:
             side = trade["side"]  # 'buy' or 'sell'
@@ -742,14 +833,20 @@ class ExecutionEngine:
             ):
                 # Close opposite position first
                 await self.close_position(symbol, order_type="market")
-                # In paper mode, allow a fresh ticker for the open leg so close and open use different fill prices
-                if settings.paper_trading_mode:
-                    await asyncio.sleep(0.05)
 
             # Validate trade parameters (after potential position close)
             validation_result = await self._validate_trade(trade)
             if not validation_result["valid"]:
                 return ExecutionResult(False, error_message=validation_result["error"])
+
+            if is_agent_controlled_authority(execution_authority):
+                record_agent_order_intent(
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    execution_authority=str(execution_authority),
+                    reasoning_chain_id=trade.get("reasoning_chain_id"),
+                )
 
             # Execute the order
             order_result = await self._place_order(
@@ -767,7 +864,13 @@ class ExecutionEngine:
 
             # If order was filled immediately, update position
             if order_result["filled_immediately"]:
-                fill_price = order_result["average_fill_price"]
+                raw_fill = order_result.get("average_fill_price")
+                if raw_fill is None:
+                    return ExecutionResult(
+                        False,
+                        error_message="Order filled but no average_fill_price returned",
+                    )
+                fill_price = float(raw_fill)
                 pex = trade.get("position_extras") or {}
                 tick_sz: Optional[float] = None
                 if pex.get("tick_size") is not None:
@@ -775,18 +878,6 @@ class ExecutionEngine:
                         tick_sz = float(pex["tick_size"])
                     except (TypeError, ValueError):
                         tick_sz = None
-                if settings.paper_trading_mode and price is not None and fill_price is not None:
-                    try:
-                        pe = float(price)
-                        fp = float(fill_price)
-                        if pe > 0:
-                            stop_loss, take_profit = rebase_sl_tp_to_fill(
-                                pe, fp, stop_loss, take_profit, tick_sz
-                            )
-                            trade["stop_loss"] = stop_loss
-                            trade["take_profit"] = take_profit
-                    except (TypeError, ValueError):
-                        pass
                 position = self.position_manager.open_position(
                     symbol=symbol,
                     side="long" if side == "buy" else "short",
@@ -803,26 +894,21 @@ class ExecutionEngine:
                     except Exception as e:
                         logger.debug("exchange_gateway_register_open_failed", error=str(e), symbol=symbol)
 
-                # Place stop loss and take profit orders if specified
-                if stop_loss:
-                    await self._place_stop_order(
-                        symbol,
-                        "sell" if side == "buy" else "buy",
-                        quantity,
-                        stop_loss,
-                        "stop_loss",
-                        tick_size=tick_sz,
+                if is_agent_controlled_authority(execution_authority):
+                    record_agent_order_fill(
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        fill_price=fill_price,
+                        execution_authority=str(execution_authority),
+                        internal_order_id=order_id,
+                        exchange_order_id=order_result.get("exchange_order_id"),
+                        client_order_id=f"js_{order_id}",
+                        reduce_only=False,
+                        reasoning_chain_id=trade.get("reasoning_chain_id"),
                     )
 
-                if take_profit:
-                    await self._place_limit_order(
-                        symbol,
-                        "sell" if side == "buy" else "buy",
-                        quantity,
-                        take_profit,
-                        "take_profit",
-                        tick_size=tick_sz,
-                    )
+                # SL/TP are monitored in software (manage_position); Delta bracket orders are not placed.
 
             result = ExecutionResult(True, order_id=order_id)
             result.details = {
@@ -835,12 +921,46 @@ class ExecutionEngine:
                 "position_opened": order_result["filled_immediately"]
             }
 
-            logger.info("trade_executed",
-                       symbol=symbol,
-                       side=side,
-                       quantity=quantity,
-                       order_id=order_id,
-                       filled_immediately=order_result["filled_immediately"])
+            base_url = getattr(self.delta_client, "base_url", None) if self.delta_client else None
+            log_extra: Dict[str, Any] = {}
+            ref_price = trade.get("reference_price") or trade.get("price")
+            fill_px = order_result.get("average_fill_price")
+            if ref_price is not None and fill_px is not None:
+                try:
+                    ref_f = float(ref_price)
+                    fill_f = float(fill_px)
+                    if ref_f > 0:
+                        slip_bps = (fill_f - ref_f) / ref_f * 10000.0
+                        if side == "sell":
+                            slip_bps = -slip_bps
+                        log_extra["execution_slippage_bps"] = round(slip_bps, 4)
+                        log_extra["reference_price"] = ref_f
+                except (TypeError, ValueError):
+                    pass
+            submitted_at = trade.get("submitted_at_monotonic")
+            if submitted_at is not None:
+                try:
+                    log_extra["execution_latency_ms"] = round(
+                        (time.perf_counter() - float(submitted_at)) * 1000.0, 2
+                    )
+                except (TypeError, ValueError):
+                    pass
+            if is_agent_controlled_authority(execution_authority):
+                record_decision_execution(decision_event_id)
+
+            logger.info(
+                "trade_executed",
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_id=order_id,
+                exchange_order_id=order_result.get("exchange_order_id"),
+                delta_exchange_base_url=base_url,
+                filled_immediately=order_result["filled_immediately"],
+                average_fill_price=order_result.get("average_fill_price"),
+                decision_event_id=decision_event_id,
+                **log_extra,
+            )
 
             return result
 
@@ -918,11 +1038,18 @@ class ExecutionEngine:
                 side=close_side,
                 quantity=position.get("lots", position.get("quantity", 0)),
                 order_type=order_type,
-                price=price
+                price=price,
+                reduce_only=True,
             )
 
             if order_result["success"] and order_result.get("filled_immediately", False):
-                exit_price = float(order_result["average_fill_price"])
+                raw_exit = order_result.get("average_fill_price")
+                if raw_exit is None:
+                    return ExecutionResult(
+                        False,
+                        error_message="Close order filled but no average_fill_price returned",
+                    )
+                exit_price = float(raw_exit)
                 if exit_price <= 0 or not math.isfinite(exit_price):
                     logger.error("close_aborted_invalid_exit_price", symbol=symbol, exit_price=exit_price)
                     return ExecutionResult(False, error_message="Invalid exit fill price")
@@ -991,6 +1118,7 @@ class ExecutionEngine:
                 notional_usd_entry = lots * entry_px * cv
                 fx_pnl_inr = notional_usd_entry * (usdinr_exit - usdinr_entry)
 
+                exit_ex = order_result.get("exchange_order_id")
                 payload_data: Dict[str, Any] = {
                     "position_id": position_id,
                     "symbol": symbol,
@@ -1006,6 +1134,7 @@ class ExecutionEngine:
                     "fx_pnl_inr": fx_pnl_inr,
                     "exit_reason": exit_reason,
                     "timestamp": datetime.now(timezone.utc),
+                    "exchange_order_id": str(exit_ex) if exit_ex is not None else None,
                 }
                 if model_predictions is not None:
                     payload_data["model_predictions"] = model_predictions
@@ -1020,54 +1149,6 @@ class ExecutionEngine:
                     payload=payload_data,
                 )
                 await event_bus.publish(pos_closed)
-
-                if settings.paper_trading_mode:
-                    from agent.core.paper_trade_logger import paper_trade_logger
-                    from decimal import Decimal, ROUND_HALF_UP
-
-                    fees_for_close_inr = (
-                        fees_exit_usd * usdinr_exit
-                        if mode != "round_trip"
-                        else fees_usd * usdinr_exit
-                    )
-                    fees_inr = Decimal(str(fees_for_close_inr)).quantize(
-                        Decimal("0.01"), rounding=ROUND_HALF_UP
-                    )
-                    net_pnl_inr = Decimal(str(net_usd * usdinr_exit)).quantize(
-                        Decimal("0.01"), rounding=ROUND_HALF_UP
-                    )
-                    margin_usd = (lots * entry_px * cv) / max(
-                        1, int(getattr(settings, "isolated_margin_leverage", 5) or 5)
-                    )
-                    pnl_pct_margin = (net_usd / margin_usd) * 100.0 if margin_usd > 0 else 0.0
-                    duration_seconds = None
-                    if isinstance(position.get("entry_time"), datetime):
-                        duration_seconds = (
-                            datetime.now(timezone.utc) - position["entry_time"]
-                        ).total_seconds()
-                    paper_trade_logger.log_position_close(
-                        position_id=position_id,
-                        symbol=symbol,
-                        side=position["side"],
-                        entry_price=position["entry_price"],
-                        exit_price=exit_price,
-                        quantity=position.get("lots", position.get("quantity", 0)),
-                        pnl=net_usd,
-                        exit_reason=exit_reason,
-                        fees_inr=float(fees_inr),
-                        net_pnl_inr=float(net_pnl_inr),
-                        usd_inr_rate=usdinr_exit,
-                        duration_seconds=duration_seconds,
-                        gross_pnl_usd=gross_usd,
-                        usdinr_at_entry=usdinr_entry,
-                        fx_pnl_inr=float(
-                            Decimal(str(fx_pnl_inr)).quantize(
-                                Decimal("0.01"), rounding=ROUND_HALF_UP
-                            )
-                        ),
-                        pnl_pct_on_margin=pnl_pct_margin,
-                        reasoning_chain_id=reasoning_chain_id,
-                    )
 
                 return ExecutionResult(True, order_id=order_result.get("order_id"))
 
@@ -1120,6 +1201,213 @@ class ExecutionEngine:
             return await self.exchange_gateway.get_assets()
         return {"success": True, "result": []}
 
+    async def get_wallet_balances_view(self) -> Dict[str, Any]:
+        """Return wallet balances from active gateway."""
+        if self.exchange_gateway:
+            return await self.exchange_gateway.get_wallet_balances()
+        return {"success": True, "result": []}
+
+    async def get_exchange_portfolio_snapshot(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """Fetch margined positions, wallet balances, and optional order history from testnet."""
+        symbol = symbol or str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD")
+        margined = await self.get_margined_positions_view()
+        wallet = await self.get_wallet_balances_view()
+        assets = await self.get_assets_view()
+        order_history: Dict[str, Any] = {"success": True, "result": []}
+        if self.delta_client:
+            try:
+                product_id = await self.delta_client.resolve_product_id(symbol)
+                order_history = await self.delta_client.get_orders_history(
+                    product_ids=str(product_id),
+                    page_size=50,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "exchange_portfolio_order_history_failed",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+        return {
+            "success": True,
+            "margined_positions": margined,
+            "wallet_balances": wallet,
+            "assets": assets,
+            "order_history": order_history,
+        }
+
+    async def adopt_exchange_position(
+        self,
+        symbol: str,
+        row: Dict[str, Any],
+    ) -> bool:
+        """Register an exchange margined leg in position_manager for SL/TP monitoring."""
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return False
+        existing = self.position_manager.get_position(sym)
+        if existing and str(existing.get("status") or "").lower() == "open":
+            return False
+
+        signed_size = float(row.get("size") or 0)
+        lots = abs(signed_size)
+        if lots <= 0:
+            return False
+
+        entry_price = float(row.get("entry_price") or row.get("avg_entry_price") or 0)
+        if entry_price <= 0:
+            mark = float(row.get("mark_price") or row.get("index_price") or 0)
+            entry_price = mark if mark > 0 else 0.0
+        if entry_price <= 0:
+            logger.warning("adopt_exchange_position_no_entry_price", symbol=sym)
+            return False
+
+        side_pm = "long" if signed_size >= 0 else "short"
+        side_risk = "BUY" if side_pm == "long" else "SELL"
+        stop_loss, take_profit = compute_stop_take_prices(
+            entry_price,
+            side_risk,
+            float(settings.stop_loss_percentage),
+            float(settings.take_profit_percentage),
+            use_atr_scaled=False,
+            atr_14=None,
+            atr_sl_mult=float(getattr(settings, "atr_sl_distance_mult", 1.0) or 1.0),
+            atr_tp_mult=float(getattr(settings, "atr_tp_distance_mult", 1.5) or 1.5),
+            tick_size=None,
+        )
+
+        created = row.get("created_at") or row.get("updated_at")
+        entry_time: Optional[datetime] = None
+        if isinstance(created, datetime):
+            entry_time = created
+        elif isinstance(created, str):
+            try:
+                entry_time = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except ValueError:
+                entry_time = None
+
+        cv = float(getattr(settings, "contract_value_btc", 0.001))
+        product = row.get("product")
+        if isinstance(product, dict) and product.get("contract_value") is not None:
+            try:
+                cv = float(product["contract_value"])
+            except (TypeError, ValueError):
+                pass
+
+        order_id = f"reconcile_{row.get('id') or sym}"
+        extras: Dict[str, Any] = {
+            "contract_value_btc": cv,
+            "exchange_reconciled": True,
+            "exchange_position_id": row.get("id"),
+            "agent_controlled": True,
+        }
+        if entry_time is not None:
+            extras["entry_time"] = entry_time
+
+        self.position_manager.open_position(
+            symbol=sym,
+            side=side_pm,
+            quantity=lots,
+            entry_price=entry_price,
+            order_id=str(order_id)[:32],
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            position_extras=extras,
+        )
+
+        if self.exchange_gateway and hasattr(self.exchange_gateway, "register_position_opened"):
+            pos = self.position_manager.get_position(sym)
+            if pos:
+                try:
+                    getattr(self.exchange_gateway, "register_position_opened")(pos)
+                except Exception as exc:
+                    logger.debug(
+                        "adopt_exchange_register_gateway_failed",
+                        symbol=sym,
+                        error=str(exc),
+                    )
+
+        logger.info(
+            "exchange_position_adopted",
+            symbol=sym,
+            side=side_pm,
+            lots=lots,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+        )
+        return True
+
+    async def close_exchange_position(
+        self,
+        symbol: str,
+        *,
+        row: Optional[Dict[str, Any]] = None,
+        exit_reason: str = "exchange_reconcile",
+    ) -> "ExecutionResult":
+        """Flatten an exchange leg with reduce-only order (no local position required)."""
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return ExecutionResult(False, error_message="missing_symbol")
+
+        if row is None:
+            try:
+                view = await self.get_margined_positions_view()
+            except Exception as exc:
+                return ExecutionResult(False, error_message=f"fetch_failed:{exc}")
+            from agent.core.position_reconcile import exchange_open_symbols, parse_margined_rows
+
+            ex_map = exchange_open_symbols(parse_margined_rows(view))
+            row = ex_map.get(sym)
+            if not row:
+                return ExecutionResult(False, error_message=f"no_exchange_position_for_{sym}")
+
+        signed_size = float(row.get("size") or 0)
+        lots = abs(signed_size)
+        if lots <= 0:
+            return ExecutionResult(False, error_message="zero_size")
+
+        close_side = "sell" if signed_size > 0 else "buy"
+        async with self._position_lock:
+            order_result = await self._place_order(
+                symbol=sym,
+                side=close_side,
+                quantity=lots,
+                order_type="market",
+                reduce_only=True,
+            )
+            if not order_result.get("success"):
+                return ExecutionResult(
+                    False,
+                    error_message=order_result.get("error", "close_order_failed"),
+                )
+
+            local = self.position_manager.get_position(sym)
+            if local and str(local.get("status") or "").lower() == "open":
+                fill = order_result.get("average_fill_price")
+                if fill is not None:
+                    await self._close_position_impl(
+                        sym,
+                        "market",
+                        float(fill),
+                        exit_reason,
+                    )
+                else:
+                    self.position_manager.close_position(
+                        sym,
+                        float(local.get("current_price") or local.get("entry_price") or 0),
+                        str(order_result.get("order_id") or "reconcile"),
+                    )
+
+            logger.info(
+                "exchange_position_closed",
+                symbol=sym,
+                lots=lots,
+                side=close_side,
+                exit_reason=exit_reason,
+                exchange_order_id=order_result.get("exchange_order_id"),
+            )
+            return ExecutionResult(True, order_id=order_result.get("order_id"))
+
     async def change_position_margin(self, symbol: str, margin_delta: float) -> Dict[str, Any]:
         """Change margin for a symbol using active gateway."""
         if not self.exchange_gateway:
@@ -1160,74 +1448,6 @@ class ExecutionEngine:
         current_price = position.get("current_price", position["entry_price"])
         entry_price = position["entry_price"]
 
-        # Paper isolated margin: liquidate when equity falls below maintenance margin
-        if settings.paper_trading_mode and bool(
-            getattr(settings, "enable_paper_liquidation", True)
-        ):
-            try:
-                lev_pm = max(1, int(getattr(settings, "isolated_margin_leverage", 5) or 5))
-                cv_pm = float(
-                    position.get("contract_value_btc")
-                    or getattr(settings, "contract_value_btc", 0.001)
-                )
-                lots_pm = float(position.get("lots", position.get("quantity", 0)))
-                ep_pm = float(entry_price)
-                if (
-                    lots_pm > 0
-                    and ep_pm > 0
-                    and cv_pm > 0
-                    and math.isfinite(float(current_price))
-                ):
-                    notional_usd = lots_pm * ep_pm * cv_pm
-                    initial_margin_usd = notional_usd / lev_pm
-                    if self.exchange_gateway:
-                        try:
-                            margined = await self.get_margined_positions_view()
-                            rows = margined.get("result", []) if isinstance(margined, dict) else []
-                            for row in rows:
-                                if (
-                                    isinstance(row, dict)
-                                    and str(row.get("product_symbol", "")) == str(position_symbol)
-                                    and row.get("margin") is not None
-                                ):
-                                    initial_margin_usd = float(row.get("margin"))
-                                    break
-                        except Exception as e:
-                            logger.debug(
-                                "paper_liquidation_margin_view_fallback",
-                                symbol=position_symbol,
-                                error=str(e),
-                            )
-                    upl = float(position.get("unrealized_pnl", 0.0))
-                    eq = isolated_equity_usd(initial_margin_usd, upl)
-                    maint_frac = float(
-                        getattr(settings, "maintenance_fraction_of_initial", 0.5) or 0.5
-                    )
-                    maintenance_usd = initial_margin_usd * max(0.0, min(1.0, maint_frac))
-                    if eq < maintenance_usd:
-                        close_result = await self.close_position(
-                            position_symbol, exit_reason="liquidation"
-                        )
-                        if close_result.success:
-                            return {
-                                "symbol": position_symbol,
-                                "actions_taken": [
-                                    {
-                                        "action": "liquidation",
-                                        "symbol": position_symbol,
-                                        "exit_price": current_price,
-                                        "equity_usd": eq,
-                                        "maintenance_usd": maintenance_usd,
-                                    }
-                                ],
-                                "position_status": "closed",
-                            }
-            except Exception as e:
-                logger.warning(
-                    "paper_liquidation_check_failed",
-                    symbol=position_symbol,
-                    error=str(e),
-                )
         trail_pct = getattr(settings, "trailing_stop_percentage", 0.015) or 0.015
         act_pct = float(
             getattr(settings, "trailing_stop_activation_profit_pct", 0.0) or 0.0
@@ -1341,15 +1561,22 @@ class ExecutionEngine:
 
         return {"valid": True}
 
+    @staticmethod
+    def _parse_delta_order_result(result: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize Delta place_order response to a single order dict."""
+        payload = result.get("result") if isinstance(result, dict) else None
+        if not isinstance(payload, dict):
+            return {}
+        nested = payload.get("order")
+        if isinstance(nested, dict):
+            return nested
+        return payload
+
     async def _place_order(self, symbol: str, side: str, quantity: float,
                           order_type: str, price: Optional[float] = None,
-                          stop_price: Optional[float] = None) -> Dict[str, Any]:
-        """Place an order with the exchange.
-
-        In paper trading mode: fetches current price from Delta ticker,
-        simulates fill without calling place_order. Fails if ticker price unavailable.
-        In live mode: calls delta_client.place_order().
-        """
+                          stop_price: Optional[float] = None,
+                          reduce_only: bool = False) -> Dict[str, Any]:
+        """Place a market/limit order on Delta testnet via delta_client.place_order()."""
         try:
             order_id = str(uuid.uuid4())[:8]
 
@@ -1365,54 +1592,69 @@ class ExecutionEngine:
             await asyncio.sleep(0.05)
 
             if order_type == "market":
-                # Get fill price: paper mode uses ticker; live uses real order
-                if settings.paper_trading_mode:
-                    base_price = await self._get_fill_price_paper(symbol, price_hint=price)
-                    max_pct = self.execution_config["max_slippage_percent"] / 100.0
-                    slippage_pct = random.uniform(0.1 * max_pct, max_pct)
-                    half_spread = getattr(settings, "half_spread_pct", 0.0002)
-                    if side == "buy":
-                        fill_price = base_price * (1 + half_spread + slippage_pct)
-                    else:
-                        fill_price = base_price * (1 - half_spread - slippage_pct)
-                    order.update_fill(quantity, fill_price)
+                if self.delta_client:
+                    client_order_id = f"js_{order_id}"
+                    result = await self.delta_client.place_order(
+                        symbol=symbol,
+                        side=side.upper(),
+                        quantity=quantity,
+                        order_type="MARKET",
+                        reduce_only=reduce_only,
+                        client_order_id=client_order_id,
+                    )
+                    order_obj = self._parse_delta_order_result(result)
+                    exchange_order_id = order_obj.get("id")
+                    if exchange_order_id is not None:
+                        try:
+                            order.exchange_order_id = int(exchange_order_id)
+                        except (TypeError, ValueError):
+                            pass
+
+                    fill_price: Optional[float] = None
+                    # Market fills must not use limit_price (bracket metadata can be stale).
+                    fill_keys = ("average_fill_price", "avg_fill_price", "price")
+                    if str(order_type).lower() != "market":
+                        fill_keys = fill_keys + ("limit_price",)
+                    for key in fill_keys:
+                        raw = order_obj.get(key)
+                        if raw is not None:
+                            try:
+                                fill_price = float(raw)
+                                break
+                            except (TypeError, ValueError):
+                                continue
+                    if fill_price is None and price is not None and price > 0:
+                        fill_price = float(price)
+                    state = str(order_obj.get("state") or "").lower()
+                    filled_immediately = state in ("closed", "filled")
+                    if filled_immediately and fill_price is None:
+                        raise ValueError(
+                            "Exchange order returned no fill price and no price parameter provided"
+                        )
+                    if fill_price is not None:
+                        order.update_fill(quantity, fill_price)
+                    base_url = getattr(self.delta_client, "base_url", None)
+                    logger.info(
+                        "delta_testnet_order_placed",
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        reduce_only=reduce_only,
+                        exchange_order_id=order.exchange_order_id,
+                        delta_exchange_base_url=base_url,
+                        filled_immediately=filled_immediately,
+                        average_fill_price=fill_price,
+                        exchange_state=state or None,
+                    )
                     return {
                         "success": True,
                         "order_id": order_id,
-                        "filled_immediately": True,
+                        "exchange_order_id": order.exchange_order_id,
+                        "filled_immediately": filled_immediately,
                         "average_fill_price": fill_price,
-                        "slippage_percent": abs(fill_price - base_price) / base_price * 100 if base_price else 0,
+                        "exchange_state": state or None,
                     }
-                else:
-                    # Live trading
-                    if self.delta_client:
-                        result = await self.delta_client.place_order(
-                            symbol=symbol,
-                            side=side.upper(),
-                            quantity=quantity,
-                            order_type="MARKET",
-                        )
-                        if result.get("result") and result["result"].get("order", {}).get("average_fill_price"):
-                            fill_price = float(result["result"]["order"]["average_fill_price"])
-                        elif price is not None and price > 0:
-                            fill_price = price
-                        else:
-                            order_price = result.get("result", {}).get("order", {}).get("price")
-                            if order_price is not None:
-                                fill_price = float(order_price)
-                            else:
-                                raise ValueError(
-                                    "Live order returned no fill price and no price parameter provided"
-                                )
-                        order.update_fill(quantity, fill_price)
-                        return {
-                            "success": True,
-                            "order_id": order_id,
-                            "filled_immediately": True,
-                            "average_fill_price": fill_price,
-                    }
-                    else:
-                        return {"success": False, "error": "Delta client not configured for live trading"}
+                return {"success": False, "error": "Delta client not configured for testnet trading"}
 
             else:
                 self.order_manager.add_order(order)
@@ -1432,132 +1674,6 @@ class ExecutionEngine:
                 "success": False,
                 "error": f"Order placement failed: {str(e)}"
             }
-
-    def _anchor_paper_reference_mid(
-        self,
-        symbol: str,
-        ticker_mid: float,
-        price_hint: Optional[float],
-    ) -> float:
-        """Clamp ticker mid to within max_slippage_percent of approval/reference price (when hint set)."""
-        if price_hint is None:
-            return ticker_mid
-        try:
-            hint = float(price_hint)
-        except (TypeError, ValueError):
-            return ticker_mid
-        if hint <= 0 or not math.isfinite(hint) or not math.isfinite(ticker_mid):
-            return ticker_mid
-        max_frac = float(self.execution_config.get("max_slippage_percent", 0.5)) / 100.0
-        lo = hint * (1.0 - max_frac)
-        hi = hint * (1.0 + max_frac)
-        anchored = min(hi, max(lo, ticker_mid))
-        if abs(anchored - ticker_mid) > 1e-9:
-            logger.debug(
-                "paper_fill_reference_mid_clamped_to_hint_band",
-                symbol=symbol,
-                ticker_mid=ticker_mid,
-                price_hint=hint,
-                anchored_mid=anchored,
-                max_slippage_percent=self.execution_config.get("max_slippage_percent"),
-            )
-        return anchored
-
-    async def _get_fill_price_paper(
-        self, symbol: str, price_hint: Optional[float] = None
-    ) -> float:
-        """Reference mid for paper fill: Delta ticker (freshness-checked), clamped to hint band.
-
-        If ticker cannot be used but ``price_hint`` is a valid positive price, returns the hint
-        and logs ``paper_fill_price_ticker_unavailable_using_hint`` (audit/reconciliation).
-        """
-        if not self.delta_client:
-            if price_hint is not None:
-                try:
-                    h = float(price_hint)
-                    if h > 0 and math.isfinite(h):
-                        logger.warning(
-                            "paper_fill_price_ticker_unavailable_using_hint",
-                            symbol=symbol,
-                            reason="no_delta_client",
-                            price_hint=h,
-                        )
-                        return h
-                except (TypeError, ValueError):
-                    pass
-            raise ValueError("Delta client not configured; cannot get fill price for paper trade")
-
-        try:
-            ticker = await self.delta_client.get_ticker(symbol)
-            result = ticker.get("result") or ticker
-            if not isinstance(result, dict):
-                raise ValueError(f"Ticker returned invalid data for {symbol}")
-            ticker_ts_raw = result.get("timestamp")
-            if ticker_ts_raw is None:
-                raise ValueError(f"Ticker for {symbol} has no timestamp; cannot validate freshness")
-
-            ticker_ts = float(ticker_ts_raw)
-            if ticker_ts > 1e10:
-                ticker_ts /= 1000.0
-
-            max_age_s = float(getattr(settings, "paper_ticker_max_age_seconds", 10.0) or 10.0)
-            age_s = time.time() - ticker_ts
-            if age_s > max_age_s:
-                if getattr(settings, "paper_fill_price_fallback_enabled", True):
-                    context_price = self._get_context_price(symbol)
-                    if context_price is not None and context_price > 0:
-                        logger.warning(
-                            "paper_fill_price_fallback_used",
-                            symbol=symbol,
-                            ticker_age_s=round(age_s, 3),
-                            max_age_s=max_age_s,
-                            fallback_price=context_price,
-                        )
-                        mid = float(context_price)
-                        return self._anchor_paper_reference_mid(symbol, mid, price_hint)
-                raise ValueError(
-                    f"Stale ticker for {symbol}, age={age_s:.1f}s (max={max_age_s:.1f}s)"
-                )
-            mark = result.get("mark_price")
-            close = result.get("close")
-            raw = float(mark) if mark is not None else (float(close) if close is not None else None)
-            if raw is None:
-                raise ValueError(f"Ticker has no mark_price/close for {symbol}")
-            mid = self._anchor_paper_reference_mid(symbol, raw, price_hint)
-            return mid
-        except Exception as exc:
-            if price_hint is not None:
-                try:
-                    h = float(price_hint)
-                    if h > 0 and math.isfinite(h):
-                        logger.warning(
-                            "paper_fill_price_ticker_unavailable_using_hint",
-                            symbol=symbol,
-                            reason=str(exc),
-                            price_hint=h,
-                        )
-                        return h
-                except (TypeError, ValueError):
-                    pass
-            raise
-
-    def _get_context_price(self, symbol: str) -> Optional[float]:
-        """Best-effort fallback to latest in-memory market price."""
-        try:
-            state = context_manager.get_state()
-            if state and hasattr(state, "config") and isinstance(state.config, dict):
-                md = state.config.get("market_data", {})
-                if isinstance(md, dict):
-                    price = md.get("price")
-                    if price is not None:
-                        return float(price)
-            if state and hasattr(state, "market_data") and isinstance(state.market_data, dict):
-                price = state.market_data.get("price")
-                if price is not None:
-                    return float(price)
-        except Exception:
-            return None
-        return None
 
     async def _place_stop_order(
         self,
@@ -1619,9 +1735,59 @@ class ExecutionEngine:
 
         return None
 
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel an open order."""
+    async def cancel_order(self, order_id: str, symbol: Optional[str] = None) -> bool:
+        """Cancel an open order (exchange API in live mode, local OrderManager otherwise)."""
+        order = self.order_manager.get_order(order_id)
+        sym = symbol or (order.symbol if order else None)
+
+        if self.delta_client and sym:
+            exchange_id: Optional[int] = None
+            if order and order.exchange_order_id is not None:
+                exchange_id = int(order.exchange_order_id)
+            else:
+                try:
+                    exchange_id = int(order_id)
+                except (TypeError, ValueError):
+                    exchange_id = None
+            if exchange_id is not None:
+                try:
+                    product_id = await self.delta_client.resolve_product_id(sym)
+                    await self.delta_client.cancel_order(
+                        exchange_id, product_id=product_id
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "exchange_cancel_order_failed",
+                        order_id=order_id,
+                        exchange_order_id=exchange_id,
+                        symbol=sym,
+                        error=str(exc),
+                    )
+                    return False
+
         return self.order_manager.cancel_order(order_id)
+
+    async def cancel_all_orders(self, symbol: str) -> Dict[str, Any]:
+        """Cancel all open orders for a symbol on the exchange (live mode)."""
+        if not self.delta_client:
+            open_orders = self.order_manager.get_open_orders()
+            cancelled = 0
+            for oid, ord_obj in list(open_orders.items()):
+                if ord_obj.symbol == symbol and self.order_manager.cancel_order(oid):
+                    cancelled += 1
+            return {"success": True, "cancelled_count": cancelled}
+
+        try:
+            product_id = await self.delta_client.resolve_product_id(symbol)
+            result = await self.delta_client.cancel_all_orders(product_id=product_id)
+            return {"success": True, "result": result}
+        except Exception as exc:
+            logger.error(
+                "exchange_cancel_all_orders_failed",
+                symbol=symbol,
+                error=str(exc),
+            )
+            return {"success": False, "error": str(exc)}
 
     async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
         """Get status of an order."""

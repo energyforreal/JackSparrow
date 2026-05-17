@@ -25,14 +25,16 @@ def test_health_response_model_has_trading_ready_and_status():
         },
         "degradation_reasons": [],
         "trading_ready": True,
-        "trading_mode": "paper",
+        "trading_mode": "testnet",
+        "delta_environment": "testnet",
         "timestamp": "2025-01-01T00:00:00Z",
     }
     resp = HealthResponse(**payload)
     assert resp.status == "healthy"
     assert resp.health_score == 0.95
     assert resp.trading_ready is True
-    assert resp.trading_mode == "paper"
+    assert resp.trading_mode == "testnet"
+    assert resp.delta_environment == "testnet"
     assert resp.degradation_reasons == []
 
 

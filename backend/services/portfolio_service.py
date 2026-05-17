@@ -125,6 +125,24 @@ class PortfolioService:
                 "stop_loss_usd": float(pos.get("stop_loss_usd", pos.get("stop_loss", 0))) if pos.get("stop_loss") else None,
                 "take_profit_usd": float(pos.get("take_profit_usd", pos.get("take_profit", 0))) if pos.get("take_profit") else None,
             }
+            if pos.get("lots") is not None:
+                serialized_pos["lots"] = int(pos.get("lots"))
+            if pos.get("mark_price") is not None:
+                serialized_pos["mark_price"] = float(pos.get("mark_price"))
+            if pos.get("current_price_usd") is not None:
+                serialized_pos["mark_price_usd"] = float(pos.get("current_price_usd"))
+            liq = pos.get("liquidation_price")
+            if liq is not None:
+                serialized_pos["liquidation_price"] = float(liq)
+                serialized_pos["liquidation_price_usd"] = float(
+                    pos.get("liquidation_price_usd", liq)
+                )
+            if pos.get("leverage") is not None:
+                serialized_pos["leverage"] = int(pos.get("leverage"))
+            if pos.get("exchange_position_id") is not None:
+                serialized_pos["exchange_position_id"] = str(pos.get("exchange_position_id"))
+            if pos.get("product_id") is not None:
+                serialized_pos["product_id"] = pos.get("product_id")
             positions_list.append(serialized_pos)
         
         # Get timestamp from time_service for consistency
@@ -140,8 +158,16 @@ class PortfolioService:
             "total_unrealized_pnl": float(summary.get("total_unrealized_pnl", 0)),
             "total_realized_pnl": float(summary.get("total_realized_pnl", 0)),
             "positions": positions_list,
-            "timestamp": time_info["server_time"]  # Use time_service for consistent format
+            "timestamp": time_info["server_time"],  # Use time_service for consistent format
         }
+        for optional_key in (
+            "data_source",
+            "sync_status",
+            "exchange_synced_at",
+            "contract_value_btc",
+        ):
+            if optional_key in summary:
+                serialized[optional_key] = summary[optional_key]
         
         logger.debug(
             "portfolio_summary_serialized",
@@ -314,13 +340,17 @@ class PortfolioService:
         
         Call this immediately after trade/position creation to ensure fresh data.
         """
-        cache_key = "portfolio:summary"
-        await delete_cache(cache_key)
-        logger.debug("portfolio_summary_cache_invalidated", cache_key=cache_key)
+        await delete_cache("portfolio:summary")
+        await delete_cache("portfolio:testnet:summary")
+        logger.debug(
+            "portfolio_summary_cache_invalidated",
+            cache_keys=["portfolio:summary", "portfolio:testnet:summary"],
+        )
 
     async def invalidate_all_portfolio_caches(self) -> None:
         """Clear portfolio summary and all cached performance metric keys."""
         await delete_cache("portfolio:summary")
+        await delete_cache("portfolio:testnet:summary")
         perf_keys = await get_cache_keys("portfolio:performance:*")
         for key in perf_keys:
             await delete_cache(key)

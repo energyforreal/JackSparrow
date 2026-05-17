@@ -13,6 +13,11 @@ export interface Portfolio {
   total_unrealized_pnl: number | string
   total_realized_pnl: number | string
   positions?: Position[]
+  data_source?: 'delta_testnet'
+  sync_status?: 'live' | 'stale' | 'error'
+  exchange_synced_at?: string
+  contract_value_btc?: number
+  timestamp?: string
 }
 
 export interface Position {
@@ -31,6 +36,14 @@ export interface Position {
   opened_at: Date | string
   stop_loss?: number | string
   take_profit?: number | string
+  exchange_position_id?: string
+  product_id?: number
+  lots?: number
+  mark_price?: number | string
+  liquidation_price?: number | string
+  liquidation_price_usd?: number | string
+  mark_price_usd?: number | string
+  leverage?: number
 }
 
 export interface Trade {
@@ -55,6 +68,8 @@ export interface Trade {
   timestamp?: Date | string
   fill_price?: number | string
   usd_inr_rate?: number | string
+  exchange_order_id?: string
+  fill_id?: string
 }
 
 export interface ModelPrediction {
@@ -178,8 +193,10 @@ export interface HealthStatus {
   agent_state?: string
   /** When false, automated trading per health rules may be unavailable. */
   trading_ready?: boolean
-  /** Backend trading_mode setting: paper | live (lowercase). */
+  /** Backend trading_mode setting (testnet). */
   trading_mode?: string
+  /** Delta cluster label from backend health. */
+  delta_environment?: string
   /** Optional model inventory summary from backend health (v15/v43 bundles). */
   ml_models?: Record<string, unknown>
   timestamp?: string | Date

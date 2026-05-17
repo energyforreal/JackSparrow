@@ -796,6 +796,28 @@ class AgentService:
             self._last_good_agent_status_at = time.time()
             return dict(status_response)
     
+    async def get_exchange_portfolio(
+        self,
+        symbol: Optional[str] = None,
+        timeout: int = 30,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch live exchange portfolio snapshot from the agent (Delta testnet)."""
+        parameters: Dict[str, Any] = {}
+        if symbol:
+            parameters["symbol"] = symbol
+        response = await self._send_command(
+            "get_exchange_portfolio",
+            parameters=parameters,
+            timeout=timeout,
+        )
+        if not response:
+            return None
+        if isinstance(response, dict) and response.get("success") is False:
+            return None
+        if isinstance(response, dict) and "data" in response:
+            return response.get("data")
+        return response
+
     async def control_agent(
         self,
         action: str,

@@ -43,7 +43,7 @@ def _parse_float(val: Any, default: float) -> float:
 def _product_result_to_specs(symbol: str, result: Dict[str, Any]) -> ContractSpecs:
     cv = _parse_float(result.get("contract_value"), float(getattr(settings, "contract_value_btc", 0.001)))
     tick = _parse_float(result.get("tick_size"), float(getattr(settings, "tick_size", 0.5)))
-    pid = int(result.get("id") or getattr(settings, "product_id", 27))
+    pid = int(result.get("id") or getattr(settings, "product_id", 84) or 84)
     taker = result.get("taker_commission_rate")
     taker_f = _parse_float(taker, float(getattr(settings, "taker_fee_rate", 0.0005))) if taker is not None else None
     return ContractSpecs(
@@ -124,7 +124,11 @@ async def get_contract_specs(symbol: str) -> ContractSpecs:
                 ttl=ttl,
             )
         except Exception as e:
-            logger.debug("product_specs_cache_set_failed", symbol=sym, error=str(e))
+            logger.debug(
+                "product_specs_cache_set_failed",
+                symbol=sym,
+                error=repr(e)[:240],
+            )
         return specs
     except Exception as e:
         logger.warning(
@@ -137,6 +141,6 @@ async def get_contract_specs(symbol: str) -> ContractSpecs:
             symbol=sym,
             contract_value_btc=default_cv,
             tick_size=default_tick,
-            product_id=int(getattr(settings, "product_id", 27)),
+            product_id=int(getattr(settings, "product_id", 84) or 84),
             taker_commission_rate=float(getattr(settings, "taker_fee_rate", 0.0005)),
         )

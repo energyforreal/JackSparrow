@@ -612,6 +612,8 @@ class AgentEventSubscriber:
                     "model_prediction",
                     "reasoning_request",
                     "price_fluctuation",
+                    "risk_approved",
+                    "evidence_ready",
                 }
                 if event_type in known_ignored_events:
                     logger.debug(
@@ -766,8 +768,21 @@ class AgentEventSubscriber:
                 )
                 
                 position_id = persistence_result.get("position_id")
+                persistence_skipped = bool(persistence_result.get("skipped"))
 
-                if not position_id:
+                if persistence_skipped:
+                    logger.info(
+                        "trade_persistence_skipped_testnet",
+                        service="backend",
+                        trade_id=trade_id,
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        fill_price=fill_price,
+                        reason=persistence_result.get("reason", "testnet_exchange_ledger"),
+                        message="Testnet mode: trade recorded on exchange; local DB ledger skipped",
+                    )
+                elif not position_id:
                     # Duplicate trade_id: create_trade_and_position skips creation and returns position_id None
                     logger.warning(
                         "agent_event_subscriber_position_not_created",
@@ -789,15 +804,20 @@ class AgentEventSubscriber:
                         fill_price=fill_price,
                         message="Trade and position successfully persisted to database"
                     )
-                    
-                    # Invalidate portfolio cache immediately to ensure fresh data
-                    from backend.services.portfolio_service import portfolio_service
+
+                # Refresh portfolio snapshot (testnet uses exchange cache key)
+                from backend.core.redis import delete_cache
+                from backend.services.portfolio_service import portfolio_service
+
+                await delete_cache("portfolio:testnet:summary")
+                if not persistence_skipped and position_id:
                     await portfolio_service.invalidate_portfolio_cache()
-                    logger.debug(
-                        "portfolio_cache_invalidated_after_position_creation",
-                        trade_id=trade_id,
-                        position_id=position_id
-                    )
+                logger.debug(
+                    "portfolio_cache_invalidated_after_order_fill",
+                    trade_id=trade_id,
+                    position_id=position_id,
+                    persistence_skipped=persistence_skipped,
+                )
             except Exception as persistence_error:
                 # Log error but don't fail the entire handler
                 log_error_with_context(
@@ -949,27 +969,13 @@ class AgentEventSubscriber:
             # briefly replace portfolio with {position_closed: {...}} on frontend
             await self._broadcast_portfolio_update()
 
-            # Publish a closed-trade row so Recent Trades (closed-only mode) updates immediately.
+            # Agent-only Recent Trades: record round-trip and push to UI (testnet + DB modes).
             try:
-                from backend.core.database import AsyncSessionLocal, Position
-                from backend.services.portfolio_service import portfolio_service
-                from backend.services.fx_rate_service import get_usdinr_rate
-                from sqlalchemy import select
+                from backend.services.agent_trade_ledger_service import record_closed_trade
 
-                async with AsyncSessionLocal() as session:
-                    closed_row = await session.execute(
-                        select(Position).where(Position.position_id == position_id)
-                    )
-                    closed_position = closed_row.scalar_one_or_none()
-
-                if closed_position and closed_position.closed_at is not None:
-                    usdinr_rate = Decimal(str(await get_usdinr_rate()))
-                    closed_trade_data = portfolio_service.build_closed_trade_row(
-                        closed_position,
-                        usdinr_rate,
-                    )
-                    trade_message = create_trade_update(closed_trade_data)
-                    await unified_websocket_manager.broadcast(trade_message, channel="data_update")
+                closed_trade_data = await record_closed_trade(payload)
+                trade_message = create_trade_update(closed_trade_data)
+                await unified_websocket_manager.broadcast(trade_message, channel="data_update")
             except Exception as broadcast_error:
                 logger.warning(
                     "agent_event_subscriber_closed_trade_broadcast_failed",
@@ -1334,11 +1340,22 @@ class AgentEventSubscriber:
             try:
                 from backend.core.database import AsyncSessionLocal
                 from backend.services.portfolio_service import portfolio_service
-                
+                from backend.services.portfolio_fetch import (
+                    TestnetExchangeUnavailableError,
+                    fetch_portfolio_summary,
+                )
+
                 async with AsyncSessionLocal() as session:
-                    # Get portfolio summary (may be cached)
-                    portfolio_summary = await portfolio_service.get_portfolio_summary(session)
-                    
+                    try:
+                        portfolio_summary = await fetch_portfolio_summary(session)
+                    except TestnetExchangeUnavailableError as exc:
+                        logger.error(
+                            "portfolio_broadcast_skipped_testnet_down",
+                            service="backend",
+                            error=exc.message,
+                        )
+                        return
+
                     if portfolio_summary:
                         try:
                             # Use shared serialization function to ensure identical format with API

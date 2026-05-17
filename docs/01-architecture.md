@@ -604,10 +604,10 @@ The system employs a comprehensive 4-step startup sequence managed by `start_par
 - Validates environment variable format and presence
 - Sets up child process environment inheritance
 
-#### Step 2: Paper Trading Validation
-- **Safety Feature**: Validates `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
-- **Protection Logic**: Blocks startup if live trading mode is detected
-- **Safety Indicators**: Displays clear status messages and warnings
+#### Step 2: Delta Testnet Validation
+- **Safety feature**: Validates `TRADING_MODE=testnet`, `DELTA_ENV=india_testnet`, and testnet REST/WebSocket URLs
+- **Protection logic**: Rejects `PAPER_TRADING_MODE`, `EXCHANGE_BACKEND=delta_paper_sim`, and production Delta hosts
+- **Safety indicators**: Displays testnet status in the monitoring dashboard
 
 #### Step 3: Configuration Validation
 - **Environment Validation**: Runs `validate-env.py` to check required variables

@@ -45,6 +45,7 @@ from agent.core.agent_policy_engine import (
     build_ml_evidence_from_reasoning_context,
 )
 from agent.core.config import settings
+from agent.core.v43_market_frames import closed_5m_bar_index
 from agent.core.v43_signal_gates import (
     V43GateState,
     apply_gate5_min_edge,
@@ -61,6 +62,38 @@ from feature_store.feature_registry import get_feature_list
 from feature_store.jacksparrow_v43_contract import V43_FORWARD_TARGET_BARS
 
 logger = structlog.get_logger()
+
+
+async def _exchange_has_open_position_async(symbol: str) -> bool:
+    """True when agent memory or Delta testnet reports an open position for symbol."""
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return False
+    try:
+        from agent.core.execution import execution_module
+
+        local_pos = execution_module.position_manager.get_position(sym)
+        if local_pos and str(local_pos.get("status") or "").lower() == "open":
+            return True
+
+        view = await execution_module.get_margined_positions_view()
+        rows = view.get("result") if isinstance(view, dict) else None
+        if not isinstance(rows, list):
+            return False
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            ps = str(row.get("product_symbol") or row.get("symbol") or "").upper()
+            if ps != sym:
+                continue
+            try:
+                if abs(float(row.get("size") or 0)) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    except Exception:
+        return False
+    return False
 
 
 def _v43_reasoning_portfolio_risk_overlay(symbol: str) -> Dict[str, Any]:
@@ -158,6 +191,7 @@ class MCPOrchestrator:
         self.delta_client = None  # Set by agent for 15m trend (MTF confirmation)
         self._initialized = False
         self._v43_gate_state = V43GateState()
+        self._v43_last_entry_decision_bar: Optional[int] = None
     
     async def initialize(self):
         """Initialize all MCP components."""
@@ -371,21 +405,24 @@ class MCPOrchestrator:
         pctx = pred0.context if isinstance(pred0.context, dict) else {}
         proba = float(pctx.get("expected_return", 0.0) or 0.0)
         thr = float(pctx.get("threshold", 0.005) or 0.005)
+        short_thr = float(pctx.get("short_threshold", thr) or thr)
         regime = str(pctx.get("regime", "neutral") or "neutral")
         u_scale = float(pctx.get("unc_scale", 1.0) or 1.0)
         closed_feats = pctx.get("closed_bar_features") or {}
         if not isinstance(closed_feats, dict):
             closed_feats = {}
 
-        bar_idx = int(pctx.get("bar_index_hint", max(0, len(df5) - 1)))
+        bar_idx = closed_5m_bar_index(df5)
         has_open = bool(context.get("has_open_position", False))
+        if not has_open:
+            has_open = await _exchange_has_open_position_async(symbol)
 
         eps = float(getattr(settings, "jacksparrow_v43_near_threshold_epsilon", 0.0) or 0.0)
         raw_long = bool(proba > (thr - max(0.0, eps)))
         short_enabled = bool(
             getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
         )
-        raw_short = bool(short_enabled and proba < -thr)
+        raw_short = bool(short_enabled and proba < -(short_thr - max(0.0, eps)))
         if raw_long and raw_short:
             raw_long = raw_short = False
 
@@ -409,6 +446,8 @@ class MCPOrchestrator:
                     reject_tail = g5.reject_reason or "min_edge_cost"
             else:
                 reject_tail = gr2.reject_reason or "gate"
+            if final_long:
+                reject_tail = "gates_passed_long"
         elif raw_short:
             gr2s = apply_post_threshold_gates_short(
                 raw_short=raw_short,
@@ -419,18 +458,20 @@ class MCPOrchestrator:
             )
             reject_tail = gr2s.reject_reason or "below_threshold_short"
             if gr2s.allow:
-                g5s = apply_gate5_min_edge_short(proba, thr, self._v43_gate_state)
+                g5s = apply_gate5_min_edge_short(proba, short_thr, self._v43_gate_state)
                 final_short = bool(g5s.allow)
                 if not final_short:
                     reject_tail = g5s.reject_reason or "min_edge_cost"
             else:
                 reject_tail = gr2s.reject_reason or "gate"
+            if final_short:
+                reject_tail = "gates_passed_short"
         else:
             if proba <= (thr - max(0.0, eps)):
                 reject_tail = "below_threshold"
             elif eps > 0.0 and proba <= thr:
                 reject_tail = "near_threshold"
-            elif short_enabled and proba >= -thr:
+            elif short_enabled and proba >= -short_thr:
                 reject_tail = "below_threshold_short"
             else:
                 reject_tail = "below_threshold"
@@ -440,13 +481,15 @@ class MCPOrchestrator:
 
         ai_entry_floor = float(getattr(settings, "ai_signal_min_entry_confidence", 0.7) or 0.7)
         if final_long:
-            self._v43_gate_state.note_entry(bar_idx, datetime.now(timezone.utc))
             conclusion = "BUY - JackSparrow v43 dedicated path (gates passed)"
             step5_conf = max(float(pred0.confidence), min(1.0, ai_entry_floor * 0.96))
+            reject_tail = "gates_passed_long"
+            self.record_v43_signal_decision(bar_idx)
         elif final_short:
-            self._v43_gate_state.note_entry(bar_idx, datetime.now(timezone.utc))
             conclusion = "SELL - JackSparrow v43 dedicated path (gates passed)"
             step5_conf = max(float(pred0.confidence), min(1.0, ai_entry_floor * 0.96))
+            reject_tail = "gates_passed_short"
+            self.record_v43_signal_decision(bar_idx)
         else:
             conclusion = f"HOLD - JackSparrow v43 ({reject_tail})"
             # Raw edge cleared threshold but a later gate blocked — keep moderate step-5 weight.
@@ -529,6 +572,7 @@ class MCPOrchestrator:
             "v43_dedicated_decision": v43_decision,
             "v43_execution_profile": v43_exec,
             "v43_gate_reject": None if (final_long or final_short) else reject_tail,
+            "v43_closed_bar_index": bar_idx,
             "v43_training_forward_bars": V43_FORWARD_TARGET_BARS,
         }
 
@@ -1227,6 +1271,28 @@ class MCPOrchestrator:
                 position_size = verdict.position_size
                 confidence = verdict.confidence
 
+                _entry_signals = frozenset(
+                    {"BUY", "SELL", "STRONG_BUY", "STRONG_SELL"}
+                )
+                mctx = result.get("market_context") if isinstance(result.get("market_context"), dict) else {}
+                v43_bar = mctx.get("v43_closed_bar_index")
+                if signal in _entry_signals and v43_bar is not None:
+                    try:
+                        bar_i = int(v43_bar)
+                    except (TypeError, ValueError):
+                        bar_i = None
+                    if bar_i is not None and self._v43_last_entry_decision_bar == bar_i:
+                        logger.info(
+                            "v43_decision_emit_skipped_duplicate_bar",
+                            symbol=decision_symbol,
+                            signal=signal,
+                            bar_idx=bar_i,
+                            correlation_id=event.event_id,
+                        )
+                        return
+                    if bar_i is not None:
+                        self._v43_last_entry_decision_bar = bar_i
+
                 # Normalize per-model predictions so backend and frontend can
                 # consistently build model_consensus and reasoning views.
                 raw_model_predictions = result.get("model_predictions") or result.get("models", {}).get(
@@ -1433,6 +1499,16 @@ class MCPOrchestrator:
                         event_id=event.event_id,
                         error=str(e),
                         exc_info=True)
+
+
+    def record_v43_signal_decision(self, bar_index: int) -> None:
+        """Stamp v43 debounce after a gated BUY/SELL signal (before fill)."""
+        self._v43_gate_state.note_signal_decision(int(bar_index))
+
+    def record_v43_trade_executed(self, bar_index: int) -> None:
+        """Stamp v43 frequency state after a fill."""
+        self._v43_gate_state.note_entry(int(bar_index), datetime.now(timezone.utc))
+        self._v43_gate_state.counters.trades_executed += 1
 
 
 # Create global MCP orchestrator instance

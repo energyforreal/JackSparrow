@@ -21,6 +21,19 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def test_ensemble_predict_clips_to_expected_return_range():
+    """Output is always clipped to [-0.10, 0.10] for gate-5 safety."""
+    from agent.models.v43_pickle_shims import EnsembleModel
+
+    model = EnsembleModel()
+    model._base_predictions = lambda X: np.array([[0.5, 0.5, 0.5]], dtype=np.float64)
+    out = model.predict(np.zeros((1, 40), dtype=np.float32))
+    assert float(out[0]) == pytest.approx(0.10)
+    model._base_predictions = lambda X: np.array([[-0.5, -0.5, -0.5]], dtype=np.float64)
+    out_neg = model.predict(np.zeros((1, 40), dtype=np.float32))
+    assert float(out_neg[0]) == pytest.approx(-0.10)
+
+
 def test_shim_install_aliases_main():
     """Importing the shim module aliases its classes onto __main__."""
     import sys

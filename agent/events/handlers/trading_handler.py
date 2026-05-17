@@ -382,6 +382,19 @@ class TradingEventHandler:
             # Signal-reversal exit: if open position contradicts signal, close first and return
             if self.execution_module:
                 open_pos = self.execution_module.position_manager.get_position(symbol)
+                if (
+                    bool(getattr(settings, "exchange_position_reconcile_enabled", True))
+                    and (not open_pos or open_pos.get("status") != "open")
+                ):
+                    try:
+                        from agent.core.mcp_orchestrator import _exchange_has_open_position_async
+                        from agent.core.position_reconcile import reconcile_positions_with_exchange
+
+                        if await _exchange_has_open_position_async(symbol):
+                            await reconcile_positions_with_exchange(self.execution_module)
+                            open_pos = self.execution_module.position_manager.get_position(symbol)
+                    except Exception:
+                        pass
                 if open_pos and open_pos.get("status") == "open":
                     pos_side = open_pos.get("side", "")
                     if (pos_side == "long" and signal in ("STRONG_SELL", "SELL")) or (
@@ -945,16 +958,56 @@ class TradingEventHandler:
 
             quantity = float(lots)
 
+            market_context = (
+                (payload.get("reasoning_chain") or {}).get("market_context")
+                if isinstance(payload.get("reasoning_chain"), dict)
+                else {}
+            )
+            if not isinstance(market_context, dict):
+                market_context = {}
+
+            from agent.core.ml_signal_guard import validate_ml_entry_signal
+
+            ml_ok, ml_reason = validate_ml_entry_signal(
+                signal=signal,
+                side=side,
+                model_predictions=model_predictions,
+                market_context=market_context,
+                ml_evidence_snapshot=payload.get("ml_evidence_snapshot"),
+                policy_verdict=payload.get("policy_verdict"),
+            )
+            if not ml_ok:
+                self._log_entry_rejected(
+                    "ml_signal_not_valid",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    ml_reject_reason=ml_reason,
+                    **diagnostics_base,
+                )
+                return
+
             risk_payload = {
                 "symbol": symbol,
                 "side": side,
                 "quantity": quantity,
                 "price": entry_price,
+                "reference_price": entry_price,
                 "risk_score": 0.8,
                 "timestamp": datetime.now(timezone.utc),
+                "decision_event_id": event.event_id,
                 "reasoning_chain_id": (payload.get("reasoning_chain") or {}).get("chain_id"),
                 "confidence": confidence,
                 "model_predictions": (payload.get("reasoning_chain") or {}).get("model_predictions"),
+                "ml_signal_validated": True,
+                "ml_signal_source": "jacksparrow_v43" if v43_exec_enabled else "ml_models",
+                "ml_evidence_id": (
+                    (payload.get("ml_evidence_snapshot") or {}).get("evidence_id")
+                    if isinstance(payload.get("ml_evidence_snapshot"), dict)
+                    else None
+                ),
+                "policy_verdict": payload.get("policy_verdict"),
+                "market_context": market_context,
                 "usd_inr_rate": usdinr_rate,
                 "required_margin_inr": required_margin_inr,
                 "available_cash_inr": available_cash_inr,
@@ -973,6 +1026,12 @@ class TradingEventHandler:
             if stop_loss_price is not None and take_profit_price is not None:
                 risk_payload["stop_loss"] = stop_loss_price
                 risk_payload["take_profit"] = take_profit_price
+            v43_bar = mc.get("v43_closed_bar_index") if isinstance(mc, dict) else None
+            if v43_bar is not None:
+                try:
+                    risk_payload["v43_closed_bar_index"] = int(v43_bar)
+                except (TypeError, ValueError):
+                    pass
             risk_approved = RiskApprovedEvent(
                 source="trading_handler",
                 correlation_id=event.event_id,
@@ -983,6 +1042,7 @@ class TradingEventHandler:
             if not minimal_entry and getattr(settings, "entry_signal_filter_enabled", True):
                 self._entry_signal_filter.record_trade()
 
+            # ai_signal_minimal_entry_gates already in diagnostics_base — do not pass twice (structlog TypeError).
             logger.info(
                 "trading_handler_risk_approved_published",
                 symbol=symbol,
@@ -990,9 +1050,22 @@ class TradingEventHandler:
                 quantity=quantity,
                 entry_price=entry_price,
                 event_id=event.event_id,
-                ai_signal_minimal_entry_gates=minimal_entry,
                 **diagnostics_base,
             )
+            # #region agent log
+            try:
+                from agent.core.debug_session_log import debug_session_log
+
+                debug_session_log(
+                    hypothesis_id="H1",
+                    location="trading_handler.py:handle_decision_ready_for_trading",
+                    message="success_log_after_risk_approved_ok",
+                    data={"event_id": event.event_id, "runId": "post-fix"},
+                    run_id="post-fix",
+                )
+            except Exception:
+                pass
+            # #endregion
             try:
                 from agent.core.signal_audit_md import append_risk_approved
 

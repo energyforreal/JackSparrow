@@ -10,7 +10,8 @@ alwaysApply: false
 
 ## Model File Organization
 
-- **Default Docker bundle (v15 pipeline)**: `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/` with `5m/` and `15m/` subfolders (`pipeline_*_v14.pkl` + metadata). Override with `AGENT_MODEL_DIR` / `MODEL_DIR`. Runtime **adaptive** retrain may add `pipeline_{tf}_latest.pkl`, `pipeline_{tf}_v_auto_*.pkl`, and `retrain_log.json` beside each `metadata_BTCUSD_{tf}.json` when `ADAPTIVE_RETRAIN_ENABLED=true` (see `agent/learning/adaptive/` and `docs/03-ml-models.md`).
+- **Default v43 inference bundle (current)**: `agent/model_storage/JackSparrow_v43_models_BTCUSD/` — flat folder with `metadata_v43.json` + `model_artifact_v43.pkl` (and optional `regime_models_v43.pkl`). `MODEL_DIR` / `AGENT_MODEL_DIR` should point at this directory (see `agent/core/config.py`, `docker-compose.yml`). Promote notebook/Colab exports into this path unless you intentionally use a separate bundle directory.
+- **Default Docker bundle (v15 pipeline — archival)**: `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/` with `5m/` and `15m/` subfolders (`pipeline_*_v14.pkl` + metadata). Not loaded by current v43-only `ModelDiscovery`. Runtime **adaptive** retrain may add `pipeline_{tf}_latest.pkl`, `pipeline_{tf}_v_auto_*.pkl`, and `retrain_log.json` beside each `metadata_BTCUSD_{tf}.json` when `ADAPTIVE_RETRAIN_ENABLED=true` (see `agent/learning/adaptive/` and `docs/03-ml-models.md`).
 - **Legacy v5 bundle**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` (slim 5m+15m export; see metadata `artifacts`).
 - **Full multi-TF bundle (reference)**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` (five horizons; entry+exit per TF when exported).
 - **Discovery contract (v4 loader)**: `metadata_BTCUSD_*.json` is discovered under `MODEL_DIR`; with `MODEL_DISCOVERY_RECURSIVE=true` (default), subfolders such as `jacksparrow_v5_BTCUSD_*/` are scanned so `MODEL_DIR` may be `./agent/model_storage`.
@@ -19,11 +20,10 @@ alwaysApply: false
 
 ## Environment Variables
 
-- `MODEL_DIR`: Root for discovery (e.g. `./agent/model_storage` or a specific bundle folder)
-- `MODEL_FORMAT`: `v4_ensemble`, `v15_pipeline`, or `auto` — selects discovery path and node type (`PipelineV15Node` vs `V4EnsembleNode`).
-- `MODEL_DISCOVERY_RECURSIVE`: When true (default), find `metadata_BTCUSD_*.json` in subfolders
-- `MODEL_DISCOVERY_ENABLED`: Enable metadata-based discovery
-- `MODEL_AUTO_REGISTER`: Auto-register discovered models in MCP registry
+- **`MODEL_DIR`** / **`AGENT_MODEL_DIR`**: Must be the **bundle directory** that contains **`metadata_v43.json`** (default `./agent/model_storage/JackSparrow_v43_models_BTCUSD`). Not the parent `agent/model_storage` unless that folder itself holds `metadata_v43.json`.
+- **`MODEL_FORMAT`**: Defaults to **`jacksparrow_v43`** (integration label); discovery is v43-only in this codebase.
+- **`MODEL_DISCOVERY_RECURSIVE`**: Typically **false** for v43 (flat bundle). Legacy forks used recursive `metadata_BTCUSD_*.json` scans.
+- **`MODEL_DISCOVERY_ENABLED`**, **`MODEL_AUTO_REGISTER`**: Control discovery and MCP registration (defaults **true**).
 
 ## Model Implementation
 

@@ -330,6 +330,8 @@ class AgentWebSocketServer:
                 response = await self._agent._handle_execute_trade(parameters)
             elif command == "get_status":
                 response = await self._agent._handle_get_status()
+            elif command == "get_exchange_portfolio":
+                response = await self._agent._handle_get_exchange_portfolio(parameters)
             elif command == "control":
                 response = await self._agent._handle_control(parameters)
             elif command == "register_models":

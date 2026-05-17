@@ -133,7 +133,7 @@ class MarketDataEventHandler:
             )
             
             await event_bus.publish(feature_request)
-            
+
             logger.info(
                 "candle_closed_handled",
                 symbol=symbol,

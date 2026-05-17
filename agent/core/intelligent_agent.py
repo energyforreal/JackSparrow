@@ -133,7 +133,10 @@ class IntelligentAgent:
         self.default_symbol = settings.trading_symbol or settings.agent_symbol
         timeframe_list = settings.resolved_agent_timeframes()
         self.timeframes = timeframe_list or [settings.agent_interval]
-        self.primary_interval = self.timeframes[0]
+        # v43 gates debounce on 5m bar index — trigger pipeline on 5m close when available.
+        self.primary_interval = (
+            "5m" if "5m" in self.timeframes else self.timeframes[0]
+        )
         self.trading_mode = settings.trading_mode
         self.initial_balance = settings.initial_balance
         self.confidence_threshold = settings.min_confidence_threshold
@@ -175,7 +178,7 @@ class IntelligentAgent:
             agent_interval=settings.agent_interval,
             trading_symbol=settings.trading_symbol,
             trading_mode=settings.trading_mode,
-            paper_trading_mode=settings.paper_trading_mode,
+            delta_env=settings.delta_env,
             # Risk Management
             max_position_size=settings.max_position_size,
             max_portfolio_heat=settings.max_portfolio_heat,
@@ -249,23 +252,14 @@ class IntelligentAgent:
             close_position_cb=_close_symbol_from_gateway,
         )
         gateway_name = self.exchange_gateway.__class__.__name__
-        effective_exchange_backend = (
-            "delta_paper_sim" if "PaperSim" in gateway_name else "delta_live"
-        )
         logger.info(
             "agent_exchange_backend_effective",
             service="agent",
             trading_mode=settings.trading_mode,
-            paper_trading_mode=settings.paper_trading_mode,
+            delta_env=settings.delta_env,
+            delta_environment=getattr(settings, "delta_environment", "testnet"),
             configured_exchange_backend=getattr(settings, "exchange_backend", None),
-            effective_exchange_backend=effective_exchange_backend,
             exchange_gateway_class=gateway_name,
-            paper_simulate_delta_private_apis=getattr(
-                settings, "paper_simulate_delta_private_apis", None
-            ),
-            paper_margined_view_delay_seconds=getattr(
-                settings, "paper_margined_view_delay_seconds", None
-            ),
         )
         await execution_module.initialize(
             delta_client=self.delta_client,
@@ -282,6 +276,23 @@ class IntelligentAgent:
                         service="agent",
                         count=n,
                     )
+        if bool(getattr(settings, "exchange_position_reconcile_enabled", True)):
+            from agent.core.position_reconcile import reconcile_positions_with_exchange
+
+            try:
+                reconcile_summary = await reconcile_positions_with_exchange(execution_module)
+                logger.info(
+                    "agent_exchange_position_reconcile_startup",
+                    service="agent",
+                    summary=reconcile_summary,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "agent_exchange_position_reconcile_startup_failed",
+                    service="agent",
+                    error=str(exc),
+                    exc_info=True,
+                )
         self.mcp_orchestrator.delta_client = self.delta_client  # For MTF trend_15m when enabled
         await self.learning_system.initialize()
         await self.market_data_service.initialize()
@@ -570,63 +581,65 @@ class IntelligentAgent:
 
     async def _position_monitor_loop(self) -> None:
         """Background loop: update position prices and run manage_position for stop/take profit."""
+        last_reconcile_at = 0.0
+        reconcile_interval = float(
+            getattr(settings, "exchange_position_reconcile_interval_seconds", 30.0) or 30.0
+        )
         while self.running:
             try:
-                open_positions = execution_module.position_manager.get_all_positions()
-                if self.exchange_gateway is not None:
+                now_mono = time.time()
+                if (
+                    bool(getattr(settings, "exchange_position_reconcile_enabled", True))
+                    and (now_mono - last_reconcile_at) >= reconcile_interval
+                ):
+                    from agent.core.position_reconcile import reconcile_positions_with_exchange
+
                     try:
-                        positions_view = await execution_module.get_positions_view()
-                        rows = positions_view.get("result", []) if isinstance(positions_view, dict) else []
-                        open_positions = {
-                            str(row.get("product_symbol")): execution_module.position_manager.get_position(
-                                str(row.get("product_symbol"))
-                            )
-                            for row in rows
-                            if isinstance(row, dict) and row.get("product_symbol")
-                        }
-                    except Exception as e:
-                        logger.debug("position_monitor_gateway_view_failed", error=str(e), service="agent")
+                        await reconcile_positions_with_exchange(execution_module)
+                    except Exception as exc:
+                        logger.debug(
+                            "position_monitor_reconcile_failed",
+                            error=str(exc),
+                            service="agent",
+                        )
+                    last_reconcile_at = now_mono
+
+                from agent.core.position_reconcile import symbols_to_monitor
+
+                monitor_symbols = symbols_to_monitor(execution_module)
                 interval_seconds = (
                     getattr(settings, "min_monitor_interval_seconds", 2.0)
-                    if open_positions
+                    if monitor_symbols
                     else getattr(settings, "position_monitor_interval_seconds", 15.0)
                 )
                 await asyncio.sleep(interval_seconds)
                 if not self.running:
                     break
-                open_positions = execution_module.position_manager.get_all_positions()
-                if self.exchange_gateway is not None:
-                    try:
-                        positions_view = await execution_module.get_positions_view()
-                        rows = positions_view.get("result", []) if isinstance(positions_view, dict) else []
-                        open_positions = {
-                            str(row.get("product_symbol")): execution_module.position_manager.get_position(
-                                str(row.get("product_symbol"))
-                            )
-                            for row in rows
-                            if isinstance(row, dict) and row.get("product_symbol")
-                        }
-                    except Exception as e:
-                        logger.debug("position_monitor_gateway_view_failed", error=str(e), service="agent")
-                if not open_positions:
+
+                monitor_symbols = symbols_to_monitor(execution_module)
+                if not monitor_symbols:
                     continue
+
                 max_hold_s = (getattr(settings, "max_position_hold_hours", 24) or 24) * 3600
                 now = datetime.now(timezone.utc)
-                for symbol in list(open_positions.keys()):
+                for symbol in monitor_symbols:
                     if not self.running:
                         break
                     try:
                         position = execution_module.position_manager.get_position(symbol)
-                        if position:
-                            entry_time = position.get("entry_time")
-                            if entry_time is not None:
-                                et = entry_time
-                                if getattr(et, "tzinfo", None) is None and hasattr(et, "replace"):
-                                    et = et.replace(tzinfo=timezone.utc)
-                                held_s = (now - et).total_seconds()
-                                if held_s > max_hold_s:
-                                    await execution_module.close_position(symbol, exit_reason="time_limit")
-                                    continue
+                        if not position or str(position.get("status") or "").lower() != "open":
+                            continue
+                        entry_time = position.get("entry_time")
+                        if entry_time is not None:
+                            et = entry_time
+                            if getattr(et, "tzinfo", None) is None and hasattr(et, "replace"):
+                                et = et.replace(tzinfo=timezone.utc)
+                            held_s = (now - et).total_seconds()
+                            if held_s > max_hold_s:
+                                await execution_module.close_position(
+                                    symbol, exit_reason="time_limit"
+                                )
+                                continue
                         ticker = await self.delta_client.get_ticker(symbol)
                         result = ticker.get("result") or ticker
                         if isinstance(result, dict):
@@ -635,7 +648,9 @@ class IntelligentAgent:
                             close = mp if mp is not None else cl
                             if close is not None:
                                 current_price = float(close)
-                                execution_module.position_manager.update_position(symbol, current_price)
+                                execution_module.position_manager.update_position(
+                                    symbol, current_price
+                                )
                                 await execution_module.manage_position(symbol)
                     except Exception as e:
                         logger.debug(
@@ -1015,6 +1030,9 @@ class IntelligentAgent:
             elif cmd == "close_all_positions":
                 result = await execution_module.close_all_positions(exit_reason="emergency_exit")
                 await self._send_response(request_id, result)
+            elif cmd == "get_exchange_portfolio":
+                result = await self._handle_get_exchange_portfolio(params)
+                await self._send_response(request_id, result.get("data", result))
             else:
                 await self._send_response(
                     request_id,
@@ -1045,6 +1063,25 @@ class IntelligentAgent:
     
     async def _handle_execute_trade(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle trade execution request via execution engine."""
+        if bool(getattr(settings, "agent_only_delta_orders", True)) and bool(
+            getattr(settings, "block_manual_execute_trade", True)
+        ):
+            return {
+                "success": False,
+                "data": None,
+                "error": (
+                    "Manual execute_trade is disabled; only autonomous agent decisions "
+                    "may place Delta orders (AGENT_ONLY_DELTA_ORDERS)."
+                ),
+            }
+
+        if not execution_module.exchange_connected:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Delta testnet connection is down; trading halted",
+            }
+
         symbol = params.get("symbol", self.default_symbol)
         side_raw = params.get("side", "BUY")
         side = side_raw.lower() if isinstance(side_raw, str) else "buy"
@@ -1070,17 +1107,17 @@ class IntelligentAgent:
                 "error": "Invalid quantity"
             }
 
-        trading_mode = (getattr(settings, "trading_mode", "paper") or "paper").lower()
+        trading_mode = (getattr(settings, "trading_mode", "testnet") or "testnet").lower()
         require_audit = bool(
             getattr(settings, "manual_execute_requires_audit_reason_live", True)
         )
-        if trading_mode == "live" and require_audit and not audit_reason:
+        if require_audit and not audit_reason:
             return {
                 "success": False,
                 "data": None,
                 "error": (
-                    "manual_trade_audit_reason is required for execute_trade when "
-                    "TRADING_MODE=live (agent-first policy)."
+                    "manual_trade_audit_reason is required for execute_trade on Delta testnet "
+                    "(agent-first policy)."
                 ),
             }
 
@@ -1173,38 +1210,6 @@ class IntelligentAgent:
             },
         )
         await event_bus.publish(order_fill)
-
-        if settings.paper_trading_mode:
-            from agent.core.paper_trade_entry import (
-                compute_paper_entry_ledger,
-                resolve_paper_usdinr_rate,
-            )
-            from agent.core.paper_trade_logger import paper_trade_logger
-
-            try:
-                cv = float(getattr(settings, "contract_value_btc", 0.001))
-            except (TypeError, ValueError):
-                cv = 0.001
-            rate = await resolve_paper_usdinr_rate(None)
-            trade_value_inr, fees_inr_open, _ = compute_paper_entry_ledger(
-                quantity=float(quantity),
-                fill_price=float(fill_price),
-                contract_value_btc=cv,
-                usd_inr_rate=rate,
-                entry_fee_usd=None,
-            )
-
-            paper_trade_logger.log_trade(
-                trade_id=trade_id,
-                symbol=symbol,
-                side=side_raw if isinstance(side_raw, str) else side.upper(),
-                quantity=quantity,
-                fill_price=fill_price,
-                order_id=order_id,
-                usd_inr_rate=rate,
-                trade_value_inr=trade_value_inr,
-                fees_inr=fees_inr_open,
-            )
 
         return {
             "success": True,
@@ -1448,6 +1453,11 @@ class IntelligentAgent:
         # Add overall status
         detailed_health["overall_status"] = health.get("overall_status", "unknown")
 
+        from agent.core.agent_thesis_engine import get_last_thesis_snapshot
+
+        thesis_snap = get_last_thesis_snapshot()
+        policy_mode = str(getattr(settings, "agent_policy_mode", "ml_only") or "ml_only")
+
         return {
             "success": True,
             "data": {
@@ -1455,9 +1465,38 @@ class IntelligentAgent:
                 "state": self.state_machine.current_state.value,
                 "health": health,  # Keep original health structure for backward compatibility
                 "detailed_health": detailed_health,  # New detailed structure
-                "latency_ms": 5.0
+                "latency_ms": 5.0,
+                "policy_mode": policy_mode,
+                "current_regime": thesis_snap.get("regime"),
+                "active_thesis_strategy": thesis_snap.get("thesis_type"),
+                "thesis_fires_this_bar": thesis_snap.get("thesis_fires_this_bar", False),
             }
         }
+
+    async def _handle_get_exchange_portfolio(
+        self, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Return live Delta testnet portfolio snapshot (positions, wallet, order history)."""
+        params = params or {}
+        symbol = params.get("symbol", self.default_symbol)
+        try:
+            snapshot = await execution_module.get_exchange_portfolio_snapshot(symbol=symbol)
+            return {"success": True, "data": snapshot}
+        except Exception as exc:
+            err = str(exc)
+            expected = (
+                "ip whitelist" in err.lower()
+                or "circuit breaker is open" in err.lower()
+                or "placeholders" in err.lower()
+            )
+            log_fn = logger.warning if expected else logger.error
+            log_fn(
+                "get_exchange_portfolio_failed",
+                error=err,
+                exc_info=not expected,
+                service="agent",
+            )
+            return {"success": False, "error": err}
     
     async def _handle_register_models(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle manual model registration requests."""

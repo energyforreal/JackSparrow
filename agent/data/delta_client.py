@@ -27,7 +27,9 @@ try:
 except ImportError:
     # Fallback if config not available
     class Settings:
-        delta_exchange_base_url = os.getenv("DELTA_EXCHANGE_BASE_URL", "https://api.india.delta.exchange")
+        delta_exchange_base_url = os.getenv(
+            "DELTA_EXCHANGE_BASE_URL", "https://cdn-ind.testnet.deltaex.org"
+        )
         delta_exchange_api_key = os.getenv("DELTA_EXCHANGE_API_KEY", "")
         delta_exchange_api_secret = os.getenv("DELTA_EXCHANGE_API_SECRET", "")
     settings = Settings()
@@ -134,11 +136,66 @@ class DeltaExchangeClient:
         
         # Used to de-duplicate repeated transient error logs (timeouts, rate limits, etc.).
         self._transient_log_state: Dict[str, float] = {}
+        self._auth_blocked_reason: Optional[str] = None
+        self._auth_blocked_client_ip: Optional[str] = None
         
         # Validate system time synchronization on initialization
         self._validate_time_sync()
         # Delta signature timestamps are Unix seconds; offset = server - local (refreshed on auth errors).
         self._auth_timestamp_offset_seconds: int = 0
+
+    @staticmethod
+    def _is_public_market_endpoint(endpoint: str) -> bool:
+        """Return True when Delta serves this GET path without API-key signing."""
+        clean = (endpoint or "").split("?")[0]
+        if clean == "/v2/history/candles":
+            return True
+        if clean.startswith("/v2/tickers/"):
+            return True
+        if clean.startswith("/v2/l2orderbook/"):
+            return True
+        if clean.startswith("/v2/products/"):
+            return True
+        return False
+
+    @staticmethod
+    def _extract_client_ip_from_error(error_text: str) -> Optional[str]:
+        """Parse Delta auth error JSON for the rejected client IP."""
+        try:
+            payload = json.loads(error_text or "")
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        err = payload.get("error")
+        if not isinstance(err, dict):
+            return None
+        ctx = err.get("context")
+        if not isinstance(ctx, dict):
+            return None
+        ip = ctx.get("client_ip")
+        return str(ip) if ip else None
+
+    def _latch_auth_blocked(self, reason: str, *, client_ip: Optional[str] = None) -> None:
+        """Pause signed private API calls until credentials/IP whitelist are fixed."""
+        self._auth_blocked_reason = reason
+        if client_ip:
+            self._auth_blocked_client_ip = client_ip
+        if self.circuit_breaker.state == CircuitBreakerState.OPEN:
+            return
+        self.circuit_breaker.state = CircuitBreakerState.OPEN
+        self.circuit_breaker.failure_count = self.circuit_breaker.failure_threshold
+        self.circuit_breaker.last_failure_time = time.time()
+        logger.error(
+            "delta_exchange_auth_blocked",
+            reason=reason,
+            client_ip=client_ip or self._auth_blocked_client_ip,
+            component="delta_client",
+            message=(
+                "Delta Exchange private API paused. For ip_restriction, whitelist the "
+                "reported client_ip on your Delta API key settings."
+            ),
+        )
 
     @staticmethod
     def _classify_delta_auth_error(error_text: str) -> str:
@@ -240,6 +297,36 @@ class DeltaExchangeClient:
             self._transient_log_state[key] = now
             return True
         return False
+
+    async def _make_public_request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Unauthenticated GET for public market-data endpoints (no IP whitelist on key)."""
+        if method.upper() != "GET":
+            raise ValueError("Public Delta API helper supports GET only")
+        clean_endpoint = endpoint.split("?")[0]
+        if not self._is_public_market_endpoint(clean_endpoint):
+            raise ValueError(f"Endpoint is not a public market path: {clean_endpoint}")
+
+        url = f"{self.base_url}{clean_endpoint}"
+        query_string = self._build_query_string(params) if params else ""
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout, follow_redirects=True
+            ) as client:
+                response = await client.get(f"{url}{query_string}")
+        except httpx.HTTPError as exc:
+            raise DeltaExchangeError(f"HTTP client error: {exc}") from exc
+
+        if response.status_code >= 400:
+            error_text = response.text
+            raise DeltaExchangeError(
+                f"Delta Exchange public API error {response.status_code}: {error_text}"
+            )
+        return response.json()
     
     async def _make_request(
         self,
@@ -283,8 +370,22 @@ class DeltaExchangeClient:
                         # matches exactly what we used for signature generation.
                         query_string = self._build_query_string(params) if params else ""
                         response = await client.get(f"{url}{query_string}", headers=headers)
-                    elif method == "POST":
-                        response = await client.post(url, headers=headers, json=data)
+                    elif method in ("POST", "DELETE"):
+                        # Body bytes must match the compact JSON used for signing.
+                        body_str = (
+                            self._serialize_payload(data, method=method.upper())
+                            if data
+                            else ""
+                        )
+                        body_bytes = body_str.encode("utf-8") if body_str else b""
+                        if method == "POST":
+                            response = await client.post(
+                                url, headers=headers, content=body_bytes
+                            )
+                        else:
+                            response = await client.request(
+                                "DELETE", url, headers=headers, content=body_bytes
+                            )
                     else:
                         raise ValueError(f"Unsupported method: {method}")
                 except httpx.HTTPError as exc:
@@ -385,6 +486,15 @@ class DeltaExchangeClient:
                             auth_timestamp_offset_seconds=self._auth_timestamp_offset_seconds,
                             message="Authentication failed - check API credentials, scopes, and clock sync",
                         )
+
+                    if auth_class == "ip_restriction":
+                        client_ip = self._extract_client_ip_from_error(error_text)
+                        self._latch_auth_blocked("ip_restriction", client_ip=client_ip)
+                        ip_hint = client_ip or self._auth_blocked_client_ip or "your host IP"
+                        raise DeltaExchangeError(
+                            f"Delta Exchange API key IP whitelist: add {ip_hint} to the key's "
+                            f"allowed IPs in Delta Exchange settings. Raw: {error_text}"
+                        )
                     
                     # Log signature details for debugging (without exposing secret)
                     logger.debug(
@@ -432,13 +542,19 @@ class DeltaExchangeClient:
                 raise CircuitBreakerOpenError(
                     "Delta Exchange credentials appear to be placeholders; request execution paused."
                 )
+            if self._auth_blocked_reason == "ip_restriction":
+                ip_hint = self._auth_blocked_client_ip or "your host IP"
+                raise CircuitBreakerOpenError(
+                    f"Delta Exchange private API paused (IP whitelist): add {ip_hint} "
+                    "to your API key allowed IPs in Delta Exchange settings."
+                )
             return await _request(0)
         
         return await self.circuit_breaker.call(_request_wrapper)
     
     async def get_ticker(self, symbol: str) -> Dict[str, Any]:
         """Get ticker information."""
-        return await self._make_request("GET", f"/v2/tickers/{symbol}")
+        return await self._make_public_request("GET", f"/v2/tickers/{symbol}")
     
     async def get_candles(
         self,
@@ -487,7 +603,7 @@ class DeltaExchangeClient:
             "start": start,
             "end": end
         }
-        return await self._make_request("GET", "/v2/history/candles", params=params)
+        return await self._make_public_request("GET", "/v2/history/candles", params=params)
     
     @staticmethod
     def _calculate_candle_time_range(resolution: str, candle_count: int) -> tuple[int, int]:
@@ -521,58 +637,242 @@ class DeltaExchangeClient:
             "symbol": symbol,
             "depth": depth
         }
-        return await self._make_request("GET", f"/v2/l2orderbook/{symbol}", params=params)
+        return await self._make_public_request("GET", f"/v2/l2orderbook/{symbol}", params=params)
     
+    async def resolve_product_id(self, symbol: str) -> int:
+        """Resolve Delta product_id for a symbol (product_specs cache, then settings)."""
+        sym = (symbol or "").strip().upper() or "BTCUSD"
+        try:
+            from agent.core.product_specs import get_contract_specs
+
+            specs = await get_contract_specs(sym)
+            pid = int(specs.product_id)
+            env_pid = int(getattr(settings, "product_id", 0) or 0)
+            if env_pid > 0 and env_pid != pid:
+                logger.warning(
+                    "delta_product_id_env_mismatch",
+                    symbol=sym,
+                    env_product_id=env_pid,
+                    resolved_product_id=pid,
+                )
+            return pid
+        except Exception as exc:
+            logger.warning(
+                "delta_product_id_resolve_failed",
+                symbol=sym,
+                error=str(exc),
+            )
+            pid = int(getattr(settings, "product_id", 0) or 0)
+            if pid <= 0:
+                raise DeltaExchangeError(
+                    f"Could not resolve product_id for {sym}; set PRODUCT_ID in environment"
+                ) from exc
+            return pid
+
+    @staticmethod
+    def _normalize_order_type(order_type: str) -> str:
+        order_type_upper = (order_type or "MARKET").upper()
+        if order_type_upper in ("MARKET", "MKT"):
+            return "market_order"
+        if order_type_upper == "LIMIT":
+            return "limit_order"
+        lowered = order_type.lower()
+        if lowered == "market":
+            return "market_order"
+        if lowered == "limit":
+            return "limit_order"
+        return lowered
+
     async def place_order(
         self,
         symbol: str,
         side: str,
         quantity: float,
         order_type: str = "MARKET",
-        price: Optional[float] = None
+        price: Optional[float] = None,
+        *,
+        product_id: Optional[int] = None,
+        reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
+        use_product_symbol_only: bool = False,
     ) -> Dict[str, Any]:
-        """Place order (paper trading)."""
-        data = {
-            "symbol": symbol,
+        """Place order on Delta Exchange (live/testnet)."""
+        if quantity != int(quantity):
+            raise DeltaExchangeError(
+                "Order size must be a whole number (integer lots); fractional lots are not allowed"
+            )
+        lots = int(quantity)
+        if lots < 1:
+            raise DeltaExchangeError("Order size must be at least 1 lot")
+
+        delta_order_type = self._normalize_order_type(order_type)
+        pid = product_id
+        if pid is None and not use_product_symbol_only:
+            pid = await self.resolve_product_id(symbol)
+
+        data: Dict[str, Any] = {
+            "size": lots,
             "side": side.lower(),
-            "size": quantity,
-            "type": order_type.lower()
+            "order_type": delta_order_type,
         }
-        
-        if order_type == "LIMIT" and price:
-            data["price"] = price
-        
+        if use_product_symbol_only or pid is None:
+            sym = (symbol or "").strip().upper()
+            if not sym:
+                raise DeltaExchangeError("product_symbol is required when product_id is not set")
+            data["product_symbol"] = sym
+        else:
+            data["product_id"] = int(pid)
+
+        if reduce_only:
+            data["reduce_only"] = "true"
+        if client_order_id:
+            data["client_order_id"] = str(client_order_id)[:32]
+        if delta_order_type == "limit_order" and price is not None:
+            data["limit_price"] = str(price)
+
         return await self._make_request("POST", "/v2/orders", data=data)
+
+    async def get_orders(
+        self,
+        product_ids: Optional[str] = None,
+        states: Optional[str] = None,
+        contract_types: Optional[str] = None,
+        order_types: Optional[str] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """List active orders (GET /v2/orders)."""
+        params: Dict[str, Any] = {}
+        if product_ids:
+            params["product_ids"] = product_ids
+        if states:
+            params["states"] = states
+        if contract_types:
+            params["contract_types"] = contract_types
+        if order_types:
+            params["order_types"] = order_types
+        if page_size is not None:
+            params["page_size"] = page_size
+        return await self._make_request("GET", "/v2/orders", params=params or None)
+
+    async def get_orders_history(
+        self,
+        product_ids: Optional[str] = None,
+        page_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Order history (GET /v2/orders/history)."""
+        params: Dict[str, Any] = {}
+        if product_ids:
+            params["product_ids"] = product_ids
+        if page_size is not None:
+            params["page_size"] = page_size
+        return await self._make_request("GET", "/v2/orders/history", params=params or None)
+
+    async def cancel_order(
+        self,
+        order_id: int,
+        *,
+        product_id: Optional[int] = None,
+        product_symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Cancel a specific open order (DELETE /v2/orders)."""
+        if product_id is None and not product_symbol:
+            raise DeltaExchangeError(
+                "cancel_order requires product_id or product_symbol"
+            )
+        data: Dict[str, Any] = {"id": int(order_id)}
+        if product_id is not None:
+            data["product_id"] = int(product_id)
+        else:
+            data["product_symbol"] = product_symbol
+        return await self._make_request("DELETE", "/v2/orders", data=data)
+
+    async def cancel_all_orders(
+        self,
+        *,
+        product_id: Optional[int] = None,
+        product_symbol: Optional[str] = None,
+        cancel_limit_orders: bool = True,
+        cancel_stop_orders: bool = True,
+    ) -> Dict[str, Any]:
+        """Cancel all open orders for a product (DELETE /v2/orders/all)."""
+        if product_id is None and not product_symbol:
+            raise DeltaExchangeError(
+                "cancel_all_orders requires product_id or product_symbol"
+            )
+        data: Dict[str, Any] = {
+            "cancel_limit_orders": "true" if cancel_limit_orders else "false",
+            "cancel_stop_orders": "true" if cancel_stop_orders else "false",
+        }
+        if product_id is not None:
+            data["product_id"] = int(product_id)
+        else:
+            data["product_symbol"] = product_symbol
+        return await self._make_request("DELETE", "/v2/orders/all", data=data)
 
     async def get_positions(
         self,
+        product_id: Optional[int] = None,
         product_symbol: Optional[str] = None,
         underlying_asset_symbol: Optional[str] = None,
+        *,
+        symbol: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Get account positions with optional product/underlying filters."""
+        """Get real-time position (GET /v2/positions); prefers product_id when set."""
         params: Dict[str, Any] = {}
-        if product_symbol:
+        if product_id is not None:
+            params["product_id"] = int(product_id)
+        elif product_symbol:
             params["product_symbol"] = product_symbol
+        elif symbol:
+            params["product_symbol"] = symbol
         if underlying_asset_symbol:
             params["underlying_asset_symbol"] = underlying_asset_symbol
-        return await self._make_request("GET", "/v2/positions", params=params or None)
+        if not params:
+            raise DeltaExchangeError(
+                "get_positions requires product_id, product_symbol, or symbol"
+            )
+        return await self._make_request("GET", "/v2/positions", params=params)
 
-    async def get_margined_positions(self) -> Dict[str, Any]:
-        """Get account margined positions (portfolio-level view)."""
-        return await self._make_request("GET", "/v2/positions/margined")
+    async def get_margined_positions(
+        self,
+        contract_types: Optional[str] = "perpetual_futures",
+    ) -> Dict[str, Any]:
+        """Get margined positions (GET /v2/positions/margined)."""
+        params: Dict[str, Any] = {}
+        if contract_types:
+            params["contract_types"] = contract_types
+        return await self._make_request(
+            "GET", "/v2/positions/margined", params=params or None
+        )
 
     async def get_assets(self) -> Dict[str, Any]:
         """Get exchange assets metadata."""
         return await self._make_request("GET", "/v2/assets")
+
+    async def get_wallet_balances(self) -> Dict[str, Any]:
+        """Get wallet balances (GET /v2/wallet/balances)."""
+        return await self._make_request("GET", "/v2/wallet/balances")
 
     async def change_margin(self, product_symbol: str, margin: float) -> Dict[str, Any]:
         """Adjust isolated position margin."""
         data = {"product_symbol": product_symbol, "margin": margin}
         return await self._make_request("POST", "/v2/positions/change_margin", data=data)
 
-    async def close_all_positions(self) -> Dict[str, Any]:
-        """Emergency close all open positions."""
-        return await self._make_request("POST", "/v2/positions/close_all", data={})
+    async def close_all_positions(
+        self,
+        *,
+        close_all_portfolio: bool = True,
+        close_all_isolated: bool = True,
+        user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Emergency close all open positions (POST /v2/positions/close_all)."""
+        data: Dict[str, Any] = {
+            "close_all_portfolio": bool(close_all_portfolio),
+            "close_all_isolated": bool(close_all_isolated),
+        }
+        if user_id is not None:
+            data["user_id"] = int(user_id)
+        return await self._make_request("POST", "/v2/positions/close_all", data=data)
     
     def get_circuit_breaker_state(self) -> Dict[str, Any]:
         """Get circuit breaker state."""
@@ -668,9 +968,9 @@ class DeltaExchangeClient:
         if method_upper == "GET" and params:
             query_string = self._build_query_string(params)
         
-        # Build payload: empty for GET requests, JSON for POST requests
+        # Build payload: empty for GET; compact JSON for POST/DELETE bodies
         payload = ""
-        if method_upper == "POST" and data:
+        if method_upper in ("POST", "DELETE") and data:
             payload = self._serialize_payload(data, method=method_upper)
         
         # Build signature data: METHOD + TIMESTAMP + PATH + QUERY_STRING + PAYLOAD

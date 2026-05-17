@@ -5,6 +5,12 @@ import { Badge } from '@/components/ui/badge'
 import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
 import { formatConfidence, formatCurrency, formatDateTime } from '@/utils/formatters'
+import {
+  parseFiniteNumber,
+  resolveContractValueBtc,
+  resolveUsdInrRate,
+  sideBadgeVariant,
+} from '@/utils/tradingDisplay'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { EdgeGauge } from './v15/EdgeGauge'
 import { ProbabilityBar } from './v15/ProbabilityBar'
@@ -13,8 +19,9 @@ import { ModelStatusPanel } from './v15/ModelStatusPanel'
 interface TradingDecisionProps {
   signal?: Signal | null
   recentTrade?: Trade | null
-  paperTradingMode: boolean
+  exchangeEnvironment?: string
   usdInrRate?: number | string
+  contractValueBtc?: number | string
 }
 
 const getSignalBadgeClasses = (signal: SignalType) => {
@@ -63,28 +70,24 @@ const formatQuantity = (quantity: number | string | undefined) => {
 export function TradingDecision({
   signal,
   recentTrade,
+  exchangeEnvironment,
   usdInrRate,
+  contractValueBtc,
 }: TradingDecisionProps) {
   const hasSignal = signal && signal.signal
   const hasRecentTrade = recentTrade !== null && recentTrade !== undefined
 
-  const parseNumber = (value: number | string | undefined): number | null => {
-    if (value === undefined || value === null) return null
-    const parsed = typeof value === 'number' ? value : parseFloat(value)
-    return Number.isFinite(parsed) ? parsed : null
-  }
-
   const formatTradeValueInr = (trade: Trade) => {
-    const explicit = parseNumber(trade.trade_value_inr)
+    const explicit = parseFiniteNumber(trade.trade_value_inr)
     if (explicit !== null) return formatCurrency(explicit)
-    const quantity = parseNumber(trade.quantity)
-    const priceUsd = parseNumber(trade.price ?? trade.fill_price)
+    const quantity = parseFiniteNumber(trade.quantity)
+    const priceUsd = parseFiniteNumber(trade.price ?? trade.fill_price ?? trade.entry_price)
     const fx =
-      parseNumber((trade as any).usd_inr_rate) ??
-      parseNumber(usdInrRate) ??
-      83
-    if (quantity === null || priceUsd === null) return 'N/A'
-    const valueInr = quantity * priceUsd * 0.001 * fx
+      resolveUsdInrRate((trade as Trade & { usd_inr_rate?: number }).usd_inr_rate) ??
+      resolveUsdInrRate(usdInrRate)
+    const contractBtc = resolveContractValueBtc(contractValueBtc) ?? 0.001
+    if (quantity === null || priceUsd === null || fx === null) return '—'
+    const valueInr = quantity * priceUsd * contractBtc * fx
     return formatCurrency(valueInr)
   }
 
@@ -92,6 +95,12 @@ export function TradingDecision({
     <Card role="region" aria-label="Trading Decision Flow">
       <CardHeader>
         <CardTitle>Trading Decision Flow</CardTitle>
+        {(exchangeEnvironment === 'testnet' ||
+          exchangeEnvironment === 'india_testnet') && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Executing on Delta testnet
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Current Decision */}
@@ -169,7 +178,7 @@ export function TradingDecision({
         {/* Recent Trade Connection */}
         {hasRecentTrade && (
           <div className="space-y-3 pt-2 border-t">
-            <h3 className="text-sm font-semibold">Related Trade</h3>
+            <h3 className="text-sm font-semibold">Latest fill</h3>
             <div className="p-4 rounded-lg border bg-card">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
@@ -184,10 +193,7 @@ export function TradingDecision({
                 </div>
                 <div>
                   <span className="text-muted-foreground">Side:</span>
-                  <Badge
-                    variant={recentTrade.side === 'BUY' ? 'default' : 'destructive'}
-                    className="ml-2"
-                  >
+                  <Badge variant={sideBadgeVariant(recentTrade.side)} className="ml-2">
                     {recentTrade.side}
                   </Badge>
                 </div>
@@ -216,6 +222,14 @@ export function TradingDecision({
                     {recentTrade.status.toUpperCase()}
                   </Badge>
                 </div>
+                {recentTrade.exchange_order_id ? (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Exchange order:</span>
+                    <span className="ml-2 font-medium font-mono text-xs">
+                      {recentTrade.exchange_order_id}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="col-span-2">
                   <span className="text-muted-foreground">Executed at:</span>
                   <span className="ml-2 font-medium text-xs">

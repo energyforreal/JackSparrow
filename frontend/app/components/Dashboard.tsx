@@ -75,7 +75,8 @@ export function Dashboard() {
     isPortfolioLoading,
     error,
     performanceData,
-    resetLocalTradingState
+    marketData,
+    syncStatus,
   } = useTradingData()
 
   const reasoningChainMeta = useMemo(() => reasoningChainMetaFromSignal(signal), [signal])
@@ -112,7 +113,7 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header isConnected={isConnected} onPaperPortfolioReset={resetLocalTradingState} />
+      <Header isConnected={isConnected} health={health} />
       <div className="container mx-auto px-4 py-6 space-y-6">
         {error && (
           <Card className="border-destructive bg-destructive/5">
@@ -121,14 +122,20 @@ export function Dashboard() {
                 <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <div className="text-destructive font-semibold mb-1">
-                    Connection Error
+                    {error.message?.toLowerCase().includes('testnet')
+                      ? 'Delta Testnet Unavailable'
+                      : 'Connection Error'}
                   </div>
                   <div className="text-sm text-muted-foreground mb-2">
-                    Unable to connect to real-time updates or load trading data.
+                    {error.message?.toLowerCase().includes('testnet')
+                      ? 'Trading is halted until the Delta testnet connection is restored.'
+                      : 'Unable to connect to real-time updates or load trading data.'}
                   </div>
-                  <span className="text-xs text-muted-foreground block mb-4">
-                    Ensure backend is running and WebSocket endpoint is accessible.
-                  </span>
+                  {!error.message?.toLowerCase().includes('testnet') && (
+                    <span className="text-xs text-muted-foreground block mb-4">
+                      Ensure backend is running and WebSocket endpoint is accessible.
+                    </span>
+                  )}
                   {error.message && (
                     <Accordion type="single" collapsible className="mb-4">
                       <AccordionItem value="details" className="border-none">
@@ -181,7 +188,13 @@ export function Dashboard() {
             {/* Real-Time Price, Agent Status, Signal Indicator, Health Monitor */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <ErrorBoundary>
-                <RealTimePrice symbol="BTCUSD" positions={positions} showPositionImpact={true} />
+                <RealTimePrice
+                  symbol="BTCUSD"
+                  positions={positions}
+                  showPositionImpact={true}
+                  sharedConnected={isConnected}
+                  sharedMarketTick={marketData?.BTCUSD ?? null}
+                />
               </ErrorBoundary>
               <ErrorBoundary>
                 <AgentStatus
@@ -215,13 +228,18 @@ export function Dashboard() {
             {/* Active Positions and Recent Trades */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <ErrorBoundary>
-                <ActivePositions positions={positions} isLoading={portfolioBlockLoading} />
+                <ActivePositions
+                  positions={positions}
+                  isLoading={portfolioBlockLoading}
+                  expectedOpenCount={portfolio?.open_positions ?? 0}
+                />
               </ErrorBoundary>
               <ErrorBoundary>
                 <RecentTrades
                   trades={recentTrades}
                   isLoading={portfolioBlockLoading}
                   usdInrRate={portfolio?.usd_inr_rate}
+                  contractValueBtc={portfolio?.contract_value_btc}
                 />
               </ErrorBoundary>
             </div>
@@ -231,8 +249,9 @@ export function Dashboard() {
               <TradingDecision
                 signal={signal}
                 recentTrade={recentTrades?.[0] || null}
-                paperTradingMode={true}
+                exchangeEnvironment={health?.delta_environment ?? health?.trading_mode}
                 usdInrRate={portfolio?.usd_inr_rate}
+                contractValueBtc={portfolio?.contract_value_btc}
               />
             </ErrorBoundary>
           </TabsContent>

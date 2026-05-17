@@ -2,6 +2,8 @@
 
 Run with **`MODEL_DIR`** set to **`agent/model_storage/JackSparrow_v43_models_BTCUSD`** (or your custom bundle folder—**not** a parent that lacks `metadata_v43.json`). Ensure Delta credentials are set. Optional: **`JACKSPARROW_V43_SHORT_EXECUTION_ENABLED=true`** if you are explicitly testing symmetric shorts (default **OFF**). **`JACKSPARROW_V43_MODE_ENABLED`** is retained for env compatibility (default **true**, marked deprecated in **`agent/core/config.py`** because v43 is the only path). See [`.env.example`](../.env.example).
 
+After Colab’s **`jacksparrow_v43_bundle.zip`** unpack (e.g. `%USERPROFILE%\Downloads\jacksparrow_v43_bundle\`), copy **`metadata_v43.json`** and **`model_artifact_v43.pkl`** into that **`MODEL_DIR`** folder so discovery picks up the new export (see [ML models — operational workflow](03-ml-models.md#operational-workflow-bundle-first)).
+
 ## Pickle compatibility (mandatory)
 
 The shipped `model_artifact_v43.pkl`, `feature_engineer.pkl`, and `regime_models_v43.pkl` reference `__main__.EnsembleModel`, `__main__.LGBMModel`, and `__main__.FeatureEngineer` — classes that only existed in the Colab training scope. The agent installs minimal stubs via `agent.models.v43_pickle_shims` (auto-imported by `JackSparrowV43Node`) so `joblib.load` succeeds and `EnsembleModel.predict(...)` / `predict_uncertainty(...)` work end-to-end via the stored `_ens_scaler` + `xgb` + `rf` (+ inner `lgbm_model`).

@@ -61,6 +61,9 @@ export function normalizeHealthPayload(raw: unknown): HealthStatus | null {
   if (typeof h.trading_mode === 'string' && h.trading_mode.trim()) {
     merged.trading_mode = h.trading_mode.trim().toLowerCase()
   }
+  if (typeof h.delta_environment === 'string' && h.delta_environment.trim()) {
+    merged.delta_environment = h.delta_environment.trim().toLowerCase()
+  }
   if (h.ml_models && typeof h.ml_models === 'object') {
     merged.ml_models = h.ml_models as Record<string, unknown>
   }
@@ -118,6 +121,8 @@ export function mergeHealthPreserveFields(
         : previous.trading_ready,
     trading_mode:
       next.trading_mode !== undefined ? next.trading_mode : previous.trading_mode,
+    delta_environment:
+      next.delta_environment !== undefined ? next.delta_environment : previous.delta_environment,
     ml_models: next.ml_models !== undefined ? next.ml_models : previous.ml_models,
     agent_state: next.agent_state !== undefined ? next.agent_state : previous.agent_state,
     degradation_reasons:
