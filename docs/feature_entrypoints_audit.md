@@ -16,6 +16,8 @@ Single source of truth for **generic** JackSparrow feature names used by legacy 
 
 ## JackSparrow v43 closed-bar inference (primary production path)
 
+**Training notebook:** [`notebooks/jacksparrow_v43_delta_india_training.ipynb`](../notebooks/jacksparrow_v43_delta_india_training.ipynb) (Colab: clone branch **`major-rework`**). **Promotion:** copy export into `agent/model_storage/JackSparrow_v43_models_BTCUSD/`, run [`scripts/patch_v43_model_artifact.py`](../scripts/patch_v43_model_artifact.py) — see [ML models — Operational Workflow](../docs/03-ml-models.md#operational-workflow-bundle-first).
+
 | Stage | Location |
 |-------|----------|
 | Canonical feature order / version gate | [`feature_store/jacksparrow_v43_contract.py`](../feature_store/jacksparrow_v43_contract.py) (`validate_v43_metadata_compatibility` at model load) |

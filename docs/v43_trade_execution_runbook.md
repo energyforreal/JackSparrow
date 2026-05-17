@@ -68,7 +68,9 @@ When the Colab notebook §4c meta-stacking path is used, the exported bundle inc
 |-------|----------------|-------|
 | `model_architecture.meta_learner` | `"lgbm_classifier"` | Absent = regressor-mean only (legacy path) |
 | `model_architecture.calibrator` | `"ridge"` | **Must** be present whenever `meta_learner` is set |
-| `validation_metrics.meta_auc` | > 0.50 | Meta direction classifier better than random |
+| `validation_metrics.inference_path` | `"meta_calibrator"` | Confirms §4c ran and thresholds were calibrated on meta-stack predictions |
+| `validation_metrics.validation_corr` | > 0 | Meta-stack expected return vs realized forward return |
+| `validation_metrics.meta_auc` | > 0.48 | Hard export gate; values in **[0.48, 0.50)** are noise-band warnings in the notebook |
 
 **Why calibrator is mandatory:** `meta.predict_proba` returns values in **[0, 1]**.
 Without the Ridge calibrator, gate-5 compares probability to expected-return thresholds
@@ -86,6 +88,22 @@ as a backstop, but promotion should never ship meta without calibrator.
 
 **Rollback:** set `JACKSPARROW_V43_ARTIFACT_BASENAME=model_artifact_v43.pkl` (pre-meta
 artifact) and restart the agent.
+
+**Short-side caveat:** meta-stack exports may show a very small `short_threshold` and
+`short_candidates.count = 0` on validation if P25 of meta predictions never goes negative.
+Enable `JACKSPARROW_V43_SHORT_EXECUTION_ENABLED=true` only after reviewing metadata and
+testnet gate mix (`gates_passed_short` vs `gates_passed_long` in logs).
+
+### Promoting a Colab export into the repo
+
+1. Download **`jacksparrow_v43_bundle.zip`** from Colab (contains `metadata_v43.json` + `model_artifact_v43.pkl`).
+2. Back up files under **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (rename to `*_old_YYYYMMDD.*`).
+3. Copy the two new files into that folder.
+4. From repo root: `python scripts/patch_v43_model_artifact.py` → produces **`model_artifact_v43_patched.pkl`**.
+5. Confirm `.env` has **`JACKSPARROW_V43_ARTIFACT_BASENAME=model_artifact_v43_patched.pkl`**.
+6. Restart the agent; run **`python scripts/smoke_test_v43.py`** and **`scripts/analyze_v43_gate_rejects.py`** on a short testnet session.
+
+See also [ML models — Operational Workflow](03-ml-models.md#operational-workflow-bundle-first).
 
 ---
 

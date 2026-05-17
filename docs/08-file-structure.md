@@ -91,6 +91,7 @@ JackSparrow/
 │   ├── feature_registry.py            # Canonical and perpetual feature lists
 │   ├── unified_feature_engine.py      # Batch/single feature computation including perpetual markets
 │   ├── jacksparrow_v43_contract.py   # v43 training contract: `V43_CANONICAL_FEATURES`, horizon constant
+│   ├── jacksparrow_v43_build_matrix.py  # `build_v43_feature_matrix` (training + shim transform)
 │   ├── jacksparrow_v43_mcp_row.py     # Ordered MCP feature row builder for v43 inference
 │   ├── perpetual_features.py          # Perpetual-specific feature computation
 │   └── ...
@@ -909,11 +910,16 @@ Example v43 tree:
 
 ```
 agent/model_storage/JackSparrow_v43_models_BTCUSD/
-├── metadata_v43.json
-├── model_artifact_v43.pkl
-├── feature_engineer.pkl
-└── regime_models_v43.pkl   # optional
+├── metadata_v43.json              # promotion metadata + validation_metrics
+├── model_artifact_v43.pkl         # Colab export (base)
+├── model_artifact_v43_patched.pkl # runtime default (patch script output)
+├── model_artifact_v43_old_*.pkl   # local rollback copies (optional, not always in git)
+├── metadata_v43_old_*.json
+├── feature_engineer.pkl           # optional sidecar
+└── regime_models_v43.pkl          # optional
 ```
+
+Promote Colab exports with [`scripts/patch_v43_model_artifact.py`](../scripts/patch_v43_model_artifact.py); see [ML models — Operational Workflow](03-ml-models.md#operational-workflow-bundle-first).
 
 Example legacy v5 tree:
 

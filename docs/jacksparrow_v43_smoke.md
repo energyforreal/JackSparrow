@@ -2,11 +2,18 @@
 
 Run with **`MODEL_DIR`** set to **`agent/model_storage/JackSparrow_v43_models_BTCUSD`** (or your custom bundle folder—**not** a parent that lacks `metadata_v43.json`). Ensure Delta credentials are set. Optional: **`JACKSPARROW_V43_SHORT_EXECUTION_ENABLED=true`** if you are explicitly testing symmetric shorts (default **OFF**). **`JACKSPARROW_V43_MODE_ENABLED`** is retained for env compatibility (default **true**, marked deprecated in **`agent/core/config.py`** because v43 is the only path). See [`.env.example`](../.env.example).
 
-After Colab’s **`jacksparrow_v43_bundle.zip`** unpack (e.g. `%USERPROFILE%\Downloads\jacksparrow_v43_bundle\`), copy **`metadata_v43.json`** and **`model_artifact_v43.pkl`** into that **`MODEL_DIR`** folder so discovery picks up the new export (see [ML models — operational workflow](03-ml-models.md#operational-workflow-bundle-first)).
+After Colab’s **`jacksparrow_v43_bundle.zip`** unpack (e.g. `%USERPROFILE%\Downloads\jacksparrow_v43_bundle(1)\`):
+
+1. Back up existing `metadata_v43.json`, `model_artifact_v43.pkl`, and `model_artifact_v43_patched.pkl` in **`MODEL_DIR`**.
+2. Copy the new **`metadata_v43.json`** and **`model_artifact_v43.pkl`** into **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (or your **`MODEL_DIR`**).
+3. From repo root: `python scripts/patch_v43_model_artifact.py` — writes **`model_artifact_v43_patched.pkl`** (what the agent loads by default).
+4. Restart the agent.
+
+Full steps: [ML models — Operational Workflow](03-ml-models.md#operational-workflow-bundle-first) and [v43 runbook — Promoting a Colab export](v43_trade_execution_runbook.md#promoting-a-colab-export-into-the-repo).
 
 ## Pickle compatibility (mandatory)
 
-The shipped `model_artifact_v43.pkl`, `feature_engineer.pkl`, and `regime_models_v43.pkl` reference `__main__.EnsembleModel`, `__main__.LGBMModel`, and `__main__.FeatureEngineer` — classes that only existed in the Colab training scope. The agent installs minimal stubs via `agent.models.v43_pickle_shims` (auto-imported by `JackSparrowV43Node`) so `joblib.load` succeeds and `EnsembleModel.predict(...)` / `predict_uncertainty(...)` work end-to-end via the stored `_ens_scaler` + `xgb` + `rf` (+ inner `lgbm_model`).
+The shipped `model_artifact_v43.pkl` / `model_artifact_v43_patched.pkl` reference `__main__.EnsembleModel`, `__main__.LGBMModel`, and `__main__.FeatureEngineer` — classes that only existed in the Colab training scope. The agent installs stubs via `agent.models.v43_pickle_shims` (auto-imported by `JackSparrowV43Node`) so `joblib.load` succeeds. Pattern 3 bundles add `ensemble.meta` (LGBMClassifier) + `ensemble.calibrator` (Ridge); `predict()` maps meta proba → calibrator (2D input) → clipped expected return.
 
 The hardened training notebook exports the `FeatureEngineer` as a column contract and relies on the runtime-registered `build_v43_feature_matrix` path. If you are validating an older artifact, check these historical limitations:
 
