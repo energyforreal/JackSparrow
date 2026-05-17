@@ -47,7 +47,7 @@ def _safe_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except Exception as exc:  # pragma: no cover
-        _logger.warning("v43_shim_call_failed", err=str(exc))
+        _logger.warning("v43_shim_call_failed: %s", exc)
         return None
 
 
@@ -293,14 +293,14 @@ class EnsembleModel(_StateDictMixin):
             try:
                 return np.asarray(est.predict(Xs), dtype=np.float64).ravel()
             except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_inner_lgbm_predict_failed", err=str(exc))
+                _logger.warning("v43_shim_inner_lgbm_predict_failed: %s", exc)
                 return None
         # Regressors (XGBRegressor, RandomForestRegressor, etc.).
         if hasattr(est, "predict") and not hasattr(est, "predict_proba"):
             try:
                 return np.asarray(est.predict(Xs), dtype=np.float64).ravel()
             except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_regressor_predict_failed", clf=type(est).__name__, err=str(exc))
+                _logger.warning("v43_shim_regressor_predict_failed clf=%s: %s", type(est).__name__, exc)
                 return None
         # Classifiers (legacy).
         if hasattr(est, "predict_proba"):
@@ -310,7 +310,7 @@ class EnsembleModel(_StateDictMixin):
                     return p[:, 1]
                 return p.ravel()
             except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_clf_predict_proba_failed", clf=type(est).__name__, err=str(exc))
+                _logger.warning("v43_shim_clf_predict_proba_failed clf=%s: %s", type(est).__name__, exc)
                 return None
         return None
 
@@ -354,11 +354,11 @@ class EnsembleModel(_StateDictMixin):
                     rs = scaler.transform(rv.reshape(-1, len(cols)))
                     X_meta = np.hstack([stack, rs])
                 except Exception as exc:  # pragma: no cover
-                    _logger.warning("v43_shim_regime_meta_assemble_failed", err=str(exc))
+                    _logger.warning("v43_shim_regime_meta_assemble_failed: %s", exc)
             try:
                 out = meta.predict_proba(X_meta)[:, 1]
             except Exception as exc:
-                _logger.warning("v43_shim_meta_failed", err=str(exc))
+                _logger.warning("v43_shim_meta_failed: %s", exc)
                 out = stack.mean(axis=1)
         else:
             # v43 path: simple unweighted mean of regressor expected returns.
@@ -366,9 +366,9 @@ class EnsembleModel(_StateDictMixin):
         cal = getattr(self, "calibrator", None)
         if cal is not None and hasattr(cal, "predict"):
             try:
-                out = cal.predict(out)
+                out = cal.predict(np.asarray(out, dtype=np.float64).reshape(-1, 1)).ravel()
             except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_calibrator_failed", err=str(exc))
+                _logger.warning("v43_shim_calibrator_failed: %s", exc)
         # Safety: clamp to sane expected-return range regardless of meta/calibrator state.
         out = np.clip(np.asarray(out, dtype=np.float64), -0.10, 0.10)
         return out
@@ -383,7 +383,7 @@ class EnsembleModel(_StateDictMixin):
             stack = self._base_predictions(X)
             return stack.std(axis=1)
         except Exception as exc:
-            _logger.warning("v43_shim_unc_failed", err=str(exc))
+            _logger.warning("v43_shim_unc_failed: %s", exc)
             return np.full(np.asarray(X).shape[0], 0.05, dtype=np.float64)
 
 
