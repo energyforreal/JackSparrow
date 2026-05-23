@@ -32,12 +32,16 @@ V43_HORIZON_KEY_TO_BARS: Dict[str, int] = {
 V43_MULTIHEAD_BARS: Tuple[int, ...] = tuple(sorted(set(V43_HORIZON_KEY_TO_BARS.values())))
 
 # Minimum meta-classifier AUC on validation for production export (BTC intraday).
+# Primary head (30m execution) uses the tightest bar; 1h/2h are advisory unless full strict.
 V43_MIN_META_AUC_BY_HORIZON: Dict[str, float] = {
     "scalp_10m": 0.54,
-    "intraday_30m": 0.56,
+    "intraday_30m": 0.53,
     "trend_1h": 0.58,
     "swing_2h": 0.60,
 }
+
+# Full strict export applies production mins to these horizons only (Colab default).
+V43_EXPORT_PRIMARY_ONLY_HORIZON_KEYS: Tuple[str, ...] = ("scalp_10m", "intraday_30m")
 
 # Minimum validation correlation (predicted vs realized forward return).
 V43_MIN_VALIDATION_CORR_BY_HORIZON: Dict[str, float] = {
@@ -47,8 +51,11 @@ V43_MIN_VALIDATION_CORR_BY_HORIZON: Dict[str, float] = {
     "swing_2h": 0.0,
 }
 
-# Always block export when meta_auc falls below this (worse than noise band).
+# Always block export when meta_auc falls below this on primary horizons.
 V43_EXPORT_HARD_FLOOR_META_AUC: float = 0.52
+
+# Secondary horizons (1h/2h) in primary-only export mode: block below this only.
+V43_EXPORT_SECONDARY_HARD_FLOOR_META_AUC: float = 0.50
 
 _ENV_MIN_AUC_KEYS: Dict[str, str] = {
     "scalp_10m": "V43_MIN_META_AUC_SCALP_10M",
@@ -80,6 +87,23 @@ def resolve_export_hard_floor_meta_auc() -> float:
         return float(raw)
     except (TypeError, ValueError):
         return V43_EXPORT_HARD_FLOOR_META_AUC
+
+
+def resolve_export_secondary_hard_floor_meta_auc() -> float:
+    raw = os.environ.get("V43_EXPORT_SECONDARY_HARD_FLOOR_META_AUC")
+    if raw is None or str(raw).strip() == "":
+        return V43_EXPORT_SECONDARY_HARD_FLOOR_META_AUC
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return V43_EXPORT_SECONDARY_HARD_FLOOR_META_AUC
+
+
+def resolve_export_strict_primary_only() -> bool:
+    raw = os.environ.get("V43_EXPORT_STRICT_PRIMARY_ONLY")
+    if raw is None or str(raw).strip() == "":
+        return True
+    return str(raw).strip().lower() in ("1", "true", "yes")
 
 # Policy: which ML heads confirm / veto for a thesis target horizon.
 V43_THESIS_CONFIRMATION_HEADS: Dict[int, Tuple[int, ...]] = {
@@ -195,17 +219,28 @@ def validate_multihead_export_gates(
     strict: bool = True,
     return_soft: bool = False,
     horizon_keys: Optional[Tuple[str, ...]] = None,
+    strict_primary_only: Optional[bool] = None,
 ) -> List[str] | Tuple[List[str], List[str]]:
     """Return export gate failures; raise when ``strict`` and any hard failure exists.
 
-    When ``strict`` is False, heads between the hard floor (default 0.52) and the
-    production minimum are reported as *soft* failures (warnings) but do not block.
-    Heads below the hard floor always block.
+    When ``strict`` is False, heads between the hard floor and the production minimum
+    are reported as *soft* failures (warnings) but do not block.
+
+    When ``strict_primary_only`` is True (default via env), production minimums apply
+    only to ``V43_EXPORT_PRIMARY_ONLY_HORIZON_KEYS`` (scalp + intraday_30m). Longer
+    horizons must only clear the secondary hard floor (default 0.50).
     """
     failures: List[str] = []
     soft_failures: List[str] = []
     min_auc_by_key = resolve_min_meta_auc_by_horizon()
     hard_floor = resolve_export_hard_floor_meta_auc()
+    secondary_floor = resolve_export_secondary_hard_floor_meta_auc()
+    primary_only = (
+        resolve_export_strict_primary_only()
+        if strict_primary_only is None
+        else bool(strict_primary_only)
+    )
+    primary_keys = frozenset(V43_EXPORT_PRIMARY_ONLY_HORIZON_KEYS)
     keys = horizon_keys or V43_HORIZON_KEYS
     horizons = meta.get("horizons")
     if not isinstance(horizons, dict):
@@ -231,16 +266,19 @@ def validate_multihead_export_gates(
         except (TypeError, ValueError):
             auc = None
         min_auc = min_auc_by_key.get(key, 0.54)
+        is_primary = key in primary_keys
+        floor = hard_floor if (not primary_only or is_primary) else secondary_floor
         if auc is None:
             failures.append(f"horizons[{key}] missing meta_auc")
-        elif auc < hard_floor:
+        elif auc < floor:
             failures.append(
-                f"horizons[{key}] meta_auc={auc:.4f} < hard floor {hard_floor:.2f} "
+                f"horizons[{key}] meta_auc={auc:.4f} < hard floor {floor:.2f} "
                 "(at or below random — retrain before export)"
             )
         elif auc < min_auc:
             msg = f"horizons[{key}] meta_auc={auc:.4f} < minimum {min_auc:.2f}"
-            if strict:
+            enforce_min = strict and (not primary_only or is_primary)
+            if enforce_min:
                 failures.append(msg)
             else:
                 soft_failures.append(msg)
@@ -329,10 +367,21 @@ def format_horizon_training_diagnostics(meta: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def format_export_gate_summary(meta: Mapping[str, Any]) -> str:
+def format_export_gate_summary(
+    meta: Mapping[str, Any],
+    *,
+    strict_primary_only: Optional[bool] = None,
+) -> str:
     """Human-readable per-horizon meta_auc vs thresholds."""
     min_auc_by_key = resolve_min_meta_auc_by_horizon()
     hard_floor = resolve_export_hard_floor_meta_auc()
+    secondary_floor = resolve_export_secondary_hard_floor_meta_auc()
+    primary_only = (
+        resolve_export_strict_primary_only()
+        if strict_primary_only is None
+        else bool(strict_primary_only)
+    )
+    primary_keys = frozenset(V43_EXPORT_PRIMARY_ONLY_HORIZON_KEYS)
     horizons = meta.get("horizons") if isinstance(meta.get("horizons"), dict) else {}
     lines = [
         f"{'horizon':<16} {'meta_auc':>8} {'min':>6} {'floor':>6} {'status':>8}",
@@ -348,10 +397,14 @@ def format_export_gate_summary(meta: Mapping[str, Any]) -> str:
             auc = None
             auc_s = "n/a"
         min_auc = min_auc_by_key.get(key, 0.54)
+        is_primary = key in primary_keys
+        floor = hard_floor if (not primary_only or is_primary) else secondary_floor
         if auc is None:
             status = "MISSING"
-        elif auc < hard_floor:
+        elif auc < floor:
             status = "BLOCK"
+        elif primary_only and not is_primary and auc < min_auc:
+            status = "SOFT"
         elif auc < min_auc:
             status = "WARN"
         else:

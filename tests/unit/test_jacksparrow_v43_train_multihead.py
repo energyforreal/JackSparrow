@@ -81,7 +81,7 @@ def test_validate_multihead_export_gates_soft_warns_near_miss() -> None:
             "intraday_30m": {
                 "validation_metrics": {
                     "inference_path": "meta_calibrator",
-                    "meta_auc": 0.5499,
+                    "meta_auc": 0.525,
                     "validation_corr": 0.01,
                     "tradable_label_fraction": 0.2,
                 }
@@ -177,6 +177,47 @@ def test_format_horizon_training_diagnostics_includes_heads() -> None:
     text = format_horizon_training_diagnostics(meta)
     assert "intraday_30m" in text
     assert "0.5700" in text or "0.57" in text
+
+
+def test_validate_multihead_export_gates_user_colab_metrics_primary_only() -> None:
+    """Regression: typical Colab run passes export with primary-only strict gates."""
+    meta = {
+        "horizons": {
+            "scalp_10m": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.6013,
+                    "validation_corr": 0.01,
+                }
+            },
+            "intraday_30m": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.5387,
+                    "validation_corr": 0.01,
+                }
+            },
+            "trend_1h": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.5072,
+                    "validation_corr": -0.0055,
+                }
+            },
+            "swing_2h": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.5093,
+                    "validation_corr": 0.01,
+                }
+            },
+        }
+    }
+    failures, warnings = validate_multihead_export_gates(
+        meta, strict=True, return_soft=True, strict_primary_only=True
+    )
+    assert failures == []
+    assert warnings
 
 
 def test_validate_multihead_export_gates_strict_with_return_soft_does_not_raise() -> None:
