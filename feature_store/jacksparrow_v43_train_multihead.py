@@ -23,6 +23,14 @@ from feature_store.jacksparrow_v43_multihead import (
     bars_to_horizon_key,
 )
 
+# Longer horizons: slightly relax cost mask (larger moves; avoid over-pruning 1h/2h).
+V43_HORIZON_COST_SCALE: Dict[int, float] = {
+    2: 1.0,
+    6: 1.0,
+    12: 0.85,
+    24: 0.80,
+}
+
 try:
     import lightgbm as lgb
     from lightgbm import LGBMClassifier
@@ -203,6 +211,45 @@ def _candidate_stats(
     }
 
 
+def _horizon_meta_classifier_params(forward_bars: int, rng: int) -> Dict[str, Any]:
+    """Slightly richer meta models on longer horizons (more validation signal)."""
+    fb = int(forward_bars)
+    if fb >= 24:
+        return {
+            "n_estimators": 300,
+            "num_leaves": 31,
+            "min_child_samples": 80,
+            "reg_lambda": 2.0,
+            "reg_alpha": 0.1,
+            "learning_rate": 0.04,
+            "random_state": rng,
+            "verbose": -1,
+            "class_weight": "balanced",
+        }
+    if fb >= 12:
+        return {
+            "n_estimators": 250,
+            "num_leaves": 23,
+            "min_child_samples": 90,
+            "reg_lambda": 2.0,
+            "reg_alpha": 0.1,
+            "learning_rate": 0.045,
+            "random_state": rng,
+            "verbose": -1,
+            "class_weight": "balanced",
+        }
+    return {
+        "n_estimators": 200,
+        "num_leaves": 15,
+        "min_child_samples": 100,
+        "reg_lambda": 2.0,
+        "reg_alpha": 0.1,
+        "learning_rate": 0.05,
+        "random_state": rng,
+        "verbose": -1,
+    }
+
+
 def train_horizon_ensemble(
     X_train: pd.DataFrame,
     y_train: pd.Series,
@@ -211,6 +258,7 @@ def train_horizon_ensemble(
     *,
     rng: int = 42,
     round_trip_cost: float = 0.0048,
+    forward_bars: int = 6,
 ) -> Tuple[EnsembleModel, Dict[str, Any]]:
     """Train one meta-stack ensemble for a single horizon (Pattern 3)."""
     feat_cols = list(X_train.columns)
@@ -308,16 +356,7 @@ def train_horizon_ensemble(
         y_meta_fit_va = y_bin_val
         auc_mask = use_va
 
-    meta_clf = LGBMClassifier(
-        n_estimators=200,
-        num_leaves=15,
-        min_child_samples=100,
-        reg_lambda=2.0,
-        reg_alpha=0.1,
-        learning_rate=0.05,
-        random_state=rng,
-        verbose=-1,
-    )
+    meta_clf = LGBMClassifier(**_horizon_meta_classifier_params(forward_bars, rng))
     _fit_lgb_sklearn_compat(
         meta_clf,
         X_meta_tr,
@@ -431,10 +470,14 @@ def train_multihead_from_feature_matrix(
     for hkey in V43_HORIZON_KEYS:
         fb = int(V43_HORIZON_KEY_TO_BARS[hkey])
         label_mode_horizon = "cost_aware" if cost_aware_labels else "gross_forward_return"
+        cost_scale = float(V43_HORIZON_COST_SCALE.get(fb, 1.0))
+        effective_cost = round_trip_cost * cost_scale
         if cost_aware_labels:
             y_raw, label_stats = build_cost_aware_forward_labels(
-                close, fb, round_trip_cost=round_trip_cost
+                close, fb, round_trip_cost=effective_cost
             )
+            label_stats["horizon_cost_scale"] = cost_scale
+            label_stats["effective_round_trip_cost_pct"] = effective_cost
         else:
             y_raw = build_forward_labels(close, fb)
             label_stats = {"tradable_label_fraction": 1.0, "sub_cost_suppressed_fraction": 0.0}
@@ -474,6 +517,7 @@ def train_multihead_from_feature_matrix(
             y_val,
             rng=rng + fb,
             round_trip_cost=round_trip_cost,
+            forward_bars=fb,
         )
         bundle.set_head(fb, ensemble)
 

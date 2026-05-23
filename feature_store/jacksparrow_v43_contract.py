@@ -18,6 +18,7 @@ from feature_store.jacksparrow_v43_multihead import (
     V43_MULTIHEAD_MODEL_FAMILY,
     validate_v43_multihead_metadata,
     validate_multihead_export_gates,
+    resolve_min_meta_auc_by_horizon,
     V43_MIN_META_AUC_BY_HORIZON,
 )
 
@@ -116,7 +117,7 @@ def audit_v43_metadata_promotion(meta: Mapping[str, Any]) -> List[str]:
     family = str(meta.get("model_family") or "").strip()
     horizons = meta.get("horizons")
     if family == "jacksparrow_v43_multihead" or isinstance(horizons, dict):
-        for key, min_auc in V43_MIN_META_AUC_BY_HORIZON.items():
+        for key, min_auc in resolve_min_meta_auc_by_horizon().items():
             block = horizons.get(key) if isinstance(horizons, dict) else None
             if not isinstance(block, dict):
                 warnings.append(f"horizons[{key}] missing for promotion audit")

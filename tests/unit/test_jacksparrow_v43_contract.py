@@ -127,6 +127,54 @@ def test_audit_v43_metadata_warns_zero_short_candidates() -> None:
     assert any("short_candidates" in w for w in warnings)
 
 
+def test_validate_v43_metadata_promotion_strict_blocks_weak_multihead() -> None:
+    meta = {
+        "model_family": "jacksparrow_v43_multihead",
+        "features": list(V43_CANONICAL_FEATURES),
+        "compatible_feature_version": V43_COMPATIBLE_FEATURE_VERSION,
+        "horizons": {
+            "scalp_10m": {
+                "forward_bars": 2,
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.55,
+                    "validation_corr": 0.01,
+                    "dynamic_threshold": 0.004,
+                },
+            },
+            "intraday_30m": {
+                "forward_bars": 6,
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.55,
+                    "validation_corr": 0.01,
+                    "dynamic_threshold": 0.005,
+                },
+            },
+            "trend_1h": {
+                "forward_bars": 12,
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.50,
+                    "validation_corr": 0.01,
+                    "dynamic_threshold": 0.006,
+                },
+            },
+            "swing_2h": {
+                "forward_bars": 24,
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.61,
+                    "validation_corr": 0.01,
+                    "dynamic_threshold": 0.007,
+                },
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="promotion gate|export gates"):
+        validate_v43_metadata_promotion(meta, strict=True)
+
+
 def test_validate_v43_metadata_promotion_strict_raises() -> None:
     meta = {
         "validation_metrics": {

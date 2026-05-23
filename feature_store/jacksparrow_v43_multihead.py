@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Tuple
+import os
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from feature_store.jacksparrow_v43_horizon import (
     V43_CANDLE_MINUTES,
@@ -45,6 +46,40 @@ V43_MIN_VALIDATION_CORR_BY_HORIZON: Dict[str, float] = {
     "trend_1h": 0.0,
     "swing_2h": 0.0,
 }
+
+# Always block export when meta_auc falls below this (worse than noise band).
+V43_EXPORT_HARD_FLOOR_META_AUC: float = 0.52
+
+_ENV_MIN_AUC_KEYS: Dict[str, str] = {
+    "scalp_10m": "V43_MIN_META_AUC_SCALP_10M",
+    "intraday_30m": "V43_MIN_META_AUC_INTRADAY_30M",
+    "trend_1h": "V43_MIN_META_AUC_TREND_1H",
+    "swing_2h": "V43_MIN_META_AUC_SWING_2H",
+}
+
+
+def resolve_min_meta_auc_by_horizon() -> Dict[str, float]:
+    """Production minimums with optional per-horizon env overrides."""
+    out = dict(V43_MIN_META_AUC_BY_HORIZON)
+    for key, env_name in _ENV_MIN_AUC_KEYS.items():
+        raw = os.environ.get(env_name)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            out[key] = float(raw)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def resolve_export_hard_floor_meta_auc() -> float:
+    raw = os.environ.get("V43_EXPORT_HARD_FLOOR_META_AUC")
+    if raw is None or str(raw).strip() == "":
+        return V43_EXPORT_HARD_FLOOR_META_AUC
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return V43_EXPORT_HARD_FLOOR_META_AUC
 
 # Policy: which ML heads confirm / veto for a thesis target horizon.
 V43_THESIS_CONFIRMATION_HEADS: Dict[int, Tuple[int, ...]] = {
@@ -158,17 +193,28 @@ def validate_multihead_export_gates(
     meta: Mapping[str, Any],
     *,
     strict: bool = True,
-) -> List[str]:
-    """Return export gate failures; raise when ``strict`` and any check fails."""
+    return_soft: bool = False,
+    horizon_keys: Optional[Tuple[str, ...]] = None,
+) -> List[str] | Tuple[List[str], List[str]]:
+    """Return export gate failures; raise when ``strict`` and any hard failure exists.
+
+    When ``strict`` is False, heads between the hard floor (default 0.52) and the
+    production minimum are reported as *soft* failures (warnings) but do not block.
+    Heads below the hard floor always block.
+    """
     failures: List[str] = []
+    soft_failures: List[str] = []
+    min_auc_by_key = resolve_min_meta_auc_by_horizon()
+    hard_floor = resolve_export_hard_floor_meta_auc()
+    keys = horizon_keys or V43_HORIZON_KEYS
     horizons = meta.get("horizons")
     if not isinstance(horizons, dict):
         failures.append("metadata missing horizons dict")
-        if strict:
+        if strict and failures:
             raise ValueError("v43 export gates failed: " + "; ".join(failures))
-        return failures
+        return (failures, soft_failures) if return_soft else failures
 
-    for key in V43_HORIZON_KEYS:
+    for key in keys:
         block = horizons.get(key)
         if not isinstance(block, dict):
             failures.append(f"horizons[{key}] missing")
@@ -184,13 +230,20 @@ def validate_multihead_export_gates(
             auc = float(vm.get("meta_auc"))
         except (TypeError, ValueError):
             auc = None
-        min_auc = V43_MIN_META_AUC_BY_HORIZON.get(key, 0.54)
+        min_auc = min_auc_by_key.get(key, 0.54)
         if auc is None:
             failures.append(f"horizons[{key}] missing meta_auc")
-        elif auc < min_auc:
+        elif auc < hard_floor:
             failures.append(
-                f"horizons[{key}] meta_auc={auc:.4f} < minimum {min_auc:.2f}"
+                f"horizons[{key}] meta_auc={auc:.4f} < hard floor {hard_floor:.2f} "
+                "(at or below random — retrain before export)"
             )
+        elif auc < min_auc:
+            msg = f"horizons[{key}] meta_auc={auc:.4f} < minimum {min_auc:.2f}"
+            if strict:
+                failures.append(msg)
+            else:
+                soft_failures.append(msg)
 
         try:
             corr = float(vm.get("validation_corr"))
@@ -200,23 +253,110 @@ def validate_multihead_export_gates(
         if corr is None:
             failures.append(f"horizons[{key}] missing validation_corr")
         elif corr < min_corr:
-            failures.append(
-                f"horizons[{key}] validation_corr={corr:.4f} < minimum {min_corr:.2f}"
-            )
+            msg = f"horizons[{key}] validation_corr={corr:.4f} < minimum {min_corr:.2f}"
+            if strict:
+                failures.append(msg)
+            else:
+                soft_failures.append(msg)
 
         tradable = vm.get("tradable_label_fraction")
         if tradable is not None:
             try:
                 if float(tradable) < 0.05:
-                    failures.append(
-                        f"horizons[{key}] tradable_label_fraction={float(tradable):.4f} too low"
+                    msg = (
+                        f"horizons[{key}] tradable_label_fraction="
+                        f"{float(tradable):.4f} too low"
                     )
+                    if strict:
+                        failures.append(msg)
+                    else:
+                        soft_failures.append(msg)
             except (TypeError, ValueError):
                 pass
 
     if strict and failures:
         raise ValueError("v43 multi-head export gates failed: " + "; ".join(failures))
+    if return_soft:
+        return failures, soft_failures
     return failures
+
+
+def format_horizon_training_diagnostics(meta: Mapping[str, Any]) -> str:
+    """Per-head rows, label modes, tradable fractions, and validation metrics."""
+    horizons = meta.get("horizons") if isinstance(meta.get("horizons"), dict) else {}
+    cost = meta.get("runtime_cost_assumptions") if isinstance(meta.get("runtime_cost_assumptions"), dict) else {}
+    lines = [
+        "Horizon training diagnostics",
+        f"target_definition={meta.get('target_definition')} "
+        f"round_trip_cost_pct={cost.get('round_trip_cost_pct')}",
+        f"{'horizon':<16} {'bars':>4} {'rows_tr':>7} {'rows_val':>7} "
+        f"{'tradable':>8} {'label_mode':<28} {'meta_auc':>8} {'corr':>8}",
+        "-" * 95,
+    ]
+    for key in V43_HORIZON_KEYS:
+        block = horizons.get(key) if isinstance(horizons, dict) else None
+        if not isinstance(block, dict):
+            lines.append(f"{key:<16} {'—':>4} {'—':>7} {'—':>7} {'—':>8} {'MISSING':<28} {'—':>8} {'—':>8}")
+            continue
+        split = block.get("split") if isinstance(block.get("split"), dict) else {}
+        stats = block.get("label_stats") if isinstance(block.get("label_stats"), dict) else {}
+        vm = block.get("validation_metrics") if isinstance(block.get("validation_metrics"), dict) else {}
+        try:
+            tradable = float(stats.get("tradable_label_fraction"))
+            trad_s = f"{tradable:.3f}"
+        except (TypeError, ValueError):
+            trad_s = "n/a"
+        try:
+            auc_s = f"{float(vm.get('meta_auc')):.4f}"
+        except (TypeError, ValueError):
+            auc_s = "n/a"
+        try:
+            corr_s = f"{float(vm.get('validation_corr')):.4f}"
+        except (TypeError, ValueError):
+            corr_s = "n/a"
+        label_mode = str(block.get("label_mode") or vm.get("label_mode") or "—")[:28]
+        lines.append(
+            f"{key:<16} {int(block.get('forward_bars', 0)):>4} "
+            f"{int(split.get('rows_train', 0)):>7} "
+            f"{int(split.get('rows_validation', 0)):>7} "
+            f"{trad_s:>8} {label_mode:<28} {auc_s:>8} {corr_s:>8}"
+        )
+    lines.append("")
+    lines.append(format_export_gate_summary(meta))
+    return "\n".join(lines)
+
+
+def format_export_gate_summary(meta: Mapping[str, Any]) -> str:
+    """Human-readable per-horizon meta_auc vs thresholds."""
+    min_auc_by_key = resolve_min_meta_auc_by_horizon()
+    hard_floor = resolve_export_hard_floor_meta_auc()
+    horizons = meta.get("horizons") if isinstance(meta.get("horizons"), dict) else {}
+    lines = [
+        f"{'horizon':<16} {'meta_auc':>8} {'min':>6} {'floor':>6} {'status':>8}",
+        "-" * 50,
+    ]
+    for key in V43_HORIZON_KEYS:
+        block = horizons.get(key) if isinstance(horizons, dict) else None
+        vm = block.get("validation_metrics") if isinstance(block, dict) else {}
+        try:
+            auc = float(vm.get("meta_auc"))
+            auc_s = f"{auc:.4f}"
+        except (TypeError, ValueError):
+            auc = None
+            auc_s = "n/a"
+        min_auc = min_auc_by_key.get(key, 0.54)
+        if auc is None:
+            status = "MISSING"
+        elif auc < hard_floor:
+            status = "BLOCK"
+        elif auc < min_auc:
+            status = "WARN"
+        else:
+            status = "PASS"
+        lines.append(
+            f"{key:<16} {auc_s:>8} {min_auc:>6.2f} {hard_floor:>6.2f} {status:>8}"
+        )
+    return "\n".join(lines)
 
 
 def head_thresholds(meta: Mapping[str, Any], horizon_key: str) -> Tuple[float, float]:

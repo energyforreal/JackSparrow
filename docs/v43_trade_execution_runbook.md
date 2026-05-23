@@ -70,7 +70,9 @@ When the Colab notebook §4c meta-stacking path is used, the exported bundle inc
 | `model_architecture.calibrator` | `"ridge"` | **Must** be present whenever `meta_learner` is set |
 | `validation_metrics.inference_path` | `"meta_calibrator"` | Confirms §4c ran and thresholds were calibrated on meta-stack predictions |
 | `validation_metrics.validation_corr` | > 0 | Meta-stack expected return vs realized forward return |
-| `horizons.*.validation_metrics.meta_auc` | scalp 0.54 / 30m 0.56 / 1h 0.58 / 2h 0.60 | Hard export gate via `validate_multihead_export_gates` |
+| `horizons.*.validation_metrics.meta_auc` | scalp 0.54 / 30m 0.56 / 1h 0.58 / 2h 0.60 | Hard export gate via `validate_multihead_export_gates` when `V43_EXPORT_GATES_STRICT=true` |
+| `V43_EXPORT_GATES_STRICT` | `true` (production) | Set `false` in Colab for research-only export; hard floor 0.52 still blocks random heads |
+| `V43_EXPORT_HARD_FLOOR_META_AUC` | 0.52 | Always blocks export below this AUC (any head) |
 
 **Why calibrator is mandatory:** `meta.predict_proba` returns values in **[0, 1]**.
 Without the Ridge calibrator, gate-5 compares probability to expected-return thresholds
