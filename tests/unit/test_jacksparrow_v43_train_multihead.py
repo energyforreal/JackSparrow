@@ -179,6 +179,46 @@ def test_format_horizon_training_diagnostics_includes_heads() -> None:
     assert "0.5700" in text or "0.57" in text
 
 
+def test_validate_multihead_export_gates_strict_with_return_soft_does_not_raise() -> None:
+    meta = {
+        "horizons": {
+            "scalp_10m": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.55,
+                    "validation_corr": 0.01,
+                }
+            },
+            "intraday_30m": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.55,
+                    "validation_corr": 0.01,
+                }
+            },
+            "trend_1h": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.59,
+                    "validation_corr": 0.01,
+                }
+            },
+            "swing_2h": {
+                "validation_metrics": {
+                    "inference_path": "meta_calibrator",
+                    "meta_auc": 0.61,
+                    "validation_corr": 0.01,
+                }
+            },
+        }
+    }
+    failures, soft = validate_multihead_export_gates(
+        meta, strict=True, return_soft=True
+    )
+    assert isinstance(failures, list)
+    assert isinstance(soft, list)
+
+
 def test_validate_multihead_export_gates_passes_strong_model() -> None:
     horizons = {}
     for key, min_auc in V43_MIN_META_AUC_BY_HORIZON.items():

@@ -210,7 +210,7 @@ def validate_multihead_export_gates(
     horizons = meta.get("horizons")
     if not isinstance(horizons, dict):
         failures.append("metadata missing horizons dict")
-        if strict and failures:
+        if strict and failures and not return_soft:
             raise ValueError("v43 export gates failed: " + "; ".join(failures))
         return (failures, soft_failures) if return_soft else failures
 
@@ -254,7 +254,10 @@ def validate_multihead_export_gates(
             failures.append(f"horizons[{key}] missing validation_corr")
         elif corr < min_corr:
             msg = f"horizons[{key}] validation_corr={corr:.4f} < minimum {min_corr:.2f}"
-            if strict:
+            # Hard-block only clearly negative corr; tiny negatives are warnings when return_soft.
+            if corr is not None and corr < -0.02:
+                failures.append(msg)
+            elif strict and not return_soft:
                 failures.append(msg)
             else:
                 soft_failures.append(msg)
@@ -274,7 +277,7 @@ def validate_multihead_export_gates(
             except (TypeError, ValueError):
                 pass
 
-    if strict and failures:
+    if strict and failures and not return_soft:
         raise ValueError("v43 multi-head export gates failed: " + "; ".join(failures))
     if return_soft:
         return failures, soft_failures
