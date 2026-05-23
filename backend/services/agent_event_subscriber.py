@@ -1585,6 +1585,29 @@ class AgentEventSubscriber:
             if v is not None:
                 signal_data[k] = v
 
+        for k in (
+            "policy_verdict",
+            "policy_reason_codes",
+            "strategy_origin",
+            "trade_score",
+            "thesis_signal",
+            "ml_evidence_snapshot",
+            "agent_introspection",
+            "memory_context_id",
+            "decision_event_id",
+        ):
+            v = payload.get(k)
+            if v is not None:
+                signal_data[k] = v
+        if isinstance(market_context, dict):
+            excerpt: Dict[str, Any] = {}
+            for k in ("trade_score", "strategy_candidate", "ml_validation", "market_structure"):
+                v = market_context.get(k)
+                if v is not None:
+                    excerpt[k] = v
+            if excerpt:
+                signal_data["market_context_excerpt"] = excerpt
+
         await _append_signal_edge_history_redis(symbol, signal_data)
 
         # Broadcast signal update
@@ -1621,6 +1644,25 @@ class AgentEventSubscriber:
 
     async def _handle_position_closed_consolidated(self, payload: Dict[str, Any]):
         """Handle position_closed events with simplified logic."""
+        reflection = payload.get("reflection_snapshot")
+        if isinstance(reflection, dict):
+            try:
+                reflection_message = create_agent_state_update(
+                    {
+                        "state": "POSITION_REFLECTION",
+                        "reason": "advisory_reflection",
+                        "reflection_snapshot": reflection,
+                        "symbol": payload.get("symbol"),
+                        "position_id": payload.get("position_id"),
+                        "timestamp": payload.get("timestamp"),
+                    }
+                )
+                await unified_websocket_manager.broadcast(
+                    reflection_message,
+                    channel="agent_update",
+                )
+            except Exception:
+                pass
         # Only broadcast full portfolio update - avoid partial update that would
         # briefly replace portfolio with {position_closed: {...}} on frontend
         await self._broadcast_portfolio_update()

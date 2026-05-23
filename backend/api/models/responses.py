@@ -327,6 +327,26 @@ class PredictResponse(DecimalSerializerMixin, BaseModel):
         default=None,
         description="Inference mode: primary, fallback, or degraded"
     )
+    agent_introspection: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Deterministic self-awareness snapshot at decision time",
+    )
+    policy_verdict: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Agent policy verdict when surfaced on predict path",
+    )
+    trade_score: Optional[float] = Field(
+        default=None,
+        description="Confluence score 0-100 from trade scorer",
+    )
+    ml_evidence_snapshot: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured ML evidence snapshot",
+    )
+    memory_context_id: Optional[str] = Field(
+        default=None,
+        description="Vector memory context id for outcome correlation",
+    )
 
 
 class TradeResponse(DecimalSerializerMixin, BaseModel):

@@ -48,6 +48,22 @@ def _has_healthy_model_predictions(model_predictions: List[Dict[str, Any]]) -> b
     return False
 
 
+def _ml_validation_gates_passed(market_context: Dict[str, Any], side: str) -> Tuple[bool, str]:
+    """Require ml_validation.final_long/final_short aligned with entry side."""
+    ml_val = market_context.get("ml_validation")
+    if not isinstance(ml_val, dict):
+        return False, "ml_validation_missing"
+    if side == "BUY":
+        if not bool(ml_val.get("final_long")):
+            return False, "ml_validation_final_long_false"
+        return True, "ml_validation_long_gates_passed"
+    if side == "SELL":
+        if not bool(ml_val.get("final_short")):
+            return False, "ml_validation_final_short_false"
+        return True, "ml_validation_short_gates_passed"
+    return False, "ml_validation_invalid_side"
+
+
 def _v43_gates_passed(market_context: Dict[str, Any], side: str) -> Tuple[bool, str]:
     v43_exec = market_context.get("v43_execution_profile")
     if not isinstance(v43_exec, dict) or not v43_exec.get("enabled"):
@@ -59,6 +75,10 @@ def _v43_gates_passed(market_context: Dict[str, Any], side: str) -> Tuple[bool, 
     v43_dec = market_context.get("v43_dedicated_decision")
     if not isinstance(v43_dec, dict) or not v43_dec.get("enabled"):
         return False, "v43_decision_missing"
+
+    ml_ok, ml_reason = _ml_validation_gates_passed(market_context, side)
+    if not ml_ok:
+        return False, ml_reason
 
     desired = v43_exec.get("desired_side")
     if side == "BUY":
@@ -109,11 +129,57 @@ def _policy_supports_entry(
         return False, f"policy_signal_mismatch={verdict_sig}"
     if verdict_sig not in _BUY_SIGNALS | _SELL_SIGNALS:
         return False, "policy_signal_not_entry"
+    if "agent_thesis_confirms_ml" in reason_set:
+        return True, "policy_thesis_confirms_ml"
     if "agent_thesis_origin" in reason_set or "agent_thesis_entry" in reason_set:
         return True, "policy_thesis_entry"
     if not bool(policy_verdict.get("adopted_ml_candidate")):
         return False, "policy_did_not_adopt_ml_candidate"
     return True, "policy_adopted_ml_candidate"
+
+
+def _strategy_ml_agreement_ok(
+    market_context: Dict[str, Any],
+    policy_verdict: Optional[Dict[str, Any]],
+) -> Tuple[bool, str]:
+    """Validate thesis+ML agreement for ml_and_thesis production mode."""
+    mode = str(getattr(settings, "agent_policy_mode", "ml_and_thesis") or "ml_and_thesis").lower()
+    if not bool(getattr(settings, "require_strategy_ml_agreement", True)):
+        return True, "strategy_ml_agreement_not_required"
+    if mode != "ml_and_thesis":
+        return True, "strategy_ml_agreement_mode_skip"
+
+    reasons = set()
+    if isinstance(policy_verdict, dict):
+        reasons = {str(r) for r in (policy_verdict.get("reason_codes") or [])}
+    if any(
+        str(r).startswith("multi_horizon_") and "passed" not in str(r)
+        for r in reasons
+    ):
+        return False, "strategy_ml_multi_horizon_reject"
+    if "fusion_ml_and_thesis_no_agreement" in reasons:
+        return False, "strategy_ml_no_agreement"
+    if "agent_thesis_confirms_ml" not in reasons:
+        return False, "missing_agent_thesis_confirms_ml"
+
+    ts = market_context.get("trade_score")
+    if isinstance(ts, dict) and not bool(ts.get("passed", True)):
+        return False, "trade_score_not_passed"
+
+    ml_val = market_context.get("ml_validation")
+    policy_sig = ""
+    if isinstance(policy_verdict, dict):
+        policy_sig = str(policy_verdict.get("signal") or "").upper()
+    if isinstance(ml_val, dict):
+        if policy_sig in _BUY_SIGNALS and not bool(ml_val.get("final_long")):
+            return False, "ml_validation_final_long_false"
+        if policy_sig in _SELL_SIGNALS and not bool(ml_val.get("final_short")):
+            return False, "ml_validation_final_short_false"
+        if policy_sig in _BUY_SIGNALS | _SELL_SIGNALS:
+            return True, "strategy_ml_agreement_ok"
+        if not bool(ml_val.get("final_long") or ml_val.get("final_short")):
+            return False, "ml_validation_gates_not_passed"
+    return True, "strategy_ml_agreement_ok"
 
 
 def validate_ml_entry_signal(
@@ -149,8 +215,15 @@ def validate_ml_entry_signal(
     if not policy_ok:
         return False, policy_reason
 
-    if policy_reason == "policy_thesis_entry":
-        return True, "thesis_policy_entry"
+    if policy_reason in ("policy_thesis_entry", "policy_thesis_confirms_ml"):
+        agree_ok, agree_reason = _strategy_ml_agreement_ok(mc, policy_verdict)
+        if not agree_ok:
+            return False, agree_reason
+        return True, policy_reason
+
+    agree_ok, agree_reason = _strategy_ml_agreement_ok(mc, policy_verdict)
+    if not agree_ok and str(getattr(settings, "agent_policy_mode", "")).lower() == "ml_and_thesis":
+        return False, agree_reason
 
     if isinstance(ml_evidence_snapshot, dict):
         ml_sig = str(ml_evidence_snapshot.get("ml_candidate_signal") or "").upper()

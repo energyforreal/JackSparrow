@@ -148,8 +148,10 @@ JackSparrow/
 │   │   └── dev_watcher.py             # Docker-dev hot-reload watcher for `agent.core.intelligent_agent`
 │   ├── memory/
 │   │   ├── __init__.py
-│   │   ├── vector_store.py            # Vector memory store
+│   │   ├── vector_store.py            # Vector memory store (DecisionContext, outcome backfill)
 │   │   └── embedding_service.py       # Embedding generation
+│   │   # Self-awareness (deterministic, no LLM):
+│   │   # agent_introspection.py, agent_reflection_engine.py, agent_self_awareness_hooks.py
 │   ├── learning/
 │   │   ├── __init__.py
 │   │   ├── performance_tracker.py     # Directional accuracy/PnL tracker (bounded history)

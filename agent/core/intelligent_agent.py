@@ -620,7 +620,9 @@ class IntelligentAgent:
                 if not monitor_symbols:
                     continue
 
-                max_hold_s = (getattr(settings, "max_position_hold_hours", 24) or 24) * 3600
+                from agent.core.v43_runtime_horizon import effective_max_position_hold_hours
+
+                max_hold_s = effective_max_position_hold_hours() * 3600
                 now = datetime.now(timezone.utc)
                 for symbol in monitor_symbols:
                     if not self.running:

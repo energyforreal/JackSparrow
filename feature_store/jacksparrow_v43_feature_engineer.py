@@ -20,6 +20,7 @@ from feature_store.jacksparrow_v43_build_matrix import build_v43_feature_matrix
 from feature_store.jacksparrow_v43_contract import (
     V43_CANONICAL_FEATURES,
     V43_FORWARD_TARGET_BARS,
+    resolve_training_forward_bars,
 )
 from feature_store.jacksparrow_v43_mcp_row import _ohlc
 
@@ -79,7 +80,16 @@ class JackSparrowV43FeatureEngineer:
                     f"after transform ({len(d)} vs {len(result)})"
                 )
             c = d["close"].astype(float)
-            horizon = int(V43_FORWARD_TARGET_BARS)
+            try:
+                from agent.core.config import settings
+
+                horizon = resolve_training_forward_bars(
+                    settings_fallback=int(
+                        getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6
+                    ),
+                )
+            except Exception:
+                horizon = int(V43_FORWARD_TARGET_BARS)
             fwd = c.shift(-horizon) / c - 1.0
             result = result.copy()
             tgt = pd.Series(fwd.values, dtype="float64").replace([np.inf, -np.inf], np.nan)

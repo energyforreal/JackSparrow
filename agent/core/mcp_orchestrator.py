@@ -38,6 +38,8 @@ from agent.events.schemas import (
     EvidenceReadyEvent,
     EventType,
     PolicyAuthority,
+    PolicyVerdict,
+    MLEvidenceSnapshot,
 )
 from agent.core.agent_policy_engine import (
     agent_policy_engine,
@@ -45,6 +47,7 @@ from agent.core.agent_policy_engine import (
     build_ml_evidence_from_reasoning_context,
 )
 from agent.core.config import settings
+from agent.core.agent_introspection import build_introspection_snapshot
 from agent.core.v43_market_frames import closed_5m_bar_index
 from agent.core.v43_signal_gates import (
     V43GateState,
@@ -59,7 +62,18 @@ from agent.core.log_context import (
     KEY_SYMBOL,
 )
 from feature_store.feature_registry import get_feature_list
-from feature_store.jacksparrow_v43_contract import V43_FORWARD_TARGET_BARS
+from agent.core.v43_runtime_horizon import set_runtime_v43_horizon
+from agent.core.multi_horizon_evidence import (
+    build_multi_horizon_evidence,
+    primary_head_for_gates,
+)
+from feature_store.jacksparrow_v43_horizon import (
+    V43_SUPPORTED_FORWARD_TARGET_BARS,
+    build_execution_profile,
+    forward_bars_to_minutes,
+    resolve_training_forward_bars,
+)
+from feature_store.jacksparrow_v43_multihead import primary_execution_horizon_bars
 
 logger = structlog.get_logger()
 
@@ -356,9 +370,18 @@ class MCPOrchestrator:
         context: Dict[str, Any],
         _t0: float,
     ) -> Dict[str, Any]:
-        """Dedicated v43 path: multi-TF frames → model → five gates → reasoning."""
+        """Strategy-first v43 path: frames → ML validation → thesis → score → policy → reasoning."""
         from agent.core.v43_market_frames import fetch_v43_market_frames
-
+        from agent.core.agent_thesis_engine import agent_thesis_engine
+        from agent.core.market_structure import classify_market_structure
+        from agent.core.ml_validator import (
+            apply_gates_to_ml_validation,
+            build_ml_validation_from_prediction,
+            ml_confirms_direction,
+            ml_candidate_signal_from_validation,
+            thesis_verdict_to_strategy_candidate,
+        )
+        from agent.core.trade_scorer import score_trade_setup
         if not self.delta_client:
             logger.warning(
                 "mcp_orchestrator_v43_no_delta_client",
@@ -403,10 +426,68 @@ class MCPOrchestrator:
 
         pred0 = model_response.predictions[0]
         pctx = pred0.context if isinstance(pred0.context, dict) else {}
-        proba = float(pctx.get("expected_return", 0.0) or 0.0)
-        thr = float(pctx.get("threshold", 0.005) or 0.005)
-        short_thr = float(pctx.get("short_threshold", thr) or thr)
-        regime = str(pctx.get("regime", "neutral") or "neutral")
+        head_payloads = pctx.get("multi_horizon_heads")
+        if not isinstance(head_payloads, dict) or not head_payloads:
+            return self._create_model_error_prediction_response(
+                symbol=symbol,
+                context=context,
+                error_code="V43MultiHeadMissing",
+                error_message="v43 prediction missing multi_horizon_heads (retrain multi-head bundle)",
+            )
+        meta_stub = {
+            "primary_execution_horizon_bars": int(
+                pctx.get("primary_execution_horizon_bars", 6) or 6
+            ),
+            "horizons": {
+                k: {"forward_bars": v.get("forward_bars"), "validation_metrics": {}}
+                for k, v in head_payloads.items()
+                if isinstance(v, dict)
+            },
+        }
+        short_enabled = bool(
+            getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
+        )
+        eps = float(getattr(settings, "jacksparrow_v43_near_threshold_epsilon", 0.0) or 0.0)
+        mh_evidence = build_multi_horizon_evidence(
+            head_payloads,
+            meta_stub,
+            short_enabled=short_enabled,
+            eps=eps,
+        )
+        gate_head = primary_head_for_gates(mh_evidence)
+        training_forward_bars = int(
+            gate_head.forward_bars or primary_execution_horizon_bars(meta_stub)
+        )
+        align_horizon = bool(
+            getattr(settings, "jacksparrow_v43_align_execution_to_horizon", True)
+        )
+        v43_execution_profile = build_execution_profile(
+            training_forward_bars,
+            align=align_horizon,
+            debounce_override=(
+                None
+                if align_horizon
+                else int(getattr(settings, "jacksparrow_v43_trade_debounce_bars", 2) or 2)
+            ),
+            max_hold_hours_override=(
+                None
+                if align_horizon
+                else float(getattr(settings, "max_position_hold_hours", 24) or 24)
+            ),
+            take_profit_pct_override=(
+                None
+                if align_horizon
+                else float(getattr(settings, "jacksparrow_v43_take_profit_pct", 0.01) or 0.01)
+            ),
+        )
+        set_runtime_v43_horizon(
+            training_forward_bars, execution_profile=v43_execution_profile
+        )
+        horizon_minutes = forward_bars_to_minutes(training_forward_bars)
+        proba = float(gate_head.expected_return)
+        thr = float(gate_head.threshold)
+        short_thr = float(gate_head.short_threshold)
+        regime = str(gate_head.regime or pctx.get("regime", "neutral") or "neutral")
         u_scale = float(pctx.get("unc_scale", 1.0) or 1.0)
         closed_feats = pctx.get("closed_bar_features") or {}
         if not isinstance(closed_feats, dict):
@@ -417,14 +498,77 @@ class MCPOrchestrator:
         if not has_open:
             has_open = await _exchange_has_open_position_async(symbol)
 
-        eps = float(getattr(settings, "jacksparrow_v43_near_threshold_epsilon", 0.0) or 0.0)
-        raw_long = bool(proba > (thr - max(0.0, eps)))
-        short_enabled = bool(
-            getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
+        ml_validation = build_ml_validation_from_prediction(
+            pctx,
+            pred_confidence=float(pred0.confidence),
+            pred_value=float(pred0.prediction),
+            eps=eps,
+            short_enabled=short_enabled,
         )
-        raw_short = bool(short_enabled and proba < -(short_thr - max(0.0, eps)))
-        if raw_long and raw_short:
-            raw_long = raw_short = False
+        proba = ml_validation.expected_return
+        thr = ml_validation.threshold
+        short_thr = ml_validation.short_threshold
+        raw_long = ml_validation.raw_long
+        raw_short = ml_validation.raw_short
+
+        features_dict: Dict[str, Any] = {str(k): float(v) for k, v in closed_feats.items()}
+        if "volatility" not in features_dict:
+            atr = features_dict.get("atr_pct")
+            if atr is not None:
+                features_dict["volatility"] = float(atr) * 100.0
+
+        structure = classify_market_structure(features_dict, v43_regime=regime)
+        thesis_mc: Dict[str, Any] = {
+            **(context or {}),
+            "symbol": symbol,
+            "features": features_dict,
+            "regime": regime,
+            "v43_regime": regime,
+            "market_structure": structure.to_dict(),
+            "has_open_position": has_open,
+        }
+        thesis_verdict = agent_thesis_engine.evaluate(regime, thesis_mc)
+        strategy_candidate = thesis_verdict_to_strategy_candidate(thesis_verdict)
+
+        thesis_h_bars = int(
+            strategy_candidate.intended_horizon_bars
+            or thesis_verdict.intended_horizon_bars
+            or 0
+        )
+        exec_bars = (
+            thesis_h_bars
+            if thesis_h_bars in V43_SUPPORTED_FORWARD_TARGET_BARS
+            else training_forward_bars
+        )
+        if exec_bars != training_forward_bars:
+            align_horizon = bool(
+                getattr(settings, "jacksparrow_v43_align_execution_to_horizon", True)
+            )
+            v43_execution_profile = build_execution_profile(
+                exec_bars,
+                align=align_horizon,
+                debounce_override=(
+                    None
+                    if align_horizon
+                    else int(
+                        getattr(settings, "jacksparrow_v43_trade_debounce_bars", 2) or 2
+                    )
+                ),
+                max_hold_hours_override=(
+                    None
+                    if align_horizon
+                    else float(getattr(settings, "max_position_hold_hours", 24) or 24)
+                ),
+                take_profit_pct_override=(
+                    None
+                    if align_horizon
+                    else float(
+                        getattr(settings, "jacksparrow_v43_take_profit_pct", 0.01) or 0.01
+                    )
+                ),
+            )
+            set_runtime_v43_horizon(exec_bars, execution_profile=v43_execution_profile)
+            horizon_minutes = forward_bars_to_minutes(exec_bars)
 
         final_long = False
         final_short = False
@@ -476,46 +620,71 @@ class MCPOrchestrator:
             else:
                 reject_tail = "below_threshold"
 
+        gate_reject = None if (final_long or final_short) else reject_tail
+        apply_gates_to_ml_validation(
+            ml_validation,
+            final_long=final_long,
+            final_short=final_short,
+            gate_reject=gate_reject,
+        )
+        ml_validation.target_horizon_bars = exec_bars
+        ml_validation.horizon_minutes = horizon_minutes
+        ml_validation.multi_horizon_evidence = mh_evidence.to_dict()
+
+        strat_side = (
+            "LONG"
+            if strategy_candidate.direction == "LONG"
+            else ("SHORT" if strategy_candidate.direction == "SHORT" else "FLAT")
+        )
+        ml_confirms = (
+            ml_confirms_direction(ml_validation, strat_side, eps=eps, require_gated=True)
+            if strat_side != "FLAT"
+            else False
+        )
+        trade_score = score_trade_setup(
+            strategy=strategy_candidate,
+            ml_validation=ml_validation,
+            structure=structure,
+            ml_confirms=ml_confirms,
+        )
+
+        ml_sig, ml_conf, ml_size = ml_candidate_signal_from_validation(
+            ml_validation, prefer_gated=True
+        )
+
         max_pct = float(getattr(settings, "jacksparrow_v43_max_position_pct", 0.2) or 0.2)
         pos_hint = float(max(0.01, min(1.0, max_pct * u_scale)))
 
-        ai_entry_floor = float(getattr(settings, "ai_signal_min_entry_confidence", 0.7) or 0.7)
-        if final_long:
-            conclusion = "BUY - JackSparrow v43 dedicated path (gates passed)"
-            step5_conf = max(float(pred0.confidence), min(1.0, ai_entry_floor * 0.96))
-            reject_tail = "gates_passed_long"
-            self.record_v43_signal_decision(bar_idx)
-        elif final_short:
-            conclusion = "SELL - JackSparrow v43 dedicated path (gates passed)"
-            step5_conf = max(float(pred0.confidence), min(1.0, ai_entry_floor * 0.96))
-            reject_tail = "gates_passed_short"
-            self.record_v43_signal_decision(bar_idx)
-        else:
-            conclusion = f"HOLD - JackSparrow v43 ({reject_tail})"
-            # Raw edge cleared threshold but a later gate blocked — keep moderate step-5 weight.
-            step5_conf = 0.35 if (raw_long or raw_short) else float(pred0.confidence)
-
+        head_summary = " ".join(
+            f"{k}={h.direction}"
+            for k, h in sorted(mh_evidence.heads.items())
+        )
         evidence_lines = [
             f"expected_return={proba:.5f} thr={thr:.5f} eps={eps:.5f} regime={regime}",
-            f"gates final_long={final_long} final_short={final_short} reject={reject_tail}",
+            f"ml_gate_horizon_bars={training_forward_bars} exec_bars={exec_bars} ({horizon_minutes}m)",
+            f"multi_head={head_summary} align={mh_evidence.alignment_score:.2f}",
+            f"thesis={strategy_candidate.signal} type={strategy_candidate.thesis_type} "
+            f"thesis_horizon_bars={strategy_candidate.intended_horizon_bars}",
+            f"ml_confirms={ml_confirms} gates final_long={final_long} final_short={final_short}",
+            f"trade_score={trade_score.score:.1f} passed={trade_score.passed}",
             f"collapse_rate={self._v43_gate_state.counters.collapse_rate():.3f}",
         ]
         v43_decision = {
             "enabled": True,
-            "conclusion": conclusion,
-            "confidence": step5_conf,
+            "conclusion": "HOLD - strategy-first adjudication pending policy",
+            "confidence": float(pred0.confidence),
             "evidence": evidence_lines,
             "final_long": final_long,
             "final_short": final_short,
-            "position_size_hint": pos_hint if (final_long or final_short) else 0.0,
-        }
-        v43_exec = {
-            "enabled": True,
-            "skip_legacy_entry_gate": True,
-            "skip_volatility_requirement": True,
-            "margin_cap_fraction": pos_hint if (final_long or final_short) else 0.0,
-            "unc_scale": u_scale,
-            "desired_side": ("long" if final_long else ("short" if final_short else None)),
+            "ml_confirms_long": ml_validation.confirms_long,
+            "ml_confirms_short": ml_validation.confirms_short,
+            "ml_candidate_signal": ml_sig,
+            "position_size_hint": 0.0,
+            "strategy_signal": strategy_candidate.signal,
+            "trade_score": trade_score.score,
+            "target_horizon_bars": exec_bars,
+            "horizon_minutes": horizon_minutes,
+            "multi_horizon_evidence": mh_evidence.to_dict(),
         }
 
         ts = datetime.utcnow()
@@ -554,11 +723,6 @@ class MCPOrchestrator:
         model_predictions_payload: List[Dict[str, Any]] = [
             self._serialize_model_prediction(p) for p in model_response.predictions
         ]
-        features_dict: Dict[str, Any] = {str(k): float(v) for k, v in closed_feats.items()}
-        if "volatility" not in features_dict:
-            atr = features_dict.get("atr_pct")
-            if atr is not None:
-                features_dict["volatility"] = float(atr) * 100.0
 
         market_context_for_reasoning: Dict[str, Any] = {
             **(context or {}),
@@ -570,11 +734,134 @@ class MCPOrchestrator:
             "feature_quality": feature_response.overall_quality.value,
             "quality_score": feature_response.quality_score,
             "v43_dedicated_decision": v43_decision,
-            "v43_execution_profile": v43_exec,
-            "v43_gate_reject": None if (final_long or final_short) else reject_tail,
+            "v43_gate_reject": gate_reject,
             "v43_closed_bar_index": bar_idx,
-            "v43_training_forward_bars": V43_FORWARD_TARGET_BARS,
+            "v43_training_forward_bars": training_forward_bars,
+            "v43_execution_horizon_bars": exec_bars,
+            "v43_horizon_minutes": horizon_minutes,
+            "v43_execution_profile": v43_execution_profile,
+            "multi_horizon_evidence": mh_evidence.to_dict(),
+            "v43_bundle_metadata": meta_stub,
+            "ml_validation": ml_validation.to_dict(),
+            "strategy_candidate": strategy_candidate.to_dict(),
+            "thesis_verdict": {
+                "signal": thesis_verdict.signal,
+                "confidence": thesis_verdict.confidence,
+                "thesis_type": thesis_verdict.thesis_type,
+                "reason_codes": thesis_verdict.reason_codes,
+                "intended_horizon_bars": thesis_verdict.intended_horizon_bars,
+                "horizon_minutes": thesis_verdict.horizon_minutes,
+            },
+            "market_structure": structure.to_dict(),
+            "trade_score": trade_score.to_dict(),
+            "regime": regime,
+            "v43_regime": regime,
         }
+
+        ml_evidence = MLEvidenceSnapshot(
+            symbol=symbol,
+            source="v43_orchestrator",
+            ml_candidate_signal=ml_sig,
+            ml_candidate_confidence=ml_conf,
+            ml_candidate_position_size=ml_size,
+            consensus_signal=float(model_response.consensus_prediction),
+            consensus_confidence=float(model_response.consensus_confidence),
+            model_predictions=model_predictions_payload,
+            v43_gate_reject=gate_reject,
+            v43_regime=regime,
+            market_context_excerpt={
+                "v43_dedicated_decision": v43_decision,
+                "v43_execution_profile": v43_execution_profile,
+                "v43_training_forward_bars": training_forward_bars,
+                "v43_execution_horizon_bars": exec_bars,
+                "multi_horizon_evidence": mh_evidence.to_dict(),
+                "ml_validation": ml_validation.to_dict(),
+                "strategy_candidate": strategy_candidate.to_dict(),
+                "trade_score": trade_score.to_dict(),
+            },
+            thesis_signal=strategy_candidate.signal,
+            trade_score=trade_score.score,
+            ml_confirms=ml_confirms,
+        )
+        policy_verdict = agent_policy_engine.evaluate(
+            ml_evidence=ml_evidence,
+            conclusion="",
+            market_context=market_context_for_reasoning,
+        )
+
+        from agent.core.portfolio_intelligence import (
+            apply_portfolio_guard_to_verdict,
+            evaluate_portfolio_guard,
+            fetch_portfolio_exposure_snapshot,
+        )
+
+        portfolio_snap = await fetch_portfolio_exposure_snapshot(
+            symbol,
+            market_context_for_reasoning,
+        )
+        portfolio_guard = evaluate_portfolio_guard(
+            portfolio_snap,
+            symbol=symbol,
+            proposed_signal=policy_verdict.signal,
+            proposed_size_fraction=float(policy_verdict.position_size or 0.0),
+        )
+        pre_guard_signal = policy_verdict.signal
+        pre_guard_size = float(policy_verdict.position_size or 0.0)
+        policy_verdict = apply_portfolio_guard_to_verdict(
+            policy_verdict,
+            portfolio_guard,
+            symbol=symbol,
+        )
+        market_context_for_reasoning["portfolio_exposure"] = portfolio_snap.to_dict()
+        market_context_for_reasoning["portfolio_guard"] = portfolio_guard.to_dict()
+        logger.info(
+            "portfolio_guard_evaluated",
+            symbol=symbol,
+            pre_signal=pre_guard_signal,
+            post_signal=policy_verdict.signal,
+            pre_size=pre_guard_size,
+            post_size=float(policy_verdict.position_size or 0.0),
+            guard_action=portfolio_guard.action,
+            heat_ratio=portfolio_guard.heat_ratio,
+            side_concentration=portfolio_guard.side_concentration_ratio,
+            shadow_only=portfolio_guard.shadow_only,
+            reason_codes=portfolio_guard.reason_codes,
+        )
+
+        _entry_signals = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
+        if policy_verdict.signal in _entry_signals and not trade_score.passed:
+            policy_verdict = PolicyVerdict(
+                signal="HOLD",
+                confidence=policy_verdict.confidence,
+                position_size=0.0,
+                reason_codes=list(policy_verdict.reason_codes)
+                + ["trade_score_below_min", f"score={trade_score.score:.1f}"],
+                ml_evidence_id=policy_verdict.ml_evidence_id,
+                adopted_ml_candidate=False,
+            )
+
+        policy_entry = policy_verdict.signal in _entry_signals
+        v43_exec = {
+            "enabled": True,
+            "skip_legacy_entry_gate": True,
+            "skip_volatility_requirement": True,
+            "margin_cap_fraction": pos_hint if policy_entry else 0.0,
+            "unc_scale": u_scale,
+            "desired_side": (
+                "long"
+                if policy_verdict.signal in ("BUY", "STRONG_BUY")
+                else ("short" if policy_verdict.signal in ("SELL", "STRONG_SELL") else None)
+            ),
+        }
+        market_context_for_reasoning["v43_execution_profile"] = v43_exec
+        if policy_entry:
+            self.record_v43_signal_decision(bar_idx)
+            v43_decision["conclusion"] = (
+                f"{policy_verdict.signal} - strategy-first (thesis+ML policy)"
+            )
+            v43_decision["position_size_hint"] = float(policy_verdict.position_size or pos_hint)
+            v43_decision["policy_signal"] = policy_verdict.signal
+            # Gate truth stays in final_long/final_short from ml_validation; do not overwrite.
 
         reasoning_request = MCPReasoningRequest(
             symbol=symbol,
@@ -582,6 +869,14 @@ class MCPOrchestrator:
             use_memory=bool(self.vector_store),
         )
         reasoning_chain = await self.reasoning_engine.generate_reasoning(reasoning_request)
+
+        policy_decision = {
+            "signal": policy_verdict.signal,
+            "position_size": float(policy_verdict.position_size or 0.0),
+            "confidence": float(policy_verdict.confidence or 0.0),
+            "reasoning": reasoning_chain.conclusion,
+            "policy_reason_codes": list(policy_verdict.reason_codes),
+        }
 
         result = {
             "symbol": symbol,
@@ -618,13 +913,18 @@ class MCPOrchestrator:
                 "conclusion": reasoning_chain.conclusion,
                 "final_confidence": reasoning_chain.final_confidence,
             },
-            "decision": self._extract_decision_from_reasoning(reasoning_chain),
+            "decision": policy_decision,
+            "policy_verdict": policy_verdict.model_dump(mode="json"),
+            "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
         }
         result["inference_latency_ms"] = (time.perf_counter() - _t0) * 1000.0
         _gc = self._v43_gate_state.counters
         logger.info(
             "mcp_orchestrator_v43_prediction_complete",
             symbol=symbol,
+            policy_signal=policy_verdict.signal,
+            thesis_signal=strategy_candidate.signal,
+            trade_score=trade_score.score,
             final_long=final_long,
             final_short=final_short,
             reject=reject_tail,
@@ -1028,18 +1328,77 @@ class MCPOrchestrator:
                 continue
 
         context_id = f"decision-{chain_id}-{timestamp.timestamp():.0f}"
+        dec = {
+            "signal": decision.get("signal"),
+            "confidence": decision.get("confidence"),
+            "position_size": decision.get("position_size"),
+            "reasoning_chain_id": chain_id,
+            "decision_event_id": decision.get("decision_event_id"),
+        }
         return DecisionContext(
             context_id=context_id,
             symbol=symbol,
             timestamp=timestamp,
             features=features,
             market_context=market_context,
-            decision={
-                "signal": decision.get("signal"),
-                "confidence": decision.get("confidence"),
-                "position_size": decision.get("position_size"),
-            },
+            decision=dec,
+            decision_event_id=decision.get("decision_event_id"),
         )
+
+    async def _memory_context_count(self) -> int:
+        if not self.vector_store:
+            return 0
+        try:
+            stats = await self.vector_store.get_memory_stats()
+            return int(stats.get("total_contexts", 0) or 0)
+        except Exception:
+            return 0
+
+    async def _enrich_decision_event_self_awareness(
+        self,
+        decision_event: DecisionReadyEvent,
+        *,
+        symbol: str,
+        signal: str,
+        confidence: float,
+        verdict: PolicyVerdict,
+        ml_evidence: MLEvidenceSnapshot,
+        market_context: Dict[str, Any],
+        chain_id: str,
+        timestamp: datetime,
+        decision_for_store: Dict[str, Any],
+        market_context_for_store: Dict[str, Any],
+    ) -> None:
+        """Attach introspection + memory ids to DecisionReady payload before publish."""
+        payload = decision_event.payload
+        payload["decision_event_id"] = decision_event.event_id
+
+        memory_context_id = await self._store_decision_context(
+            symbol=symbol,
+            decision=decision_for_store,
+            market_context=market_context_for_store,
+            chain_id=chain_id,
+            timestamp=timestamp,
+            decision_event_id=decision_event.event_id,
+        )
+        if memory_context_id:
+            payload["memory_context_id"] = memory_context_id
+
+        if getattr(settings, "agent_introspection_enabled", True):
+            mem_count = await self._memory_context_count()
+            intro = build_introspection_snapshot(
+                symbol=symbol,
+                signal=signal,
+                confidence=confidence,
+                policy_reason_codes=list(verdict.reason_codes),
+                policy_verdict=verdict.model_dump(mode="json"),
+                ml_evidence_snapshot=ml_evidence.model_dump(mode="json"),
+                market_context=market_context,
+                trade_score=ml_evidence.trade_score,
+                memory_enabled=bool(self.vector_store),
+                memory_context_count=mem_count,
+            )
+            payload["agent_introspection"] = intro.to_dict()
 
     async def _store_decision_context(
         self,
@@ -1048,31 +1407,39 @@ class MCPOrchestrator:
         market_context: Dict[str, Any],
         chain_id: str,
         timestamp: datetime,
-    ) -> None:
+        decision_event_id: Optional[str] = None,
+    ) -> Optional[str]:
         """Store a decision context in the vector store for future similarity search."""
         if not self.vector_store:
-            return
+            return None
         try:
+            dec = dict(decision)
+            if decision_event_id:
+                dec["decision_event_id"] = decision_event_id
             ctx = self._build_decision_context_for_storage(
                 symbol=symbol,
-                decision=decision,
+                decision=dec,
                 market_context=market_context,
                 chain_id=chain_id,
                 timestamp=timestamp,
             )
             if ctx:
+                if decision_event_id:
+                    ctx.decision_event_id = decision_event_id
                 await self.vector_store.store_decision_context(ctx)
                 logger.debug(
                     "mcp_orchestrator_decision_context_stored",
                     context_id=ctx.context_id,
                     symbol=symbol,
                 )
+                return ctx.context_id
         except Exception as e:
             logger.warning(
                 "mcp_orchestrator_decision_context_store_failed",
                 symbol=symbol,
                 error=str(e),
             )
+        return None
 
     async def get_health_status(self) -> Dict[str, Any]:
         """Get comprehensive health status of all MCP components."""
@@ -1246,14 +1613,19 @@ class MCPOrchestrator:
                 decision_symbol = result.get("symbol") or symbol
                 timestamp = result.get("timestamp") or datetime.utcnow()
 
-                ml_evidence = build_ml_evidence_from_orchestrator_result(result)
-                verdict = agent_policy_engine.evaluate(
-                    ml_evidence=ml_evidence,
-                    conclusion=str(reasoning.get("conclusion") or ""),
-                    market_context=result.get("market_context")
-                    if isinstance(result.get("market_context"), dict)
-                    else {},
-                )
+                pv_raw = result.get("policy_verdict")
+                if isinstance(pv_raw, dict) and pv_raw.get("signal"):
+                    verdict = PolicyVerdict(**pv_raw)
+                    ml_evidence = build_ml_evidence_from_orchestrator_result(result)
+                else:
+                    ml_evidence = build_ml_evidence_from_orchestrator_result(result)
+                    verdict = agent_policy_engine.evaluate(
+                        ml_evidence=ml_evidence,
+                        conclusion=str(reasoning.get("conclusion") or ""),
+                        market_context=result.get("market_context")
+                        if isinstance(result.get("market_context"), dict)
+                        else {},
+                    )
 
                 evidence_event = EvidenceReadyEvent(
                     source="agent_policy_engine",
@@ -1311,6 +1683,11 @@ class MCPOrchestrator:
                     "market_context": result.get("market_context") or {},
                 }
 
+                strategy_origin = (
+                    "agent_thesis_origin" in verdict.reason_codes
+                    or "agent_thesis_confirms_ml" in verdict.reason_codes
+                )
+                ts_val = ml_evidence.trade_score
                 decision_payload = {
                         "symbol": decision_symbol,
                         "signal": signal,
@@ -1322,6 +1699,17 @@ class MCPOrchestrator:
                         "policy_reason_codes": list(verdict.reason_codes),
                         "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
                         "policy_verdict": verdict.model_dump(mode="json"),
+                        "strategy_origin": strategy_origin,
+                        "trade_score": ts_val,
+                        "thesis_signal": ml_evidence.thesis_signal,
+                        "anticipated_horizon_bars": int(
+                            (mctx or {}).get("v43_execution_horizon_bars", 0) or 0
+                        )
+                        or None,
+                        "anticipated_horizon_minutes": int(
+                            (mctx or {}).get("v43_horizon_minutes", 0) or 0
+                        )
+                        or None,
                 }
                 decision_payload.update(_decision_ws_metadata(result))
 
@@ -1331,16 +1719,25 @@ class MCPOrchestrator:
                     payload=decision_payload,
                 )
 
-                await event_bus.publish(decision_event)
-
-                # Store decision context for future historical similarity search (Step 2)
-                await self._store_decision_context(
+                await self._enrich_decision_event_self_awareness(
+                    decision_event,
                     symbol=decision_symbol,
-                    decision={"signal": signal, "confidence": confidence, "position_size": position_size},
-                    market_context=reasoning_chain_payload.get("market_context", {}),
-                    chain_id=reasoning.get("chain_id", "unknown"),
-                    timestamp=timestamp,
+                    signal=signal,
+                    confidence=float(confidence) if confidence is not None else 0.0,
+                    verdict=verdict,
+                    ml_evidence=ml_evidence,
+                    market_context=mctx,
+                    chain_id=str(reasoning.get("chain_id", "unknown")),
+                    timestamp=timestamp if isinstance(timestamp, datetime) else datetime.utcnow(),
+                    decision_for_store={
+                        "signal": signal,
+                        "confidence": confidence,
+                        "position_size": position_size,
+                    },
+                    market_context_for_store=reasoning_chain_payload.get("market_context", {}),
                 )
+
+                await event_bus.publish(decision_event)
 
                 self._schedule_prediction_audit(
                     correlation_id=event.event_id,
@@ -1463,21 +1860,26 @@ class MCPOrchestrator:
                 correlation_id=event.event_id,
                 payload=decision_payload,
             )
-            await event_bus.publish(decision_event)
 
-            # Store decision context for future historical similarity search (Step 2)
             decision_for_store = {
                 "signal": verdict.signal,
                 "confidence": verdict.confidence,
                 "position_size": verdict.position_size,
             }
-            await self._store_decision_context(
-                symbol=symbol,
-                decision=decision_for_store,
-                market_context=reasoning_chain_payload.get("market_context", {}),
+            await self._enrich_decision_event_self_awareness(
+                decision_event,
+                symbol=str(symbol or ""),
+                signal=verdict.signal,
+                confidence=float(verdict.confidence or 0.0),
+                verdict=verdict,
+                ml_evidence=ml_evidence,
+                market_context=market_context if isinstance(market_context, dict) else {},
                 chain_id=reasoning_chain.chain_id,
                 timestamp=ts_decision,
+                decision_for_store=decision_for_store,
+                market_context_for_store=reasoning_chain_payload.get("market_context", {}),
             )
+            await event_bus.publish(decision_event)
 
             self._schedule_prediction_audit(
                 correlation_id=event.event_id,

@@ -745,11 +745,39 @@ class Settings(BaseSettings):
         ge=48,
         description="Number of 1h candles for v43 (OHLCV + funding alignment).",
     )
+    jacksparrow_v43_forward_target_bars: int = Field(
+        default=6,
+        env="JACKSPARROW_V43_FORWARD_TARGET_BARS",
+        ge=1,
+        description=(
+            "Training label horizon in 5m bars for new v43 exports (6 = 30m). "
+            "Runtime uses metadata.training_forward_bars from the loaded bundle."
+        ),
+    )
+    jacksparrow_v43_align_execution_to_horizon: bool = Field(
+        default=True,
+        env="JACKSPARROW_V43_ALIGN_EXECUTION_TO_HORIZON",
+        description=(
+            "When True, debounce/max-hold/TP hints follow the loaded model's "
+            "training_forward_bars via v43 execution profile."
+        ),
+    )
+    jacksparrow_v43_require_horizon_fusion_match: bool = Field(
+        default=True,
+        env="JACKSPARROW_V43_REQUIRE_HORIZON_FUSION_MATCH",
+        description=(
+            "When True, ml_and_thesis fusion requires thesis intended_horizon_bars "
+            "to match the ML bundle training_forward_bars."
+        ),
+    )
     jacksparrow_v43_trade_debounce_bars: int = Field(
-        default=3,
+        default=2,
         env="JACKSPARROW_V43_TRADE_DEBOUNCE_BARS",
         ge=1,
-        description="Minimum 5m bars between v43 entries (default 3 ≈ 15 min; set 6 for ~30 min).",
+        description=(
+            "Minimum 5m bars between v43 entries when horizon alignment is off "
+            "(default 2 ≈ 10 min for 30m label training)."
+        ),
     )
     jacksparrow_v43_max_trades_per_hour: int = Field(
         default=2,
@@ -794,6 +822,14 @@ class Settings(BaseSettings):
             "it does not block patched calibrations."
         ),
     )
+    jacksparrow_v43_metadata_promotion_strict: bool = Field(
+        default=False,
+        env="JACKSPARROW_V43_METADATA_PROMOTION_STRICT",
+        description=(
+            "When True, reject v43 bundle load if metadata promotion audit finds "
+            "meta_calibrator issues (zero short candidates, low meta_auc, missing calibrator)."
+        ),
+    )
     jacksparrow_v43_near_threshold_epsilon: float = Field(
         default=0.0,
         env="JACKSPARROW_V43_NEAR_THRESHOLD_EPSILON",
@@ -817,10 +853,13 @@ class Settings(BaseSettings):
         description="Leverage used in v43 edge-cost and sizing formulas (match training notebook).",
     )
     jacksparrow_v43_take_profit_pct: float = Field(
-        default=0.015,
+        default=0.01,
         env="JACKSPARROW_V43_TAKE_PROFIT_PCT",
         ge=0.0,
-        description="TP fraction retained in v43 diagnostics and execution tuning metadata.",
+        description=(
+            "TP fraction for v43 diagnostics when horizon alignment is off "
+            "(profile uses ~1% for 30m / 2.5% for 10h when alignment on)."
+        ),
     )
     jacksparrow_v43_maker_fee_rate: float = Field(
         default=0.0005,
@@ -1604,11 +1643,133 @@ class Settings(BaseSettings):
         ),
     )
     agent_policy_mode: str = Field(
-        default="ml_only",
+        default="ml_and_thesis",
         env="AGENT_POLICY_MODE",
         description=(
             "Signal fusion: ml_only | thesis_only | ml_or_thesis | ml_and_thesis | thesis_veto_ml"
         ),
+    )
+    agent_trade_score_min: float = Field(
+        default=70.0,
+        env="AGENT_TRADE_SCORE_MIN",
+        ge=0.0,
+        le=100.0,
+        description="Minimum confluence score (0-100) before policy may emit entry.",
+    )
+    require_strategy_ml_agreement: bool = Field(
+        default=True,
+        env="REQUIRE_STRATEGY_ML_AGREEMENT",
+        description="When True and policy mode is ml_and_thesis, execution requires thesis+ML agreement.",
+    )
+    agent_introspection_enabled: bool = Field(
+        default=True,
+        env="AGENT_INTROSPECTION_ENABLED",
+        description="Emit deterministic agent_introspection on DecisionReadyEvent (read-only).",
+    )
+    agent_memory_outcome_backfill_enabled: bool = Field(
+        default=True,
+        env="AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED",
+        description="Backfill vector memory with trade outcomes on position close.",
+    )
+    agent_reflection_advisory_enabled: bool = Field(
+        default=True,
+        env="AGENT_REFLECTION_ADVISORY_ENABLED",
+        description="Emit advisory reflection_snapshot on position close (no policy mutation).",
+    )
+    portfolio_intelligence_enabled: bool = Field(
+        default=False,
+        env="PORTFOLIO_INTELLIGENCE_ENABLED",
+        description="Enable portfolio heat/concentration/correlation guard before execution.",
+    )
+    portfolio_intelligence_shadow_mode: bool = Field(
+        default=True,
+        env="PORTFOLIO_INTELLIGENCE_SHADOW_MODE",
+        description=(
+            "When True (default), compute portfolio guard and log but do not mutate policy verdict."
+        ),
+    )
+    portfolio_intelligence_reduce_enabled: bool = Field(
+        default=False,
+        env="PORTFOLIO_INTELLIGENCE_REDUCE_ENABLED",
+        description="When shadow is False, allow guard to reduce position_size_fraction.",
+    )
+    portfolio_intelligence_block_enabled: bool = Field(
+        default=False,
+        env="PORTFOLIO_INTELLIGENCE_BLOCK_ENABLED",
+        description="When shadow is False, allow guard to block entries (HOLD).",
+    )
+    portfolio_max_heat_ratio: float = Field(
+        default=0.85,
+        env="PORTFOLIO_MAX_HEAT_RATIO",
+        ge=0.1,
+        le=3.0,
+        description="Max (open+proposed notional) / equity before block.",
+    )
+    portfolio_max_same_side_concentration: float = Field(
+        default=0.70,
+        env="PORTFOLIO_MAX_SAME_SIDE_CONCENTRATION",
+        ge=0.5,
+        le=1.0,
+        description="Max fraction of directional notional on proposed side after entry.",
+    )
+    portfolio_max_correlation_group_fraction: float = Field(
+        default=0.55,
+        env="PORTFOLIO_MAX_CORRELATION_GROUP_FRACTION",
+        ge=0.1,
+        le=1.0,
+        description="Max group notional as fraction of equity.",
+    )
+    portfolio_near_limit_size_factor: float = Field(
+        default=0.50,
+        env="PORTFOLIO_NEAR_LIMIT_SIZE_FACTOR",
+        ge=0.1,
+        le=1.0,
+        description="Size multiplier when near heat cap (reduce_size action).",
+    )
+    portfolio_near_limit_band: float = Field(
+        default=0.08,
+        env="PORTFOLIO_NEAR_LIMIT_BAND",
+        ge=0.0,
+        le=0.5,
+        description="Heat ratio band below cap that triggers reduce_size.",
+    )
+    portfolio_correlation_groups_json: str = Field(
+        default='{"crypto_major":["BTCUSD","ETHUSD","BTCUSDT","ETHUSDT"]}',
+        env="PORTFOLIO_CORRELATION_GROUPS_JSON",
+        description="JSON map of correlation group name to symbol list.",
+    )
+    agent_structure_chop_atr_pct_max: float = Field(
+        default=0.003,
+        env="AGENT_STRUCTURE_CHOP_ATR_PCT_MAX",
+    )
+    agent_structure_low_vol_regime_max: float = Field(
+        default=0.85,
+        env="AGENT_STRUCTURE_LOW_VOL_REGIME_MAX",
+    )
+    agent_structure_trending_adx_min: float = Field(
+        default=22.0,
+        env="AGENT_STRUCTURE_TRENDING_ADX_MIN",
+    )
+    agent_thesis_chop_veto_enabled: bool = Field(
+        default=True,
+        env="AGENT_THESIS_CHOP_VETO_ENABLED",
+    )
+    agent_thesis_min_atr_pct: float = Field(
+        default=0.0,
+        env="AGENT_THESIS_MIN_ATR_PCT",
+    )
+    agent_thesis_max_spread_bps: float = Field(
+        default=50.0,
+        env="AGENT_THESIS_MAX_SPREAD_BPS",
+    )
+    agent_thesis_funding_pressure_max: float = Field(
+        default=2.0,
+        env="AGENT_THESIS_FUNDING_PRESSURE_MAX",
+    )
+    agent_daily_drawdown_halt_pct: float = Field(
+        default=4.0,
+        env="AGENT_DAILY_DRAWDOWN_HALT_PCT",
+        description="Halt new entries when daily drawdown exceeds this percent.",
     )
     agent_thesis_breakout_enabled: bool = Field(
         default=True,

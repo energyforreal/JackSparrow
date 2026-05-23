@@ -104,6 +104,46 @@ export const ReasoningChainSchema = z.object({
   final_confidence: z.number().min(0).max(1).describe('Final confidence score (0.0 to 1.0)'),
 });
 
+export const AgentIntrospectionSnapshotSchema = z.object({
+  version: z.string(),
+  timestamp: z.string(),
+  symbol: z.string(),
+  agent_state: z.string(),
+  policy_mode: z.string(),
+  policy_signal: z.string(),
+  policy_confidence: z.number(),
+  policy_reason_codes: z.array(z.string()).default([]),
+  ml_candidate_signal: z.string().optional(),
+  thesis_signal: z.string().optional(),
+  trade_score: z.number().optional(),
+  trade_score_pass: z.boolean().optional(),
+  v43_regime: z.string().optional(),
+  v43_gate_reject: z.string().optional(),
+  portfolio_guard_action: z.string().optional(),
+  portfolio_guard_reason_codes: z.array(z.string()).default([]),
+  memory_enabled: z.boolean(),
+  memory_context_count: z.number(),
+  limits: z.record(z.unknown()).optional(),
+});
+
+export const ReflectionSnapshotSchema = z.object({
+  version: z.string(),
+  timestamp: z.string(),
+  symbol: z.string(),
+  position_id: z.string(),
+  advisory_only: z.boolean(),
+  predicted_signal: z.string(),
+  exit_reason: z.string(),
+  pnl: z.number(),
+  was_profitable: z.boolean(),
+  direction_correct: z.boolean().optional(),
+  confidence_at_entry: z.number().optional(),
+  calibration_bucket: z.string(),
+  quality_score: z.number(),
+  diagnostics: z.array(z.string()).default([]),
+  reason_codes: z.array(z.string()).default([]),
+});
+
 // Predict response
 export const PredictResponseSchema = z.object(
   {
@@ -130,6 +170,11 @@ export const PredictResponseSchema = z.object(
       .record(z.unknown(), { description: 'Market context used' })
       .default({}),
     timestamp: DateSchema,
+    agent_introspection: AgentIntrospectionSnapshotSchema.optional(),
+    policy_verdict: z.record(z.unknown()).optional(),
+    trade_score: z.number().optional(),
+    ml_evidence_snapshot: z.record(z.unknown()).optional(),
+    memory_context_id: z.string().optional(),
   },
   { description: 'Predict response' },
 );
@@ -171,10 +216,15 @@ export const PositionResponseSchema = z.object({
 
 // Portfolio summary response
 export const PortfolioSummaryResponseSchema = z.object({
-  total_value: DecimalSchema.describe('Total portfolio value'),
+  total_value: DecimalSchema.describe('Total portfolio value in INR'),
+  /** USD account value = wallet balance + unrealized PnL; matches Delta testnet "Account Value". */
+  total_value_usd: DecimalSchema.optional().describe('Total portfolio value in USD'),
+  /** USD wallet balance without unrealized PnL. */
+  wallet_balance_usd: DecimalSchema.optional().describe('Wallet balance in USD (no unrealized)'),
   available_balance: DecimalSchema.describe('Available balance'),
   open_positions: z.number().describe('Number of open positions'),
-  total_unrealized_pnl: DecimalSchema.describe('Total unrealized profit/loss'),
+  total_unrealized_pnl: DecimalSchema.describe('Total unrealized profit/loss in INR'),
+  total_unrealized_pnl_usd: DecimalSchema.optional().describe('Total unrealized profit/loss in USD'),
   total_realized_pnl: DecimalSchema.describe('Total realized profit/loss'),
   positions: z.array(PositionResponseSchema).default([]).describe('Open positions'),
   margin_used: DecimalSchema.optional(),

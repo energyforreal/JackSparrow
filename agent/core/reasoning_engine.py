@@ -393,23 +393,97 @@ class MCPReasoningEngine:
         # Step 5: Decision Synthesis
         step5 = await self._step5_decision_synthesis(request, steps)
         steps.append(step5)
+
+        # Step 5b: Trade adjudication (strategy vs ML validation)
+        step5b = self._step_trade_adjudication(request)
+        steps.append(step5b)
         
         # Extract model predictions and features
         feature_context = request.market_context.get("features", {})
 
-        # Step 6: Confidence Calibration
+        # Step 7: Confidence Calibration (step 6 reserved for trade adjudication)
         step6 = await self._step6_confidence_calibration(request, steps, model_predictions)
+        step6.step_number = 7
+        step6.step_name = "Confidence Calibration"
         steps.append(step6)
         
+        if isinstance(request.market_context.get("strategy_candidate"), dict):
+            final_conclusion = step5b.description
+        else:
+            final_conclusion = step5.description
+
         return MCPReasoningChain(
             chain_id=chain_id,
             timestamp=timestamp,
             market_context=request.market_context,
             steps=steps,
-            conclusion=step5.description,
+            conclusion=final_conclusion,
             final_confidence=step6.confidence,
             model_predictions=model_predictions,
             feature_context=[{"name": k, "value": v} for k, v in feature_context.items()]
+        )
+    
+    def _step_trade_adjudication(self, request: MCPReasoningRequest) -> ReasoningStep:
+        """Adjudicate deterministic thesis vs ML validation (strategy-first pipeline)."""
+        mc = request.market_context
+        strat = mc.get("strategy_candidate") if isinstance(mc.get("strategy_candidate"), dict) else {}
+        ml_val = mc.get("ml_validation") if isinstance(mc.get("ml_validation"), dict) else {}
+        ts = mc.get("trade_score") if isinstance(mc.get("trade_score"), dict) else {}
+
+        thesis_sig = str(strat.get("signal") or "HOLD").upper()
+        ml_sig = str(
+            (mc.get("v43_dedicated_decision") or {}).get("ml_candidate_signal") or "HOLD"
+        ).upper()
+        score = float(ts.get("score") or 0.0)
+        passed = bool(ts.get("passed", False))
+        ml_confirms = bool(
+            ml_val.get("final_long")
+            or ml_val.get("final_short")
+            or ml_val.get("confirms_long")
+            or ml_val.get("confirms_short")
+        )
+
+        evidence = [
+            f"thesis_signal={thesis_sig}",
+            f"ml_candidate={ml_sig}",
+            f"ml_confirms={ml_confirms}",
+            f"trade_score={score:.1f} passed={passed}",
+        ]
+
+        entry = thesis_sig in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL")
+        same_dir = (
+            (thesis_sig in ("BUY", "STRONG_BUY") and ml_sig in ("BUY", "STRONG_BUY"))
+            or (thesis_sig in ("SELL", "STRONG_SELL") and ml_sig in ("SELL", "STRONG_SELL"))
+        )
+
+        if entry and same_dir and ml_confirms and passed:
+            desc = f"{thesis_sig} - trade adjudication: thesis and ML agree (score={score:.0f})"
+            conf = 0.75
+            evidence.append("adjudication_verdict=agree")
+        elif entry and not ml_confirms:
+            desc = f"HOLD - trade adjudication: thesis {thesis_sig} lacks ML confirmation"
+            conf = 0.4
+            evidence.append("adjudication_verdict=ml_reject")
+        elif entry and not same_dir:
+            desc = f"HOLD - trade adjudication: thesis {thesis_sig} vs ML {ml_sig} conflict"
+            conf = 0.35
+            evidence.append("adjudication_verdict=conflict")
+        elif entry and not passed:
+            desc = f"HOLD - trade adjudication: score {score:.0f} below minimum"
+            conf = 0.3
+            evidence.append("adjudication_verdict=score_reject")
+        else:
+            desc = "HOLD - trade adjudication: no aligned strategy+ML setup"
+            conf = 0.25
+            evidence.append("adjudication_verdict=flat")
+
+        return ReasoningStep(
+            step_number=6,
+            step_name="Trade Adjudication",
+            description=desc,
+            evidence=evidence,
+            confidence=conf,
+            timestamp=datetime.utcnow(),
         )
     
     async def _step1_situational_assessment(self, request: MCPReasoningRequest) -> ReasoningStep:
@@ -534,10 +608,15 @@ class MCPReasoningEngine:
                     decision={}  # Empty decision for query context
                 )
 
-                similar_contexts = await self.vector_store.find_similar_contexts(
+                similar_contexts = await self.vector_store.get_similar_decisions_with_outcomes(
                     query_context=query_context,
-                    limit=3
+                    limit=3,
                 )
+                if not similar_contexts:
+                    similar_contexts = await self.vector_store.find_similar_contexts(
+                        query_context=query_context,
+                        limit=3,
+                    )
 
                 if similar_contexts:
                     # Extract similarity scores
@@ -549,6 +628,18 @@ class MCPReasoningEngine:
 
                     evidence.append(f"Found {len(similar_contexts)} similar historical contexts")
                     evidence.append(f"Average similarity: {avg_similarity:.2f}")
+                    with_outcomes = [
+                        ctx for ctx, _ in similar_contexts if ctx.outcome is not None
+                    ]
+                    if with_outcomes:
+                        profitable = sum(
+                            1
+                            for ctx in with_outcomes
+                            if float((ctx.outcome or {}).get("pnl", 0) or 0) > 0
+                        )
+                        evidence.append(
+                            f"Similar setups with outcomes: {profitable}/{len(with_outcomes)} profitable"
+                        )
                 else:
                     evidence.append("No similar historical contexts found")
                     avg_similarity = 0.0
@@ -721,12 +812,34 @@ class MCPReasoningEngine:
         
         model_predictions = request.market_context.get("model_predictions", [])
 
+        strat = request.market_context.get("strategy_candidate")
+        if isinstance(strat, dict) and strat.get("signal"):
+            thesis_sig = str(strat.get("signal") or "HOLD")
+            ts = request.market_context.get("trade_score") or {}
+            score = float(ts.get("score") or 0.0) if isinstance(ts, dict) else 0.0
+            v43_dec = request.market_context.get("v43_dedicated_decision") or {}
+            evidence = list(v43_dec.get("evidence") or []) if isinstance(v43_dec, dict) else []
+            evidence.append(f"strategy-first synthesis thesis={thesis_sig} score={score:.0f}")
+            conclusion = f"HOLD - awaiting policy ({thesis_sig} thesis, score={score:.0f})"
+            data_freshness_seconds = self._compute_data_freshness_seconds(
+                request.market_context.get("timestamp")
+            )
+            return ReasoningStep(
+                step_number=5,
+                step_name="Decision Synthesis",
+                description=conclusion,
+                evidence=evidence,
+                confidence=float(strat.get("confidence") or 0.5),
+                timestamp=datetime.utcnow(),
+                data_freshness_seconds=data_freshness_seconds,
+            )
+
         v43_dec = request.market_context.get("v43_dedicated_decision")
         if isinstance(v43_dec, dict) and v43_dec.get("enabled"):
             conclusion = str(v43_dec.get("conclusion", "HOLD - v43"))
             avg_confidence = float(v43_dec.get("confidence", 0.5))
             evidence = list(v43_dec.get("evidence") or [])
-            evidence.append("v43 dedicated path — MTF synthesis skipped")
+            evidence.append("v43 diagnostic path — MTF synthesis skipped")
             data_freshness_seconds = self._compute_data_freshness_seconds(
                 request.market_context.get("timestamp")
             )

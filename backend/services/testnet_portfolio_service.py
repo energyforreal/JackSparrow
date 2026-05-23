@@ -255,13 +255,17 @@ class TestnetPortfolioService:
         balance_usd = wallet["balance_usd"]
         available_usd = wallet["available_usd"]
 
-        if balance_usd <= 0 and margin_used_usd > 0:
+        # Fallback: if balance field was missing/zero, reconstruct from available + margin.
+        # Also applies when there are no positions (margin_used = 0) but available_usd > 0.
+        if balance_usd <= 0 and (margin_used_usd > 0 or available_usd > 0):
             balance_usd = available_usd + margin_used_usd + total_unrealized_usd
         if available_usd <= 0 and balance_usd > 0:
             available_usd = max(0.0, balance_usd - margin_used_usd)
 
+        # total_value_usd mirrors Delta's "Account Value" = wallet balance + unrealized PnL.
+        # Without open positions total_unrealized_usd is 0, so this equals the wallet balance.
         return {
-            "total_value_usd": balance_usd,
+            "total_value_usd": balance_usd + total_unrealized_usd,
             "available_usd": available_usd,
             "margin_used_usd": margin_used_usd,
             "total_unrealized_usd": total_unrealized_usd,
@@ -276,6 +280,8 @@ class TestnetPortfolioService:
         available_usd = Decimal(str(partial.get("available_usd", 0)))
         margin_usd = Decimal(str(partial.get("margin_used_usd", 0)))
         unrealized_usd = Decimal(str(partial.get("total_unrealized_usd", 0)))
+        # wallet balance in USD = account value minus unrealized
+        wallet_balance_usd = total_usd - unrealized_usd
 
         total_inr = total_usd * usdinr_rate
         available_inr = available_usd * usdinr_rate
@@ -299,11 +305,15 @@ class TestnetPortfolioService:
         synced_at = time_service.get_time_info()["server_time"]
         return {
             "total_value": float(total_inr),
+            # USD equivalent of total_value for direct comparison with Delta testnet display.
+            "total_value_usd": float(total_usd),
+            "wallet_balance_usd": float(wallet_balance_usd),
             "available_balance": float(available_inr),
             "margin_used": float(margin_inr),
             "usd_inr_rate": float(usdinr_rate),
             "open_positions": len(positions_list),
             "total_unrealized_pnl": float(unrealized_inr),
+            "total_unrealized_pnl_usd": float(unrealized_usd),
             "total_realized_pnl": 0.0,
             "positions": positions_list,
             "data_source": "delta_testnet",

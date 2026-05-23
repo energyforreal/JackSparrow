@@ -92,6 +92,21 @@ The Intelligence Layer contains the "brain" of the trading agent:
 
 Trade *intent* on the event bus is issued only after the **Agent Policy** stage (`AgentPolicyEngine` in code): ML outputs are packaged as **evidence** (`EVIDENCE_READY` / `MLEvidenceSnapshot`), then the policy layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation; in `TRADING_MODE=live`, a non-empty `manual_trade_audit_reason` is required unless disabled via settings.
 
+**Strategy-first pipeline (v43 production default)**
+
+Default fusion mode is `AGENT_POLICY_MODE=ml_and_thesis`: the agent does not treat v43 `expected_return` alone as executable intent.
+
+1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
+2. **ML validation** — `JackSparrowV43Node` produces `MLValidationSnapshot` (thresholds, `confirms_long` / `confirms_short`, gates).
+3. **Market structure** — `classify_market_structure()` (trending / ranging / low-vol / crisis) from closed-bar features.
+4. **Agent thesis** — `AgentThesisEngine` proposes breakout / trend / mean-reversion candidates (deterministic rules).
+5. **Trade score** — `score_trade_setup()` confluence gate (`AGENT_TRADE_SCORE_MIN`, default 70).
+6. **Policy** — `AgentPolicyEngine` fuses thesis + ML (`ml_and_thesis` requires agreement).
+7. **Reasoning** — includes **Trade Adjudication** step; primary `decision.signal` comes from `PolicyVerdict`, not reasoning text alone.
+8. **Execution guard** — `ml_signal_guard` requires healthy ML predictions + policy reason `agent_thesis_confirms_ml` when `REQUIRE_STRATEGY_ML_AGREEMENT=true`.
+
+Rollback to ML-primary behavior: set `AGENT_POLICY_MODE=ml_only`.
+
 **Learning Module**
 - Performance tracking per model
 - Dynamic model weight adjustment
@@ -99,9 +114,21 @@ Trade *intent* on the event bus is issued only after the **Agent Policy** stage 
 - Confidence calibration
 
 **Vector Memory Store**
-- Stores decision contexts as embeddings
-- Retrieves similar past situations
-- Enables learning from historical patterns
+- Stores decision contexts as embeddings (canonical `FEATURE_LIST` + market-context factors)
+- Retrieves similar past situations for reasoning Step 2
+- Backfills trade outcomes on position close when `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED=true`
+
+**Deterministic self-awareness (no LLM)**
+
+Read-only and advisory telemetry layered on the existing strategy-first pipeline. Trade authority is unchanged (`ML/gates → thesis → policy → risk → execution`).
+
+| Phase | Module | Behavior |
+|-------|--------|----------|
+| Introspection | `agent/core/agent_introspection.py` | Builds `agent_introspection` on each `DECISION_READY` (policy mode, ML/thesis, trade score, v43 regime/gate, portfolio guard excerpt, memory stats). |
+| Memory loop | `agent/memory/vector_store.py` + `mcp_orchestrator._store_decision_context` | Stores `memory_context_id` + `decision_event_id`; updates outcome on close via `agent_self_awareness_hooks`. |
+| Reflection | `agent/core/agent_reflection_engine.py` | Advisory `reflection_snapshot` on `POSITION_CLOSED` (direction vs PnL, calibration bucket, quality score). Does **not** mutate policy. |
+
+Feature flags (default on): `AGENT_INTROSPECTION_ENABLED`, `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED`, `AGENT_REFLECTION_ADVISORY_ENABLED`. See [Logic & reasoning – Deterministic self-awareness](05-logic-reasoning.md#deterministic-self-awareness).
 
 ### Layer 3: Presentation Layer
 
@@ -179,12 +206,13 @@ MCP Orchestrator
         └── Uses Memory Store
 ```
 
-**Orchestration Flow**:
+**Orchestration Flow (strategy-first v43)**:
 1. Request arrives at MCP Orchestrator
-2. Feature Orchestrator requests features via Feature Protocol (using model-required feature names from registry metadata when available)
-3. Model Orchestrator requests predictions via Model Protocol
-4. Reasoning Orchestrator generates reasoning chain via Reasoning Protocol
-5. All components work together to produce final decision
+2. Model Orchestrator runs v43 inference → ML validation snapshot
+3. Market structure + Agent thesis evaluate closed-bar features
+4. v43 execution gates + trade score + policy fusion (`ml_and_thesis`)
+5. Reasoning Orchestrator generates chain (including trade adjudication)
+6. `PolicyVerdict` drives `DECISION_READY`; risk manager and trading handler veto before execution
 
 For detailed orchestration documentation, see [MCP Layer Documentation - Orchestration](02-mcp-layer.md#mcp-orchestration).
 

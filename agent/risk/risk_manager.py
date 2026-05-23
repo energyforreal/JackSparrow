@@ -312,6 +312,20 @@ class RiskManager:
 
         # Drawdown risk
         drawdown = assessment.risk_factors["drawdown"]
+        try:
+            from agent.core.config import settings as agent_settings
+
+            daily_halt_pct = float(
+                getattr(agent_settings, "agent_daily_drawdown_halt_pct", 4.0) or 4.0
+            )
+            if daily_halt_pct > 0 and drawdown * 100.0 >= daily_halt_pct:
+                assessment.can_trade = False
+                assessment.emergency_actions.append(
+                    f"Daily drawdown halt: {drawdown * 100:.2f}% >= {daily_halt_pct:.1f}%"
+                )
+        except Exception:
+            pass
+
         if drawdown > self.risk_limits["max_drawdown"]:
             risk_score += 0.4
             assessment.emergency_actions.append("Portfolio drawdown exceeds limit - consider reducing exposure")

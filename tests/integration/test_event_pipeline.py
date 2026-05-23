@@ -20,8 +20,10 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 from agent.events.event_bus import EventBus
 from agent.events.schemas import (
     AgentCommandEvent,
+    DecisionReadyEvent,
     MarketTickEvent,
-    EventType
+    PositionClosedEvent,
+    EventType,
 )
 
 
@@ -459,4 +461,106 @@ async def test_event_retry_count_handling(redis_event_bus, mock_redis):
     
     # Event should be processed despite retry count
     assert len(received_events) == 1
+
+
+@pytest.mark.asyncio
+async def test_decision_ready_self_awareness_pipeline(redis_event_bus, mock_redis):
+    """decision_ready events with introspection fields survive Redis publish/consume."""
+    event = DecisionReadyEvent(
+        source="integration_test",
+        payload={
+            "symbol": "BTCUSD",
+            "signal": "BUY",
+            "confidence": 0.72,
+            "position_size": 0.05,
+            "reasoning_chain": {"chain_id": "int-chain", "steps": []},
+            "timestamp": datetime.now().isoformat(),
+            "agent_introspection": {
+                "version": "1.0",
+                "symbol": "BTCUSD",
+                "policy_signal": "BUY",
+                "memory_enabled": True,
+            },
+            "memory_context_id": "decision-int-chain-1",
+            "decision_event_id": "evt-integration-1",
+        },
+    )
+
+    received: list = []
+
+    async def handler(evt):
+        received.append(evt)
+
+    redis_event_bus.subscribe(EventType.DECISION_READY, handler)
+    assert await redis_event_bus.publish(event) is True
+
+    messages = await mock_redis.xreadgroup(
+        groupname="test_group",
+        consumername="test_consumer",
+        streams={"test_stream": ">"},
+        count=10,
+        block=100,
+    )
+    for _stream, stream_messages in messages:
+        for msg_id, msg_data in stream_messages:
+            await redis_event_bus._process_message(
+                msg_id.decode("utf-8"), msg_data, mock_redis
+            )
+
+    assert len(received) == 1
+    assert isinstance(received[0], DecisionReadyEvent)
+    assert received[0].payload["memory_context_id"] == "decision-int-chain-1"
+    intro = received[0].payload.get("agent_introspection")
+    assert isinstance(intro, dict)
+    assert intro.get("policy_signal") == "BUY"
+
+
+@pytest.mark.asyncio
+async def test_position_closed_reflection_pipeline(redis_event_bus, mock_redis):
+    """position_closed with reflection_snapshot survives Redis publish/consume."""
+    event = PositionClosedEvent(
+        source="integration_test",
+        payload={
+            "position_id": "pos_int",
+            "symbol": "BTCUSD",
+            "entry_price": 50000.0,
+            "exit_price": 50100.0,
+            "pnl": 10.0,
+            "duration_seconds": 300.0,
+            "exit_reason": "take_profit",
+            "timestamp": datetime.now().isoformat(),
+            "reflection_snapshot": {
+                "version": "1.0",
+                "advisory_only": True,
+                "was_profitable": True,
+                "quality_score": 0.75,
+            },
+        },
+    )
+
+    received: list = []
+
+    async def handler(evt):
+        received.append(evt)
+
+    redis_event_bus.subscribe(EventType.POSITION_CLOSED, handler)
+    assert await redis_event_bus.publish(event) is True
+
+    messages = await mock_redis.xreadgroup(
+        groupname="test_group",
+        consumername="test_consumer",
+        streams={"test_stream": ">"},
+        count=10,
+        block=100,
+    )
+    for _stream, stream_messages in messages:
+        for msg_id, msg_data in stream_messages:
+            await redis_event_bus._process_message(
+                msg_id.decode("utf-8"), msg_data, mock_redis
+            )
+
+    assert len(received) == 1
+    snap = received[0].payload.get("reflection_snapshot")
+    assert snap.get("advisory_only") is True
+    assert snap.get("was_profitable") is True
 

@@ -997,6 +997,8 @@ class TradingEventHandler:
                 "timestamp": datetime.now(timezone.utc),
                 "decision_event_id": event.event_id,
                 "reasoning_chain_id": (payload.get("reasoning_chain") or {}).get("chain_id"),
+                "memory_context_id": payload.get("memory_context_id"),
+                "agent_introspection_at_entry": payload.get("agent_introspection"),
                 "confidence": confidence,
                 "model_predictions": (payload.get("reasoning_chain") or {}).get("model_predictions"),
                 "ml_signal_validated": True,

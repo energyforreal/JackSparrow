@@ -956,6 +956,9 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `AI_SIGNAL_MINIMAL_ENTRY_GATES` | When `true`, trading handler approves using **raw** payload AI `confidence` ≥ `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` plus price, margin, min lots, and open-position rules; skips v15 entry gate, stale-signal age, feature/MTF/SR filters, profit/R:R gate, Redis-blended confidence, `validate_trade`, debounce, and v15 gap/daily caps | No | false |
 | `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` | Minimum **raw** (uncalibrated) payload `confidence` when `AI_SIGNAL_MINIMAL_ENTRY_GATES` is enabled | No | 0.70 |
 | `V15_SIGNAL_LOGIC_ENABLED` | Apply v15 entry/exit filters when v15 models are active | No | true |
+| `AGENT_INTROSPECTION_ENABLED` | Emit `agent_introspection` on `DECISION_READY` (read-only telemetry) | No | true |
+| `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED` | Backfill vector memory outcomes on position close | No | true |
+| `AGENT_REFLECTION_ADVISORY_ENABLED` | Emit advisory `reflection_snapshot` on `POSITION_CLOSED` | No | true |
 
 ### Frontend Environment Variables
 

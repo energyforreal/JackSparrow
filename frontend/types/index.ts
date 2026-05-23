@@ -6,11 +6,16 @@ export interface AgentState {
 
 export interface Portfolio {
   total_value: number | string
+  /** USD account value (wallet balance + unrealized PnL) — matches Delta testnet "Account Value". */
+  total_value_usd?: number | string
+  /** USD wallet balance without unrealized PnL. */
+  wallet_balance_usd?: number | string
   available_balance: number | string
   margin_used?: number | string
   usd_inr_rate?: number | string
   open_positions: number
   total_unrealized_pnl: number | string
+  total_unrealized_pnl_usd?: number | string
   total_realized_pnl: number | string
   positions?: Position[]
   data_source?: 'delta_testnet'
@@ -181,6 +186,57 @@ export interface Signal {
   v15_timeframe?: string
   edge_threshold?: number
   v15_filters?: Record<string, unknown>
+  policy_verdict?: Record<string, unknown>
+  policy_reason_codes?: string[]
+  strategy_origin?: boolean
+  trade_score?: number
+  thesis_signal?: string
+  ml_evidence_snapshot?: Record<string, unknown>
+  market_context_excerpt?: Record<string, unknown>
+  agent_introspection?: AgentIntrospectionSnapshot
+  memory_context_id?: string
+  decision_event_id?: string
+  reflection_snapshot?: ReflectionSnapshot
+}
+
+export interface AgentIntrospectionSnapshot {
+  version: string
+  timestamp: string
+  symbol: string
+  agent_state: string
+  policy_mode: string
+  policy_signal: string
+  policy_confidence: number
+  policy_reason_codes: string[]
+  ml_candidate_signal?: string
+  thesis_signal?: string
+  trade_score?: number
+  trade_score_pass?: boolean
+  v43_regime?: string
+  v43_gate_reject?: string
+  portfolio_guard_action?: string
+  portfolio_guard_reason_codes?: string[]
+  memory_enabled: boolean
+  memory_context_count: number
+  limits?: Record<string, unknown>
+}
+
+export interface ReflectionSnapshot {
+  version: string
+  timestamp: string
+  symbol: string
+  position_id: string
+  advisory_only: boolean
+  predicted_signal: string
+  exit_reason: string
+  pnl: number
+  was_profitable: boolean
+  direction_correct?: boolean
+  confidence_at_entry?: number
+  calibration_bucket: string
+  quality_score: number
+  diagnostics: string[]
+  reason_codes: string[]
 }
 
 export interface HealthStatus {

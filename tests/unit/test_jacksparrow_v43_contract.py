@@ -12,8 +12,11 @@ from feature_store.jacksparrow_v43_contract import (
     V43_COMPATIBLE_FEATURE_VERSION,
     V43_EXPECTED_FEATURE_COUNT,
     V43_FORWARD_TARGET_BARS,
+    audit_v43_metadata_promotion,
     validate_v43_metadata_compatibility,
+    validate_v43_metadata_promotion,
 )
+from feature_store.jacksparrow_v43_horizon import V43_SUPPORTED_FORWARD_TARGET_BARS
 
 
 def _repo_root() -> Path:
@@ -60,16 +63,23 @@ def test_v43_metadata_features_match_contract(metadata_v43):
     assert metadata_v43.get("compatible_feature_version") == V43_COMPATIBLE_FEATURE_VERSION
 
 
-def test_validate_v43_metadata_accepts_legacy_without_version_field() -> None:
+def test_validate_v43_metadata_requires_multihead_horizons() -> None:
     meta = {"features": list(V43_CANONICAL_FEATURES)}
+    with pytest.raises(ValueError, match="must be multi-head"):
+        validate_v43_metadata_compatibility(meta)
+
+
+def test_validate_v43_metadata_accepts_multihead_fixture() -> None:
+    p = Path(__file__).resolve().parents[1] / "fixtures" / "v43_multihead_metadata.json"
+    with p.open(encoding="utf-8") as f:
+        meta = json.load(f)
     validate_v43_metadata_compatibility(meta)
 
 
 def test_validate_v43_metadata_accepts_matching_version() -> None:
-    meta = {
-        "features": list(V43_CANONICAL_FEATURES),
-        "compatible_feature_version": V43_COMPATIBLE_FEATURE_VERSION,
-    }
+    p = Path(__file__).resolve().parents[1] / "fixtures" / "v43_multihead_metadata.json"
+    with p.open(encoding="utf-8") as f:
+        meta = json.load(f)
     validate_v43_metadata_compatibility(meta)
 
 
@@ -104,10 +114,36 @@ def test_jacksparrow_v43_node_rejects_bad_metadata(tmp_path) -> None:
         JackSparrowV43Node.from_metadata_path(p)
 
 
-def test_metadata_training_forward_bars(metadata_v43):
-    assert int(metadata_v43.get("training_forward_bars", V43_FORWARD_TARGET_BARS)) == (
-        V43_FORWARD_TARGET_BARS
-    )
+def test_audit_v43_metadata_warns_zero_short_candidates() -> None:
+    meta = {
+        "validation_metrics": {
+            "inference_path": "meta_calibrator",
+            "meta_auc": 0.49,
+            "short_candidates": {"count": 0},
+        },
+        "model_architecture": {"meta_learner": "lgbm_classifier", "calibrator": "ridge"},
+    }
+    warnings = audit_v43_metadata_promotion(meta)
+    assert any("short_candidates" in w for w in warnings)
+
+
+def test_validate_v43_metadata_promotion_strict_raises() -> None:
+    meta = {
+        "validation_metrics": {
+            "inference_path": "meta_calibrator",
+            "short_candidates": {"count": 0},
+        },
+    }
+    with pytest.raises(ValueError, match="promotion gate"):
+        validate_v43_metadata_promotion(meta, strict=True)
+
+
+def test_metadata_has_multihead_horizons(metadata_v43):
+    horizons = metadata_v43.get("horizons")
+    assert isinstance(horizons, dict)
+    for key in ("scalp_10m", "intraday_30m", "trend_1h", "swing_2h"):
+        assert key in horizons
+        assert int(horizons[key]["forward_bars"]) in V43_SUPPORTED_FORWARD_TARGET_BARS
 
 
 def test_model_artifact_has_threshold_attrs_if_present():

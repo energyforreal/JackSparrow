@@ -712,6 +712,29 @@ Per-model `model_consensus[]` entries may also include `p_buy`, `p_sell`, `p_hol
 
 Per-model `model_consensus[]` rows for **`jacksparrow_v43`** may include the same keys when the agent forwards model context; the backend prefers the row with largest **|expected_return|** when consolidating.
 
+**Strategy / policy extensions** (from `DECISION_READY`, relayed on `signal` `data_update`):
+
+| Field | Description |
+|-------|-------------|
+| `policy_verdict` | Agent policy output (`signal`, `confidence`, `reason_codes`, …). |
+| `policy_reason_codes` | Auditable fusion codes (e.g. `agent_thesis_confirms_ml`). |
+| `trade_score` | Confluence score 0–100. |
+| `thesis_signal` | Deterministic thesis label. |
+| `ml_evidence_snapshot` | Structured ML + gate excerpt. |
+| `market_context_excerpt` | Subset of orchestrator `market_context` (trade_score, ml_validation, …). |
+
+**Self-awareness extensions** (deterministic telemetry, optional):
+
+| Field | Description |
+|-------|-------------|
+| `agent_introspection` | Read-only snapshot at decision time (`version`, `policy_signal`, `trade_score_pass`, `v43_regime`, `memory_context_count`, …). |
+| `memory_context_id` | Vector memory key for correlating with closed trades. |
+| `decision_event_id` | `DecisionReadyEvent.event_id` for audit trails. |
+
+**Position reflection** (`agent_update`, not `data_update`): when `POSITION_CLOSED` includes `reflection_snapshot`, `agent_event_subscriber` broadcasts `state: "POSITION_REFLECTION"` with the snapshot, symbol, and position id.
+
+REST **`PredictResponse`** may include `agent_introspection`, `policy_verdict`, `trade_score`, `ml_evidence_snapshot`, and `memory_context_id` when the predict path surfaces orchestrator output ([`backend/api/models/responses.py`](../backend/api/models/responses.py)).
+
 **Reasoning Chain Update** (`data_update` with `resource: "signal"`):
 ```json
 {

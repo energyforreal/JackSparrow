@@ -52,6 +52,31 @@ Emitted by **`mcp_orchestrator` / agent policy** after ML inference (and optiona
 
 Both `ReasoningEventHandler` and `TradingEventHandler` subscribe to `DECISION_READY`. The event bus invokes subscribers in **registration order**: reasoning runs first, then trading. Do not rely on implicit ordering for correctness; keep handlers idempotent and use correlation IDs. If ordering becomes load-bearing, consolidate to a single subscriber or add an explicit pipeline stage event.
 
+#### Self-awareness payload fields (optional, additive)
+
+Populated by `mcp_orchestrator._enrich_decision_event_self_awareness` before publish when flags are enabled:
+
+| Field | Description |
+|-------|-------------|
+| `agent_introspection` | Versioned read-only snapshot (`version`, `policy_signal`, `trade_score_pass`, `v43_regime`, `memory_context_count`, …). |
+| `memory_context_id` | Vector store key for outcome backfill (`decision-{chain_id}-{ts}`). |
+| `decision_event_id` | Same as `DecisionReadyEvent.event_id` for audit correlation. |
+
+`TradingEventHandler` forwards `memory_context_id` and `agent_introspection` on `RISK_APPROVED` so execution can attach them to open positions.
+
+### `POSITION_CLOSED` self-awareness
+
+Before publish, `execution` calls `agent/core/agent_self_awareness_hooks.enrich_position_closed_payload`:
+
+| Field | Description |
+|-------|-------------|
+| `reflection_snapshot` | Advisory post-trade critique (`advisory_only=true`, `quality_score`, `calibration_bucket`, `reason_codes`). |
+| `memory_context_id` | Resolved after outcome backfill when lookup succeeds. |
+| `agent_introspection_at_entry` | Copy of entry-time introspection from the open position. |
+| `reasoning_chain_id`, `predicted_signal`, `confidence_at_entry` | Propagated for reflection and SQL metadata. |
+
+Backend relays `reflection_snapshot` on the `agent_update` channel as `state=POSITION_REFLECTION` (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
+
 ## Other important subscribers
 
 | Component | Event types |

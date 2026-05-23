@@ -11,6 +11,7 @@ from agent.core.ml_signal_guard import validate_ml_entry_signal
 
 def _v43_market_context(*, final_long: bool = False, final_short: bool = False) -> dict:
     desired = "long" if final_long else ("short" if final_short else None)
+    gate_reject = None if (final_long or final_short) else "min_edge_cost"
     return {
         "v43_execution_profile": {
             "enabled": True,
@@ -21,7 +22,13 @@ def _v43_market_context(*, final_long: bool = False, final_short: bool = False) 
             "final_long": final_long,
             "final_short": final_short,
         },
-        "v43_gate_reject": None,
+        "ml_validation": {
+            "final_long": final_long,
+            "final_short": final_short,
+            "confirms_long": final_long,
+            "confirms_short": final_short,
+        },
+        "v43_gate_reject": gate_reject,
         "consensus_signal": 0.8 if final_long else (-0.8 if final_short else 0.0),
     }
 
@@ -107,6 +114,28 @@ def test_rejects_when_policy_did_not_adopt_ml():
     assert "policy" in reason
 
 
+def test_rejects_policy_adopted_ml_when_ml_validation_gates_failed():
+    with patch("agent.core.ml_signal_guard.settings") as mock_settings:
+        mock_settings.require_ml_signal_for_orders = True
+        mock_settings.require_v43_gates_for_entry = True
+        mock_settings.require_ml_consensus_alignment = True
+        mock_settings.agent_policy_mode = "ml_only"
+        mock_settings.jacksparrow_v43_short_execution_enabled = False
+        ok, reason = validate_ml_entry_signal(
+            signal="BUY",
+            side="BUY",
+            model_predictions=_model_preds(),
+            market_context=_v43_market_context(final_long=False),
+            policy_verdict=_policy_verdict("BUY"),
+        )
+    assert not ok
+    assert (
+        "ml_validation" in reason
+        or "final_long" in reason
+        or "v43_gate_reject" in reason
+    )
+
+
 def test_accepts_thesis_policy_entry_without_v43_gates():
     with patch("agent.core.ml_signal_guard.settings") as mock_settings:
         mock_settings.require_ml_signal_for_orders = True
@@ -123,4 +152,4 @@ def test_accepts_thesis_policy_entry_without_v43_gates():
             },
         )
     assert ok
-    assert reason == "thesis_policy_entry"
+    assert reason == "policy_thesis_entry"

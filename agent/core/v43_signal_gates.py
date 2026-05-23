@@ -140,7 +140,9 @@ def apply_post_threshold_gates_short(
         state.counters.rejected_pos_open += 1
         return V43GateResult(allow=False, reject_reason="open_position")
 
-    debounce_bars = int(getattr(settings, "jacksparrow_v43_trade_debounce_bars", 3) or 3)
+    from agent.core.v43_runtime_horizon import effective_v43_trade_debounce_bars
+
+    debounce_bars = effective_v43_trade_debounce_bars()
     debounce_ref = state.last_signal_bar_index
     bar_delta = (
         (current_bar_index - debounce_ref)
@@ -238,7 +240,9 @@ def apply_post_threshold_gates(
         state.counters.rejected_pos_open += 1
         return V43GateResult(allow=False, reject_reason="open_position")
 
-    debounce_bars = int(getattr(settings, "jacksparrow_v43_trade_debounce_bars", 3) or 3)
+    from agent.core.v43_runtime_horizon import effective_v43_trade_debounce_bars
+
+    debounce_bars = effective_v43_trade_debounce_bars()
     debounce_ref = state.last_signal_bar_index
     bar_delta = (
         (current_bar_index - debounce_ref)

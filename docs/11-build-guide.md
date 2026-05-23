@@ -830,7 +830,7 @@ See [ML Models Documentation](03-ml-models.md#model-training) for detailed train
 
 **Post-train parity checklist (required before deployment)**:
 1. **`MODEL_DIR`** must be the **JackSparrow v43** bundle directory containing **`metadata_v43.json`** and the pickle artefacts.
-2. Confirm **`metadata_v43.json`** lists **`features`** in the same order/count as **`V43_CANONICAL_FEATURES`** and includes **`training_forward_bars`: 120**.
+2. Confirm **`metadata_v43.json`** lists **`features`** in the same order/count as **`V43_CANONICAL_FEATURES`** and includes **`horizons`** for 2/6/12/24-bar heads.
 3. Run `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py -q` (plus `test_jacksparrow_v43_inference.py` / `test_jack_sparrow_v43_node_ctx.py` as needed).
 
 **Historical v5 / expanded bundles** (when validating archived exports): confirm `metadata_*` includes `features` / `features_required` matching **`feature_store/feature_registry.py`** **`EXPANDED_FEATURE_LIST`** order and count where applicable; run `pytest tests/unit/test_feature_parity.py -q`.

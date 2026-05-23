@@ -238,6 +238,18 @@ class MLEvidenceSnapshot(BaseModel):
         default_factory=dict,
         description="Small excerpt (e.g. v43 flags) for audit — not full OHLCV.",
     )
+    thesis_signal: Optional[str] = Field(
+        default=None,
+        description="Deterministic strategy signal from AgentThesisEngine.",
+    )
+    trade_score: Optional[float] = Field(
+        default=None,
+        description="Confluence score 0-100 from trade scorer.",
+    )
+    ml_confirms: Optional[bool] = Field(
+        default=None,
+        description="Whether ML validation agreed with structural setup.",
+    )
 
 
 class PolicyVerdict(BaseModel):
@@ -255,6 +267,50 @@ class PolicyVerdict(BaseModel):
         default=False,
         description="True when policy chose to align with the ML candidate after evaluation.",
     )
+
+
+class AgentIntrospectionSnapshot(BaseModel):
+    """Deterministic read-only self-awareness block at decision time."""
+
+    version: str = "1.0"
+    timestamp: str = ""
+    symbol: str = ""
+    agent_state: str = "unknown"
+    policy_mode: str = ""
+    policy_signal: str = ""
+    policy_confidence: float = 0.0
+    policy_reason_codes: List[str] = Field(default_factory=list)
+    ml_candidate_signal: Optional[str] = None
+    thesis_signal: Optional[str] = None
+    trade_score: Optional[float] = None
+    trade_score_pass: Optional[bool] = None
+    v43_regime: Optional[str] = None
+    v43_gate_reject: Optional[str] = None
+    portfolio_guard_action: Optional[str] = None
+    portfolio_guard_reason_codes: List[str] = Field(default_factory=list)
+    memory_enabled: bool = False
+    memory_context_count: int = 0
+    limits: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReflectionSnapshot(BaseModel):
+    """Deterministic advisory post-trade reflection block."""
+
+    version: str = "1.0"
+    timestamp: str = ""
+    symbol: str = ""
+    position_id: str = ""
+    advisory_only: bool = True
+    predicted_signal: str = ""
+    exit_reason: str = ""
+    pnl: float = 0.0
+    was_profitable: bool = False
+    direction_correct: Optional[bool] = None
+    confidence_at_entry: Optional[float] = None
+    calibration_bucket: str = "unknown"
+    quality_score: float = 0.0
+    diagnostics: List[str] = Field(default_factory=list)
+    reason_codes: List[str] = Field(default_factory=list)
 
 
 class EvidenceReadyEvent(BaseEvent):
@@ -288,6 +344,29 @@ class DecisionReadyEvent(BaseEvent):
         policy_reason_codes: List[str] = Field(default_factory=list)
         ml_evidence_snapshot: Optional[Dict[str, Any]] = None
         policy_verdict: Optional[Dict[str, Any]] = None
+        strategy_origin: bool = Field(
+            default=False,
+            description="True when entry originated from agent thesis (not ML-only).",
+        )
+        trade_score: Optional[float] = None
+        thesis_signal: Optional[str] = None
+        anticipated_horizon_bars: Optional[int] = Field(
+            default=None,
+            description="Expected movement horizon in 5m bars (2/6/12/24).",
+        )
+        anticipated_horizon_minutes: Optional[int] = None
+        agent_introspection: Optional[Dict[str, Any]] = Field(
+            default=None,
+            description="Deterministic self-awareness snapshot (read-only telemetry).",
+        )
+        memory_context_id: Optional[str] = Field(
+            default=None,
+            description="Vector memory context id for outcome backfill on position close.",
+        )
+        decision_event_id: Optional[str] = Field(
+            default=None,
+            description="DecisionReadyEvent.event_id for audit correlation.",
+        )
 
 
 # Risk Events
@@ -456,4 +535,16 @@ class PositionClosedEvent(BaseEvent):
         duration_seconds: float
         exit_reason: str  # stop_loss, take_profit, manual, signal_reversal
         timestamp: datetime
+        reflection_snapshot: Optional[Dict[str, Any]] = Field(
+            default=None,
+            description="Advisory deterministic post-trade reflection (no policy mutation).",
+        )
+        memory_context_id: Optional[str] = Field(
+            default=None,
+            description="Linked decision memory context id when available.",
+        )
+        reasoning_chain_id: Optional[str] = None
+        predicted_signal: Optional[str] = None
+        confidence_at_entry: Optional[float] = None
+        agent_introspection_at_entry: Optional[Dict[str, Any]] = None
 

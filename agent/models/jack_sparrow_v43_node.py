@@ -35,9 +35,27 @@ from agent.models.jacksparrow_v43_inference import (
     uncertainty_scale,
 )
 from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
-from feature_store.jacksparrow_v43_contract import validate_v43_metadata_compatibility
+from feature_store.jacksparrow_v43_contract import (
+    audit_v43_metadata_promotion,
+    validate_v43_metadata_compatibility,
+    validate_v43_metadata_promotion,
+)
+from feature_store.jacksparrow_v43_horizon import (
+    forward_bars_to_minutes,
+    resolve_training_forward_bars,
+)
+from feature_store.jacksparrow_v43_multihead import (
+    V43_HORIZON_KEY_TO_BARS,
+    V43_HORIZON_KEYS,
+    head_thresholds,
+    primary_execution_horizon_bars as meta_primary_horizon_bars,
+)
+from agent.models.v43_pickle_shims import MultiHeadBundle
 
 logger = structlog.get_logger()
+
+# Heuristic: classifier P(class=1) often sits in [0,1] with span < 0.85
+_PROB_RETURN_SCALE = 0.04
 
 
 def _ctx_dataframe(ctx: Dict[str, Any], primary_key: str, fallback_key: str) -> Optional[pd.DataFrame]:
@@ -119,6 +137,75 @@ def _apply_v43_threshold_patch(artifact: Dict[str, Any]) -> bool:
     return False
 
 
+def _hydrate_ensemble_thresholds_from_metadata(ensemble: Any, meta: Dict[str, Any]) -> Dict[str, str]:
+    """Apply metadata validation thresholds when the pickle omits them."""
+    sources: Dict[str, str] = {}
+    vm = meta.get("validation_metrics")
+    if not isinstance(vm, dict):
+        return sources
+    dt_meta = vm.get("dynamic_threshold")
+    st_meta = vm.get("short_threshold")
+    if dt_meta is not None:
+        try:
+            dt_f = float(dt_meta)
+            if getattr(ensemble, "threshold", None) is None and getattr(
+                ensemble, "dynamic_threshold", None
+            ) is None:
+                ensemble.dynamic_threshold = dt_f
+                sources["dynamic_threshold"] = "metadata"
+            lgbm = getattr(ensemble, "lgbm_model", None)
+            if lgbm is not None and getattr(lgbm, "dynamic_threshold", None) is None:
+                lgbm.dynamic_threshold = dt_f
+        except (TypeError, ValueError):
+            pass
+    if st_meta is not None:
+        try:
+            st_f = abs(float(st_meta))
+            if getattr(ensemble, "short_threshold", None) is None:
+                ensemble.short_threshold = st_f
+                sources["short_threshold"] = "metadata"
+        except (TypeError, ValueError):
+            pass
+    return sources
+
+
+def _looks_like_classifier_probability(arr: np.ndarray) -> bool:
+    if arr.size == 0:
+        return False
+    mn = float(np.min(arr))
+    mx = float(np.max(arr))
+    if mn >= 0.0 and mx <= 1.0 and (mx - mn) < 0.85:
+        return True
+    return False
+
+
+def _coerce_probability_to_return_scale(arr: np.ndarray) -> np.ndarray:
+    """Map P(class=1) in [0,1] to a small signed return proxy for gating."""
+    return (np.asarray(arr, dtype=np.float64) - 0.5) * _PROB_RETURN_SCALE
+
+
+def _sanitize_expected_return(
+    arr: np.ndarray,
+    *,
+    active_model: Any,
+    model_name: str,
+) -> np.ndarray:
+    out = np.asarray(arr, dtype=np.float64).ravel()
+    if not _looks_like_classifier_probability(out):
+        return out
+    active_cls = type(active_model).__name__
+    if active_cls == "EnsembleModel":
+        return out
+    logger.warning(
+        "v43_classifier_probability_coerced_to_return_scale",
+        model_name=model_name,
+        active_type=active_cls,
+        sample_min=float(np.min(out)),
+        sample_max=float(np.max(out)),
+    )
+    return _coerce_probability_to_return_scale(out)
+
+
 def _merge_regime_models(
     artifact: Dict[str, Any],
     file_dict: Optional[Dict[str, Any]],
@@ -148,8 +235,10 @@ class JackSparrowV43Node(MCPModelNode):
         self._metadata_path = metadata_path
         self._feature_names = list(feature_names)
         self._bundle_dir = metadata_path.parent
+        self._bundle_metadata: Dict[str, Any] = {}
         self._artifact: Dict[str, Any] = {}
         self._ensemble: Any = None
+        self._multihead: Optional[MultiHeadBundle] = None
         self._fe: Any = None
         self._regime_models: Optional[Dict[str, Any]] = None
         self._artifact_path: Optional[Path] = None
@@ -160,6 +249,11 @@ class JackSparrowV43Node(MCPModelNode):
         self._error_count = 0
         # Serialize inference: sklearn/LGBM on one node are not safe under concurrent predict.
         self._predict_lock = asyncio.Lock()
+        self._training_forward_bars: int = 6
+
+    @property
+    def training_forward_bars(self) -> int:
+        return int(self._training_forward_bars)
 
     @classmethod
     def from_metadata_path(cls, metadata_path: Path) -> "JackSparrowV43Node":
@@ -169,12 +263,19 @@ class JackSparrowV43Node(MCPModelNode):
         name = str(meta.get("model_name") or "jacksparrow_v43_BTCUSD")
         ver = str(meta.get("version") or meta.get("version_tag") or "v43")
         feats = list(meta.get("features") or [])
-        return cls(
+        node = cls(
             model_name=name,
             model_version=ver,
             metadata_path=metadata_path,
             feature_names=feats,
         )
+        node._training_forward_bars = resolve_training_forward_bars(
+            meta,
+            settings_fallback=int(
+                getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6
+            ),
+        )
+        return node
 
     @property
     def model_name(self) -> str:
@@ -189,14 +290,78 @@ class JackSparrowV43Node(MCPModelNode):
         return "jacksparrow_v43"
 
     def _load_bundle_into_state(self) -> None:
+        with self._metadata_path.open("r", encoding="utf-8") as f:
+            self._bundle_metadata = json.load(f)
+        self._training_forward_bars = resolve_training_forward_bars(
+            self._bundle_metadata,
+            settings_fallback=int(
+                getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6
+            ),
+        )
+        cfg_bars = int(getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6)
+        if self._training_forward_bars != cfg_bars:
+            logger.warning(
+                "v43_horizon_bundle_config_mismatch",
+                bundle_forward_bars=self._training_forward_bars,
+                config_forward_target_bars=cfg_bars,
+                hint="Retrain and promote a bundle with matching training_forward_bars, "
+                "or align JACKSPARROW_V43_FORWARD_TARGET_BARS to the loaded metadata.",
+            )
+        strict_promo = bool(
+            getattr(settings, "jacksparrow_v43_metadata_promotion_strict", False)
+        )
+        validate_v43_metadata_promotion(self._bundle_metadata, strict=strict_promo)
+        promo_warnings = audit_v43_metadata_promotion(self._bundle_metadata)
+        if promo_warnings:
+            logger.warning(
+                "v43_metadata_promotion_warnings",
+                warnings=promo_warnings,
+                strict=strict_promo,
+            )
+
         art_path = _resolve_artifact_path(self._bundle_dir)
         self._artifact_path = art_path
         self._artifact = _load(art_path)
-        threshold_patched = _apply_v43_threshold_patch(self._artifact)
-        self._ensemble = self._artifact.get("model")
+        model = self._artifact.get("model")
+        if isinstance(model, MultiHeadBundle):
+            self._multihead = model
+        elif hasattr(model, "horizon_models") and isinstance(
+            getattr(model, "horizon_models", None), dict
+        ):
+            self._multihead = model
+        else:
+            raise ValueError(
+                "v43 artifact must contain MultiHeadBundle with horizon_models "
+                f"(got {type(model).__name__}). Retrain with multi-head export."
+            )
+        for fb in self._multihead.head_bars():
+            head_model = self._multihead.get_head(fb)
+            if head_model is not None:
+                _apply_v43_threshold_patch({"model": head_model})
+                hkey = next(
+                    (k for k, b in V43_HORIZON_KEY_TO_BARS.items() if b == fb),
+                    None,
+                )
+                if hkey:
+                    dt, st = head_thresholds(self._bundle_metadata, hkey)
+                    _hydrate_ensemble_thresholds_from_metadata(
+                        head_model,
+                        {
+                            "validation_metrics": {
+                                "dynamic_threshold": dt,
+                                "short_threshold": st,
+                            }
+                        },
+                    )
+        self._training_forward_bars = meta_primary_horizon_bars(self._bundle_metadata)
+        self._ensemble = self._multihead.get_head(self._training_forward_bars)
+        if self._ensemble is None:
+            raise ValueError(
+                f"multi-head bundle missing primary head {self._training_forward_bars}"
+            )
         self._fe = self._artifact.get("feature_engineer")
-        if self._ensemble is None or self._fe is None:
-            raise ValueError("v43 artifact must contain 'model' and 'feature_engineer'")
+        if self._multihead is None or self._fe is None:
+            raise ValueError("v43 artifact must contain multi-head 'model' and 'feature_engineer'")
         feats = self._artifact.get("features")
         if isinstance(feats, list) and feats:
             self._feature_names = [str(x) for x in feats]
@@ -283,7 +448,11 @@ class JackSparrowV43Node(MCPModelNode):
                 arr = np.asarray(out, dtype=np.float64)
                 if arr.ndim == 2 and arr.shape[1] >= 2:
                     arr = arr[:, 1]
-                return arr.ravel()
+                return _sanitize_expected_return(
+                    arr.ravel(),
+                    active_model=active,
+                    model_name=self._model_name,
+                )
             except (TypeError, ValueError) as exc:
                 last_err = exc
                 continue
@@ -359,67 +528,99 @@ class JackSparrowV43Node(MCPModelNode):
             except Exception:
                 regime = "neutral"
 
-        active = get_regime_model(regime, self._regime_models, self._ensemble)
         floor = float(getattr(settings, "jacksparrow_v43_signal_threshold_floor", 0.005))
-        thr = get_signal_threshold(
-            regime,
-            self._ensemble,
-            active,
-            floor=floor,
+        short_enabled = bool(
+            getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
         )
-        short_thr = get_short_signal_threshold(
-            regime,
-            self._ensemble,
-            active,
-            floor=floor,
-            long_threshold=thr,
-        )
+        head_payloads: Dict[str, Dict[str, Any]] = {}
+        primary_fb = int(self._training_forward_bars)
+        primary_proba = 0.0
+        primary_thr = floor
+        primary_short_thr = floor
+        primary_pred_val = 0.0
+        primary_conf = 0.0
+        primary_unc = 0.05
+        primary_u_scale = uncertainty_scale(primary_unc)
 
-        if active is None:
-            proba0 = 0.0
-            unc = 1.0
-            u_scale = uncertainty_scale(unc)
-            pred_val = 0.0
-            conf = 0.0
-            reasoning = "v43 crisis regime — forced flat (no sub-model)"
-        else:
-            try:
-                proba_arr = self._predict_active(active, X, X_df)
-            except Exception as active_exc:
-                if active is self._ensemble:
-                    raise
-                logger.warning(
-                    "v43_active_regime_model_failed_fallback_global",
-                    model_name=self._model_name,
-                    regime=regime,
-                    active_type=type(active).__name__,
-                    error=str(active_exc),
-                )
-                active = self._ensemble
-                proba_arr = self._predict_active(active, X, X_df)
-            proba0 = float(proba_arr[0]) if proba_arr.size else 0.0
-            unc = ensemble_predict_uncertainty(self._ensemble, X_df)
-            u_scale = uncertainty_scale(unc)
-            edge = float(proba0) - float(thr)
-            pred_val = float(np.tanh(edge * 80.0))
-            conf = float(min(1.0, max(0.0, abs(edge) / 0.015 + 0.25) * u_scale))
-            reasoning = (
-                f"v43 regime={regime} expected_ret={proba0:.5f} thr={thr:.5f} "
-                f"unc={unc:.4f} u_scale={u_scale:.3f}"
+        if self._multihead is None:
+            raise RuntimeError("multi-head bundle not loaded")
+
+        for hkey in V43_HORIZON_KEYS:
+            fb = int(V43_HORIZON_KEY_TO_BARS[hkey])
+            head_ens = self._multihead.get_head(fb)
+            if head_ens is None:
+                continue
+            active = get_regime_model(regime, self._regime_models, head_ens)
+            thr = get_signal_threshold(regime, head_ens, active, floor=floor)
+            short_thr = get_short_signal_threshold(
+                regime,
+                head_ens,
+                active,
+                floor=floor,
+                long_threshold=thr,
             )
+            if active is None:
+                proba0 = 0.0
+                unc_h = 1.0
+            else:
+                try:
+                    proba_arr = self._predict_active(active, X, X_df)
+                except Exception as active_exc:
+                    if active is head_ens:
+                        raise
+                    logger.warning(
+                        "v43_head_regime_fallback",
+                        horizon=hkey,
+                        error=str(active_exc),
+                    )
+                    proba_arr = self._predict_active(head_ens, X, X_df)
+                proba0 = float(proba_arr[0]) if proba_arr.size else 0.0
+                unc_h = float(ensemble_predict_uncertainty(head_ens, X_df))
+            head_payloads[hkey] = {
+                "horizon_key": hkey,
+                "forward_bars": fb,
+                "horizon_minutes": forward_bars_to_minutes(fb),
+                "expected_return": proba0,
+                "threshold": thr,
+                "short_threshold": short_thr,
+                "regime": regime,
+                "uncertainty": unc_h,
+            }
+            if fb == primary_fb:
+                primary_proba = proba0
+                primary_thr = thr
+                primary_short_thr = short_thr
+                primary_unc = unc_h
+                primary_u_scale = uncertainty_scale(primary_unc)
+                edge = float(proba0) - float(thr)
+                primary_pred_val = float(np.tanh(edge * 80.0))
+                primary_conf = float(
+                    min(1.0, max(0.0, abs(edge) / 0.015 + 0.25) * primary_u_scale)
+                )
+
+        reasoning = (
+            f"v43 multi-head regime={regime} primary={primary_fb}bars "
+            f"er={primary_proba:.5f} thr={primary_thr:.5f}"
+        )
 
         out_ctx: Dict[str, Any] = {
-            "format": "jacksparrow_v43",
-            "expected_return": float(proba0),
-            "threshold": float(thr),
-            "short_threshold": float(short_thr),
+            "format": "jacksparrow_v43_multihead",
+            "multi_horizon_heads": head_payloads,
+            "expected_return": float(primary_proba),
+            "threshold": float(primary_thr),
+            "short_threshold": float(primary_short_thr),
             "regime": regime,
-            "uncertainty": float(unc),
-            "unc_scale": float(u_scale),
+            "uncertainty": float(primary_unc),
+            "unc_scale": float(primary_u_scale),
             "bar_index_hint": int(closed_5m_bar_index(df5)),
             "feature_names_used": use_cols,
-            "RECOMMENDED_LONG_THRESHOLD": float(thr),
+            "RECOMMENDED_LONG_THRESHOLD": float(primary_thr),
+            "RECOMMENDED_SHORT_THRESHOLD": float(primary_short_thr),
             "closed_bar_features": closed_feats,
+            "primary_execution_horizon_bars": primary_fb,
+            "training_forward_bars": primary_fb,
+            "target_horizon_bars": primary_fb,
+            "short_execution_enabled": short_enabled,
         }
 
         ms = (time.perf_counter() - t0) * 1000.0
@@ -427,8 +628,8 @@ class JackSparrowV43Node(MCPModelNode):
         return MCPModelPrediction(
             model_name=self._model_name,
             model_version=self._model_version,
-            prediction=pred_val,
-            confidence=conf,
+            prediction=primary_pred_val,
+            confidence=primary_conf,
             reasoning=reasoning,
             features_used=list(use_cols),
             feature_importance={},

@@ -77,6 +77,16 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
   const marginUsed = parseNumber(portfolio.margin_used)
   const totalEquity = totalValue  // Use backend-computed total_value directly
 
+  // USD account value for direct comparison with Delta testnet display.
+  // Prefer the backend-provided field; fall back to deriving from INR value + FX rate.
+  const usdInrRate = parseNumber(portfolio.usd_inr_rate)
+  const totalValueUsd: number | null =
+    portfolio.total_value_usd != null
+      ? parseNumber(portfolio.total_value_usd)
+      : usdInrRate > 0
+        ? totalValue / usdInrRate
+        : null
+
   const roeRatio = unrealizedPnlPercentOnMargin(totalUnrealizedPnL, marginUsed)
   const roePercentStr = roeRatio !== null ? formatPercent(roeRatio) : null
   const syncStatus = portfolio.sync_status
@@ -101,6 +111,14 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
         <div className="flex items-baseline justify-between">
           <div>
             <div className="text-3xl font-bold">{formatCurrency(totalValue)}</div>
+            {totalValueUsd !== null && (
+              <div className="text-sm text-muted-foreground mt-0.5">
+                ≈ ${totalValueUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+                {usdInrRate > 0 && (
+                  <span className="ml-1 opacity-70">(@ ₹{usdInrRate.toFixed(2)}/$)</span>
+                )}
+              </div>
+            )}
             <div className="flex flex-col gap-1 mt-1">
               <span title={ROE_MARGIN_TOOLTIP}>
                 <Badge

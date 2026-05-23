@@ -20,7 +20,7 @@ logger = structlog.get_logger()
 
 USDINR_CACHE_KEY = "fx:usdinr:last"
 USDINR_TTL_SECONDS = 60
-DEFAULT_USDINR_FALLBACK = 83.0
+DEFAULT_USDINR_FALLBACK = 86.0
 
 
 def _parse_rate(value: object) -> Optional[float]:

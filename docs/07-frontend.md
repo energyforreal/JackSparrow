@@ -82,6 +82,8 @@ The dashboard reads all trading-related state from a single hook backed by a `us
 
 `frontend/types/index.ts` extends **`Signal`** and **`ModelConsensus`** with optional **`edge`**, **`p_buy`**, **`p_sell`**, **`p_hold`**, **`v15_timeframe`** (v15 pipeline), and—with **JackSparrow v43**—**`expected_return`**, **`threshold`**, **`regime`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`**. WebSocket `data_update` / `resource: "signal"` merges these when the backend forwards agent metadata (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
 
+**Self-awareness** (optional on the same `Signal` payload): **`agent_introspection`** (`AgentIntrospectionSnapshot`), **`policy_verdict`**, **`policy_reason_codes`**, **`trade_score`**, **`thesis_signal`**, **`ml_evidence_snapshot`**, **`memory_context_id`**, **`decision_event_id`**. Zod schemas: `AgentIntrospectionSnapshotSchema`, `ReflectionSnapshotSchema` in `frontend/schemas/api.validation.ts`. Post-trade **`reflection_snapshot`** arrives on **`agent_update`** with `state: "POSITION_REFLECTION"` (not merged into `Signal` today). UI panels can consume these incrementally; existing components remain compatible when fields are absent.
+
 **Components** (under `app/components/v15/`):
 
 - `EdgeGauge` — horizontal edge bar (roughly [-1, 1]).

@@ -1,0 +1,40 @@
+{
+  "version": "v43",
+  "model_family": "jacksparrow_v43_multihead",
+  "artifact_format": "jacksparrow_v43_multihead_v1",
+  "compatible_feature_version": "jacksparrow_v43_features_v1",
+  "model_name": "jacksparrow_v43_BTCUSD",
+  "feature_count": 40,
+  "features": [
+    "ret_1", "ret_6", "ret_24", "mom_accel", "ema_21_50_cross", "price_ema21",
+    "price_ema100", "rsi_14", "rsi_mom", "macd_hist_n", "bb_width", "bb_pos",
+    "atr_pct", "vol_regime", "adx_14", "di_spread", "kauf_er_20", "obv_ret",
+    "cmf_20", "session_vwap_dev", "body", "body_dir", "wick_asym", "sr_compression",
+    "hour_sin", "hour_cos", "hurst_60", "trend_mom", "trend_conf", "funding_zscore",
+    "funding_mom", "h_ret_1", "h_trend", "h_trend_200", "h_rsi_14", "h1_trend",
+    "h1_rsi_14", "h1_adx", "h1_vol_regime", "bull_bar"
+  ],
+  "primary_execution_horizon_bars": 6,
+  "horizons": {
+    "scalp_10m": {
+      "forward_bars": 2,
+      "horizon_minutes": 10,
+      "validation_metrics": { "dynamic_threshold": 0.004, "short_threshold": 0.004 }
+    },
+    "intraday_30m": {
+      "forward_bars": 6,
+      "horizon_minutes": 30,
+      "validation_metrics": { "dynamic_threshold": 0.005, "short_threshold": 0.005 }
+    },
+    "trend_1h": {
+      "forward_bars": 12,
+      "horizon_minutes": 60,
+      "validation_metrics": { "dynamic_threshold": 0.006, "short_threshold": 0.006 }
+    },
+    "swing_2h": {
+      "forward_bars": 24,
+      "horizon_minutes": 120,
+      "validation_metrics": { "dynamic_threshold": 0.007, "short_threshold": 0.007 }
+    }
+  }
+}

@@ -13,7 +13,7 @@ Operational guide for tuning v43 entry frequency while keeping rollback discipli
 | `TRADING_MODE` | `.env` / compose | Must be `testnet` (local paper simulation removed). |
 | `EXCHANGE_BACKEND` | `.env` | Must be `delta_live` (orders hit Delta testnet APIs). |
 | Delta cluster | `DELTA_EXCHANGE_BASE_URL`, `WEBSOCKET_URL` | Must both point at India testnet (see `.env.example`). |
-| Model bundle | `MODEL_DIR`, `AGENT_MODEL_DIR` | Must contain `metadata_v43.json` and the artifact basename below. |
+| Model bundle | `MODEL_DIR`, `AGENT_MODEL_DIR` | Must contain `metadata_v43.json` with **`horizons{}`** (2/6/12/24 bars) and `model_artifact_v43.pkl` (`MultiHeadBundle`). |
 | v43 artifact | `JACKSPARROW_V43_ARTIFACT_BASENAME` | Default in code: `model_artifact_v43_patched.pkl`. Confirm file exists under `MODEL_DIR`. |
 | Threshold patch | Agent startup logs | When using an unpatched artifact, runtime may still apply a patch — watch for `v43_threshold_patch_applied` or related model-load logs in [`jack_sparrow_v43_node.py`](../agent/models/jack_sparrow_v43_node.py). |
 
@@ -70,7 +70,7 @@ When the Colab notebook §4c meta-stacking path is used, the exported bundle inc
 | `model_architecture.calibrator` | `"ridge"` | **Must** be present whenever `meta_learner` is set |
 | `validation_metrics.inference_path` | `"meta_calibrator"` | Confirms §4c ran and thresholds were calibrated on meta-stack predictions |
 | `validation_metrics.validation_corr` | > 0 | Meta-stack expected return vs realized forward return |
-| `validation_metrics.meta_auc` | > 0.48 | Hard export gate; values in **[0.48, 0.50)** are noise-band warnings in the notebook |
+| `horizons.*.validation_metrics.meta_auc` | scalp 0.54 / 30m 0.56 / 1h 0.58 / 2h 0.60 | Hard export gate via `validate_multihead_export_gates` |
 
 **Why calibrator is mandatory:** `meta.predict_proba` returns values in **[0, 1]**.
 Without the Ridge calibrator, gate-5 compares probability to expected-return thresholds

@@ -15,7 +15,14 @@ os.environ.setdefault("DELTA_EXCHANGE_API_SECRET", "test-secret")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from agent.events.event_bus import EventBus
-from agent.events.schemas import AgentCommandEvent, BaseEvent, EventType, MarketTickEvent
+from agent.events.schemas import (
+    AgentCommandEvent,
+    BaseEvent,
+    DecisionReadyEvent,
+    EventType,
+    MarketTickEvent,
+    PositionClosedEvent,
+)
 
 
 def _agent_command_event(
@@ -352,4 +359,87 @@ async def test_deserialize_unicode_characters(event_bus, mock_redis):
     
     assert len(handler_called) == 1
     assert "✓ ⚠ ✗ ✅" in handler_called[0].payload["parameters"]["message"]
+
+
+def _decision_ready_event() -> DecisionReadyEvent:
+    return DecisionReadyEvent(
+        source="unit_test",
+        payload={
+            "symbol": "BTCUSD",
+            "signal": "HOLD",
+            "confidence": 0.55,
+            "position_size": 0.0,
+            "reasoning_chain": {"chain_id": "c-self", "steps": []},
+            "timestamp": datetime.now().isoformat(),
+            "agent_introspection": {
+                "version": "1.0",
+                "symbol": "BTCUSD",
+                "policy_signal": "HOLD",
+            },
+            "memory_context_id": "decision-c-self-100",
+            "decision_event_id": "evt-self-1",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_deserialize_decision_ready_with_self_awareness(event_bus, mock_redis):
+    """DecisionReadyEvent round-trip preserves self-awareness payload fields."""
+    event = _decision_ready_event()
+    event_data = event.model_dump()
+    event_data["_event_class"] = "DecisionReadyEvent"
+    event_json = json.dumps(event_data, default=str)
+    message_data = {b"event": event_json.encode("utf-8")}
+
+    handler_called = []
+    async def test_handler(evt):
+        handler_called.append(evt)
+
+    event_bus.subscribe(EventType.DECISION_READY, test_handler)
+    await event_bus._process_message("test-msg-decision", message_data, mock_redis)
+
+    assert len(handler_called) == 1
+    assert isinstance(handler_called[0], DecisionReadyEvent)
+    assert handler_called[0].payload["memory_context_id"] == "decision-c-self-100"
+    assert handler_called[0].payload["agent_introspection"]["policy_signal"] == "HOLD"
+
+
+@pytest.mark.asyncio
+async def test_deserialize_position_closed_with_reflection(event_bus, mock_redis):
+    """PositionClosedEvent round-trip preserves reflection_snapshot."""
+    event = PositionClosedEvent(
+        source="unit_test",
+        payload={
+            "position_id": "pos_1",
+            "symbol": "BTCUSD",
+            "entry_price": 100.0,
+            "exit_price": 105.0,
+            "pnl": 5.0,
+            "duration_seconds": 120.0,
+            "exit_reason": "take_profit",
+            "timestamp": datetime.now().isoformat(),
+            "reflection_snapshot": {
+                "version": "1.0",
+                "advisory_only": True,
+                "quality_score": 0.8,
+            },
+        },
+    )
+    event_data = event.model_dump()
+    event_data["_event_class"] = "PositionClosedEvent"
+    event_json = json.dumps(event_data, default=str)
+    message_data = {b"event": event_json.encode("utf-8")}
+
+    handler_called = []
+    async def test_handler(evt):
+        handler_called.append(evt)
+
+    event_bus.subscribe(EventType.POSITION_CLOSED, test_handler)
+    await event_bus._process_message("test-msg-close", message_data, mock_redis)
+
+    assert len(handler_called) == 1
+    assert isinstance(handler_called[0], PositionClosedEvent)
+    snap = handler_called[0].payload.get("reflection_snapshot")
+    assert isinstance(snap, dict)
+    assert snap.get("advisory_only") is True
 

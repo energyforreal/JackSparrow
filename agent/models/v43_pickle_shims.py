@@ -234,6 +234,39 @@ class LGBMModel(_StateDictMixin):
         return np.full(Xs.shape[0], 0.05, dtype=np.float64)
 
 
+class MultiHeadBundle(_StateDictMixin):
+    """Single-bundle container for intraday multi-horizon ensembles (2/6/12/24 bars)."""
+
+    def __init__(self) -> None:
+        self.horizon_models: Dict[int, Any] = {}
+        self._is_fitted: bool = False
+
+    def set_head(self, forward_bars: int, model: Any) -> None:
+        self.horizon_models[int(forward_bars)] = model
+        self._is_fitted = True
+
+    def get_head(self, forward_bars: int) -> Optional[Any]:
+        return self.horizon_models.get(int(forward_bars))
+
+    def head_bars(self) -> List[int]:
+        return sorted(int(k) for k in self.horizon_models.keys())
+
+    def predict_head(
+        self,
+        forward_bars: int,
+        X: np.ndarray,
+        X_df: Optional[pd.DataFrame] = None,
+    ) -> np.ndarray:
+        m = self.get_head(forward_bars)
+        if m is None:
+            raise KeyError(f"multi-head bundle missing horizon forward_bars={forward_bars}")
+        pred_fn = getattr(m, "predict", None)
+        if pred_fn is None:
+            raise RuntimeError(f"head model for {forward_bars} has no predict()")
+        out = pred_fn(X, X_df=X_df)
+        return np.asarray(out, dtype=np.float64).ravel()
+
+
 class EnsembleModel(_StateDictMixin):
     """Pickle shim for the v43 ensemble class.
 
@@ -397,7 +430,7 @@ def install_main_aliases() -> None:
     main_mod = sys.modules.get("__main__")
     if main_mod is None:
         return
-    for cls in (EnsembleModel, LGBMModel, FeatureEngineer):
+    for cls in (EnsembleModel, LGBMModel, FeatureEngineer, MultiHeadBundle):
         existing = getattr(main_mod, cls.__name__, None)
         if existing is None or getattr(existing, "__module__", "") == __name__:
             try:

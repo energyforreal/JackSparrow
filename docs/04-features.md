@@ -71,10 +71,10 @@ When the registry runs **only** `xgboost_pipeline_v15` models, the feature serve
    - Assesses data quality
 
 2. **Historical Context Retrieval**
-   - Searches vector memory for similar past situations
-   - Analyzes outcomes of similar historical decisions
-   - Extracts insights from past experiences
-   - Identifies novel situations
+   - Searches vector memory for similar past situations (in-process `VectorMemoryStore`)
+   - Prefers similar contexts that already have realized trade outcomes
+   - Summarizes profitable/total counts in step evidence when outcomes exist
+   - Identifies novel situations when memory is empty or disabled
 
 3. **Model Consensus Analysis**
    - Aggregates predictions from multiple ML models
@@ -205,6 +205,22 @@ The example illustrates how raw market context, historical success rate, and mod
 - Model performance changes
 - Strategy adaptations made
 - Confidence calibration updates
+
+---
+
+### 4b. Deterministic Self-Awareness (agent telemetry)
+
+**Description**: Adds structured self-knowledge to the agent without LLM reasoning or policy overrides. Complements the 6-step chain and strategy-first pipeline.
+
+**Capabilities**:
+
+1. **Decision introspection** — Each `DECISION_READY` may include `agent_introspection`: policy fusion mode, signals, trade-score pass/fail, v43 regime/gate, portfolio guard summary, and memory store utilization.
+2. **Context memory with outcomes** — Decisions are stored with `memory_context_id`; when a position closes, PnL and exit metadata backfill the matching record for future Step 2 retrieval.
+3. **Advisory reflection** — Each `POSITION_CLOSED` may include `reflection_snapshot` scoring direction alignment, calibration bucket, and diagnostic reason codes (`advisory_only=true`).
+
+**Configuration** (`.env`): `AGENT_INTROSPECTION_ENABLED`, `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED`, `AGENT_REFLECTION_ADVISORY_ENABLED` (all default `true`).
+
+**UI/API**: WebSocket `data_update` / `signal` payloads forward introspection fields; reflection is broadcast on `agent_update` as `POSITION_REFLECTION`. TypeScript types in `frontend/types/index.ts`. Details: [Logic & reasoning – Deterministic self-awareness](05-logic-reasoning.md#deterministic-self-awareness).
 
 ---
 

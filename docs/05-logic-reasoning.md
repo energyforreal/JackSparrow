@@ -17,6 +17,7 @@ This document describes **JackSparrow's** reasoning engine, decision-making proc
 - [Decision Framework](#decision-framework)
 - [Learning Algorithms](#learning-algorithms)
 - [Vector Memory System](#vector-memory-system)
+- [Deterministic Self-Awareness](#deterministic-self-awareness)
 - [Model Consensus Mechanism](#model-consensus-mechanism)
 - [Model Intelligence and Interaction](#model-intelligence-and-interaction)
 - [Related Documentation](#related-documentation)
@@ -446,7 +447,7 @@ Identified Risks:
 Risk Mitigation:
 - Recommended position size multiplier: 1.0x
 - Stop loss tighter by: 0%
-- Maximum holding period: 120 minutes
+- Maximum holding period: aligned to thesis execution horizon (2/6/12/24 × 5m bars via `v43_execution_profile`)
 
 Risk/Reward Assessment:
 Favorable risk/reward ratio with low risk factors
@@ -752,45 +753,81 @@ def adapt_strategy(performance_metrics):
 
 ### Purpose
 
-Store decision contexts as embeddings to enable similarity search and learning from past situations.
+Store decision contexts as in-process vector embeddings to support reasoning **Step 2 (Historical Context Retrieval)** and closed-loop outcome learning. Implementation: [`agent/memory/vector_store.py`](../agent/memory/vector_store.py).
 
-### Storage Process
+### Storage process (decision time)
 
-1. **Create Embedding**:
-   - Combine market context, features, and decision
-   - Generate embedding using sentence transformer
-   - Store in vector database
+1. **`mcp_orchestrator._store_decision_context`** builds a `DecisionContext` after policy emits `DECISION_READY`.
+2. **Embedding**: concatenation of canonical `FEATURE_LIST` values (missing → `0.0`) plus normalized market-context factors (regime one-hot, trend strength, hour sin/cos). Vectors are L2-normalized; similarity uses cosine distance (sklearn when available).
+3. **Identifiers**:
+   - `context_id`: `decision-{reasoning_chain_id}-{timestamp}`
+   - `decision_event_id`: `DecisionReadyEvent.event_id`
+   - `decision.reasoning_chain_id` for lookup on close
 
-2. **Store Decision**:
-   - Decision ID
-   - Timestamp
-   - Context (market regime, features, portfolio state)
-   - Reasoning chain
-   - Decision made
-   - Outcome (filled after trade completes)
+### Retrieval process (reasoning Step 2)
 
-### Retrieval Process
+1. Build a query `DecisionContext` from current `market_context.features`.
+2. Prefer **`get_similar_decisions_with_outcomes`** (contexts that already have `outcome`).
+3. Fall back to **`find_similar_contexts`** when no outcomes exist yet.
+4. Evidence strings include profitable/total counts when outcomes are present.
 
-1. **Create Query Embedding**:
-   - Embed current situation
-   - Use same embedding model
+Default similarity threshold: `0.8` on `VectorMemoryStore` (configurable at construct time). `MCPReasoningRequest.use_memory` must be true and the orchestrator must expose a vector store.
 
-2. **Similarity Search**:
-   - Search vector database
-   - Cosine similarity threshold: 0.7
-   - Return top 5 similar situations
+### Outcome backfill (position close)
 
-3. **Analyze Outcomes**:
-   - Extract outcomes from similar situations
-   - Calculate success rate
-   - Identify patterns
+On paper/live close, [`agent/core/agent_self_awareness_hooks.py`](../agent/core/agent_self_awareness_hooks.py) resolves the context by `memory_context_id` or `reasoning_chain_id` and calls **`update_context_outcome`** with `pnl`, `exit_reason`, `was_profitable`, `duration_seconds`.
 
-### Embedding Model
+Controlled by `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED` (default `true`). Qdrant env vars exist for future persistence; the runtime store is currently in-process.
 
-- Uses sentence-transformers
-- Model: `all-MiniLM-L6-v2` or similar
-- Dimension: 384
-- Normalized embeddings for cosine similarity
+---
+
+## Deterministic Self-Awareness
+
+Deterministic, **non-LLM** telemetry: introspection at decision time, memory outcome closure, and advisory reflection after trades. Does not override `AgentPolicyEngine`, `ml_signal_guard`, or risk gates.
+
+### Phase 1 — Introspection (read-only)
+
+- **Builder**: [`agent/core/agent_introspection.py`](../agent/core/agent_introspection.py) → `build_introspection_snapshot()`
+- **Emit**: `DecisionReadyEvent.payload.agent_introspection` (version `1.0`)
+- **Contents**: policy mode/signal/confidence, reason codes, ML candidate, thesis signal, trade score pass/fail vs `AGENT_TRADE_SCORE_MIN`, v43 regime/gate reject, portfolio guard action, memory store size
+- **Flag**: `AGENT_INTROSPECTION_ENABLED` (default `true`)
+
+### Phase 2 — Memory close loop
+
+See [Vector Memory System](#vector-memory-system). Links decision → execution → close without changing entry authority.
+
+### Phase 3 — Reflection (advisory)
+
+- **Engine**: [`agent/core/agent_reflection_engine.py`](../agent/core/agent_reflection_engine.py) → `reflect_on_trade()`
+- **Emit**: `PositionClosedEvent.payload.reflection_snapshot` (`advisory_only=true`)
+- **Checks**: direction vs PnL, confidence calibration bucket, trade-score/gate mismatches at entry, recurring policy hold codes vs entry signal
+- **Flag**: `AGENT_REFLECTION_ADVISORY_ENABLED` (default `true`)
+- **Not wired**: `threshold_adapter` / policy mutation (future optional step)
+
+### End-to-end flow
+
+```mermaid
+flowchart LR
+  orchestrator[MCP orchestrator] --> intro[agent_introspection]
+  orchestrator --> mem[VectorMemoryStore]
+  trading[Trading handler] --> exec[Execution position]
+  exec --> close[PositionClosed]
+  close --> hooks[agent_self_awareness_hooks]
+  hooks --> mem
+  hooks --> reflect[reflection_snapshot]
+  intro --> ws[Backend signal WS]
+  reflect --> ws2[Backend agent_update]
+```
+
+### Tests
+
+- `tests/unit/test_agent_introspection.py`
+- `tests/unit/test_agent_reflection_engine.py`
+- `tests/unit/test_vector_store.py`
+- `tests/unit/test_agent_self_awareness_hooks.py`
+- `tests/unit/test_reasoning_engine_memory.py`
+- `tests/unit/trading_agent_tests/test_event_bus_deserialization.py` (decision/close round-trip)
+- `tests/integration/test_event_pipeline.py` (Redis publish/consume)
 
 ---
 

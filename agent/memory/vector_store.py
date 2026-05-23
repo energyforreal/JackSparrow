@@ -27,9 +27,17 @@ logger = structlog.get_logger()
 class DecisionContext:
     """Represents a decision context with features and outcome."""
 
-    def __init__(self, context_id: str, symbol: str, timestamp: datetime,
-                 features: Dict[str, float], market_context: Dict[str, Any],
-                 decision: Dict[str, Any], outcome: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        context_id: str,
+        symbol: str,
+        timestamp: datetime,
+        features: Dict[str, float],
+        market_context: Dict[str, Any],
+        decision: Dict[str, Any],
+        outcome: Optional[Dict[str, Any]] = None,
+        decision_event_id: Optional[str] = None,
+    ):
         self.context_id = context_id
         self.symbol = symbol
         self.timestamp = timestamp
@@ -37,6 +45,7 @@ class DecisionContext:
         self.market_context = market_context
         self.decision = decision
         self.outcome = outcome
+        self.decision_event_id = decision_event_id
         self.embedding = None  # Will be computed later
 
     def to_dict(self) -> Dict[str, Any]:
@@ -49,6 +58,7 @@ class DecisionContext:
             "market_context": self.market_context,
             "decision": self.decision,
             "outcome": self.outcome,
+            "decision_event_id": self.decision_event_id,
             "embedding": self.embedding.tolist() if self.embedding is not None else None
         }
 
@@ -62,7 +72,8 @@ class DecisionContext:
             features=data["features"],
             market_context=data["market_context"],
             decision=data["decision"],
-            outcome=data["outcome"]
+            outcome=data["outcome"],
+            decision_event_id=data.get("decision_event_id"),
         )
         if data.get("embedding"):
             context.embedding = np.array(data["embedding"])
@@ -286,6 +297,40 @@ class VectorMemoryStore:
         """Retrieve a specific context by ID."""
         for context in self.contexts:
             if context.context_id == context_id:
+                return context
+        return None
+
+    async def find_context_by_reasoning_chain_id(
+        self, reasoning_chain_id: str
+    ) -> Optional[DecisionContext]:
+        """Find the most recent stored context for a reasoning chain id."""
+        if not reasoning_chain_id:
+            return None
+        chain = str(reasoning_chain_id)
+        matches: List[DecisionContext] = []
+        for context in reversed(self.contexts):
+            dec = context.decision if isinstance(context.decision, dict) else {}
+            if dec.get("reasoning_chain_id") == chain:
+                matches.append(context)
+                continue
+            if context.context_id.startswith(f"decision-{chain}-"):
+                matches.append(context)
+        if not matches:
+            return None
+        return matches[0]
+
+    async def find_context_by_decision_event_id(
+        self, decision_event_id: str
+    ) -> Optional[DecisionContext]:
+        """Find context linked to a DecisionReadyEvent id."""
+        if not decision_event_id:
+            return None
+        eid = str(decision_event_id)
+        for context in reversed(self.contexts):
+            if context.decision_event_id == eid:
+                return context
+            dec = context.decision if isinstance(context.decision, dict) else {}
+            if dec.get("decision_event_id") == eid:
                 return context
         return None
 

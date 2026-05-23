@@ -629,6 +629,14 @@ class ExecutionEngine:
                 pos["model_predictions"] = payload.get("model_predictions")
                 pos["reasoning_chain_id"] = payload.get("reasoning_chain_id")
                 pos["predicted_signal"] = payload.get("side", "")
+                if payload.get("memory_context_id") is not None:
+                    pos["memory_context_id"] = payload.get("memory_context_id")
+                if payload.get("agent_introspection_at_entry") is not None:
+                    pos["agent_introspection_at_entry"] = payload.get(
+                        "agent_introspection_at_entry"
+                    )
+                if payload.get("confidence") is not None:
+                    pos["confidence_at_entry"] = payload.get("confidence")
             if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                 from agent.risk.risk_manager import Position as RMPosition
                 rm_pos = RMPosition(
@@ -1029,6 +1037,9 @@ class ExecutionEngine:
         reasoning_chain_id = position.get("reasoning_chain_id")
         predicted_signal = position.get("predicted_signal")
         entry_time = position.get("entry_time")
+        memory_context_id = position.get("memory_context_id")
+        agent_introspection_at_entry = position.get("agent_introspection_at_entry")
+        confidence_at_entry = position.get("confidence_at_entry")
 
         try:
             close_side = "sell" if position["side"] == "long" else "buy"
@@ -1144,6 +1155,35 @@ class ExecutionEngine:
                     payload_data["predicted_signal"] = predicted_signal
                 if entry_time is not None:
                     payload_data["entry_time"] = entry_time
+                if memory_context_id is not None:
+                    payload_data["memory_context_id"] = memory_context_id
+                if agent_introspection_at_entry is not None:
+                    payload_data["agent_introspection_at_entry"] = (
+                        agent_introspection_at_entry
+                    )
+                if confidence_at_entry is not None:
+                    payload_data["confidence_at_entry"] = confidence_at_entry
+                if entry_time is not None:
+                    try:
+                        closed_ts = payload_data["timestamp"]
+                        if hasattr(closed_ts, "timestamp") and hasattr(entry_time, "timestamp"):
+                            payload_data["duration_seconds"] = (
+                                closed_ts - entry_time
+                            ).total_seconds()
+                    except Exception:
+                        pass
+                try:
+                    from agent.core.agent_self_awareness_hooks import (
+                        enrich_position_closed_payload,
+                    )
+
+                    await enrich_position_closed_payload(payload_data)
+                except Exception as e:
+                    logger.warning(
+                        "position_closed_self_awareness_hooks_failed",
+                        error=str(e),
+                    )
+
                 pos_closed = PositionClosedEvent(
                     source="execution_engine",
                     payload=payload_data,

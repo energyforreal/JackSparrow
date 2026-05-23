@@ -16,7 +16,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 02 | [MCP layer](docs/02-mcp-layer.md) | Feature / model / reasoning protocols |
 | 03 | [ML models](docs/03-ml-models.md) | Discovery (**JackSparrow v43** `metadata_v43.json`), training notebook (`jacksparrow_v43_delta_india_training.ipynb`), **`feature_store/jacksparrow_v43_contract.py`** parity, optional **SHORT execution** gate, Docker **`MODEL_DIR` / `AGENT_MODEL_DIR`**, optional **adaptive retrain** (v15 parquet only) |
 | 04 | [Features](docs/04-features.md) | Product capabilities, signal triggers |
-| 05 | [Logic & reasoning](docs/05-logic-reasoning.md) | Six-step chain, consensus, HOLD/MTF/exit behavior, optional **minimal AI-entry gates** (`AI_SIGNAL_MINIMAL_ENTRY_GATES`) |
+| 05 | [Logic & reasoning](docs/05-logic-reasoning.md) | Six-step chain, consensus, vector memory, **deterministic self-awareness** (introspection / outcome backfill / advisory reflection) |
 | 06 | [Backend](docs/06-backend.md) | FastAPI, REST, WebSocket contract, services |
 | 07 | [Frontend](docs/07-frontend.md) | Next.js, `useTradingData`, WebSocket UI, portfolio ROE % (`portfolioMetrics`) |
 | 08 | [File structure](docs/08-file-structure.md) | Repository layout |
@@ -50,6 +50,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | Model bundles & `MODEL_DIR` | [ML models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults), [Smoke – jacksparrow v43](docs/jacksparrow_v43_smoke.md) |
 | Adaptive drift / warm-start retrain (v15) | [ML models – Runtime adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional), [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), [.env.example](.env.example) |
 | WebSocket message shape | [Backend – WebSocket](docs/06-backend.md#websocket-protocol), [Frontend – WebSocket](docs/07-frontend.md#websocket-integration) |
+| Self-awareness flags & telemetry | [Logic & reasoning – Self-awareness](docs/05-logic-reasoning.md#deterministic-self-awareness), [Canonical events](docs/canonical_events.md), `.env.example` |
 | Troubleshooting | [Debugging](docs/13-debugging.md), [Deployment – Troubleshooting](docs/10-deployment.md#troubleshooting) |
 | AI signal / paper trade audit (IST ledger + markdown + structlog) | [reference/ai-signal-action-audit-log.md](reference/ai-signal-action-audit-log.md), [Logging – Audit journal](docs/12-logging.md#ai-signal-and-action-audit-journal), [Deployment – host log paths](docs/10-deployment.md#common-operations) |
 
@@ -59,4 +60,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-05-13 — v43 training doc sync: notebook path, metadata promotion notes, optional HTF frames in `JackSparrowV43Node`.
+**Last updated**: 2026-05-22 — Deterministic self-awareness: introspection on `DECISION_READY`, memory outcome backfill, advisory reflection on `POSITION_CLOSED`, WS/API types.

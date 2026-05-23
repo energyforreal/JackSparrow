@@ -259,6 +259,7 @@ All model predictions include SHAP (SHapley Additive exPlanations) based reasoni
 - **Positive/Negative Contributions**: Both supporting and opposing factors identified
 - **Consistency Across Models**: We normalise SHAP outputs across heterogeneous model types so downstream consumers can compare contributions without bespoke conversions.
 - **Persisted Metadata**: SHAP vectors and summarised narratives are stored alongside the reasoning chain in the decision memory table (`decision_memory.reasoning_chain`) to support audit replay.
+- **Runtime vector memory**: `mcp_orchestrator` stores each `DecisionReady` context in [`agent/memory/vector_store.py`](../agent/memory/vector_store.py) and attaches optional `agent_introspection` / `memory_context_id` on the event payload. Outcomes are backfilled on position close (see [Logic & reasoning – Self-awareness](05-logic-reasoning.md#deterministic-self-awareness)).
 
 **Example SHAP Explanation**:
 ```python
