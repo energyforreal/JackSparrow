@@ -24,6 +24,37 @@ def test_round_trip_cost_positive() -> None:
     assert round_trip_cost_pct() > 0
 
 
+def test_round_trip_cost_excludes_leverage(monkeypatch) -> None:
+    """Gate 5 hurdle must not multiply by leverage (expected_return is price-scale)."""
+    from agent.core import v43_signal_gates as gates_mod
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "jacksparrow_v43_maker_fee_rate", 0.0005)
+    monkeypatch.setattr(settings, "jacksparrow_v43_slippage_pct", 0.0003)
+    monkeypatch.setattr(settings, "jacksparrow_v43_leverage_assumption", 3)
+    assert gates_mod.round_trip_cost_pct() == pytest.approx(0.0016)
+    monkeypatch.setattr(settings, "jacksparrow_v43_leverage_assumption", 10)
+    assert gates_mod.round_trip_cost_pct() == pytest.approx(0.0016)
+
+
+def test_gate5_realistic_edge_passes_without_leverage_inflation(monkeypatch) -> None:
+    """Typical v43 edge (~1e-4 to 3e-4) should not be killed by 3x cost inflation."""
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "jacksparrow_v43_maker_fee_rate", 0.0005)
+    monkeypatch.setattr(settings, "jacksparrow_v43_slippage_pct", 0.0003)
+    monkeypatch.setattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.75)
+    thr = 0.0011
+    proba = thr + 0.0003  # edge = 0.0003
+    metrics = gate5_long_edge_metrics(proba, thr)
+    assert metrics.rtc == pytest.approx(0.0016)
+    assert metrics.rhs == pytest.approx(0.0012)
+    assert metrics.edge_pct == pytest.approx(0.0003)
+    assert metrics.passes is False  # thin edge still below 0.75 * rtc
+    strong_proba = thr + 0.0015  # edge = 0.0015 > rhs
+    assert gate5_long_edge_metrics(strong_proba, thr).passes is True
+
+
 def test_gate5_edge_ok_strong_signal() -> None:
     assert gate5_edge_ok(0.60, 0.01) is True
     m = gate5_long_edge_metrics(0.60, 0.01)
@@ -37,9 +68,9 @@ def test_gate5_metrics_matches_edge_ok() -> None:
 
 
 def test_gate5_long_compares_expected_return_edge_to_cost() -> None:
-    metrics = gate5_long_edge_metrics(0.014, 0.011)
-    assert metrics.edge_pct == pytest.approx(0.003)
-    assert metrics.lhs == pytest.approx(0.003)
+    metrics = gate5_long_edge_metrics(0.012, 0.011)
+    assert metrics.edge_pct == pytest.approx(0.001)
+    assert metrics.lhs == pytest.approx(0.001)
     assert metrics.rhs == pytest.approx(metrics.ratio * metrics.rtc)
     assert metrics.passes is False
 
@@ -58,12 +89,15 @@ def test_gate5_short_compares_expected_return_edge_to_cost() -> None:
 
 
 def test_debounce_blocks_second_entry() -> None:
+    from agent.core import v43_runtime_horizon as rh
+
+    rh.set_runtime_v43_horizon(6, execution_profile={"enabled": False})
     st = V43GateState()
     st.note_signal_decision(10)
     gr = apply_post_threshold_gates(
         raw_long=True,
         regime="neutral",
-        current_bar_index=12,
+        current_bar_index=11,
         has_open_position=False,
         state=st,
     )
@@ -98,12 +132,15 @@ def test_post_threshold_short_not_raw() -> None:
 
 
 def test_post_threshold_short_debounce_same_as_long() -> None:
+    from agent.core import v43_runtime_horizon as rh
+
+    rh.set_runtime_v43_horizon(6, execution_profile={"enabled": False})
     st = V43GateState()
     st.note_signal_decision(10)
     gr = apply_post_threshold_gates_short(
         raw_short=True,
         regime="neutral",
-        current_bar_index=12,
+        current_bar_index=11,
         has_open_position=False,
         state=st,
     )

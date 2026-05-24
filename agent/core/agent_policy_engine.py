@@ -192,6 +192,37 @@ def _is_entry(sig: str) -> bool:
     return _normalize_signal(sig) in _ENTRY_SIGNALS
 
 
+def _ml_gated_from_context(
+    market_context: Optional[Dict[str, Any]],
+    ml_evidence: MLEvidenceSnapshot,
+) -> bool:
+    """True when v43 post-gates passed (final_long/final_short) in market context."""
+    mc = market_context if isinstance(market_context, dict) else {}
+    ml_val = mc.get("ml_validation")
+    if isinstance(ml_val, dict):
+        return bool(ml_val.get("final_long") or ml_val.get("final_short"))
+    excerpt = ml_evidence.market_context_excerpt or {}
+    ml_val = excerpt.get("ml_validation")
+    if isinstance(ml_val, dict):
+        return bool(ml_val.get("final_long") or ml_val.get("final_short"))
+    v43 = excerpt.get("v43_dedicated_decision")
+    if isinstance(v43, dict):
+        return bool(v43.get("final_long") or v43.get("final_short"))
+    return False
+
+
+def _thesis_blocks_gated_ml_adoption(thesis: ThesisVerdict) -> bool:
+    """True when rule thesis explicitly vetoes adopting gated ML while thesis is HOLD."""
+    if thesis.thesis_type in ("crisis_veto",):
+        return True
+    codes = {str(r) for r in (thesis.reason_codes or [])}
+    if "thesis_direction_conflict" in codes:
+        return True
+    if any("veto" in c for c in codes):
+        return True
+    return False
+
+
 def _same_direction(a: str, b: str) -> bool:
     sa, sb = _normalize_signal(a), _normalize_signal(b)
     if sa in ("BUY", "STRONG_BUY") and sb in ("BUY", "STRONG_BUY"):
@@ -391,6 +422,23 @@ def _fuse_signals(
             )
             v.confidence = max(v.confidence, float(thesis.confidence))
             return v
+        if (
+            ml_entry
+            and not th_entry
+            and th_sig == "HOLD"
+            and bool(getattr(settings, "agent_policy_adopt_gated_ml_when_thesis_neutral", True))
+            and (
+                bool(ml_evidence.ml_confirms)
+                or _ml_gated_from_context(market_context, ml_evidence)
+            )
+            and not _thesis_blocks_gated_ml_adoption(thesis)
+        ):
+            return _verdict_from_ml(
+                ml_evidence,
+                ml_sig,
+                conclusion,
+                reasons + ["fusion_ml_gated_thesis_neutral"],
+            )
         return PolicyVerdict(
             signal="HOLD",
             confidence=float(ml_evidence.ml_candidate_confidence or 0.0),

@@ -58,6 +58,14 @@ logger = structlog.get_logger()
 _PROB_RETURN_SCALE = 0.04
 
 
+def _v43_head_confidence(edge: float, threshold: float, unc_scale: float) -> float:
+    """Map edge-over-threshold to [0,1] confidence, scaled by uncertainty."""
+    thr = max(float(threshold), 1e-6)
+    edge_ratio = min(1.0, abs(float(edge)) / thr)
+    base = 0.25 + 0.75 * edge_ratio
+    return float(min(1.0, max(0.0, base * float(unc_scale))))
+
+
 def _ctx_dataframe(ctx: Dict[str, Any], primary_key: str, fallback_key: str) -> Optional[pd.DataFrame]:
     v = ctx.get(primary_key)
     if isinstance(v, pd.DataFrame):
@@ -334,9 +342,21 @@ class JackSparrowV43Node(MCPModelNode):
                 "v43 artifact must contain MultiHeadBundle with horizon_models "
                 f"(got {type(model).__name__}). Retrain with multi-head export."
             )
+        stack_mode = str(
+            getattr(settings, "jacksparrow_v43_inference_stack", "meta_calibrator")
+            or "meta_calibrator"
+        ).strip().lower()
+        if stack_mode not in ("meta_calibrator", "regressor_mean"):
+            logger.warning(
+                "v43_inference_stack_unknown_fallback",
+                requested=stack_mode,
+                fallback="meta_calibrator",
+            )
+            stack_mode = "meta_calibrator"
         for fb in self._multihead.head_bars():
             head_model = self._multihead.get_head(fb)
             if head_model is not None:
+                setattr(head_model, "_inference_stack", stack_mode)
                 _apply_v43_threshold_patch({"model": head_model})
                 hkey = next(
                     (k for k, b in V43_HORIZON_KEY_TO_BARS.items() if b == fb),
@@ -392,6 +412,9 @@ class JackSparrowV43Node(MCPModelNode):
             feature_count=len(self._feature_names),
             artifact=str(self._artifact_path),
             regime_keys=list(self._regime_models.keys()) if self._regime_models else [],
+            inference_stack=str(
+                getattr(settings, "jacksparrow_v43_inference_stack", "meta_calibrator")
+            ),
         )
 
     async def _reload_if_stale(self) -> None:
@@ -594,9 +617,7 @@ class JackSparrowV43Node(MCPModelNode):
                 primary_u_scale = uncertainty_scale(primary_unc)
                 edge = float(proba0) - float(thr)
                 primary_pred_val = float(np.tanh(edge * 80.0))
-                primary_conf = float(
-                    min(1.0, max(0.0, abs(edge) / 0.015 + 0.25) * primary_u_scale)
-                )
+                primary_conf = _v43_head_confidence(edge, thr, primary_u_scale)
 
         reasoning = (
             f"v43 multi-head regime={regime} primary={primary_fb}bars "

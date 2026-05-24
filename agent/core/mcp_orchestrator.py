@@ -364,6 +364,23 @@ class MCPOrchestrator:
             "required_feature_count": len(self._required_feature_names_cache),
         }
 
+    def _resolve_v43_bundle_metadata(self, model_name: str) -> Dict[str, Any]:
+        """Load full v43 bundle metadata for multi-horizon threshold validation."""
+        if not self.model_registry:
+            raise RuntimeError("Model registry not initialized")
+        model = self.model_registry.get_model(model_name)
+        bundle_meta = getattr(model, "_bundle_metadata", None) if model is not None else None
+        if isinstance(bundle_meta, dict) and isinstance(bundle_meta.get("horizons"), dict):
+            return bundle_meta
+        for node in self.model_registry.models.values():
+            candidate = getattr(node, "_bundle_metadata", None)
+            if isinstance(candidate, dict) and isinstance(candidate.get("horizons"), dict):
+                return candidate
+        raise ValueError(
+            f"v43 bundle metadata unavailable for model {model_name!r}; "
+            "ensure metadata_v43.json is loaded on the JackSparrowV43Node"
+        )
+
     async def _process_jacksparrow_v43_prediction(
         self,
         symbol: str,
@@ -434,29 +451,28 @@ class MCPOrchestrator:
                 error_code="V43MultiHeadMissing",
                 error_message="v43 prediction missing multi_horizon_heads (retrain multi-head bundle)",
             )
-        meta_stub = {
-            "primary_execution_horizon_bars": int(
-                pctx.get("primary_execution_horizon_bars", 6) or 6
-            ),
-            "horizons": {
-                k: {"forward_bars": v.get("forward_bars"), "validation_metrics": {}}
-                for k, v in head_payloads.items()
-                if isinstance(v, dict)
-            },
-        }
+        try:
+            bundle_metadata = self._resolve_v43_bundle_metadata(pred0.model_name)
+        except (RuntimeError, ValueError) as e:
+            return self._create_model_error_prediction_response(
+                symbol=symbol,
+                context=context,
+                error_code=type(e).__name__,
+                error_message=str(e),
+            )
         short_enabled = bool(
             getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
         )
         eps = float(getattr(settings, "jacksparrow_v43_near_threshold_epsilon", 0.0) or 0.0)
         mh_evidence = build_multi_horizon_evidence(
             head_payloads,
-            meta_stub,
+            bundle_metadata,
             short_enabled=short_enabled,
             eps=eps,
         )
         gate_head = primary_head_for_gates(mh_evidence)
         training_forward_bars = int(
-            gate_head.forward_bars or primary_execution_horizon_bars(meta_stub)
+            gate_head.forward_bars or primary_execution_horizon_bars(bundle_metadata)
         )
         align_horizon = bool(
             getattr(settings, "jacksparrow_v43_align_execution_to_horizon", True)
@@ -641,6 +657,7 @@ class MCPOrchestrator:
             if strat_side != "FLAT"
             else False
         )
+        ml_gates_passed = bool(final_long or final_short)
         trade_score = score_trade_setup(
             strategy=strategy_candidate,
             ml_validation=ml_validation,
@@ -741,7 +758,7 @@ class MCPOrchestrator:
             "v43_horizon_minutes": horizon_minutes,
             "v43_execution_profile": v43_execution_profile,
             "multi_horizon_evidence": mh_evidence.to_dict(),
-            "v43_bundle_metadata": meta_stub,
+            "v43_bundle_metadata": bundle_metadata,
             "ml_validation": ml_validation.to_dict(),
             "strategy_candidate": strategy_candidate.to_dict(),
             "thesis_verdict": {
@@ -781,7 +798,7 @@ class MCPOrchestrator:
             },
             thesis_signal=strategy_candidate.signal,
             trade_score=trade_score.score,
-            ml_confirms=ml_confirms,
+            ml_confirms=ml_gates_passed or ml_confirms,
         )
         policy_verdict = agent_policy_engine.evaluate(
             ml_evidence=ml_evidence,
@@ -940,6 +957,32 @@ class MCPOrchestrator:
             v43_cnt_rejected_edge=_gc.rejected_edge,
             v43_cnt_trades_executed=_gc.trades_executed,
         )
+        try:
+            from agent.core.signal_recovery_telemetry import record_decision_cycle
+
+            record_decision_cycle(
+                symbol=symbol,
+                signal=str(policy_verdict.signal),
+                confidence=float(policy_verdict.confidence),
+                expected_return=float(proba),
+                trade_score=float(trade_score.score),
+                thesis_signal=str(strategy_candidate.signal),
+                policy_reason_codes=list(policy_verdict.reason_codes),
+                v43_collapse_rate=float(_gc.collapse_rate()),
+                proba=float(proba),
+                threshold=float(thr),
+                inference_stack=str(
+                    getattr(settings, "jacksparrow_v43_inference_stack", "meta_calibrator")
+                ),
+                event="v43_prediction_complete",
+                extra={
+                    "final_long": final_long,
+                    "final_short": final_short,
+                    "reject": reject_tail,
+                },
+            )
+        except Exception:
+            pass
         return result
 
     async def process_prediction_request(
@@ -1756,6 +1799,23 @@ class MCPOrchestrator:
                     event_id=decision_event.event_id,
                     correlation_id=event.event_id,
                 )
+                try:
+                    from agent.core.signal_recovery_telemetry import record_decision_cycle
+
+                    record_decision_cycle(
+                        symbol=decision_symbol,
+                        signal=str(signal),
+                        confidence=float(confidence) if confidence is not None else 0.0,
+                        trade_score=float(ts_val) if ts_val is not None else None,
+                        thesis_signal=str(ml_evidence.thesis_signal)
+                        if ml_evidence.thesis_signal
+                        else None,
+                        policy_reason_codes=list(verdict.reason_codes),
+                        event="decision_ready_emitted",
+                        extra={"event_id": decision_event.event_id},
+                    )
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error("mcp_orchestrator_prediction_request_failed",

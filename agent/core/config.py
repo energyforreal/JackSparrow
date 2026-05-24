@@ -875,12 +875,33 @@ class Settings(BaseSettings):
     )
 
     jacksparrow_v43_short_execution_enabled: bool = Field(
-        default=False,
+        default=True,
         env="JACKSPARROW_V43_SHORT_EXECUTION_ENABLED",
         description=(
             "When True, symmetric short entries fire when expected_return < -threshold "
-            "(same gates/cost model as long)."
+            "(same gates/cost model as long). Default on for BTCUSD perpetual futures; "
+            "set false only to run long-only experiments."
         ),
+    )
+    jacksparrow_v43_inference_stack: str = Field(
+        default="meta_calibrator",
+        env="JACKSPARROW_V43_INFERENCE_STACK",
+        description=(
+            "v43 ensemble inference path: meta_calibrator (production default) or "
+            "regressor_mean (A/B ablation — base regressor mean only, skips meta+calibrator)."
+        ),
+    )
+    signal_recovery_telemetry_enabled: bool = Field(
+        default=True,
+        env="SIGNAL_RECOVERY_TELEMETRY_ENABLED",
+        description=(
+            "Append per-cycle decision telemetry NDJSON for signal-recovery KPI scripts."
+        ),
+    )
+    signal_recovery_telemetry_subpath: str = Field(
+        default="signal_recovery/decision_telemetry.ndjson",
+        env="SIGNAL_RECOVERY_TELEMETRY_SUBPATH",
+        description="Relative to LOGS_ROOT; used by baseline/ablation tooling.",
     )
 
     trade_outcomes_writes_enabled: bool = Field(
@@ -1660,6 +1681,14 @@ class Settings(BaseSettings):
         default=True,
         env="REQUIRE_STRATEGY_ML_AGREEMENT",
         description="When True and policy mode is ml_and_thesis, execution requires thesis+ML agreement.",
+    )
+    agent_policy_adopt_gated_ml_when_thesis_neutral: bool = Field(
+        default=True,
+        env="AGENT_POLICY_ADOPT_GATED_ML_WHEN_THESIS_NEUTRAL",
+        description=(
+            "In ml_and_thesis mode, adopt gated ML entries (final_long/final_short) when thesis "
+            "is HOLD and not in crisis/veto/conflict. Enables perp shorts without a parallel thesis rule."
+        ),
     )
     agent_introspection_enabled: bool = Field(
         default=True,

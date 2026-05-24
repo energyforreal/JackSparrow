@@ -373,8 +373,23 @@ class EnsembleModel(_StateDictMixin):
             )
         return np.column_stack(cols)
 
-    def predict(self, X: np.ndarray, X_df: Optional[pd.DataFrame] = None) -> np.ndarray:
+    def predict(
+        self,
+        X: np.ndarray,
+        X_df: Optional[pd.DataFrame] = None,
+        *,
+        inference_stack: Optional[str] = None,
+    ) -> np.ndarray:
         stack = self._base_predictions(X)
+        stack_mode = (
+            inference_stack
+            or getattr(self, "_inference_stack", None)
+            or "meta_calibrator"
+        )
+        if stack_mode == "regressor_mean":
+            out = stack.mean(axis=1)
+            out = np.clip(np.asarray(out, dtype=np.float64), -0.10, 0.10)
+            return out
         meta = getattr(self, "meta", None)
         # Legacy meta-learner path (v27/v28 classifier ensemble).
         if meta is not None and hasattr(meta, "predict_proba"):

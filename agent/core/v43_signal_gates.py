@@ -59,11 +59,15 @@ class V43GateResult:
 
 
 def round_trip_cost_pct() -> float:
-    """``2 * (maker_fee + slippage) * leverage`` from settings."""
+    """Round-trip cost on **price-return scale** (not leveraged PnL).
+
+    ``expected_return`` from v43 is a raw forward price move fraction; gate 5
+    compares ``edge = expected_return - threshold`` to this cost hurdle. Leverage
+    affects position sizing elsewhere — it must not inflate the edge-vs-cost gate.
+    """
     maker = float(getattr(settings, "jacksparrow_v43_maker_fee_rate", 0.0005) or 0.0)
     slip = float(getattr(settings, "jacksparrow_v43_slippage_pct", 0.0003) or 0.0)
-    lev = int(getattr(settings, "jacksparrow_v43_leverage_assumption", 3) or 1)
-    return 2.0 * (maker + slip) * float(max(1, lev))
+    return 2.0 * (maker + slip)
 
 
 @dataclass(frozen=True)

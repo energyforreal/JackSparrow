@@ -74,6 +74,37 @@ def test_score_skips_ml_points_without_gated_final() -> None:
     assert "score_ml_ungated_skipped" in result.reason_codes
 
 
+def test_score_passes_flat_thesis_with_gated_short() -> None:
+    strategy = StrategyCandidate(
+        direction="FLAT",
+        strength=0.0,
+        signal="HOLD",
+        thesis_type="flat",
+    )
+    ml = MLValidationSnapshot(
+        expected_return=-0.019,
+        threshold=0.001,
+        short_threshold=0.001,
+        regime="neutral",
+        final_short=True,
+    )
+    structure = MarketStructureSnapshot(
+        market_type="NEUTRAL",
+        regime="neutral",
+        liquidity_ok=True,
+        chop_market=False,
+    )
+    result = score_trade_setup(
+        strategy=strategy,
+        ml_validation=ml,
+        structure=structure,
+        ml_confirms=True,
+    )
+    assert result.score >= 70.0
+    assert result.passed is True
+    assert "score_effective_direction_from_ml_gates" in result.reason_codes
+
+
 def test_score_fails_flat_thesis() -> None:
     strategy = StrategyCandidate(
         direction="FLAT",

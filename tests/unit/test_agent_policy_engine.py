@@ -112,6 +112,35 @@ def test_ml_and_thesis_requires_agreement(monkeypatch: pytest.MonkeyPatch) -> No
     assert "fusion_ml_and_thesis_no_agreement" in v.reason_codes
 
 
+def test_ml_and_thesis_adopts_gated_ml_when_thesis_hold(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
+    monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "ml_and_thesis")
+    monkeypatch.setattr(
+        ape_mod.settings, "agent_policy_adopt_gated_ml_when_thesis_neutral", True
+    )
+    eng = MagicMock()
+    eng.evaluate.return_value = ThesisVerdict(
+        signal="HOLD",
+        confidence=0.4,
+        position_size=0.0,
+        reason_codes=["thesis_flat"],
+        thesis_type="flat",
+    )
+    engine = AgentPolicyEngine(thesis_engine=eng)
+    ev = MLEvidenceSnapshot(
+        symbol="BTCUSD",
+        source="v43_orchestrator",
+        ml_candidate_signal="SELL",
+        ml_candidate_confidence=0.72,
+        ml_candidate_position_size=0.05,
+        ml_confirms=True,
+    )
+    v = engine.evaluate(ml_evidence=ev, market_context={})
+    assert v.signal == "SELL"
+    assert "fusion_ml_gated_thesis_neutral" in v.reason_codes
+    assert v.adopted_ml_candidate is True
+
+
 def test_ml_and_thesis_agrees(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
     monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "ml_and_thesis")

@@ -131,6 +131,8 @@ def _policy_supports_entry(
         return False, "policy_signal_not_entry"
     if "agent_thesis_confirms_ml" in reason_set:
         return True, "policy_thesis_confirms_ml"
+    if "fusion_ml_gated_thesis_neutral" in reason_set:
+        return True, "policy_ml_gated_thesis_neutral"
     if "agent_thesis_origin" in reason_set or "agent_thesis_entry" in reason_set:
         return True, "policy_thesis_entry"
     if not bool(policy_verdict.get("adopted_ml_candidate")):
@@ -159,7 +161,7 @@ def _strategy_ml_agreement_ok(
         return False, "strategy_ml_multi_horizon_reject"
     if "fusion_ml_and_thesis_no_agreement" in reasons:
         return False, "strategy_ml_no_agreement"
-    if "agent_thesis_confirms_ml" not in reasons:
+    if "agent_thesis_confirms_ml" not in reasons and "fusion_ml_gated_thesis_neutral" not in reasons:
         return False, "missing_agent_thesis_confirms_ml"
 
     ts = market_context.get("trade_score")
@@ -215,7 +217,11 @@ def validate_ml_entry_signal(
     if not policy_ok:
         return False, policy_reason
 
-    if policy_reason in ("policy_thesis_entry", "policy_thesis_confirms_ml"):
+    if policy_reason in (
+        "policy_thesis_entry",
+        "policy_thesis_confirms_ml",
+        "policy_ml_gated_thesis_neutral",
+    ):
         agree_ok, agree_reason = _strategy_ml_agreement_ok(mc, policy_verdict)
         if not agree_ok:
             return False, agree_reason

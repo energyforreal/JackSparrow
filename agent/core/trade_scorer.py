@@ -30,6 +30,20 @@ class TradeScoreResult:
         }
 
 
+def _effective_direction(
+    strategy: StrategyCandidate,
+    ml_validation: MLValidationSnapshot,
+) -> str:
+    """Use gated ML side when thesis is FLAT but v43 gates passed (perp long/short symmetry)."""
+    if strategy.direction != "FLAT":
+        return strategy.direction
+    if ml_validation.final_short and not ml_validation.final_long:
+        return "SHORT"
+    if ml_validation.final_long and not ml_validation.final_short:
+        return "LONG"
+    return "FLAT"
+
+
 def _multi_horizon_alignment_bonus(
     ml_validation: MLValidationSnapshot,
     strategy: StrategyCandidate,
@@ -57,29 +71,33 @@ def score_trade_setup(
     """Weighted confluence score for strategy-first pipeline."""
     components: Dict[str, float] = {}
     reasons: List[str] = []
+    direction = _effective_direction(strategy, ml_validation)
+    if direction != strategy.direction and direction != "FLAT":
+        reasons.append("score_effective_direction_from_ml_gates")
 
     thesis_pts = 0.0
-    if strategy.direction in ("LONG", "SHORT"):
-        thesis_pts = min(30.0, 15.0 + strategy.strength * 20.0)
+    if direction in ("LONG", "SHORT"):
+        strength = strategy.strength if strategy.direction != "FLAT" else 0.5
+        thesis_pts = min(30.0, 15.0 + strength * 20.0)
         reasons.append("score_thesis_active")
     components["thesis"] = thesis_pts
 
     ml_pts = 0.0
     gated_ml = False
-    if strategy.direction == "LONG":
+    if direction == "LONG":
         gated_ml = bool(ml_validation.final_long)
-    elif strategy.direction == "SHORT":
+    elif direction == "SHORT":
         gated_ml = bool(ml_validation.final_short)
-    if gated_ml and strategy.direction != "FLAT":
+    if gated_ml and direction != "FLAT":
         thr_use = (
             ml_validation.threshold
-            if strategy.direction == "LONG"
+            if direction == "LONG"
             else ml_validation.short_threshold
         )
         edge = abs(ml_validation.expected_return) - thr_use
         ml_pts = min(25.0, max(0.0, 10.0 + edge * 500.0))
         reasons.append("score_ml_gated_confirms")
-    elif ml_confirms and strategy.direction != "FLAT":
+    elif ml_confirms and direction != "FLAT":
         reasons.append("score_ml_ungated_skipped")
     components["ml"] = ml_pts
 
@@ -111,15 +129,24 @@ def score_trade_setup(
         reasons.append("score_ml_gates_passed")
     components["gates"] = gate_pts
 
-    mh_pts = _multi_horizon_alignment_bonus(ml_validation, strategy)
+    mh_pts = _multi_horizon_alignment_bonus(
+        ml_validation,
+        StrategyCandidate(
+            direction=direction,
+            strength=strategy.strength,
+            signal=strategy.signal,
+            thesis_type=strategy.thesis_type,
+            confidence=strategy.confidence,
+        ),
+    )
     if mh_pts > 0:
         reasons.append("score_multi_horizon_alignment")
     components["multi_horizon"] = mh_pts
 
     total = sum(components.values())
     min_score = float(getattr(settings, "agent_trade_score_min", 70.0) or 70.0)
-    passed = total >= min_score and strategy.direction != "FLAT"
-    if not passed and strategy.direction != "FLAT":
+    passed = total >= min_score and direction != "FLAT"
+    if not passed and direction != "FLAT":
         reasons.append(f"score_below_min={total:.1f}<{min_score:.1f}")
 
     return TradeScoreResult(
