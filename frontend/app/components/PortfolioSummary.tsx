@@ -75,7 +75,7 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
   const isPositive = totalPnL >= 0
   const availableBalance = parseNumber(portfolio.available_balance)
   const marginUsed = parseNumber(portfolio.margin_used)
-  const totalEquity = totalValue  // Use backend-computed total_value directly
+  const netPnl = totalPnL
 
   // USD account value for direct comparison with Delta testnet display.
   // Prefer the backend-provided field; fall back to deriving from INR value + FX rate.
@@ -197,9 +197,15 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
             </div>
           </div>
           <div>
-            <div className="text-sm text-muted-foreground mb-1">Total Equity</div>
-            <div className="text-xl font-semibold">
-              {formatCurrency(totalEquity)}
+            <div className="text-sm text-muted-foreground mb-1">Net PnL</div>
+            <div
+              className={cn(
+                'text-xl font-semibold',
+                netPnl >= 0 ? 'text-success' : 'text-error'
+              )}
+            >
+              {netPnl > 0 ? '+' : ''}
+              {formatCurrency(netPnl)}
             </div>
           </div>
         </div>

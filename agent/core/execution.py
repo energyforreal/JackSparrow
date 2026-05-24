@@ -29,6 +29,7 @@ from agent.core.futures_utils import (
 from agent.core.sl_tp import (
     compute_stop_take_prices,
     parse_risk_approved_side,
+    rebase_sl_tp_to_fill,
 )
 from agent.core.exchange_gateway import ExchangeGateway
 from agent.core.agent_order_registry import (
@@ -617,7 +618,7 @@ class ExecutionEngine:
                 return
 
             fill_price = result.details.get("average_fill_price") or price
-            # SL/TP may have been rebased to fill inside execute_trade (paper mode)
+            # SL/TP rebased to fill inside execute_trade when order fills immediately
             pos = self.position_manager.get_position(symbol)
             if pos:
                 if pos.get("stop_loss") is not None:
@@ -676,6 +677,58 @@ class ExecutionEngine:
                 },
             )
             await event_bus.publish(order_fill)
+
+            if getattr(settings, "signal_audit_md_enabled", True):
+                try:
+                    from agent.core.paper_trade_entry import compute_paper_entry_ledger
+                    from agent.core.paper_trade_logger import paper_trade_logger
+
+                    pos_audit = self.position_manager.get_position(symbol)
+                    position_id = f"pos_{order_id}"
+                    cv = float(
+                        (pos_audit or {}).get("contract_value_btc")
+                        or getattr(settings, "contract_value_btc", 0.001)
+                    )
+                    payload_usdinr = payload.get("usd_inr_rate")
+                    if payload_usdinr is not None:
+                        try:
+                            usdinr = float(payload_usdinr)
+                        except (TypeError, ValueError):
+                            usdinr = await self._resolve_usdinr_paper()
+                    else:
+                        usdinr = await self._resolve_usdinr_paper()
+                    trade_value_inr, fees_inr, _ = compute_paper_entry_ledger(
+                        quantity=float(quantity),
+                        fill_price=float(fill_price),
+                        contract_value_btc=cv,
+                        usd_inr_rate=usdinr,
+                    )
+                    sl_audit = stop_loss
+                    tp_audit = take_profit
+                    if pos_audit:
+                        if pos_audit.get("stop_loss") is not None:
+                            sl_audit = pos_audit.get("stop_loss")
+                        if pos_audit.get("take_profit") is not None:
+                            tp_audit = pos_audit.get("take_profit")
+                    ref_px = payload.get("price")
+                    paper_trade_logger.log_trade(
+                        trade_id=trade_id,
+                        symbol=symbol,
+                        side=side_raw,
+                        quantity=quantity,
+                        fill_price=fill_price,
+                        order_id=order_id,
+                        position_id=position_id,
+                        reasoning_chain_id=payload.get("reasoning_chain_id"),
+                        usd_inr_rate=usdinr,
+                        trade_value_inr=trade_value_inr,
+                        fees_inr=fees_inr,
+                        reference_price=float(ref_px) if ref_px is not None else None,
+                        stop_loss=float(sl_audit) if sl_audit is not None else None,
+                        take_profit=float(tp_audit) if tp_audit is not None else None,
+                    )
+                except Exception:
+                    pass
 
             v43_bar = payload.get("v43_closed_bar_index")
             if v43_bar is not None:
@@ -886,6 +939,22 @@ class ExecutionEngine:
                         tick_sz = float(pex["tick_size"])
                     except (TypeError, ValueError):
                         tick_sz = None
+                try:
+                    planned_entry = float(
+                        trade.get("reference_price") or trade.get("price") or fill_price
+                    )
+                except (TypeError, ValueError):
+                    planned_entry = fill_price
+                if (stop_loss is not None or take_profit is not None) and planned_entry > 0:
+                    stop_loss, take_profit = rebase_sl_tp_to_fill(
+                        planned_entry,
+                        fill_price,
+                        stop_loss,
+                        take_profit,
+                        tick_size=tick_sz,
+                    )
+                    trade["stop_loss"] = stop_loss
+                    trade["take_profit"] = take_profit
                 position = self.position_manager.open_position(
                     symbol=symbol,
                     side="long" if side == "buy" else "short",
@@ -1183,6 +1252,32 @@ class ExecutionEngine:
                         "position_closed_self_awareness_hooks_failed",
                         error=str(e),
                     )
+
+                if getattr(settings, "signal_audit_md_enabled", True):
+                    try:
+                        from agent.core.paper_trade_logger import paper_trade_logger
+
+                        duration_s = payload_data.get("duration_seconds")
+                        net_pnl_inr = float(net_usd) * float(usdinr_exit) + float(fx_pnl_inr)
+                        paper_trade_logger.log_position_close(
+                            position_id=position_id,
+                            symbol=symbol,
+                            side=position["side"],
+                            entry_price=float(position["entry_price"]),
+                            exit_price=exit_price,
+                            quantity=lots,
+                            pnl=net_usd,
+                            exit_reason=exit_reason,
+                            net_pnl_inr=net_pnl_inr,
+                            duration_seconds=duration_s,
+                            gross_pnl_usd=gross_usd,
+                            usdinr_at_entry=usdinr_entry,
+                            usd_inr_rate=usdinr_exit,
+                            fx_pnl_inr=fx_pnl_inr,
+                            reasoning_chain_id=reasoning_chain_id,
+                        )
+                    except Exception:
+                        pass
 
                 pos_closed = PositionClosedEvent(
                     source="execution_engine",

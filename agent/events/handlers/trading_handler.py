@@ -165,6 +165,10 @@ class TradingEventHandler:
                     out["synthesis_step5_description"] = (s.get("description") or "")[:240]
                     out["synthesis_step5_confidence"] = s.get("confidence")
                 elif sn == 6:
+                    out["adjudication_step6_description"] = (s.get("description") or "")[:240]
+                    out["adjudication_step6_confidence"] = s.get("confidence")
+                elif sn == 7:
+                    out["calibration_step7_confidence"] = s.get("confidence")
                     out["calibration_step6_confidence"] = s.get("confidence")
         hold_bucket = None
         conclusion = (out.get("reasoning_conclusion") or "").lower()

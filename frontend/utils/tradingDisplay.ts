@@ -36,19 +36,21 @@ export function computeTradeDurationSeconds(
   durationSeconds: number | undefined,
   entryTime: Date | string | undefined,
   exitTime: Date | string | undefined
-): number {
+): number | null {
   if (typeof durationSeconds === 'number' && durationSeconds > 0) {
     return durationSeconds
   }
-  if (!entryTime || !exitTime) return 0
+  if (!entryTime || !exitTime) return null
   const entryMs = new Date(entryTime).getTime()
   const exitMs = new Date(exitTime).getTime()
-  if (!Number.isFinite(entryMs) || !Number.isFinite(exitMs)) return 0
-  return Math.max(0, Math.floor((exitMs - entryMs) / 1000))
+  if (!Number.isFinite(entryMs) || !Number.isFinite(exitMs)) return null
+  const diffSec = Math.floor((exitMs - entryMs) / 1000)
+  if (diffSec <= 0) return null
+  return diffSec
 }
 
-export function formatTradeDuration(durationSeconds: number): string {
-  if (durationSeconds <= 0) return '0s'
+export function formatTradeDuration(durationSeconds: number | null): string {
+  if (durationSeconds === null || durationSeconds <= 0) return '—'
   const hours = Math.floor(durationSeconds / 3600)
   const minutes = Math.floor((durationSeconds % 3600) / 60)
   const seconds = durationSeconds % 60

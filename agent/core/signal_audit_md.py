@@ -169,6 +169,9 @@ def append_paper_trade(
     fill_price: float,
     position_id: Optional[str] = None,
     reasoning_chain_id: Optional[str] = None,
+    reference_price: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    take_profit: Optional[float] = None,
 ) -> None:
     ts_ist, ts_utc = _audit_ts_pair()
     line = (
@@ -179,6 +182,12 @@ def append_paper_trade(
         line += f" | position_id=`{position_id}`"
     if reasoning_chain_id:
         line += f" | chain=`{reasoning_chain_id}`"
+    if reference_price is not None:
+        line += f" | reference_price={reference_price}"
+    if stop_loss is not None:
+        line += f" | stop_loss={stop_loss}"
+    if take_profit is not None:
+        line += f" | take_profit={take_profit}"
     line += "\n"
     _append_raw(line)
 

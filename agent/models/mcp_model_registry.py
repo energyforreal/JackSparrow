@@ -208,8 +208,10 @@ class MCPModelRegistry:
         predictions: List[MCPModelPrediction] = []
         failed_models = []
         
-        # Timeout per model: 5 seconds (prevents slow models from blocking others)
-        MODEL_PREDICTION_TIMEOUT = 5.0
+        # Timeout per model (prevents slow models from blocking others)
+        model_prediction_timeout = float(
+            getattr(settings, "model_prediction_timeout_seconds", 12.0) or 12.0
+        )
         
         tasks = []
         for model in self.models.values():
@@ -218,7 +220,7 @@ class MCPModelRegistry:
                 mreq = per_model_requests[model.model_name]
             task = asyncio.wait_for(
                 self._get_prediction_safe(model, mreq),
-                timeout=MODEL_PREDICTION_TIMEOUT
+                timeout=model_prediction_timeout
             )
             tasks.append(task)
         
@@ -234,7 +236,7 @@ class MCPModelRegistry:
                 logger.warning(
                     "model_registry_prediction_timeout",
                     model_name=model_name,
-                    timeout=MODEL_PREDICTION_TIMEOUT,
+                    timeout=model_prediction_timeout,
                     message="Model prediction timed out - model will be excluded from consensus"
                 )
                 # Create a degraded prediction for timeout
@@ -243,11 +245,15 @@ class MCPModelRegistry:
                     model_version="unknown",
                     prediction=0.0,
                     confidence=0.0,
-                    reasoning=f"Model prediction timed out after {MODEL_PREDICTION_TIMEOUT}s",
+                    reasoning=f"Model prediction timed out after {model_prediction_timeout}s",
                     features_used=[],
                     feature_importance={},
-                    computation_time_ms=MODEL_PREDICTION_TIMEOUT * 1000,
-                    health_status="degraded"
+                    computation_time_ms=model_prediction_timeout * 1000,
+                    health_status="degraded",
+                    context={
+                        "timeout_seconds": model_prediction_timeout,
+                        "timeout_reason": "model_registry_wait_for",
+                    },
                 ))
             elif isinstance(result, Exception):
                 # Exception was raised despite _get_prediction_safe wrapper

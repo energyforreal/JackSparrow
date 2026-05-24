@@ -27,18 +27,49 @@ const WS_URL = resolveWebSocketUrl()
 
 const DEFAULT_DOCUMENT_TITLE = 'JackSparrow Trading Agent'
 
-export function RealTimePrice({
+/** Opens its own WebSocket — use only when not receiving a shared dashboard feed. */
+function RealTimePriceWithOwnConnection(props: RealTimePriceProps) {
+  const { isConnected, lastMessage } = useWebSocket(WS_URL)
+  return (
+    <RealTimePriceContent
+      {...props}
+      isConnected={isConnected}
+      lastMessage={lastMessage}
+      usingSharedFeed={false}
+    />
+  )
+}
+
+export function RealTimePrice(props: RealTimePriceProps) {
+  if (props.sharedConnected !== undefined) {
+    return (
+      <RealTimePriceContent
+        {...props}
+        isConnected={Boolean(props.sharedConnected)}
+        lastMessage={null}
+        usingSharedFeed
+      />
+    )
+  }
+  return <RealTimePriceWithOwnConnection {...props} />
+}
+
+interface RealTimePriceContentProps extends RealTimePriceProps {
+  isConnected: boolean
+  lastMessage: ReturnType<typeof useWebSocket>['lastMessage']
+  usingSharedFeed: boolean
+}
+
+function RealTimePriceContent({
   symbol = 'BTCUSD',
   className,
   positions = [],
   showPositionImpact = true,
   sharedMarketTick,
-  sharedConnected,
-}: RealTimePriceProps) {
-  const usingSharedFeed = sharedConnected !== undefined
-  const { isConnected: ownConnected, lastMessage: ownLastMessage } = useWebSocket(WS_URL)
-  const isConnected = usingSharedFeed ? Boolean(sharedConnected) : ownConnected
-  const lastMessage = usingSharedFeed ? null : ownLastMessage
+  isConnected,
+  lastMessage,
+  usingSharedFeed,
+}: RealTimePriceContentProps) {
   const [ticker, setTicker] = useState<EnhancedTickerData | null>(null)
   const [priceChange, setPriceChange] = useState<number>(0)
   const [isLoading, setIsLoading] = useState(true)
@@ -157,7 +188,11 @@ export function RealTimePrice({
     const tick: EnhancedTickerData = {
       symbol,
       price,
+      volume: sharedMarketTick.volume ?? 0,
       timestamp: sharedMarketTick.timestamp ?? new Date().toISOString(),
+      change_24h_pct: sharedMarketTick.change_24h_pct,
+      high_24h: sharedMarketTick.high_24h,
+      low_24h: sharedMarketTick.low_24h,
     }
     setTicker(tick)
     setLastPrice(price)

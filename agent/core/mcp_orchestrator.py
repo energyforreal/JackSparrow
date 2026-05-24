@@ -111,14 +111,7 @@ async def _exchange_has_open_position_async(symbol: str) -> bool:
 
 
 def _v43_reasoning_portfolio_risk_overlay(symbol: str) -> Dict[str, Any]:
-    """Fields expected by reasoning step 4 (risk) from live AgentState.
-
-    ``context_manager.initialize()`` is not called by the runtime, so
-    ``current_state`` is ``None`` on every prediction cycle. We fall back to a
-    default :class:`AgentState` seeded with ``settings.initial_balance`` so
-    step-4 risk assessment can read portfolio fields and contribute its full
-    ~0.6 to calibration instead of being stuck at 0.2.
-    """
+    """Fields expected by reasoning step 4 (risk) from live AgentState."""
     try:
         from agent.core.context_manager import context_manager, AgentState as _AgentState
 
@@ -126,6 +119,11 @@ def _v43_reasoning_portfolio_risk_overlay(symbol: str) -> Dict[str, Any]:
     except Exception:
         return {}
     if st is None:
+        logger.warning(
+            "v43_reasoning_portfolio_fallback",
+            symbol=symbol,
+            message="context_manager state unavailable; using synthetic initial_balance overlay",
+        )
         try:
             st = _AgentState()
             init_bal = float(getattr(settings, "initial_balance", 10000.0) or 10000.0)

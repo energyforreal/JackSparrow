@@ -22,9 +22,17 @@ interface ActivePositionsProps {
   expectedOpenCount?: number
 }
 
-function truncateId(id: string, len = 8): string {
-  if (id.length <= len) return id
-  return `${id.slice(0, len)}…`
+function resolveMarkPriceUsd(position: Position): number | null {
+  const candidates = [
+    position.mark_price_usd,
+    position.current_price_usd,
+  ]
+  for (const value of candidates) {
+    if (value === undefined || value === null) continue
+    const parsed = typeof value === 'number' ? value : parseFloat(String(value))
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
 }
 
 export function ActivePositions({
@@ -187,7 +195,10 @@ export function ActivePositions({
                   </TableCell>
                   <TableCell>{formatPrice(position.entry_price_usd ?? position.entry_price)}</TableCell>
                   <TableCell>
-                    {formatPrice(position.current_price_usd ?? position.entry_price_usd)}
+                    {(() => {
+                      const markUsd = resolveMarkPriceUsd(position)
+                      return markUsd === null ? '—' : formatPrice(markUsd)
+                    })()}
                   </TableCell>
                   <TableCell>
                     {position.liquidation_price != null ||

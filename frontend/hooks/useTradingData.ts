@@ -44,6 +44,14 @@ export type Trade = SharedTrade
 /** Max trades kept in UI state (matches REST bootstrap limit). */
 export const RECENT_TRADES_MAX = 50
 
+/** Terminal trade statuses accepted for the recent-closed-trades table. */
+export const TERMINAL_TRADE_STATUSES = new Set([
+  'CLOSED',
+  'FILLED',
+  'EXECUTED',
+  'COMPLETED',
+])
+
 export interface MarketData {
   symbol: string
   price: number
@@ -151,7 +159,7 @@ function normalizeTradeRecord(raw: unknown): Trade | null {
   const id = r.trade_id
   if (id == null || id === '') return null
   const status = String(r.status ?? 'CLOSED').toUpperCase()
-  if (status !== 'CLOSED') return null
+  if (!TERMINAL_TRADE_STATUSES.has(status)) return null
   const exitTime = (r.exit_time ?? r.closed_at ?? r.executed_at ?? r.timestamp) as Trade['executed_at']
   if (!exitTime) return null
   return {
@@ -300,12 +308,18 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                       typeof pos.quantity === 'number'
                         ? pos.quantity
                         : parseFloat(String(pos.quantity ?? 0))
+                    const entryUsdRaw = pos.entry_price_usd
                     const entry =
-                      typeof pos.entry_price_usd === 'number'
-                        ? pos.entry_price_usd
-                        : typeof pos.entry_price === 'number'
-                          ? pos.entry_price
-                          : parseFloat(String(pos.entry_price_usd ?? pos.entry_price ?? 0))
+                      typeof entryUsdRaw === 'number'
+                        ? entryUsdRaw
+                        : parseFloat(String(entryUsdRaw ?? ''))
+                    if (!Number.isFinite(entry)) {
+                      return {
+                        ...pos,
+                        current_price: marketPrice,
+                        current_price_usd: marketPrice,
+                      }
+                    }
                     const side = String(pos.side ?? '').toUpperCase()
                     const isLong = side === 'BUY' || side === 'LONG'
                     const pnl =
@@ -370,10 +384,12 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
             }
             }
           case 'model': {
-            // Update model data; set or merge main signal so first meaningful update is from consensus
-            const hasConsensus = (data.consensus_confidence != null && data.consensus_confidence > 0) ||
+            // Update model channel only; do not overwrite a live agent signal with stale model metadata.
+            const hasConsensus =
+              (data.consensus_confidence != null && data.consensus_confidence > 0) ||
               (data.confidence != null && data.confidence > 0)
             const currentConf = state.signal?.confidence ?? 0
+            const hasLiveSignal = Boolean(state.signal) && currentConf > 0
             const modelMeta = {
               inference_latency_ms: data.inference_latency_ms,
               inference_source: data.inference_source,
@@ -381,7 +397,7 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
               model_version: data.model_version,
             }
             const signalFromModel =
-              hasConsensus && (!state.signal || currentConf === 0)
+              !hasLiveSignal && hasConsensus
                 ? {
                     ...data,
                     signal: data.consensus_signal ?? data.signal ?? state.signal?.signal ?? 'HOLD',
@@ -389,8 +405,6 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
                     ...modelMeta,
                   }
                 : state.signal
-                  ? { ...state.signal, ...data, ...modelMeta }
-                  : null
             return {
               ...state,
               modelData: data,
@@ -440,74 +454,6 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
             }
           default:
             return state
-        }
-      }
-      
-      // Backward compatibility: Handle legacy message types
-      // These should be rare as backend now uses simplified format
-      if (messageType === 'signal_update' || messageType === 'reasoning_chain_update' || messageType === 'model_prediction_update') {
-        return {
-          ...state,
-          signal: { ...state.signal, ...data },
-          lastUpdate: now,
-          dataSource: 'websocket'
-        }
-      }
-      
-      if (messageType === 'portfolio_update') {
-        return {
-          ...state,
-          portfolio: data,
-          lastUpdate: now,
-          dataSource: 'websocket'
-        }
-      }
-      
-      if (messageType === 'trade_executed') {
-        const normalizedTrade = normalizeTradeRecord(data)
-        if (!normalizedTrade) return state
-        const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
-        if (!existingTradeIds.has(normalizedTrade.trade_id)) {
-          const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
-          return {
-            ...state,
-            recentTrades: newTrades,
-            lastUpdate: now,
-            dataSource: 'websocket'
-          }
-        }
-        return state
-      }
-      
-      if (messageType === 'market_tick') {
-        return {
-          ...state,
-          marketData: {
-            ...state.marketData,
-            [data.symbol]: data
-          },
-          lastUpdate: now,
-          dataSource: 'websocket'
-        }
-      }
-      
-      if (messageType === 'agent_state') {
-        return {
-          ...state,
-          agentState: data?.state || state.agentState,
-          lastUpdate: now,
-          dataSource: 'websocket'
-        }
-      }
-      
-      if (messageType === 'health_update') {
-        const n = normalizeHealthPayload(data)
-        const merged = n ? mergeHealthPreserveFields(state.health, n) : null
-        return {
-          ...state,
-          health: merged ?? state.health,
-          lastUpdate: now,
-          dataSource: 'websocket'
         }
       }
       
@@ -730,6 +676,8 @@ export function useTradingData() {
   const lastToastedTradeIdRef = useRef<string | null>(null)
   /** True after first mount REST bootstrap completes (success or failure). */
   const portfolioLoadSettledRef = useRef(false)
+  /** Tracks whether WebSocket has connected at least once (for reconnect-only refresh). */
+  const hasConnectedOnceRef = useRef(false)
 
   // Keep lastMessageRef in sync with lastMessage (required for apiClient response polling)
   useEffect(() => {
@@ -828,9 +776,52 @@ export function useTradingData() {
   useEffect(() => {
     if (!isConnected) return
 
+    const isReconnect = hasConnectedOnceRef.current
+    hasConnectedOnceRef.current = true
+    const mountBootstrapDone = portfolioLoadSettledRef.current
+
     const fetchInitialData = async () => {
-      const showPortfolioSpinner = !portfolioLoadSettledRef.current
-      dispatch({ type: 'SET_LOADING', payload: true })
+      // First WS connect after mount REST bootstrap: only fetch WS-only fields.
+      if (!isReconnect && mountBootstrapDone) {
+        try {
+          const [performanceResult, agentStatusResult] = await Promise.allSettled([
+            apiClient.getPerformance(),
+            apiClient.getAgentStatus(),
+          ])
+          if (performanceResult.status === 'fulfilled') {
+            const performanceMetrics = performanceResult.value
+            if (performanceMetrics && typeof performanceMetrics === 'object') {
+              const totalReturn =
+                typeof (performanceMetrics as { total_return?: number }).total_return === 'number'
+                  ? (performanceMetrics as { total_return: number }).total_return
+                  : typeof (performanceMetrics as { total_return_pct?: number }).total_return_pct ===
+                      'number'
+                    ? (performanceMetrics as { total_return_pct: number }).total_return_pct
+                    : 0
+              dispatch({
+                type: 'SET_PERFORMANCE_DATA',
+                payload: [{ date: new Date().toISOString(), value: totalReturn }],
+              })
+            }
+          }
+          if (agentStatusResult.status === 'fulfilled') {
+            const agentStatus = agentStatusResult.value
+            if (agentStatus?.state) {
+              dispatch({ type: 'UPDATE_AGENT_STATE', payload: agentStatus.state })
+            }
+          }
+        } catch (error) {
+          console.warn('WS-only bootstrap failed:', error)
+        }
+        return
+      }
+
+      const isLightReconnect = isReconnect
+      const showPortfolioSpinner = !portfolioLoadSettledRef.current && !isLightReconnect
+
+      if (!isLightReconnect) {
+        dispatch({ type: 'SET_LOADING', payload: true })
+      }
       if (showPortfolioSpinner) {
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: true })
       }
@@ -846,8 +837,8 @@ export function useTradingData() {
           apiClient.getHealth(),
           apiClient.getPortfolioSummary(),
           apiClient.getRecentClosedTrades(RECENT_TRADES_MAX),
-          apiClient.getPerformance(),
-          apiClient.getAgentStatus(),
+          isLightReconnect ? Promise.resolve(null) : apiClient.getPerformance(),
+          isLightReconnect ? Promise.resolve(null) : apiClient.getAgentStatus(),
         ])
 
         if (healthResult.status === 'fulfilled') {
@@ -919,14 +910,15 @@ export function useTradingData() {
           }
         }
 
-        if (performanceResult.status === 'fulfilled') {
+        if (!isLightReconnect && performanceResult.status === 'fulfilled') {
           const performanceMetrics = performanceResult.value
           if (performanceMetrics && typeof performanceMetrics === 'object') {
             const totalReturn =
-              typeof (performanceMetrics as any).total_return === 'number'
-                ? (performanceMetrics as any).total_return
-                : typeof (performanceMetrics as any).total_return_pct === 'number'
-                  ? (performanceMetrics as any).total_return_pct
+              typeof (performanceMetrics as { total_return?: number }).total_return === 'number'
+                ? (performanceMetrics as { total_return: number }).total_return
+                : typeof (performanceMetrics as { total_return_pct?: number }).total_return_pct ===
+                    'number'
+                  ? (performanceMetrics as { total_return_pct: number }).total_return_pct
                   : 0
 
             dispatch({
@@ -936,14 +928,16 @@ export function useTradingData() {
           }
         }
 
-        if (agentStatusResult.status === 'fulfilled') {
+        if (!isLightReconnect && agentStatusResult.status === 'fulfilled') {
           const agentStatus = agentStatusResult.value
           if (agentStatus?.state) {
             dispatch({ type: 'UPDATE_AGENT_STATE', payload: agentStatus.state })
           }
         }
 
-        dispatch({ type: 'SET_LOADING', payload: false })
+        if (!isLightReconnect) {
+          dispatch({ type: 'SET_LOADING', payload: false })
+        }
         dispatch({ type: 'SET_DATA_SOURCE', payload: 'api' })
       } catch (error) {
         console.error('Error fetching initial trading data:', error)
@@ -962,7 +956,9 @@ export function useTradingData() {
         })
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
         portfolioLoadSettledRef.current = true
-        dispatch({ type: 'SET_LOADING', payload: false })
+        if (!isLightReconnect) {
+          dispatch({ type: 'SET_LOADING', payload: false })
+        }
       }
     }
 
@@ -1003,11 +999,6 @@ export function useTradingData() {
 export function useSignal() {
   const { signal } = useTradingData()
   return signal
-}
-
-export function usePortfolio() {
-  const { portfolio } = useTradingData()
-  return portfolio
 }
 
 export function useTrades() {

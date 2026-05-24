@@ -79,10 +79,11 @@ class ModelEventHandler:
                 )
                 return
 
-            # Update context with predictions
+            # Update context with predictions (canonical key: model_predictions)
             await self.context_manager.update_state(
                 {
-                    "predictions": predictions
+                    "model_predictions": predictions,
+                    "predictions": predictions,
                 }
             )
 
@@ -93,6 +94,7 @@ class ModelEventHandler:
                 payload={
                     "symbol": symbol,
                     "market_context": {
+                        "model_predictions": predictions,
                         "predictions": predictions,
                         "consensus_signal": consensus_signal or 0.0,
                         "consensus_confidence": consensus_confidence or 0.0,

@@ -25,7 +25,7 @@ def _fetch_open_positions_sync(database_url: str) -> List[Dict[str, Any]]:
             text(
                 """
                 SELECT position_id, symbol, side::text AS side,
-                       quantity, entry_price, stop_loss, take_profit
+                       quantity, entry_price, stop_loss, take_profit, opened_at
                 FROM positions
                 WHERE status::text = 'OPEN'
                 """
@@ -67,6 +67,10 @@ async def restore_open_positions_from_db(execution_module: Any, database_url: st
         oid = str(r.get("position_id") or "restored")[:12]
         sl = float(r["stop_loss"]) if r.get("stop_loss") is not None else None
         tp = float(r["take_profit"]) if r.get("take_profit") is not None else None
+        position_extras: Dict[str, Any] = {}
+        opened_at = r.get("opened_at")
+        if opened_at is not None:
+            position_extras["entry_time"] = opened_at
         execution_module.position_manager.open_position(
             symbol=sym,
             side=side,
@@ -75,6 +79,7 @@ async def restore_open_positions_from_db(execution_module: Any, database_url: st
             order_id=oid,
             stop_loss=sl,
             take_profit=tp,
+            position_extras=position_extras or None,
         )
         restored += 1
         logger.info(
@@ -83,5 +88,6 @@ async def restore_open_positions_from_db(execution_module: Any, database_url: st
             side=side,
             quantity=qty,
             entry_price=ep,
+            opened_at=opened_at,
         )
     return restored

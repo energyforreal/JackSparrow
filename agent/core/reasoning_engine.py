@@ -7,7 +7,9 @@ Implements 6-step reasoning chain for trading decisions.
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict
+import asyncio
 import statistics
+import time
 import uuid
 
 from agent.data.feature_server import MCPFeatureServer, MCPFeatureResponse
@@ -98,6 +100,35 @@ class MCPReasoningEngine:
             )
         except (ValueError, TypeError):
             return None
+
+    @staticmethod
+    def _get_model_predictions(market_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Resolve model predictions from canonical or legacy market_context keys."""
+        preds = market_context.get("model_predictions")
+        if preds is None:
+            preds = market_context.get("predictions")
+        return preds if isinstance(preds, list) else []
+
+    @staticmethod
+    def _normalize_market_context_predictions(
+        market_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Ensure ``model_predictions`` is populated for downstream reasoning steps."""
+        normalized = dict(market_context or {})
+        preds = MCPReasoningEngine._get_model_predictions(normalized)
+        if preds:
+            normalized["model_predictions"] = preds
+        return normalized
+
+    @staticmethod
+    def _resolve_decision_step_for_hold(
+        request: MCPReasoningRequest,
+        steps: List[ReasoningStep],
+    ) -> Optional[ReasoningStep]:
+        """Return the step whose description reflects the final trade decision."""
+        if isinstance(request.market_context.get("strategy_candidate"), dict):
+            return next((s for s in steps if s.step_number == 6), None)
+        return next((s for s in steps if s.step_number == 5), None)
 
     @staticmethod
     def _extract_hold_bucket(conclusion: str, evidence: List[str]) -> str:
@@ -354,9 +385,12 @@ class MCPReasoningEngine:
             )
     
     async def generate_reasoning(self, request: MCPReasoningRequest) -> MCPReasoningChain:
-        """Generate 6-step reasoning chain."""
-        # Accept both "model_predictions" and "predictions" (model_handler sends "predictions")
-        model_predictions = request.market_context.get("model_predictions") or request.market_context.get("predictions") or []
+        """Generate 7-step reasoning chain (including trade adjudication)."""
+        normalized_context = self._normalize_market_context_predictions(
+            request.market_context
+        )
+        request = request.model_copy(update={"market_context": normalized_context})
+        model_predictions = self._get_model_predictions(normalized_context)
 
         # Enforce that reasoning is only generated when real model predictions
         # are present. This prevents pseudo-decisions based solely on features
@@ -373,44 +407,77 @@ class MCPReasoningEngine:
         chain_id = str(uuid.uuid4())
         timestamp = datetime.utcnow()
         steps: List[ReasoningStep] = []
+        step_timings_ms: Dict[str, float] = {}
+
+        async def _run_step(step_name: str, coro):
+            t0 = time.perf_counter()
+            result = await coro
+            step_timings_ms[step_name] = round((time.perf_counter() - t0) * 1000.0, 2)
+            if step_timings_ms[step_name] > 100.0:
+                logger.warning(
+                    "reasoning_step_slow",
+                    step=step_name,
+                    duration_ms=step_timings_ms[step_name],
+                )
+            return result
         
         # Step 1: Situational Assessment
-        step1 = await self._step1_situational_assessment(request)
+        step1 = await _run_step("situational_assessment", self._step1_situational_assessment(request))
         steps.append(step1)
         
         # Step 2: Historical Context Retrieval
-        step2 = await self._step2_historical_context(request, chain_id)
+        step2 = await _run_step(
+            "historical_context",
+            self._step2_historical_context(request, chain_id),
+        )
         steps.append(step2)
         
         # Step 3: Model Consensus Analysis
-        step3 = await self._step3_model_consensus(request)
+        step3 = await _run_step("model_consensus", self._step3_model_consensus(request))
         steps.append(step3)
         
         # Step 4: Risk Assessment
-        step4 = await self._step4_risk_assessment(request, steps)
+        step4 = await _run_step(
+            "risk_assessment",
+            self._step4_risk_assessment(request, steps),
+        )
         steps.append(step4)
         
         # Step 5: Decision Synthesis
-        step5 = await self._step5_decision_synthesis(request, steps)
+        step5 = await _run_step(
+            "decision_synthesis",
+            self._step5_decision_synthesis(request, steps),
+        )
         steps.append(step5)
 
-        # Step 5b: Trade adjudication (strategy vs ML validation)
-        step5b = self._step_trade_adjudication(request)
+        # Step 6: Trade adjudication (strategy vs ML validation)
+        step5b = await _run_step(
+            "trade_adjudication",
+            asyncio.to_thread(self._step_trade_adjudication, request),
+        )
         steps.append(step5b)
         
         # Extract model predictions and features
         feature_context = request.market_context.get("features", {})
 
-        # Step 7: Confidence Calibration (step 6 reserved for trade adjudication)
-        step6 = await self._step6_confidence_calibration(request, steps, model_predictions)
-        step6.step_number = 7
-        step6.step_name = "Confidence Calibration"
-        steps.append(step6)
+        # Step 7: Confidence Calibration
+        step7 = await _run_step(
+            "confidence_calibration",
+            self._step7_confidence_calibration(request, steps, model_predictions),
+        )
+        steps.append(step7)
         
         if isinstance(request.market_context.get("strategy_candidate"), dict):
             final_conclusion = step5b.description
         else:
             final_conclusion = step5.description
+
+        logger.info(
+            "reasoning_chain_generated",
+            chain_id=chain_id,
+            step_count=len(steps),
+            step_timings_ms=step_timings_ms,
+        )
 
         return MCPReasoningChain(
             chain_id=chain_id,
@@ -418,7 +485,7 @@ class MCPReasoningEngine:
             market_context=request.market_context,
             steps=steps,
             conclusion=final_conclusion,
-            final_confidence=step6.confidence,
+            final_confidence=step7.confidence,
             model_predictions=model_predictions,
             feature_context=[{"name": k, "value": v} for k, v in feature_context.items()]
         )
@@ -662,7 +729,7 @@ class MCPReasoningEngine:
     async def _step3_model_consensus(self, request: MCPReasoningRequest) -> ReasoningStep:
         """Step 3: Analyze model consensus."""
         
-        model_predictions = request.market_context.get("model_predictions", [])
+        model_predictions = self._get_model_predictions(request.market_context)
         
         evidence = []
         if model_predictions:
@@ -810,7 +877,7 @@ class MCPReasoningEngine:
     async def _step5_decision_synthesis(self, request: MCPReasoningRequest, previous_steps: List[ReasoningStep]) -> ReasoningStep:
         """Step 5: Synthesize final decision."""
         
-        model_predictions = request.market_context.get("model_predictions", [])
+        model_predictions = self._get_model_predictions(request.market_context)
 
         strat = request.market_context.get("strategy_candidate")
         if isinstance(strat, dict) and strat.get("signal"):
@@ -1120,45 +1187,49 @@ class MCPReasoningEngine:
             data_freshness_seconds=data_freshness_seconds
         )
     
-    async def _step6_confidence_calibration(
+    async def _step7_confidence_calibration(
         self,
         request: MCPReasoningRequest,
         steps: List[ReasoningStep],
         model_predictions: List[Dict[str, Any]],
     ) -> ReasoningStep:
-        """Step 6: Calibrate final confidence using weighted average and consistency adjustment.
+        """Step 7: Calibrate final confidence using weighted average and consistency adjustment.
 
         When learning is disabled, calibration uses only step confidences and a consistency
         adjustment (no historical accuracy). If learning is enabled, historical calibration
         could be integrated here (e.g. w * historical_accuracy + (1-w) * raw_confidence).
         """
 
-        # Weighted average with step importance weights
-        # Steps 3 (model consensus) and 5 (decision synthesis) get higher weights
-        step5 = next((s for s in steps if s.step_number == 5), None)
-        step5_desc = (step5.description if step5 else "").upper()
-        is_hold = "HOLD" in step5_desc
+        # Weighted average with step importance weights.
+        # Step 6 (trade adjudication) is the decisive gate on the v43 path.
+        decision_step = self._resolve_decision_step_for_hold(request, steps)
+        decision_desc = (decision_step.description if decision_step else "").upper()
+        is_hold = "HOLD" in decision_desc
 
-        # Increase model-driven influence (3/5) to avoid midpoint compression.
         step_weights = {
             1: 0.08,  # Situational assessment
             2: 0.05,  # Historical context
-            3: 0.37,  # Model consensus
+            3: 0.30,  # Model consensus
             4: 0.05,  # Risk assessment
-            5: 0.40,  # Decision synthesis
-            6: 0.05,  # Confidence calibration (meta-step)
+            5: 0.25,  # Decision synthesis
+            6: 0.27,  # Trade adjudication (final BUY/SELL/HOLD gate)
         }
 
+        calibration_steps = [s for s in steps if s.step_number <= 6]
         weighted_sum = sum(
             step.confidence * step_weights.get(step.step_number, 0.1)
-            for step in steps
+            for step in calibration_steps
         )
-        total_weight = sum(step_weights.get(step.step_number, 0.1) for step in steps)
+        total_weight = sum(
+            step_weights.get(step.step_number, 0.1) for step in calibration_steps
+        )
         base_confidence = weighted_sum / total_weight if total_weight > 0 else 0.0
 
         # Consistency adjustment (less aggressive)
-        if steps:
-            confidence_range = max(step.confidence for step in steps) - min(step.confidence for step in steps)
+        if calibration_steps:
+            confidence_range = max(step.confidence for step in calibration_steps) - min(
+                step.confidence for step in calibration_steps
+            )
             # Use consistency as a small adjustment factor, not a multiplier
             consistency_adjustment = max(0.95, 1.0 - (confidence_range * 0.12))
             # For actionable non-HOLD outputs, avoid strong confidence collapse.
@@ -1225,26 +1296,29 @@ class MCPReasoningEngine:
         final_confidence = max(0.0, min(1.0, final_confidence))
 
         # Log confidence calculation for debugging
-        step_confidences = {step.step_number: step.confidence for step in steps}
+        step_confidences = {step.step_number: step.confidence for step in calibration_steps}
         logger.info(
             "confidence_calibration_completed",
             step_confidences=step_confidences,
             base_confidence=base_confidence,
             consistency_adjustment=consistency_adjustment,
             final_confidence=final_confidence,
+            is_hold=is_hold,
+            decision_step_number=getattr(decision_step, "step_number", None),
             is_fallback_scenario=is_fallback_scenario,
             model_predictions_count=len(model_predictions),
             message="Confidence calibration step completed"
         )
 
         return ReasoningStep(
-            step_number=6,
+            step_number=7,
             step_name="Confidence Calibration",
             description=f"Final confidence: {final_confidence:.2f}",
             evidence=[
                 f"Weighted base confidence: {base_confidence:.2f}",
                 f"Consistency adjustment: {consistency_adjustment:.2f}",
                 f"Final confidence: {final_confidence:.2f}",
+                f"Hold decision: {is_hold}",
                 f"Fallback scenario: {is_fallback_scenario}"
             ],
             confidence=final_confidence,

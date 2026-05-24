@@ -137,9 +137,9 @@ export function ReasoningChainView({
     consistencyScore = normalized * 100
   }
 
-  const step6ForEvidence = sortedSteps.find((s) => s.step_number === 6)
+  const step7ForEvidence = sortedSteps.find((s) => s.step_number === 7)
   const fallbackScenarioFromEvidence =
-    step6ForEvidence?.evidence?.some((e) =>
+    step7ForEvidence?.evidence?.some((e) =>
       /fallback scenario:\s*true/i.test(String(e))
     ) ?? false
   const steps345 = sortedSteps.filter((s) => [3, 4, 5].includes(s.step_number))
@@ -163,7 +163,8 @@ export function ReasoningChainView({
     3: 'Model Consensus Analysis',
     4: 'Risk Assessment',
     5: 'Decision Synthesis',
-    6: 'Confidence Calibration',
+    6: 'Trade Adjudication',
+    7: 'Confidence Calibration',
   }
 
   // Generate confidence tooltip text for each step
@@ -182,6 +183,8 @@ export function ReasoningChainView({
       case 5:
         return `Decision Synthesis confidence (${confidencePercent.toFixed(1)}%) based on model prediction strength and consistency. Higher scores indicate clearer trading signals.`
       case 6:
+        return `Trade Adjudication confidence (${confidencePercent.toFixed(1)}%) reflects agreement between strategy thesis and ML validation. This step determines the final BUY/SELL/HOLD gate.`
+      case 7:
         return `Confidence Calibration (${confidencePercent.toFixed(1)}%) is the final calibrated confidence after considering step consistency and historical performance.`
       default:
         return `Step confidence: ${confidencePercent.toFixed(1)}%`
@@ -196,7 +199,8 @@ export function ReasoningChainView({
       3: 'Aggregates predictions from multiple ML models.',
       4: 'Assesses trading risks and portfolio exposure.',
       5: 'Synthesizes all inputs into a trading decision.',
-      6: 'Calibrates final confidence based on step consistency.',
+      6: 'Adjudicates strategy thesis against ML validation.',
+      7: 'Calibrates final confidence based on step consistency.',
     }
 
     let summary = baseSummaries[step.step_number] || 'Processing step analysis.'

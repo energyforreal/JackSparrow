@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
@@ -10,6 +11,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Trade } from '@/types'
 import { formatClockTime, formatCurrency, formatUsdCurrency } from '@/utils/formatters'
 import {
@@ -21,6 +23,9 @@ import {
   resolveUsdInrRate,
   sideBadgeVariant,
 } from '@/utils/tradingDisplay'
+
+const INITIAL_VISIBLE_TRADES = 10
+const VISIBLE_TRADES_STEP = 10
 
 interface RecentTradesProps {
   trades?: Trade[]
@@ -35,6 +40,8 @@ export function RecentTrades({
   usdInrRate,
   contractValueBtc,
 }: RecentTradesProps) {
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TRADES)
+
   if (isLoading) {
     return (
       <Card role="status" aria-label="Loading recent trades">
@@ -62,34 +69,34 @@ export function RecentTrades({
                 {[1, 2, 3, 4, 5].map((row) => (
                   <TableRow key={row}>
                     <TableCell>
-                      <motionSkeletonBar className="h-4 w-14" />
+                      <MotionSkeletonBar className="h-4 w-14" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-4 w-14" />
+                      <MotionSkeletonBar className="h-4 w-14" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-4 w-10" />
+                      <MotionSkeletonBar className="h-4 w-10" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-6 w-12" />
+                      <MotionSkeletonBar className="h-6 w-12" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-4 w-16" />
+                      <MotionSkeletonBar className="h-4 w-16" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-4 w-10" />
+                      <MotionSkeletonBar className="h-4 w-10" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-4 w-16" />
+                      <MotionSkeletonBar className="h-4 w-16" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-4 w-16" />
+                      <MotionSkeletonBar className="h-4 w-16" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-6 w-16" />
+                      <MotionSkeletonBar className="h-6 w-16" />
                     </TableCell>
                     <TableCell>
-                      <motionSkeletonBar className="h-6 w-16" />
+                      <MotionSkeletonBar className="h-6 w-16" />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -119,6 +126,9 @@ export function RecentTrades({
 
   const usdInr = resolveUsdInrRate(usdInrRate)
   const contractBtc = resolveContractValueBtc(contractValueBtc) ?? 0.001
+  const totalTrades = trades.length
+  const visibleTrades = trades.slice(0, visibleCount)
+  const hasMore = visibleCount < totalTrades
 
   const formatQuantity = (quantity: number | string | undefined) => {
     const parsed = parseFiniteNumber(quantity)
@@ -126,7 +136,10 @@ export function RecentTrades({
     return parsed.toLocaleString('en-IN', { maximumFractionDigits: 6 })
   }
 
-  const formatDate = (date: Date | string) => formatClockTime(date)
+  const formatDate = (date: Date | string | undefined) => {
+    if (!date) return '—'
+    return formatClockTime(date)
+  }
 
   const formatPriceUsd = (price: number | string | undefined) => {
     const parsed = parseFiniteNumber(price)
@@ -168,8 +181,11 @@ export function RecentTrades({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle>Agent trades</CardTitle>
+        <p className="text-xs text-muted-foreground tabular-nums">
+          Showing {visibleTrades.length} of {totalTrades}
+        </p>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto -mx-6 px-6">
@@ -190,10 +206,8 @@ export function RecentTrades({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {trades.slice(0, 10).map((trade) => {
-                const entryTime = (trade.entry_time ?? trade.executed_at ?? trade.timestamp) as
-                  | Date
-                  | string
+              {visibleTrades.map((trade) => {
+                const entryTime = trade.entry_time as Date | string | undefined
                 const exitTime = (trade.exit_time ?? trade.executed_at ?? trade.timestamp) as
                   | Date
                   | string
@@ -242,11 +256,25 @@ export function RecentTrades({
             </TableBody>
           </Table>
         </div>
+        {hasMore && (
+          <div className="mt-4 flex justify-center">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setVisibleCount((count) => Math.min(count + VISIBLE_TRADES_STEP, totalTrades))
+              }
+            >
+              Show more ({totalTrades - visibleCount} remaining)
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
 }
 
-function motionSkeletonBar({ className }: { className: string }) {
+function MotionSkeletonBar({ className }: { className: string }) {
   return <div className={`bg-muted rounded-md ${className}`} aria-hidden />
 }

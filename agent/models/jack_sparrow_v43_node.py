@@ -256,8 +256,20 @@ class JackSparrowV43Node(MCPModelNode):
         self._call_count = 0
         self._error_count = 0
         # Serialize inference: sklearn/LGBM on one node are not safe under concurrent predict.
-        self._predict_lock = asyncio.Lock()
+        self._predict_lock: Optional[asyncio.Lock] = None
+        # Protect bundle init/reload from concurrent state mutation.
+        self._bundle_lock: Optional[asyncio.Lock] = None
         self._training_forward_bars: int = 6
+
+    def _get_predict_lock(self) -> asyncio.Lock:
+        if self._predict_lock is None:
+            self._predict_lock = asyncio.Lock()
+        return self._predict_lock
+
+    def _get_bundle_lock(self) -> asyncio.Lock:
+        if self._bundle_lock is None:
+            self._bundle_lock = asyncio.Lock()
+        return self._bundle_lock
 
     @property
     def training_forward_bars(self) -> int:
@@ -401,23 +413,25 @@ class JackSparrowV43Node(MCPModelNode):
             self._artifact_mtime_ref = 0.0
 
     async def initialize(self) -> None:
-        if self._initialized:
-            return
-        self._load_bundle_into_state()
-        self._initialized = True
-        self._health = "healthy"
-        logger.info(
-            "jacksparrow_v43_node_initialized",
-            model_name=self._model_name,
-            feature_count=len(self._feature_names),
-            artifact=str(self._artifact_path),
-            regime_keys=list(self._regime_models.keys()) if self._regime_models else [],
-            inference_stack=str(
-                getattr(settings, "jacksparrow_v43_inference_stack", "meta_calibrator")
-            ),
-        )
+        async with self._get_bundle_lock():
+            if self._initialized:
+                return
+            self._load_bundle_into_state()
+            self._initialized = True
+            self._health = "healthy"
+            logger.info(
+                "jacksparrow_v43_node_initialized",
+                model_name=self._model_name,
+                feature_count=len(self._feature_names),
+                artifact=str(self._artifact_path),
+                regime_keys=list(self._regime_models.keys()) if self._regime_models else [],
+                inference_stack=str(
+                    getattr(settings, "jacksparrow_v43_inference_stack", "meta_calibrator")
+                ),
+            )
 
-    async def _reload_if_stale(self) -> None:
+    def _reload_if_stale_locked(self) -> None:
+        """Reload bundle when artifact mtime changed. Caller must hold ``_bundle_lock``."""
         if not self._artifact_path or not self._artifact_path.is_file():
             return
         try:
@@ -432,7 +446,10 @@ class JackSparrowV43Node(MCPModelNode):
                 new_mtime=cur,
             )
             self._load_bundle_into_state()
-            self._artifact_mtime_ref = cur
+
+    async def _reload_if_stale(self) -> None:
+        async with self._get_bundle_lock():
+            self._reload_if_stale_locked()
 
     def get_model_info(self) -> Dict[str, Any]:
         return {
@@ -660,8 +677,18 @@ class JackSparrowV43Node(MCPModelNode):
         )
 
     async def predict(self, request: MCPModelRequest) -> MCPModelPrediction:
-        await self.initialize()
-        await self._reload_if_stale()
+        phase_timings: Dict[str, float] = {}
+        bundle_start = time.perf_counter()
+        async with self._get_bundle_lock():
+            if not self._initialized:
+                self._load_bundle_into_state()
+                self._initialized = True
+                self._health = "healthy"
+            self._reload_if_stale_locked()
+            phase_timings["bundle_ready_ms"] = round(
+                (time.perf_counter() - bundle_start) * 1000.0, 2
+            )
+
         self._call_count += 1
         t0 = time.perf_counter()
         ctx = dict(request.context or {})
@@ -671,10 +698,25 @@ class JackSparrowV43Node(MCPModelNode):
         thr = float(getattr(settings, "jacksparrow_v43_signal_threshold_floor", 0.005))
         regime = "neutral"
         try:
-            async with self._predict_lock:
+            lock_wait_start = time.perf_counter()
+            async with self._get_predict_lock():
+                phase_timings["lock_wait_ms"] = round(
+                    (time.perf_counter() - lock_wait_start) * 1000.0, 2
+                )
+                infer_start = time.perf_counter()
                 pred = await asyncio.to_thread(self._sync_predict_impl, ctx)
+                phase_timings["inference_ms"] = round(
+                    (time.perf_counter() - infer_start) * 1000.0, 2
+                )
             wall_ms = (time.perf_counter() - t0) * 1000.0
-            return pred.model_copy(update={"computation_time_ms": wall_ms})
+            pred_ctx = dict(pred.context or {})
+            pred_ctx["predict_phase_timings_ms"] = phase_timings
+            return pred.model_copy(
+                update={
+                    "computation_time_ms": wall_ms,
+                    "context": pred_ctx,
+                }
+            )
         except Exception as e:
             self._error_count += 1
             self._health = "degraded"

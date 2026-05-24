@@ -1,10 +1,9 @@
 import { useTradingData } from './useTradingData'
 
 /**
- * @deprecated Use useTradingData() and its `portfolio` field directly instead.
+ * Canonical portfolio hook for components that need loading/error state.
  *
- * This wrapper exists for backward compatibility and simply forwards data
- * from the unified trading data hook.
+ * Prefer `useTradingData().portfolio` when you already use the unified hook.
  */
 export function usePortfolio() {
   const { portfolio, isLoading, error } = useTradingData()

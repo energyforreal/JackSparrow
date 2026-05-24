@@ -185,6 +185,14 @@ class Settings(BaseSettings):
             "Integration label (health/API). Runtime is always JackSparrow v43 bundle discovery."
         ),
     )
+    model_prediction_timeout_seconds: float = Field(
+        default=12.0,
+        env="MODEL_PREDICTION_TIMEOUT_SECONDS",
+        description=(
+            "Per-model asyncio timeout for registry predictions. v43 inference plus "
+            "lock contention can exceed 5s on busy cycles."
+        ),
+    )
     v15_signal_logic_enabled: bool = Field(
         default=False,
         env="V15_SIGNAL_LOGIC_ENABLED",

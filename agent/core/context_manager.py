@@ -239,7 +239,7 @@ class ContextManager:
         self.state_file = Path("data") / state_file
         self.backup_dir = Path("data") / backup_dir
         self.current_state: Optional[AgentState] = None
-        self.state_lock = asyncio.Lock()
+        self._state_lock: Optional[asyncio.Lock] = None
         self.auto_save_interval = 300  # 5 minutes
         self._auto_save_task: Optional[asyncio.Task] = None
         self._initialized = False
@@ -248,7 +248,13 @@ class ContextManager:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
 
-    async def initialize(self, load_existing: bool = True):
+    def _get_state_lock(self) -> asyncio.Lock:
+        """Create the asyncio lock lazily once an event loop is running."""
+        if self._state_lock is None:
+            self._state_lock = asyncio.Lock()
+        return self._state_lock
+
+    async def initialize(self, load_existing: bool = True, start_auto_save: bool = True):
         """Initialize context manager."""
         if load_existing:
             await self.load_state()
@@ -258,7 +264,8 @@ class ContextManager:
         self._initialized = True
 
         # Start auto-save task
-        self._auto_save_task = asyncio.create_task(self._auto_save_loop())
+        if start_auto_save:
+            self._auto_save_task = asyncio.create_task(self._auto_save_loop())
 
         logger.info("context_manager_initialized",
                    state_file=str(self.state_file),
@@ -279,6 +286,35 @@ class ContextManager:
         self._initialized = False
         logger.info("context_manager_shutdown")
 
+    async def _persist_state_unlocked(self) -> bool:
+        """Write current state to disk. Caller must hold the state lock."""
+        if not self.current_state:
+            logger.warning("context_manager_no_state_to_save")
+            return False
+
+        try:
+            if self.state_file.exists():
+                await self._create_backup()
+
+            state_data = self.current_state.to_dict()
+            with open(self.state_file, "w", encoding="utf-8") as f:
+                json.dump(state_data, f, indent=2, default=str)
+
+            logger.info(
+                "agent_state_saved",
+                file=str(self.state_file),
+                portfolio_value=self.current_state.portfolio_value,
+                total_trades=self.current_state.total_trades,
+            )
+            return True
+        except Exception as e:
+            logger.error(
+                "agent_state_save_failed",
+                file=str(self.state_file),
+                error=str(e),
+            )
+            return False
+
     async def save_state(self) -> bool:
         """
         Save current agent state to disk.
@@ -290,29 +326,8 @@ class ContextManager:
             logger.warning("context_manager_no_state_to_save")
             return False
 
-        async with self.state_lock:
-            try:
-                # Create backup of existing state
-                if self.state_file.exists():
-                    await self._create_backup()
-
-                # Save current state
-                state_data = self.current_state.to_dict()
-                with open(self.state_file, 'w') as f:
-                    json.dump(state_data, f, indent=2, default=str)
-
-                logger.info("agent_state_saved",
-                           file=str(self.state_file),
-                           portfolio_value=self.current_state.portfolio_value,
-                           total_trades=self.current_state.total_trades)
-
-                return True
-
-            except Exception as e:
-                logger.error("agent_state_save_failed",
-                           file=str(self.state_file),
-                           error=str(e))
-                return False
+        async with self._get_state_lock():
+            return await self._persist_state_unlocked()
 
     async def load_state(self) -> bool:
         """
@@ -328,7 +343,7 @@ class ContextManager:
             self.current_state = AgentState()
             return True
 
-        async with self.state_lock:
+        async with self._get_state_lock():
             try:
                 with open(self.state_file, 'r') as f:
                     state_data = json.load(f)
@@ -404,17 +419,29 @@ class ContextManager:
         if not self.current_state:
             return False
 
-        async with self.state_lock:
+        async with self._get_state_lock():
             try:
                 for key, value in updates.items():
-                    if hasattr(self.current_state, key):
+                    if key == "portfolio" and isinstance(value, dict):
+                        if "value" in value:
+                            self.current_state.portfolio_value = float(value["value"])
+                        if "balance" in value:
+                            self.current_state.cash_balance = float(value["balance"])
+                    elif key in {"predictions", "model_predictions"}:
+                        self.current_state.config[key] = value
+                    elif key in {"symbol", "timeframes", "trading_mode", "confidence_threshold"}:
+                        self.current_state.config[key] = value
+                    elif hasattr(self.current_state, key):
                         setattr(self.current_state, key, value)
 
                 self.current_state.last_update = datetime.utcnow()
 
-                # Auto-save critical updates immediately
-                if any(key in updates for key in ["portfolio_value", "emergency_stop", "trading_enabled"]):
-                    await self.save_state()
+                # Auto-save critical updates immediately (lock already held)
+                if any(
+                    key in updates
+                    for key in ["portfolio_value", "emergency_stop", "trading_enabled"]
+                ):
+                    await self._persist_state_unlocked()
 
                 logger.debug("agent_state_updated", updates=list(updates.keys()))
                 return True

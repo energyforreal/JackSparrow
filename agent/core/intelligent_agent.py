@@ -146,8 +146,12 @@ class IntelligentAgent:
     
     async def initialize(self):
         """Initialize agent."""
+        await self.context_manager.initialize(load_existing=True)
+
         # Seed initial context using environment configuration
         await self.context_manager.update_state({
+            "portfolio_value": self.initial_balance,
+            "cash_balance": self.initial_balance,
             "symbol": self.default_symbol,
             "timeframes": self.timeframes,
             "trading_mode": self.trading_mode,

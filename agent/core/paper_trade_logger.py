@@ -103,6 +103,9 @@ class PaperTradeLogger:
         usd_inr_rate: Optional[float] = None,
         trade_value_inr: Optional[float] = None,
         fees_inr: Optional[float] = None,
+        reference_price: Optional[float] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
     ) -> None:
         """Log a paper trade execution.
 
@@ -140,6 +143,9 @@ class PaperTradeLogger:
                     fill_price=fill_price,
                     position_id=position_id,
                     reasoning_chain_id=reasoning_chain_id,
+                    reference_price=reference_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
                 )
             except Exception:
                 pass

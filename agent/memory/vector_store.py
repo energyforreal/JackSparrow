@@ -215,6 +215,46 @@ class VectorMemoryStore:
                         error=str(e))
             return False
 
+    def _find_similar_contexts_sync(
+        self,
+        query_context: DecisionContext,
+        limit: int,
+        min_similarity: Optional[float],
+    ) -> List[Tuple[DecisionContext, float]]:
+        """CPU-bound similarity search executed off the asyncio event loop."""
+        if query_context.embedding is None:
+            query_context.compute_embedding()
+
+        query_embedding = query_context.embedding.reshape(1, -1)
+        similarities: List[Tuple[DecisionContext, float]] = []
+
+        for context in self.contexts:
+            if context.embedding is not None:
+                context_embedding = context.embedding.reshape(1, -1)
+
+                if context_embedding.shape[1] != query_embedding.shape[1]:
+                    logger.warning(
+                        "vector_memory_embedding_dim_mismatch",
+                        query_context_id=query_context.context_id,
+                        context_id=context.context_id,
+                        query_dim=int(query_embedding.shape[1]),
+                        context_dim=int(context_embedding.shape[1]),
+                    )
+                    continue
+
+                if SKLEARN_AVAILABLE:
+                    similarity = cosine_similarity(query_embedding, context_embedding)[0][0]
+                else:
+                    distance = np.linalg.norm(query_embedding - context_embedding)
+                    similarity = max(0.0, 1.0 - distance)
+
+                similarities.append((context, float(similarity)))
+
+        threshold = min_similarity if min_similarity is not None else self.similarity_threshold
+        similarities = [(ctx, sim) for ctx, sim in similarities if sim >= threshold]
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        return similarities[:limit]
+
     async def find_similar_contexts(self, query_context: DecisionContext,
                                   limit: int = 5,
                                   min_similarity: Optional[float] = None) -> List[Tuple[DecisionContext, float]]:
@@ -237,53 +277,17 @@ class VectorMemoryStore:
             return []
 
         try:
-            # Compute query embedding
-            if query_context.embedding is None:
-                query_context.compute_embedding()
-
-            query_embedding = query_context.embedding.reshape(1, -1)
-
-            # Calculate similarities with all stored contexts
-            similarities = []
-
-            for context in self.contexts:
-                if context.embedding is not None:
-                    context_embedding = context.embedding.reshape(1, -1)
-
-                    # Skip contexts whose embedding dimension doesn't match the query.
-                    # This can happen if older contexts were stored before FEATURE_LIST
-                    # was standardized or after schema changes.
-                    if context_embedding.shape[1] != query_embedding.shape[1]:
-                        logger.warning(
-                            "vector_memory_embedding_dim_mismatch",
-                            query_context_id=query_context.context_id,
-                            context_id=context.context_id,
-                            query_dim=int(query_embedding.shape[1]),
-                            context_dim=int(context_embedding.shape[1]),
-                        )
-                        continue
-
-                    if SKLEARN_AVAILABLE:
-                        similarity = cosine_similarity(query_embedding, context_embedding)[0][0]
-                    else:
-                        # Fallback: Euclidean distance (convert to similarity)
-                        distance = np.linalg.norm(query_embedding - context_embedding)
-                        similarity = max(0.0, 1.0 - distance)  # Convert distance to similarity
-
-                    similarities.append((context, float(similarity)))
-
-            # Filter by similarity threshold
-            threshold = min_similarity if min_similarity is not None else self.similarity_threshold
-            similarities = [(ctx, sim) for ctx, sim in similarities if sim >= threshold]
-
-            # Sort by similarity (highest first) and limit results
-            similarities.sort(key=lambda x: x[1], reverse=True)
-            results = similarities[:limit]
+            results = await asyncio.to_thread(
+                self._find_similar_contexts_sync,
+                query_context,
+                limit,
+                min_similarity,
+            )
 
             logger.debug("similar_contexts_found",
                         query_context_id=query_context.context_id,
                         results_found=len(results),
-                        min_similarity=threshold)
+                        min_similarity=min_similarity if min_similarity is not None else self.similarity_threshold)
 
             return results
 

@@ -106,6 +106,7 @@ class UnifiedWebSocketManager:
         self._agent_state_sync_task: Optional[asyncio.Task] = None
         self._redis_channel = "websocket:broadcast"
         self._last_signal: Optional[Dict[str, Any]] = None
+        self._last_portfolio: Optional[Dict[str, Any]] = None
         self._last_market_by_symbol: Dict[str, Dict[str, Any]] = {}
         self._last_agent_state: Optional[Dict[str, Any]] = None
         self._ws_last_market_sent_ms: Dict[str, float] = {}
@@ -318,6 +319,40 @@ class UnifiedWebSocketManager:
                     websocket,
                     {"type": "data_update", "resource": "market", "data": market_snapshot},
                 )
+            if self._last_portfolio:
+                try:
+                    ts_raw = (
+                        self._last_portfolio.get("exchange_synced_at")
+                        or self._last_portfolio.get("timestamp")
+                    )
+                    portfolio_fresh = False
+                    if isinstance(ts_raw, str):
+                        try:
+                            ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                        except Exception:
+                            ts = None
+                    elif hasattr(ts_raw, "isoformat"):
+                        ts = ts_raw  # type: ignore[assignment]
+                    else:
+                        ts = None
+
+                    if ts is not None:
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+                        portfolio_fresh = age_seconds <= 30
+
+                    if portfolio_fresh:
+                        await self.send_personal_message(
+                            websocket,
+                            {
+                                "type": "data_update",
+                                "resource": "portfolio",
+                                "data": self._last_portfolio,
+                            },
+                        )
+                except Exception:
+                    pass
             # Push health snapshot immediately so frontend does not wait for poll interval
             from backend.core.database import AsyncSessionLocal
             from backend.api.routes.health import check_overall_health
@@ -438,6 +473,8 @@ class UnifiedWebSocketManager:
             if msg_type_str == "data_update":
                 if resource_str == "signal" and isinstance(data, dict):
                     self._last_signal = dict(data)
+                elif resource_str == "portfolio" and isinstance(data, dict):
+                    self._last_portfolio = dict(data)
                 elif resource_str == "market" and isinstance(data, dict) and data.get("symbol"):
                     self._last_market_by_symbol[data["symbol"]] = dict(data)
             elif msg_type_str == "agent_update" and isinstance(data, dict):
