@@ -10,6 +10,7 @@ import structlog
 from agent.core.agent_order_registry import is_exchange_position_agent_attributed
 from agent.core.config import settings
 from agent.core.sl_tp import compute_stop_take_prices
+from agent.events.event_bus import event_bus
 
 logger = structlog.get_logger()
 
@@ -156,19 +157,58 @@ async def reconcile_positions_with_exchange(execution_module: Any) -> Dict[str, 
         if sym in ex_syms:
             continue
         pos = local_open[sym]
+        entry_px = float(pos.get("entry_price") or 0)
+        exit_px = float(pos.get("current_price") or entry_px)
+        if exit_px <= 0:
+            exit_px = entry_px
         logger.warning(
             "position_reconcile_local_without_exchange",
             symbol=sym,
             side=pos.get("side"),
-            entry_price=pos.get("entry_price"),
+            entry_price=entry_px,
+            exit_price=exit_px,
         )
-        exit_px = float(pos.get("current_price") or pos.get("entry_price") or 0)
-        pm.close_position(
+        closed = pm.close_position(
             symbol=sym,
-            exit_price=exit_px if exit_px > 0 else float(pos.get("entry_price") or 0),
+            exit_price=exit_px,
             exit_order_id="reconcile_local_stale",
         )
         summary["cleared_local"].append(sym)
+
+        # Emit PositionClosedEvent so the backend ledger, Redis and frontend
+        # all receive the close notification — prevents ghost open positions.
+        try:
+            from agent.events.event_types import PositionClosedEvent
+
+            pos_id = f"pos_reconcile_{sym}"
+            entry_time = pos.get("entry_time") or pos.get("opened_at")
+            payload: Dict[str, Any] = {
+                "position_id": pos_id,
+                "symbol": sym,
+                "side": pos.get("side", ""),
+                "entry_price": entry_px,
+                "exit_price": exit_px,
+                "quantity": float(pos.get("lots") or pos.get("quantity") or 0),
+                "pnl": 0.0,
+                "gross_pnl_usd": 0.0,
+                "fees_usd": 0.0,
+                "exit_reason": "reconcile_exchange_flat",
+                "timestamp": datetime.now(timezone.utc),
+            }
+            if entry_time is not None:
+                payload["entry_time"] = entry_time
+            if closed and isinstance(closed, dict):
+                order_id = closed.get("entry_order_id") or closed.get("exit_order_id")
+                if order_id:
+                    payload["exchange_order_id"] = str(order_id)
+            ev = PositionClosedEvent(source="position_reconcile", payload=payload)
+            await event_bus.publish(ev)
+        except Exception as _ev_err:
+            logger.warning(
+                "position_reconcile_position_closed_event_failed",
+                symbol=sym,
+                error=str(_ev_err),
+            )
 
     if summary["adopted"] or summary["closed_exchange"] or summary["cleared_local"]:
         logger.info("position_reconcile_complete", **summary)

@@ -7,6 +7,7 @@ import { AgentStatus } from './AgentStatus'
 import { PortfolioSummary } from './PortfolioSummary'
 import { Header } from './Header'
 import { SignalIndicator } from './SignalIndicator'
+import { SelfAwarenessPanel } from './SelfAwarenessPanel'
 import { HealthMonitor } from './HealthMonitor'
 import { ActivePositions } from './ActivePositions'
 import { RecentTrades } from './RecentTrades'
@@ -77,6 +78,7 @@ export function Dashboard() {
     performanceData,
     marketData,
     syncStatus,
+    lastReflection,
   } = useTradingData()
 
   const reasoningChainMeta = useMemo(() => reasoningChainMetaFromSignal(signal), [signal])
@@ -205,7 +207,11 @@ export function Dashboard() {
               </ErrorBoundary>
               <ErrorBoundary>
                 <div className="space-y-1">
-                  <SignalIndicator signal={signal || undefined} modelData={modelData || undefined} />
+                  <SignalIndicator
+                    signal={signal || undefined}
+                    lastReflection={lastReflection}
+                    modelData={modelData || undefined}
+                  />
                   <p className="text-[10px] text-muted-foreground text-center px-1">
                     Press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">P</kbd> for
                     prediction
@@ -274,6 +280,14 @@ export function Dashboard() {
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
+
+            {/* Self-Awareness telemetry */}
+            <ErrorBoundary>
+              <SelfAwarenessPanel
+                introspection={signal?.agent_introspection}
+                reflection={lastReflection ?? signal?.reflection_snapshot}
+              />
+            </ErrorBoundary>
 
             {/* Reasoning Chain Viewer with Integrated Model Reasoning */}
             <ErrorBoundary>

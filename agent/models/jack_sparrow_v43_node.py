@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -197,13 +197,18 @@ def _sanitize_expected_return(
     *,
     active_model: Any,
     model_name: str,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, Dict[str, Any]]:
     out = np.asarray(arr, dtype=np.float64).ravel()
+    diagnostics: Dict[str, Any] = {
+        "coerced": False,
+        "ensemble_fallback": False,
+        "active_type": type(active_model).__name__ if active_model is not None else None,
+    }
     if not _looks_like_classifier_probability(out):
-        return out
+        return out, diagnostics
     active_cls = type(active_model).__name__
     if active_cls == "EnsembleModel":
-        return out
+        return out, diagnostics
     logger.warning(
         "v43_classifier_probability_coerced_to_return_scale",
         model_name=model_name,
@@ -211,7 +216,18 @@ def _sanitize_expected_return(
         sample_min=float(np.min(out)),
         sample_max=float(np.max(out)),
     )
-    return _coerce_probability_to_return_scale(out)
+    diagnostics["coerced"] = True
+    return _coerce_probability_to_return_scale(out), diagnostics
+
+
+def _active_model_origin(active: Any, head_ensemble: Any) -> str:
+    if active is None:
+        return "none"
+    if active is head_ensemble:
+        return "global_ensemble"
+    if type(active).__name__ == "EnsembleModel" and active is head_ensemble:
+        return "global_ensemble"
+    return "regime_submodel"
 
 
 def _merge_regime_models(
@@ -471,7 +487,7 @@ class JackSparrowV43Node(MCPModelNode):
             "error_count": self._error_count,
         }
 
-    def _predict_active(self, active: Any, X: np.ndarray, X_df: pd.DataFrame) -> np.ndarray:
+    def _raw_predict(self, active: Any, X: np.ndarray, X_df: pd.DataFrame) -> np.ndarray:
         pred_fn = getattr(active, "predict", None)
         if pred_fn is None:
             pred_fn = getattr(active, "predict_proba", None)
@@ -488,17 +504,74 @@ class JackSparrowV43Node(MCPModelNode):
                 arr = np.asarray(out, dtype=np.float64)
                 if arr.ndim == 2 and arr.shape[1] >= 2:
                     arr = arr[:, 1]
-                return _sanitize_expected_return(
-                    arr.ravel(),
-                    active_model=active,
-                    model_name=self._model_name,
-                )
+                return arr.ravel()
             except (TypeError, ValueError) as exc:
                 last_err = exc
                 continue
         if last_err is not None:
             raise last_err
         raise RuntimeError("active model predict raised no value")
+
+    def _predict_active(
+        self,
+        active: Any,
+        head_ensemble: Any,
+        X: np.ndarray,
+        X_df: pd.DataFrame,
+        *,
+        horizon_key: str,
+        regime: str,
+        guard_enabled: bool,
+    ) -> Tuple[np.ndarray, Dict[str, Any]]:
+        origin = _active_model_origin(active, head_ensemble)
+        diagnostics: Dict[str, Any] = {
+            "horizon_key": horizon_key,
+            "regime": regime,
+            "model_origin": origin,
+            "active_type": type(active).__name__ if active is not None else None,
+            "coerced": False,
+            "ensemble_fallback": False,
+        }
+        if active is None:
+            return np.array([0.0], dtype=np.float64), diagnostics
+
+        raw = self._raw_predict(active, X, X_df)
+        looks_classifier = _looks_like_classifier_probability(raw)
+        active_cls = type(active).__name__
+
+        if looks_classifier and active_cls != "EnsembleModel":
+            if guard_enabled and active is not head_ensemble and head_ensemble is not None:
+                logger.info(
+                    "v43_regime_classifier_fallback_to_head_ensemble",
+                    model_name=self._model_name,
+                    horizon_key=horizon_key,
+                    regime=regime,
+                    model_origin=origin,
+                    active_type=active_cls,
+                    sample_min=float(np.min(raw)),
+                    sample_max=float(np.max(raw)),
+                )
+                diagnostics["ensemble_fallback"] = True
+                diagnostics["model_origin"] = "global_ensemble"
+                diagnostics["active_type"] = type(head_ensemble).__name__
+                fallback_raw = self._raw_predict(head_ensemble, X, X_df)
+                sanitized, inner_diag = _sanitize_expected_return(
+                    fallback_raw,
+                    active_model=head_ensemble,
+                    model_name=self._model_name,
+                )
+                diagnostics["coerced"] = bool(inner_diag.get("coerced"))
+                return sanitized, diagnostics
+
+            sanitized, inner_diag = _sanitize_expected_return(
+                raw,
+                active_model=active,
+                model_name=self._model_name,
+            )
+            diagnostics["coerced"] = bool(inner_diag.get("coerced"))
+            return sanitized, diagnostics
+
+        return raw, diagnostics
 
     def _sync_predict_impl(self, ctx: Dict[str, Any]) -> MCPModelPrediction:
         """Transform + predict on worker thread (keeps asyncio event loop responsive)."""
@@ -585,6 +658,13 @@ class JackSparrowV43Node(MCPModelNode):
         if self._multihead is None:
             raise RuntimeError("multi-head bundle not loaded")
 
+        guard_enabled = bool(
+            getattr(settings, "jacksparrow_v43_regime_classifier_coercion_guard_enabled", True)
+        )
+        coercion_count = 0
+        fallback_count = 0
+        routing_diagnostics: List[Dict[str, Any]] = []
+
         for hkey in V43_HORIZON_KEYS:
             fb = int(V43_HORIZON_KEY_TO_BARS[hkey])
             head_ens = self._multihead.get_head(fb)
@@ -599,12 +679,27 @@ class JackSparrowV43Node(MCPModelNode):
                 floor=floor,
                 long_threshold=thr,
             )
+            route_diag: Dict[str, Any] = {
+                "horizon_key": hkey,
+                "model_origin": _active_model_origin(active, head_ens),
+                "active_type": type(active).__name__ if active is not None else None,
+                "coerced": False,
+                "ensemble_fallback": False,
+            }
             if active is None:
                 proba0 = 0.0
                 unc_h = 1.0
             else:
                 try:
-                    proba_arr = self._predict_active(active, X, X_df)
+                    proba_arr, route_diag = self._predict_active(
+                        active,
+                        head_ens,
+                        X,
+                        X_df,
+                        horizon_key=hkey,
+                        regime=regime,
+                        guard_enabled=guard_enabled,
+                    )
                 except Exception as active_exc:
                     if active is head_ens:
                         raise
@@ -613,9 +708,24 @@ class JackSparrowV43Node(MCPModelNode):
                         horizon=hkey,
                         error=str(active_exc),
                     )
-                    proba_arr = self._predict_active(head_ens, X, X_df)
+                    proba_arr, route_diag = self._predict_active(
+                        head_ens,
+                        head_ens,
+                        X,
+                        X_df,
+                        horizon_key=hkey,
+                        regime=regime,
+                        guard_enabled=guard_enabled,
+                    )
+                    route_diag["ensemble_fallback"] = True
+                    route_diag["model_origin"] = "global_ensemble"
                 proba0 = float(proba_arr[0]) if proba_arr.size else 0.0
                 unc_h = float(ensemble_predict_uncertainty(head_ens, X_df))
+            if route_diag.get("coerced"):
+                coercion_count += 1
+            if route_diag.get("ensemble_fallback"):
+                fallback_count += 1
+            routing_diagnostics.append(route_diag)
             head_payloads[hkey] = {
                 "horizon_key": hkey,
                 "forward_bars": fb,
@@ -625,6 +735,10 @@ class JackSparrowV43Node(MCPModelNode):
                 "short_threshold": short_thr,
                 "regime": regime,
                 "uncertainty": unc_h,
+                "model_origin": route_diag.get("model_origin"),
+                "active_type": route_diag.get("active_type"),
+                "coercion_applied": bool(route_diag.get("coerced")),
+                "ensemble_fallback": bool(route_diag.get("ensemble_fallback")),
             }
             if fb == primary_fb:
                 primary_proba = proba0
@@ -635,6 +749,25 @@ class JackSparrowV43Node(MCPModelNode):
                 edge = float(proba0) - float(thr)
                 primary_pred_val = float(np.tanh(edge * 80.0))
                 primary_conf = _v43_head_confidence(edge, thr, primary_u_scale)
+
+        if coercion_count or fallback_count:
+            logger.info(
+                "v43_inference_regime_diagnostics",
+                model_name=self._model_name,
+                regime=regime,
+                coercion_count=coercion_count,
+                ensemble_fallback_count=fallback_count,
+                guard_enabled=guard_enabled,
+                routing=routing_diagnostics,
+            )
+        else:
+            logger.debug(
+                "v43_inference_regime_routing",
+                model_name=self._model_name,
+                regime=regime,
+                guard_enabled=guard_enabled,
+                routing=routing_diagnostics,
+            )
 
         reasoning = (
             f"v43 multi-head regime={regime} primary={primary_fb}bars "

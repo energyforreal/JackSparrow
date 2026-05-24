@@ -3,14 +3,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ConfidenceProgress } from './ConfidenceProgress'
-import { ModelConsensus, Signal, SignalType } from '@/types'
+import { ModelConsensus, Signal, SignalType, ReflectionSnapshot } from '@/types'
 import { cn } from '@/lib/utils'
 import { normalizeConfidenceToPercent, formatConfidence } from '@/utils/formatters'
+import { resolveDisplayConfidence } from '@/utils/signalConfidence'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 
 interface SignalIndicatorProps {
   signal?: Signal
+  lastReflection?: ReflectionSnapshot | null
   modelData?: {
     model_consensus?: ModelConsensus[]
     inference_latency_ms?: number
@@ -36,7 +38,7 @@ const getSignalBadgeClasses = (signal: SignalType) => {
   }
 }
 
-export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
+export function SignalIndicator({ signal, lastReflection, modelData }: SignalIndicatorProps) {
   if (!signal) {
     return (
       <Card>
@@ -53,7 +55,9 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
     )
   }
 
-  const overallConfidence = normalizeConfidenceToPercent(signal.confidence)
+  const displayConfidence = resolveDisplayConfidence(signal)
+  const overallConfidence = displayConfidence.percent
+  const policyConfidencePercent = displayConfidence.policyPercent
   const modelConsensus = signal.model_consensus && signal.model_consensus.length > 0
     ? signal.model_consensus
     : modelData?.model_consensus && modelData.model_consensus.length > 0
@@ -130,8 +134,17 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
           )}
           <div className="flex-1">
             <div className="flex justify-between text-sm mb-1">
-              <span className="text-muted-foreground" title="Calibrated across the 6-step reasoning pipeline (may differ from raw model scores)">
-                Reasoning confidence
+              <span
+                className="text-muted-foreground"
+                title={
+                  displayConfidence.source === 'reasoning'
+                    ? 'Calibrated final confidence from the 6-step reasoning pipeline (final_confidence).'
+                    : 'Policy/ML confidence from decision_ready; reasoning final_confidence not yet available.'
+                }
+              >
+                {displayConfidence.source === 'reasoning'
+                  ? 'Reasoning confidence'
+                  : 'Policy confidence'}
               </span>
               <span className="font-medium">
                 {formatConfidence(overallConfidence)}
@@ -142,8 +155,22 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
               className="h-2" 
             />
             <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-              Blended and calibrated in the agent; not a simple average of the rows below.
+              {displayConfidence.source === 'reasoning'
+                ? 'Calibrated final confidence from the reasoning pipeline; not a simple average of the rows below.'
+                : 'Policy/ML confidence until reasoning completes; model rows below show raw ensemble scores.'}
             </p>
+            {displayConfidence.usedPolicyFallback && (
+              <p className="text-[10px] text-amber-600/90 dark:text-amber-400/90 mt-0.5 leading-tight">
+                Reasoning final_confidence not available yet — showing policy confidence.
+              </p>
+            )}
+            {displayConfidence.source === 'reasoning' &&
+              policyConfidencePercent != null &&
+              Math.abs(policyConfidencePercent - overallConfidence) >= 2 && (
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight tabular-nums">
+                  Policy/ML confidence: {formatConfidence(policyConfidencePercent)}
+                </p>
+              )}
           </div>
         </div>
 
@@ -286,6 +313,32 @@ export function SignalIndicator({ signal, modelData }: SignalIndicatorProps) {
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
+          </div>
+        )}
+
+        {signal.agent_introspection && (
+          <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
+            <p className="font-medium text-foreground text-xs">Agent introspection</p>
+            <p>
+              {signal.agent_introspection.policy_mode} · score{' '}
+              {signal.agent_introspection.trade_score ?? '—'} · memory{' '}
+              {signal.agent_introspection.memory_context_count}
+            </p>
+          </div>
+        )}
+
+        {(lastReflection ?? signal.reflection_snapshot) && (
+          <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
+            <p className="font-medium text-foreground text-xs">Latest reflection</p>
+            <p>
+              quality{' '}
+              {formatConfidence(
+                (lastReflection ?? signal.reflection_snapshot)!.quality_score <= 1
+                  ? (lastReflection ?? signal.reflection_snapshot)!.quality_score * 100
+                  : (lastReflection ?? signal.reflection_snapshot)!.quality_score
+              )}{' '}
+              · {(lastReflection ?? signal.reflection_snapshot)!.calibration_bucket}
+            </p>
           </div>
         )}
 

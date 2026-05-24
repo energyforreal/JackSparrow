@@ -18,6 +18,21 @@ from feature_store.jacksparrow_v43_train_multihead import (
 )
 
 
+def test_cost_aware_labels_more_tradable_at_runtime_cost() -> None:
+    """Unleveraged training cost (~0.0016) yields more labels than legacy 0.0048."""
+    rng = np.random.default_rng(42)
+    n = 5000
+    rets = rng.normal(0.0006, 0.0005, size=n)
+    close = pd.Series(100.0 * np.cumprod(1.0 + rets))
+    _, stats_legacy = build_cost_aware_forward_labels(
+        close, forward_bars=6, round_trip_cost=0.0048
+    )
+    _, stats_runtime = build_cost_aware_forward_labels(
+        close, forward_bars=6, round_trip_cost=0.0016
+    )
+    assert stats_runtime["tradable_label_fraction"] > stats_legacy["tradable_label_fraction"]
+
+
 def test_build_cost_aware_forward_labels_suppresses_sub_cost() -> None:
     close = pd.Series([100.0, 100.0, 100.0, 100.05, 100.0], index=range(5))
     raw = build_forward_labels(close, forward_bars=1)
@@ -156,10 +171,20 @@ def test_horizon_cost_scale_relaxes_longer_horizons() -> None:
     assert V43_HORIZON_COST_SCALE[24] < V43_HORIZON_COST_SCALE[12]
 
 
+def test_compute_v43_round_trip_cost_matches_runtime_gate5() -> None:
+    from agent.core.v43_signal_gates import round_trip_cost_pct
+    from feature_store.jacksparrow_v43_train_multihead import compute_v43_round_trip_cost_pct
+
+    train_cost = compute_v43_round_trip_cost_pct(maker_fee=0.0005, slippage=0.0003)
+    assert train_cost == pytest.approx(0.0016)
+    # Runtime default fees match training defaults when settings use same fee/slip.
+    assert train_cost == pytest.approx(round_trip_cost_pct(), rel=0.05)
+
+
 def test_format_horizon_training_diagnostics_includes_heads() -> None:
     meta = {
         "target_definition": "cost_aware_forward_return",
-        "runtime_cost_assumptions": {"round_trip_cost_pct": 0.0048},
+        "runtime_cost_assumptions": {"round_trip_cost_pct": 0.0016},
         "horizons": {
             "intraday_30m": {
                 "forward_bars": 6,

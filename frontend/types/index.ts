@@ -17,6 +17,7 @@ export interface Portfolio {
   total_unrealized_pnl: number | string
   total_unrealized_pnl_usd?: number | string
   total_realized_pnl: number | string
+  total_realized_pnl_usd?: number | string
   positions?: Position[]
   data_source?: 'delta_testnet'
   sync_status?: 'live' | 'stale' | 'error'
@@ -168,6 +169,8 @@ export interface Signal {
   chain_id?: string
   /** Reasoning engine final confidence, 0-1 (may differ from calibrated UI confidence). */
   final_confidence?: number
+  /** Which confidence field is authoritative for the AI card display. */
+  confidence_source?: 'policy' | 'reasoning'
   /** v43 JackSparrow: regime label from model context when surfaced on signal. */
   regime?: string
   /** v43: expected return from model context. */

@@ -175,6 +175,7 @@ export const PredictResponseSchema = z.object(
     trade_score: z.number().optional(),
     ml_evidence_snapshot: z.record(z.unknown()).optional(),
     memory_context_id: z.string().optional(),
+    reflection_snapshot: ReflectionSnapshotSchema.optional(),
   },
   { description: 'Predict response' },
 );
@@ -226,6 +227,9 @@ export const PortfolioSummaryResponseSchema = z.object({
   total_unrealized_pnl: DecimalSchema.describe('Total unrealized profit/loss in INR'),
   total_unrealized_pnl_usd: DecimalSchema.optional().describe('Total unrealized profit/loss in USD'),
   total_realized_pnl: DecimalSchema.describe('Total realized profit/loss'),
+  total_realized_pnl_usd: DecimalSchema.optional().describe(
+    'Total realized profit/loss in USD (agent ledger on testnet)'
+  ),
   positions: z.array(PositionResponseSchema).default([]).describe('Open positions'),
   margin_used: DecimalSchema.optional(),
   usd_inr_rate: DecimalSchema.optional(),

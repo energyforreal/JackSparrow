@@ -161,6 +161,10 @@ class PortfolioService:
             "timestamp": time_info["server_time"],  # Use time_service for consistent format
         }
         for optional_key in (
+            "total_value_usd",
+            "wallet_balance_usd",
+            "total_unrealized_pnl_usd",
+            "total_realized_pnl_usd",
             "data_source",
             "sync_status",
             "exchange_synced_at",

@@ -67,14 +67,29 @@ async def apply_redis_hold_band_overrides(
     return strong_thresh, mild_thresh
 
 
-async def get_effective_min_confidence_threshold() -> float:
+async def get_effective_min_confidence_threshold(
+    learning_system: Optional[Any] = None,
+) -> float:
     """Minimum confidence for trade entry; Redis may nudge within bounds."""
     base = float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52)
     base = _clamp(base, MIN_CONF_BOUNDS[0], MIN_CONF_BOUNDS[1])
     rv = await _redis_get_float(REDIS_KEY_MIN_CONF)
-    if rv is None:
-        return base
-    return _clamp(rv, MIN_CONF_BOUNDS[0], MIN_CONF_BOUNDS[1])
+    eff = _clamp(rv, MIN_CONF_BOUNDS[0], MIN_CONF_BOUNDS[1]) if rv is not None else base
+
+    if (
+        learning_system is not None
+        and getattr(settings, "agent_reflection_policy_feedback_enabled", False)
+    ):
+        try:
+            params = learning_system.strategy_adapter.get_strategy_parameters()
+            adapted = params.get("min_confidence_threshold")
+            if adapted is not None:
+                adapted_val = float(adapted)
+                eff = max(eff, _clamp(adapted_val, MIN_CONF_BOUNDS[0], MIN_CONF_BOUNDS[1]))
+        except Exception as e:
+            logger.debug("dynamic_threshold_strategy_adapter_failed", error=str(e))
+
+    return eff
 
 
 def resolve_metadata_recommended_threshold(

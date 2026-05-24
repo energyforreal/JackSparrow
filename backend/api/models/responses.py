@@ -581,8 +581,16 @@ class PortfolioSummaryResponse(DecimalSerializerMixin, BaseModel):
     
     total_value: Decimal = Field(
         ...,
-        description="Total portfolio value",
+        description="Total portfolio value (INR; uses Delta INR when testnet)",
         example=10000.0
+    )
+    total_value_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Total portfolio value in USD (Delta account value)",
+    )
+    wallet_balance_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Wallet balance in USD excluding unrealized PnL",
     )
     available_balance: Decimal = Field(
         ...,
@@ -613,6 +621,10 @@ class PortfolioSummaryResponse(DecimalSerializerMixin, BaseModel):
         ...,
         description="Total realized profit/loss",
         example=250.0
+    )
+    total_realized_pnl_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Total realized profit/loss in USD (agent ledger on testnet)",
     )
     positions: List[PositionResponse] = Field(
         default_factory=list,

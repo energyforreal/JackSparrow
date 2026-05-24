@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { Portfolio } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatCurrency as formatInrCurrency, formatPercent } from '@/utils/formatters'
+import { formatCurrency as formatInrCurrency, formatPercent, formatUsdCurrency } from '@/utils/formatters'
 import { unrealizedPnlPercentOnMargin } from '@/utils/portfolioMetrics'
 
 /** Shown on ROE badge; margin is derived from ISOLATED_MARGIN_LEVERAGE in backend/agent config. */
@@ -76,10 +76,9 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
   const availableBalance = parseNumber(portfolio.available_balance)
   const marginUsed = parseNumber(portfolio.margin_used)
   const netPnl = totalPnL
-
-  // USD account value for direct comparison with Delta testnet display.
-  // Prefer the backend-provided field; fall back to deriving from INR value + FX rate.
   const usdInrRate = parseNumber(portfolio.usd_inr_rate)
+
+  const isTestnetSource = portfolio.data_source === 'delta_testnet'
   const totalValueUsd: number | null =
     portfolio.total_value_usd != null
       ? parseNumber(portfolio.total_value_usd)
@@ -110,14 +109,28 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
       <CardContent className="space-y-4">
         <div className="flex items-baseline justify-between">
           <div>
-            <div className="text-3xl font-bold">{formatCurrency(totalValue)}</div>
-            {totalValueUsd !== null && (
-              <div className="text-sm text-muted-foreground mt-0.5">
-                ≈ ${totalValueUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
-                {usdInrRate > 0 && (
-                  <span className="ml-1 opacity-70">(@ ₹{usdInrRate.toFixed(2)}/$)</span>
+            {isTestnetSource && totalValueUsd !== null ? (
+              <>
+                <div className="text-3xl font-bold">{formatUsdCurrency(totalValueUsd)}</div>
+                <div className="text-sm text-muted-foreground mt-0.5">
+                  {formatCurrency(totalValue)} INR
+                  {usdInrRate > 0 && (
+                    <span className="ml-1 opacity-70">(Delta rate ₹{usdInrRate.toFixed(2)}/$)</span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-3xl font-bold">{formatCurrency(totalValue)}</div>
+                {totalValueUsd !== null && (
+                  <div className="text-sm text-muted-foreground mt-0.5">
+                    ≈ {formatUsdCurrency(totalValueUsd)}
+                    {usdInrRate > 0 && (
+                      <span className="ml-1 opacity-70">(@ ₹{usdInrRate.toFixed(2)}/$)</span>
+                    )}
+                  </div>
                 )}
-              </div>
+              </>
             )}
             <div className="flex flex-col gap-1 mt-1">
               <span title={ROE_MARGIN_TOOLTIP}>

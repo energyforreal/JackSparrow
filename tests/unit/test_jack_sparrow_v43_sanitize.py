@@ -22,22 +22,24 @@ def test_looks_like_classifier_probability_detects_unit_interval() -> None:
 
 def test_sanitize_coerces_regime_classifier_output() -> None:
     arr = np.array([0.7], dtype=np.float64)
-    out = _sanitize_expected_return(
+    out, diag = _sanitize_expected_return(
         arr,
         active_model=_FakeClassifierRegime(),
         model_name="test_regime",
     )
     assert float(out[0]) == _coerce_probability_to_return_scale(arr)[0]
     assert -0.02 <= float(out[0]) <= 0.02
+    assert diag["coerced"] is True
 
 
 def test_sanitize_leaves_ensemble_small_returns() -> None:
     from agent.models.v43_pickle_shims import EnsembleModel
 
     arr = np.array([0.0012, -0.0008], dtype=np.float64)
-    out = _sanitize_expected_return(
+    out, diag = _sanitize_expected_return(
         arr,
         active_model=EnsembleModel(),
         model_name="test_ensemble",
     )
     np.testing.assert_allclose(out, arr)
+    assert diag["coerced"] is False

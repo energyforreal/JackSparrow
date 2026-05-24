@@ -31,6 +31,20 @@ V43_HORIZON_COST_SCALE: Dict[int, float] = {
     24: 0.80,
 }
 
+
+def compute_v43_round_trip_cost_pct(
+    *,
+    maker_fee: float = 0.0005,
+    slippage: float = 0.0003,
+) -> float:
+    """Price-return round-trip cost on the same scale as runtime Gate 5.
+
+    Leverage affects position sizing elsewhere — it must not inflate label or
+    meta-classifier cost masking (matches ``agent.core.v43_signal_gates``).
+    """
+    return 2.0 * (float(maker_fee) + float(slippage))
+
+
 try:
     import lightgbm as lgb
     from lightgbm import LGBMClassifier
@@ -257,7 +271,7 @@ def train_horizon_ensemble(
     y_val: pd.Series,
     *,
     rng: int = 42,
-    round_trip_cost: float = 0.0048,
+    round_trip_cost: float = 0.0016,
     forward_bars: int = 6,
 ) -> Tuple[EnsembleModel, Dict[str, Any]]:
     """Train one meta-stack ensemble for a single horizon (Pattern 3)."""
@@ -462,7 +476,10 @@ def train_multihead_from_feature_matrix(
     if missing:
         raise ValueError(f"feature matrix missing columns: {missing[:8]}")
 
-    round_trip_cost = 2.0 * (maker_fee + slippage) * max(1, leverage)
+    round_trip_cost = compute_v43_round_trip_cost_pct(
+        maker_fee=maker_fee,
+        slippage=slippage,
+    )
     bundle = MultiHeadBundle()
     horizons_meta: Dict[str, Any] = {}
     split_meta_global: Dict[str, Any] = {}
@@ -554,6 +571,7 @@ def train_multihead_from_feature_matrix(
             "slippage_pct": slippage,
             "leverage_assumption": leverage,
             "round_trip_cost_pct": round_trip_cost,
+            "round_trip_cost_includes_leverage": False,
         },
     }
     return bundle, metadata

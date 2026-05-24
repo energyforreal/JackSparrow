@@ -965,6 +965,7 @@ class AgentEventSubscriber:
                     symbol=symbol
                 )
             
+            await self._broadcast_position_reflection(payload)
             # Only broadcast full portfolio update - avoid partial update that would
             # briefly replace portfolio with {position_closed: {...}} on frontend
             await self._broadcast_portfolio_update()
@@ -1557,7 +1558,10 @@ class AgentEventSubscriber:
         else:
             ts_str = str(ts_raw)
 
-        # Create signal data for WebSocket
+        # WebSocket signal schema:
+        # - confidence: policy/ML confidence from decision_ready (entry gating source)
+        # - final_confidence: calibrated reasoning confidence from reasoning_chain
+        # - confidence_source: hints which field the UI should prioritize for display
         signal_data = {
             "signal": signal,
             "confidence": confidence,
@@ -1568,6 +1572,7 @@ class AgentEventSubscriber:
             "model_consensus": model_consensus,
             "chain_id": chain_id,
             "final_confidence": chain_final,
+            "confidence_source": "reasoning" if final_from_chain is not None else "policy",
             "timestamp": ts_str,
             "reasoning_chain_full": {
                 "chain_id": chain_id or "",
@@ -1642,29 +1647,32 @@ class AgentEventSubscriber:
         # Update portfolio after trade
         await self._broadcast_portfolio_update()
 
+    async def _broadcast_position_reflection(self, payload: Dict[str, Any]) -> None:
+        """Broadcast advisory reflection snapshot to frontend agent_update channel."""
+        reflection = payload.get("reflection_snapshot")
+        if not isinstance(reflection, dict):
+            return
+        try:
+            reflection_message = create_agent_state_update(
+                {
+                    "state": "POSITION_REFLECTION",
+                    "reason": "advisory_reflection",
+                    "reflection_snapshot": reflection,
+                    "symbol": payload.get("symbol"),
+                    "position_id": payload.get("position_id"),
+                    "timestamp": payload.get("timestamp"),
+                }
+            )
+            await unified_websocket_manager.broadcast(
+                reflection_message,
+                channel="agent_update",
+            )
+        except Exception:
+            pass
+
     async def _handle_position_closed_consolidated(self, payload: Dict[str, Any]):
         """Handle position_closed events with simplified logic."""
-        reflection = payload.get("reflection_snapshot")
-        if isinstance(reflection, dict):
-            try:
-                reflection_message = create_agent_state_update(
-                    {
-                        "state": "POSITION_REFLECTION",
-                        "reason": "advisory_reflection",
-                        "reflection_snapshot": reflection,
-                        "symbol": payload.get("symbol"),
-                        "position_id": payload.get("position_id"),
-                        "timestamp": payload.get("timestamp"),
-                    }
-                )
-                await unified_websocket_manager.broadcast(
-                    reflection_message,
-                    channel="agent_update",
-                )
-            except Exception:
-                pass
-        # Only broadcast full portfolio update - avoid partial update that would
-        # briefly replace portfolio with {position_closed: {...}} on frontend
+        await self._broadcast_position_reflection(payload)
         await self._broadcast_portfolio_update()
 
     async def _handle_state_transition_consolidated(self, payload: Dict[str, Any]):
@@ -1793,7 +1801,7 @@ class AgentEventSubscriber:
         else:
             ts_str = str(ts_raw)
 
-        # Create reasoning data
+        # reasoning_complete: confidence mirrors final_confidence (calibrated reasoning).
         reasoning_data = {
             "symbol": symbol,
             "reasoning_chain": steps,
@@ -1803,6 +1811,7 @@ class AgentEventSubscriber:
             # Expose final confidence under generic 'confidence' key so the
             # primary signal display always has a value to show.
             "confidence": final_confidence,
+            "confidence_source": "reasoning",
             "timestamp": ts_str,
             "reasoning_chain_full": {
                 "chain_id": chain_id or "",

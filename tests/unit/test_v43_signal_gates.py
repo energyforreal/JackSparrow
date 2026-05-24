@@ -67,12 +67,25 @@ def test_gate5_metrics_matches_edge_ok() -> None:
     assert gate5_short_edge_ok(-0.011, thr) == gate5_short_edge_metrics(-0.011, thr).passes
 
 
-def test_gate5_long_compares_expected_return_edge_to_cost() -> None:
+def test_gate5_long_compares_expected_return_edge_to_cost(monkeypatch) -> None:
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.75)
     metrics = gate5_long_edge_metrics(0.012, 0.011)
     assert metrics.edge_pct == pytest.approx(0.001)
     assert metrics.lhs == pytest.approx(0.001)
     assert metrics.rhs == pytest.approx(metrics.ratio * metrics.rtc)
     assert metrics.passes is False
+
+
+def test_gate5_long_passes_at_recovery_ratio(monkeypatch) -> None:
+    """Recovery P0 ratio 0.5 allows moderate edges that fail at 0.75."""
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.5)
+    metrics = gate5_long_edge_metrics(0.012, 0.011)
+    assert metrics.ratio == pytest.approx(0.5)
+    assert metrics.passes is True
 
 
 def test_gate5_long_representative_edge_passes_default_cost() -> None:

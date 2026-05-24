@@ -237,6 +237,7 @@ class LearningSystem:
             "model_stats": out_stats,
             "calibration_factors": dict(self.confidence_calibration.calibration_factors),
             "strategy_params": dict(self.strategy_adapter.strategy_params),
+            "reflection_calibration": self.confidence_calibration.serialize_reflection_state(),
         }
 
     def _load_state(self) -> None:
@@ -299,6 +300,9 @@ class LearningSystem:
         strategy_params = data.get("strategy_params")
         if isinstance(strategy_params, dict):
             self.strategy_adapter.strategy_params.update(strategy_params)
+        reflection_state = data.get("reflection_calibration")
+        if isinstance(reflection_state, dict):
+            self.confidence_calibration.load_reflection_state(reflection_state)
         logger.info("learning_state_loaded", path=str(path), models=len(parsed))
 
     def _persist_state(self) -> None:
@@ -358,6 +362,91 @@ class LearningSystem:
         # Persist after updating rolling stats so adaptive weights survive restarts.
         self._persist_state()
 
+    async def record_reflection_outcome(
+        self,
+        reflection: Dict[str, Any],
+        model_predictions: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        """Ingest advisory reflection telemetry into bounded calibration state."""
+        from agent.core.config import settings
+
+        if not getattr(settings, "agent_reflection_policy_feedback_enabled", False):
+            return
+        if not self._initialized:
+            await self.initialize()
+        if not isinstance(reflection, dict):
+            return
+
+        await self.confidence_calibration.update_from_reflection(reflection)
+        await self.strategy_adapter.adapt_from_reflection(reflection)
+
+        if model_predictions:
+            await self.confidence_calibration.update_calibration(
+                self._trade_outcome_from_reflection(reflection),
+                model_predictions,
+            )
+
+        self._reflection_updates = getattr(self, "_reflection_updates", 0) + 1
+        logger.info(
+            "reflection_outcome_recorded",
+            calibration_bucket=reflection.get("calibration_bucket"),
+            quality_score=reflection.get("quality_score"),
+            reflection_updates=self._reflection_updates,
+        )
+        self._persist_state()
+
+    @staticmethod
+    def _trade_outcome_from_reflection(reflection: Dict[str, Any]) -> TradeOutcome:
+        """Build a minimal TradeOutcome for calibrator updates from reflection."""
+        now = datetime.utcnow()
+        pnl = float(reflection.get("pnl") or 0.0)
+        return TradeOutcome(
+            trade_id=str(reflection.get("position_id") or ""),
+            symbol=str(reflection.get("symbol") or ""),
+            entry_price=1.0,
+            exit_price=1.0,
+            entry_time=now,
+            exit_time=now,
+            position_size=1.0,
+            predicted_signal=str(reflection.get("predicted_signal") or ""),
+            actual_pnl=pnl,
+            holding_period_hours=0.0,
+        )
+
+    async def calibrate_reasoning_confidence(
+        self,
+        raw_confidence: float,
+        model_predictions: List[Dict[str, Any]],
+        *,
+        historical_win_rate: Optional[float] = None,
+    ) -> tuple[float, Dict[str, Any]]:
+        """Apply reflection + historical calibration to reasoning Step 7 confidence."""
+        from agent.core.config import settings
+
+        diagnostics: Dict[str, Any] = {}
+        try:
+            confidence = max(0.0, min(1.0, float(raw_confidence)))
+        except (TypeError, ValueError):
+            return 0.0, diagnostics
+
+        if not getattr(settings, "agent_reflection_policy_feedback_enabled", False):
+            return confidence, diagnostics
+
+        reflection_factor = self.confidence_calibration.get_reflection_factor()
+        diagnostics["reflection_global_factor"] = reflection_factor
+        confidence *= reflection_factor
+
+        if historical_win_rate is not None:
+            hr = max(0.0, min(1.0, float(historical_win_rate)))
+            hr_factor = max(0.75, min(1.15, 0.85 + 0.30 * hr))
+            diagnostics["historical_win_rate"] = hr
+            diagnostics["historical_win_rate_factor"] = hr_factor
+            confidence *= hr_factor
+
+        calibrated = await self.calibrate_runtime_confidence(confidence, model_predictions)
+        diagnostics["reasoning_calibrated_confidence"] = calibrated
+        return max(0.0, min(1.0, calibrated)), diagnostics
+
     async def get_updated_model_weights(self, current_weights: Dict[str, float]) -> Dict[str, float]:
         """Get updated model weights based on learning."""
         return self.performance_tracker.get_all_model_weights(current_weights)
@@ -404,10 +493,16 @@ class LearningSystem:
 
     async def get_learning_insights(self) -> Dict[str, Any]:
         """Get current learning insights and recommendations."""
+        from agent.core.config import settings
+
         insights = {
             "performance_summary": {},
             "confidence_calibration": await self.confidence_calibration.get_calibration_status(),
             "strategy_adaptations": await self.strategy_adapter.get_adaptation_status(),
+            "reflection_policy_feedback_enabled": bool(
+                getattr(settings, "agent_reflection_policy_feedback_enabled", False)
+            ),
+            "reflection_updates": getattr(self, "_reflection_updates", 0),
             "recommendations": []
         }
 
@@ -460,7 +555,9 @@ class LearningSystem:
             "models_tracked": len(self.performance_tracker.model_stats),
             "recent_trades": len(self.performance_tracker.recent_trades),
             "total_trades_learned": sum(stats["total_trades"]
-                                      for stats in self.performance_tracker.model_stats.values())
+                                      for stats in self.performance_tracker.model_stats.values()),
+            "reflection_updates": getattr(self, "_reflection_updates", 0),
+            "reflection_global_factor": self.confidence_calibration.global_reflection_factor,
         }
 
 
@@ -470,6 +567,93 @@ class ConfidenceCalibrator:
     def __init__(self):
         self.confidence_history: Dict[str, List[Dict[str, Any]]] = {}
         self.calibration_factors: Dict[str, float] = {}
+        self.reflection_history: List[Dict[str, Any]] = []
+        self.global_reflection_factor: float = 1.0
+        self.reflection_bucket_factors: Dict[str, float] = {}
+
+    def serialize_reflection_state(self) -> Dict[str, Any]:
+        return {
+            "global_reflection_factor": self.global_reflection_factor,
+            "reflection_bucket_factors": dict(self.reflection_bucket_factors),
+            "reflection_history_size": len(self.reflection_history),
+        }
+
+    def load_reflection_state(self, state: Dict[str, Any]) -> None:
+        try:
+            self.global_reflection_factor = float(
+                state.get("global_reflection_factor", 1.0) or 1.0
+            )
+        except (TypeError, ValueError):
+            self.global_reflection_factor = 1.0
+        buckets = state.get("reflection_bucket_factors")
+        if isinstance(buckets, dict):
+            parsed: Dict[str, float] = {}
+            for key, value in buckets.items():
+                try:
+                    parsed[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+            self.reflection_bucket_factors = parsed
+
+    async def update_from_reflection(self, reflection: Dict[str, Any]) -> None:
+        """Update global/bucket calibration from reflection snapshot."""
+        from agent.core.config import settings
+
+        if not getattr(settings, "agent_reflection_policy_feedback_enabled", False):
+            return
+
+        try:
+            quality = float(reflection.get("quality_score", 0.5) or 0.5)
+        except (TypeError, ValueError):
+            quality = 0.5
+        bucket = str(reflection.get("calibration_bucket") or "unknown")
+        step = float(getattr(settings, "reflection_calibration_step_size", 0.02) or 0.02)
+        min_samples = int(getattr(settings, "reflection_calibration_min_samples", 5) or 5)
+
+        self.reflection_history.append(
+            {
+                "quality_score": quality,
+                "calibration_bucket": bucket,
+                "was_profitable": bool(reflection.get("was_profitable")),
+                "timestamp": datetime.utcnow(),
+            }
+        )
+        if len(self.reflection_history) > 200:
+            self.reflection_history = self.reflection_history[-200:]
+
+        if len(self.reflection_history) < min_samples:
+            return
+
+        recent = self.reflection_history[-min(50, len(self.reflection_history)) :]
+        avg_quality = statistics.mean(r["quality_score"] for r in recent)
+        target_factor = 0.90 + 0.20 * avg_quality
+        delta = max(-step, min(step, target_factor - self.global_reflection_factor))
+        self.global_reflection_factor = max(0.85, min(1.15, self.global_reflection_factor + delta))
+
+        bucket_samples = [r for r in recent if r["calibration_bucket"] == bucket]
+        if len(bucket_samples) >= 2:
+            bucket_quality = statistics.mean(r["quality_score"] for r in bucket_samples)
+            bucket_target = 0.90 + 0.20 * bucket_quality
+            current_bucket = self.reflection_bucket_factors.get(bucket, 1.0)
+            bucket_delta = max(-step, min(step, bucket_target - current_bucket))
+            self.reflection_bucket_factors[bucket] = max(
+                0.85, min(1.15, current_bucket + bucket_delta)
+            )
+
+        if bucket == "high_confidence_loss":
+            self.global_reflection_factor = max(
+                0.85, self.global_reflection_factor - step * 0.5
+            )
+
+    def get_reflection_factor(self, calibration_bucket: Optional[str] = None) -> float:
+        from agent.core.config import settings
+
+        if not getattr(settings, "agent_reflection_policy_feedback_enabled", False):
+            return 1.0
+        factor = self.global_reflection_factor
+        if calibration_bucket and calibration_bucket in self.reflection_bucket_factors:
+            factor = (factor + self.reflection_bucket_factors[calibration_bucket]) / 2.0
+        return max(0.85, min(1.15, factor))
 
     async def update_calibration(self, trade_outcome: TradeOutcome,
                                model_predictions: List[Dict[str, Any]]) -> None:
@@ -550,7 +734,10 @@ class ConfidenceCalibrator:
             "calibration_factors": self.calibration_factors.copy(),
             "models_calibrated": len(self.calibration_factors),
             "calibration_history_size": sum(len(history)
-                                          for history in self.confidence_history.values())
+                                          for history in self.confidence_history.values()),
+            "global_reflection_factor": self.global_reflection_factor,
+            "reflection_bucket_factors": self.reflection_bucket_factors.copy(),
+            "reflection_history_size": len(self.reflection_history),
         }
 
 
@@ -565,6 +752,29 @@ class StrategyAdapter:
             "holding_period_limit": 24  # hours
         }
         self.performance_history: List[Dict[str, Any]] = []
+
+    async def adapt_from_reflection(self, reflection: Dict[str, Any]) -> None:
+        """Nudge strategy parameters from reflection quality (bounded)."""
+        from agent.core.config import settings
+
+        if not getattr(settings, "agent_reflection_policy_feedback_enabled", False):
+            return
+        try:
+            quality = float(reflection.get("quality_score", 0.5) or 0.5)
+        except (TypeError, ValueError):
+            quality = 0.5
+        step = float(getattr(settings, "reflection_calibration_step_size", 0.02) or 0.02)
+
+        if quality >= 0.75:
+            self.strategy_params["min_confidence_threshold"] = max(
+                0.5,
+                self.strategy_params["min_confidence_threshold"] - step,
+            )
+        elif quality <= 0.35:
+            self.strategy_params["min_confidence_threshold"] = min(
+                0.8,
+                self.strategy_params["min_confidence_threshold"] + step,
+            )
 
     async def adapt_strategy(self, trade_outcome: TradeOutcome,
                            participating_models: set) -> None:

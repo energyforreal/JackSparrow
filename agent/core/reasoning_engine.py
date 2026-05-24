@@ -41,6 +41,7 @@ class ReasoningStep(BaseModel):
     data_freshness_seconds: Optional[int] = None
     similarity_score: Optional[float] = None
     feature_quality_score: Optional[float] = None
+    step_metadata: Optional[Dict[str, Any]] = None
 
 
 class MCPReasoningChain(BaseModel):
@@ -70,12 +71,14 @@ class MCPReasoningEngine:
         self,
         feature_server: MCPFeatureServer,
         model_registry: MCPModelRegistry,
-        vector_store: Optional[VectorMemoryStore] = None
+        vector_store: Optional[VectorMemoryStore] = None,
+        learning_system: Optional[Any] = None,
     ):
         """Initialize reasoning engine."""
         self.feature_server = feature_server
         self.model_registry = model_registry
         self.vector_store = vector_store
+        self.learning_system = learning_system
 
     @staticmethod
     def _compute_data_freshness_seconds(market_timestamp: Any) -> Optional[int]:
@@ -662,6 +665,7 @@ class MCPReasoningEngine:
         confidence = 0.0
         similar_contexts = None  # Initialize to avoid UnboundLocalError
         avg_similarity = 0.0
+        historical_win_rate: Optional[float] = None
 
         if request.use_memory and self.vector_store:
             try:
@@ -704,9 +708,16 @@ class MCPReasoningEngine:
                             for ctx in with_outcomes
                             if float((ctx.outcome or {}).get("pnl", 0) or 0) > 0
                         )
+                        historical_win_rate = profitable / len(with_outcomes)
                         evidence.append(
                             f"Similar setups with outcomes: {profitable}/{len(with_outcomes)} profitable"
                         )
+                        if getattr(settings, "agent_reflection_policy_feedback_enabled", False):
+                            win_factor = max(0.75, min(1.15, 0.85 + 0.30 * historical_win_rate))
+                            confidence = max(0.0, min(1.0, confidence * win_factor))
+                            evidence.append(
+                                f"Historical win-rate adjustment factor: {win_factor:.2f}"
+                            )
                 else:
                     evidence.append("No similar historical contexts found")
                     avg_similarity = 0.0
@@ -716,6 +727,12 @@ class MCPReasoningEngine:
         else:
             evidence.append("Vector store not configured")
 
+        step_metadata = (
+            {"historical_win_rate": historical_win_rate}
+            if historical_win_rate is not None
+            else None
+        )
+
         return ReasoningStep(
             step_number=2,
             step_name="Historical Context Retrieval",
@@ -723,7 +740,8 @@ class MCPReasoningEngine:
             evidence=evidence,
             confidence=confidence,
             timestamp=datetime.utcnow(),
-            similarity_score=avg_similarity if similar_contexts else None
+            similarity_score=avg_similarity if similar_contexts else None,
+            step_metadata=step_metadata,
         )
     
     async def _step3_model_consensus(self, request: MCPReasoningRequest) -> ReasoningStep:
@@ -1295,6 +1313,33 @@ class MCPReasoningEngine:
         # Ensure final confidence is in valid range
         final_confidence = max(0.0, min(1.0, final_confidence))
 
+        historical_win_rate: Optional[float] = None
+        step2 = next((s for s in steps if s.step_number == 2), None)
+        if step2 and isinstance(step2.step_metadata, dict):
+            hr = step2.step_metadata.get("historical_win_rate")
+            if hr is not None:
+                try:
+                    historical_win_rate = float(hr)
+                except (TypeError, ValueError):
+                    historical_win_rate = None
+
+        learning_diagnostics: Dict[str, Any] = {}
+        if self.learning_system:
+            try:
+                final_confidence, learning_diagnostics = (
+                    await self.learning_system.calibrate_reasoning_confidence(
+                        final_confidence,
+                        model_predictions,
+                        historical_win_rate=historical_win_rate,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    "reasoning_learning_calibration_failed",
+                    error=str(e),
+                    exc_info=True,
+                )
+
         # Log confidence calculation for debugging
         step_confidences = {step.step_number: step.confidence for step in calibration_steps}
         logger.info(
@@ -1307,27 +1352,36 @@ class MCPReasoningEngine:
             decision_step_number=getattr(decision_step, "step_number", None),
             is_fallback_scenario=is_fallback_scenario,
             model_predictions_count=len(model_predictions),
+            learning_diagnostics=learning_diagnostics or None,
             message="Confidence calibration step completed"
         )
+
+        evidence_list = [
+            f"Weighted base confidence: {base_confidence:.2f}",
+            f"Consistency adjustment: {consistency_adjustment:.2f}",
+        ]
+        if learning_diagnostics:
+            evidence_list.append(
+                f"Learning calibration: {learning_diagnostics}"
+            )
 
         return ReasoningStep(
             step_number=7,
             step_name="Confidence Calibration",
             description=f"Final confidence: {final_confidence:.2f}",
-            evidence=[
-                f"Weighted base confidence: {base_confidence:.2f}",
-                f"Consistency adjustment: {consistency_adjustment:.2f}",
+            evidence=evidence_list
+            + [
                 f"Final confidence: {final_confidence:.2f}",
                 f"Hold decision: {is_hold}",
-                f"Fallback scenario: {is_fallback_scenario}"
+                f"Fallback scenario: {is_fallback_scenario}",
             ],
             confidence=final_confidence,
             timestamp=datetime.utcnow(),
-            data_freshness_seconds=None,  # Meta-step, no direct market data access
+            data_freshness_seconds=None,
             similarity_score=None,
-            feature_quality_score=None
+            feature_quality_score=None,
         )
-    
+
     async def get_health_status(self) -> Dict[str, Any]:
         """Get health status."""
         return {

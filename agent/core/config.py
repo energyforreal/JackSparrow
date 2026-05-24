@@ -899,6 +899,15 @@ class Settings(BaseSettings):
             "regressor_mean (A/B ablation — base regressor mean only, skips meta+calibrator)."
         ),
     )
+    jacksparrow_v43_regime_classifier_coercion_guard_enabled: bool = Field(
+        default=True,
+        env="JACKSPARROW_V43_REGIME_CLASSIFIER_COERCION_GUARD_ENABLED",
+        description=(
+            "When True, regime submodels that emit classifier-like probabilities on the "
+            "return-target path fall back to the head ensemble instead of coercing P(class=1) "
+            "to a small return proxy."
+        ),
+    )
     signal_recovery_telemetry_enabled: bool = Field(
         default=True,
         env="SIGNAL_RECOVERY_TELEMETRY_ENABLED",
@@ -1712,6 +1721,38 @@ class Settings(BaseSettings):
         default=True,
         env="AGENT_REFLECTION_ADVISORY_ENABLED",
         description="Emit advisory reflection_snapshot on position close (no policy mutation).",
+    )
+    agent_reflection_policy_feedback_enabled: bool = Field(
+        default=False,
+        env="AGENT_REFLECTION_POLICY_FEEDBACK_ENABLED",
+        description=(
+            "When True, reflection quality/buckets feed bounded confidence calibration "
+            "for future decisions. Roll out behind this flag."
+        ),
+    )
+    reflection_calibration_step_size: float = Field(
+        default=0.02,
+        env="REFLECTION_CALIBRATION_STEP_SIZE",
+        ge=0.001,
+        le=0.1,
+        description="Max per-trade adjustment to global reflection calibration factor.",
+    )
+    reflection_calibration_min_samples: int = Field(
+        default=5,
+        env="REFLECTION_CALIBRATION_MIN_SAMPLES",
+        ge=1,
+        le=100,
+        description="Minimum reflection samples before calibration affects decisions.",
+    )
+    agent_vector_store_backend: str = Field(
+        default="memory",
+        env="AGENT_VECTOR_STORE_BACKEND",
+        description="Vector memory backend: memory (in-process) or qdrant.",
+    )
+    agent_vector_store_qdrant_collection: str = Field(
+        default="decision_contexts",
+        env="AGENT_VECTOR_STORE_QDRANT_COLLECTION",
+        description="Qdrant collection name for decision context vectors.",
     )
     portfolio_intelligence_enabled: bool = Field(
         default=False,

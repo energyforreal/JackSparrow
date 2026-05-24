@@ -27,6 +27,8 @@ import {
 import {
   PortfolioSummaryResponseSchema,
   validateResponse,
+  ReflectionSnapshotSchema,
+  AgentIntrospectionSnapshotSchema,
 } from '@/schemas/api.validation'
 import type {
   Signal as SharedSignal,
@@ -34,6 +36,7 @@ import type {
   Trade as SharedTrade,
   HealthStatus,
   SignalType,
+  ReflectionSnapshot,
 } from '@/types'
 
 // Local types that extend shared domain models where needed
@@ -101,6 +104,7 @@ export interface TradingDataState {
   modelData: ModelData | null
   health: HealthData | null
   performanceData: Array<{ date: string; value: number }>
+  lastReflection: ReflectionSnapshot | null
 
   // Status
   agentState: string
@@ -144,6 +148,7 @@ const initialState: TradingDataState = {
   modelData: null,
   health: null,
   performanceData: [],
+  lastReflection: null,
   agentState: 'UNKNOWN',
   isConnected: false,
   lastUpdate: null,
@@ -183,6 +188,25 @@ function normalizeHealthFromRest(raw: unknown): HealthData | null {
   return normalizeHealthPayload(raw)
 }
 
+function parseReflectionSnapshot(raw: unknown): ReflectionSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null
+  const parsed = ReflectionSnapshotSchema.safeParse(raw)
+  return parsed.success ? parsed.data : (raw as ReflectionSnapshot)
+}
+
+function mergeAgentIntrospection(
+  signal: Signal | null,
+  data: Record<string, unknown>
+): Signal {
+  const merged = { ...signal, ...data } as Signal
+  const intro = data.agent_introspection
+  if (intro && typeof intro === 'object') {
+    const parsed = AgentIntrospectionSnapshotSchema.safeParse(intro)
+    if (parsed.success) merged.agent_introspection = parsed.data
+  }
+  return merged
+}
+
 // Reducer for state management
 function tradingDataReducer(state: TradingDataState, action: TradingDataAction): TradingDataState {
   switch (action.type) {
@@ -201,10 +225,7 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
           case 'signal':
             // Merge signal data - may include reasoning chain, model data, etc.
             {
-              const mergedSignal = {
-                ...state.signal,
-                ...data
-              }
+              const mergedSignal = mergeAgentIntrospection(state.signal, data as Record<string, unknown>)
 
               // If the signal doesn't yet have model consensus data but we've
               // already received it via the model channel, merge it in so the
@@ -419,9 +440,12 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       }
       
       if (messageType === 'agent_update') {
+        const reflection = parseReflectionSnapshot(data?.reflection_snapshot)
+        const nextReflection = reflection ?? state.lastReflection
         return {
           ...state,
           agentState: data?.state || state.agentState,
+          lastReflection: nextReflection,
           lastUpdate: now,
           dataSource: 'websocket'
         }
@@ -979,6 +1003,7 @@ export function useTradingData() {
     modelData: state.modelData,
     health: state.health,
     performanceData: state.performanceData,
+    lastReflection: state.lastReflection,
 
     // Status
     agentState: state.agentState,

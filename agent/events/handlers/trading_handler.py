@@ -48,19 +48,20 @@ def _tf_bar_seconds(tf: str) -> int:
 class TradingEventHandler:
     """Handler that bridges DecisionReadyEvent to RiskApprovedEvent."""
 
-    def __init__(self, risk_manager, delta_client=None, execution_module=None):
+    def __init__(self, risk_manager, delta_client=None, execution_module=None, learning_system=None):
         """Initialize trading event handler.
 
         Args:
             risk_manager: RiskManager instance for trade validation
             delta_client: DeltaExchangeClient for fetching live market prices (required for paper trading)
             execution_module: ExecutionEngine instance for position checks and signal-reversal exit
+            learning_system: Shared LearningSystem instance (optional; creates one if omitted)
         """
         self.risk_manager = risk_manager
         self.context_manager = context_manager
         self.delta_client = delta_client
         self.execution_module = execution_module
-        self.learning_system = LearningSystem()
+        self.learning_system = learning_system or LearningSystem()
         # Deduplicate: last (symbol, side) -> timestamp of last RiskApproved published
         self._last_risk_approved: Dict[str, float] = {}
         self._entry_signal_filter = EntrySignalFilter(
@@ -435,7 +436,9 @@ class TradingEventHandler:
                 )
             else:
                 # Check confidence threshold (Redis learning layer may nudge within bounds)
-                eff_min_conf = await get_effective_min_confidence_threshold()
+                eff_min_conf = await get_effective_min_confidence_threshold(
+                    learning_system=self.learning_system,
+                )
                 rec_threshold = resolve_metadata_recommended_threshold(
                     signal=signal,
                     model_predictions=model_predictions,

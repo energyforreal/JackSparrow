@@ -56,10 +56,18 @@ def _extract_result_list(payload: Any) -> List[Dict[str, Any]]:
 
 
 def _wallet_totals_usd(wallet_payload: Any) -> Dict[str, float]:
-    """Sum USD/USDT wallet rows into balance and available USD."""
+    """Sum USD/USDT wallet rows; prefer Delta-native INR fields when present."""
     rows = _extract_result_list(wallet_payload)
     balance_usd = 0.0
     available_usd = 0.0
+    balance_inr = 0.0
+    available_inr = 0.0
+    net_equity = 0.0
+    if isinstance(wallet_payload, dict):
+        meta = wallet_payload.get("meta")
+        if isinstance(meta, dict):
+            net_equity = _coerce_float(meta.get("net_equity"))
+
     for row in rows:
         sym = str(row.get("asset_symbol") or row.get("symbol") or "").upper()
         if sym not in ("USD", "USDT", "USDC"):
@@ -68,7 +76,20 @@ def _wallet_totals_usd(wallet_payload: Any) -> Dict[str, float]:
         available_usd += _coerce_float(
             row.get("available_balance") or row.get("available") or row.get("balance")
         )
-    return {"balance_usd": balance_usd, "available_usd": available_usd}
+        balance_inr += _coerce_float(row.get("balance_inr"))
+        available_inr += _coerce_float(row.get("available_balance_inr"))
+
+    if net_equity > 0 and balance_usd <= 0:
+        balance_usd = net_equity
+        available_usd = net_equity
+
+    return {
+        "balance_usd": balance_usd,
+        "available_usd": available_usd,
+        "balance_inr": balance_inr,
+        "available_inr": available_inr,
+        "net_equity_usd": net_equity,
+    }
 
 
 def _parse_exchange_timestamp(value: Any) -> Optional[datetime]:
@@ -269,13 +290,15 @@ class TestnetPortfolioService:
             "available_usd": available_usd,
             "margin_used_usd": margin_used_usd,
             "total_unrealized_usd": total_unrealized_usd,
+            "balance_inr_exchange": wallet.get("balance_inr") or 0.0,
+            "available_inr_exchange": wallet.get("available_inr") or 0.0,
             "positions_list": positions_list,
             "sync_status": sync_status,
             "order_history": snapshot.get("order_history"),
         }
 
     async def _finalize_summary_inr(self, partial: Dict[str, Any]) -> Dict[str, Any]:
-        usdinr_rate = Decimal(str(await get_usdinr_rate()))
+        fallback_rate = Decimal(str(await get_usdinr_rate()))
         total_usd = Decimal(str(partial.get("total_value_usd", 0)))
         available_usd = Decimal(str(partial.get("available_usd", 0)))
         margin_usd = Decimal(str(partial.get("margin_used_usd", 0)))
@@ -283,8 +306,19 @@ class TestnetPortfolioService:
         # wallet balance in USD = account value minus unrealized
         wallet_balance_usd = total_usd - unrealized_usd
 
-        total_inr = total_usd * usdinr_rate
-        available_inr = available_usd * usdinr_rate
+        balance_inr_ex = Decimal(str(partial.get("balance_inr_exchange") or 0))
+        available_inr_ex = Decimal(str(partial.get("available_inr_exchange") or 0))
+
+        # Prefer Delta's own INR conversion (matches Delta testnet UI); fall back to app FX rate.
+        if balance_inr_ex > 0 and wallet_balance_usd > 0:
+            usdinr_rate = balance_inr_ex / wallet_balance_usd
+            total_inr = balance_inr_ex + (unrealized_usd * usdinr_rate)
+            available_inr = available_inr_ex if available_inr_ex > 0 else (available_usd * usdinr_rate)
+        else:
+            usdinr_rate = fallback_rate
+            total_inr = total_usd * usdinr_rate
+            available_inr = available_usd * usdinr_rate
+
         margin_inr = margin_usd * usdinr_rate
         unrealized_inr = unrealized_usd * usdinr_rate
 
@@ -323,6 +357,20 @@ class TestnetPortfolioService:
             "timestamp": synced_at,
         }
 
+    async def _attach_agent_realized_pnl(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Sum closed round-trip PnL from the agent ledger (testnet Recent Trades source)."""
+        try:
+            from backend.services.agent_trade_ledger_service import get_agent_closed_trades
+
+            rows = await get_agent_closed_trades(limit=500)
+            realized_inr = sum(float(r.get("pnl") or 0) for r in rows)
+            realized_usd = sum(float(r.get("pnl_usd") or 0) for r in rows)
+            summary["total_realized_pnl"] = realized_inr
+            summary["total_realized_pnl_usd"] = realized_usd
+        except Exception as exc:
+            logger.debug("testnet_realized_pnl_attach_skipped", error=str(exc))
+        return summary
+
     async def get_portfolio_summary(self, db: AsyncSession) -> Optional[Dict[str, Any]]:
         _ = db  # testnet portfolio is exchange-only; no local DB ledger
         cached = await get_cache(_CACHE_KEY)
@@ -337,6 +385,7 @@ class TestnetPortfolioService:
         try:
             partial = self.build_summary_from_snapshot(snapshot, sync_status="live")
             summary = await self._finalize_summary_inr(partial)
+            summary = await self._attach_agent_realized_pnl(summary)
             await set_cache(_CACHE_KEY, summary, ttl=_CACHE_TTL_SECONDS)
             return summary
         except TestnetExchangeUnavailableError:

@@ -33,19 +33,16 @@ def run_execution_ablation(*, out_dir: Path) -> Dict[str, Any]:
         },
         "suggested_ablation_matrix": [
             {
-                "variant": "A_baseline",
-                "short_execution": False,
-                "inference_stack": "meta_calibrator",
+                "variant": "A_regressor_mean",
+                "short_execution": True,
+                "inference_stack": "regressor_mean",
+                "soak_hours": 24,
             },
             {
-                "variant": "B_short_enabled",
+                "variant": "B_meta_calibrator",
                 "short_execution": True,
                 "inference_stack": "meta_calibrator",
-            },
-            {
-                "variant": "C_regressor_mean",
-                "short_execution": False,
-                "inference_stack": "regressor_mean",
+                "soak_hours": 24,
             },
         ],
     }

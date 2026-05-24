@@ -290,16 +290,17 @@ class MCPOrchestrator:
             logger.info("mcp_orchestrator_model_registry_initialized")
 
             # Initialize Vector Memory Store for historical context retrieval (Step 2)
-            self.vector_store = VectorMemoryStore(
-                max_memory_size=10000,
-                similarity_threshold=0.5)
-            await self.vector_store.initialize()
+            from agent.memory.vector_store_factory import create_vector_store
+
+            self.vector_store = await create_vector_store()
+            self.learning_system = None
 
             # Initialize MCP Reasoning Engine
             self.reasoning_engine = MCPReasoningEngine(
                 feature_server=self.feature_server,
                 model_registry=self.model_registry,
-                vector_store=self.vector_store
+                vector_store=self.vector_store,
+                learning_system=self.learning_system,
             )
             await self.reasoning_engine.initialize()
             logger.info("mcp_orchestrator_reasoning_engine_initialized")

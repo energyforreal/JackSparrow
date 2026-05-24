@@ -191,6 +191,24 @@ class AgentStateMachine:
                     exc_info=True,
                 )
 
+        reflection = payload.get("reflection_snapshot")
+        if (
+            isinstance(reflection, dict)
+            and self.learning_system
+            and getattr(settings, "agent_reflection_policy_feedback_enabled", False)
+        ):
+            try:
+                await self.learning_system.record_reflection_outcome(
+                    reflection,
+                    model_predictions if isinstance(model_predictions, list) else None,
+                )
+            except Exception as e:
+                logger.warning(
+                    "position_closed_reflection_learning_failed",
+                    error=str(e),
+                    exc_info=True,
+                )
+
         if getattr(settings, "trade_outcomes_writes_enabled", True):
             try:
                 from agent.persistence.db_writes import persist_trade_outcome_async

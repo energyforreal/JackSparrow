@@ -242,6 +242,9 @@ class IntelligentAgent:
         # Model discovery and initialization is handled by MCP orchestrator
         self.model_registry = self.mcp_orchestrator.model_registry
         self.state_machine.model_registry = self.model_registry
+        self.mcp_orchestrator.learning_system = self.learning_system
+        if self.mcp_orchestrator.reasoning_engine is not None:
+            self.mcp_orchestrator.reasoning_engine.learning_system = self.learning_system
         
         # Initialize all components with event handlers
         await self.state_machine.initialize()
@@ -353,6 +356,7 @@ class IntelligentAgent:
             risk_manager=self.risk_manager,
             delta_client=self.delta_client,
             execution_module=exec_module,
+            learning_system=self.learning_system,
         )
         await trading_handler.register_handlers()
         
