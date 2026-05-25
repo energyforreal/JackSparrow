@@ -19,7 +19,11 @@ The hardened training notebook exports the `FeatureEngineer` as a column contrac
 
 1. **`feature_engineer.pkl` only stores `self.columns`.** This is expected for hardened exports. `JackSparrowV43Node` registers the repository v43 feature matrix at import time, and the shim's `FeatureEngineer.transform` delegates to it. If an older artifact still pickles notebook-local closures, prefer re-exporting with the current notebook rather than relying on those closures.
 2. **scikit-learn version skew.** The artifact was trained on scikit-learn `1.6.1`; in newer environments the pickled `LGBMRegressor` calls the obsolete `check_array(force_all_finite=...)` kwarg (renamed `ensure_all_finite` in `1.8`). The shim degrades gracefully (skips the failing head, keeps `xgb`+`rf`), but for parity with training, pin `scikit-learn==1.6.*` in `requirements.txt` or retrain with current versions.
-3. **v43 predict context frames.** `JackSparrowV43Node` requires **`v43_df5m`** and **`v43_df_funding`** as non-empty `pandas.DataFrame` objects. **`v43_df15m`** and **`v43_df1h`** may be omitted or set to `None`; the node substitutes empty frames because `build_v43_feature_matrix` derives HTF columns from the 5m grid only.
+3. **v43 predict context frames.** `JackSparrowV43Node` requires **`v43_df5m`** and **`v43_df_funding`** as non-empty `pandas.DataFrame` objects. **`v43_df15m`** and **`v43_df1h`** may be omitted or set to `None`; the node substitutes empty frames because `build_v43_feature_matrix` derives HTF columns from the 5m grid only. **`v43_df_oi`** (expanded ticker ring buffer: OI + bid/ask + bands) and **`v43_df_mark`** (`MARK:BTCUSD` 5m) come from `fetch_v43_market_frames`; sparse/missing columns zero-fill until history accumulates.
+
+4. **Public ticker + products (read-only).** Ticker/OI and contract state use **`JACKSPARROW_V43_OI_PUBLIC_BASE_URL`** (default `https://api.india.delta.exchange`), separate from testnet trading REST. Disable ticker fetch with **`JACKSPARROW_V43_OI_ENABLED=false`**. Contract health gates use **`GET /v2/products/{symbol}`** (cached ~60s).
+
+5. **Feature contract v3.** New exports use 51 features (`jacksparrow_v43_features_v3`: OI + basis + microstructure). Legacy v2 (44) and v1 (40) bundles still load. Retrain with `MARK:BTCUSD` candles + real ticker/OI CSV before promoting a v3 bundle.
 
 ## Runtime smoke checklist
 

@@ -91,19 +91,63 @@ class FeatureEngineer(_StateDictMixin):
         df_15m: pd.DataFrame,
         df_1h: Optional[pd.DataFrame] = None,
         df_funding: Optional[pd.DataFrame] = None,
+        df_oi: Optional[pd.DataFrame] = None,
+        df_mark: Optional[pd.DataFrame] = None,
         include_target: bool = False,
     ) -> pd.DataFrame:
         # 1) Delegate to a callable stored on the instance (closures captured).
         for cand in ("_transform", "pipeline", "_pipeline", "transform_impl"):
             fn = getattr(self, cand, None)
             if callable(fn):
-                out = fn(df_5m, df_15m, df_1h, df_funding, include_target=include_target)
+                try:
+                    out = fn(
+                        df_5m,
+                        df_15m,
+                        df_1h,
+                        df_funding,
+                        df_oi=df_oi,
+                        df_mark=df_mark,
+                        include_target=include_target,
+                    )
+                except TypeError:
+                    try:
+                        out = fn(
+                            df_5m,
+                            df_15m,
+                            df_1h,
+                            df_funding,
+                            df_oi=df_oi,
+                            include_target=include_target,
+                        )
+                    except TypeError:
+                        out = fn(df_5m, df_15m, df_1h, df_funding, include_target=include_target)
                 if isinstance(out, pd.DataFrame):
                     return out
         # 2) Delegate to a registered ``build_feature_matrix`` function.
         bfm = _BUILD_FEATURE_MATRIX
         if callable(bfm):
-            out = bfm(df_5m, df_15m, df_1h, df_funding, for_training=include_target)
+            try:
+                out = bfm(
+                    df_5m,
+                    df_15m,
+                    df_1h,
+                    df_funding,
+                    df_oi=df_oi,
+                    df_mark=df_mark,
+                    for_training=include_target,
+                )
+            except TypeError:
+                try:
+                    out = bfm(
+                        df_5m,
+                        df_15m,
+                        df_1h,
+                        df_funding,
+                        df_oi=df_oi,
+                        for_training=include_target,
+                    )
+                except TypeError:
+                    out = bfm(df_5m, df_15m, df_1h, df_funding, for_training=include_target)
             if not isinstance(out, pd.DataFrame):
                 raise RuntimeError(
                     "v43 FeatureEngineer shim: registered build_feature_matrix "
@@ -136,9 +180,12 @@ _BUILD_FEATURE_MATRIX: Optional[Any] = None
 
 
 def set_v43_build_feature_matrix(fn: Any) -> None:
-    """Register a v43 ``build_feature_matrix(df_5m, df_15m, df_1h, df_funding,
-    for_training: bool)`` implementation. Required for ``fe.transform()`` to
-    work when the pickle did not capture its closure."""
+    """Register a v43 ``build_feature_matrix(...)`` implementation.
+
+    Signature: ``build_v43_feature_matrix(df_5m, df_15m, df_1h, df_funding,
+    df_oi=None, df_mark=None, for_training=False, ...)``. Required when the pickle did not
+    capture its closure.
+    """
     global _BUILD_FEATURE_MATRIX
     _BUILD_FEATURE_MATRIX = fn
 

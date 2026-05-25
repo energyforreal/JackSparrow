@@ -70,6 +70,8 @@ THESIS_TYPE_FORWARD_BARS: Dict[str, int] = {
     "mean_reversion": 2,
     "breakout": 12,
     "trend_continuation": 6,
+    "basis_crowding": 12,
+    "funding_crowding": 12,
     "flat": 6,
     "crisis_veto": 6,
 }

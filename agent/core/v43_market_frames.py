@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import structlog
 
+from agent.core.v43_oi_frames import fetch_oi_history
 from agent.data.candle_validation import dataframe_from_delta_candles, validate_candles
 from agent.core.config import settings
 
@@ -93,29 +94,47 @@ async def _fetch_funding_series(
     return pd.DataFrame()
 
 
+async def _fetch_oi_df(
+    delta_client: Any,
+    symbol: str,
+    n_bars: int,
+) -> pd.DataFrame:
+    """Fetch OI snapshot history for ``symbol``; returns empty DataFrame on failure."""
+    try:
+        return await fetch_oi_history(delta_client, symbol, n_snapshots=n_bars)
+    except Exception as e:
+        logger.warning("v43_oi_frames_fetch_failed", symbol=symbol, error=str(e))
+        return pd.DataFrame()
+
+
 async def fetch_v43_market_frames(
     delta_client: Any,
     symbol: str,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load 5m / 15m / 1h OHLCV and hourly funding-like series for ``fe.transform``.
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load 5m / 15m / 1h OHLCV, funding, ticker snapshots, and MARK candles for ``fe.transform``.
 
     Args:
         delta_client: ``DeltaExchangeClient`` with ``get_candles``.
         symbol: Underlying (e.g. ``BTCUSD``).
 
     Returns:
-        Tuple ``(df5m, df15m, df1h, df_funding)``. Funding uses ``FUNDING:{symbol}``
-        at ``1h`` when available; otherwise zeros aligned to ``df1h`` index.
+        Tuple ``(df5m, df15m, df1h, df_funding, df_oi, df_mark)``. Funding uses
+        ``FUNDING:{symbol}`` at ``1h`` when available. ``df_oi`` is the expanded ticker
+        ring buffer (OI + microstructure fields). ``df_mark`` is ``MARK:{symbol}`` 5m OHLCV.
     """
     n5 = int(getattr(settings, "jacksparrow_v43_candles_5m", 600) or 600)
     n15 = int(getattr(settings, "jacksparrow_v43_candles_15m", 400) or 400)
     n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 300) or 300)
+    n_oi = int(getattr(settings, "jacksparrow_v43_candles_oi", 300) or 300)
+    mark_symbol = f"MARK:{symbol}"
 
-    df5m, df15m, df1h, df_funding = await asyncio.gather(
+    df5m, df15m, df1h, df_funding, df_oi, df_mark = await asyncio.gather(
         _fetch_ohlcv_df(delta_client, symbol, "5m", 300, n5),
         _fetch_ohlcv_df(delta_client, symbol, "15m", 900, n15),
         _fetch_ohlcv_df(delta_client, symbol, "1h", 3600, n1h),
         _fetch_funding_series(delta_client, symbol, n1h),
+        _fetch_oi_df(delta_client, symbol, n_oi),
+        _fetch_ohlcv_df(delta_client, mark_symbol, "5m", 300, n5),
     )
 
     if df_funding.empty and not df1h.empty:
@@ -152,7 +171,7 @@ async def fetch_v43_market_frames(
                     error=str(e),
                 )
 
-    return df5m, df15m, df1h, df_funding
+    return df5m, df15m, df1h, df_funding, df_oi, df_mark
 
 
 def v43_frames_summary(dfs: Dict[str, pd.DataFrame]) -> Dict[str, int]:

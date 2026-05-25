@@ -753,6 +753,72 @@ class Settings(BaseSettings):
         ge=48,
         description="Number of 1h candles for v43 (OHLCV + funding alignment).",
     )
+    jacksparrow_v43_candles_oi: int = Field(
+        default=300,
+        env="JACKSPARROW_V43_CANDLES_OI",
+        ge=48,
+        description=(
+            "Max OI snapshots to request for v43 feature engineering (5m cadence). "
+            "Real-only: shorter frames are returned until the ring buffer fills."
+        ),
+    )
+    jacksparrow_v43_oi_enabled: bool = Field(
+        default=True,
+        env="JACKSPARROW_V43_OI_ENABLED",
+        description=(
+            "Enable OI feature fetching from Delta public ticker API. "
+            "When False, OI features are zero-filled."
+        ),
+    )
+    jacksparrow_v43_oi_fetch_timeout_s: float = Field(
+        default=4.0,
+        env="JACKSPARROW_V43_OI_FETCH_TIMEOUT_S",
+        ge=1.0,
+        le=15.0,
+        description="Per-request timeout for the OI public ticker fetch (seconds).",
+    )
+    jacksparrow_v43_oi_public_base_url: str = Field(
+        default="https://api.india.delta.exchange",
+        env="JACKSPARROW_V43_OI_PUBLIC_BASE_URL",
+        description=(
+            "Public REST base URL for OI ticker reads only (no auth). "
+            "May differ from DELTA_EXCHANGE_BASE_URL (testnet trading)."
+        ),
+    )
+    jacksparrow_v43_basis_zscore_window: int = Field(
+        default=48,
+        env="JACKSPARROW_V43_BASIS_ZSCORE_WINDOW",
+        ge=12,
+        le=200,
+        description="Rolling window (5m bars) for basis z-score feature.",
+    )
+    jacksparrow_v43_crowding_basis_threshold: float = Field(
+        default=2.0,
+        env="JACKSPARROW_V43_CROWDING_BASIS_THRESHOLD",
+        description="Absolute basis_zscore threshold for basis crowding thesis.",
+    )
+    jacksparrow_v43_crowding_oi_threshold: float = Field(
+        default=1.0,
+        env="JACKSPARROW_V43_CROWDING_OI_THRESHOLD",
+        description="Minimum oi_zscore for basis crowding thesis.",
+    )
+    jacksparrow_v43_crowding_funding_x_oi_threshold: float = Field(
+        default=1.5,
+        env="JACKSPARROW_V43_CROWDING_FUNDING_X_OI_THRESHOLD",
+        description="Absolute funding_x_oi threshold for funding crowding thesis.",
+    )
+    jacksparrow_v43_price_band_veto_pct: float = Field(
+        default=0.5,
+        env="JACKSPARROW_V43_PRICE_BAND_VETO_PCT",
+        description="Veto longs within this %% of upper band; shorts near lower band.",
+    )
+    jacksparrow_v43_contract_state_ttl_s: float = Field(
+        default=60.0,
+        env="JACKSPARROW_V43_CONTRACT_STATE_TTL_S",
+        ge=5.0,
+        le=600.0,
+        description="TTL for in-process contract state cache (seconds).",
+    )
     jacksparrow_v43_forward_target_bars: int = Field(
         default=6,
         env="JACKSPARROW_V43_FORWARD_TARGET_BARS",

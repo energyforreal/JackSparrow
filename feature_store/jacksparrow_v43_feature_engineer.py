@@ -38,6 +38,8 @@ class JackSparrowV43FeatureEngineer:
         df_15m: pd.DataFrame,
         df_1h: Optional[pd.DataFrame] = None,
         df_funding: Optional[pd.DataFrame] = None,
+        df_oi: Optional[pd.DataFrame] = None,
+        df_mark: Optional[pd.DataFrame] = None,
         include_target: bool = False,
     ) -> pd.DataFrame:
         """Return feature matrix aligned to ``df_5m`` rows.
@@ -51,6 +53,8 @@ class JackSparrowV43FeatureEngineer:
             df_15m,
             df_1h,
             df_funding,
+            df_oi=df_oi,
+            df_mark=df_mark,
             for_training=include_target,
             primary_interval="5m",
         )

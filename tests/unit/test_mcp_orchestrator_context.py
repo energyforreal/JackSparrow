@@ -30,7 +30,9 @@ os.environ.setdefault("DELTA_EXCHANGE_API_KEY", "test-key")
 os.environ.setdefault("DELTA_EXCHANGE_API_SECRET", "test-secret")
 
 from agent.core.mcp_orchestrator import MCPOrchestrator
+from agent.core.v43_contract_state import ContractStateSnapshot
 from agent.models.mcp_model_node import MCPModelPrediction
+from feature_store.jacksparrow_v43_contract import V43_LEGACY_CANONICAL_FEATURES
 
 
 @pytest.mark.asyncio
@@ -50,8 +52,34 @@ async def test_process_prediction_request_preserves_model_context():
         feature_importance={},
         computation_time_ms=12.5,
         health_status="healthy",
-        context={"entry_signal": 0.4, "exit_signal": -0.6},
+        context={
+            "entry_signal": 0.4,
+            "exit_signal": -0.6,
+            "multi_horizon_heads": {
+                "intraday_30m": {
+                    "horizon_key": "intraday_30m",
+                    "forward_bars": 6,
+                    "expected_return": 0.012,
+                    "threshold": 0.005,
+                    "short_threshold": 0.005,
+                    "regime": "neutral",
+                },
+            },
+            "closed_bar_features": {"ret_1": 0.001, "atr_pct": 0.01},
+        },
     )
+    bundle_meta = {
+        "model_family": "jacksparrow_v43_multihead",
+        "features": list(V43_LEGACY_CANONICAL_FEATURES),
+        "compatible_feature_version": "jacksparrow_v43_features_v1",
+        "horizons": {
+            "scalp_10m": {"forward_bars": 2, "validation_metrics": {"dynamic_threshold": 0.004}},
+            "intraday_30m": {"forward_bars": 6, "validation_metrics": {"dynamic_threshold": 0.005}},
+            "trend_1h": {"forward_bars": 12, "validation_metrics": {"dynamic_threshold": 0.006}},
+            "swing_2h": {"forward_bars": 24, "validation_metrics": {"dynamic_threshold": 0.007}},
+        },
+    }
+    mock_model = SimpleNamespace(_bundle_metadata=bundle_meta)
     model_response = SimpleNamespace(
         predictions=[prediction],
         consensus_prediction=0.4,
@@ -62,7 +90,8 @@ async def test_process_prediction_request_preserves_model_context():
     orchestrator.model_registry = SimpleNamespace(
         get_required_feature_names=lambda: ["ema_9"],
         get_predictions=AsyncMock(return_value=model_response),
-        models={"jacksparrow_BTCUSD_15m": object()},
+        get_model=lambda _name: mock_model,
+        models={"jacksparrow_BTCUSD_15m": mock_model},
     )
 
     reasoning_chain = SimpleNamespace(
@@ -75,11 +104,31 @@ async def test_process_prediction_request_preserves_model_context():
         generate_reasoning=AsyncMock(return_value=reasoning_chain)
     )
 
-    df_stub = pd.DataFrame({"close": [1.0, 2.0, 3.0]})
+    df_stub = pd.DataFrame(
+        {
+            "close": [1.0, 2.0, 3.0],
+            "timestamp": pd.date_range("2024-01-01", periods=3, freq="5min", tz="UTC"),
+        }
+    )
+    contract_snap = ContractStateSnapshot(
+        symbol="BTCUSD",
+        state="live",
+        trading_status="operational",
+        only_reduce_only_orders_allowed=False,
+        maintenance_margin=0.25,
+        initial_margin=0.5,
+        max_leverage_notional=100000.0,
+        impact_size=10000.0,
+        price_band_pct=2.5,
+    )
     with patch(
         "agent.core.v43_market_frames.fetch_v43_market_frames",
         new_callable=AsyncMock,
-        return_value=(df_stub, df_stub, df_stub, df_stub),
+        return_value=(df_stub, df_stub, df_stub, df_stub, pd.DataFrame(), pd.DataFrame()),
+    ), patch(
+        "agent.core.v43_contract_state.get_contract_state",
+        new_callable=AsyncMock,
+        return_value=contract_snap,
     ):
         result = await orchestrator.process_prediction_request("BTCUSD", {})
 

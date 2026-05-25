@@ -5,61 +5,61 @@
  * backend API responses match expected types before being used in the frontend.
  */
 
-import { z, ZodSchema, ZodError } from 'zod'
+import { z, type ZodType, type ZodError } from 'zod'
 
-// Shared schemas
-const DecimalSchema = z.number({ description: 'Decimal value serialized as float' });
+// Shared schemas (Zod 4: use .describe() — do not pass { description } as a 2nd ctor arg to z.record/z.array)
+const DecimalSchema = z.number().describe('Decimal value serialized as float')
 const DateSchema = z
-  .union([z.string().datetime(), z.date()], { description: 'ISO 8601 datetime string' });
-const SignalTypeSchema = z.enum(['STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL'], {
-  description: 'Trading signal type',
-});
-const PositionStatusSchema = z.enum(['OPEN', 'CLOSED', 'LIQUIDATED'], {
-  description: 'Position status',
-});
-const TradeStatusSchema = z.enum(['EXECUTED', 'PENDING', 'FAILED'], {
-  description: 'Trade status',
-});
-const SideSchema = z.enum(['BUY', 'SELL', 'LONG', 'SHORT'], {
-  description: 'Trading side',
-});
+  .union([z.string().datetime(), z.date()])
+  .describe('ISO 8601 datetime string')
+const SignalTypeSchema = z
+  .enum(['STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL'])
+  .describe('Trading signal type')
+const PositionStatusSchema = z
+  .enum(['OPEN', 'CLOSED', 'LIQUIDATED'])
+  .describe('Position status')
+const TradeStatusSchema = z
+  .enum(['EXECUTED', 'PENDING', 'FAILED'])
+  .describe('Trade status')
+const SideSchema = z.enum(['BUY', 'SELL', 'LONG', 'SHORT']).describe('Trading side')
 
 // Service status
-export const HealthServiceStatusSchema = z.object(
-  {
-    status: z.string({ description: 'Service status (up/down/degraded)' }),
-    latency_ms: z.number({ description: 'Service latency in milliseconds' }).optional(),
-    error: z.string({ description: 'Error message if service is down' }).optional(),
-    details: z.record(z.unknown(), {
-      description: 'Additional service details',
-    }).optional(),
-  },
-  { description: 'Health service status' },
-);
+export const HealthServiceStatusSchema = z
+  .object({
+    status: z.string().describe('Service status (up/down/degraded)'),
+    latency_ms: z.number().describe('Service latency in milliseconds').optional(),
+    error: z.string().describe('Error message if service is down').optional(),
+    details: z
+      .record(z.string(), z.unknown())
+      .describe('Additional service details')
+      .optional(),
+  })
+  .describe('Health service status')
 
 // Health response
-export const HealthResponseSchema = z.object(
-  {
-    status: z.string({ description: 'Overall system status' }),
+export const HealthResponseSchema = z
+  .object({
+    status: z.string().describe('Overall system status'),
     health_score: z
-      .number({ description: 'Health score (0.0 to 1.0)' })
+      .number()
       .min(0)
-      .max(1),
-    services: z.record(HealthServiceStatusSchema, {
-      description: 'Status of individual services',
-    }),
-    agent_state: z.string({ description: 'Current agent state' }).optional(),
+      .max(1)
+      .describe('Health score (0.0 to 1.0)'),
+    services: z
+      .record(z.string(), HealthServiceStatusSchema)
+      .describe('Status of individual services'),
+    agent_state: z.string().describe('Current agent state').optional(),
     degradation_reasons: z
-      .array(z.string(), { description: 'Reasons for degraded status' })
+      .array(z.string())
+      .describe('Reasons for degraded status')
       .default([]),
     trading_ready: z.boolean().optional(),
     trading_mode: z.string().optional(),
     delta_environment: z.string().optional(),
-    ml_models: z.record(z.unknown()).optional(),
+    ml_models: z.record(z.string(), z.unknown()).optional(),
     timestamp: DateSchema,
-  },
-  { description: 'Health response' },
-);
+  })
+  .describe('Health response')
 
 // Model prediction
 export const ModelPredictionSchema = z.object({
@@ -123,7 +123,7 @@ export const AgentIntrospectionSnapshotSchema = z.object({
   portfolio_guard_reason_codes: z.array(z.string()).default([]),
   memory_enabled: z.boolean(),
   memory_context_count: z.number(),
-  limits: z.record(z.unknown()).optional(),
+  limits: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const ReflectionSnapshotSchema = z.object({
@@ -145,40 +145,40 @@ export const ReflectionSnapshotSchema = z.object({
 });
 
 // Predict response
-export const PredictResponseSchema = z.object(
-  {
-    signal: z.string({ description: 'Trading signal' }),
+export const PredictResponseSchema = z
+  .object({
+    signal: z.string().describe('Trading signal'),
     confidence: z
-      .number({ description: 'Confidence score (0.0 to 1.0)' })
+      .number()
       .min(0)
-      .max(1),
+      .max(1)
+      .describe('Confidence score (0.0 to 1.0)'),
     position_size: DecimalSchema.optional(),
     reasoning_chain: ReasoningChainSchema,
     model_predictions: z
-      .array(ModelPredictionSchema, { description: 'Individual model predictions' }),
+      .array(ModelPredictionSchema)
+      .describe('Individual model predictions'),
     model_consensus: z
-      .array(ModelConsensusEntrySchema, {
-        description: 'Per-model consensus-style signals used in the frontend',
-      })
+      .array(ModelConsensusEntrySchema)
+      .describe('Per-model consensus-style signals used in the frontend')
       .default([]),
     individual_model_reasoning: z
-      .array(ModelReasoningEntrySchema, {
-        description: 'Per-model natural language reasoning summaries',
-      })
+      .array(ModelReasoningEntrySchema)
+      .describe('Per-model natural language reasoning summaries')
       .default([]),
     market_context: z
-      .record(z.unknown(), { description: 'Market context used' })
+      .record(z.string(), z.unknown())
+      .describe('Market context used')
       .default({}),
     timestamp: DateSchema,
     agent_introspection: AgentIntrospectionSnapshotSchema.optional(),
-    policy_verdict: z.record(z.unknown()).optional(),
+    policy_verdict: z.record(z.string(), z.unknown()).optional(),
     trade_score: z.number().optional(),
-    ml_evidence_snapshot: z.record(z.unknown()).optional(),
+    ml_evidence_snapshot: z.record(z.string(), z.unknown()).optional(),
     memory_context_id: z.string().optional(),
     reflection_snapshot: ReflectionSnapshotSchema.optional(),
-  },
-  { description: 'Predict response' },
-);
+  })
+  .describe('Predict response')
 
 // Trade response
 export const TradeResponseSchema = z.object({
@@ -241,17 +241,17 @@ export const PortfolioSummaryResponseSchema = z.object({
 });
 
 // Market data response
-export const MarketDataResponseSchema = z.object(
-  {
-    symbol: z.string({ description: 'Trading symbol' }),
-    interval: z.string({ description: 'Time interval' }),
+export const MarketDataResponseSchema = z
+  .object({
+    symbol: z.string().describe('Trading symbol'),
+    interval: z.string().describe('Time interval'),
     candles: z
-      .array(z.record(z.unknown()), { description: 'OHLCV candle data' }),
+      .array(z.record(z.string(), z.unknown()))
+      .describe('OHLCV candle data'),
     latest_price: DecimalSchema,
     timestamp: DateSchema,
-  },
-  { description: 'Market data response' },
-);
+  })
+  .describe('Market data response')
 
 // Agent status response
 export const AgentStatusResponseSchema = z.object({
@@ -383,7 +383,7 @@ export type WebSocketMessage = z.infer<typeof WebSocketMessageSchema>;
  */
 export function validateResponse<T>(
   data: unknown,
-  schema: ZodSchema<T>,
+  schema: ZodType<T>,
   context: string = 'API response'
 ): T | null {
   try {

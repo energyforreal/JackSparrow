@@ -2,9 +2,9 @@
   "version": "v43",
   "model_family": "jacksparrow_v43_multihead",
   "artifact_format": "jacksparrow_v43_multihead_v1",
-  "compatible_feature_version": "jacksparrow_v43_features_v1",
+  "compatible_feature_version": "jacksparrow_v43_features_v2",
   "model_name": "jacksparrow_v43_BTCUSD",
-  "feature_count": 40,
+  "feature_count": 44,
   "features": [
     "ret_1", "ret_6", "ret_24", "mom_accel", "ema_21_50_cross", "price_ema21",
     "price_ema100", "rsi_14", "rsi_mom", "macd_hist_n", "bb_width", "bb_pos",
@@ -12,7 +12,8 @@
     "cmf_20", "session_vwap_dev", "body", "body_dir", "wick_asym", "sr_compression",
     "hour_sin", "hour_cos", "hurst_60", "trend_mom", "trend_conf", "funding_zscore",
     "funding_mom", "h_ret_1", "h_trend", "h_trend_200", "h_rsi_14", "h1_trend",
-    "h1_rsi_14", "h1_adx", "h1_vol_regime", "bull_bar"
+    "h1_rsi_14", "h1_adx", "h1_vol_regime", "bull_bar",
+    "oi_zscore", "oi_change_6", "oi_price_divergence", "oi_acceleration"
   ],
   "primary_execution_horizon_bars": 6,
   "horizons": {

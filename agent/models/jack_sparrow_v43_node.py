@@ -580,6 +580,8 @@ class JackSparrowV43Node(MCPModelNode):
         df15 = _ctx_dataframe(ctx, "v43_df15m", "df15m")
         df1h = _ctx_dataframe(ctx, "v43_df1h", "df1h")
         df_fund = _ctx_dataframe(ctx, "v43_df_funding", "df_funding")
+        df_oi = _ctx_dataframe(ctx, "v43_df_oi", "df_oi")
+        df_mark = _ctx_dataframe(ctx, "v43_df_mark", "df_mark")
         if not isinstance(df5, pd.DataFrame):
             raise ValueError("v43 predict requires v43_df5m as pd.DataFrame")
         if not isinstance(df_fund, pd.DataFrame):
@@ -600,6 +602,8 @@ class JackSparrowV43Node(MCPModelNode):
             df15,
             df1h,
             df_fund,
+            df_oi=df_oi,
+            df_mark=df_mark,
             include_target=False,
         )
         if df_feat is None or len(df_feat) < 2:

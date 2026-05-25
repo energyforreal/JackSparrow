@@ -26,10 +26,10 @@ _DEFAULT_POSITION_SIZE = 0.05
 # Regime -> which thesis rule families may run
 _REGIME_ALLOWED_RULES: Dict[str, Set[str]] = {
     "crisis": set(),
-    "trending": {"trend_continuation"},
-    "neutral": {"breakout", "trend_continuation"},
+    "trending": {"trend_continuation", "basis_crowding", "funding_crowding"},
+    "neutral": {"breakout", "trend_continuation", "basis_crowding", "funding_crowding"},
     "ranging": {"mean_reversion"},
-    "unknown": {"breakout", "trend_continuation"},
+    "unknown": {"breakout", "trend_continuation", "basis_crowding", "funding_crowding"},
 }
 
 _last_thesis_snapshot: Dict[str, Any] = {}
@@ -89,6 +89,20 @@ class AgentThesisEngine:
         features = mc.get("features") if isinstance(mc.get("features"), dict) else {}
         reg = _normalize_regime(regime or mc.get("v43_regime") or mc.get("regime"))
         allowed = _allowed_rules_for_regime(reg)
+
+        if bool(mc.get("market_health_hold")):
+            verdict = ThesisVerdict(
+                signal="HOLD",
+                confidence=0.0,
+                position_size=0.0,
+                reason_codes=[
+                    "thesis_market_health_veto",
+                    str(mc.get("market_health_reason") or "non_operational"),
+                ],
+                thesis_type="flat",
+            )
+            _store_snapshot(reg, allowed, verdict)
+            return verdict
 
         if bool(mc.get("has_open_position", False)):
             verdict = ThesisVerdict(
@@ -194,6 +208,7 @@ class AgentThesisEngine:
             pos_size=pos_size,
             regime=reg,
         )
+        verdict = self._apply_price_band_veto(verdict, mc)
         _store_snapshot(reg, allowed, verdict)
         return verdict
 
@@ -238,6 +253,16 @@ class AgentThesisEngine:
                 if mrs is not None:
                     candidates.append(mrs)
 
+        if "basis_crowding" in allowed:
+            bc = self._eval_basis_crowding(features, short_enabled=short_enabled)
+            if bc is not None:
+                candidates.append(bc)
+
+        if "funding_crowding" in allowed:
+            fc = self._eval_funding_crowding(features, short_enabled=short_enabled)
+            if fc is not None:
+                candidates.append(fc)
+
         return candidates
 
     @staticmethod
@@ -281,6 +306,119 @@ class AgentThesisEngine:
         best.intended_horizon_bars = h_bars
         best.horizon_minutes = forward_bars_to_minutes(h_bars)
         return best
+
+    @staticmethod
+    def _apply_price_band_veto(
+        verdict: ThesisVerdict,
+        market_context: Dict[str, Any],
+    ) -> ThesisVerdict:
+        """Downgrade entry signals near exchange price-band limits."""
+        sig = str(verdict.signal or "HOLD").upper()
+        if sig not in _ENTRY_SIGNALS:
+            return verdict
+        prox = market_context.get("price_band_proximity")
+        if not isinstance(prox, dict):
+            return verdict
+        veto_pct = float(
+            getattr(settings, "jacksparrow_v43_price_band_veto_pct", 0.5) or 0.5
+        )
+        dist_upper = float(prox.get("dist_upper_pct") or 999.0)
+        dist_lower = float(prox.get("dist_lower_pct") or 999.0)
+        if sig in ("BUY", "STRONG_BUY") and dist_upper < veto_pct:
+            return ThesisVerdict(
+                signal="HOLD",
+                confidence=0.0,
+                position_size=0.0,
+                reason_codes=[
+                    "thesis_price_band_upper_veto",
+                    f"dist_upper_pct={dist_upper:.3f}",
+                ],
+                thesis_type="flat",
+            )
+        if sig in ("SELL", "STRONG_SELL") and dist_lower < veto_pct:
+            return ThesisVerdict(
+                signal="HOLD",
+                confidence=0.0,
+                position_size=0.0,
+                reason_codes=[
+                    "thesis_price_band_lower_veto",
+                    f"dist_lower_pct={dist_lower:.3f}",
+                ],
+                thesis_type="flat",
+            )
+        return verdict
+
+    def _eval_basis_crowding(
+        self,
+        features: Dict[str, Any],
+        *,
+        short_enabled: bool,
+    ) -> Optional[ThesisVerdict]:
+        basis_z = _feat(features, "basis_zscore")
+        oi_z = _feat(features, "oi_zscore")
+        basis_thr = float(
+            getattr(settings, "jacksparrow_v43_crowding_basis_threshold", 2.0) or 2.0
+        )
+        oi_thr = float(getattr(settings, "jacksparrow_v43_crowding_oi_threshold", 1.0) or 1.0)
+        if oi_z <= oi_thr:
+            return None
+        if basis_z > basis_thr:
+            if not short_enabled:
+                return None
+            conf = min(0.88, 0.6 + 0.05 * min(basis_z - basis_thr, 4.0))
+            return ThesisVerdict(
+                signal="SELL",
+                confidence=conf,
+                position_size=0.0,
+                reason_codes=[
+                    "thesis_basis_crowding_short",
+                    f"basis_zscore={basis_z:.2f}",
+                    f"oi_zscore={oi_z:.2f}",
+                ],
+                thesis_type="basis_crowding",
+            )
+        if basis_z < -basis_thr:
+            conf = min(0.88, 0.6 + 0.05 * min(-basis_z - basis_thr, 4.0))
+            return ThesisVerdict(
+                signal="BUY",
+                confidence=conf,
+                position_size=0.0,
+                reason_codes=[
+                    "thesis_basis_crowding_long",
+                    f"basis_zscore={basis_z:.2f}",
+                    f"oi_zscore={oi_z:.2f}",
+                ],
+                thesis_type="basis_crowding",
+            )
+        return None
+
+    def _eval_funding_crowding(
+        self,
+        features: Dict[str, Any],
+        *,
+        short_enabled: bool,
+    ) -> Optional[ThesisVerdict]:
+        fxoi = _feat(features, "funding_x_oi")
+        thr = float(getattr(settings, "jacksparrow_v43_crowding_funding_x_oi_threshold", 1.5) or 1.5)
+        if abs(fxoi) <= thr:
+            return None
+        if fxoi > thr:
+            if not short_enabled:
+                return None
+            return ThesisVerdict(
+                signal="SELL",
+                confidence=min(0.85, 0.62 + 0.03 * min(fxoi - thr, 5.0)),
+                position_size=0.0,
+                reason_codes=["thesis_funding_crowding_short", f"funding_x_oi={fxoi:.2f}"],
+                thesis_type="funding_crowding",
+            )
+        return ThesisVerdict(
+            signal="BUY",
+            confidence=min(0.85, 0.62 + 0.03 * min(-fxoi - thr, 5.0)),
+            position_size=0.0,
+            reason_codes=["thesis_funding_crowding_long", f"funding_x_oi={fxoi:.2f}"],
+            thesis_type="funding_crowding",
+        )
 
     def _eval_breakout_long(
         self, features: Dict[str, Any], regime: str

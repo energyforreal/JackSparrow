@@ -23,7 +23,9 @@ from feature_store.jacksparrow_v43_multihead import (
 )
 
 # Bump when ``V43_CANONICAL_FEATURES`` or semantics change (retrain + re-export metadata).
-V43_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v1"
+V43_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v3"
+V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v2"
+V43_LEGACY_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v1"
 
 # Forward return label in training: close[t+h]/close[t] - 1 on 5m bars (new exports).
 V43_FORWARD_TARGET_BARS = V43_FORWARD_TARGET_BARS_DEFAULT
@@ -70,9 +72,70 @@ V43_CANONICAL_FEATURES: tuple[str, ...] = (
     "h1_adx",
     "h1_vol_regime",
     "bull_bar",
+    "oi_zscore",
+    "oi_change_6",
+    "oi_price_divergence",
+    "oi_acceleration",
+    "basis",
+    "basis_zscore",
+    "basis_momentum",
+    "bid_ask_imbalance",
+    "spread_bps",
+    "funding_x_oi",
+    "funding_predicted_zscore",
 )
 
 V43_EXPECTED_FEATURE_COUNT = len(V43_CANONICAL_FEATURES)
+
+# v2 contract (44 features, OI only) — bundles trained before derivatives v3 upgrade.
+_V3_ONLY_FEATURES: tuple[str, ...] = (
+    "basis",
+    "basis_zscore",
+    "basis_momentum",
+    "bid_ask_imbalance",
+    "spread_bps",
+    "funding_x_oi",
+    "funding_predicted_zscore",
+)
+V43_LEGACY_V2_CANONICAL_FEATURES: tuple[str, ...] = tuple(
+    f for f in V43_CANONICAL_FEATURES if f not in _V3_ONLY_FEATURES
+)
+V43_LEGACY_V2_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_V2_CANONICAL_FEATURES)
+
+# Pre-OI contract (40 features) — existing bundles load until re-exported with v2.
+V43_LEGACY_CANONICAL_FEATURES: tuple[str, ...] = tuple(
+    f for f in V43_LEGACY_V2_CANONICAL_FEATURES if not f.startswith("oi_")
+)
+V43_LEGACY_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_CANONICAL_FEATURES)
+
+_SUPPORTED_FEATURE_CONTRACTS: dict[str, tuple[str, ...]] = {
+    V43_COMPATIBLE_FEATURE_VERSION: V43_CANONICAL_FEATURES,
+    V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_V2_CANONICAL_FEATURES,
+    V43_LEGACY_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_CANONICAL_FEATURES,
+}
+
+
+def resolve_v43_feature_contract(
+    meta: Mapping[str, Any],
+) -> tuple[str, tuple[str, ...]]:
+    """Return ``(compatible_feature_version, feature_tuple)`` for a metadata dict."""
+    ver = str(meta.get("compatible_feature_version") or "").strip()
+    feats = meta.get("features")
+    ordered = tuple(str(x) for x in feats) if isinstance(feats, list) else ()
+    if ordered == V43_CANONICAL_FEATURES:
+        return V43_COMPATIBLE_FEATURE_VERSION, V43_CANONICAL_FEATURES
+    if ordered == V43_LEGACY_V2_CANONICAL_FEATURES:
+        return V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION, V43_LEGACY_V2_CANONICAL_FEATURES
+    if ordered == V43_LEGACY_CANONICAL_FEATURES:
+        return V43_LEGACY_COMPATIBLE_FEATURE_VERSION, V43_LEGACY_CANONICAL_FEATURES
+    if ver in _SUPPORTED_FEATURE_CONTRACTS and ordered == _SUPPORTED_FEATURE_CONTRACTS[ver]:
+        return ver, ordered
+    raise ValueError(
+        "v43 metadata features[] does not match a supported feature contract "
+        f"(expected v1={V43_LEGACY_EXPECTED_FEATURE_COUNT}, "
+        f"v2={V43_LEGACY_V2_EXPECTED_FEATURE_COUNT}, or "
+        f"v3={V43_EXPECTED_FEATURE_COUNT} features)"
+    )
 
 
 def validate_v43_metadata_compatibility(meta: Mapping[str, Any]) -> None:
@@ -87,19 +150,15 @@ def validate_v43_metadata_compatibility(meta: Mapping[str, Any]) -> None:
     feats = meta.get("features")
     if not isinstance(feats, list) or not feats:
         raise ValueError("v43 metadata missing non-empty features list")
-    ordered = tuple(str(x) for x in feats)
-    if ordered != V43_CANONICAL_FEATURES:
-        raise ValueError(
-            "v43 metadata features[] does not match V43_CANONICAL_FEATURES "
-            "(train-serve order-sensitive contract)"
-        )
-    ver = meta.get("compatible_feature_version")
-    if ver is not None and isinstance(ver, str) and ver.strip():
-        if str(ver).strip() != V43_COMPATIBLE_FEATURE_VERSION:
+    ver, ordered = resolve_v43_feature_contract(meta)
+    meta_ver = meta.get("compatible_feature_version")
+    if meta_ver is not None and isinstance(meta_ver, str) and meta_ver.strip():
+        if str(meta_ver).strip() != ver:
             raise ValueError(
-                f"v43 metadata compatible_feature_version={ver!r} incompatible with "
-                f"agent {V43_COMPATIBLE_FEATURE_VERSION!r}; re-export metadata or align contract"
+                f"v43 metadata compatible_feature_version={meta_ver!r} incompatible with "
+                f"resolved contract {ver!r}; re-export metadata or align contract"
             )
+    _ = ordered
     family = str(meta.get("model_family") or "").strip()
     if family == V43_MULTIHEAD_MODEL_FAMILY or isinstance(meta.get("horizons"), dict):
         validate_v43_multihead_metadata(meta)

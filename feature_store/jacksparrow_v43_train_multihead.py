@@ -264,6 +264,74 @@ def _horizon_meta_classifier_params(forward_bars: int, rng: int) -> Dict[str, An
     }
 
 
+def _validation_metrics_from_predictions(
+    ensemble: EnsembleModel,
+    lgbm_model: LGBMModel,
+    *,
+    val_pred: np.ndarray,
+    y_va: np.ndarray,
+    round_trip_cost: float,
+    inference_path: str,
+    label_mode: str,
+    tradable_frac: float,
+    threshold_source: str,
+    meta_auc: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Shared thresholding + validation metrics for meta or regressor-mean stacks."""
+    dt_long = max(float(np.nanpercentile(val_pred, 75)), 1e-6)
+    dt_short = min(float(np.nanpercentile(val_pred, 25)), -1e-6)
+    dt_short_mag = abs(dt_short)
+    ensemble.threshold = dt_long
+    ensemble.dynamic_threshold = dt_long
+    ensemble.short_threshold = dt_short_mag
+    lgbm_model.dynamic_threshold = dt_long
+    lgbm_model.short_threshold = dt_short_mag
+    lgbm_model.regime_thresholds = {
+        "neutral": dt_long,
+        "ranging": dt_long,
+        "trending": dt_long,
+        "crisis": dt_long,
+    }
+
+    directional_mask = y_va != 0
+    long_cand = val_pred > dt_long
+    short_cand = val_pred < dt_short
+    long_net = y_va - round_trip_cost
+    short_gross = -y_va
+    short_net = short_gross - round_trip_cost
+
+    vm: Dict[str, Any] = {
+        "model_family": "jacksparrow_v43_regression",
+        "target": "cost_aware_forward_return",
+        "label_mode": label_mode,
+        "round_trip_cost_pct": float(round_trip_cost),
+        "tradable_label_fraction": tradable_frac,
+        "inference_path": inference_path,
+        "threshold_source": threshold_source,
+        "threshold_percentile": 75.0,
+        "short_threshold_percentile": 25.0,
+        "dynamic_threshold": dt_long,
+        "short_threshold": dt_short_mag,
+        "validation_rmse": float(np.sqrt(np.mean((val_pred - y_va) ** 2))),
+        "validation_mae": float(np.mean(np.abs(val_pred - y_va))),
+        "validation_corr": _safe_corr(val_pred, y_va),
+        "directional_accuracy": float(
+            np.mean(np.sign(val_pred[directional_mask]) == np.sign(y_va[directional_mask]))
+        )
+        if np.any(directional_mask)
+        else None,
+        "prediction_mean": float(np.mean(val_pred)),
+        "prediction_std": float(np.std(val_pred)),
+        "target_mean": float(np.mean(y_va)),
+        "target_std": float(np.std(y_va)),
+        "long_candidates": _candidate_stats(long_cand, y_va, long_net, len(y_va)),
+        "short_candidates": _candidate_stats(short_cand, short_gross, short_net, len(y_va)),
+    }
+    if meta_auc is not None:
+        vm["meta_auc"] = meta_auc
+    return vm
+
+
 def train_horizon_ensemble(
     X_train: pd.DataFrame,
     y_train: pd.Series,
@@ -273,8 +341,9 @@ def train_horizon_ensemble(
     rng: int = 42,
     round_trip_cost: float = 0.0016,
     forward_bars: int = 6,
+    use_meta_stack: bool = True,
 ) -> Tuple[EnsembleModel, Dict[str, Any]]:
-    """Train one meta-stack ensemble for a single horizon (Pattern 3)."""
+    """Train one horizon ensemble (LGBM + XGB + RF); optional meta-classifier stack."""
     feat_cols = list(X_train.columns)
     y_tr = y_train.values.astype(np.float64)
     y_va = y_val.values.astype(np.float64)
@@ -347,6 +416,33 @@ def train_horizon_ensemble(
     ensemble.feature_cols = feat_cols
     ensemble._is_fitted = True
 
+    _, trad_va = _tradable_meta_labels(y_va, round_trip_cost)
+    tradable_frac = float(np.mean(trad_va)) if trad_va.size else 0.0
+
+    if not use_meta_stack:
+        ensemble.meta = None
+        ensemble.calibrator = None
+        val_pred = np.asarray(
+            ensemble.predict(
+                X_val.values,
+                X_df=X_val,
+                inference_stack="regressor_mean",
+            ),
+            dtype=np.float64,
+        ).ravel()
+        validation_metrics = _validation_metrics_from_predictions(
+            ensemble,
+            lgbm_model,
+            val_pred=val_pred,
+            y_va=y_va,
+            round_trip_cost=round_trip_cost,
+            inference_path="regressor_mean",
+            label_mode="regressor_mean_stack",
+            tradable_frac=tradable_frac,
+            threshold_source="validation_regressor_mean_percentile",
+        )
+        return ensemble, validation_metrics
+
     X_stack_train = ensemble._base_predictions(X_train.values)
     X_stack_val = ensemble._base_predictions(X_val.values)
     y_meta_tr, trad_tr = _tradable_meta_labels(y_tr, round_trip_cost)
@@ -392,27 +488,6 @@ def train_horizon_ensemble(
     val_pred = np.asarray(
         ensemble.predict(X_val.values, X_df=X_val), dtype=np.float64
     ).ravel()
-    dt_long = max(float(np.nanpercentile(val_pred, 75)), 1e-6)
-    dt_short = min(float(np.nanpercentile(val_pred, 25)), -1e-6)
-    dt_short_mag = abs(dt_short)
-    ensemble.threshold = dt_long
-    ensemble.dynamic_threshold = dt_long
-    ensemble.short_threshold = dt_short_mag
-    lgbm_model.dynamic_threshold = dt_long
-    lgbm_model.short_threshold = dt_short_mag
-    lgbm_model.regime_thresholds = {
-        "neutral": dt_long,
-        "ranging": dt_long,
-        "trending": dt_long,
-        "crisis": dt_long,
-    }
-
-    directional_mask = y_va != 0
-    long_cand = val_pred > dt_long
-    short_cand = val_pred < dt_short
-    long_net = y_va - round_trip_cost
-    short_gross = -y_va
-    short_net = short_gross - round_trip_cost
 
     try:
         from sklearn.metrics import roc_auc_score
@@ -424,36 +499,18 @@ def train_horizon_ensemble(
     except Exception:
         meta_auc = 0.5
 
-    tradable_frac = float(np.mean(trad_va)) if trad_va.size else 0.0
-
-    validation_metrics = {
-        "model_family": "jacksparrow_v43_regression",
-        "target": "cost_aware_forward_return",
-        "label_mode": label_mode,
-        "round_trip_cost_pct": float(round_trip_cost),
-        "tradable_label_fraction": tradable_frac,
-        "inference_path": "meta_calibrator",
-        "threshold_source": "validation_meta_prediction_percentile",
-        "threshold_percentile": 75.0,
-        "short_threshold_percentile": 25.0,
-        "dynamic_threshold": dt_long,
-        "short_threshold": dt_short_mag,
-        "validation_rmse": float(np.sqrt(np.mean((val_pred - y_va) ** 2))),
-        "validation_mae": float(np.mean(np.abs(val_pred - y_va))),
-        "validation_corr": _safe_corr(val_pred, y_va),
-        "directional_accuracy": float(
-            np.mean(np.sign(val_pred[directional_mask]) == np.sign(y_va[directional_mask]))
-        )
-        if np.any(directional_mask)
-        else None,
-        "meta_auc": meta_auc,
-        "prediction_mean": float(np.mean(val_pred)),
-        "prediction_std": float(np.std(val_pred)),
-        "target_mean": float(np.mean(y_va)),
-        "target_std": float(np.std(y_va)),
-        "long_candidates": _candidate_stats(long_cand, y_va, long_net, len(y_va)),
-        "short_candidates": _candidate_stats(short_cand, short_gross, short_net, len(y_va)),
-    }
+    validation_metrics = _validation_metrics_from_predictions(
+        ensemble,
+        lgbm_model,
+        val_pred=val_pred,
+        y_va=y_va,
+        round_trip_cost=round_trip_cost,
+        inference_path="meta_calibrator",
+        label_mode=label_mode,
+        tradable_frac=tradable_frac,
+        threshold_source="validation_meta_prediction_percentile",
+        meta_auc=meta_auc,
+    )
 
     return ensemble, validation_metrics
 
@@ -469,8 +526,13 @@ def train_multihead_from_feature_matrix(
     slippage: float = 0.0003,
     leverage: int = 3,
     cost_aware_labels: bool = True,
+    use_meta_stack: bool = True,
 ) -> Tuple[MultiHeadBundle, Dict[str, Any]]:
-    """Train all horizon heads on shared features."""
+    """Train all horizon heads on shared features.
+
+    When ``use_meta_stack`` is False, each head uses the mean of base regressors only
+    (``inference_path=regressor_mean``) with no LGBMClassifier meta-learner or Ridge calibrator.
+    """
     cols = feat_cols or list(V43_CANONICAL_FEATURES)
     missing = [c for c in cols if c not in df_feat.columns]
     if missing:
@@ -535,6 +597,7 @@ def train_multihead_from_feature_matrix(
             rng=rng + fb,
             round_trip_cost=round_trip_cost,
             forward_bars=fb,
+            use_meta_stack=use_meta_stack,
         )
         bundle.set_head(fb, ensemble)
 

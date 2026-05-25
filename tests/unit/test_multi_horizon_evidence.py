@@ -15,7 +15,7 @@ from agent.core.multi_horizon_evidence import (
 )
 from agent.events.schemas import MLEvidenceSnapshot
 from feature_store.jacksparrow_v43_contract import (
-    V43_CANONICAL_FEATURES,
+    resolve_v43_feature_contract,
     validate_v43_metadata_compatibility,
 )
 from feature_store.jacksparrow_v43_multihead import V43_HORIZON_KEYS
@@ -42,7 +42,8 @@ def _head_payloads_long() -> dict:
 
 def test_validate_multihead_metadata_fixture() -> None:
     meta = _fixture_meta()
-    assert tuple(meta["features"]) == V43_CANONICAL_FEATURES
+    _ver, ordered = resolve_v43_feature_contract(meta)
+    assert tuple(meta["features"]) == ordered
     validate_v43_metadata_compatibility(meta)
 
 

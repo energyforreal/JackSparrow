@@ -355,6 +355,8 @@ def build_v43_last_row(
     for k, v in list(row.items()):
         if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
             row[k] = 0.0
+    for name in V43_CANONICAL_FEATURES:
+        row.setdefault(name, 0.0)
     return row
 
 

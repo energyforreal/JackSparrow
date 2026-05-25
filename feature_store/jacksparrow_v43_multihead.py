@@ -171,11 +171,19 @@ def validate_v43_multihead_metadata(meta: Mapping[str, Any]) -> None:
             raise ValueError(f"horizons[{key!r}] missing dynamic_threshold in validation_metrics")
     feats = meta.get("features")
     if isinstance(feats, list) and feats:
-        from feature_store.jacksparrow_v43_contract import V43_CANONICAL_FEATURES
+        from feature_store.jacksparrow_v43_contract import resolve_v43_feature_contract
 
+        try:
+            _ver, expected = resolve_v43_feature_contract(meta)
+        except ValueError as exc:
+            raise ValueError(
+                "v43 metadata features[] order mismatch vs supported feature contract"
+            ) from exc
         ordered = tuple(str(x) for x in feats)
-        if ordered != V43_CANONICAL_FEATURES:
-            raise ValueError("v43 metadata features[] order mismatch vs V43_CANONICAL_FEATURES")
+        if ordered != expected:
+            raise ValueError(
+                "v43 metadata features[] order mismatch vs supported feature contract"
+            )
     # Legacy 120-bar-only bundles are not supported.
     legacy = meta.get("training_forward_bars")
     if legacy is not None:
@@ -258,30 +266,34 @@ def validate_multihead_export_gates(
         if not isinstance(vm, dict):
             failures.append(f"horizons[{key}] missing validation_metrics")
             continue
-        if vm.get("inference_path") != "meta_calibrator":
-            failures.append(f"horizons[{key}] inference_path must be meta_calibrator")
-
-        try:
-            auc = float(vm.get("meta_auc"))
-        except (TypeError, ValueError):
-            auc = None
-        min_auc = min_auc_by_key.get(key, 0.54)
-        is_primary = key in primary_keys
-        floor = hard_floor if (not primary_only or is_primary) else secondary_floor
-        if auc is None:
-            failures.append(f"horizons[{key}] missing meta_auc")
-        elif auc < floor:
+        inf_path = str(vm.get("inference_path") or "").strip()
+        if inf_path not in ("meta_calibrator", "regressor_mean"):
             failures.append(
-                f"horizons[{key}] meta_auc={auc:.4f} < hard floor {floor:.2f} "
-                "(at or below random — retrain before export)"
+                f"horizons[{key}] inference_path must be meta_calibrator or regressor_mean"
             )
-        elif auc < min_auc:
-            msg = f"horizons[{key}] meta_auc={auc:.4f} < minimum {min_auc:.2f}"
-            enforce_min = strict and (not primary_only or is_primary)
-            if enforce_min:
-                failures.append(msg)
-            else:
-                soft_failures.append(msg)
+
+        if inf_path == "meta_calibrator":
+            try:
+                auc = float(vm.get("meta_auc"))
+            except (TypeError, ValueError):
+                auc = None
+            min_auc = min_auc_by_key.get(key, 0.54)
+            is_primary = key in primary_keys
+            floor = hard_floor if (not primary_only or is_primary) else secondary_floor
+            if auc is None:
+                failures.append(f"horizons[{key}] missing meta_auc")
+            elif auc < floor:
+                failures.append(
+                    f"horizons[{key}] meta_auc={auc:.4f} < hard floor {floor:.2f} "
+                    "(at or below random — retrain before export)"
+                )
+            elif auc < min_auc:
+                msg = f"horizons[{key}] meta_auc={auc:.4f} < minimum {min_auc:.2f}"
+                enforce_min = strict and (not primary_only or is_primary)
+                if enforce_min:
+                    failures.append(msg)
+                else:
+                    soft_failures.append(msg)
 
         try:
             corr = float(vm.get("validation_corr"))

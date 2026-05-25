@@ -285,6 +285,23 @@ def test_validate_multihead_export_gates_strict_with_return_soft_does_not_raise(
     assert isinstance(soft, list)
 
 
+def test_validate_multihead_export_gates_accepts_regressor_mean() -> None:
+    meta = {
+        "horizons": {
+            key: {
+                "validation_metrics": {
+                    "inference_path": "regressor_mean",
+                    "validation_corr": 0.05,
+                    "tradable_label_fraction": 0.25,
+                }
+            }
+            for key in V43_MIN_META_AUC_BY_HORIZON
+        }
+    }
+    failures = validate_multihead_export_gates(meta, strict=True)
+    assert failures == []
+
+
 def test_validate_multihead_export_gates_passes_strong_model() -> None:
     horizons = {}
     for key, min_auc in V43_MIN_META_AUC_BY_HORIZON.items():

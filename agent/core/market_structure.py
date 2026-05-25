@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from agent.core.config import settings
 from agent.core.strategy_types import MarketStructureSnapshot
+from agent.core.v43_contract_state import ContractStateSnapshot
 
 
 def _feat(features: Dict[str, Any], key: str, default: float = 0.0) -> float:
@@ -30,6 +31,7 @@ def classify_market_structure(
     features: Dict[str, Any],
     *,
     v43_regime: Optional[str] = None,
+    contract_state: Optional[ContractStateSnapshot] = None,
 ) -> MarketStructureSnapshot:
     """Classify market from closed-bar features (deterministic, no ML)."""
     reg = _normalize_v43_regime(v43_regime)
@@ -56,8 +58,15 @@ def classify_market_structure(
     spread_proxy = _feat(features, "spread_bps", 0.0)
     spread_max = float(getattr(settings, "agent_thesis_max_spread_bps", 50.0) or 50.0)
     liquidity_ok = spread_proxy <= 0 or spread_proxy <= spread_max
+    if contract_state is not None and contract_state.impact_size > 0:
+        if spread_proxy > spread_max and spread_proxy > 0:
+            liquidity_ok = False
     if not liquidity_ok:
         reasons.append(f"structure_spread_high={spread_proxy:.1f}")
+
+    if contract_state is not None and not contract_state.is_operational:
+        liquidity_ok = False
+        reasons.append("structure_contract_not_operational")
 
     if reg == "crisis":
         market_type = "CRISIS"

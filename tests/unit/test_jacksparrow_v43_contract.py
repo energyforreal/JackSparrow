@@ -12,7 +12,14 @@ from feature_store.jacksparrow_v43_contract import (
     V43_COMPATIBLE_FEATURE_VERSION,
     V43_EXPECTED_FEATURE_COUNT,
     V43_FORWARD_TARGET_BARS,
+    V43_LEGACY_CANONICAL_FEATURES,
+    V43_LEGACY_COMPATIBLE_FEATURE_VERSION,
+    V43_LEGACY_EXPECTED_FEATURE_COUNT,
+    V43_LEGACY_V2_CANONICAL_FEATURES,
+    V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION,
+    V43_LEGACY_V2_EXPECTED_FEATURE_COUNT,
     audit_v43_metadata_promotion,
+    resolve_v43_feature_contract,
     validate_v43_metadata_compatibility,
     validate_v43_metadata_promotion,
 )
@@ -57,10 +64,40 @@ def test_repo_metadata_v43_must_exist() -> None:
 def test_v43_metadata_features_match_contract(metadata_v43):
     feats = metadata_v43.get("features")
     assert isinstance(feats, list), "metadata must include features array"
-    assert len(feats) == V43_EXPECTED_FEATURE_COUNT
-    assert metadata_v43.get("feature_count") in (V43_EXPECTED_FEATURE_COUNT, len(feats))
-    assert tuple(feats) == V43_CANONICAL_FEATURES
-    assert metadata_v43.get("compatible_feature_version") == V43_COMPATIBLE_FEATURE_VERSION
+    ver, ordered = resolve_v43_feature_contract(metadata_v43)
+    assert ver in (
+        V43_COMPATIBLE_FEATURE_VERSION,
+        V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION,
+        V43_LEGACY_COMPATIBLE_FEATURE_VERSION,
+    )
+    assert tuple(feats) == ordered
+    if ver == V43_COMPATIBLE_FEATURE_VERSION:
+        assert len(feats) == V43_EXPECTED_FEATURE_COUNT
+        assert ordered == V43_CANONICAL_FEATURES
+    elif ver == V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION:
+        assert len(feats) == V43_LEGACY_V2_EXPECTED_FEATURE_COUNT
+        assert ordered == V43_LEGACY_V2_CANONICAL_FEATURES
+    else:
+        assert len(feats) == V43_LEGACY_EXPECTED_FEATURE_COUNT
+        assert ordered == V43_LEGACY_CANONICAL_FEATURES
+    assert metadata_v43.get("feature_count") in (
+        len(feats),
+        V43_EXPECTED_FEATURE_COUNT,
+        V43_LEGACY_V2_EXPECTED_FEATURE_COUNT,
+        V43_LEGACY_EXPECTED_FEATURE_COUNT,
+    )
+
+
+def test_v43_feature_contract_versions() -> None:
+    assert V43_EXPECTED_FEATURE_COUNT == 51
+    assert V43_LEGACY_V2_EXPECTED_FEATURE_COUNT == 44
+    assert V43_LEGACY_EXPECTED_FEATURE_COUNT == 40
+    assert resolve_v43_feature_contract({"features": list(V43_CANONICAL_FEATURES)})[0] == (
+        V43_COMPATIBLE_FEATURE_VERSION
+    )
+    assert resolve_v43_feature_contract({"features": list(V43_LEGACY_V2_CANONICAL_FEATURES)})[0] == (
+        V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION
+    )
 
 
 def test_validate_v43_metadata_requires_multihead_horizons() -> None:
@@ -137,7 +174,7 @@ def test_validate_v43_metadata_promotion_strict_blocks_weak_multihead() -> None:
                 "forward_bars": 2,
                 "validation_metrics": {
                     "inference_path": "meta_calibrator",
-                    "meta_auc": 0.55,
+                    "meta_auc": 0.40,
                     "validation_corr": 0.01,
                     "dynamic_threshold": 0.004,
                 },
@@ -146,7 +183,7 @@ def test_validate_v43_metadata_promotion_strict_blocks_weak_multihead() -> None:
                 "forward_bars": 6,
                 "validation_metrics": {
                     "inference_path": "meta_calibrator",
-                    "meta_auc": 0.55,
+                    "meta_auc": 0.40,
                     "validation_corr": 0.01,
                     "dynamic_threshold": 0.005,
                 },

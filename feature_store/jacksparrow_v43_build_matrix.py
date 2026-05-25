@@ -12,6 +12,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from feature_store.jacksparrow_v43_basis_features import _basis_features_on_primary
+from feature_store.jacksparrow_v43_microstructure_features import _microstructure_features_on_primary
+from feature_store.jacksparrow_v43_oi_features import _oi_features_on_primary
 from feature_store.jacksparrow_v43_mcp_row import (
     EPS,
     V43_MCP_FEATURE_NAMES,
@@ -73,6 +76,8 @@ def build_v43_feature_matrix(
     df_15m: Optional[pd.DataFrame] = None,
     df_1h: Optional[pd.DataFrame] = None,
     df_funding: Optional[pd.DataFrame] = None,
+    df_oi: Optional[pd.DataFrame] = None,
+    df_mark: Optional[pd.DataFrame] = None,
     *,
     for_training: bool = False,
     primary_interval: str = "5m",
@@ -280,6 +285,29 @@ def build_v43_feature_matrix(
 
     if "timestamp" in d.columns:
         out.insert(0, "timestamp", d["timestamp"].values)
+
+    prim = d.reset_index(drop=True)
+    oi_feats = _oi_features_on_primary(prim, df_oi)
+    for col in ("oi_zscore", "oi_change_6", "oi_price_divergence", "oi_acceleration"):
+        out[col] = oi_feats[col].values
+
+    basis_feats = _basis_features_on_primary(prim, df_mark, df_oi)
+    for col in ("basis", "basis_zscore", "basis_momentum"):
+        out[col] = basis_feats[col].values
+
+    micro_feats = _microstructure_features_on_primary(
+        prim,
+        df_oi,
+        out["funding_zscore"],
+        out["oi_zscore"],
+    )
+    for col in (
+        "bid_ask_imbalance",
+        "spread_bps",
+        "funding_x_oi",
+        "funding_predicted_zscore",
+    ):
+        out[col] = micro_feats[col].values
 
     if for_training:
         _ = for_training  # reserved for notebook parity

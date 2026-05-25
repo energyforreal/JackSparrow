@@ -408,11 +408,20 @@ class MCPOrchestrator:
 
         context = _merge_prediction_context_with_agent_state(symbol, context)
 
-        df5, df15, df1h, df_fund = await fetch_v43_market_frames(
+        df5, df15, df1h, df_fund, df_oi, df_mark = await fetch_v43_market_frames(
             self.delta_client, symbol
         )
         if df5.empty or len(df5) < 2:
             return self._create_empty_prediction_response(symbol, context)
+
+        import pandas as pd
+
+        from agent.core.v43_contract_state import get_contract_state
+
+        ticker_row: Dict[str, Any] = {}
+        if isinstance(df_oi, pd.DataFrame) and not df_oi.empty:
+            ticker_row = df_oi.iloc[-1].to_dict()
+        contract_state = await get_contract_state(symbol, ticker_row=ticker_row)
 
         req_id = f"pred_v43_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         mctx = {
@@ -421,9 +430,19 @@ class MCPOrchestrator:
             "v43_df15m": df15,
             "v43_df1h": df1h,
             "v43_df_funding": df_fund,
+            "v43_df_oi": df_oi,
+            "v43_df_mark": df_mark,
+            "v43_contract_state": contract_state,
             "current_price": context.get("current_price"),
             "symbol": symbol,
         }
+        if not contract_state.is_operational:
+            mctx["v43_market_health_hold"] = True
+            mctx["v43_market_health_reason"] = (
+                f"contract_state={contract_state.state} "
+                f"trading_status={contract_state.trading_status} "
+                f"reduce_only={contract_state.only_reduce_only_orders_allowed}"
+            )
         model_request = MCPModelRequest(
             request_id=req_id,
             features=[],
@@ -532,7 +551,11 @@ class MCPOrchestrator:
             if atr is not None:
                 features_dict["volatility"] = float(atr) * 100.0
 
-        structure = classify_market_structure(features_dict, v43_regime=regime)
+        structure = classify_market_structure(
+            features_dict,
+            v43_regime=regime,
+            contract_state=contract_state,
+        )
         thesis_mc: Dict[str, Any] = {
             **(context or {}),
             "symbol": symbol,
@@ -541,7 +564,15 @@ class MCPOrchestrator:
             "v43_regime": regime,
             "market_structure": structure.to_dict(),
             "has_open_position": has_open,
+            "v43_contract_state": contract_state,
+            "price_band_proximity": {
+                "dist_upper_pct": contract_state.dist_to_upper_band_pct(),
+                "dist_lower_pct": contract_state.dist_to_lower_band_pct(),
+            },
         }
+        if mctx.get("v43_market_health_hold"):
+            thesis_mc["market_health_hold"] = True
+            thesis_mc["market_health_reason"] = mctx.get("v43_market_health_reason")
         thesis_verdict = agent_thesis_engine.evaluate(regime, thesis_mc)
         strategy_candidate = thesis_verdict_to_strategy_candidate(thesis_verdict)
 
