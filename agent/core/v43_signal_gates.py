@@ -89,7 +89,7 @@ class Gate5EdgeMetrics:
 def gate5_long_edge_metrics(proba: float, thr: float) -> Gate5EdgeMetrics:
     """Long-side gate 5 inputs (expected-return edge vs cost multiple)."""
     tp = float(getattr(settings, "jacksparrow_v43_take_profit_pct", 0.015) or 0.015)
-    ratio = float(getattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.75) or 0.75)
+    ratio = float(getattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 1.25) or 1.25)
     rtc = round_trip_cost_pct()
     thr_f = float(thr)
     edge_pct = float(proba) - thr_f
@@ -103,7 +103,7 @@ def gate5_long_edge_metrics(proba: float, thr: float) -> Gate5EdgeMetrics:
 def gate5_short_edge_metrics(proba: float, thr: float) -> Gate5EdgeMetrics:
     """Short-side gate 5 (symmetric negative edge)."""
     tp = float(getattr(settings, "jacksparrow_v43_take_profit_pct", 0.015) or 0.015)
-    ratio = float(getattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.75) or 0.75)
+    ratio = float(getattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 1.25) or 1.25)
     rtc = round_trip_cost_pct()
     thr_f = float(thr)
     edge_pct = -float(proba) - thr_f

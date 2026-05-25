@@ -35,6 +35,15 @@ from feature_store.jacksparrow_v43_mcp_row import (
 )
 
 REGIME_MIN_BARS = 6
+_FUNDING_ROC_DIFF_BARS = 4
+
+
+def _funding_rate_roc_on_primary(fund_rate: pd.Series, *, z_window: int = 48) -> pd.Series:
+    """Normalized 4-bar funding rate change (~20m on 5m grid) for 30m continuation."""
+    diff = fund_rate.diff(_FUNDING_ROC_DIFF_BARS)
+    mu = diff.rolling(z_window, min_periods=5).mean()
+    std = diff.rolling(z_window, min_periods=5).std().replace(0, EPS)
+    return ((diff - mu) / std).fillna(0.0).clip(-4.0, 4.0)
 
 
 def _smooth_regime_labels(regime_series: pd.Series, min_bars: int = REGIME_MIN_BARS) -> pd.Series:
@@ -175,6 +184,7 @@ def build_v43_feature_matrix(
     funding_zscore = (fund_rate - fz_mean) / fz_std
     funding_zscore = funding_zscore.fillna(0.0)
     funding_mom = funding_zscore * ret_6
+    funding_rate_roc = _funding_rate_roc_on_primary(fund_rate, z_window=wz)
 
     base_m = primary_minutes_from_interval(primary_interval)
     hf = _empty_hf_series(len(d))
@@ -259,6 +269,7 @@ def build_v43_feature_matrix(
             "trend_conf": trend_conf,
             "funding_zscore": funding_zscore,
             "funding_mom": funding_mom,
+            "funding_rate_roc": funding_rate_roc,
             "h_ret_1": hf["h_ret_1"],
             "h_trend": hf["h_trend"],
             "h_trend_200": hf["h_trend_200"],

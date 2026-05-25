@@ -256,6 +256,7 @@ def build_v43_last_row(
     trend_conf = (hurst_60 - 0.5) * kauf_er_20
 
     funding_mom = pd.Series(fz, index=d.index) * ret_6
+    funding_rate_roc = pd.Series(0.0, index=d.index)
 
     base_m = primary_minutes_from_interval(primary_interval)
     # HTF mirrors (notebook: true 15m / 1h bars)
@@ -341,6 +342,7 @@ def build_v43_last_row(
         "trend_conf": _last(trend_conf),
         "funding_zscore": fz,
         "funding_mom": _last(funding_mom),
+        "funding_rate_roc": _last(funding_rate_roc),
         "h_ret_1": _last(hf["h_ret_1"]),
         "h_trend": _last(hf["h_trend"]),
         "h_trend_200": _last(hf["h_trend_200"]),

@@ -23,7 +23,8 @@ from feature_store.jacksparrow_v43_multihead import (
 )
 
 # Bump when ``V43_CANONICAL_FEATURES`` or semantics change (retrain + re-export metadata).
-V43_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v3"
+V43_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v4"
+V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v3"
 V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v2"
 V43_LEGACY_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v1"
 
@@ -63,6 +64,7 @@ V43_CANONICAL_FEATURES: tuple[str, ...] = (
     "trend_conf",
     "funding_zscore",
     "funding_mom",
+    "funding_rate_roc",
     "h_ret_1",
     "h_trend",
     "h_trend_200",
@@ -87,6 +89,13 @@ V43_CANONICAL_FEATURES: tuple[str, ...] = (
 
 V43_EXPECTED_FEATURE_COUNT = len(V43_CANONICAL_FEATURES)
 
+# v3 contract (51 features) — bundles before funding_rate_roc (v4).
+_V4_ONLY_FEATURES: tuple[str, ...] = ("funding_rate_roc",)
+V43_LEGACY_V3_CANONICAL_FEATURES: tuple[str, ...] = tuple(
+    f for f in V43_CANONICAL_FEATURES if f not in _V4_ONLY_FEATURES
+)
+V43_LEGACY_V3_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_V3_CANONICAL_FEATURES)
+
 # v2 contract (44 features, OI only) — bundles trained before derivatives v3 upgrade.
 _V3_ONLY_FEATURES: tuple[str, ...] = (
     "basis",
@@ -98,7 +107,7 @@ _V3_ONLY_FEATURES: tuple[str, ...] = (
     "funding_predicted_zscore",
 )
 V43_LEGACY_V2_CANONICAL_FEATURES: tuple[str, ...] = tuple(
-    f for f in V43_CANONICAL_FEATURES if f not in _V3_ONLY_FEATURES
+    f for f in V43_LEGACY_V3_CANONICAL_FEATURES if f not in _V3_ONLY_FEATURES
 )
 V43_LEGACY_V2_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_V2_CANONICAL_FEATURES)
 
@@ -110,6 +119,7 @@ V43_LEGACY_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_CANONICAL_FEATURES)
 
 _SUPPORTED_FEATURE_CONTRACTS: dict[str, tuple[str, ...]] = {
     V43_COMPATIBLE_FEATURE_VERSION: V43_CANONICAL_FEATURES,
+    V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_V3_CANONICAL_FEATURES,
     V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_V2_CANONICAL_FEATURES,
     V43_LEGACY_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_CANONICAL_FEATURES,
 }
@@ -124,6 +134,8 @@ def resolve_v43_feature_contract(
     ordered = tuple(str(x) for x in feats) if isinstance(feats, list) else ()
     if ordered == V43_CANONICAL_FEATURES:
         return V43_COMPATIBLE_FEATURE_VERSION, V43_CANONICAL_FEATURES
+    if ordered == V43_LEGACY_V3_CANONICAL_FEATURES:
+        return V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION, V43_LEGACY_V3_CANONICAL_FEATURES
     if ordered == V43_LEGACY_V2_CANONICAL_FEATURES:
         return V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION, V43_LEGACY_V2_CANONICAL_FEATURES
     if ordered == V43_LEGACY_CANONICAL_FEATURES:
@@ -134,7 +146,8 @@ def resolve_v43_feature_contract(
         "v43 metadata features[] does not match a supported feature contract "
         f"(expected v1={V43_LEGACY_EXPECTED_FEATURE_COUNT}, "
         f"v2={V43_LEGACY_V2_EXPECTED_FEATURE_COUNT}, or "
-        f"v3={V43_EXPECTED_FEATURE_COUNT} features)"
+        f"v3={V43_LEGACY_V3_EXPECTED_FEATURE_COUNT}, "
+        f"v4={V43_EXPECTED_FEATURE_COUNT} features)"
     )
 
 

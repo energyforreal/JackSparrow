@@ -866,13 +866,13 @@ class Settings(BaseSettings):
         description="Gate 3: max entries per UTC day.",
     )
     jacksparrow_v43_min_edge_cost_ratio: float = Field(
-        default=0.40,
+        default=1.25,
         env="JACKSPARROW_V43_MIN_EDGE_COST_RATIO",
         ge=0.0,
         description=(
             "Gate 5: min multiple of round-trip cost vs expected-return edge. "
-            "Default 0.75 balances small expected_return magnitudes vs fees; "
-            "raise toward 1.0–1.5 to tighten entries (see docs/v43_trade_execution_runbook.md)."
+            "Default 1.25 requires material edge above threshold (see .env.example); "
+            "lower toward 0.75 for more entries (docs/v43_trade_execution_runbook.md)."
         ),
     )
     jacksparrow_v43_block_trending_entries: bool = Field(

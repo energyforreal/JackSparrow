@@ -101,9 +101,13 @@ def test_gate5_short_compares_expected_return_edge_to_cost() -> None:
     assert metrics.passes is True
 
 
-def test_debounce_blocks_second_entry() -> None:
+def test_debounce_blocks_second_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.core import v43_runtime_horizon as rh
 
+    monkeypatch.setattr(
+        "agent.core.v43_runtime_horizon.effective_v43_trade_debounce_bars",
+        lambda: 3,
+    )
     rh.set_runtime_v43_horizon(6, execution_profile={"enabled": False})
     st = V43GateState()
     st.note_signal_decision(10)
@@ -144,9 +148,13 @@ def test_post_threshold_short_not_raw() -> None:
     assert gr.reject_reason == "below_threshold_short"
 
 
-def test_post_threshold_short_debounce_same_as_long() -> None:
+def test_post_threshold_short_debounce_same_as_long(monkeypatch: pytest.MonkeyPatch) -> None:
     from agent.core import v43_runtime_horizon as rh
 
+    monkeypatch.setattr(
+        "agent.core.v43_runtime_horizon.effective_v43_trade_debounce_bars",
+        lambda: 3,
+    )
     rh.set_runtime_v43_horizon(6, execution_profile={"enabled": False})
     st = V43GateState()
     st.note_signal_decision(10)

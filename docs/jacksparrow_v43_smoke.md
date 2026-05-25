@@ -23,7 +23,7 @@ The hardened training notebook exports the `FeatureEngineer` as a column contrac
 
 4. **Public ticker + products (read-only).** Ticker/OI and contract state use **`JACKSPARROW_V43_OI_PUBLIC_BASE_URL`** (default `https://api.india.delta.exchange`), separate from testnet trading REST. Disable ticker fetch with **`JACKSPARROW_V43_OI_ENABLED=false`**. Contract health gates use **`GET /v2/products/{symbol}`** (cached ~60s).
 
-5. **Feature contract v3.** New exports use 51 features (`jacksparrow_v43_features_v3`: OI + basis + microstructure). Legacy v2 (44) and v1 (40) bundles still load. Retrain with `MARK:BTCUSD` candles + real ticker/OI CSV before promoting a v3 bundle.
+5. **Feature contract v4.** New exports use 52 features (`jacksparrow_v43_features_v4`: adds `funding_rate_roc`). Legacy v3 (51), v2 (44), and v1 (40) bundles still load. Retrain with `MARK:BTCUSD` candles + real ticker/OI CSV before promoting a v4 bundle.
 
 ## Runtime smoke checklist
 

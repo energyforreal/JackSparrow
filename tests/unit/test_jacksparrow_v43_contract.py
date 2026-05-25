@@ -16,6 +16,9 @@ from feature_store.jacksparrow_v43_contract import (
     V43_LEGACY_COMPATIBLE_FEATURE_VERSION,
     V43_LEGACY_EXPECTED_FEATURE_COUNT,
     V43_LEGACY_V2_CANONICAL_FEATURES,
+    V43_LEGACY_V3_CANONICAL_FEATURES,
+    V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION,
+    V43_LEGACY_V3_EXPECTED_FEATURE_COUNT,
     V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION,
     V43_LEGACY_V2_EXPECTED_FEATURE_COUNT,
     audit_v43_metadata_promotion,
@@ -67,6 +70,7 @@ def test_v43_metadata_features_match_contract(metadata_v43):
     ver, ordered = resolve_v43_feature_contract(metadata_v43)
     assert ver in (
         V43_COMPATIBLE_FEATURE_VERSION,
+        V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION,
         V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION,
         V43_LEGACY_COMPATIBLE_FEATURE_VERSION,
     )
@@ -74,6 +78,9 @@ def test_v43_metadata_features_match_contract(metadata_v43):
     if ver == V43_COMPATIBLE_FEATURE_VERSION:
         assert len(feats) == V43_EXPECTED_FEATURE_COUNT
         assert ordered == V43_CANONICAL_FEATURES
+    elif ver == V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION:
+        assert len(feats) == V43_LEGACY_V3_EXPECTED_FEATURE_COUNT
+        assert ordered == V43_LEGACY_V3_CANONICAL_FEATURES
     elif ver == V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION:
         assert len(feats) == V43_LEGACY_V2_EXPECTED_FEATURE_COUNT
         assert ordered == V43_LEGACY_V2_CANONICAL_FEATURES
@@ -83,17 +90,22 @@ def test_v43_metadata_features_match_contract(metadata_v43):
     assert metadata_v43.get("feature_count") in (
         len(feats),
         V43_EXPECTED_FEATURE_COUNT,
+        V43_LEGACY_V3_EXPECTED_FEATURE_COUNT,
         V43_LEGACY_V2_EXPECTED_FEATURE_COUNT,
         V43_LEGACY_EXPECTED_FEATURE_COUNT,
     )
 
 
 def test_v43_feature_contract_versions() -> None:
-    assert V43_EXPECTED_FEATURE_COUNT == 51
+    assert V43_EXPECTED_FEATURE_COUNT == 52
+    assert V43_LEGACY_V3_EXPECTED_FEATURE_COUNT == 51
     assert V43_LEGACY_V2_EXPECTED_FEATURE_COUNT == 44
     assert V43_LEGACY_EXPECTED_FEATURE_COUNT == 40
     assert resolve_v43_feature_contract({"features": list(V43_CANONICAL_FEATURES)})[0] == (
         V43_COMPATIBLE_FEATURE_VERSION
+    )
+    assert resolve_v43_feature_contract({"features": list(V43_LEGACY_V3_CANONICAL_FEATURES)})[0] == (
+        V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION
     )
     assert resolve_v43_feature_contract({"features": list(V43_LEGACY_V2_CANONICAL_FEATURES)})[0] == (
         V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION

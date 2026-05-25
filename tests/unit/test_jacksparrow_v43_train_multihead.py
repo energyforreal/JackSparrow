@@ -15,6 +15,7 @@ from feature_store.jacksparrow_v43_train_multihead import V43_HORIZON_COST_SCALE
 from feature_store.jacksparrow_v43_train_multihead import (
     build_cost_aware_forward_labels,
     build_forward_labels,
+    resolve_validation_threshold_percentiles,
 )
 
 
@@ -167,8 +168,26 @@ def test_validate_multihead_export_gates_blocks_low_auc() -> None:
 
 
 def test_horizon_cost_scale_relaxes_longer_horizons() -> None:
+    assert V43_HORIZON_COST_SCALE[2] > V43_HORIZON_COST_SCALE[6]
     assert V43_HORIZON_COST_SCALE[12] < V43_HORIZON_COST_SCALE[6]
     assert V43_HORIZON_COST_SCALE[24] < V43_HORIZON_COST_SCALE[12]
+
+
+def test_resolve_validation_threshold_percentiles_defaults_90_10(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("V43_THRESHOLD_PERCENTILE", raising=False)
+    monkeypatch.delenv("V43_THRESHOLD_PERCENTILE_LONG", raising=False)
+    monkeypatch.delenv("V43_THRESHOLD_PERCENTILE_SHORT", raising=False)
+    assert resolve_validation_threshold_percentiles() == (90.0, 10.0)
+
+
+def test_resolve_validation_threshold_percentiles_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("V43_THRESHOLD_PERCENTILE_LONG", "85")
+    monkeypatch.setenv("V43_THRESHOLD_PERCENTILE_SHORT", "15")
+    assert resolve_validation_threshold_percentiles() == (85.0, 15.0)
 
 
 def test_compute_v43_round_trip_cost_matches_runtime_gate5() -> None:

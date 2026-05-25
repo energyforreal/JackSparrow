@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,10 +26,10 @@ from feature_store.jacksparrow_v43_multihead import (
 
 # Longer horizons: slightly relax cost mask (larger moves; avoid over-pruning 1h/2h).
 V43_HORIZON_COST_SCALE: Dict[int, float] = {
-    2: 1.0,
+    2: 1.5,
     6: 1.0,
-    12: 0.85,
-    24: 0.80,
+    12: 0.7,
+    24: 0.5,
 }
 
 
@@ -183,6 +184,28 @@ def chronological_split_indices(
     return train_idx, embargo_idx, val_idx, meta
 
 
+def resolve_validation_threshold_percentiles() -> tuple[float, float]:
+    """Long/short validation percentiles for dynamic thresholds (env-tunable).
+
+    Defaults: 90 / 10 (~10–15% candidate coverage vs legacy 75/25).
+    """
+    legacy = os.environ.get("V43_THRESHOLD_PERCENTILE", "").strip()
+    long_raw = os.environ.get("V43_THRESHOLD_PERCENTILE_LONG", legacy or "90").strip()
+    short_raw = os.environ.get("V43_THRESHOLD_PERCENTILE_SHORT", "").strip()
+    long_p = float(long_raw or "90")
+    if short_raw:
+        short_p = float(short_raw)
+    elif legacy:
+        short_p = 100.0 - long_p
+    else:
+        short_p = 10.0
+    long_p = float(min(99.0, max(50.0, long_p)))
+    short_p = float(min(50.0, max(1.0, short_p)))
+    if long_p <= short_p:
+        short_p = max(1.0, long_p - 10.0)
+    return long_p, short_p
+
+
 def _safe_corr(a: np.ndarray, b: np.ndarray) -> Optional[float]:
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
@@ -278,8 +301,9 @@ def _validation_metrics_from_predictions(
     meta_auc: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Shared thresholding + validation metrics for meta or regressor-mean stacks."""
-    dt_long = max(float(np.nanpercentile(val_pred, 75)), 1e-6)
-    dt_short = min(float(np.nanpercentile(val_pred, 25)), -1e-6)
+    long_p, short_p = resolve_validation_threshold_percentiles()
+    dt_long = max(float(np.nanpercentile(val_pred, long_p)), 1e-6)
+    dt_short = min(float(np.nanpercentile(val_pred, short_p)), -1e-6)
     dt_short_mag = abs(dt_short)
     ensemble.threshold = dt_long
     ensemble.dynamic_threshold = dt_long
@@ -308,8 +332,8 @@ def _validation_metrics_from_predictions(
         "tradable_label_fraction": tradable_frac,
         "inference_path": inference_path,
         "threshold_source": threshold_source,
-        "threshold_percentile": 75.0,
-        "short_threshold_percentile": 25.0,
+        "threshold_percentile": float(long_p),
+        "short_threshold_percentile": float(short_p),
         "dynamic_threshold": dt_long,
         "short_threshold": dt_short_mag,
         "validation_rmse": float(np.sqrt(np.mean((val_pred - y_va) ** 2))),
