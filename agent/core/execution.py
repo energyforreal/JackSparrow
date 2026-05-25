@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import asyncio
 import math
-import random
 import time
 import uuid
 import structlog
@@ -207,7 +206,7 @@ class PositionManager:
             else:  # short
                 position["unrealized_pnl"] = entry_value - current_value
 
-            position["updated_time"] = datetime.utcnow()
+            position["updated_time"] = datetime.now(timezone.utc)
 
     def close_position(self, symbol: str, exit_price: float,
                       exit_order_id: str) -> Optional[Dict[str, Any]]:
@@ -234,7 +233,7 @@ class PositionManager:
         # rows cannot be mistaken for an open leg (execute_trade / monitors).
         position.update({
             "exit_price": exit_price,
-            "exit_time": datetime.utcnow(),
+            "exit_time": datetime.now(timezone.utc),
             "realized_pnl": realized_pnl,
             "exit_order_id": exit_order_id,
             "status": "closed"
@@ -285,7 +284,7 @@ class ExecutionResult:
         self.success = success
         self.order_id = order_id
         self.error_message = error_message
-        self.execution_time = datetime.utcnow()
+        self.execution_time = datetime.now(timezone.utc)
         self.details: Dict[str, Any] = {}
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1707,103 +1706,123 @@ class ExecutionEngine:
             return nested
         return payload
 
+    @staticmethod
+    def _delta_order_type_label(order_type: str) -> str:
+        """Map internal order type to Delta API order_type string."""
+        normalized = str(order_type or "market").lower()
+        if normalized == "limit":
+            return "LIMIT"
+        if normalized == "stop":
+            return "MARKET"
+        return "MARKET"
+
     async def _place_order(self, symbol: str, side: str, quantity: float,
                           order_type: str, price: Optional[float] = None,
                           stop_price: Optional[float] = None,
                           reduce_only: bool = False) -> Dict[str, Any]:
-        """Place a market/limit order on Delta testnet via delta_client.place_order()."""
+        """Place market/limit/stop orders on Delta testnet via delta_client.place_order()."""
         try:
             order_id = str(uuid.uuid4())[:8]
+            normalized_type = str(order_type or "market").lower()
 
             order = Order(
                 order_id=order_id,
                 symbol=symbol,
                 side=side,
-                order_type=order_type,
+                order_type=normalized_type,
                 quantity=quantity,
-                price=price
+                price=price,
+                stop_price=stop_price,
             )
 
             await asyncio.sleep(0.05)
 
-            if order_type == "market":
-                if self.delta_client:
-                    client_order_id = f"js_{order_id}"
-                    result = await self.delta_client.place_order(
-                        symbol=symbol,
-                        side=side.upper(),
-                        quantity=quantity,
-                        order_type="MARKET",
-                        reduce_only=reduce_only,
-                        client_order_id=client_order_id,
-                    )
-                    order_obj = self._parse_delta_order_result(result)
-                    exchange_order_id = order_obj.get("id")
-                    if exchange_order_id is not None:
-                        try:
-                            order.exchange_order_id = int(exchange_order_id)
-                        except (TypeError, ValueError):
-                            pass
-
-                    fill_price: Optional[float] = None
-                    # Market fills must not use limit_price (bracket metadata can be stale).
-                    fill_keys = ("average_fill_price", "avg_fill_price", "price")
-                    if str(order_type).lower() != "market":
-                        fill_keys = fill_keys + ("limit_price",)
-                    for key in fill_keys:
-                        raw = order_obj.get(key)
-                        if raw is not None:
-                            try:
-                                fill_price = float(raw)
-                                break
-                            except (TypeError, ValueError):
-                                continue
-                    if fill_price is None and price is not None and price > 0:
-                        fill_price = float(price)
-                    state = str(order_obj.get("state") or "").lower()
-                    filled_immediately = state in ("closed", "filled")
-                    if filled_immediately and fill_price is None:
-                        raise ValueError(
-                            "Exchange order returned no fill price and no price parameter provided"
-                        )
-                    if fill_price is not None:
-                        order.update_fill(quantity, fill_price)
-                    base_url = getattr(self.delta_client, "base_url", None)
-                    logger.info(
-                        "delta_testnet_order_placed",
-                        symbol=symbol,
-                        side=side,
-                        quantity=quantity,
-                        reduce_only=reduce_only,
-                        exchange_order_id=order.exchange_order_id,
-                        delta_exchange_base_url=base_url,
-                        filled_immediately=filled_immediately,
-                        average_fill_price=fill_price,
-                        exchange_state=state or None,
-                    )
-                    return {
-                        "success": True,
-                        "order_id": order_id,
-                        "exchange_order_id": order.exchange_order_id,
-                        "filled_immediately": filled_immediately,
-                        "average_fill_price": fill_price,
-                        "exchange_state": state or None,
-                    }
+            if not self.delta_client:
                 return {"success": False, "error": "Delta client not configured for testnet trading"}
 
-            else:
-                self.order_manager.add_order(order)
-                return {
-                    "success": True,
-                    "order_id": order_id,
-                    "filled_immediately": False
-                }
+            if normalized_type == "limit" and (price is None or price <= 0):
+                return {"success": False, "error": "Limit order requires a positive price"}
+            if normalized_type == "stop" and (stop_price is None or stop_price <= 0):
+                return {"success": False, "error": "Stop order requires a positive stop_price"}
+
+            client_order_id = f"js_{order_id}"
+            delta_order_type = self._delta_order_type_label(normalized_type)
+            limit_price = float(price) if normalized_type == "limit" and price is not None else None
+            trigger_price = (
+                float(stop_price) if normalized_type == "stop" and stop_price is not None else None
+            )
+
+            result = await self.delta_client.place_order(
+                symbol=symbol,
+                side=side.upper(),
+                quantity=quantity,
+                order_type=delta_order_type,
+                price=limit_price,
+                stop_price=trigger_price,
+                reduce_only=reduce_only,
+                client_order_id=client_order_id,
+            )
+            order_obj = self._parse_delta_order_result(result)
+            exchange_order_id = order_obj.get("id")
+            if exchange_order_id is not None:
+                try:
+                    order.exchange_order_id = int(exchange_order_id)
+                except (TypeError, ValueError):
+                    pass
+
+            fill_price: Optional[float] = None
+            fill_keys = ("average_fill_price", "avg_fill_price", "price")
+            if normalized_type != "market":
+                fill_keys = fill_keys + ("limit_price",)
+            for key in fill_keys:
+                raw = order_obj.get(key)
+                if raw is not None:
+                    try:
+                        fill_price = float(raw)
+                        break
+                    except (TypeError, ValueError):
+                        continue
+            if fill_price is None and limit_price is not None and limit_price > 0:
+                fill_price = limit_price
+            state = str(order_obj.get("state") or "").lower()
+            filled_immediately = state in ("closed", "filled")
+            if filled_immediately and fill_price is None and normalized_type == "market":
+                raise ValueError(
+                    "Exchange order returned no fill price and no price parameter provided"
+                )
+            if fill_price is not None:
+                order.update_fill(quantity, fill_price)
+            self.order_manager.add_order(order)
+            base_url = getattr(self.delta_client, "base_url", None)
+            logger.info(
+                "delta_testnet_order_placed",
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=normalized_type,
+                reduce_only=reduce_only,
+                exchange_order_id=order.exchange_order_id,
+                delta_exchange_base_url=base_url,
+                filled_immediately=filled_immediately,
+                average_fill_price=fill_price,
+                exchange_state=state or None,
+                stop_price=trigger_price,
+            )
+            return {
+                "success": True,
+                "order_id": order_id,
+                "exchange_order_id": order.exchange_order_id,
+                "filled_immediately": filled_immediately,
+                "average_fill_price": fill_price,
+                "exchange_state": state or None,
+            }
 
         except Exception as e:
             logger.error("order_placement_failed",
                         symbol=symbol,
                         side=side,
                         quantity=quantity,
+                        order_type=order_type,
                         error=str(e))
             return {
                 "success": False,

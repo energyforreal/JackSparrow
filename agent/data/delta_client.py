@@ -691,6 +691,8 @@ class DeltaExchangeClient:
         order_type: str = "MARKET",
         price: Optional[float] = None,
         *,
+        stop_price: Optional[float] = None,
+        stop_order_type: Optional[str] = None,
         product_id: Optional[int] = None,
         reduce_only: bool = False,
         client_order_id: Optional[str] = None,
@@ -729,6 +731,9 @@ class DeltaExchangeClient:
             data["client_order_id"] = str(client_order_id)[:32]
         if delta_order_type == "limit_order" and price is not None:
             data["limit_price"] = str(price)
+        if stop_price is not None:
+            data["stop_price"] = str(stop_price)
+            data["stop_order_type"] = str(stop_order_type or "stop_loss_order")
 
         return await self._make_request("POST", "/v2/orders", data=data)
 

@@ -7,7 +7,7 @@ import pytest
 
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test_db")
 
-from agent.core.exchange_gateway import DeltaPaperSimExchangeGateway
+from tests.support.delta_paper_sim_gateway import DeltaPaperSimExchangeGateway
 
 
 def _position(

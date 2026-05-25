@@ -7,7 +7,7 @@ Frequency cap counts only trades that passed all other checks (call record_trade
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 
 class EntrySignalFilter:

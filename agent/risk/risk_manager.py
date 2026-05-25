@@ -527,12 +527,14 @@ class RiskManager:
             "recommendations": []
         }
 
-        # Assess risk level
-        if portfolio_risk.portfolio_heat > 0.15:  # >15% portfolio at risk
+        # Assess risk level (aligned with check_risk_limits max_portfolio_heat)
+        max_heat = float(self.risk_limits.get("max_portfolio_heat", 0.30))
+        warn_heat = max_heat * (2.0 / 3.0)
+        if portfolio_risk.portfolio_heat > max_heat:
             risk_assessment["risk_level"] = "high"
             risk_assessment["can_trade"] = False
             risk_assessment["recommendations"].append("Portfolio heat too high - reduce exposure")
-        elif portfolio_risk.portfolio_heat > 0.10:  # >10% portfolio at risk
+        elif portfolio_risk.portfolio_heat > warn_heat:
             risk_assessment["risk_level"] = "medium"
             risk_assessment["recommendations"].append("Monitor portfolio heat closely")
         elif position_value > max_position_risk:

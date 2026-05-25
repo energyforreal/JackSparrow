@@ -845,7 +845,7 @@ class Settings(BaseSettings):
         ),
     )
     jacksparrow_v43_trade_debounce_bars: int = Field(
-        default=2,
+        default=1,
         env="JACKSPARROW_V43_TRADE_DEBOUNCE_BARS",
         ge=1,
         description=(
@@ -854,19 +854,19 @@ class Settings(BaseSettings):
         ),
     )
     jacksparrow_v43_max_trades_per_hour: int = Field(
-        default=2,
+        default=6,
         env="JACKSPARROW_V43_MAX_TRADES_PER_HOUR",
         ge=1,
         description="Gate 3: max entries per rolling hour.",
     )
     jacksparrow_v43_max_trades_per_day: int = Field(
-        default=6,
+        default=20,
         env="JACKSPARROW_V43_MAX_TRADES_PER_DAY",
         ge=1,
         description="Gate 3: max entries per UTC day.",
     )
     jacksparrow_v43_min_edge_cost_ratio: float = Field(
-        default=0.75,
+        default=0.40,
         env="JACKSPARROW_V43_MIN_EDGE_COST_RATIO",
         ge=0.0,
         description=(
@@ -876,7 +876,7 @@ class Settings(BaseSettings):
         ),
     )
     jacksparrow_v43_block_trending_entries: bool = Field(
-        default=True,
+        default=False,
         env="JACKSPARROW_V43_BLOCK_TRENDING_ENTRIES",
         description="When True, skip entries when regime_label is trending.",
     )
@@ -1700,7 +1700,7 @@ class Settings(BaseSettings):
         description="Trading symbol"
     )
     min_confidence_threshold: float = Field(
-        default=0.70,
+        default=0.55,
         env="MIN_CONFIDENCE_THRESHOLD",
         description="Minimum confidence threshold for trades"
     )
