@@ -19,6 +19,7 @@ from feature_store.jacksparrow_v43_contract import (
     V43_LEGACY_V3_CANONICAL_FEATURES,
     V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION,
     V43_LEGACY_V3_EXPECTED_FEATURE_COUNT,
+    V43_LEGACY_V4_EXPECTED_FEATURE_COUNT,
     V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION,
     V43_LEGACY_V2_EXPECTED_FEATURE_COUNT,
     audit_v43_metadata_promotion,
@@ -97,7 +98,8 @@ def test_v43_metadata_features_match_contract(metadata_v43):
 
 
 def test_v43_feature_contract_versions() -> None:
-    assert V43_EXPECTED_FEATURE_COUNT == 52
+    assert V43_EXPECTED_FEATURE_COUNT == 53
+    assert V43_LEGACY_V4_EXPECTED_FEATURE_COUNT == 52
     assert V43_LEGACY_V3_EXPECTED_FEATURE_COUNT == 51
     assert V43_LEGACY_V2_EXPECTED_FEATURE_COUNT == 44
     assert V43_LEGACY_EXPECTED_FEATURE_COUNT == 40

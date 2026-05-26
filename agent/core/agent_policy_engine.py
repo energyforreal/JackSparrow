@@ -262,7 +262,7 @@ def _multi_horizon_evidence_from_context(
             meta = {
                 "model_family": "jacksparrow_v43_multihead",
                 "primary_execution_horizon_bars": int(
-                    raw.get("primary_execution_horizon_bars", 6) or 6
+                    raw.get("primary_execution_horizon_bars", 2) or 2
                 ),
                 "horizons": {
                     k: {
@@ -289,7 +289,7 @@ def _ml_training_forward_bars(
         raw = excerpt.get("v43_training_forward_bars")
     return resolve_training_forward_bars(
         {"training_forward_bars": raw} if raw is not None else None,
-        settings_fallback=int(getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6),
+        settings_fallback=int(getattr(settings, "jacksparrow_v43_forward_target_bars", 2) or 2),
     )
 
 

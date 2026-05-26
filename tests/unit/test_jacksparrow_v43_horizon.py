@@ -22,6 +22,7 @@ def test_forward_bars_to_minutes() -> None:
 
 
 def test_resolve_training_forward_bars_from_meta() -> None:
+    assert resolve_training_forward_bars({"primary_execution_horizon_bars": 2}) == 2
     assert resolve_training_forward_bars({"primary_execution_horizon_bars": 6}) == 6
     assert resolve_training_forward_bars({"training_forward_bars": 6}) == 6
 
@@ -62,5 +63,9 @@ def test_validate_metadata_forward_bars_rejects_unknown() -> None:
         validate_metadata_forward_bars({"training_forward_bars": 99})
 
 
-def test_default_training_bars_is_30m() -> None:
-    assert V43_FORWARD_TARGET_BARS_DEFAULT == 6
+def test_default_training_bars_is_scalp_10m() -> None:
+    assert V43_FORWARD_TARGET_BARS_DEFAULT == 2
+
+
+def test_resolve_training_forward_bars_scalp_primary() -> None:
+    assert resolve_training_forward_bars({"primary_execution_horizon_bars": 2}) == 2

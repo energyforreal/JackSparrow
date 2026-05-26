@@ -820,12 +820,12 @@ class Settings(BaseSettings):
         description="TTL for in-process contract state cache (seconds).",
     )
     jacksparrow_v43_forward_target_bars: int = Field(
-        default=6,
+        default=2,
         env="JACKSPARROW_V43_FORWARD_TARGET_BARS",
         ge=1,
         description=(
-            "Training label horizon in 5m bars for new v43 exports (6 = 30m). "
-            "Runtime uses metadata.training_forward_bars from the loaded bundle."
+            "Training label horizon in 5m bars for new v43 exports (2 = scalp 10m). "
+            "Runtime uses metadata.primary_execution_horizon_bars from the loaded bundle."
         ),
     )
     jacksparrow_v43_align_execution_to_horizon: bool = Field(
@@ -866,13 +866,13 @@ class Settings(BaseSettings):
         description="Gate 3: max entries per UTC day.",
     )
     jacksparrow_v43_min_edge_cost_ratio: float = Field(
-        default=1.25,
+        default=0.2,
         env="JACKSPARROW_V43_MIN_EDGE_COST_RATIO",
         ge=0.0,
         description=(
             "Gate 5: min multiple of round-trip cost vs expected-return edge. "
-            "Default 1.25 requires material edge above threshold (see .env.example); "
-            "lower toward 0.75 for more entries (docs/v43_trade_execution_runbook.md)."
+            "Default 0.2 matches v43 regressor scale (~1e-4 predictions); raise toward "
+            "0.5–1.25 after measuring reject rates (docs/v43_trade_execution_runbook.md)."
         ),
     )
     jacksparrow_v43_block_trending_entries: bool = Field(

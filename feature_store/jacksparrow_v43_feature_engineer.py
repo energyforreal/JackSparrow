@@ -89,7 +89,7 @@ class JackSparrowV43FeatureEngineer:
 
                 horizon = resolve_training_forward_bars(
                     settings_fallback=int(
-                        getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6
+                        getattr(settings, "jacksparrow_v43_forward_target_bars", 2) or 2
                     ),
                 )
             except Exception:

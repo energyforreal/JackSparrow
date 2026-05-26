@@ -35,11 +35,11 @@ from feature_store.jacksparrow_v43_mcp_row import (
 )
 
 REGIME_MIN_BARS = 6
-_FUNDING_ROC_DIFF_BARS = 4
+_FUNDING_ROC_DIFF_BARS = 2  # 2×5m = 10m — aligned with scalp_10m primary head
 
 
 def _funding_rate_roc_on_primary(fund_rate: pd.Series, *, z_window: int = 48) -> pd.Series:
-    """Normalized 4-bar funding rate change (~20m on 5m grid) for 30m continuation."""
+    """Normalized short-horizon funding rate change (10m on 5m grid) for scalp continuation."""
     diff = fund_rate.diff(_FUNDING_ROC_DIFF_BARS)
     mu = diff.rolling(z_window, min_periods=5).mean()
     std = diff.rolling(z_window, min_periods=5).std().replace(0, EPS)
@@ -299,7 +299,13 @@ def build_v43_feature_matrix(
 
     prim = d.reset_index(drop=True)
     oi_feats = _oi_features_on_primary(prim, df_oi)
-    for col in ("oi_zscore", "oi_change_6", "oi_price_divergence", "oi_acceleration"):
+    for col in (
+        "oi_zscore",
+        "oi_change_6",
+        "oi_price_divergence",
+        "oi_acceleration",
+        "oi_delta_z",
+    ):
         out[col] = oi_feats[col].values
 
     basis_feats = _basis_features_on_primary(prim, df_mark, df_oi)

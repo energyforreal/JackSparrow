@@ -1,0 +1,470 @@
+{
+  "scenario": "high_confidence_bad_portfolio",
+  "description": "Strong ML signal but portfolio at max heat (5/5 positions open)",
+  "symbol": "BTCUSD",
+  "total_ms": 950.1,
+  "error": null,
+  "layers": [
+    {
+      "name": "ml_inference",
+      "ok": true,
+      "duration_ms": 947.6,
+      "error": null,
+      "health": "healthy",
+      "expected_return": -0.003870102132832739,
+      "threshold": 0.0019469952829566511,
+      "short_threshold": 0.0005980995889019935,
+      "regime": "neutral",
+      "uncertainty": 0.2355797574270416,
+      "unc_scale": 0.3,
+      "heads": {
+        "scalp_10m": {
+          "expected_return": -0.003870102132832739,
+          "threshold": 0.0019469952829566511,
+          "direction": "SHORT"
+        },
+        "intraday_30m": {
+          "expected_return": -0.003915061726491424,
+          "threshold": 0.001119793641877166,
+          "direction": "SHORT"
+        },
+        "trend_1h": {
+          "expected_return": -0.003884695626976048,
+          "threshold": 0.0006395624995366687,
+          "direction": "SHORT"
+        },
+        "swing_2h": {
+          "expected_return": -0.004818014700185339,
+          "threshold": 0.0005863112011748666,
+          "direction": "SHORT"
+        }
+      },
+      "pred_context": {
+        "format": "jacksparrow_v43_multihead",
+        "multi_horizon_heads": {
+          "scalp_10m": {
+            "horizon_key": "scalp_10m",
+            "forward_bars": 2,
+            "horizon_minutes": 10,
+            "expected_return": -0.003870102132832739,
+            "threshold": 0.0019469952829566511,
+            "short_threshold": 0.0005980995889019935,
+            "regime": "neutral",
+            "uncertainty": 0.2355797574270416,
+            "model_origin": "global_ensemble",
+            "active_type": "EnsembleModel",
+            "coercion_applied": false,
+            "ensemble_fallback": true
+          },
+          "intraday_30m": {
+            "horizon_key": "intraday_30m",
+            "forward_bars": 6,
+            "horizon_minutes": 30,
+            "expected_return": -0.003915061726491424,
+            "threshold": 0.001119793641877166,
+            "short_threshold": 0.0005,
+            "regime": "neutral",
+            "uncertainty": 0.2366057159461568,
+            "model_origin": "global_ensemble",
+            "active_type": "EnsembleModel",
+            "coercion_applied": false,
+            "ensemble_fallback": true
+          },
+          "trend_1h": {
+            "horizon_key": "trend_1h",
+            "forward_bars": 12,
+            "horizon_minutes": 60,
+            "expected_return": -0.003884695626976048,
+            "threshold": 0.0006395624995366687,
+            "short_threshold": 0.0005,
+            "regime": "neutral",
+            "uncertainty": 0.23772373459624788,
+            "model_origin": "global_ensemble",
+            "active_type": "EnsembleModel",
+            "coercion_applied": false,
+            "ensemble_fallback": true
+          },
+          "swing_2h": {
+            "horizon_key": "swing_2h",
+            "forward_bars": 24,
+            "horizon_minutes": 120,
+            "expected_return": -0.004818014700185339,
+            "threshold": 0.0005863112011748666,
+            "short_threshold": 0.0005,
+            "regime": "neutral",
+            "uncertainty": 0.24023690262656242,
+            "model_origin": "global_ensemble",
+            "active_type": "EnsembleModel",
+            "coercion_applied": false,
+            "ensemble_fallback": true
+          }
+        },
+        "expected_return": -0.003870102132832739,
+        "threshold": 0.0019469952829566511,
+        "short_threshold": 0.0005980995889019935,
+        "regime": "neutral",
+        "uncertainty": 0.2355797574270416,
+        "unc_scale": 0.3,
+        "bar_index_hint": 5680522,
+        "feature_names_used": [
+          "ret_1",
+          "ret_6",
+          "ret_24",
+          "mom_accel",
+          "ema_21_50_cross",
+          "price_ema21",
+          "price_ema100",
+          "rsi_14",
+          "rsi_mom",
+          "macd_hist_n",
+          "bb_width",
+          "bb_pos",
+          "atr_pct",
+          "vol_regime",
+          "adx_14",
+          "di_spread",
+          "kauf_er_20",
+          "obv_ret",
+          "cmf_20",
+          "session_vwap_dev",
+          "body",
+          "body_dir",
+          "wick_asym",
+          "sr_compression",
+          "hour_sin",
+          "hour_cos",
+          "hurst_60",
+          "trend_mom",
+          "trend_conf",
+          "funding_zscore",
+          "funding_mom",
+          "h_ret_1",
+          "h_trend",
+          "h_trend_200",
+          "h_rsi_14",
+          "h1_trend",
+          "h1_rsi_14",
+          "h1_adx",
+          "h1_vol_regime",
+          "bull_bar"
+        ],
+        "RECOMMENDED_LONG_THRESHOLD": 0.0019469952829566511,
+        "RECOMMENDED_SHORT_THRESHOLD": 0.0005980995889019935,
+        "closed_bar_features": {
+          "ret_1": 0.0002968619944965223,
+          "ret_6": 0.0031036664328667474,
+          "ret_24": 0.010022981709606471,
+          "mom_accel": -0.0009569285445283349,
+          "ema_21_50_cross": 0.004784006880683695,
+          "price_ema21": 0.0045147538272327335,
+          "price_ema100": 0.015337622000009378,
+          "rsi_14": 93.53359542158034,
+          "rsi_mom": 2.2053058369921104,
+          "macd_hist_n": 0.22510094818114265,
+          "bb_width": 0.011933409218399896,
+          "bb_pos": 0.8929347381565549,
+          "atr_pct": 0.0010106527966766122,
+          "vol_regime": 0.7959730074148896,
+          "adx_14": 79.12641077468655,
+          "di_spread": 46.00358056140846,
+          "kauf_er_20": 0.8696126684727296,
+          "obv_ret": 2.3560372781577437,
+          "cmf_20": -0.5384615384437651,
+          "session_vwap_dev": 0.0023388356435210898,
+          "body": 0.4710974637056667,
+          "body_dir": 0.4710974637056667,
+          "wick_asym": 0.8174082849328204,
+          "sr_compression": 0.004882202894671799,
+          "hour_sin": 0.21643961393810288,
+          "hour_cos": 0.9762960071199334,
+          "hurst_60": 0.04689199132541244,
+          "trend_mom": -0.0019138570890566697,
+          "trend_conf": -0.3940284645298728,
+          "funding_zscore": 0.5720083230605867,
+          "funding_mom": 0.001775323031603541,
+          "h_ret_1": 0.00122526062775985,
+          "h_trend": 0.008617565521149482,
+          "h_trend_200": 0.013177349980427546,
+          "h_rsi_14": 99.45935395250083,
+          "h1_trend": 0.0,
+          "h1_rsi_14": 0.0,
+          "h1_adx": 0.0,
+          "h1_vol_regime": 0.0,
+          "bull_bar": 1.0
+        },
+        "primary_execution_horizon_bars": 2,
+        "training_forward_bars": 2,
+        "target_horizon_bars": 2,
+        "short_execution_enabled": true,
+        "predict_phase_timings_ms": {
+          "bundle_ready_ms": 0.14,
+          "lock_wait_ms": 0.0,
+          "inference_ms": 947.35
+        }
+      }
+    },
+    {
+      "name": "multi_horizon",
+      "ok": true,
+      "duration_ms": 0.4,
+      "error": null,
+      "alignment_score": 1.0,
+      "dominant_direction": "SHORT",
+      "opposition_detected": false,
+      "primary_head": "scalp_10m",
+      "primary_expected_return": -0.00387,
+      "primary_threshold": 0.001947,
+      "heads": {
+        "scalp_10m": {
+          "direction": "SHORT",
+          "expected_return": -0.00387,
+          "threshold": 0.001947,
+          "forward_bars": 2
+        },
+        "intraday_30m": {
+          "direction": "SHORT",
+          "expected_return": -0.003915,
+          "threshold": 0.00112,
+          "forward_bars": 6
+        },
+        "trend_1h": {
+          "direction": "SHORT",
+          "expected_return": -0.003885,
+          "threshold": 0.00064,
+          "forward_bars": 12
+        },
+        "swing_2h": {
+          "direction": "SHORT",
+          "expected_return": -0.004818,
+          "threshold": 0.000586,
+          "forward_bars": 24
+        }
+      }
+    },
+    {
+      "name": "market_structure",
+      "ok": true,
+      "duration_ms": 0.0,
+      "error": null,
+      "market_type": "LOW_VOL",
+      "regime": "neutral",
+      "adx": 79.126,
+      "atr_pct": 0.00101,
+      "vol_regime": 0.796,
+      "liquidity_ok": true,
+      "chop_market": true,
+      "reason_codes": [
+        "structure_chop_low_vol"
+      ]
+    },
+    {
+      "name": "thesis",
+      "ok": true,
+      "duration_ms": 0.0,
+      "error": null,
+      "signal": "HOLD",
+      "confidence": 0.0,
+      "thesis_type": "flat",
+      "direction": "FLAT",
+      "strength": 0.0,
+      "intended_horizon_bars": 0,
+      "reason_codes": [
+        "thesis_chop_market_veto"
+      ]
+    },
+    {
+      "name": "ml_gates",
+      "ok": true,
+      "duration_ms": 0.1,
+      "error": null,
+      "expected_return": -0.00387,
+      "threshold": 0.001947,
+      "short_threshold": 0.000598,
+      "raw_long": false,
+      "raw_short": true,
+      "final_long": false,
+      "final_short": true,
+      "gate_reject": null
+    },
+    {
+      "name": "trade_scorer",
+      "ok": true,
+      "duration_ms": 0.1,
+      "error": null,
+      "score": 61.64,
+      "passed": false,
+      "min_required": 70.0,
+      "ml_confirms": false,
+      "components": {
+        "thesis": 25.0,
+        "ml": 11.64,
+        "regime_fit": 0.0,
+        "liquidity": 15.0,
+        "structure": 0.0,
+        "gates": 10.0,
+        "multi_horizon": 0.0
+      },
+      "reason_codes": [
+        "score_effective_direction_from_ml_gates",
+        "score_thesis_active",
+        "score_ml_gated_confirms",
+        "score_chop_penalty",
+        "score_ml_gates_passed",
+        "score_below_min=61.6<70.0"
+      ]
+    },
+    {
+      "name": "policy_engine",
+      "ok": true,
+      "duration_ms": 0.3,
+      "error": null,
+      "signal": "SELL",
+      "confidence": 0.5,
+      "position_size": 0.05,
+      "adopted_ml_candidate": true,
+      "reason_codes": [
+        "fusion_mode=ml_and_thesis",
+        "thesis_type=flat",
+        "thesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_gated_thesis_neutral",
+        "agent_ratified_ml_evidence",
+        "ml_evidence_supporting",
+        "ml_source=v43_orchestrator"
+      ],
+      "ml_candidate_signal": "SELL"
+    },
+    {
+      "name": "portfolio_guard",
+      "ok": true,
+      "duration_ms": 0.1,
+      "error": null,
+      "action": "block",
+      "heat_ratio": 0.883,
+      "side_concentration": 0.057,
+      "allowed_size_fraction": 0.0,
+      "shadow_only": false,
+      "reason_codes": [
+        "portfolio_heat_cap:0.883>0.850"
+      ],
+      "portfolio_equity": 12000.0,
+      "open_positions_count": 5
+    },
+    {
+      "name": "final_decision",
+      "ok": true,
+      "duration_ms": 0.0,
+      "error": null,
+      "signal": "SELL",
+      "execute": false,
+      "position_size": 0.05,
+      "guard_action": "block",
+      "reason": [
+        "fusion_mode=ml_and_thesis",
+        "thesis_type=flat",
+        "thesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_gated_thesis_neutral",
+        "agent_ratified_ml_evidence",
+        "ml_evidence_supporting",
+        "ml_source=v43_orchestrator"
+      ]
+    }
+  ],
+  "expected": {
+    "portfolio_guard_action_in": [
+      "reduce_size",
+      "block"
+    ],
+    "execute": false
+  },
+  "assertions": {
+    "strict": false,
+    "tier1_passed": false,
+    "tier2_passed": true,
+    "scenario_passed": false,
+    "all_passed": false,
+    "critical_passed": 4,
+    "critical_total": 5,
+    "tier1_critical_passed": 2,
+    "tier1_critical_total": 3,
+    "tier2_critical_passed": 2,
+    "tier2_critical_total": 2,
+    "warnings_passed": 2,
+    "warnings_total": 2,
+    "checks": [
+      {
+        "check": "ml_layer_healthy",
+        "passed": true,
+        "actual": "ok",
+        "expected": "ok",
+        "severity": "critical",
+        "note": "ML model must run without error"
+      },
+      {
+        "check": "pipeline_complete",
+        "passed": true,
+        "actual": "missing=[] errored=[]",
+        "expected": "all layers ok",
+        "severity": "critical",
+        "note": "Every layer must complete without errors"
+      },
+      {
+        "check": "score_execution_coherence",
+        "passed": false,
+        "actual": "score_passed=False policy_signal=SELL",
+        "expected": "consistent",
+        "severity": "critical",
+        "note": "INCOHERENT: score failed but policy issued entry \u2014 orchestrator score gate may be bypassed"
+      },
+      {
+        "check": "gate_policy_coherence",
+        "passed": true,
+        "actual": "gates_passed=True policy_signal=SELL",
+        "expected": "consistent",
+        "severity": "info",
+        "note": "Gate \u2192 policy direction is consistent"
+      },
+      {
+        "check": "expected_return_stable",
+        "passed": true,
+        "actual": -0.00387,
+        "expected": "abs < 0.5",
+        "severity": "warning",
+        "note": "Expected return should be in a realistic range"
+      },
+      {
+        "check": "multi_horizon_alignment_range",
+        "passed": true,
+        "actual": 1.0,
+        "expected": "0.0 - 1.0",
+        "severity": "warning",
+        "note": "Alignment score must be a valid 0-1 fraction"
+      },
+      {
+        "check": "expected_execute",
+        "passed": true,
+        "actual": false,
+        "expected": false,
+        "severity": "critical",
+        "note": "Trade execution intent must match expected"
+      },
+      {
+        "check": "portfolio_guard_action",
+        "passed": true,
+        "actual": "block",
+        "expected": "one of ['reduce_size', 'block']",
+        "severity": "critical",
+        "note": "Portfolio guard must take expected protective action"
+      }
+    ],
+    "failed_critical": [
+      "score_execution_coherence"
+    ],
+    "failed_tier1": [
+      "score_execution_coherence"
+    ],
+    "failed_tier2": [],
+    "failed_warnings": []
+  }
+}

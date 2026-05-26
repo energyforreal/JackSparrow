@@ -15,7 +15,11 @@ from feature_store.jacksparrow_v43_contract import (
     V43_CANONICAL_FEATURES,
     V43_COMPATIBLE_FEATURE_VERSION,
 )
-from feature_store.jacksparrow_v43_horizon import build_execution_profile, forward_bars_to_minutes
+from feature_store.jacksparrow_v43_horizon import (
+    V43_FORWARD_TARGET_BARS_DEFAULT,
+    build_execution_profile,
+    forward_bars_to_minutes,
+)
 from feature_store.jacksparrow_v43_multihead import (
     V43_HORIZON_KEY_TO_BARS,
     V43_HORIZON_KEYS,
@@ -649,7 +653,12 @@ def train_multihead_from_feature_matrix(
         "target_definition": (
             "cost_aware_forward_return" if cost_aware_labels else "simple_forward_return"
         ),
-        "primary_execution_horizon_bars": 6,
+        "primary_execution_horizon_bars": int(
+            os.environ.get(
+                "V43_PRIMARY_EXECUTION_HORIZON_BARS",
+                str(V43_FORWARD_TARGET_BARS_DEFAULT),
+            )
+        ),
         "horizons": horizons_meta,
         "split": split_meta_global,
         "exported_at": exported_at,

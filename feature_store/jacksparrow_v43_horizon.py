@@ -11,8 +11,8 @@ V43_CANDLE_MINUTES = 5
 V43_MULTIHEAD_FORWARD_BARS = frozenset({2, 6, 12, 24})
 V43_SUPPORTED_FORWARD_TARGET_BARS = V43_MULTIHEAD_FORWARD_BARS
 
-# Primary execution / thesis default (30m).
-V43_FORWARD_TARGET_BARS_DEFAULT = 6
+# Primary execution / thesis default (scalp 10m).
+V43_FORWARD_TARGET_BARS_DEFAULT = 2
 
 
 @dataclass(frozen=True)
@@ -101,6 +101,9 @@ def resolve_training_forward_bars(
         peh = meta.get("primary_execution_horizon_bars")
         if peh is not None:
             return normalize_forward_bars(peh)
+        legacy = meta.get("training_forward_bars")
+        if legacy is not None:
+            return normalize_forward_bars(legacy)
     if settings_fallback is not None:
         return normalize_forward_bars(settings_fallback)
     return V43_FORWARD_TARGET_BARS_DEFAULT

@@ -1,0 +1,96 @@
+{
+  "run_at": "20260526_120755",
+  "scenarios_run": 7,
+  "scenarios_passed": 7,
+  "scenarios_tier1_passed": 7,
+  "scenarios": [
+    {
+      "name": "strong_breakout",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 4856.9,
+      "error": null
+    },
+    {
+      "name": "fake_breakout",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 472.7,
+      "error": null
+    },
+    {
+      "name": "chop_market",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 541.2,
+      "error": null
+    },
+    {
+      "name": "liquidation_spike",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 512.8,
+      "error": null
+    },
+    {
+      "name": "high_drawdown",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 646.7,
+      "error": null
+    },
+    {
+      "name": "thesis_ml_disagreement",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 523.7,
+      "error": null
+    },
+    {
+      "name": "high_confidence_bad_portfolio",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": false,
+      "failed_critical": [
+        "portfolio_guard_action"
+      ],
+      "failed_tier1": [],
+      "failed_tier2": [
+        "portfolio_guard_action"
+      ],
+      "failed_warnings": [],
+      "total_ms": 518.1,
+      "error": null
+    }
+  ]
+}

@@ -88,6 +88,21 @@ def test_gate5_long_passes_at_recovery_ratio(monkeypatch) -> None:
     assert metrics.passes is True
 
 
+def test_gate5_default_ratio_allows_metadata_scale_edge(monkeypatch) -> None:
+    """Default 0.2 ratio: typical scalp head edge (~3e-4) clears Gate 5."""
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "jacksparrow_v43_maker_fee_rate", 0.0005)
+    monkeypatch.setattr(settings, "jacksparrow_v43_slippage_pct", 0.0003)
+    monkeypatch.setattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.2)
+    thr = 0.00012032051081347966  # scalp_10m dynamic_threshold from metadata
+    proba = thr + 0.00035  # ~p90-scale edge above ratio*rtc at 0.2
+    metrics = gate5_long_edge_metrics(proba, thr)
+    assert metrics.rhs == pytest.approx(0.2 * 0.0016)
+    assert metrics.edge_pct == pytest.approx(0.00035)
+    assert metrics.passes is True
+
+
 def test_gate5_long_representative_edge_passes_default_cost() -> None:
     metrics = gate5_long_edge_metrics(0.015, 0.011)
     assert metrics.edge_pct == pytest.approx(0.004)

@@ -1,0 +1,94 @@
+{
+  "run_at": "20260526_115332",
+  "scenarios_run": 7,
+  "scenarios_passed": 0,
+  "scenarios": [
+    {
+      "name": "strong_breakout",
+      "passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "expected_policy_signal"
+      ],
+      "failed_warnings": [
+        "ml_confirms_direction",
+        "thesis_direction"
+      ],
+      "total_ms": 4241.3,
+      "error": null
+    },
+    {
+      "name": "fake_breakout",
+      "passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "expected_execute"
+      ],
+      "failed_warnings": [],
+      "total_ms": 523.2,
+      "error": null
+    },
+    {
+      "name": "chop_market",
+      "passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "expected_policy_signal",
+        "expected_execute"
+      ],
+      "failed_warnings": [
+        "score_below_max"
+      ],
+      "total_ms": 707.0,
+      "error": null
+    },
+    {
+      "name": "liquidation_spike",
+      "passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "expected_execute"
+      ],
+      "failed_warnings": [],
+      "total_ms": 555.0,
+      "error": null
+    },
+    {
+      "name": "high_drawdown",
+      "passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "expected_execute"
+      ],
+      "failed_warnings": [],
+      "total_ms": 571.3,
+      "error": null
+    },
+    {
+      "name": "thesis_ml_disagreement",
+      "passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "expected_policy_signal",
+        "expected_execute"
+      ],
+      "failed_warnings": [],
+      "total_ms": 533.7,
+      "error": null
+    },
+    {
+      "name": "high_confidence_bad_portfolio",
+      "passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "score_execution_coherence",
+        "portfolio_guard_action"
+      ],
+      "failed_warnings": [
+        "ml_confirms_direction"
+      ],
+      "total_ms": 508.2,
+      "error": null
+    }
+  ]
+}

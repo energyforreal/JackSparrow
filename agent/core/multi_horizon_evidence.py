@@ -50,11 +50,11 @@ class HorizonHeadSnapshot:
 @dataclass
 class MultiHorizonMLEvidence:
     heads: Dict[str, HorizonHeadSnapshot] = field(default_factory=dict)
-    primary_execution_horizon_bars: int = 6
+    primary_execution_horizon_bars: int = 2
     alignment_score: float = 0.0
     opposition_detected: bool = False
     timing_head_key: str = "scalp_10m"
-    execution_head_key: str = "intraday_30m"
+    execution_head_key: str = "scalp_10m"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -153,7 +153,7 @@ def build_multi_horizon_evidence(
             eps=eps,
         )
 
-    peh = int(meta.get("primary_execution_horizon_bars", 6) or 6)
+    peh = int(meta.get("primary_execution_horizon_bars", 2) or 2)
     align = _compute_alignment(heads, peh)
     opp = _detect_opposition(heads, peh)
     return MultiHorizonMLEvidence(

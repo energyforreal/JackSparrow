@@ -16,6 +16,7 @@ OI_FEATURE_NAMES: tuple[str, ...] = (
     "oi_change_6",
     "oi_price_divergence",
     "oi_acceleration",
+    "oi_delta_z",
 )
 
 
@@ -31,6 +32,7 @@ def _oi_features_on_primary(
             "oi_change_6": np.zeros(n),
             "oi_price_divergence": np.zeros(n),
             "oi_acceleration": np.zeros(n),
+            "oi_delta_z": np.zeros(n),
         },
         index=primary_df.index,
     )
@@ -82,12 +84,18 @@ def _oi_features_on_primary(
     oi_price_divergence = pd.Series(oi_price_divergence).fillna(0.0)
     oi_acceleration = oi_change_6.diff().fillna(0.0).clip(-0.02, 0.02)
 
+    oi_delta_1 = oi_s.diff(1).fillna(0.0)
+    oi_delta_mu = oi_delta_1.rolling(w, min_periods=max(2, w // 4)).mean()
+    oi_delta_std = oi_delta_1.rolling(w, min_periods=max(2, w // 4)).std().clip(lower=_EPS)
+    oi_delta_z = ((oi_delta_1 - oi_delta_mu) / oi_delta_std).fillna(0.0).clip(-4.0, 4.0)
+
     out = pd.DataFrame(
         {
             "oi_zscore": oi_zscore.values,
             "oi_change_6": oi_change_6.values,
             "oi_price_divergence": oi_price_divergence.values,
             "oi_acceleration": oi_acceleration.values,
+            "oi_delta_z": oi_delta_z.values,
         },
         index=primary_df.index,
     )

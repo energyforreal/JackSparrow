@@ -41,6 +41,7 @@ from feature_store.jacksparrow_v43_contract import (
     validate_v43_metadata_promotion,
 )
 from feature_store.jacksparrow_v43_horizon import (
+    V43_FORWARD_TARGET_BARS_DEFAULT,
     forward_bars_to_minutes,
     resolve_training_forward_bars,
 )
@@ -275,7 +276,7 @@ class JackSparrowV43Node(MCPModelNode):
         self._predict_lock: Optional[asyncio.Lock] = None
         # Protect bundle init/reload from concurrent state mutation.
         self._bundle_lock: Optional[asyncio.Lock] = None
-        self._training_forward_bars: int = 6
+        self._training_forward_bars: int = V43_FORWARD_TARGET_BARS_DEFAULT
 
     def _get_predict_lock(self) -> asyncio.Lock:
         if self._predict_lock is None:
@@ -308,7 +309,12 @@ class JackSparrowV43Node(MCPModelNode):
         node._training_forward_bars = resolve_training_forward_bars(
             meta,
             settings_fallback=int(
-                getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6
+                getattr(
+                    settings,
+                    "jacksparrow_v43_forward_target_bars",
+                    V43_FORWARD_TARGET_BARS_DEFAULT,
+                )
+                or V43_FORWARD_TARGET_BARS_DEFAULT
             ),
         )
         return node
@@ -331,10 +337,22 @@ class JackSparrowV43Node(MCPModelNode):
         self._training_forward_bars = resolve_training_forward_bars(
             self._bundle_metadata,
             settings_fallback=int(
-                getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6
+                getattr(
+                    settings,
+                    "jacksparrow_v43_forward_target_bars",
+                    V43_FORWARD_TARGET_BARS_DEFAULT,
+                )
+                or V43_FORWARD_TARGET_BARS_DEFAULT
             ),
         )
-        cfg_bars = int(getattr(settings, "jacksparrow_v43_forward_target_bars", 6) or 6)
+        cfg_bars = int(
+            getattr(
+                settings,
+                "jacksparrow_v43_forward_target_bars",
+                V43_FORWARD_TARGET_BARS_DEFAULT,
+            )
+            or V43_FORWARD_TARGET_BARS_DEFAULT
+        )
         if self._training_forward_bars != cfg_bars:
             logger.warning(
                 "v43_horizon_bundle_config_mismatch",

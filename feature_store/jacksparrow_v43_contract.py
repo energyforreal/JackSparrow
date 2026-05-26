@@ -23,7 +23,8 @@ from feature_store.jacksparrow_v43_multihead import (
 )
 
 # Bump when ``V43_CANONICAL_FEATURES`` or semantics change (retrain + re-export metadata).
-V43_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v4"
+V43_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v5"
+V43_LEGACY_V4_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v4"
 V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v3"
 V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v2"
 V43_LEGACY_COMPATIBLE_FEATURE_VERSION = "jacksparrow_v43_features_v1"
@@ -78,6 +79,7 @@ V43_CANONICAL_FEATURES: tuple[str, ...] = (
     "oi_change_6",
     "oi_price_divergence",
     "oi_acceleration",
+    "oi_delta_z",
     "basis",
     "basis_zscore",
     "basis_momentum",
@@ -89,10 +91,16 @@ V43_CANONICAL_FEATURES: tuple[str, ...] = (
 
 V43_EXPECTED_FEATURE_COUNT = len(V43_CANONICAL_FEATURES)
 
-# v3 contract (51 features) — bundles before funding_rate_roc (v4).
+# v4 contract (52 features) — bundles before oi_delta_z (v5).
+_V5_ONLY_FEATURES: tuple[str, ...] = ("oi_delta_z",)
 _V4_ONLY_FEATURES: tuple[str, ...] = ("funding_rate_roc",)
+V43_LEGACY_V4_CANONICAL_FEATURES: tuple[str, ...] = tuple(
+    f for f in V43_CANONICAL_FEATURES if f not in _V5_ONLY_FEATURES
+)
+V43_LEGACY_V4_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_V4_CANONICAL_FEATURES)
+# v3 contract (51 features) — bundles before funding_rate_roc (v4).
 V43_LEGACY_V3_CANONICAL_FEATURES: tuple[str, ...] = tuple(
-    f for f in V43_CANONICAL_FEATURES if f not in _V4_ONLY_FEATURES
+    f for f in V43_CANONICAL_FEATURES if f not in (_V4_ONLY_FEATURES + _V5_ONLY_FEATURES)
 )
 V43_LEGACY_V3_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_V3_CANONICAL_FEATURES)
 
@@ -119,6 +127,7 @@ V43_LEGACY_EXPECTED_FEATURE_COUNT = len(V43_LEGACY_CANONICAL_FEATURES)
 
 _SUPPORTED_FEATURE_CONTRACTS: dict[str, tuple[str, ...]] = {
     V43_COMPATIBLE_FEATURE_VERSION: V43_CANONICAL_FEATURES,
+    V43_LEGACY_V4_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_V4_CANONICAL_FEATURES,
     V43_LEGACY_V3_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_V3_CANONICAL_FEATURES,
     V43_LEGACY_V2_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_V2_CANONICAL_FEATURES,
     V43_LEGACY_COMPATIBLE_FEATURE_VERSION: V43_LEGACY_CANONICAL_FEATURES,

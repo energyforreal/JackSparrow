@@ -15,7 +15,7 @@
     "h1_rsi_14", "h1_adx", "h1_vol_regime", "bull_bar",
     "oi_zscore", "oi_change_6", "oi_price_divergence", "oi_acceleration"
   ],
-  "primary_execution_horizon_bars": 6,
+  "primary_execution_horizon_bars": 2,
   "horizons": {
     "scalp_10m": {
       "forward_bars": 2,

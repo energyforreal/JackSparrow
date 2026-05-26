@@ -1,0 +1,100 @@
+{
+  "run_at": "20260526_120354",
+  "scenarios_run": 7,
+  "scenarios_passed": 6,
+  "scenarios_tier1_passed": 6,
+  "scenarios": [
+    {
+      "name": "strong_breakout",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 5064.8,
+      "error": null
+    },
+    {
+      "name": "fake_breakout",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 1041.5,
+      "error": null
+    },
+    {
+      "name": "chop_market",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": false,
+      "failed_critical": [
+        "expected_policy_signal"
+      ],
+      "failed_tier1": [],
+      "failed_tier2": [
+        "expected_policy_signal"
+      ],
+      "failed_warnings": [],
+      "total_ms": 1048.2,
+      "error": null
+    },
+    {
+      "name": "liquidation_spike",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 998.1,
+      "error": null
+    },
+    {
+      "name": "high_drawdown",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 1001.2,
+      "error": null
+    },
+    {
+      "name": "thesis_ml_disagreement",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 1015.9,
+      "error": null
+    },
+    {
+      "name": "high_confidence_bad_portfolio",
+      "passed": false,
+      "tier1_passed": false,
+      "all_passed": false,
+      "failed_critical": [
+        "score_execution_coherence"
+      ],
+      "failed_tier1": [
+        "score_execution_coherence"
+      ],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 950.1,
+      "error": null
+    }
+  ]
+}

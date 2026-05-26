@@ -51,6 +51,41 @@ def _safe_call(fn, *args, **kwargs):
         return None
 
 
+def _is_sklearn_array_compat_error(exc: BaseException) -> bool:
+    msg = str(exc)
+    return "force_all_finite" in msg or "ensure_all_finite" in msg
+
+
+def _predict_regressor_sklearn_compat(est: Any, Xs: np.ndarray) -> Optional[np.ndarray]:
+    """Predict with sklearn 1.6 artifacts on sklearn 1.8+ (force_all_finite rename)."""
+    try:
+        return np.asarray(est.predict(Xs), dtype=np.float64).ravel()
+    except TypeError as exc:
+        if not _is_sklearn_array_compat_error(exc):
+            raise
+    booster = getattr(est, "_Booster", None)
+    if booster is not None and hasattr(booster, "predict"):
+        return np.asarray(booster.predict(Xs), dtype=np.float64).ravel()
+    return None
+
+
+def _predict_proba_sklearn_compat(est: Any, Xs: np.ndarray) -> Optional[np.ndarray]:
+    try:
+        p = np.asarray(est.predict_proba(Xs), dtype=np.float64)
+        if p.ndim == 2 and p.shape[1] >= 2:
+            return p[:, 1]
+        return p.ravel()
+    except TypeError as exc:
+        if not _is_sklearn_array_compat_error(exc):
+            raise
+    booster = getattr(est, "_Booster", None)
+    if booster is not None and hasattr(booster, "predict"):
+        raw = np.asarray(booster.predict(Xs), dtype=np.float64).ravel()
+        raw = np.clip(raw, 0.0, 1.0)
+        return raw
+    return None
+
+
 class _StateDictMixin:
     """Default __setstate__ that accepts an arbitrary attribute dict."""
 
@@ -227,29 +262,32 @@ class LGBMModel(_StateDictMixin):
             hasattr(est, "predict") and not hasattr(est, "predict_proba")
         )
         if is_regressor:
-            try:
-                return np.asarray(est.predict(Xs), dtype=np.float64).ravel()
-            except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_regressor_predict_failed",
-                                clf=type(est).__name__, err=str(exc))
-                return None
+            out = _predict_regressor_sklearn_compat(est, Xs)
+            if out is not None:
+                return out
+            _logger.warning(
+                "v43_shim_regressor_predict_failed",
+                clf=type(est).__name__,
+            )
+            return None
         if hasattr(est, "predict_proba"):
-            try:
-                p = np.asarray(est.predict_proba(Xs), dtype=np.float64)
-                if p.ndim == 2 and p.shape[1] >= 2:
-                    return p[:, 1]
-                return p.ravel()
-            except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_clf_predict_proba_failed",
-                                clf=type(est).__name__, err=str(exc))
-                return None
+            out = _predict_proba_sklearn_compat(est, Xs)
+            if out is not None:
+                return out
+            _logger.warning(
+                "v43_shim_clf_predict_proba_failed",
+                clf=type(est).__name__,
+            )
+            return None
         if hasattr(est, "predict"):
-            try:
-                return np.asarray(est.predict(Xs), dtype=np.float64).ravel()
-            except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_predict_fallback_failed",
-                                clf=type(est).__name__, err=str(exc))
-                return None
+            out = _predict_regressor_sklearn_compat(est, Xs)
+            if out is not None:
+                return out
+            _logger.warning(
+                "v43_shim_predict_fallback_failed",
+                clf=type(est).__name__,
+            )
+            return None
         return None
 
     def predict(self, X: np.ndarray, X_df: Optional[pd.DataFrame] = None) -> np.ndarray:
@@ -377,21 +415,18 @@ class EnsembleModel(_StateDictMixin):
                 return None
         # Regressors (XGBRegressor, RandomForestRegressor, etc.).
         if hasattr(est, "predict") and not hasattr(est, "predict_proba"):
-            try:
-                return np.asarray(est.predict(Xs), dtype=np.float64).ravel()
-            except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_regressor_predict_failed clf=%s: %s", type(est).__name__, exc)
-                return None
+            out = _predict_regressor_sklearn_compat(est, Xs)
+            if out is not None:
+                return out
+            _logger.warning("v43_shim_regressor_predict_failed clf=%s", type(est).__name__)
+            return None
         # Classifiers (legacy).
         if hasattr(est, "predict_proba"):
-            try:
-                p = np.asarray(est.predict_proba(Xs), dtype=np.float64)
-                if p.ndim == 2 and p.shape[1] >= 2:
-                    return p[:, 1]
-                return p.ravel()
-            except Exception as exc:  # pragma: no cover
-                _logger.warning("v43_shim_clf_predict_proba_failed clf=%s: %s", type(est).__name__, exc)
-                return None
+            out = _predict_proba_sklearn_compat(est, Xs)
+            if out is not None:
+                return out
+            _logger.warning("v43_shim_clf_predict_proba_failed clf=%s", type(est).__name__)
+            return None
         return None
 
     def _base_predictions(self, X_raw: np.ndarray) -> np.ndarray:
@@ -451,7 +486,13 @@ class EnsembleModel(_StateDictMixin):
                 except Exception as exc:  # pragma: no cover
                     _logger.warning("v43_shim_regime_meta_assemble_failed: %s", exc)
             try:
-                out = meta.predict_proba(X_meta)[:, 1]
+                proba = _predict_proba_sklearn_compat(meta, X_meta)
+                if proba is not None:
+                    out = proba
+                else:
+                    out = np.asarray(meta.predict_proba(X_meta), dtype=np.float64)
+                    if out.ndim == 2 and out.shape[1] >= 2:
+                        out = out[:, 1]
             except Exception as exc:
                 _logger.warning("v43_shim_meta_failed: %s", exc)
                 out = stack.mean(axis=1)
