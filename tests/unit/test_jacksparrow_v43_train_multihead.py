@@ -191,13 +191,13 @@ def test_resolve_validation_threshold_percentiles_env_override(
     assert resolve_validation_threshold_percentiles() == (85.0, 15.0)
 
 
-def test_resolve_min_dynamic_threshold_default_full_cost(
+def test_resolve_min_dynamic_threshold_default_half_cost(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from feature_store.jacksparrow_v43_train_multihead import resolve_min_dynamic_threshold
 
     monkeypatch.delenv("V43_MIN_THRESHOLD_COST_FRACTION", raising=False)
-    assert resolve_min_dynamic_threshold(0.001) == pytest.approx(0.001)
+    assert resolve_min_dynamic_threshold(0.001) == pytest.approx(0.0005)
 
 
 def test_resolve_min_dynamic_threshold_fraction_env(

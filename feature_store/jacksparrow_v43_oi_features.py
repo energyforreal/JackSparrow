@@ -44,9 +44,14 @@ def _oi_features_on_primary(
         prim_ts = pd.to_datetime(primary_df["timestamp"], utc=True)
         oi_copy = df_oi.copy()
         oi_copy["_ts"] = pd.to_datetime(oi_copy["timestamp"], utc=True)
-        oi_sorted = oi_copy.sort_values("_ts")
+        oi_sorted = (
+            oi_copy.sort_values("_ts")
+            .drop_duplicates(subset=["_ts"], keep="last")
+        )
 
         left = pd.DataFrame({"ts": prim_ts, "_ord": np.arange(n)}).sort_values("ts")
+        if not left["ts"].is_monotonic_increasing:
+            left = left.sort_values("ts")
         merged = pd.merge_asof(
             left,
             oi_sorted[["_ts", "oi_contracts"]],

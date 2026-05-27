@@ -33,6 +33,8 @@ class AgentIntrospectionSnapshot:
     trade_score_pass: Optional[bool] = None
     v43_regime: Optional[str] = None
     v43_gate_reject: Optional[str] = None
+    regime_bar_age: Optional[int] = None
+    regime_transition_risk: Optional[str] = None
     portfolio_guard_action: Optional[str] = None
     portfolio_guard_reason_codes: List[str] = field(default_factory=list)
     memory_enabled: bool = False
@@ -55,6 +57,8 @@ class AgentIntrospectionSnapshot:
             "trade_score_pass": self.trade_score_pass,
             "v43_regime": self.v43_regime,
             "v43_gate_reject": self.v43_gate_reject,
+            "regime_bar_age": self.regime_bar_age,
+            "regime_transition_risk": self.regime_transition_risk,
             "portfolio_guard_action": self.portfolio_guard_action,
             "portfolio_guard_reason_codes": list(self.portfolio_guard_reason_codes),
             "memory_enabled": self.memory_enabled,
@@ -139,6 +143,19 @@ def build_introspection_snapshot(
     if v43_gate is None and isinstance(ml_validation, dict):
         v43_gate = ml_validation.get("gate_reject")
 
+    regime_bar_age: Optional[int] = None
+    regime_transition_risk: Optional[str] = None
+    if isinstance(mctx, dict):
+        rba = mctx.get("regime_bar_age")
+        if rba is not None:
+            try:
+                regime_bar_age = int(rba)
+            except (TypeError, ValueError):
+                regime_bar_age = None
+        rtr = mctx.get("regime_transition_risk")
+        if rtr is not None:
+            regime_transition_risk = str(rtr)
+
     limits: Dict[str, Any] = {
         "trade_score_min": min_score,
         "require_ml_signal_for_orders": bool(
@@ -162,6 +179,8 @@ def build_introspection_snapshot(
         trade_score_pass=trade_pass,
         v43_regime=str(v43_regime) if v43_regime is not None else None,
         v43_gate_reject=str(v43_gate) if v43_gate is not None else None,
+        regime_bar_age=regime_bar_age,
+        regime_transition_risk=regime_transition_risk,
         portfolio_guard_action=str(pg_action) if pg_action is not None else None,
         portfolio_guard_reason_codes=pg_codes,
         memory_enabled=memory_enabled,

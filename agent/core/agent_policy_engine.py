@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from agent.events.schemas import MLEvidenceSnapshot, PolicyVerdict
+from agent.core.reasoning_engine import MCPReasoningChain
 from agent.core.config import settings
 from agent.core.agent_thesis_engine import AgentThesisEngine, ThesisVerdict, agent_thesis_engine
 from agent.core.multi_horizon_evidence import (
@@ -500,6 +501,7 @@ class AgentPolicyEngine:
         ml_evidence: MLEvidenceSnapshot,
         conclusion: str = "",
         market_context: Optional[Dict[str, Any]] = None,
+        reasoning_chain: Optional[MCPReasoningChain] = None,
     ) -> PolicyVerdict:
         """Return the agent policy verdict for this cycle."""
         mc = market_context if isinstance(market_context, dict) else {}
@@ -521,7 +523,41 @@ class AgentPolicyEngine:
 
         regime = ml_evidence.v43_regime or mc.get("regime") or mc.get("v43_regime")
         thesis = self._thesis_engine.evaluate(regime, mc)
-        return _fuse_signals(ml_evidence, thesis, mode, conclusion, market_context=mc)
+        verdict = _fuse_signals(ml_evidence, thesis, mode, conclusion, market_context=mc)
+        memory_scale = _memory_size_scale_from_reasoning(reasoning_chain)
+        if memory_scale < 1.0 and verdict.position_size > 0:
+            verdict = verdict.model_copy(
+                update={
+                    "position_size": float(verdict.position_size) * memory_scale,
+                    "memory_size_scale": memory_scale,
+                    "reason_codes": list(verdict.reason_codes)
+                    + [f"memory_size_scale={memory_scale:.2f}"],
+                }
+            )
+        elif memory_scale != 1.0:
+            verdict = verdict.model_copy(update={"memory_size_scale": memory_scale})
+        return verdict
+
+
+def _memory_size_scale_from_reasoning(
+    reasoning_chain: Optional[MCPReasoningChain],
+) -> float:
+    """Scale position size down when similar historical setups underperformed."""
+    if reasoning_chain is None:
+        return 1.0
+    step2 = next((s for s in reasoning_chain.steps if s.step_number == 2), None)
+    if step2 is None or not isinstance(step2.step_metadata, dict):
+        return 1.0
+    hr = step2.step_metadata.get("historical_win_rate")
+    if hr is None:
+        return 1.0
+    try:
+        win_rate = float(hr)
+    except (TypeError, ValueError):
+        return 1.0
+    if win_rate < 0.40:
+        return 0.8
+    return 1.0
 
 
 agent_policy_engine = AgentPolicyEngine()

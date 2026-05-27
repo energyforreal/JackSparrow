@@ -55,6 +55,10 @@ from agent.core.v43_signal_gates import (
     apply_gate5_min_edge_short,
     apply_post_threshold_gates,
     apply_post_threshold_gates_short,
+    compute_regime_transition_risk,
+    load_gate_state_from_redis,
+    maybe_widen_epsilon_on_high_collapse,
+    persist_gate_state,
 )
 from agent.core.log_context import (
     EVENT_MODEL_PREDICTION,
@@ -77,12 +81,58 @@ from feature_store.jacksparrow_v43_multihead import primary_execution_horizon_ba
 
 logger = structlog.get_logger()
 
+_last_position_reconcile_ts: float = 0.0
+_POSITION_RECONCILE_STALE_SECONDS: float = 30.0
+
+
+def mark_position_reconcile_completed() -> None:
+    """Update reconcile freshness timestamp (called after background reconcile)."""
+    global _last_position_reconcile_ts
+    _last_position_reconcile_ts = time.time()
+
 
 async def _exchange_has_open_position_async(symbol: str) -> bool:
     """True when agent memory or Delta testnet reports an open position for symbol."""
+    global _last_position_reconcile_ts
     sym = str(symbol or "").strip().upper()
     if not sym:
         return False
+
+    now_mono = time.time()
+    if (now_mono - _last_position_reconcile_ts) > _POSITION_RECONCILE_STALE_SECONDS:
+        try:
+            from agent.core.execution import execution_module
+            from agent.core.position_reconcile import reconcile_positions_with_exchange
+
+            await asyncio.wait_for(
+                reconcile_positions_with_exchange(execution_module),
+                timeout=5.0,
+            )
+            _last_position_reconcile_ts = time.time()
+        except Exception as exc:
+            logger.warning(
+                "position_reconcile_before_entry_failed",
+                symbol=sym,
+                error=str(exc),
+                exc_info=True,
+            )
+            try:
+                from agent.events.schemas import RiskAlertEvent
+
+                alert = RiskAlertEvent(
+                    source="mcp_orchestrator",
+                    payload={
+                        "alert_type": "reconciliation_failed",
+                        "symbol": sym,
+                        "message": "Exchange reconciliation failed; blocking new entry",
+                        "error": str(exc),
+                    },
+                )
+                await event_bus.publish(alert)
+            except Exception:
+                pass
+            return True
+
     try:
         from agent.core.execution import execution_module
 
@@ -203,6 +253,8 @@ class MCPOrchestrator:
         self.delta_client = None  # Set by agent for 15m trend (MTF confirmation)
         self._initialized = False
         self._v43_gate_state = V43GateState()
+        self._v43_gate_state_lock = asyncio.Lock()
+        self._v43_gate_symbol: Optional[str] = None
         self._v43_last_entry_decision_bar: Optional[int] = None
     
     async def initialize(self):
@@ -309,6 +361,25 @@ class MCPOrchestrator:
             event_bus.subscribe(EventType.MODEL_PREDICTION_REQUEST, self._handle_prediction_request)
             event_bus.subscribe(EventType.REASONING_REQUEST, self._handle_reasoning_request)
 
+            gate_symbol = str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD").upper()
+            self._v43_gate_symbol = gate_symbol
+            try:
+                from agent.core.redis_config import get_redis
+
+                redis_client = await get_redis()
+                self._v43_gate_state = await load_gate_state_from_redis(
+                    gate_symbol,
+                    redis_client,
+                )
+                logger.info(
+                    "v43_gate_state_loaded",
+                    symbol=gate_symbol,
+                    last_signal_bar=self._v43_gate_state.last_signal_bar_index,
+                    trades_today=sum(self._v43_gate_state.trades_by_date.values()),
+                )
+            except Exception as e:
+                logger.warning("v43_gate_state_load_skipped", error=str(e))
+
             self._initialized = True
             logger.info("mcp_orchestrator_initialization_complete",
                        message="MCP Orchestrator fully initialized and ready")
@@ -336,11 +407,57 @@ class MCPOrchestrator:
 
             if self.feature_server:
                 await self.feature_server.shutdown()
+
+            if self._v43_gate_symbol:
+                try:
+                    from agent.core.redis_config import get_redis
+
+                    redis_client = await get_redis()
+                    await persist_gate_state(
+                        self._v43_gate_symbol,
+                        self._v43_gate_state,
+                        redis_client,
+                    )
+                except Exception as e:
+                    logger.warning("v43_gate_state_shutdown_persist_failed", error=str(e))
+
     
             logger.info("mcp_orchestrator_shutdown_complete")
 
         except Exception as e:
             logger.error("mcp_orchestrator_shutdown_failed", error=str(e), exc_info=True)
+
+    async def validate_models_dry_run(self) -> bool:
+        """Run a minimal inference pass to verify the v43 bundle loads correctly."""
+        import math
+
+        if not self.model_registry or not self.model_registry.models:
+            return False
+        try:
+            from agent.models.mcp_model_node import MCPModelRequest
+
+            names = self._required_feature_names_cache or get_feature_list()
+            feats = [0.0] * max(1, len(names))
+            req = MCPModelRequest(
+                request_id="dry_run_validation",
+                features=feats,
+                context={"dry_run": True, "symbol": getattr(settings, "trading_symbol", "BTCUSD")},
+            )
+            resp = await self.model_registry.get_predictions(req)
+            preds = getattr(resp, "predictions", None) or []
+            if not preds:
+                return False
+            p0 = preds[0]
+            ctx = getattr(p0, "context", None) or {}
+            er = ctx.get("expected_return") if isinstance(ctx, dict) else None
+            if er is None:
+                er = getattr(p0, "prediction", None)
+            if er is None:
+                return False
+            return math.isfinite(float(er))
+        except Exception as e:
+            logger.warning("model_dry_run_validation_failed", error=str(e), exc_info=True)
+            return False
 
     async def refresh_models(self) -> Dict[str, Any]:
         """Re-run model discovery and refresh required feature cache."""
@@ -351,6 +468,11 @@ class MCPOrchestrator:
         discovery = ModelDiscovery(self.model_registry)
         discovered_models = await discovery.discover_models()
         self._required_feature_names_cache = self.model_registry.get_required_feature_names()
+        if not await self.validate_models_dry_run():
+            logger.warning(
+                "mcp_orchestrator_model_dry_run_failed_after_refresh",
+                message="Models discovered but dry-run validation failed; registry left as-is.",
+            )
         logger.info(
             "mcp_orchestrator_models_refreshed",
             discovered_count=len(discovered_models),
@@ -619,52 +741,72 @@ class MCPOrchestrator:
         final_long = False
         final_short = False
         reject_tail = "below_threshold"
+        eps_eff = float(eps) + float(self._v43_gate_state.near_threshold_epsilon_bump or 0.0)
 
-        if raw_long:
-            gr2 = apply_post_threshold_gates(
-                raw_long=raw_long,
-                regime=regime,
-                current_bar_index=bar_idx,
-                has_open_position=has_open,
-                state=self._v43_gate_state,
+        async with self._v43_gate_state_lock:
+            self._v43_gate_state.note_regime(regime)
+            if raw_long:
+                gr2 = apply_post_threshold_gates(
+                    raw_long=raw_long,
+                    regime=regime,
+                    current_bar_index=bar_idx,
+                    has_open_position=has_open,
+                    state=self._v43_gate_state,
+                )
+                reject_tail = gr2.reject_reason or "below_threshold"
+                if gr2.allow:
+                    g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
+                    final_long = bool(g5.allow)
+                    if not final_long:
+                        reject_tail = g5.reject_reason or "min_edge_cost"
+                else:
+                    reject_tail = gr2.reject_reason or "gate"
+                if final_long:
+                    reject_tail = "gates_passed_long"
+            elif raw_short:
+                gr2s = apply_post_threshold_gates_short(
+                    raw_short=raw_short,
+                    regime=regime,
+                    current_bar_index=bar_idx,
+                    has_open_position=has_open,
+                    state=self._v43_gate_state,
+                )
+                reject_tail = gr2s.reject_reason or "below_threshold_short"
+                if gr2s.allow:
+                    g5s = apply_gate5_min_edge_short(proba, short_thr, self._v43_gate_state)
+                    final_short = bool(g5s.allow)
+                    if not final_short:
+                        reject_tail = g5s.reject_reason or "min_edge_cost"
+                else:
+                    reject_tail = gr2s.reject_reason or "gate"
+                if final_short:
+                    reject_tail = "gates_passed_short"
+            else:
+                if proba <= (thr - max(0.0, eps_eff)):
+                    reject_tail = "below_threshold"
+                elif eps_eff > 0.0 and proba <= thr:
+                    reject_tail = "near_threshold"
+                elif short_enabled and proba >= -short_thr:
+                    reject_tail = "below_threshold_short"
+                else:
+                    reject_tail = "below_threshold"
+
+            collapse_rate = self._v43_gate_state.counters.collapse_rate()
+            self._v43_gate_state.record_collapse_sample(collapse_rate)
+            score_std = float(features_dict.get("returns_std_20", 0.0) or 0.0)
+            epsilon_bump = maybe_widen_epsilon_on_high_collapse(
+                self._v43_gate_state,
+                score_std=score_std,
             )
-            reject_tail = gr2.reject_reason or "below_threshold"
-            if gr2.allow:
-                g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
-                final_long = bool(g5.allow)
-                if not final_long:
-                    reject_tail = g5.reject_reason or "min_edge_cost"
-            else:
-                reject_tail = gr2.reject_reason or "gate"
-            if final_long:
-                reject_tail = "gates_passed_long"
-        elif raw_short:
-            gr2s = apply_post_threshold_gates_short(
-                raw_short=raw_short,
-                regime=regime,
-                current_bar_index=bar_idx,
-                has_open_position=has_open,
-                state=self._v43_gate_state,
-            )
-            reject_tail = gr2s.reject_reason or "below_threshold_short"
-            if gr2s.allow:
-                g5s = apply_gate5_min_edge_short(proba, short_thr, self._v43_gate_state)
-                final_short = bool(g5s.allow)
-                if not final_short:
-                    reject_tail = g5s.reject_reason or "min_edge_cost"
-            else:
-                reject_tail = gr2s.reject_reason or "gate"
-            if final_short:
-                reject_tail = "gates_passed_short"
-        else:
-            if proba <= (thr - max(0.0, eps)):
-                reject_tail = "below_threshold"
-            elif eps > 0.0 and proba <= thr:
-                reject_tail = "near_threshold"
-            elif short_enabled and proba >= -short_thr:
-                reject_tail = "below_threshold_short"
-            else:
-                reject_tail = "below_threshold"
+            if epsilon_bump is not None:
+                logger.warning(
+                    "high_collapse_rate_alert",
+                    symbol=symbol,
+                    collapse_rate=collapse_rate,
+                    rolling_collapse_rate=self._v43_gate_state.rolling_collapse_rate(),
+                    epsilon_bump=epsilon_bump,
+                )
+            await self._persist_v43_gate_state_locked(symbol)
 
         gate_reject = None if (final_long or final_short) else reject_tail
         apply_gates_to_ml_validation(
@@ -830,11 +972,6 @@ class MCPOrchestrator:
             trade_score=trade_score.score,
             ml_confirms=ml_gates_passed or ml_confirms,
         )
-        policy_verdict = agent_policy_engine.evaluate(
-            ml_evidence=ml_evidence,
-            conclusion="",
-            market_context=market_context_for_reasoning,
-        )
 
         from agent.core.portfolio_intelligence import (
             apply_portfolio_guard_to_verdict,
@@ -846,6 +983,45 @@ class MCPOrchestrator:
             symbol,
             market_context_for_reasoning,
         )
+        market_context_for_reasoning["portfolio_exposure"] = portfolio_snap.to_dict()
+        _eq = float(portfolio_snap.portfolio_equity_usd or 0.0)
+        _notional = float(portfolio_snap.total_open_notional_usd or 0.0)
+        market_context_for_reasoning["portfolio_heat"] = (
+            _notional / _eq if _eq > 0 else 0.0
+        )
+        _long_n = float(portfolio_snap.long_notional_usd or 0.0)
+        _short_n = float(portfolio_snap.short_notional_usd or 0.0)
+        _side_total = _long_n + _short_n
+        market_context_for_reasoning["position_correlation"] = (
+            max(_long_n, _short_n) / _side_total if _side_total > 0 else 0.0
+        )
+        market_context_for_reasoning.update(_v43_reasoning_portfolio_risk_overlay(symbol))
+        market_context_for_reasoning["regime_bar_age"] = int(
+            self._v43_gate_state.regime_bar_age or 0
+        )
+        thesis_allowed = sum(
+            1
+            for code in (thesis_verdict.reason_codes or [])
+            if str(code).startswith("regime_allows_")
+        )
+        market_context_for_reasoning["regime_transition_risk"] = compute_regime_transition_risk(
+            thesis_allowed
+        )
+
+        reasoning_request = MCPReasoningRequest(
+            symbol=symbol,
+            market_context=market_context_for_reasoning,
+            use_memory=bool(self.vector_store),
+        )
+        reasoning_chain = await self.reasoning_engine.generate_reasoning(reasoning_request)
+
+        policy_verdict = agent_policy_engine.evaluate(
+            ml_evidence=ml_evidence,
+            conclusion=reasoning_chain.conclusion or "",
+            market_context=market_context_for_reasoning,
+            reasoning_chain=reasoning_chain,
+        )
+
         portfolio_guard = evaluate_portfolio_guard(
             portfolio_snap,
             symbol=symbol,
@@ -859,7 +1035,6 @@ class MCPOrchestrator:
             portfolio_guard,
             symbol=symbol,
         )
-        market_context_for_reasoning["portfolio_exposure"] = portfolio_snap.to_dict()
         market_context_for_reasoning["portfolio_guard"] = portfolio_guard.to_dict()
         logger.info(
             "portfolio_guard_evaluated",
@@ -909,13 +1084,6 @@ class MCPOrchestrator:
             v43_decision["position_size_hint"] = float(policy_verdict.position_size or pos_hint)
             v43_decision["policy_signal"] = policy_verdict.signal
             # Gate truth stays in final_long/final_short from ml_validation; do not overwrite.
-
-        reasoning_request = MCPReasoningRequest(
-            symbol=symbol,
-            market_context=market_context_for_reasoning,
-            use_memory=bool(self.vector_store),
-        )
-        reasoning_chain = await self.reasoning_engine.generate_reasoning(reasoning_request)
 
         policy_decision = {
             "signal": policy_verdict.signal,
@@ -1993,6 +2161,19 @@ class MCPOrchestrator:
                         exc_info=True)
 
 
+    async def _persist_v43_gate_state_locked(self, symbol: str) -> None:
+        """Persist gate state (caller must hold ``_v43_gate_state_lock``)."""
+        sym = str(symbol or self._v43_gate_symbol or "").upper()
+        if not sym:
+            return
+        try:
+            from agent.core.redis_config import get_redis
+
+            redis_client = await get_redis()
+            await persist_gate_state(sym, self._v43_gate_state, redis_client)
+        except Exception as e:
+            logger.warning("v43_gate_state_persist_failed", symbol=sym, error=str(e))
+
     def record_v43_signal_decision(self, bar_index: int) -> None:
         """Stamp v43 debounce after a gated BUY/SELL signal (before fill)."""
         self._v43_gate_state.note_signal_decision(int(bar_index))
@@ -2001,6 +2182,11 @@ class MCPOrchestrator:
         """Stamp v43 frequency state after a fill."""
         self._v43_gate_state.note_entry(int(bar_index), datetime.now(timezone.utc))
         self._v43_gate_state.counters.trades_executed += 1
+
+    async def persist_v43_gate_state_after_trade(self, symbol: str) -> None:
+        """Persist gate counters after fill (async-safe)."""
+        async with self._v43_gate_state_lock:
+            await self._persist_v43_gate_state_locked(symbol)
 
 
 # Create global MCP orchestrator instance

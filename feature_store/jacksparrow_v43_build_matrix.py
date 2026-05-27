@@ -298,7 +298,12 @@ def build_v43_feature_matrix(
         out.insert(0, "timestamp", d["timestamp"].values)
 
     prim = d.reset_index(drop=True)
-    oi_feats = _oi_features_on_primary(prim, df_oi)
+    df_oi_aligned = df_oi
+    if df_oi is not None and not df_oi.empty and "timestamp" in prim.columns:
+        from feature_store.jacksparrow_v43_oi_history import align_ticker_frame_to_primary
+
+        df_oi_aligned = align_ticker_frame_to_primary(prim, df_oi)
+    oi_feats = _oi_features_on_primary(prim, df_oi_aligned)
     for col in (
         "oi_zscore",
         "oi_change_6",
@@ -308,13 +313,13 @@ def build_v43_feature_matrix(
     ):
         out[col] = oi_feats[col].values
 
-    basis_feats = _basis_features_on_primary(prim, df_mark, df_oi)
+    basis_feats = _basis_features_on_primary(prim, df_mark, df_oi_aligned)
     for col in ("basis", "basis_zscore", "basis_momentum"):
         out[col] = basis_feats[col].values
 
     micro_feats = _microstructure_features_on_primary(
         prim,
-        df_oi,
+        df_oi_aligned,
         out["funding_zscore"],
         out["oi_zscore"],
     )

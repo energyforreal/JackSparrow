@@ -15,7 +15,13 @@ import uuid
 import structlog
 
 from agent.events.event_bus import event_bus
-from agent.events.schemas import RiskApprovedEvent, OrderFillEvent, PositionClosedEvent, EventType
+from agent.events.schemas import (
+    RiskApprovedEvent,
+    OrderFillEvent,
+    PositionClosedEvent,
+    PartialFillEvent,
+    EventType,
+)
 from agent.core.config import settings
 from agent.core.futures_utils import (
     net_pnl_usd_after_fees,
@@ -326,6 +332,8 @@ class ExecutionEngine:
         self._position_lock = asyncio.Lock()
         self._inflight_lock = asyncio.Lock()
         self._inflight_symbols: set[str] = set()
+        self._last_ws_sltp_check_ts: Dict[str, float] = {}
+        self._partial_fill_tasks: Dict[str, asyncio.Task] = {}
 
     async def initialize(self, delta_client=None, risk_manager=None, exchange_gateway: Optional[ExchangeGateway] = None):
         """Initialize execution engine.
@@ -343,6 +351,7 @@ class ExecutionEngine:
 
         # Subscribe to RiskApprovedEvent for automatic trade execution
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
+        event_bus.subscribe(EventType.PARTIAL_FILL, self._handle_partial_fill)
 
         logger.info("execution_engine_initialized",
                    config=self.execution_config,
@@ -379,6 +388,58 @@ class ExecutionEngine:
         """Disconnect from trading exchange."""
         self.exchange_connected = False
         logger.info("exchange_disconnected")
+
+    async def _handle_partial_fill(self, event: PartialFillEvent) -> None:
+        """Complete or close a partial fill after a short timeout."""
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        symbol = str(payload.get("symbol") or "")
+        order_id = str(payload.get("order_id") or "")
+        if not symbol or not order_id:
+            return
+        if order_id in self._partial_fill_tasks and not self._partial_fill_tasks[order_id].done():
+            return
+
+        async def _resolve_partial() -> None:
+            timeout_s = float(getattr(settings, "partial_fill_timeout_seconds", 10.0) or 10.0)
+            await asyncio.sleep(timeout_s)
+            requested = float(payload.get("requested_quantity") or 0.0)
+            filled = float(payload.get("filled_quantity") or 0.0)
+            remainder = max(0.0, requested - filled)
+            if remainder <= 0:
+                return
+            side = str(payload.get("side") or "buy").lower()
+            try:
+                retry = await self._place_order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=remainder,
+                    order_type="market",
+                )
+                if retry.get("success") and (
+                    retry.get("filled_immediately") or float(retry.get("filled_quantity") or 0) > 0
+                ):
+                    add_qty = float(retry.get("filled_quantity") or remainder)
+                    pos = self.position_manager.get_position(symbol)
+                    if pos and str(pos.get("status") or "").lower() == "open":
+                        pos["quantity"] = float(pos.get("quantity") or 0) + add_qty
+                        self.position_manager.update_position(symbol, pos.get("current_price"))
+                    logger.info(
+                        "partial_fill_completed",
+                        symbol=symbol,
+                        order_id=order_id,
+                        added_quantity=add_qty,
+                    )
+                    return
+            except Exception as exc:
+                logger.warning(
+                    "partial_fill_retry_failed",
+                    symbol=symbol,
+                    order_id=order_id,
+                    error=str(exc),
+                )
+            await self.close_position(symbol, exit_reason="partial_fill_timeout")
+
+        self._partial_fill_tasks[order_id] = asyncio.create_task(_resolve_partial())
 
     async def _handle_risk_approved(self, event: RiskApprovedEvent):
         """Handle RiskApprovedEvent - execute trade and publish OrderFillEvent on success.
@@ -735,6 +796,9 @@ class ExecutionEngine:
                     from agent.core.mcp_orchestrator import mcp_orchestrator
 
                     mcp_orchestrator.record_v43_trade_executed(int(v43_bar))
+                    asyncio.create_task(
+                        mcp_orchestrator.persist_v43_gate_state_after_trade(symbol)
+                    )
                 except Exception:
                     pass
 
@@ -922,8 +986,9 @@ class ExecutionEngine:
 
             order_id = order_result["order_id"]
 
-            # If order was filled immediately, update position
-            if order_result["filled_immediately"]:
+            filled_qty = float(order_result.get("filled_quantity") or 0.0)
+            position_opened = False
+            if order_result.get("filled_immediately") or filled_qty > 0:
                 raw_fill = order_result.get("average_fill_price")
                 if raw_fill is None:
                     return ExecutionResult(
@@ -931,6 +996,7 @@ class ExecutionEngine:
                         error_message="Order filled but no average_fill_price returned",
                     )
                 fill_price = float(raw_fill)
+                open_qty = filled_qty if filled_qty > 0 else quantity
                 pex = trade.get("position_extras") or {}
                 tick_sz: Optional[float] = None
                 if pex.get("tick_size") is not None:
@@ -957,13 +1023,14 @@ class ExecutionEngine:
                 position = self.position_manager.open_position(
                     symbol=symbol,
                     side="long" if side == "buy" else "short",
-                    quantity=quantity,
+                    quantity=open_qty,
                     entry_price=fill_price,
                     order_id=order_id,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
                     position_extras=trade.get("position_extras"),
                 )
+                position_opened = True
                 if self.exchange_gateway and hasattr(self.exchange_gateway, "register_position_opened"):
                     try:
                         getattr(self.exchange_gateway, "register_position_opened")(position)
@@ -974,7 +1041,7 @@ class ExecutionEngine:
                     record_agent_order_fill(
                         symbol=symbol,
                         side=side,
-                        quantity=quantity,
+                        quantity=open_qty,
                         fill_price=fill_price,
                         execution_authority=str(execution_authority),
                         internal_order_id=order_id,
@@ -984,7 +1051,26 @@ class ExecutionEngine:
                         reasoning_chain_id=trade.get("reasoning_chain_id"),
                     )
 
-                # SL/TP are monitored in software (manage_position); Delta bracket orders are not placed.
+            if order_result.get("partial_fill"):
+                partial_event = PartialFillEvent(
+                    source="execution_engine",
+                    payload={
+                        "order_id": order_id,
+                        "symbol": symbol,
+                        "side": side,
+                        "requested_quantity": float(order_result.get("requested_quantity") or quantity),
+                        "filled_quantity": filled_qty,
+                        "fill_price": float(order_result.get("average_fill_price") or 0.0),
+                        "timestamp": datetime.now(timezone.utc),
+                        "exchange_order_id": order_result.get("exchange_order_id"),
+                        "execution_authority": execution_authority,
+                        "reasoning_chain_id": trade.get("reasoning_chain_id"),
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit,
+                        "position_extras": trade.get("position_extras"),
+                    },
+                )
+                await event_bus.publish(partial_event)
 
             result = ExecutionResult(True, order_id=order_id)
             result.details = {
@@ -993,8 +1079,10 @@ class ExecutionEngine:
                 "quantity": quantity,
                 "order_type": order_type,
                 "filled_immediately": order_result["filled_immediately"],
+                "partial_fill": bool(order_result.get("partial_fill")),
+                "filled_quantity": filled_qty,
                 "average_fill_price": order_result.get("average_fill_price"),
-                "position_opened": order_result["filled_immediately"]
+                "position_opened": position_opened,
             }
 
             base_url = getattr(self.delta_client, "base_url", None) if self.delta_client else None
@@ -1397,6 +1485,14 @@ class ExecutionEngine:
 
         side_pm = "long" if signed_size >= 0 else "short"
         side_risk = "BUY" if side_pm == "long" else "SELL"
+        tick_sz: Optional[float] = None
+        try:
+            from agent.core.product_specs import get_contract_specs
+
+            specs = await get_contract_specs(sym)
+            tick_sz = float(specs.tick_size)
+        except Exception:
+            tick_sz = None
         stop_loss, take_profit = compute_stop_take_prices(
             entry_price,
             side_risk,
@@ -1406,7 +1502,7 @@ class ExecutionEngine:
             atr_14=None,
             atr_sl_mult=float(getattr(settings, "atr_sl_distance_mult", 1.0) or 1.0),
             atr_tp_mult=float(getattr(settings, "atr_tp_distance_mult", 1.5) or 1.5),
-            tick_size=None,
+            tick_size=tick_sz,
         )
 
         created = row.get("created_at") or row.get("updated_at")
@@ -1707,6 +1803,80 @@ class ExecutionEngine:
         return payload
 
     @staticmethod
+    def _extract_filled_quantity(order_obj: Dict[str, Any], requested_qty: float) -> float:
+        """Best-effort filled size from Delta order payload."""
+        for key in ("filled_size", "filled_quantity", "filled_qty"):
+            raw = order_obj.get(key)
+            if raw is not None:
+                try:
+                    val = float(raw)
+                    if val > 0:
+                        return min(val, requested_qty)
+                except (TypeError, ValueError):
+                    continue
+        try:
+            total = float(order_obj.get("size") or requested_qty)
+            unfilled = float(order_obj.get("unfilled_size") or 0.0)
+            filled = max(0.0, total - unfilled)
+            if filled > 0:
+                return min(filled, requested_qty)
+        except (TypeError, ValueError):
+            pass
+        state = str(order_obj.get("state") or "").lower()
+        if state in ("closed", "filled"):
+            return requested_qty
+        return 0.0
+
+    async def _poll_order_fill_status(
+        self,
+        *,
+        symbol: str,
+        exchange_order_id: Optional[int],
+        requested_qty: float,
+        attempts: int = 3,
+        delay_seconds: float = 1.0,
+    ) -> Tuple[float, Optional[float], str]:
+        """Poll exchange for order fill progress."""
+        if self.delta_client is None or exchange_order_id is None:
+            return 0.0, None, "unknown"
+        filled_qty = 0.0
+        fill_price: Optional[float] = None
+        state = "open"
+        for _ in range(max(1, attempts)):
+            await asyncio.sleep(delay_seconds)
+            try:
+                resp = await self.delta_client.get_orders(page_size=50)
+                rows = resp.get("result") if isinstance(resp, dict) else None
+                if not isinstance(rows, list):
+                    continue
+                match = next(
+                    (r for r in rows if isinstance(r, dict) and r.get("id") == exchange_order_id),
+                    None,
+                )
+                if not isinstance(match, dict):
+                    continue
+                state = str(match.get("state") or "open").lower()
+                filled_qty = self._extract_filled_quantity(match, requested_qty)
+                for key in ("average_fill_price", "avg_fill_price", "price"):
+                    raw = match.get(key)
+                    if raw is not None:
+                        try:
+                            fill_price = float(raw)
+                            break
+                        except (TypeError, ValueError):
+                            continue
+                if state in ("closed", "filled") or filled_qty >= requested_qty * 0.999:
+                    break
+            except Exception as exc:
+                logger.debug(
+                    "order_fill_poll_failed",
+                    symbol=symbol,
+                    exchange_order_id=exchange_order_id,
+                    error=str(exc),
+                )
+        return filled_qty, fill_price, state
+
+    @staticmethod
     def _delta_order_type_label(order_type: str) -> str:
         """Map internal order type to Delta API order_type string."""
         normalized = str(order_type or "market").lower()
@@ -1785,13 +1955,29 @@ class ExecutionEngine:
             if fill_price is None and limit_price is not None and limit_price > 0:
                 fill_price = limit_price
             state = str(order_obj.get("state") or "").lower()
-            filled_immediately = state in ("closed", "filled")
+            filled_qty = self._extract_filled_quantity(order_obj, quantity)
+            filled_immediately = state in ("closed", "filled") or filled_qty >= quantity * 0.999
+            if not filled_immediately and filled_qty <= 0:
+                polled_qty, polled_px, polled_state = await self._poll_order_fill_status(
+                    symbol=symbol,
+                    exchange_order_id=order.exchange_order_id,
+                    requested_qty=quantity,
+                    attempts=3,
+                    delay_seconds=1.0,
+                )
+                if polled_qty > 0:
+                    filled_qty = polled_qty
+                    state = polled_state
+                if polled_px is not None:
+                    fill_price = polled_px
+                filled_immediately = state in ("closed", "filled") or filled_qty >= quantity * 0.999
+            partial_fill = filled_qty > 0 and not filled_immediately
             if filled_immediately and fill_price is None and normalized_type == "market":
                 raise ValueError(
                     "Exchange order returned no fill price and no price parameter provided"
                 )
-            if fill_price is not None:
-                order.update_fill(quantity, fill_price)
+            if filled_qty > 0 and fill_price is not None:
+                order.update_fill(filled_qty, fill_price)
             self.order_manager.add_order(order)
             base_url = getattr(self.delta_client, "base_url", None)
             logger.info(
@@ -1804,6 +1990,8 @@ class ExecutionEngine:
                 exchange_order_id=order.exchange_order_id,
                 delta_exchange_base_url=base_url,
                 filled_immediately=filled_immediately,
+                partial_fill=partial_fill,
+                filled_quantity=filled_qty,
                 average_fill_price=fill_price,
                 exchange_state=state or None,
                 stop_price=trigger_price,
@@ -1813,6 +2001,9 @@ class ExecutionEngine:
                 "order_id": order_id,
                 "exchange_order_id": order.exchange_order_id,
                 "filled_immediately": filled_immediately,
+                "partial_fill": partial_fill,
+                "filled_quantity": filled_qty,
+                "requested_quantity": quantity,
                 "average_fill_price": fill_price,
                 "exchange_state": state or None,
             }

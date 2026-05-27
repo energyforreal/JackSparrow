@@ -213,6 +213,13 @@ async def reconcile_positions_with_exchange(execution_module: Any) -> Dict[str, 
     if summary["adopted"] or summary["closed_exchange"] or summary["cleared_local"]:
         logger.info("position_reconcile_complete", **summary)
 
+    try:
+        from agent.core.mcp_orchestrator import mark_position_reconcile_completed
+
+        mark_position_reconcile_completed()
+    except Exception:
+        pass
+
     return summary
 
 

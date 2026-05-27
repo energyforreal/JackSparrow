@@ -25,6 +25,28 @@ def parse_risk_approved_side(side_raw: Any) -> Optional[str]:
     return None
 
 
+def _enforce_min_sl_distance(
+    entry_price: float,
+    stop_loss: Optional[float],
+    *,
+    tick_size: Optional[float],
+    spread_estimate: Optional[float],
+) -> Optional[float]:
+    """Push stop away from entry when inside spread / tick minimum distance."""
+    if stop_loss is None or entry_price <= 0:
+        return stop_loss
+    ts = float(tick_size) if tick_size is not None and float(tick_size) > 0 else 0.0
+    spread = float(spread_estimate) if spread_estimate is not None and float(spread_estimate) > 0 else 0.0
+    min_dist = max(2.0 * spread, 3.0 * ts) if (spread > 0 or ts > 0) else 0.0
+    if min_dist <= 0:
+        return stop_loss
+    if abs(entry_price - stop_loss) < min_dist:
+        if stop_loss < entry_price:
+            return entry_price - min_dist
+        return entry_price + min_dist
+    return stop_loss
+
+
 def compute_stop_take_prices(
     entry_price: float,
     side: str,
@@ -36,6 +58,7 @@ def compute_stop_take_prices(
     atr_sl_mult: float = 1.0,
     atr_tp_mult: float = 1.5,
     tick_size: Optional[float] = None,
+    spread_estimate: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
     """Compute absolute stop-loss and take-profit prices.
 
@@ -101,6 +124,13 @@ def compute_stop_take_prices(
                 take_profit = entry_price * (1.0 + float(take_profit_pct))
             else:
                 take_profit = entry_price * (1.0 - float(take_profit_pct))
+
+    stop_loss = _enforce_min_sl_distance(
+        entry_price,
+        stop_loss,
+        tick_size=tick_size,
+        spread_estimate=spread_estimate,
+    )
 
     ts = float(tick_size) if tick_size is not None and float(tick_size) > 0 else None
     if ts is not None:

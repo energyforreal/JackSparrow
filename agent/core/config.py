@@ -1204,6 +1204,16 @@ class Settings(BaseSettings):
         env="WEBSOCKET_SL_TP_ENABLED",
         description="Use WebSocket ticks for SL/TP checks when positions open"
     )
+    partial_fill_timeout_seconds: float = Field(
+        default=10.0,
+        env="PARTIAL_FILL_TIMEOUT_SECONDS",
+        description="Seconds to wait for remainder fill before closing partial position",
+    )
+    position_reconcile_stale_seconds: float = Field(
+        default=30.0,
+        env="POSITION_RECONCILE_STALE_SECONDS",
+        description="Max age of last reconcile before blocking new entries",
+    )
     mtf_confirmation_enabled: bool = Field(
         default=False,
         env="MTF_CONFIRMATION_ENABLED",
@@ -1810,7 +1820,7 @@ class Settings(BaseSettings):
         description="Emit advisory reflection_snapshot on position close (no policy mutation).",
     )
     agent_reflection_policy_feedback_enabled: bool = Field(
-        default=False,
+        default=True,
         env="AGENT_REFLECTION_POLICY_FEEDBACK_ENABLED",
         description=(
             "When True, reflection quality/buckets feed bounded confidence calibration "

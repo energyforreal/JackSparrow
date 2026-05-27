@@ -424,27 +424,14 @@ class MCPReasoningEngine:
                 )
             return result
         
-        # Step 1: Situational Assessment
-        step1 = await _run_step("situational_assessment", self._step1_situational_assessment(request))
-        steps.append(step1)
-        
-        # Step 2: Historical Context Retrieval
-        step2 = await _run_step(
-            "historical_context",
-            self._step2_historical_context(request, chain_id),
+        # Steps 1–4 are independent; run concurrently for lower latency.
+        step1, step2, step3, step4 = await asyncio.gather(
+            _run_step("situational_assessment", self._step1_situational_assessment(request)),
+            _run_step("historical_context", self._step2_historical_context(request, chain_id)),
+            _run_step("model_consensus", self._step3_model_consensus(request)),
+            _run_step("risk_assessment", self._step4_risk_assessment(request, [])),
         )
-        steps.append(step2)
-        
-        # Step 3: Model Consensus Analysis
-        step3 = await _run_step("model_consensus", self._step3_model_consensus(request))
-        steps.append(step3)
-        
-        # Step 4: Risk Assessment
-        step4 = await _run_step(
-            "risk_assessment",
-            self._step4_risk_assessment(request, steps),
-        )
-        steps.append(step4)
+        steps.extend([step1, step2, step3, step4])
         
         # Step 5: Decision Synthesis
         step5 = await _run_step(
@@ -829,58 +816,84 @@ class MCPReasoningEngine:
         )
     
     async def _step4_risk_assessment(self, request: MCPReasoningRequest, previous_steps: List[ReasoningStep]) -> ReasoningStep:
-        """Step 4: Assess trading risks."""
+        """Step 4: Assess trading risks using live portfolio and drawdown metrics."""
 
-        evidence = []
+        evidence: List[str] = []
         risk_level = "medium"
-        confidence = 0.0
+        confidence = 0.35
+        mc = request.market_context or {}
 
-        # Check volatility data availability (+0.2 if available)
-        features = request.market_context.get("features", {})
-        volatility = features.get("volatility", None)
-
+        features = mc.get("features", {}) if isinstance(mc.get("features"), dict) else {}
+        volatility = features.get("volatility")
         if volatility is not None:
-            confidence += 0.2
-            if volatility > 5:
-                evidence.append("High volatility - increased risk")
-                risk_level = "high"
-            elif volatility < 2:
-                evidence.append("Low volatility - reduced risk")
-                risk_level = "low"
+            try:
+                vol_f = float(volatility)
+                if vol_f > 5:
+                    risk_level = "high"
+                    confidence += 0.15
+                    evidence.append(f"High volatility ({vol_f:.2f})")
+                elif vol_f < 2:
+                    risk_level = "low"
+                    confidence += 0.2
+                    evidence.append(f"Low volatility ({vol_f:.2f})")
+                else:
+                    confidence += 0.1
+                    evidence.append(f"Moderate volatility ({vol_f:.2f})")
+            except (TypeError, ValueError):
+                evidence.append("Volatility parse error")
         else:
             evidence.append("Volatility data unavailable")
 
-        # Check portfolio data availability (+0.2 if available)
-        portfolio_value = request.market_context.get("portfolio_value", None)
-        available_balance = request.market_context.get("available_balance", None)
+        portfolio_heat = mc.get("portfolio_heat")
+        if portfolio_heat is not None:
+            try:
+                heat = float(portfolio_heat)
+                max_heat = float(getattr(settings, "portfolio_max_heat_ratio", 0.85) or 0.85)
+                if heat > max_heat:
+                    risk_level = "high"
+                    confidence = max(0.0, confidence - 0.2)
+                    evidence.append(f"Portfolio heat above cap ({heat:.3f}>{max_heat:.3f})")
+                elif heat > (max_heat - 0.1):
+                    confidence = max(0.0, confidence - 0.08)
+                    evidence.append(f"Portfolio heat elevated ({heat:.3f})")
+                else:
+                    confidence += 0.12
+                    evidence.append(f"Portfolio heat acceptable ({heat:.3f})")
+            except (TypeError, ValueError):
+                evidence.append("Portfolio heat parse error")
 
-        if portfolio_value is not None and available_balance is not None:
-            confidence += 0.2
-            if available_balance < portfolio_value * 0.1:
-                evidence.append("Limited available balance")
-        else:
-            evidence.append("Portfolio data unavailable")
+        drawdown = mc.get("current_drawdown_pct") or mc.get("max_drawdown_current")
+        if drawdown is not None:
+            try:
+                dd = float(drawdown)
+                if dd > 0.15:
+                    risk_level = "high"
+                    confidence = max(0.0, confidence - 0.15)
+                    evidence.append(f"Drawdown elevated ({dd:.1%})")
+                elif dd > 0.08:
+                    confidence = max(0.0, confidence - 0.05)
+                    evidence.append(f"Drawdown moderate ({dd:.1%})")
+                else:
+                    confidence += 0.1
+                    evidence.append(f"Drawdown contained ({dd:.1%})")
+            except (TypeError, ValueError):
+                evidence.append("Drawdown parse error")
 
-        # Check risk metrics calculation (+0.2 if metrics can be calculated)
-        # This could include drawdown, Sharpe ratio, etc.
-        has_risk_metrics = (
-            request.market_context.get("max_drawdown_current") is not None or
-            request.market_context.get("sharpe_ratio_rolling") is not None or
-            request.market_context.get("portfolio_heat") is not None
-        )
+        corr = mc.get("position_correlation")
+        if corr is not None:
+            try:
+                conc = float(corr)
+                if conc > 0.85:
+                    confidence = max(0.0, confidence - 0.1)
+                    evidence.append(f"High side concentration ({conc:.2f})")
+                else:
+                    confidence += 0.05
+                    evidence.append(f"Side concentration ({conc:.2f})")
+            except (TypeError, ValueError):
+                pass
 
-        if has_risk_metrics:
-            confidence += 0.2
-            evidence.append("Risk metrics available")
-        else:
-            evidence.append("Risk metrics unavailable")
-
-        # Ensure confidence doesn't exceed 1.0
-        confidence = min(1.0, confidence)
-
-        data_freshness_seconds = self._compute_data_freshness_seconds(
-            request.market_context.get("timestamp")
-        )
+        confidence = max(0.0, min(1.0, confidence))
+        data_freshness_seconds = self._compute_data_freshness_seconds(mc.get("timestamp"))
 
         return ReasoningStep(
             step_number=4,
@@ -889,7 +902,7 @@ class MCPReasoningEngine:
             evidence=evidence,
             confidence=confidence,
             timestamp=datetime.utcnow(),
-            data_freshness_seconds=data_freshness_seconds
+            data_freshness_seconds=data_freshness_seconds,
         )
     
     async def _step5_decision_synthesis(self, request: MCPReasoningRequest, previous_steps: List[ReasoningStep]) -> ReasoningStep:
@@ -1225,12 +1238,12 @@ class MCPReasoningEngine:
         is_hold = "HOLD" in decision_desc
 
         step_weights = {
-            1: 0.08,  # Situational assessment
-            2: 0.05,  # Historical context
+            1: 0.01,  # Situational assessment
+            2: 0.12,  # Historical context
             3: 0.30,  # Model consensus
-            4: 0.05,  # Risk assessment
+            4: 0.04,  # Risk assessment
             5: 0.25,  # Decision synthesis
-            6: 0.27,  # Trade adjudication (final BUY/SELL/HOLD gate)
+            6: 0.28,  # Trade adjudication (final BUY/SELL/HOLD gate)
         }
 
         calibration_steps = [s for s in steps if s.step_number <= 6]
@@ -1303,7 +1316,9 @@ class MCPReasoningEngine:
             and (v43_dec.get("final_long") or v43_dec.get("final_short"))
         ):
             ai_floor = float(getattr(settings, "ai_signal_min_entry_confidence", 0.7) or 0.7)
-            final_confidence = max(final_confidence, min(1.0, ai_floor * 0.985))
+            floor_threshold = ai_floor * 0.85
+            if base_confidence >= floor_threshold:
+                final_confidence = max(final_confidence, min(1.0, ai_floor * 0.985))
 
         # Detect fallback scenario for logging/diagnostics
         is_fallback_scenario = not model_predictions or all(

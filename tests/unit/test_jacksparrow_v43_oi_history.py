@@ -25,6 +25,29 @@ def test_oi_candles_to_ticker_frame_enriches_mark_spot() -> None:
     assert float(out["spot_price"].iloc[-1]) == 50100.0
 
 
+def test_oi_candles_align_to_primary_timestamps() -> None:
+    ts = pd.date_range("2024-01-01", periods=4, freq="5min", tz="UTC")
+    primary = pd.DataFrame(
+        {
+            "timestamp": ts,
+            "open": 1.0,
+            "high": 1.0,
+            "low": 1.0,
+            "close": 100.0,
+            "volume": 1.0,
+        }
+    )
+    oi_raw = pd.DataFrame(
+        {
+            "timestamp": ts + pd.Timedelta(minutes=1),
+            "close": [1000.0, 1010.0, 1020.0, 1030.0],
+        }
+    )
+    out = oi_candles_to_ticker_frame(oi_raw, align_to=primary)
+    assert len(out) == len(primary)
+    assert float(out["oi_contracts"].max()) >= 1000.0
+
+
 def test_oi_candles_empty_returns_empty_schema() -> None:
     out = oi_candles_to_ticker_frame(pd.DataFrame())
     assert list(out.columns) == list(

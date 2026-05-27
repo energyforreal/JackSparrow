@@ -49,6 +49,7 @@ class ThresholdAdapter:
 
     WINDOW = 50
     MIN_ROWS = 20
+    _recent_directions: List[int] = []
 
     async def adapt(self) -> Optional[Dict[str, Any]]:
         """Run one adaptation cycle. Returns summary dict or None if skipped."""
@@ -113,12 +114,15 @@ class ThresholdAdapter:
                     )
                     return None
 
+                direction = 0
                 new_mild = cur_mild
                 new_strong = cur_strong
                 if win_rate < 0.40 or profit_factor < 0.90:
+                    direction = 1
                     new_mild = min(MILD_BOUNDS[1], cur_mild + 0.01)
                     new_strong = min(STRONG_BOUNDS[1], cur_strong + 0.01)
                 elif win_rate > 0.55 and pnl_mean > 0 and profit_factor > 1.10:
+                    direction = -1
                     new_mild = max(MILD_BOUNDS[0], cur_mild - 0.01)
                     new_strong = max(STRONG_BOUNDS[0], cur_strong - 0.01)
 
@@ -127,6 +131,23 @@ class ThresholdAdapter:
                     new_conf = min(MIN_CONF_BOUNDS[1], cur_conf + 0.01)
                 elif win_rate > 0.55 and pnl_mean > 0 and profit_factor > 1.10:
                     new_conf = max(MIN_CONF_BOUNDS[0], cur_conf - 0.01)
+
+                if direction != 0:
+                    recent = ThresholdAdapter._recent_directions
+                    if (
+                        len(recent) >= 2
+                        and recent[-1] == -direction
+                        and recent[-2] == -direction
+                        and recent[-1] != direction
+                    ):
+                        logger.debug(
+                            "threshold_adapter_skipped_oscillation",
+                            direction=direction,
+                            recent=recent[-2:],
+                        )
+                        return None
+                    recent.append(direction)
+                    ThresholdAdapter._recent_directions = recent[-6:]
 
                 new_mild = _clamp(new_mild, MILD_BOUNDS[0], MILD_BOUNDS[1])
                 new_strong = _clamp(new_strong, STRONG_BOUNDS[0], STRONG_BOUNDS[1])

@@ -312,7 +312,19 @@ class LearningSystem:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             payload = self._serialize_state()
-            path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            content = json.dumps(payload, indent=2, sort_keys=True)
+            bak1 = path.with_name(path.name + ".bak1")
+            bak2 = path.with_name(path.name + ".bak2")
+            bak3 = path.with_name(path.name + ".bak3")
+            if path.exists():
+                if bak2.exists():
+                    bak3.write_bytes(bak2.read_bytes())
+                if bak1.exists():
+                    bak2.write_bytes(bak1.read_bytes())
+                bak1.write_bytes(path.read_bytes())
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(content, encoding="utf-8")
+            tmp.replace(path)
         except Exception as e:
             logger.warning("learning_state_persist_failed", path=str(path), error=str(e))
 

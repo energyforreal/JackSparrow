@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -11,6 +12,16 @@ import structlog
 from agent.core.config import settings
 
 logger = structlog.get_logger(__name__)
+
+GATE_STATE_REDIS_PREFIX = "gate_state"
+GATE_STATE_DEFAULT_TTL_SECONDS = 86400
+COLLAPSE_RATE_WINDOW = 20
+COLLAPSE_RATE_HIGH_THRESHOLD = 0.85
+
+
+def _gate_state_redis_key(symbol: str) -> str:
+    sym = str(symbol or "").strip().upper() or "DEFAULT"
+    return f"{GATE_STATE_REDIS_PREFIX}:{sym}"
 
 
 @dataclass
@@ -28,6 +39,31 @@ class V43GateCounters:
     def collapse_rate(self) -> float:
         return 1.0 - (self.trades_executed / max(self.signals_raw, 1))
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "signals_raw": self.signals_raw,
+            "rejected_pos_open": self.rejected_pos_open,
+            "rejected_debounce": self.rejected_debounce,
+            "rejected_freq_cap": self.rejected_freq_cap,
+            "rejected_regime": self.rejected_regime,
+            "rejected_edge": self.rejected_edge,
+            "trades_executed": self.trades_executed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "V43GateCounters":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            signals_raw=int(data.get("signals_raw") or 0),
+            rejected_pos_open=int(data.get("rejected_pos_open") or 0),
+            rejected_debounce=int(data.get("rejected_debounce") or 0),
+            rejected_freq_cap=int(data.get("rejected_freq_cap") or 0),
+            rejected_regime=int(data.get("rejected_regime") or 0),
+            rejected_edge=int(data.get("rejected_edge") or 0),
+            trades_executed=int(data.get("trades_executed") or 0),
+        )
+
 
 @dataclass
 class V43GateState:
@@ -38,6 +74,81 @@ class V43GateState:
     trade_timestamps_utc: List[datetime] = field(default_factory=list)
     trades_by_date: Dict[str, int] = field(default_factory=dict)
     counters: V43GateCounters = field(default_factory=V43GateCounters)
+    current_regime: Optional[str] = None
+    regime_bar_age: int = 0
+    recent_collapse_samples: List[float] = field(default_factory=list)
+    near_threshold_epsilon_bump: float = 0.0
+
+    def note_regime(self, regime: str) -> None:
+        """Track consecutive bars in the same regime label."""
+        reg = str(regime or "neutral")
+        if self.current_regime == reg:
+            self.regime_bar_age = int(self.regime_bar_age or 0) + 1
+        else:
+            self.current_regime = reg
+            self.regime_bar_age = 1
+
+    def record_collapse_sample(self, collapse_rate: float) -> None:
+        """Append collapse rate for rolling-window auto-adaptation."""
+        try:
+            sample = float(collapse_rate)
+        except (TypeError, ValueError):
+            return
+        self.recent_collapse_samples.append(max(0.0, min(1.0, sample)))
+        if len(self.recent_collapse_samples) > COLLAPSE_RATE_WINDOW:
+            self.recent_collapse_samples = self.recent_collapse_samples[-COLLAPSE_RATE_WINDOW:]
+
+    def rolling_collapse_rate(self) -> Optional[float]:
+        if not self.recent_collapse_samples:
+            return None
+        return sum(self.recent_collapse_samples) / len(self.recent_collapse_samples)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "last_entry_bar_index": self.last_entry_bar_index,
+            "last_signal_bar_index": self.last_signal_bar_index,
+            "trade_timestamps_utc": [
+                t.astimezone(timezone.utc).isoformat() for t in self.trade_timestamps_utc
+            ],
+            "trades_by_date": dict(self.trades_by_date),
+            "counters": self.counters.to_dict(),
+            "current_regime": self.current_regime,
+            "regime_bar_age": int(self.regime_bar_age or 0),
+            "recent_collapse_samples": list(self.recent_collapse_samples),
+            "near_threshold_epsilon_bump": float(self.near_threshold_epsilon_bump or 0.0),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "V43GateState":
+        if not isinstance(data, dict):
+            return cls()
+        ts_list: List[datetime] = []
+        for raw in data.get("trade_timestamps_utc") or []:
+            if isinstance(raw, str):
+                try:
+                    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    ts_list.append(parsed.astimezone(timezone.utc))
+                except ValueError:
+                    continue
+        trades_by_date = data.get("trades_by_date")
+        if not isinstance(trades_by_date, dict):
+            trades_by_date = {}
+        samples = data.get("recent_collapse_samples")
+        if not isinstance(samples, list):
+            samples = []
+        return cls(
+            last_entry_bar_index=data.get("last_entry_bar_index"),
+            last_signal_bar_index=data.get("last_signal_bar_index"),
+            trade_timestamps_utc=ts_list,
+            trades_by_date={str(k): int(v) for k, v in trades_by_date.items()},
+            counters=V43GateCounters.from_dict(data.get("counters")),
+            current_regime=data.get("current_regime"),
+            regime_bar_age=int(data.get("regime_bar_age") or 0),
+            recent_collapse_samples=[float(x) for x in samples if x is not None],
+            near_threshold_epsilon_bump=float(data.get("near_threshold_epsilon_bump") or 0.0),
+        )
 
     def note_signal_decision(self, bar_index: int) -> None:
         """Stamp debounce after a gated BUY/SELL signal (before fill)."""
@@ -48,6 +159,68 @@ class V43GateState:
         self.trade_timestamps_utc.append(ts)
         key = ts.astimezone(timezone.utc).strftime("%Y-%m-%d")
         self.trades_by_date[key] = self.trades_by_date.get(key, 0) + 1
+
+
+async def load_gate_state_from_redis(
+    symbol: str,
+    redis_client: Any,
+) -> V43GateState:
+    """Load persisted gate state or return a fresh instance."""
+    if redis_client is None:
+        return V43GateState()
+    key = _gate_state_redis_key(symbol)
+    try:
+        raw = await redis_client.get(key)
+        if not raw:
+            return V43GateState()
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        payload = json.loads(raw)
+        return V43GateState.from_dict(payload)
+    except Exception as e:
+        logger.warning("v43_gate_state_load_failed", symbol=symbol, error=str(e))
+        return V43GateState()
+
+
+async def persist_gate_state(
+    symbol: str,
+    state: V43GateState,
+    redis_client: Any,
+    ttl: int = GATE_STATE_DEFAULT_TTL_SECONDS,
+) -> None:
+    """Persist gate state to Redis with TTL."""
+    if redis_client is None:
+        return
+    key = _gate_state_redis_key(symbol)
+    try:
+        await redis_client.setex(key, int(ttl), json.dumps(state.to_dict()))
+    except Exception as e:
+        logger.warning("v43_gate_state_persist_failed", symbol=symbol, error=str(e))
+
+
+def compute_regime_transition_risk(thesis_allowed_count: int) -> str:
+    """Map count of regime-valid thesis strategies to transition risk label."""
+    if thesis_allowed_count >= 2:
+        return "low"
+    if thesis_allowed_count == 1:
+        return "medium"
+    return "high"
+
+
+def maybe_widen_epsilon_on_high_collapse(
+    state: V43GateState,
+    *,
+    score_std: float = 0.0,
+) -> Optional[float]:
+    """Widen near-threshold epsilon when rolling collapse rate is sustained high."""
+    rolling = state.rolling_collapse_rate()
+    if rolling is None or rolling <= COLLAPSE_RATE_HIGH_THRESHOLD:
+        return None
+    bump = min(0.01, max(0.0, 0.5 * float(score_std or 0.0)))
+    if bump <= 0:
+        bump = 0.001
+    state.near_threshold_epsilon_bump = min(0.02, state.near_threshold_epsilon_bump + bump)
+    return bump
 
 
 @dataclass

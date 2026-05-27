@@ -37,17 +37,22 @@ V43_HORIZON_COST_SCALE: Dict[int, float] = {
     24: 0.5,
 }
 
-# OI + microstructure columns — often zero-filled without ticker history CSV.
-V43_DERIVATIVES_SPARSE_FEATURE_COLS: Tuple[str, ...] = (
+# OI model features vs microstructure (ticker-only; often zero without CSV).
+V43_OI_FEATURE_COLS: Tuple[str, ...] = (
     "oi_zscore",
     "oi_change_6",
     "oi_price_divergence",
     "oi_acceleration",
     "oi_delta_z",
+)
+V43_MICROSTRUCTURE_FEATURE_COLS: Tuple[str, ...] = (
     "bid_ask_imbalance",
     "spread_bps",
     "funding_x_oi",
     "funding_predicted_zscore",
+)
+V43_DERIVATIVES_SPARSE_FEATURE_COLS: Tuple[str, ...] = (
+    V43_OI_FEATURE_COLS + V43_MICROSTRUCTURE_FEATURE_COLS
 )
 
 
@@ -203,8 +208,8 @@ def chronological_split_indices(
 
 
 def resolve_min_dynamic_threshold(round_trip_cost: float) -> float:
-    """Floor long/short thresholds at a fraction of round-trip cost (default 100%)."""
-    frac_raw = os.environ.get("V43_MIN_THRESHOLD_COST_FRACTION", "1.0").strip()
+    """Floor long/short thresholds at a fraction of round-trip cost (default 50%)."""
+    frac_raw = os.environ.get("V43_MIN_THRESHOLD_COST_FRACTION", "0.5").strip()
     try:
         frac = float(frac_raw)
     except ValueError:
@@ -276,40 +281,62 @@ def _candidate_stats(
     }
 
 
+def _feature_column_std(df_feat: pd.DataFrame, col: str) -> float:
+    if col not in df_feat.columns:
+        return 0.0
+    s = pd.to_numeric(df_feat[col], errors="coerce").fillna(0.0)
+    return float(s.std())
+
+
 def _audit_sparse_derivatives_features(
     df_feat: pd.DataFrame,
     feat_cols: List[str],
     *,
-    zero_fraction_threshold: float = 0.80,
+    oi_std_threshold: float = 1e-8,
 ) -> Tuple[List[str], Dict[str, Any]]:
-    """Warn and optionally drop OI/microstructure cols when mostly zero-filled."""
-    sparse_cols = [c for c in V43_DERIVATIVES_SPARSE_FEATURE_COLS if c in feat_cols]
+    """Warn when OI features have no variance or microstructure is all zeros."""
+    oi_cols = [c for c in V43_OI_FEATURE_COLS if c in feat_cols]
+    micro_cols = [c for c in V43_MICROSTRUCTURE_FEATURE_COLS if c in feat_cols]
     audit: Dict[str, Any] = {
-        "sparse_derivatives_columns": sparse_cols,
-        "sparse_zero_fraction_by_column": {},
-        "sparse_zero_fraction_max": 0.0,
-        "dropped_sparse_columns": [],
+        "oi_feature_columns": oi_cols,
+        "microstructure_columns": micro_cols,
+        "oi_feature_std": {},
+        "microstructure_zero_fraction": {},
     }
-    if not sparse_cols:
-        return list(feat_cols), audit
 
-    zero_fracs: Dict[str, float] = {}
-    for col in sparse_cols:
+    oi_stds: Dict[str, float] = {}
+    for col in oi_cols:
+        oi_stds[col] = _feature_column_std(df_feat, col)
+    audit["oi_feature_std"] = oi_stds
+    max_oi_std = max(oi_stds.values()) if oi_stds else 0.0
+    audit["oi_feature_std_max"] = max_oi_std
+
+    micro_zero: Dict[str, float] = {}
+    for col in micro_cols:
         series = pd.to_numeric(df_feat[col], errors="coerce").fillna(0.0)
-        zero_fracs[col] = float((series.abs() < 1e-12).mean())
-    audit["sparse_zero_fraction_by_column"] = zero_fracs
-    max_zero = max(zero_fracs.values()) if zero_fracs else 0.0
-    audit["sparse_zero_fraction_max"] = max_zero
+        micro_zero[col] = float((series.abs() < 1e-12).mean())
+    audit["microstructure_zero_fraction"] = micro_zero
 
-    if max_zero >= zero_fraction_threshold:
+    if oi_cols and max_oi_std < oi_std_threshold:
         warnings.warn(
-            f"WARNING: training with sparse OI/microstructure data "
-            f"({max_zero * 100:.1f}% zero in worst column). "
-            "Corr gate may not be met. Provide V43_OI_HISTORY_CSV for production export.",
+            "WARNING: OI features have near-zero variance after build_v43_feature_matrix "
+            f"(max std={max_oi_std:.2e}). Check OI:SYMBOL candle alignment to df_5m timestamps.",
             UserWarning,
             stacklevel=2,
         )
-        audit["sparse_derivatives_warning"] = True
+        audit["oi_alignment_warning"] = True
+
+    if micro_cols:
+        max_micro_zero = max(micro_zero.values()) if micro_zero else 0.0
+        if max_micro_zero >= 0.80:
+            warnings.warn(
+                "WARNING: microstructure features mostly zero "
+                f"({max_micro_zero * 100:.1f}% zeros). "
+                "Provide V43_TICKER_SNAPSHOTS_CSV for bid/ask history.",
+                UserWarning,
+                stacklevel=2,
+            )
+            audit["microstructure_sparse_warning"] = True
 
     return list(feat_cols), audit
 

@@ -227,6 +227,7 @@ class MarketDataService:
                         self._last_sl_tp_check[symbol] = now
                         price = self._price_from_delta_wss_message(message)
                         if price > 0:
+                            execution_module._last_ws_sltp_check_ts[symbol] = now
                             await execution_module.update_position_price_and_check(symbol, price)
 
         except Exception as e:

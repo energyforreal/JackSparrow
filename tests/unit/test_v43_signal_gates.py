@@ -8,6 +8,10 @@ import pytest
 
 from agent.core.v43_signal_gates import (
     V43GateState,
+    V43GateCounters,
+    load_gate_state_from_redis,
+    persist_gate_state,
+    compute_regime_transition_risk,
     apply_gate5_min_edge_short,
     apply_gate5_min_edge,
     apply_post_threshold_gates,
@@ -71,9 +75,10 @@ def test_gate5_long_compares_expected_return_edge_to_cost(monkeypatch) -> None:
     from agent.core.config import settings
 
     monkeypatch.setattr(settings, "jacksparrow_v43_min_edge_cost_ratio", 0.75)
-    metrics = gate5_long_edge_metrics(0.012, 0.011)
-    assert metrics.edge_pct == pytest.approx(0.001)
-    assert metrics.lhs == pytest.approx(0.001)
+    # Keep edge below rhs (~0.00075 at default rtc=0.001, ratio=0.75)
+    metrics = gate5_long_edge_metrics(0.0115, 0.011)
+    assert metrics.edge_pct == pytest.approx(0.0005)
+    assert metrics.lhs == pytest.approx(0.0005)
     assert metrics.rhs == pytest.approx(metrics.ratio * metrics.rtc)
     assert metrics.passes is False
 
@@ -189,3 +194,41 @@ def test_gate5_short_rejects_thin_edge() -> None:
     if not gate5_short_edge_ok(-0.011, 0.01):
         g5 = apply_gate5_min_edge_short(-0.011, 0.01, st)
         assert g5.allow is False
+
+
+def test_v43_gate_state_roundtrip() -> None:
+    st = V43GateState()
+    st.note_regime("trending")
+    st.note_regime("trending")
+    st.counters.signals_raw = 5
+    st.counters.trades_executed = 1
+    restored = V43GateState.from_dict(st.to_dict())
+    assert restored.regime_bar_age == 2
+    assert restored.current_regime == "trending"
+    assert restored.counters.signals_raw == 5
+
+
+def test_regime_transition_risk_labels() -> None:
+    assert compute_regime_transition_risk(2) == "low"
+    assert compute_regime_transition_risk(1) == "medium"
+    assert compute_regime_transition_risk(0) == "high"
+
+
+@pytest.mark.asyncio
+async def test_gate_state_redis_persist_roundtrip() -> None:
+    class _FakeRedis:
+        def __init__(self) -> None:
+            self._store: dict = {}
+
+        async def setex(self, key: str, ttl: int, value: str) -> None:
+            self._store[key] = value
+
+        async def get(self, key: str):
+            return self._store.get(key)
+
+    st = V43GateState()
+    st.note_entry(42, datetime.now(timezone.utc))
+    redis = _FakeRedis()
+    await persist_gate_state("BTCUSD", st, redis, ttl=60)
+    loaded = await load_gate_state_from_redis("BTCUSD", redis)
+    assert loaded.last_entry_bar_index == 42

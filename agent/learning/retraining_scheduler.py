@@ -202,7 +202,13 @@ class RetrainingScheduler:
         logger.info("retraining_starting", command=cmd)
 
         def _run_sync() -> subprocess.CompletedProcess[str]:
-            return subprocess.run(argv, capture_output=True, text=True, check=False)
+            return subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1800,
+            )
 
         async with _RETRAIN_LOCK:
             try:

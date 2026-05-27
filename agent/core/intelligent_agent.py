@@ -661,7 +661,11 @@ class IntelligentAgent:
                                 execution_module.position_manager.update_position(
                                     symbol, current_price
                                 )
-                                await execution_module.manage_position(symbol)
+                                last_ws = float(
+                                    execution_module._last_ws_sltp_check_ts.get(symbol, 0.0)
+                                )
+                                if (time.time() - last_ws) >= 0.5:
+                                    await execution_module.manage_position(symbol)
                     except Exception as e:
                         logger.debug(
                             "position_monitor_tick_error",

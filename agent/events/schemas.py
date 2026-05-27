@@ -50,6 +50,7 @@ class EventType(str, Enum):
     # Execution events
     ORDER_SUBMITTED = "order_submitted"
     ORDER_FILL = "order_fill"
+    PARTIAL_FILL = "partial_fill"
     EXECUTION_FAILED = "execution_failed"
     
     # Control events
@@ -267,6 +268,10 @@ class PolicyVerdict(BaseModel):
         default=False,
         description="True when policy chose to align with the ML candidate after evaluation.",
     )
+    memory_size_scale: float = Field(
+        default=1.0,
+        description="Bounded multiplier from vector-memory historical win rate (0.8–1.0).",
+    )
 
 
 class AgentIntrospectionSnapshot(BaseModel):
@@ -286,6 +291,8 @@ class AgentIntrospectionSnapshot(BaseModel):
     trade_score_pass: Optional[bool] = None
     v43_regime: Optional[str] = None
     v43_gate_reject: Optional[str] = None
+    regime_bar_age: Optional[int] = None
+    regime_transition_risk: Optional[str] = None
     portfolio_guard_action: Optional[str] = None
     portfolio_guard_reason_codes: List[str] = Field(default_factory=list)
     memory_enabled: bool = False
@@ -439,6 +446,22 @@ class OrderFillEvent(BaseEvent):
         quantity: float
         fill_price: float
         timestamp: datetime
+
+
+class PartialFillEvent(BaseEvent):
+    """Order partially filled; remainder may be completed or closed."""
+
+    event_type: EventType = EventType.PARTIAL_FILL
+
+    class Payload(BaseModel):
+        order_id: str
+        symbol: str
+        side: str
+        requested_quantity: float
+        filled_quantity: float
+        fill_price: float
+        timestamp: datetime
+        exchange_order_id: Optional[int] = None
 
 
 class ExecutionFailedEvent(BaseEvent):
