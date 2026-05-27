@@ -65,7 +65,7 @@ def round_trip_cost_pct() -> float:
     compares ``edge = expected_return - threshold`` to this cost hurdle. Leverage
     affects position sizing elsewhere — it must not inflate the edge-vs-cost gate.
     """
-    maker = float(getattr(settings, "jacksparrow_v43_maker_fee_rate", 0.0005) or 0.0)
+    maker = float(getattr(settings, "jacksparrow_v43_maker_fee_rate", 0.0002) or 0.0)
     slip = float(getattr(settings, "jacksparrow_v43_slippage_pct", 0.0003) or 0.0)
     return 2.0 * (maker + slip)
 

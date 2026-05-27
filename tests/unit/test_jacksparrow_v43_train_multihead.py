@@ -9,6 +9,7 @@ import pytest
 from feature_store.jacksparrow_v43_multihead import (
     V43_MIN_META_AUC_BY_HORIZON,
     format_horizon_training_diagnostics,
+    primary_execution_horizon_bars,
     validate_multihead_export_gates,
 )
 from feature_store.jacksparrow_v43_train_multihead import V43_HORIZON_COST_SCALE
@@ -194,8 +195,8 @@ def test_compute_v43_round_trip_cost_matches_runtime_gate5() -> None:
     from agent.core.v43_signal_gates import round_trip_cost_pct
     from feature_store.jacksparrow_v43_train_multihead import compute_v43_round_trip_cost_pct
 
-    train_cost = compute_v43_round_trip_cost_pct(maker_fee=0.0005, slippage=0.0003)
-    assert train_cost == pytest.approx(0.0016)
+    train_cost = compute_v43_round_trip_cost_pct(maker_fee=0.0002, slippage=0.0003)
+    assert train_cost == pytest.approx(0.001)
     # Runtime default fees match training defaults when settings use same fee/slip.
     assert train_cost == pytest.approx(round_trip_cost_pct(), rel=0.05)
 
@@ -310,7 +311,7 @@ def test_validate_multihead_export_gates_accepts_regressor_mean() -> None:
             key: {
                 "validation_metrics": {
                     "inference_path": "regressor_mean",
-                    "validation_corr": 0.05,
+                    "validation_corr": 0.10 if key == "scalp_10m" else 0.05,
                     "tradable_label_fraction": 0.25,
                 }
             }
@@ -328,9 +329,23 @@ def test_validate_multihead_export_gates_passes_strong_model() -> None:
             "validation_metrics": {
                 "inference_path": "meta_calibrator",
                 "meta_auc": min_auc + 0.02,
-                "validation_corr": 0.05,
+                "validation_corr": 0.10 if key == "scalp_10m" else 0.05,
                 "tradable_label_fraction": 0.25,
             }
         }
     failures = validate_multihead_export_gates({"horizons": horizons}, strict=True)
     assert failures == []
+
+
+def test_primary_execution_horizon_bars_requires_metadata_key() -> None:
+    with pytest.raises(ValueError, match="missing primary_execution_horizon_bars"):
+        primary_execution_horizon_bars({})
+
+
+def test_primary_execution_horizon_bars_rejects_invalid_bars() -> None:
+    with pytest.raises(ValueError, match="not in"):
+        primary_execution_horizon_bars({"primary_execution_horizon_bars": 99})
+
+
+def test_primary_execution_horizon_bars_returns_scalp() -> None:
+    assert primary_execution_horizon_bars({"primary_execution_horizon_bars": 2}) == 2

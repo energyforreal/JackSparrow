@@ -45,7 +45,7 @@ V43_EXPORT_PRIMARY_ONLY_HORIZON_KEYS: Tuple[str, ...] = ("scalp_10m", "intraday_
 
 # Minimum validation correlation (predicted vs realized forward return).
 V43_MIN_VALIDATION_CORR_BY_HORIZON: Dict[str, float] = {
-    "scalp_10m": 0.0,
+    "scalp_10m": 0.08,  # execution head — must clear its own corr floor
     "intraday_30m": 0.0,
     "trend_1h": 0.0,
     "swing_2h": 0.0,
@@ -211,14 +211,22 @@ def parse_horizons_from_metadata(meta: Mapping[str, Any]) -> Dict[str, Dict[str,
 
 def primary_execution_horizon_bars(meta: Mapping[str, Any]) -> int:
     raw = meta.get("primary_execution_horizon_bars")
-    if raw is not None:
-        try:
-            bars = int(raw)
-            if bars in V43_MULTIHEAD_BARS:
-                return bars
-        except (TypeError, ValueError):
-            pass
-    return 6
+    if raw is None:
+        raise ValueError(
+            "metadata missing primary_execution_horizon_bars — "
+            "re-export bundle from Cell 25 before deploying."
+        )
+    try:
+        bars = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"primary_execution_horizon_bars={raw!r} is not a valid integer"
+        ) from exc
+    if bars not in V43_MULTIHEAD_BARS:
+        raise ValueError(
+            f"primary_execution_horizon_bars={bars} not in {V43_MULTIHEAD_BARS}"
+        )
+    return bars
 
 
 def validate_multihead_export_gates(

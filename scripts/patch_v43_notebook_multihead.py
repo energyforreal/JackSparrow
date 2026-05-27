@@ -1,8 +1,18 @@
-"""One-off patch: jacksparrow_v43_delta_india_training.ipynb → multi-head export."""
+"""One-off patch: jacksparrow_v43_delta_india_training.ipynb → multi-head export.
+
+STALE — do not run on major-rework. Export lives in notebook cell 25 with
+primary_execution_horizon_bars=2 (scalp_10m). This script targets obsolete cell
+indices and would corrupt the notebook.
+"""
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+raise RuntimeError(
+    "patch_v43_notebook_multihead.py is stale on major-rework — "
+    "do not run. Use notebooks/jacksparrow_v43_delta_india_training.ipynb cell 25."
+)
 
 NB = Path(__file__).resolve().parents[1] / "notebooks" / "jacksparrow_v43_delta_india_training.ipynb"
 

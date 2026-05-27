@@ -918,13 +918,22 @@ class Settings(BaseSettings):
         env="JACKSPARROW_V43_MAX_POSITION_PCT",
         ge=0.01,
         le=1.0,
-        description="Fraction of capital for v43 notional sizing before uncertainty scale.",
+        description=(
+            "Fraction of capital for v43 notional sizing before uncertainty scale. "
+            "With leverage_assumption=3, effective notional exposure is up to "
+            "max_position_pct * leverage (default 0.20 * 3 = 60% of capital per position)."
+        ),
     )
     jacksparrow_v43_leverage_assumption: int = Field(
         default=3,
         env="JACKSPARROW_V43_LEVERAGE_ASSUMPTION",
         ge=1,
-        description="Leverage used in v43 edge-cost and sizing formulas (match training notebook).",
+        description=(
+            "Leverage for position sizing (not applied to label returns or Gate-5 edge math). "
+            "Training stores this in runtime_cost_assumptions with "
+            "round_trip_cost_includes_leverage=False. Effective notional per position: "
+            "max_position_pct * leverage_assumption (default 60%)."
+        ),
     )
     jacksparrow_v43_take_profit_pct: float = Field(
         default=0.01,
@@ -936,10 +945,22 @@ class Settings(BaseSettings):
         ),
     )
     jacksparrow_v43_maker_fee_rate: float = Field(
-        default=0.0005,
+        default=0.0002,
         env="JACKSPARROW_V43_MAKER_FEE_RATE",
         ge=0.0,
-        description="Per-leg maker fee for v43 round-trip cost estimate.",
+        description=(
+            "Per-leg maker fee for v43 round-trip cost estimate. "
+            "Delta India BTC perp maker = 2 bps (0.0002)."
+        ),
+    )
+    jacksparrow_v43_taker_fee_rate: float = Field(
+        default=0.0010,
+        env="JACKSPARROW_V43_TAKER_FEE_RATE",
+        ge=0.0,
+        description=(
+            "Per-leg taker fee for market-order fallback cost estimate. "
+            "Delta India BTC perp taker = 10 bps (0.0010)."
+        ),
     )
     jacksparrow_v43_slippage_pct: float = Field(
         default=0.0003,

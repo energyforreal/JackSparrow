@@ -39,7 +39,7 @@ V43_HORIZON_COST_SCALE: Dict[int, float] = {
 
 def compute_v43_round_trip_cost_pct(
     *,
-    maker_fee: float = 0.0005,
+    maker_fee: float = 0.0002,
     slippage: float = 0.0003,
 ) -> float:
     """Price-return round-trip cost on the same scale as runtime Gate 5.
@@ -550,7 +550,7 @@ def train_multihead_from_feature_matrix(
     feat_cols: Optional[List[str]] = None,
     validation_fraction: float = 0.15,
     rng: int = 42,
-    maker_fee: float = 0.0005,
+    maker_fee: float = 0.0002,
     slippage: float = 0.0003,
     leverage: int = 3,
     cost_aware_labels: bool = True,
@@ -560,6 +560,11 @@ def train_multihead_from_feature_matrix(
 
     When ``use_meta_stack`` is False, each head uses the mean of base regressors only
     (``inference_path=regressor_mean``) with no LGBMClassifier meta-learner or Ridge calibrator.
+
+    ``leverage`` is stored in ``runtime_cost_assumptions`` metadata only; labels and
+    Gate-5 edge math use 1x price returns (``round_trip_cost_includes_leverage=False``).
+    Position sizing applies leverage separately via
+    ``jacksparrow_v43_max_position_pct * jacksparrow_v43_leverage_assumption``.
     """
     cols = feat_cols or list(V43_CANONICAL_FEATURES)
     missing = [c for c in cols if c not in df_feat.columns]
