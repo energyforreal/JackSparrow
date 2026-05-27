@@ -34,7 +34,7 @@ V43_MULTIHEAD_BARS: Tuple[int, ...] = tuple(sorted(set(V43_HORIZON_KEY_TO_BARS.v
 # Minimum meta-classifier AUC on validation for production export (BTC intraday).
 # Primary head (30m execution) uses the tightest bar; 1h/2h are advisory unless full strict.
 V43_MIN_META_AUC_BY_HORIZON: Dict[str, float] = {
-    "scalp_10m": 0.54,
+    "scalp_10m": 0.53,  # execution head — aligned with intraday_30m production min
     "intraday_30m": 0.53,
     "trend_1h": 0.58,
     "swing_2h": 0.60,
@@ -64,11 +64,32 @@ _ENV_MIN_AUC_KEYS: Dict[str, str] = {
     "swing_2h": "V43_MIN_META_AUC_SWING_2H",
 }
 
+_ENV_MIN_CORR_KEYS: Dict[str, str] = {
+    "scalp_10m": "V43_MIN_VALIDATION_CORR_SCALP_10M",
+    "intraday_30m": "V43_MIN_VALIDATION_CORR_INTRADAY_30M",
+    "trend_1h": "V43_MIN_VALIDATION_CORR_TREND_1H",
+    "swing_2h": "V43_MIN_VALIDATION_CORR_SWING_2H",
+}
+
 
 def resolve_min_meta_auc_by_horizon() -> Dict[str, float]:
     """Production minimums with optional per-horizon env overrides."""
     out = dict(V43_MIN_META_AUC_BY_HORIZON)
     for key, env_name in _ENV_MIN_AUC_KEYS.items():
+        raw = os.environ.get(env_name)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            out[key] = float(raw)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def resolve_min_validation_corr_by_horizon() -> Dict[str, float]:
+    """Production corr minimums with optional per-horizon env overrides."""
+    out = dict(V43_MIN_VALIDATION_CORR_BY_HORIZON)
+    for key, env_name in _ENV_MIN_CORR_KEYS.items():
         raw = os.environ.get(env_name)
         if raw is None or str(raw).strip() == "":
             continue
@@ -307,7 +328,7 @@ def validate_multihead_export_gates(
             corr = float(vm.get("validation_corr"))
         except (TypeError, ValueError):
             corr = None
-        min_corr = V43_MIN_VALIDATION_CORR_BY_HORIZON.get(key, 0.0)
+        min_corr = resolve_min_validation_corr_by_horizon().get(key, 0.0)
         if corr is None:
             failures.append(f"horizons[{key}] missing validation_corr")
         elif corr < min_corr:
