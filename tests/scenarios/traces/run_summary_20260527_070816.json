@@ -1,0 +1,92 @@
+{
+  "run_at": "20260527_070816",
+  "scenarios_run": 7,
+  "scenarios_passed": 7,
+  "scenarios_tier1_passed": 7,
+  "scenarios": [
+    {
+      "name": "strong_breakout",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 4921.5,
+      "error": null
+    },
+    {
+      "name": "fake_breakout",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 885.8,
+      "error": null
+    },
+    {
+      "name": "chop_market",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 1103.8,
+      "error": null
+    },
+    {
+      "name": "liquidation_spike",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 952.0,
+      "error": null
+    },
+    {
+      "name": "high_drawdown",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 982.1,
+      "error": null
+    },
+    {
+      "name": "thesis_ml_disagreement",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 937.5,
+      "error": null
+    },
+    {
+      "name": "high_confidence_bad_portfolio",
+      "passed": true,
+      "tier1_passed": true,
+      "all_passed": true,
+      "failed_critical": [],
+      "failed_tier1": [],
+      "failed_tier2": [],
+      "failed_warnings": [],
+      "total_ms": 941.0,
+      "error": null
+    }
+  ]
+}

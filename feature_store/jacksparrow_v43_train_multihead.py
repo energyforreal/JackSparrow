@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,11 +31,24 @@ from feature_store.jacksparrow_v43_multihead import (
 
 # Longer horizons: slightly relax cost mask (larger moves; avoid over-pruning 1h/2h).
 V43_HORIZON_COST_SCALE: Dict[int, float] = {
-    2: 1.5,
+    2: 1.0,
     6: 1.0,
     12: 0.7,
     24: 0.5,
 }
+
+# OI + microstructure columns — often zero-filled without ticker history CSV.
+V43_DERIVATIVES_SPARSE_FEATURE_COLS: Tuple[str, ...] = (
+    "oi_zscore",
+    "oi_change_6",
+    "oi_price_divergence",
+    "oi_acceleration",
+    "oi_delta_z",
+    "bid_ask_imbalance",
+    "spread_bps",
+    "funding_x_oi",
+    "funding_predicted_zscore",
+)
 
 
 def compute_v43_round_trip_cost_pct(
@@ -252,6 +266,64 @@ def _candidate_stats(
     }
 
 
+def _audit_sparse_derivatives_features(
+    df_feat: pd.DataFrame,
+    feat_cols: List[str],
+    *,
+    zero_fraction_threshold: float = 0.80,
+) -> Tuple[List[str], Dict[str, Any]]:
+    """Warn and optionally drop OI/microstructure cols when mostly zero-filled."""
+    sparse_cols = [c for c in V43_DERIVATIVES_SPARSE_FEATURE_COLS if c in feat_cols]
+    audit: Dict[str, Any] = {
+        "sparse_derivatives_columns": sparse_cols,
+        "sparse_zero_fraction_by_column": {},
+        "sparse_zero_fraction_max": 0.0,
+        "dropped_sparse_columns": [],
+    }
+    if not sparse_cols:
+        return list(feat_cols), audit
+
+    zero_fracs: Dict[str, float] = {}
+    for col in sparse_cols:
+        series = pd.to_numeric(df_feat[col], errors="coerce").fillna(0.0)
+        zero_fracs[col] = float((series.abs() < 1e-12).mean())
+    audit["sparse_zero_fraction_by_column"] = zero_fracs
+    max_zero = max(zero_fracs.values()) if zero_fracs else 0.0
+    audit["sparse_zero_fraction_max"] = max_zero
+
+    if max_zero >= zero_fraction_threshold:
+        warnings.warn(
+            f"WARNING: training with sparse OI/microstructure data "
+            f"({max_zero * 100:.1f}% zero in worst column). "
+            "Corr gate may not be met. Provide V43_OI_HISTORY_CSV for production export.",
+            UserWarning,
+            stacklevel=2,
+        )
+        audit["sparse_derivatives_warning"] = True
+
+    return list(feat_cols), audit
+
+
+def _calibrator_scale_sufficient(
+    calibrator: Any,
+    meta_val_proba: np.ndarray,
+    *,
+    round_trip_cost: float,
+    min_scale_fraction: float = 0.5,
+) -> Tuple[bool, float]:
+    """Return whether Ridge calibrator outputs span enough return scale for gate-5."""
+    try:
+        cal_out = np.asarray(
+            calibrator.predict(meta_val_proba.reshape(-1, 1)),
+            dtype=np.float64,
+        ).ravel()
+    except Exception:
+        return False, 0.0
+    max_abs = float(np.nanmax(np.abs(cal_out))) if cal_out.size else 0.0
+    min_required = float(round_trip_cost) * float(min_scale_fraction)
+    return max_abs >= min_required, max_abs
+
+
 def _horizon_meta_classifier_params(forward_bars: int, rng: int) -> Dict[str, Any]:
     """Slightly richer meta models on longer horizons (more validation signal)."""
     fb = int(forward_bars)
@@ -369,7 +441,7 @@ def train_horizon_ensemble(
     rng: int = 42,
     round_trip_cost: float = 0.0016,
     forward_bars: int = 6,
-    use_meta_stack: bool = True,
+    use_meta_stack: bool = False,
 ) -> Tuple[EnsembleModel, Dict[str, Any]]:
     """Train one horizon ensemble (LGBM + XGB + RF); optional meta-classifier stack."""
     feat_cols = list(X_train.columns)
@@ -384,9 +456,9 @@ def train_horizon_ensemble(
     lgb_inner = lgb.LGBMRegressor(
         n_estimators=400,
         learning_rate=0.05,
-        num_leaves=63,
-        max_depth=8,
-        min_child_samples=100,
+        num_leaves=31,
+        max_depth=6,
+        min_child_samples=150,
         reg_lambda=1.0,
         reg_alpha=0.1,
         subsample=0.8,
@@ -400,6 +472,7 @@ def train_horizon_ensemble(
         y_tr,
         eval_set=[(X_val_lgb, y_va)],
         eval_metric="l2",
+        callbacks=[lgb.early_stopping(30, verbose=False)],
     )
     lgbm_model.lgbm = lgb_inner
     lgbm_model.feature_cols = feat_cols
@@ -411,9 +484,10 @@ def train_horizon_ensemble(
 
     xgb = XGBRegressor(
         n_estimators=400,
-        max_depth=6,
+        max_depth=5,
         learning_rate=0.05,
-        min_child_weight=10,
+        min_child_weight=15,
+        gamma=0.1,
         reg_lambda=1.0,
         reg_alpha=0.1,
         subsample=0.8,
@@ -430,8 +504,8 @@ def train_horizon_ensemble(
 
     rf = RandomForestRegressor(
         n_estimators=200,
-        max_depth=12,
-        min_samples_leaf=100,
+        max_depth=8,
+        min_samples_leaf=150,
         max_features=0.5,
         random_state=rng,
         n_jobs=-1,
@@ -510,22 +584,55 @@ def train_horizon_ensemble(
     calibrator = Ridge(alpha=1.0)
     calibrator.fit(meta_val_proba.reshape(-1, 1), y_va)
 
-    ensemble.meta = meta_clf
-    ensemble.calibrator = calibrator
+    scale_ok, cal_max_abs = _calibrator_scale_sufficient(
+        calibrator,
+        meta_val_proba,
+        round_trip_cost=round_trip_cost,
+    )
+    calibrator_fallback = False
+    if not scale_ok:
+        warnings.warn(
+            f"WARNING: Ridge calibrator max |output|={cal_max_abs:.6f} < "
+            f"{round_trip_cost * 0.5:.6f} (50% round-trip). "
+            "Falling back to regressor_mean for this horizon.",
+            UserWarning,
+            stacklevel=2,
+        )
+        calibrator_fallback = True
+        ensemble.meta = None
+        ensemble.calibrator = None
+        val_pred = np.asarray(
+            ensemble.predict(
+                X_val.values,
+                X_df=X_val,
+                inference_stack="regressor_mean",
+            ),
+            dtype=np.float64,
+        ).ravel()
+        inference_path = "regressor_mean"
+        threshold_source = "validation_regressor_mean_percentile"
+        label_mode_out = "regressor_mean_stack_calibrator_fallback"
+        meta_auc = None
+    else:
+        ensemble.meta = meta_clf
+        ensemble.calibrator = calibrator
+        val_pred = np.asarray(
+            ensemble.predict(X_val.values, X_df=X_val), dtype=np.float64
+        ).ravel()
+        inference_path = "meta_calibrator"
+        threshold_source = "validation_meta_prediction_percentile"
+        label_mode_out = label_mode
+        try:
+            from sklearn.metrics import roc_auc_score
 
-    val_pred = np.asarray(
-        ensemble.predict(X_val.values, X_df=X_val), dtype=np.float64
-    ).ravel()
-
-    try:
-        from sklearn.metrics import roc_auc_score
-
-        if label_mode == "cost_aware_tradable" and int(auc_mask.sum()) > 10:
-            meta_auc = float(roc_auc_score(y_meta_va[auc_mask], meta_val_proba[auc_mask]))
-        else:
-            meta_auc = float(roc_auc_score((y_va > 0).astype(int), meta_val_proba))
-    except Exception:
-        meta_auc = 0.5
+            if label_mode == "cost_aware_tradable" and int(auc_mask.sum()) > 10:
+                meta_auc = float(
+                    roc_auc_score(y_meta_va[auc_mask], meta_val_proba[auc_mask])
+                )
+            else:
+                meta_auc = float(roc_auc_score((y_va > 0).astype(int), meta_val_proba))
+        except Exception:
+            meta_auc = 0.5
 
     validation_metrics = _validation_metrics_from_predictions(
         ensemble,
@@ -533,12 +640,15 @@ def train_horizon_ensemble(
         val_pred=val_pred,
         y_va=y_va,
         round_trip_cost=round_trip_cost,
-        inference_path="meta_calibrator",
-        label_mode=label_mode,
+        inference_path=inference_path,
+        label_mode=label_mode_out,
         tradable_frac=tradable_frac,
-        threshold_source="validation_meta_prediction_percentile",
+        threshold_source=threshold_source,
         meta_auc=meta_auc,
     )
+    if calibrator_fallback:
+        validation_metrics["calibrator_scale_fallback"] = True
+        validation_metrics["calibrator_max_abs_output"] = cal_max_abs
 
     return ensemble, validation_metrics
 
@@ -554,7 +664,7 @@ def train_multihead_from_feature_matrix(
     slippage: float = 0.0003,
     leverage: int = 3,
     cost_aware_labels: bool = True,
-    use_meta_stack: bool = True,
+    use_meta_stack: bool = False,
 ) -> Tuple[MultiHeadBundle, Dict[str, Any]]:
     """Train all horizon heads on shared features.
 
@@ -566,10 +676,12 @@ def train_multihead_from_feature_matrix(
     Position sizing applies leverage separately via
     ``jacksparrow_v43_max_position_pct * jacksparrow_v43_leverage_assumption``.
     """
-    cols = feat_cols or list(V43_CANONICAL_FEATURES)
+    cols = list(feat_cols or V43_CANONICAL_FEATURES)
     missing = [c for c in cols if c not in df_feat.columns]
     if missing:
         raise ValueError(f"feature matrix missing columns: {missing[:8]}")
+
+    cols, derivatives_audit = _audit_sparse_derivatives_features(df_feat, cols)
 
     round_trip_cost = compute_v43_round_trip_cost_pct(
         maker_fee=maker_fee,
@@ -674,6 +786,7 @@ def train_multihead_from_feature_matrix(
             "round_trip_cost_pct": round_trip_cost,
             "round_trip_cost_includes_leverage": False,
         },
+        "training_feature_audit": derivatives_audit,
     }
     return bundle, metadata
 
