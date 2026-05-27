@@ -202,6 +202,16 @@ def chronological_split_indices(
     return train_idx, embargo_idx, val_idx, meta
 
 
+def resolve_min_dynamic_threshold(round_trip_cost: float) -> float:
+    """Floor long/short thresholds at a fraction of round-trip cost (default 100%)."""
+    frac_raw = os.environ.get("V43_MIN_THRESHOLD_COST_FRACTION", "1.0").strip()
+    try:
+        frac = float(frac_raw)
+    except ValueError:
+        frac = 1.0
+    return float(round_trip_cost) * max(0.0, frac)
+
+
 def resolve_validation_threshold_percentiles() -> tuple[float, float]:
     """Long/short validation percentiles for dynamic thresholds (env-tunable).
 
@@ -378,9 +388,13 @@ def _validation_metrics_from_predictions(
 ) -> Dict[str, Any]:
     """Shared thresholding + validation metrics for meta or regressor-mean stacks."""
     long_p, short_p = resolve_validation_threshold_percentiles()
-    dt_long = max(float(np.nanpercentile(val_pred, long_p)), 1e-6)
-    dt_short = min(float(np.nanpercentile(val_pred, short_p)), -1e-6)
+    min_thr = resolve_min_dynamic_threshold(round_trip_cost)
+    dt_long = max(float(np.nanpercentile(val_pred, long_p)), min_thr, 1e-6)
+    dt_short = min(float(np.nanpercentile(val_pred, short_p)), -min_thr, -1e-6)
     dt_short_mag = abs(dt_short)
+    threshold_floor_applied = bool(
+        dt_long >= min_thr - 1e-12 or dt_short_mag >= min_thr - 1e-12
+    )
     ensemble.threshold = dt_long
     ensemble.dynamic_threshold = dt_long
     ensemble.short_threshold = dt_short_mag
@@ -412,6 +426,8 @@ def _validation_metrics_from_predictions(
         "short_threshold_percentile": float(short_p),
         "dynamic_threshold": dt_long,
         "short_threshold": dt_short_mag,
+        "min_dynamic_threshold": float(min_thr),
+        "threshold_floor_applied": threshold_floor_applied,
         "validation_rmse": float(np.sqrt(np.mean((val_pred - y_va) ** 2))),
         "validation_mae": float(np.mean(np.abs(val_pred - y_va))),
         "validation_corr": _safe_corr(val_pred, y_va),
