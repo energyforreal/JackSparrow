@@ -31,7 +31,7 @@ from feature_store.jacksparrow_v43_multihead import (
 
 # Longer horizons: slightly relax cost mask (larger moves; avoid over-pruning 1h/2h).
 V43_HORIZON_COST_SCALE: Dict[int, float] = {
-    2: 1.0,
+    2: 0.3,
     6: 1.0,
     12: 0.7,
     24: 0.5,
@@ -412,6 +412,7 @@ def _validation_metrics_from_predictions(
     tradable_frac: float,
     threshold_source: str,
     meta_auc: Optional[float] = None,
+    gross_y_va: Optional[np.ndarray] = None,
 ) -> Dict[str, Any]:
     """Shared thresholding + validation metrics for meta or regressor-mean stacks."""
     long_p, short_p = resolve_validation_threshold_percentiles()
@@ -458,6 +459,9 @@ def _validation_metrics_from_predictions(
         "validation_rmse": float(np.sqrt(np.mean((val_pred - y_va) ** 2))),
         "validation_mae": float(np.mean(np.abs(val_pred - y_va))),
         "validation_corr": _safe_corr(val_pred, y_va),
+        "validation_corr_gross": _safe_corr(val_pred, gross_y_va)
+        if gross_y_va is not None
+        else _safe_corr(val_pred, y_va),
         "directional_accuracy": float(
             np.mean(np.sign(val_pred[directional_mask]) == np.sign(y_va[directional_mask]))
         )
@@ -485,6 +489,7 @@ def train_horizon_ensemble(
     round_trip_cost: float = 0.0016,
     forward_bars: int = 6,
     use_meta_stack: bool = False,
+    gross_y_val: Optional[np.ndarray] = None,
 ) -> Tuple[EnsembleModel, Dict[str, Any]]:
     """Train one horizon ensemble (LGBM + XGB + RF); optional meta-classifier stack."""
     feat_cols = list(X_train.columns)
@@ -585,6 +590,7 @@ def train_horizon_ensemble(
             label_mode="regressor_mean_stack",
             tradable_frac=tradable_frac,
             threshold_source="validation_regressor_mean_percentile",
+            gross_y_va=gross_y_val,
         )
         return ensemble, validation_metrics
 
@@ -688,6 +694,7 @@ def train_horizon_ensemble(
         tradable_frac=tradable_frac,
         threshold_source=threshold_source,
         meta_auc=meta_auc,
+        gross_y_va=gross_y_val,
     )
     if calibrator_fallback:
         validation_metrics["calibrator_scale_fallback"] = True
@@ -706,7 +713,7 @@ def train_multihead_from_feature_matrix(
     maker_fee: float = 0.0002,
     slippage: float = 0.0003,
     leverage: int = 3,
-    cost_aware_labels: bool = True,
+    cost_aware_labels: bool = False,
     use_meta_stack: bool = False,
 ) -> Tuple[MultiHeadBundle, Dict[str, Any]]:
     """Train all horizon heads on shared features.
@@ -748,14 +755,17 @@ def train_multihead_from_feature_matrix(
         else:
             y_raw = build_forward_labels(close, fb)
             label_stats = {"tradable_label_fraction": 1.0, "sub_cost_suppressed_fraction": 0.0}
+        y_gross_full = build_forward_labels(close, fb)
         work = df_feat[cols].copy()
         work["target"] = y_raw.values
-        work = work.replace([np.inf, -np.inf], np.nan).dropna()
+        work["target_gross"] = y_gross_full.values
+        work = work.replace([np.inf, -np.inf], np.nan).dropna(subset=["target"])
         if len(work) < 500 and cost_aware_labels:
             y_gross = build_forward_labels(close, fb)
             work = df_feat[cols].copy()
             work["target"] = y_gross.values
-            work = work.replace([np.inf, -np.inf], np.nan).dropna()
+            work["target_gross"] = y_gross.values
+            work = work.replace([np.inf, -np.inf], np.nan).dropna(subset=["target"])
             label_mode_horizon = "gross_forward_return_fallback"
             label_stats = {
                 **label_stats,
@@ -776,6 +786,7 @@ def train_multihead_from_feature_matrix(
         y = work["target"]
         X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
         X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
+        y_gross_val = work.iloc[val_idx]["target_gross"].values.astype(np.float64)
 
         ensemble, vm = train_horizon_ensemble(
             X_train,
@@ -786,6 +797,7 @@ def train_multihead_from_feature_matrix(
             round_trip_cost=round_trip_cost,
             forward_bars=fb,
             use_meta_stack=use_meta_stack,
+            gross_y_val=y_gross_val,
         )
         bundle.set_head(fb, ensemble)
 

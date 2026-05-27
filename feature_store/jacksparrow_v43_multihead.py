@@ -45,7 +45,7 @@ V43_EXPORT_PRIMARY_ONLY_HORIZON_KEYS: Tuple[str, ...] = ("scalp_10m", "intraday_
 
 # Minimum validation correlation (predicted vs realized forward return).
 V43_MIN_VALIDATION_CORR_BY_HORIZON: Dict[str, float] = {
-    "scalp_10m": 0.08,  # execution head — must clear its own corr floor
+    "scalp_10m": 0.08,  # execution head — corr vs gross forward return (Layer A)
     "intraday_30m": 0.0,
     "trend_1h": 0.0,
     "swing_2h": 0.0,

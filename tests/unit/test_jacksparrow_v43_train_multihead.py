@@ -169,7 +169,7 @@ def test_validate_multihead_export_gates_blocks_low_auc() -> None:
 
 
 def test_horizon_cost_scale_relaxes_longer_horizons() -> None:
-    assert V43_HORIZON_COST_SCALE[2] == V43_HORIZON_COST_SCALE[6]
+    assert V43_HORIZON_COST_SCALE[2] < V43_HORIZON_COST_SCALE[6]
     assert V43_HORIZON_COST_SCALE[12] < V43_HORIZON_COST_SCALE[6]
     assert V43_HORIZON_COST_SCALE[24] < V43_HORIZON_COST_SCALE[12]
 

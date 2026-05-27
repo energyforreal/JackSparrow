@@ -529,7 +529,7 @@ class ContinuousSimulator:
         if self._node is not None:
             return
         from agent.models.jack_sparrow_v43_node import JackSparrowV43Node
-        print(f"  Loading model from {self.metadata_path} …", flush=True)
+        print(f"  Loading model from {self.metadata_path} ...", flush=True)
         self._node = JackSparrowV43Node.from_metadata_path(self.metadata_path)
         print(f"  Model loaded (forward_bars={self._node.training_forward_bars})", flush=True)
 
@@ -652,7 +652,7 @@ class ContinuousSimulator:
         base_price: float = 45000.0,
         seed: int = 42,
     ) -> Dict[str, Any]:
-        print("\n[SIM] Generating synthetic market data …", flush=True)
+        print("\n[SIM] Generating synthetic market data ...", flush=True)
         df_all, regime_labels = generate_continuous_ohlcv(
             segments, base_price=base_price, seed=seed
         )
@@ -673,9 +673,9 @@ class ContinuousSimulator:
 
         regime_map = {r["bar"]: r["regime"] for r in regime_labels}
         active_bars = range(self.warmup_bars, total_bars)
-        print(f"[SIM] Pipeline will run on bars {self.warmup_bars}–{total_bars - 1} "
+        print(f"[SIM] Pipeline will run on bars {self.warmup_bars}-{total_bars - 1} "
               f"({len(active_bars)} pipeline steps)", flush=True)
-        print("[SIM] Running simulation …", flush=True)
+        print("[SIM] Running simulation ...", flush=True)
 
         t_sim_start = time.perf_counter()
 
@@ -1362,7 +1362,7 @@ async def _main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
-    print("  JackSparrow v43 · CONTINUOUS SIMULATION")
+    print("  JackSparrow v43 - CONTINUOUS SIMULATION")
     print("=" * 70)
     print(f"  Symbol:       {args.symbol}")
     print(f"  Base price:   ${args.base_price:,.0f}")
@@ -1404,9 +1404,9 @@ async def _main() -> int:
     ts_  = results.get("trade_stats", {})
     lh   = results.get("layer_health_pct", {})
     print()
-    print("─" * 60)
+    print("-" * 60)
     print("  SIMULATION SUMMARY")
-    print("─" * 60)
+    print("-" * 60)
     print(f"  Simulated market time : {meta.get('simulated_hours','?')}h "
           f"({meta.get('active_bars','?')} pipeline steps)")
     print(f"  Wall-clock time       : {meta.get('sim_seconds','?'):.1f}s "
@@ -1414,12 +1414,12 @@ async def _main() -> int:
     print()
     print("  LAYER HEALTH:")
     for name, pct in lh.items():
-        icon = "✓" if pct >= 95 else "⚠" if pct >= 80 else "✗"
+        icon = "OK" if pct >= 95 else "!!" if pct >= 80 else "XX"
         print(f"    {icon} {name:<22} {pct:5.1f}%")
     print()
     print("  SIGNAL DISTRIBUTION:")
     for sig, cnt in sorted(results.get("signal_distribution", {}).items()):
-        bar_ = "█" * min(30, cnt // 2)
+        bar_ = "#" * min(30, cnt // 2)
         print(f"    {sig:<14} {cnt:4d}  {bar_}")
     print()
     print("  GATE REJECTS (top 5):")
@@ -1435,7 +1435,7 @@ async def _main() -> int:
     if results.get("errors"):
         for e in results["errors"][:3]:
             print(f"    [bar {e['bar']}] {e['stage']}: {e['error'][:80]}")
-    print("─" * 60)
+    print("-" * 60)
     return 0
 
 
