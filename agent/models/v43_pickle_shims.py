@@ -331,6 +331,24 @@ class StateHeadModel(_StateDictMixin):
         self.classes_: Optional[List[str]] = None
         self._is_fitted: bool = False
 
+    def _resolve_feature_matrix(
+        self, X: np.ndarray, X_df: Optional[pd.DataFrame] = None
+    ) -> np.ndarray:
+        """Subset to ``feature_cols`` when a wide feature frame is passed."""
+        cols = list(getattr(self, "feature_cols", None) or [])
+        if cols and X_df is not None:
+            use = [c for c in cols if c in X_df.columns]
+            if len(use) == len(cols):
+                return np.asarray(X_df[use].values, dtype=np.float32)
+        Xa = np.asarray(X, dtype=np.float32)
+        if cols and Xa.ndim == 2 and Xa.shape[1] != len(cols):
+            raise ValueError(
+                f"StateHeadModel {self.head_key!r}: X has {Xa.shape[1]} features "
+                f"but expects {len(cols)} ({cols[:3]}...). "
+                "Pass X_df with named columns or subset X to feature_cols."
+            )
+        return Xa
+
     def _scale(self, X: np.ndarray) -> np.ndarray:
         Xa = np.asarray(X, dtype=np.float32)
         scaler = getattr(self, "scaler", None)
@@ -342,7 +360,7 @@ class StateHeadModel(_StateDictMixin):
         clf = getattr(self, "classifier", None)
         if clf is None:
             raise RuntimeError(f"StateHeadModel {self.head_key!r} missing classifier")
-        Xs = self._scale(X)
+        Xs = self._scale(self._resolve_feature_matrix(X, X_df=X_df))
         proba = _predict_proba_sklearn_compat(clf, Xs)
         if proba is None:
             raise RuntimeError(f"StateHeadModel {self.head_key!r} predict_proba failed")
