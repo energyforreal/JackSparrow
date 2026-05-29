@@ -880,6 +880,35 @@ def subsample_stride_indices(n_rows: int, *, stride: int) -> np.ndarray:
     return np.arange(0, n_rows, st, dtype=np.int64)
 
 
+def align_close_to_feature_matrix(
+    df_feat: pd.DataFrame,
+    close: pd.Series,
+) -> pd.Series:
+    """Align close prices to feature matrix rows (Colab-safe when index types differ).
+
+    ``df_feat`` typically uses a RangeIndex while ``close`` is indexed by bar
+    timestamps. When a ``timestamp`` column exists on ``df_feat``, reindex by
+    that column and return a series indexed like ``df_feat``.
+    """
+    c = pd.to_numeric(close, errors="coerce").astype(float)
+    if "timestamp" in df_feat.columns:
+        ts = pd.to_datetime(df_feat["timestamp"], utc=True)
+        if isinstance(c.index, pd.DatetimeIndex):
+            c_idx = c.index.tz_convert("UTC") if c.index.tz is not None else c.index.tz_localize("UTC")
+        else:
+            c_idx = pd.to_datetime(c.index, utc=True)
+        mapped = c.copy()
+        mapped.index = c_idx
+        aligned = mapped.reindex(ts)
+        return pd.Series(aligned.values, index=df_feat.index)
+    if len(c) == len(df_feat):
+        return pd.Series(c.values, index=df_feat.index)
+    aligned = c.reindex(df_feat.index)
+    if int(aligned.notna().sum()) == 0 and len(c) == len(df_feat):
+        return pd.Series(c.values, index=df_feat.index)
+    return aligned
+
+
 def feature_correlation_report(
     df_feat: pd.DataFrame,
     feat_cols: List[str],
@@ -1186,7 +1215,13 @@ def train_state_heads_from_feature_matrix(
     masks = tier_masks or {
         k: list(v) for k, v in V43_STATE_HEAD_FEATURE_TIERS.items()
     }
-    close_aligned = close.reindex(df_feat.index)
+    close_aligned = align_close_to_feature_matrix(df_feat, close)
+    if int(close_aligned.notna().sum()) < 500:
+        raise ValueError(
+            "close series could not be aligned to df_feat rows "
+            f"(valid close rows={int(close_aligned.notna().sum())}). "
+            "Ensure close is indexed by bar timestamps matching df_feat['timestamp']."
+        )
 
     regime_raw, regime_stats = build_regime_labels(df_feat)
     vol_raw, vol_stats = build_vol_expansion_labels(

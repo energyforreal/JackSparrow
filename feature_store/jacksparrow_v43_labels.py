@@ -236,18 +236,21 @@ def build_vol_expansion_labels(
 ) -> Tuple[pd.Series, Dict[str, float]]:
     """Binary: future realized vol over N bars exceeds rolling median baseline."""
     c = close.astype(float)
-    ret = c.pct_change()
+    ret = c.pct_change(fill_method=None)
     fb = int(forward_bars)
     n = len(c)
     out = pd.Series(np.nan, index=c.index, dtype=float)
 
-    # Realized vol proxy: std of returns in forward window.
-    fwd_vol = ret.rolling(fb).std().shift(-fb)
-    baseline = ret.rolling(vol_window).std().rolling(vol_window, min_periods=50).median()
+    min_hist = max(20, vol_window // 4)
+    hist_vol = ret.rolling(vol_window, min_periods=min_hist).std()
+    baseline = hist_vol.rolling(vol_window, min_periods=50).median()
 
     for i in range(n - fb):
-        fv = fwd_vol.iloc[i]
-        bl = baseline.iloc[i]
+        window = ret.iloc[i + 1 : i + fb + 1]
+        if int(window.notna().sum()) < max(2, fb // 2):
+            continue
+        fv = float(window.std())
+        bl = float(baseline.iloc[i]) if i < len(baseline) else np.nan
         if not np.isfinite(fv) or not np.isfinite(bl) or bl <= 0:
             continue
         out.iloc[i] = 1.0 if fv > mult * bl else 0.0

@@ -45,6 +45,20 @@ def test_build_vol_expansion_labels_binary():
     assert stats["labeled_fraction"] > 0
 
 
+def test_align_close_to_feature_matrix_by_timestamp():
+    from feature_store.jacksparrow_v43_train_multihead import align_close_to_feature_matrix
+
+    n = 600
+    ts = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
+    close = pd.Series(np.linspace(100.0, 110.0, n), index=ts)
+    df = _synthetic_feat(n)
+    df["timestamp"] = ts
+    aligned = align_close_to_feature_matrix(df, close)
+    assert int(aligned.notna().sum()) == n
+    labels, stats = build_vol_expansion_labels(aligned, forward_bars=12)
+    assert stats["labeled_fraction"] > 0.1
+
+
 def test_build_trade_quality_labels_excludes_timeout():
     n = 300
     rng = np.random.default_rng(2)
