@@ -319,11 +319,58 @@ class LGBMModel(_StateDictMixin):
         return np.full(Xs.shape[0], 0.05, dtype=np.float64)
 
 
+class StateHeadModel(_StateDictMixin):
+    """Pickle shim for v43 state-intelligence classifiers (regime / vol / quality)."""
+
+    def __init__(self) -> None:
+        self.scaler = None
+        self.classifier = None
+        self.feature_cols: Optional[List[str]] = None
+        self.head_key: str = ""
+        self.head_type: str = "binary"  # binary | regime
+        self.classes_: Optional[List[str]] = None
+        self._is_fitted: bool = False
+
+    def _scale(self, X: np.ndarray) -> np.ndarray:
+        Xa = np.asarray(X, dtype=np.float32)
+        scaler = getattr(self, "scaler", None)
+        if scaler is not None and hasattr(scaler, "transform"):
+            return np.asarray(scaler.transform(Xa), dtype=np.float32)
+        return Xa
+
+    def predict_proba(self, X: np.ndarray, X_df: Optional[pd.DataFrame] = None) -> np.ndarray:
+        clf = getattr(self, "classifier", None)
+        if clf is None:
+            raise RuntimeError(f"StateHeadModel {self.head_key!r} missing classifier")
+        Xs = self._scale(X)
+        proba = _predict_proba_sklearn_compat(clf, Xs)
+        if proba is None:
+            raise RuntimeError(f"StateHeadModel {self.head_key!r} predict_proba failed")
+        if proba.ndim == 1:
+            return np.column_stack([1.0 - proba, proba])
+        return proba
+
+    def predict_scalar_score(self, X: np.ndarray, X_df: Optional[pd.DataFrame] = None) -> float:
+        """Return primary probability for policy gates."""
+        p = self.predict_proba(X, X_df=X_df)
+        if p.ndim == 2 and p.shape[1] >= 2:
+            if self.head_type == "regime" and self.classes_:
+                favorable = {"trending_up", "trending_down", "vol_expansion"}
+                score = 0.0
+                for i, cls in enumerate(self.classes_):
+                    if cls in favorable and i < p.shape[1]:
+                        score += float(p[0, i])
+                return float(np.clip(score, 0.0, 1.0))
+            return float(p[0, 1])
+        return float(p.ravel()[0])
+
+
 class MultiHeadBundle(_StateDictMixin):
     """Single-bundle container for intraday multi-horizon ensembles (2/6/12/24 bars)."""
 
     def __init__(self) -> None:
         self.horizon_models: Dict[int, Any] = {}
+        self.state_heads: Dict[str, Any] = {}
         self._is_fitted: bool = False
 
     def set_head(self, forward_bars: int, model: Any) -> None:
@@ -332,6 +379,36 @@ class MultiHeadBundle(_StateDictMixin):
 
     def get_head(self, forward_bars: int) -> Optional[Any]:
         return self.horizon_models.get(int(forward_bars))
+
+    def set_state_head(self, key: str, model: Any) -> None:
+        self.state_heads[str(key)] = model
+        self._is_fitted = True
+
+    def get_state_head(self, key: str) -> Optional[Any]:
+        return self.state_heads.get(str(key))
+
+    def state_head_keys(self) -> List[str]:
+        return sorted(str(k) for k in self.state_heads.keys())
+
+    def predict_state_score(
+        self,
+        key: str,
+        X: np.ndarray,
+        X_df: Optional[pd.DataFrame] = None,
+    ) -> float:
+        m = self.get_state_head(key)
+        if m is None:
+            raise KeyError(f"multi-head bundle missing state head {key!r}")
+        fn = getattr(m, "predict_scalar_score", None)
+        if callable(fn):
+            return float(fn(X, X_df=X_df))
+        proba_fn = getattr(m, "predict_proba", None)
+        if proba_fn is None:
+            raise RuntimeError(f"state head {key!r} has no predict_proba")
+        p = np.asarray(proba_fn(X, X_df=X_df), dtype=np.float64)
+        if p.ndim == 2 and p.shape[1] >= 2:
+            return float(p[0, 1])
+        return float(p.ravel()[0])
 
     def head_bars(self) -> List[int]:
         return sorted(int(k) for k in self.horizon_models.keys())
@@ -533,7 +610,7 @@ def install_main_aliases() -> None:
     main_mod = sys.modules.get("__main__")
     if main_mod is None:
         return
-    for cls in (EnsembleModel, LGBMModel, FeatureEngineer, MultiHeadBundle):
+    for cls in (EnsembleModel, LGBMModel, FeatureEngineer, MultiHeadBundle, StateHeadModel):
         existing = getattr(main_mod, cls.__name__, None)
         if existing is None or getattr(existing, "__module__", "") == __name__:
             try:

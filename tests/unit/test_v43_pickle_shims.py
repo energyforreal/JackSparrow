@@ -46,6 +46,8 @@ def test_shim_install_aliases_main():
         v43_pickle_shims.EnsembleModel,
         v43_pickle_shims.LGBMModel,
         v43_pickle_shims.FeatureEngineer,
+        v43_pickle_shims.StateHeadModel,
+        v43_pickle_shims.MultiHeadBundle,
     ):
         alias = getattr(main_mod, cls.__name__, None)
         assert alias is cls, f"__main__.{cls.__name__} not aliased to shim"

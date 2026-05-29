@@ -251,6 +251,22 @@ class MLEvidenceSnapshot(BaseModel):
         default=None,
         description="Whether ML validation agreed with structural setup.",
     )
+    p_regime_favorable: Optional[float] = Field(
+        default=None,
+        description="State-head probability that regime is favorable for entry.",
+    )
+    p_setup_quality: Optional[float] = Field(
+        default=None,
+        description="State-head probability of TP-first trade quality.",
+    )
+    p_vol_expansion: Optional[float] = Field(
+        default=None,
+        description="State-head probability of volatility expansion.",
+    )
+    uncertainty_score: Optional[float] = Field(
+        default=None,
+        description="Ensemble disagreement / abstention signal (higher = less confident).",
+    )
 
 
 class PolicyVerdict(BaseModel):
@@ -291,6 +307,10 @@ class AgentIntrospectionSnapshot(BaseModel):
     trade_score_pass: Optional[bool] = None
     v43_regime: Optional[str] = None
     v43_gate_reject: Optional[str] = None
+    p_regime_favorable: Optional[float] = None
+    p_setup_quality: Optional[float] = None
+    p_vol_expansion: Optional[float] = None
+    uncertainty_score: Optional[float] = None
     regime_bar_age: Optional[int] = None
     regime_transition_risk: Optional[str] = None
     portfolio_guard_action: Optional[str] = None

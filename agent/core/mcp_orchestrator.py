@@ -50,9 +50,11 @@ from agent.core.config import settings
 from agent.core.agent_introspection import build_introspection_snapshot
 from agent.core.v43_market_frames import closed_5m_bar_index
 from agent.core.v43_signal_gates import (
+    V43GateResult,
     V43GateState,
     apply_gate5_min_edge,
     apply_gate5_min_edge_short,
+    apply_uncertainty_gate,
     apply_post_threshold_gates,
     apply_post_threshold_gates_short,
     compute_regime_transition_risk,
@@ -645,6 +647,12 @@ class MCPOrchestrator:
         short_thr = float(gate_head.short_threshold)
         regime = str(gate_head.regime or pctx.get("regime", "neutral") or "neutral")
         u_scale = float(pctx.get("unc_scale", 1.0) or 1.0)
+        uncertainty_score = float(
+            pctx.get("uncertainty_score", pctx.get("uncertainty", 0.05)) or 0.05
+        )
+        p_regime_favorable = pctx.get("p_regime_favorable")
+        p_setup_quality = pctx.get("p_setup_quality")
+        p_vol_expansion = pctx.get("p_vol_expansion")
         closed_feats = pctx.get("closed_bar_features") or {}
         if not isinstance(closed_feats, dict):
             closed_feats = {}
@@ -755,7 +763,17 @@ class MCPOrchestrator:
                 )
                 reject_tail = gr2.reject_reason or "below_threshold"
                 if gr2.allow:
-                    g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
+                    if bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False)):
+                        gu = apply_uncertainty_gate(
+                            uncertainty_score, self._v43_gate_state
+                        )
+                        if not gu.allow:
+                            reject_tail = gu.reject_reason or "high_uncertainty"
+                            gr2 = V43GateResult(allow=False, reject_reason=reject_tail)
+                    if gr2.allow:
+                        g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
+                    else:
+                        g5 = V43GateResult(allow=False, reject_reason=reject_tail)
                     final_long = bool(g5.allow)
                     if not final_long:
                         reject_tail = g5.reject_reason or "min_edge_cost"
@@ -773,7 +791,17 @@ class MCPOrchestrator:
                 )
                 reject_tail = gr2s.reject_reason or "below_threshold_short"
                 if gr2s.allow:
-                    g5s = apply_gate5_min_edge_short(proba, short_thr, self._v43_gate_state)
+                    if bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False)):
+                        gu = apply_uncertainty_gate(
+                            uncertainty_score, self._v43_gate_state
+                        )
+                        if not gu.allow:
+                            reject_tail = gu.reject_reason or "high_uncertainty"
+                            gr2s = V43GateResult(allow=False, reject_reason=reject_tail)
+                    if gr2s.allow:
+                        g5s = apply_gate5_min_edge_short(proba, short_thr, self._v43_gate_state)
+                    else:
+                        g5s = V43GateResult(allow=False, reject_reason=reject_tail)
                     final_short = bool(g5s.allow)
                     if not final_short:
                         reject_tail = g5s.reject_reason or "min_edge_cost"
@@ -945,6 +973,10 @@ class MCPOrchestrator:
             "trade_score": trade_score.to_dict(),
             "regime": regime,
             "v43_regime": regime,
+            "p_regime_favorable": p_regime_favorable,
+            "p_setup_quality": p_setup_quality,
+            "p_vol_expansion": p_vol_expansion,
+            "uncertainty_score": uncertainty_score,
         }
 
         ml_evidence = MLEvidenceSnapshot(
@@ -967,10 +999,20 @@ class MCPOrchestrator:
                 "ml_validation": ml_validation.to_dict(),
                 "strategy_candidate": strategy_candidate.to_dict(),
                 "trade_score": trade_score.to_dict(),
+                "p_regime_favorable": p_regime_favorable,
+                "p_setup_quality": p_setup_quality,
+                "p_vol_expansion": p_vol_expansion,
+                "uncertainty_score": uncertainty_score,
             },
             thesis_signal=strategy_candidate.signal,
             trade_score=trade_score.score,
             ml_confirms=ml_gates_passed or ml_confirms,
+            p_regime_favorable=float(p_regime_favorable)
+            if p_regime_favorable is not None
+            else None,
+            p_setup_quality=float(p_setup_quality) if p_setup_quality is not None else None,
+            p_vol_expansion=float(p_vol_expansion) if p_vol_expansion is not None else None,
+            uncertainty_score=float(uncertainty_score),
         )
 
         from agent.core.portfolio_intelligence import (

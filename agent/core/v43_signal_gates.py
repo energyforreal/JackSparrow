@@ -460,6 +460,26 @@ def apply_post_threshold_gates(
     return V43GateResult(allow=True, reject_reason=None)
 
 
+def apply_uncertainty_gate(
+    uncertainty_score: float,
+    state: V43GateState,
+    *,
+    max_uncertainty: Optional[float] = None,
+) -> V43GateResult:
+    """Reject when ensemble disagreement exceeds configured maximum."""
+    unc_max = max_uncertainty
+    if unc_max is None:
+        unc_max = float(getattr(settings, "jacksparrow_v43_uncertainty_max", 0.02) or 0.02)
+    try:
+        unc = float(uncertainty_score)
+    except (TypeError, ValueError):
+        return V43GateResult(allow=True, reject_reason=None)
+    if unc > float(unc_max):
+        state.counters.rejected_edge += 1
+        return V43GateResult(allow=False, reject_reason="high_uncertainty")
+    return V43GateResult(allow=True, reject_reason=None)
+
+
 def apply_gate5_min_edge(
     proba: float,
     thr: float,

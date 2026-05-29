@@ -408,6 +408,67 @@ def format_horizon_training_diagnostics(meta: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+V43_STATE_HEAD_KEYS: Tuple[str, ...] = ("regime", "vol_expansion", "trade_quality")
+
+V43_STATE_HEAD_ACCEPTANCE: Dict[str, Dict[str, float]] = {
+    "regime": {"balanced_accuracy_min": 0.60},
+    "vol_expansion": {"validation_auc_min": 0.58},
+    "trade_quality": {"validation_auc_min": 0.56},
+}
+
+
+def validate_v43_state_heads_metadata(meta: Mapping[str, Any]) -> List[str]:
+    """Optional audit of state_heads block; empty list if block absent."""
+    failures: List[str] = []
+    block = meta.get("state_heads")
+    if block is None:
+        return failures
+    if not isinstance(block, dict):
+        failures.append("state_heads must be a dict")
+        return failures
+    for key in V43_STATE_HEAD_KEYS:
+        head = block.get(key)
+        if not isinstance(head, dict):
+            failures.append(f"state_heads[{key}] missing")
+            continue
+        if head.get("head_key") != key:
+            failures.append(f"state_heads[{key}].head_key mismatch")
+    return failures
+
+
+def format_state_head_diagnostics(meta: Mapping[str, Any]) -> str:
+    """Human-readable state-head validation metrics."""
+    block = meta.get("state_heads")
+    if not isinstance(block, dict):
+        return "state_heads: (not present — legacy bundle)"
+    lines = [
+        "State-head diagnostics",
+        f"{'head':<16} {'metric':<22} {'value':>10} {'target':>10}",
+        "-" * 62,
+    ]
+    regime = block.get("regime")
+    if isinstance(regime, dict):
+        bal = regime.get("balanced_accuracy")
+        tgt = V43_STATE_HEAD_ACCEPTANCE["regime"]["balanced_accuracy_min"]
+        lines.append(
+            f"{'regime':<16} {'balanced_accuracy':<22} "
+            f"{bal if bal is not None else 'n/a':>10} {tgt:>10.2f}"
+        )
+    for key, metric_key, min_key in (
+        ("vol_expansion", "validation_auc", "validation_auc_min"),
+        ("trade_quality", "validation_auc", "validation_auc_min"),
+    ):
+        head = block.get(key)
+        if isinstance(head, dict):
+            auc = head.get(metric_key)
+            tgt = V43_STATE_HEAD_ACCEPTANCE[key][min_key]
+            lines.append(
+                f"{key:<16} {metric_key:<22} "
+                f"{auc if auc is not None else 'n/a':>10} {tgt:>10.2f}"
+            )
+    return "\n".join(lines)
+
+
 def format_export_gate_summary(
     meta: Mapping[str, Any],
     *,

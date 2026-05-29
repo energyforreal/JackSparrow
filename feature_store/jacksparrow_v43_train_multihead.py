@@ -81,32 +81,30 @@ except ImportError as exc:  # pragma: no cover
         "train multi-head requires lightgbm, xgboost, scikit-learn"
     ) from exc
 
-from agent.models.v43_pickle_shims import EnsembleModel, LGBMModel, MultiHeadBundle
+from agent.models.v43_pickle_shims import (
+    EnsembleModel,
+    LGBMModel,
+    MultiHeadBundle,
+    StateHeadModel,
+)
+from feature_store.jacksparrow_v43_labels import (
+    V43_REGIME_CLASSES,
+    V43_HORIZON_FEATURE_MASKS,
+    V43_STATE_HEAD_FEATURE_TIERS,
+    build_cost_aware_forward_labels,
+    build_forward_labels,
+    build_regime_labels,
+    build_trade_quality_labels,
+    build_vol_expansion_labels,
+)
 
-
-def build_forward_labels(close: pd.Series, forward_bars: int) -> pd.Series:
-    c = close.astype(float)
-    return c.shift(-int(forward_bars)) / c - 1.0
-
-
-def build_cost_aware_forward_labels(
-    close: pd.Series,
-    forward_bars: int,
-    *,
-    round_trip_cost: float,
-) -> Tuple[pd.Series, Dict[str, float]]:
-    """Forward return labels; sub-cost moves become NaN (excluded from training)."""
-    raw = build_forward_labels(close, forward_bars)
-    cost = float(round_trip_cost)
-    tradable = raw.abs() >= cost
-    masked = raw.where(tradable, np.nan)
-    valid = raw.notna()
-    stats = {
-        "round_trip_cost_pct": cost,
-        "tradable_label_fraction": float(tradable[valid].mean()) if valid.any() else 0.0,
-        "sub_cost_suppressed_fraction": float((valid & ~tradable).mean()) if valid.any() else 0.0,
-    }
-    return masked, stats
+# Re-export label helpers for notebooks/tests that import from this module.
+__all__ = [
+    "build_forward_labels",
+    "build_cost_aware_forward_labels",
+    "train_multihead_from_feature_matrix",
+    "train_state_heads_from_feature_matrix",
+]
 
 
 def _tradable_meta_labels(
@@ -859,3 +857,450 @@ def artifact_dict_from_bundle(
         "feature_engineer": feature_engineer,
         "features": feats,
     }
+
+
+def compute_vol_sample_weights(
+    df_feat: pd.DataFrame,
+    *,
+    atr_col: str = "atr_pct",
+    window: int = 200,
+    clip_low: float = 0.5,
+    clip_high: float = 3.0,
+) -> pd.Series:
+    """Volatility-proportional sample weights (Gap 5)."""
+    atr = pd.to_numeric(df_feat[atr_col], errors="coerce")
+    med = atr.rolling(window, min_periods=50).median()
+    w = (atr / med).clip(clip_low, clip_high)
+    return w.fillna(1.0)
+
+
+def subsample_stride_indices(n_rows: int, *, stride: int) -> np.ndarray:
+    """Reduce within-train label overlap (Gap 6B)."""
+    st = max(1, int(stride))
+    return np.arange(0, n_rows, st, dtype=np.int64)
+
+
+def feature_correlation_report(
+    df_feat: pd.DataFrame,
+    feat_cols: List[str],
+    *,
+    threshold: float = 0.85,
+) -> Dict[str, Any]:
+    """Pairwise Spearman correlation; flag highly redundant pairs (Gap 3)."""
+    cols = [c for c in feat_cols if c in df_feat.columns]
+    sub = df_feat[cols].replace([np.inf, -np.inf], np.nan).dropna()
+    if sub.empty or len(cols) < 2:
+        return {"pairs_flagged": [], "threshold": threshold}
+    corr = sub.corr(method="spearman")
+    flagged: List[Dict[str, Any]] = []
+    for i, a in enumerate(cols):
+        for b in cols[i + 1 :]:
+            try:
+                r = float(corr.loc[a, b])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if abs(r) >= threshold:
+                flagged.append({"a": a, "b": b, "spearman": r})
+    return {"pairs_flagged": flagged, "threshold": threshold, "n_features": len(cols)}
+
+
+def training_feature_stats_dict(
+    df_feat: pd.DataFrame,
+    feat_cols: List[str],
+) -> Dict[str, Dict[str, float]]:
+    """Mean/std per feature for runtime drift baseline (Gap 7)."""
+    out: Dict[str, Dict[str, float]] = {}
+    for col in feat_cols:
+        if col not in df_feat.columns:
+            continue
+        s = pd.to_numeric(df_feat[col], errors="coerce").replace([np.inf, -np.inf], np.nan)
+        if s.notna().sum() < 10:
+            continue
+        out[col] = {"mean": float(s.mean()), "std": float(s.std()) if s.std() > 0 else 1e-8}
+    return out
+
+
+def extract_lgbm_importances(
+    estimator: Any,
+    feature_cols: List[str],
+    *,
+    top_k: int = 15,
+) -> Dict[str, float]:
+    """LightGBM gain importances keyed by feature name."""
+    imp = getattr(estimator, "feature_importances_", None)
+    if imp is None:
+        inner = getattr(estimator, "lgbm", None) or getattr(estimator, "classifier", None)
+        imp = getattr(inner, "feature_importances_", None) if inner is not None else None
+    if imp is None:
+        return {}
+    pairs = sorted(
+        zip(feature_cols, np.asarray(imp, dtype=np.float64)),
+        key=lambda x: -x[1],
+    )
+    return {k: float(v) for k, v in pairs[:top_k]}
+
+
+def extract_head_importances(
+    bundle: MultiHeadBundle,
+    *,
+    top_k: int = 15,
+) -> Dict[str, Dict[str, float]]:
+    """Per-horizon LGBM + state-head importances (Gap 1)."""
+    out: Dict[str, Dict[str, float]] = {}
+    for fb in bundle.head_bars():
+        ens = bundle.get_head(fb)
+        if ens is None:
+            continue
+        lgbm = getattr(ens, "lgbm_model", None)
+        if lgbm is not None:
+            cols = list(getattr(lgbm, "feature_cols", None) or [])
+            inner = getattr(lgbm, "lgbm", None)
+            if cols and inner is not None:
+                out[f"horizon_{fb}"] = extract_lgbm_importances(inner, cols, top_k=top_k)
+    for key in bundle.state_head_keys():
+        sh = bundle.get_state_head(key)
+        if sh is None:
+            continue
+        cols = list(getattr(sh, "feature_cols", None) or [])
+        clf = getattr(sh, "classifier", None)
+        if cols and clf is not None:
+            out[f"state_{key}"] = extract_lgbm_importances(clf, cols, top_k=top_k)
+    return out
+
+
+def _state_classifier_params(*, rng: int, n_classes: int) -> Dict[str, Any]:
+    base = {
+        "n_estimators": 250,
+        "num_leaves": 23,
+        "min_child_samples": 90,
+        "reg_lambda": 2.0,
+        "reg_alpha": 0.1,
+        "learning_rate": 0.045,
+        "random_state": rng,
+        "verbose": -1,
+    }
+    if n_classes > 2:
+        base["class_weight"] = "balanced"
+    return base
+
+
+def _fit_state_classifier(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    *,
+    rng: int,
+    n_classes: int,
+    sample_weight: Optional[np.ndarray] = None,
+    scale_pos_weight: Optional[float] = None,
+) -> Any:
+    params = _state_classifier_params(rng=rng, n_classes=n_classes)
+    if scale_pos_weight is not None and n_classes == 2:
+        params["scale_pos_weight"] = float(scale_pos_weight)
+    clf = LGBMClassifier(**params)
+    sw = sample_weight
+    if sw is not None:
+        try:
+            clf.fit(X_train, y_train, sample_weight=sw, eval_set=[(X_val, y_val)])
+        except TypeError:
+            _fit_lgb_sklearn_compat(
+                clf, X_train, y_train, eval_set=[(X_val, y_val)]
+            )
+    else:
+        _fit_lgb_sklearn_compat(
+            clf, X_train, y_train, eval_set=[(X_val, y_val)]
+        )
+    return clf
+
+
+def _balanced_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    from sklearn.metrics import balanced_accuracy_score
+
+    return float(balanced_accuracy_score(y_true, y_pred))
+
+
+def train_regime_head(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    *,
+    rng: int = 42,
+    sample_weight: Optional[np.ndarray] = None,
+) -> Tuple[StateHeadModel, Dict[str, Any]]:
+    """4-class regime classifier."""
+    class_to_int = {c: i for i, c in enumerate(V43_REGIME_CLASSES)}
+    y_tr = y_train.map(class_to_int).astype(int).values
+    y_va = y_val.map(class_to_int).astype(int).values
+    feat_cols = list(X_train.columns)
+    model = StateHeadModel()
+    model.scaler = RobustScaler()
+    X_tr = model.scaler.fit_transform(X_train.values)
+    X_va = model.scaler.transform(X_val.values)
+    sw = sample_weight
+    clf = _fit_state_classifier(
+        X_tr, y_tr, X_va, y_va, rng=rng, n_classes=4, sample_weight=sw
+    )
+    model.classifier = clf
+    model.feature_cols = feat_cols
+    model.head_key = "regime"
+    model.head_type = "regime"
+    model.classes_ = list(V43_REGIME_CLASSES)
+    model._is_fitted = True
+
+    proba_va = _predict_lgb_proba_compat(clf, X_va)
+    y_pred = np.argmax(proba_va, axis=1) if proba_va.ndim == 2 else (proba_va > 0.5).astype(int)
+    bal_acc = _balanced_accuracy(y_va, y_pred)
+    per_class: Dict[str, float] = {}
+    for i, cls in enumerate(V43_REGIME_CLASSES):
+        mask = y_va == i
+        if mask.any():
+            per_class[cls] = float((y_pred[mask] == i).mean())
+
+    metrics = {
+        "head_key": "regime",
+        "head_type": "regime",
+        "balanced_accuracy": bal_acc,
+        "per_class_recall": per_class,
+        "n_train": int(len(y_tr)),
+        "n_val": int(len(y_va)),
+    }
+    return model, metrics
+
+
+def train_vol_expansion_head(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    *,
+    rng: int = 42,
+    sample_weight: Optional[np.ndarray] = None,
+    scale_pos_weight: float = 4.0,
+) -> Tuple[StateHeadModel, Dict[str, Any]]:
+    """Binary volatility expansion classifier."""
+    y_tr = y_train.astype(int).values
+    y_va = y_val.astype(int).values
+    feat_cols = list(X_train.columns)
+    model = StateHeadModel()
+    model.scaler = RobustScaler()
+    X_tr = model.scaler.fit_transform(X_train.values)
+    X_va = model.scaler.transform(X_val.values)
+    clf = _fit_state_classifier(
+        X_tr,
+        y_tr,
+        X_va,
+        y_va,
+        rng=rng,
+        n_classes=2,
+        sample_weight=sample_weight,
+        scale_pos_weight=scale_pos_weight,
+    )
+    model.classifier = clf
+    model.feature_cols = feat_cols
+    model.head_key = "vol_expansion"
+    model.head_type = "binary"
+    model.classes_ = ["no_expansion", "expansion"]
+    model._is_fitted = True
+
+    proba_va = _predict_lgb_proba_compat(clf, X_va)[:, 1]
+    try:
+        from sklearn.metrics import roc_auc_score
+
+        auc = float(roc_auc_score(y_va, proba_va))
+    except Exception:
+        auc = 0.5
+    metrics = {
+        "head_key": "vol_expansion",
+        "head_type": "binary",
+        "validation_auc": auc,
+        "expansion_rate_val": float(y_va.mean()) if len(y_va) else 0.0,
+        "n_train": int(len(y_tr)),
+        "n_val": int(len(y_va)),
+    }
+    return model, metrics
+
+
+def train_trade_quality_head(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_val: pd.DataFrame,
+    y_val: pd.Series,
+    *,
+    rng: int = 42,
+    sample_weight: Optional[np.ndarray] = None,
+) -> Tuple[StateHeadModel, Dict[str, Any]]:
+    """Binary trade-quality (TP-first) classifier."""
+    y_tr = y_train.astype(int).values
+    y_va = y_val.astype(int).values
+    feat_cols = list(X_train.columns)
+    model = StateHeadModel()
+    model.scaler = RobustScaler()
+    X_tr = model.scaler.fit_transform(X_train.values)
+    X_va = model.scaler.transform(X_val.values)
+    clf = _fit_state_classifier(
+        X_tr, y_tr, X_va, y_va, rng=rng, n_classes=2, sample_weight=sample_weight
+    )
+    model.classifier = clf
+    model.feature_cols = feat_cols
+    model.head_key = "trade_quality"
+    model.head_type = "binary"
+    model.classes_ = ["sl_first", "tp_first"]
+    model._is_fitted = True
+
+    proba_va = _predict_lgb_proba_compat(clf, X_va)[:, 1]
+    try:
+        from sklearn.metrics import roc_auc_score
+
+        auc = float(roc_auc_score(y_va, proba_va))
+    except Exception:
+        auc = 0.5
+    metrics = {
+        "head_key": "trade_quality",
+        "head_type": "binary",
+        "validation_auc": auc,
+        "tp_first_rate_val": float(y_va.mean()) if len(y_va) else 0.0,
+        "n_train": int(len(y_tr)),
+        "n_val": int(len(y_va)),
+    }
+    return model, metrics
+
+
+def train_state_heads_from_feature_matrix(
+    df_feat: pd.DataFrame,
+    close: pd.Series,
+    *,
+    feat_cols: Optional[List[str]] = None,
+    validation_fraction: float = 0.15,
+    rng: int = 42,
+    embargo_bars: int = 12,
+    skip_bars: Optional[int] = None,
+    sample_weight_series: Optional[pd.Series] = None,
+    tier_masks: Optional[Dict[str, List[str]]] = None,
+    trade_quality_forward_bars: int = 12,
+    take_profit_pct: float = 0.012,
+    stop_loss_pct: float = 0.008,
+) -> Tuple[Dict[str, StateHeadModel], Dict[str, Any]]:
+    """Train regime, vol-expansion, and trade-quality state heads."""
+    masks = tier_masks or {
+        k: list(v) for k, v in V43_STATE_HEAD_FEATURE_TIERS.items()
+    }
+    close_aligned = close.reindex(df_feat.index)
+
+    regime_raw, regime_stats = build_regime_labels(df_feat)
+    vol_raw, vol_stats = build_vol_expansion_labels(
+        close_aligned, forward_bars=embargo_bars
+    )
+    tq_raw, tq_stats = build_trade_quality_labels(
+        close_aligned,
+        forward_bars=trade_quality_forward_bars,
+        take_profit_pct=take_profit_pct,
+        stop_loss_pct=stop_loss_pct,
+    )
+
+    state_models: Dict[str, StateHeadModel] = {}
+    state_meta: Dict[str, Any] = {
+        "embargo_bars": int(embargo_bars),
+        "label_stats": {
+            "regime": regime_stats,
+            "vol_expansion": vol_stats,
+            "trade_quality": tq_stats,
+        },
+        "trade_quality_params": {
+            "forward_bars": trade_quality_forward_bars,
+            "take_profit_pct": take_profit_pct,
+            "stop_loss_pct": stop_loss_pct,
+        },
+    }
+
+    label_specs = [
+        ("regime", regime_raw, masks.get("regime", list(V43_STATE_HEAD_FEATURE_TIERS["regime"]))),
+        ("vol_expansion", vol_raw, masks.get("vol_expansion", list(V43_STATE_HEAD_FEATURE_TIERS["vol_expansion"]))),
+        ("trade_quality", tq_raw, masks.get("trade_quality", list(V43_STATE_HEAD_FEATURE_TIERS["trade_quality"]))),
+    ]
+
+    trainers = {
+        "regime": train_regime_head,
+        "vol_expansion": train_vol_expansion_head,
+        "trade_quality": train_trade_quality_head,
+    }
+
+    for head_key, y_series, head_feats in label_specs:
+        use_feats = [c for c in head_feats if c in df_feat.columns]
+        if not use_feats:
+            use_feats = list(feat_cols or V43_CANONICAL_FEATURES)
+            use_feats = [c for c in use_feats if c in df_feat.columns]
+        work = df_feat[use_feats].copy()
+        work["target"] = y_series.reindex(work.index).values
+        work = work.replace([np.inf, -np.inf], np.nan).dropna(subset=["target"])
+        if len(work) < 500:
+            raise ValueError(f"insufficient rows for state head {head_key}: {len(work)}")
+
+        train_idx, _, val_idx, split_meta = chronological_split_indices(
+            len(work),
+            validation_fraction=validation_fraction,
+            embargo_bars=embargo_bars,
+        )
+        if skip_bars is not None and skip_bars > 1:
+            stride_idx = subsample_stride_indices(len(work), stride=skip_bars)
+            train_idx = train_idx[np.isin(train_idx, stride_idx)]
+
+        X = work[use_feats]
+        y = work["target"]
+        sw_train = None
+        if sample_weight_series is not None:
+            sw = sample_weight_series.reindex(work.index).fillna(1.0).values
+            sw_train = sw[train_idx]
+
+        trainer = trainers[head_key]
+        if head_key == "vol_expansion":
+            model, metrics = trainer(
+                X.iloc[train_idx],
+                y.iloc[train_idx],
+                X.iloc[val_idx],
+                y.iloc[val_idx],
+                rng=rng + 100,
+                sample_weight=sw_train,
+                scale_pos_weight=4.0,
+            )
+        else:
+            model, metrics = trainer(
+                X.iloc[train_idx],
+                y.iloc[train_idx],
+                X.iloc[val_idx],
+                y.iloc[val_idx],
+                rng=rng + 100,
+                sample_weight=sw_train,
+            )
+        metrics["split"] = split_meta
+        metrics["feature_cols"] = use_feats
+        state_models[head_key] = model
+        state_meta[head_key] = metrics
+
+    return state_models, state_meta
+
+
+def walk_forward_fold_indices(
+    n_rows: int,
+    *,
+    n_folds: int = 3,
+) -> List[Tuple[np.ndarray, np.ndarray]]:
+    """Phase 5: expanding-window walk-forward train/val index pairs."""
+    n = int(n_rows)
+    folds = max(2, int(n_folds))
+    chunk = max(1, n // (folds + 1))
+    pairs: List[Tuple[np.ndarray, np.ndarray]] = []
+    for k in range(1, folds + 1):
+        val_start = min(n - chunk, chunk * (k + 1))
+        val_end = min(n, val_start + chunk)
+        train_end = max(0, val_start - chunk)
+        if train_end < 200 or val_end <= val_start:
+            continue
+        pairs.append(
+            (
+                np.arange(0, train_end, dtype=np.int64),
+                np.arange(val_start, val_end, dtype=np.int64),
+            )
+        )
+    return pairs

@@ -995,6 +995,36 @@ class Settings(BaseSettings):
             "to a small return proxy."
         ),
     )
+    jacksparrow_v43_state_heads_enabled: bool = Field(
+        default=False,
+        env="JACKSPARROW_V43_STATE_HEADS_ENABLED",
+        description="When True, run state-intelligence heads at inference and apply policy gates.",
+    )
+    jacksparrow_v43_state_head_policy_enabled: bool = Field(
+        default=True,
+        env="JACKSPARROW_V43_STATE_HEAD_POLICY_ENABLED",
+        description="When True, ml_and_thesis fusion enforces state-head probability minima.",
+    )
+    jacksparrow_v43_regime_min: float = Field(
+        default=0.60,
+        env="JACKSPARROW_V43_REGIME_MIN",
+        description="Minimum p_regime_favorable for ML entry adoption.",
+    )
+    jacksparrow_v43_quality_min: float = Field(
+        default=0.60,
+        env="JACKSPARROW_V43_QUALITY_MIN",
+        description="Minimum p_setup_quality for ML entry adoption.",
+    )
+    jacksparrow_v43_vol_min: float = Field(
+        default=0.50,
+        env="JACKSPARROW_V43_VOL_MIN",
+        description="Below this p_vol_expansion, reduce size or hold (policy layer).",
+    )
+    jacksparrow_v43_uncertainty_max: float = Field(
+        default=0.02,
+        env="JACKSPARROW_V43_UNCERTAINTY_MAX",
+        description="Force hold when uncertainty_score exceeds this threshold.",
+    )
     signal_recovery_telemetry_enabled: bool = Field(
         default=True,
         env="SIGNAL_RECOVERY_TELEMETRY_ENABLED",

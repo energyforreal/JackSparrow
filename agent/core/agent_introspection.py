@@ -33,6 +33,10 @@ class AgentIntrospectionSnapshot:
     trade_score_pass: Optional[bool] = None
     v43_regime: Optional[str] = None
     v43_gate_reject: Optional[str] = None
+    p_regime_favorable: Optional[float] = None
+    p_setup_quality: Optional[float] = None
+    p_vol_expansion: Optional[float] = None
+    uncertainty_score: Optional[float] = None
     regime_bar_age: Optional[int] = None
     regime_transition_risk: Optional[str] = None
     portfolio_guard_action: Optional[str] = None
@@ -57,6 +61,10 @@ class AgentIntrospectionSnapshot:
             "trade_score_pass": self.trade_score_pass,
             "v43_regime": self.v43_regime,
             "v43_gate_reject": self.v43_gate_reject,
+            "p_regime_favorable": self.p_regime_favorable,
+            "p_setup_quality": self.p_setup_quality,
+            "p_vol_expansion": self.p_vol_expansion,
+            "uncertainty_score": self.uncertainty_score,
             "regime_bar_age": self.regime_bar_age,
             "regime_transition_risk": self.regime_transition_risk,
             "portfolio_guard_action": self.portfolio_guard_action,
@@ -156,6 +164,19 @@ def build_introspection_snapshot(
         if rtr is not None:
             regime_transition_risk = str(rtr)
 
+    def _ml_float(key: str) -> Optional[float]:
+        raw = ml.get(key)
+        if raw is None:
+            raw = mctx.get(key) if isinstance(mctx, dict) else None
+        if raw is None:
+            raw = excerpt.get(key)
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
     limits: Dict[str, Any] = {
         "trade_score_min": min_score,
         "require_ml_signal_for_orders": bool(
@@ -179,6 +200,10 @@ def build_introspection_snapshot(
         trade_score_pass=trade_pass,
         v43_regime=str(v43_regime) if v43_regime is not None else None,
         v43_gate_reject=str(v43_gate) if v43_gate is not None else None,
+        p_regime_favorable=_ml_float("p_regime_favorable"),
+        p_setup_quality=_ml_float("p_setup_quality"),
+        p_vol_expansion=_ml_float("p_vol_expansion"),
+        uncertainty_score=_ml_float("uncertainty_score"),
         regime_bar_age=regime_bar_age,
         regime_transition_risk=regime_transition_risk,
         portfolio_guard_action=str(pg_action) if pg_action is not None else None,

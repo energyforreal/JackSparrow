@@ -796,6 +796,44 @@ class JackSparrowV43Node(MCPModelNode):
             f"er={primary_proba:.5f} thr={primary_thr:.5f}"
         )
 
+        state_enabled = bool(
+            getattr(settings, "jacksparrow_v43_state_heads_enabled", False)
+        )
+        p_regime_favorable: Optional[float] = None
+        p_setup_quality: Optional[float] = None
+        p_vol_expansion: Optional[float] = None
+        state_head_payloads: Dict[str, Any] = {}
+        if state_enabled and self._multihead is not None:
+            for sh_key in ("regime", "vol_expansion", "trade_quality"):
+                sh_model = self._multihead.get_state_head(sh_key)
+                if sh_model is None:
+                    continue
+                sh_cols = list(getattr(sh_model, "feature_cols", None) or use_cols)
+                sh_use = [c for c in sh_cols if c in df_feat.columns]
+                if not sh_use:
+                    continue
+                X_sh = df_feat[sh_use].iloc[[-2]]
+                try:
+                    score = float(
+                        self._multihead.predict_state_score(
+                            sh_key, X_sh.values, X_df=X_sh
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "v43_state_head_predict_failed",
+                        head=sh_key,
+                        error=str(exc),
+                    )
+                    continue
+                state_head_payloads[sh_key] = {"score": score, "features": sh_use}
+                if sh_key == "regime":
+                    p_regime_favorable = score
+                elif sh_key == "trade_quality":
+                    p_setup_quality = score
+                elif sh_key == "vol_expansion":
+                    p_vol_expansion = score
+
         out_ctx: Dict[str, Any] = {
             "format": "jacksparrow_v43_multihead",
             "multi_horizon_heads": head_payloads,
@@ -804,6 +842,7 @@ class JackSparrowV43Node(MCPModelNode):
             "short_threshold": float(primary_short_thr),
             "regime": regime,
             "uncertainty": float(primary_unc),
+            "uncertainty_score": float(primary_unc),
             "unc_scale": float(primary_u_scale),
             "bar_index_hint": int(closed_5m_bar_index(df5)),
             "feature_names_used": use_cols,
@@ -814,6 +853,10 @@ class JackSparrowV43Node(MCPModelNode):
             "training_forward_bars": primary_fb,
             "target_horizon_bars": primary_fb,
             "short_execution_enabled": short_enabled,
+            "state_heads": state_head_payloads,
+            "p_regime_favorable": p_regime_favorable,
+            "p_setup_quality": p_setup_quality,
+            "p_vol_expansion": p_vol_expansion,
         }
 
         ms = (time.perf_counter() - t0) * 1000.0

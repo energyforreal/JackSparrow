@@ -119,6 +119,26 @@ def build_ml_evidence_from_orchestrator_result(result: Dict[str, Any]) -> MLEvid
     if isinstance(ts, dict):
         trade_score_val = ts.get("score")
 
+    def _ctx_float(key: str) -> Optional[float]:
+        raw = mc.get(key) if isinstance(mc, dict) else None
+        if raw is None and isinstance(mc, dict):
+            v43 = mc.get("v43_dedicated_decision")
+            if isinstance(v43, dict):
+                raw = v43.get(key)
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    p_regime = _ctx_float("p_regime_favorable")
+    p_quality = _ctx_float("p_setup_quality")
+    p_vol = _ctx_float("p_vol_expansion")
+    unc_score = _ctx_float("uncertainty_score")
+    if unc_score is None:
+        unc_score = _ctx_float("uncertainty")
+
     ml_confirms = None
     if isinstance(ml_val_raw, dict):
         ml_confirms = bool(
@@ -140,6 +160,10 @@ def build_ml_evidence_from_orchestrator_result(result: Dict[str, Any]) -> MLEvid
         thesis_signal=str(thesis_sig) if thesis_sig is not None else None,
         trade_score=_opt_float(trade_score_val),
         ml_confirms=ml_confirms,
+        p_regime_favorable=p_regime,
+        p_setup_quality=p_quality,
+        p_vol_expansion=p_vol,
+        uncertainty_score=unc_score,
     )
 
 
@@ -210,6 +234,61 @@ def _ml_gated_from_context(
     if isinstance(v43, dict):
         return bool(v43.get("final_long") or v43.get("final_short"))
     return False
+
+
+def _state_head_scores_from_context(
+    market_context: Optional[Dict[str, Any]],
+    ml_evidence: MLEvidenceSnapshot,
+) -> Dict[str, Optional[float]]:
+    """Extract state-head probabilities from market context or evidence."""
+    mc = market_context if isinstance(market_context, dict) else {}
+    out: Dict[str, Optional[float]] = {
+        "p_regime_favorable": ml_evidence.p_regime_favorable,
+        "p_setup_quality": ml_evidence.p_setup_quality,
+        "p_vol_expansion": ml_evidence.p_vol_expansion,
+        "uncertainty_score": ml_evidence.uncertainty_score,
+    }
+    for key in out:
+        if out[key] is not None:
+            continue
+        raw = mc.get(key)
+        if raw is None:
+            excerpt = ml_evidence.market_context_excerpt or {}
+            raw = excerpt.get(key)
+        if raw is not None:
+            try:
+                out[key] = float(raw)
+            except (TypeError, ValueError):
+                pass
+    return out
+
+
+def _state_head_policy_blocks_entry(
+    scores: Dict[str, Optional[float]],
+) -> Tuple[bool, List[str]]:
+    """Apply migration spec §2.1 minima when state-head policy is enabled."""
+    if not bool(getattr(settings, "jacksparrow_v43_state_head_policy_enabled", True)):
+        return False, []
+    if not bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False)):
+        return False, []
+    reasons: List[str] = []
+    regime_min = float(getattr(settings, "jacksparrow_v43_regime_min", 0.60) or 0.60)
+    quality_min = float(getattr(settings, "jacksparrow_v43_quality_min", 0.60) or 0.60)
+    unc_max = float(getattr(settings, "jacksparrow_v43_uncertainty_max", 0.02) or 0.02)
+
+    pr = scores.get("p_regime_favorable")
+    if pr is not None and pr < regime_min:
+        reasons.append(f"state_head_regime_low={pr:.3f}<{regime_min:.2f}")
+
+    pq = scores.get("p_setup_quality")
+    if pq is not None and pq < quality_min:
+        reasons.append(f"state_head_quality_low={pq:.3f}<{quality_min:.2f}")
+
+    unc = scores.get("uncertainty_score")
+    if unc is not None and unc > unc_max:
+        reasons.append(f"state_head_uncertainty_high={unc:.4f}>{unc_max:.4f}")
+
+    return bool(reasons), reasons
 
 
 def _thesis_blocks_gated_ml_adoption(thesis: ThesisVerdict) -> bool:
@@ -393,6 +472,17 @@ def _fuse_signals(
 
     if mode == "ml_and_thesis":
         mc = market_context if isinstance(market_context, dict) else {}
+        sh_scores = _state_head_scores_from_context(mc, ml_evidence)
+        blocked, sh_reasons = _state_head_policy_blocks_entry(sh_scores)
+        if blocked and ml_entry:
+            return PolicyVerdict(
+                signal="HOLD",
+                confidence=float(ml_evidence.ml_candidate_confidence or 0.0),
+                position_size=0.0,
+                reason_codes=reasons + sh_reasons + ["state_head_policy_veto"],
+                ml_evidence_id=ml_evidence.evidence_id,
+                adopted_ml_candidate=False,
+            )
         if bool(getattr(settings, "jacksparrow_v43_require_horizon_fusion_match", True)):
             mh = _multi_horizon_evidence_from_context(mc, ml_evidence)
             th_h = int(thesis.intended_horizon_bars or 0)
