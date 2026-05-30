@@ -44,7 +44,7 @@ Train **multi-horizon market-state classifiers** (not return regression).
 **Data:** `https://api.india.delta.exchange` (public OHLCV, OI, MARK, FUNDING)  
 **Agent execution:** Delta India testnet only.
 
-**Runtime:** set `MSO_DEVICE=auto|cpu|gpu|cuda` (see device cell). In Colab: *Runtime → Change runtime type* → GPU for faster LightGBM when CUDA build is available.
+**Runtime:** Colab *Runtime → Change runtime type → GPU* if you want CUDA training. Set `MSO_INSTALL_LGB_CUDA=true` before the optional build cell (5–15 min compile). Device: `MSO_DEVICE=auto|cpu|cuda` (see device cell). Default Colab pip LightGBM is **CPU-only** unless you run the CUDA build cell.
 
 **Strict policy:** training validates **raw merged** OI/funding on the 5m grid (not `funding_zscore != 0`, which flags warmup zeros incorrectly).
 
@@ -57,7 +57,7 @@ code(
     "numpy>=1.24" "pandas>=2.0" "httpx>=0.27" "structlog==23.2.0" \\
     "pydantic>=2.5" "pydantic-settings>=2.1" "python-dotenv>=1.0" \\
     "joblib>=1.3" "scikit-learn>=1.3" "xgboost==2.0.2" "lightgbm==4.1.0" \\
-    "requests"
+    "matplotlib>=3.7" "requests"
 """
 )
 
@@ -124,60 +124,79 @@ print("REPO_ROOT =", REPO_ROOT)
 """
 )
 
-md("## Device: CPU / GPU (Colab)")
+md(
+    """## Optional: CUDA LightGBM build (GPU runtime)
+
+Standard `pip install lightgbm` on Colab is **CPU-only**. To train on GPU, use a **GPU Colab runtime** and set:
+
+```python
+os.environ["MSO_INSTALL_LGB_CUDA"] = "true"
+```
+
+Run this cell once per session (compiles from source, ~5–15 min). Leave unset to skip and train on CPU.
+"""
+)
 
 code(
     """import os
 import subprocess
+import sys
 
-# auto | cpu | gpu (OpenCL) | cuda (NVIDIA, recommended on Colab GPU runtime)
-os.environ.setdefault("MSO_DEVICE", "auto")
-
-def _cuda_visible() -> bool:
+def _cuda_runtime_available() -> bool:
     try:
         r = subprocess.run(["nvidia-smi"], capture_output=True, timeout=8)
         return r.returncode == 0
     except Exception:
         return False
 
-def resolve_lgb_device() -> tuple[str, dict]:
-    want = os.environ.get("MSO_DEVICE", "auto").strip().lower()
-    has_cuda = _cuda_visible()
-
-    def _probe_lgb_cuda() -> bool:
-        try:
-            import lightgbm as _lgb
-            m = _lgb.LGBMClassifier(
-                device="cuda", n_estimators=2, verbose=-1, objective="multiclass", num_class=2,
-            )
-            m.fit(np.array([[0.0], [1.0], [2.0]]), np.array([0, 1, 0]))
-            return True
-        except Exception:
-            return False
-
-    if want == "cpu":
-        return "cpu", {}
-    if want in ("gpu", "cuda"):
-        if not has_cuda:
-            print("WARNING: MSO_DEVICE=%s but nvidia-smi failed — using CPU" % want)
-            return "cpu", {}
-        if not _probe_lgb_cuda():
-            print("WARNING: LightGBM pip wheel has no CUDA — using CPU")
-            return "cpu", {}
-        dev = "cuda" if want == "cuda" else "gpu"
-        return dev, {}
-    # auto
-    if has_cuda and _probe_lgb_cuda():
-        print("MSO_DEVICE=auto → CUDA (LightGBM CUDA build detected)")
-        return "cuda", {}
-    if has_cuda:
-        print("MSO_DEVICE=auto → CPU (GPU runtime present but LightGBM is CPU-only on Colab)")
+_install_cuda_lgb = os.environ.get("MSO_INSTALL_LGB_CUDA", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+if not _install_cuda_lgb:
+    print("MSO_INSTALL_LGB_CUDA not set — skipping CUDA build (CPU LightGBM from pip)")
+elif not _cuda_runtime_available():
+    print("MSO_INSTALL_LGB_CUDA=true but nvidia-smi failed — use Runtime → GPU, then re-run")
+else:
+    print("Building LightGBM with USE_CUDA=ON (this may take 5–15 minutes)...")
+    subprocess.run(["apt-get", "update", "-qq"], check=False)
+    subprocess.run(
+        [
+            "apt-get",
+            "install",
+            "-qq",
+            "-y",
+            "cmake",
+            "build-essential",
+            "libboost-dev",
+            "libboost-system-dev",
+            "libboost-filesystem-dev",
+        ],
+        check=False,
+    )
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "lightgbm"], check=False)
+    build = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-binary",
+            "lightgbm",
+            "--config-settings=cmake.define.USE_CUDA=ON",
+            "lightgbm>=4.1.0",
+        ],
+        capture_output=False,
+    )
+    if build.returncode != 0:
+        print("CUDA LightGBM build FAILED — reinstalling CPU wheel")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "lightgbm==4.1.0"],
+            check=False,
+        )
     else:
-        print("MSO_DEVICE=auto → CPU")
-    return "cpu", {}
-
-LGB_DEVICE, LGB_DEVICE_KW = resolve_lgb_device()
-print("LightGBM device:", LGB_DEVICE, LGB_DEVICE_KW)
+        print("CUDA LightGBM build OK — continue to imports + device cells")
 """
 )
 
@@ -219,6 +238,78 @@ warnings.filterwarnings("ignore", category=FutureWarning, module=r"sklearn.*")
 _QUICK = os.environ.get("MSO_COLAB_QUICK", "false").strip().lower() in ("1", "true", "yes")
 if _QUICK:
     print("MSO_COLAB_QUICK=true — using reduced candle targets")
+"""
+)
+
+md("## Device: CPU / GPU (Colab)")
+
+code(
+    """import os
+import subprocess
+
+import numpy as np
+
+# auto | cpu | cuda (NVIDIA). OpenCL "gpu" is deprecated on Colab — use cuda after CUDA build.
+os.environ.setdefault("MSO_DEVICE", "auto")
+
+def _cuda_visible() -> bool:
+    try:
+        r = subprocess.run(["nvidia-smi"], capture_output=True, timeout=8)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+def _probe_lgb_cuda() -> bool:
+    try:
+        import lightgbm as _lgb
+
+        m = _lgb.LGBMClassifier(
+            device="cuda",
+            n_estimators=2,
+            verbose=-1,
+            objective="multiclass",
+            num_class=2,
+        )
+        m.fit(np.array([[0.0], [1.0], [2.0]]), np.array([0, 1, 0]))
+        return True
+    except Exception as exc:
+        print("  LightGBM CUDA probe failed:", exc)
+        return False
+
+def resolve_lgb_device() -> tuple[str, dict]:
+    want = os.environ.get("MSO_DEVICE", "auto").strip().lower()
+    has_cuda = _cuda_visible()
+
+    if want == "cpu":
+        return "cpu", {}
+    if want in ("gpu", "cuda"):
+        if not has_cuda:
+            print("WARNING: MSO_DEVICE=%s but nvidia-smi failed — using CPU" % want)
+            return "cpu", {}
+        if want == "gpu":
+            print("WARNING: MSO_DEVICE=gpu (OpenCL) is unreliable on Colab — probing cuda instead")
+        if not _probe_lgb_cuda():
+            print(
+                "WARNING: LightGBM has no working CUDA — using CPU. "
+                "Set MSO_INSTALL_LGB_CUDA=true and re-run the CUDA build cell."
+            )
+            return "cpu", {}
+        return "cuda", {}
+    # auto
+    if has_cuda and _probe_lgb_cuda():
+        print("MSO_DEVICE=auto → CUDA (LightGBM CUDA build verified)")
+        return "cuda", {}
+    if has_cuda:
+        print(
+            "MSO_DEVICE=auto → CPU (GPU runtime present; pip LightGBM is CPU-only). "
+            "For GPU training set MSO_INSTALL_LGB_CUDA=true and run the CUDA build cell."
+        )
+    else:
+        print("MSO_DEVICE=auto → CPU (no GPU runtime)")
+    return "cpu", {}
+
+LGB_DEVICE, LGB_DEVICE_KW = resolve_lgb_device()
+print("LightGBM device:", LGB_DEVICE, LGB_DEVICE_KW)
 """
 )
 
@@ -586,6 +677,161 @@ for hk in ("scalp_10m", "intraday_30m"):
 """
 )
 
+md(
+    """## Post-train validation (holdout evaluation)
+
+**Not a live trading backtest** — this section evaluates the trained MSO bundle on the chronological validation split (same data as training F1):
+
+1. **F1 summary table** — all 24 heads (6 dimensions × 4 horizons).
+2. **Trend regime confusion matrix** — primary horizons `scalp_10m` and `intraday_30m`.
+3. **Sample oracle rows** — decoded predictions vs actual labels on recent validation bars.
+4. **Regime-direction simulation** — maps `intraday_30m` trend predictions to long/short/flat and scores forward returns (illustrates how the agent interprets MSO; not a production P&L claim).
+
+Compare with v43 notebook §4d, which runs regression correlation + simulated validation P&L on return heads.
+"""
+)
+
+code(
+    """from sklearn.metrics import classification_report, confusion_matrix
+
+mso_bundle_eval = MarketStateBundleExport(
+    horizon_models=bundle_dict,
+    feature_cols=feat_cols,
+    state_dimensions=MSO_STATE_DIMENSIONS,
+    label_encoders=label_encoders,
+    class_orders=class_orders,
+    training_metadata={"f1_scores": f1_scores},
+)
+
+
+def _label_from_code(hk: str, dim: str, code) -> str:
+    order = class_orders.get(f"{hk}:{dim}") or classes_for_dimension(dim)
+    idx = int(code)
+    if 0 <= idx < len(order):
+        return str(order[idx])
+    return str(code)
+
+
+def _trend_position(label: str) -> int:
+    if label in ("STRONG_BULL", "WEAK_BULL"):
+        return 1
+    if label in ("STRONG_BEAR", "WEAK_BEAR"):
+        return -1
+    return 0
+
+
+# --- 1) F1 summary table ---
+_rows = []
+for hk in HORIZON_MAP:
+    for dim in MSO_STATE_DIMENSIONS:
+        sc = f1_scores.get(hk, {}).get(dim)
+        _rows.append({"horizon": hk, "dimension": dim, "val_f1": sc})
+summary_df = pd.DataFrame(_rows)
+print("=" * 72)
+print("MSO validation F1 (chronological holdout, weighted)")
+print("=" * 72)
+print(summary_df.pivot(index="dimension", columns="horizon", values="val_f1").round(4).to_string())
+
+# --- 2) Trend regime confusion matrices ---
+for _hk in ("scalp_10m", "intraday_30m"):
+    _dim = "trend_regime"
+    if _hk not in bundle_dict or _dim not in bundle_dict[_hk]:
+        print(f"SKIP confusion {_hk}/{_dim}: model missing")
+        continue
+    _fb = HORIZON_MAP[_hk]
+    _classes = list(classes_for_dimension(_dim))
+    _labels, _ = build_mso_label(df_feat, close, _dim, _fb)
+    _y_val = _labels.iloc[split_idx:].reset_index(drop=True)
+    _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
+    if int(_m.sum()) < 20:
+        print(f"SKIP confusion {_hk}/{_dim}: too few val rows")
+        continue
+    _X = df_val.loc[_m, feat_cols].to_numpy(dtype=np.float64)
+    _pred = bundle_dict[_hk][_dim].predict(_X)
+    _y_true = _y_val.loc[_m].astype(str).values
+    _y_pred = np.array([_label_from_code(_hk, _dim, c) for c in _pred])
+    print("\\n", _hk, _dim, "confusion matrix (rows=actual, cols=pred)")
+    _cm = confusion_matrix(_y_true, _y_pred, labels=_classes)
+    print(pd.DataFrame(_cm, index=_classes, columns=_classes).to_string())
+    print(classification_report(_y_true, _y_pred, labels=_classes, zero_division=0))
+
+# --- 3) Sample oracle snapshot (last 8 validation bars, intraday_30m) ---
+_EVAL_HK = "intraday_30m"
+if _EVAL_HK in bundle_dict:
+    _snap_rows = []
+    _start = max(0, len(df_val) - 8)
+    for _i in range(_start, len(df_val)):
+        _x = df_val.iloc[[_i]][feat_cols]
+        _state = mso_bundle_eval.predict_horizon(_EVAL_HK, _x.values, X_df=_x)
+        _row = {
+            "bar": _i,
+            "trend_pred": _label_from_code(_EVAL_HK, "trend_regime", _state.get("trend_regime")),
+        }
+        for _dim in MSO_STATE_DIMENSIONS:
+            _fb = HORIZON_MAP[_EVAL_HK]
+            _lab, _ = build_mso_label(df_feat, close, _dim, _fb)
+            _actual = _lab.iloc[split_idx + _i]
+            if pd.notna(_actual):
+                _row[f"{_dim}_actual"] = str(_actual)
+        _snap_rows.append(_row)
+    if _snap_rows:
+        print("\\nSample MSO oracle (_EVAL_HK, last validation bars):")
+        print(pd.DataFrame(_snap_rows).to_string(index=False))
+
+# --- 4) Regime-direction simulation (intraday_30m trend → forward return) ---
+_SIM_HK = "intraday_30m"
+_SIM_DIM = "trend_regime"
+if _SIM_HK in bundle_dict and _SIM_DIM in bundle_dict[_SIM_HK]:
+    _fb = HORIZON_MAP[_SIM_HK]
+    _classes = list(classes_for_dimension(_SIM_DIM))
+    _trend_lab, _ = build_mso_label(df_feat, close, _SIM_DIM, _fb)
+    _y_val = _trend_lab.iloc[split_idx:].reset_index(drop=True)
+    _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
+    _X = df_val.loc[_m, feat_cols].to_numpy(dtype=np.float64)
+    _close_v = close_val.loc[_m].reset_index(drop=True)
+    _fwd = (_close_v.shift(-_fb) / _close_v - 1.0).iloc[: len(_X) - _fb]
+    _pred = bundle_dict[_SIM_HK][_SIM_DIM].predict(_X[: len(_fwd)])
+    _pos = np.array([_trend_position(_label_from_code(_SIM_HK, _SIM_DIM, c)) for c in _pred])
+    _round_trip = float(os.environ.get("MSO_ROUND_TRIP_COST_PCT", "0.0012"))
+    _gross = np.where(_pos == 1, _fwd.values, np.where(_pos == -1, -_fwd.values, 0.0))
+    _entries = np.diff(np.r_[0, _pos]) != 0
+    _net = _gross.copy()
+    _net[_entries & (_pos != 0)] -= _round_trip / 2.0
+    _net[_entries & (np.r_[0, _pos[:-1]] != 0)] -= _round_trip / 2.0
+    _active = _pos != 0
+    _hit = float((_gross[_active] > 0).mean()) if _active.any() else 0.0
+    _cum = np.cumsum(_net)
+    _total = float(_cum[-1]) if len(_cum) else 0.0
+    _peak = np.maximum.accumulate(_cum) if len(_cum) else np.array([0.0])
+    _max_dd = float(np.min(_cum - _peak)) if len(_cum) else 0.0
+    print("\\n" + "=" * 72)
+    print(f"Regime-direction simulation — {_SIM_HK} / {_SIM_DIM} (n={len(_fwd)}, fb={_fb})")
+    print("=" * 72)
+    print(f"  Active bars: {int(_active.sum())} / {len(_pos)} ({100*_active.mean():.1f}%)")
+    print(f"  Direction hit rate (gross, active only): {_hit:.1%}")
+    print(f"  Total net return (sum): {_total * 100:.2f}%")
+    print(f"  Max drawdown (net cum): {_max_dd * 100:.2f}%")
+    print(f"  Round-trip cost assumed: {_round_trip:.4%} per entry/exit")
+    try:
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(10, 3))
+        ax.plot(_cum * 100.0, color="#1f77b4", linewidth=1.2)
+        ax.set_title(f"MSO regime sim cumulative net return — {_SIM_HK}")
+        ax.set_xlabel("Validation bar")
+        ax.set_ylabel("Cumulative return (%)")
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+    except ImportError:
+        print("  (install matplotlib for cumulative return chart)")
+else:
+    print("SKIP regime simulation: trend_regime head missing for", _SIM_HK)
+"""
+)
+
+md("## Export artifacts")
+
 code(
     """EXPORT_DIR = Path(os.environ.get("MSO_EXPORT_DIR", "/content/mso_export"))
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -629,17 +875,24 @@ meta_path = EXPORT_DIR / "metadata_mso_v50.json"
 meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 print("Exported:", artifact_path, meta_path)
 print("Device used:", LGB_DEVICE_USED)
+print("Run the next cell to download jacksparrow_mso_v50_bundle.zip")
 """
 )
 
 code(
     """try:
     from google.colab import files
+    import shutil
 
-    files.download(str(artifact_path))
-    files.download(str(meta_path))
+    zip_path = Path("/content/jacksparrow_mso_v50_bundle.zip")
+    shutil.make_archive(str(zip_path.with_suffix("")), "zip", root_dir=str(EXPORT_DIR))
+    print("Created zip:", zip_path, f"({zip_path.stat().st_size / 1e6:.1f} MB)")
+    files.download(str(zip_path))
 except ImportError:
     print("Not in Colab — artifacts at", EXPORT_DIR)
+except Exception as exc:
+    print("Colab zip/download failed:", exc)
+    print("Artifacts remain at", EXPORT_DIR)
 """
 )
 
