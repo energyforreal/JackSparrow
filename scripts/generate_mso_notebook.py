@@ -46,7 +46,7 @@ Train **multi-horizon market-state classifiers** (not return regression).
 
 **Runtime:** set `MSO_DEVICE=auto|cpu|gpu|cuda` (see device cell). In Colab: *Runtime → Change runtime type* → GPU for faster LightGBM when CUDA build is available.
 
-**Strict policy:** no synthetic OI/funding fills — training hard-fails if real-data fraction is insufficient.
+**Strict policy:** training validates **raw merged** OI/funding on the 5m grid (not `funding_zscore != 0`, which flags warmup zeros incorrectly).
 
 **Quick smoke test:** `MSO_COLAB_QUICK=true` (smaller history pull).
 """
@@ -143,20 +143,37 @@ def _cuda_visible() -> bool:
 def resolve_lgb_device() -> tuple[str, dict]:
     want = os.environ.get("MSO_DEVICE", "auto").strip().lower()
     has_cuda = _cuda_visible()
+
+    def _probe_lgb_cuda() -> bool:
+        try:
+            import lightgbm as _lgb
+            m = _lgb.LGBMClassifier(
+                device="cuda", n_estimators=2, verbose=-1, objective="multiclass", num_class=2,
+            )
+            m.fit(np.array([[0.0], [1.0], [2.0]]), np.array([0, 1, 0]))
+            return True
+        except Exception:
+            return False
+
     if want == "cpu":
         return "cpu", {}
     if want in ("gpu", "cuda"):
         if not has_cuda:
             print("WARNING: MSO_DEVICE=%s but nvidia-smi failed — using CPU" % want)
             return "cpu", {}
-        # LightGBM 4.x: cuda on Colab GPU runtime; gpu = OpenCL fallback
+        if not _probe_lgb_cuda():
+            print("WARNING: LightGBM pip wheel has no CUDA — using CPU")
+            return "cpu", {}
         dev = "cuda" if want == "cuda" else "gpu"
         return dev, {}
     # auto
-    if has_cuda:
-        print("MSO_DEVICE=auto → CUDA GPU (Colab GPU runtime detected)")
+    if has_cuda and _probe_lgb_cuda():
+        print("MSO_DEVICE=auto → CUDA (LightGBM CUDA build detected)")
         return "cuda", {}
-    print("MSO_DEVICE=auto → CPU")
+    if has_cuda:
+        print("MSO_DEVICE=auto → CPU (GPU runtime present but LightGBM is CPU-only on Colab)")
+    else:
+        print("MSO_DEVICE=auto → CPU")
     return "cpu", {}
 
 LGB_DEVICE, LGB_DEVICE_KW = resolve_lgb_device()
@@ -196,6 +213,7 @@ from feature_store.jacksparrow_mso_labels import (
 from agent.models.market_state_shims import MarketStateBundleExport
 
 warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning, module=r"sklearn.*")
 
 # Smoke test: smaller pulls (~2-5 min). Full training: leave unset or false.
 _QUICK = os.environ.get("MSO_COLAB_QUICK", "false").strip().lower() in ("1", "true", "yes")
@@ -330,12 +348,70 @@ print("OI history rows:", len(df_oi_hist))
 code(
     """MIN_REAL_OI_FRACTION = float(os.environ.get("MSO_MIN_REAL_OI_FRACTION", "0.95"))
 MIN_REAL_FUND_FRACTION = float(os.environ.get("MSO_MIN_REAL_FUND_FRACTION", "0.85"))
+FUNDING_WARMUP_BARS = int(os.environ.get("MSO_FUNDING_WARMUP_BARS", "48"))
+
+
+def _merge_funding_to_5m(primary: pd.DataFrame, df_fund: pd.DataFrame) -> pd.Series:
+    \"\"\"Backward-asof merge hourly funding onto 5m timestamps (same logic as v43).\"\"\"
+    n = len(primary)
+    if df_fund is None or df_fund.empty:
+        return pd.Series(np.nan, index=range(n))
+    prim_ts = pd.to_datetime(primary["timestamp"], utc=True)
+    ff = df_fund.copy()
+    ff["_fts"] = pd.to_datetime(ff["timestamp"], utc=True)
+    fr_col = "funding_rate" if "funding_rate" in ff.columns else "close"
+    aux = pd.DataFrame(
+        {"_fts": ff["_fts"], "fr": pd.to_numeric(ff[fr_col], errors="coerce")}
+    ).sort_values("_fts")
+    left = pd.DataFrame({"ts": prim_ts, "_ord": np.arange(n, dtype=int)}).sort_values("ts")
+    merged = pd.merge_asof(left, aux, left_on="ts", right_on="_fts", direction="backward")
+    return merged.sort_values("_ord")["fr"].reset_index(drop=True)
+
+
+def _merge_oi_contracts(primary: pd.DataFrame, df_oi: pd.DataFrame) -> pd.Series:
+    n = len(primary)
+    if df_oi is None or df_oi.empty or "oi_contracts" not in df_oi.columns:
+        return pd.Series(np.nan, index=range(n))
+    prim_ts = pd.to_datetime(primary["timestamp"], utc=True)
+    aux = df_oi.copy()
+    aux["_ts"] = pd.to_datetime(aux["timestamp"], utc=True)
+    aux["oi_contracts"] = pd.to_numeric(aux["oi_contracts"], errors="coerce")
+    aux = aux.sort_values("_ts").drop_duplicates(subset=["_ts"], keep="last")
+    left = pd.DataFrame({"ts": prim_ts, "_ord": np.arange(n, dtype=int)}).sort_values("ts")
+    merged = pd.merge_asof(
+        left,
+        aux[["_ts", "oi_contracts"]],
+        left_on="ts",
+        right_on="_ts",
+        direction="backward",
+    )
+    return merged.sort_values("_ord")["oi_contracts"].reset_index(drop=True)
+
 
 assert len(df_5m) >= MIN_CANDLES_5M, f"Insufficient OHLCV: {len(df_5m)} < {MIN_CANDLES_5M}"
 assert not df_oi_hist.empty and len(df_oi_hist) >= int(MIN_CANDLES_5M * 0.90), (
     f"Insufficient OI history: {len(df_oi_hist)}"
 )
 assert len(df_funding) > 0, "Funding data empty"
+
+# Raw-source coverage on 5m grid (before feature engineering)
+_fund_raw = _merge_funding_to_5m(df_5m, df_funding)
+_oi_raw = _merge_oi_contracts(df_5m, df_oi_hist)
+_post = slice(FUNDING_WARMUP_BARS, None)
+_fund_cov_raw = float(_fund_raw.iloc[_post].notna().mean())
+_oi_cov_raw = float((_oi_raw.iloc[_post] > 0).mean())
+print(
+    f"Raw data coverage (post-warmup {FUNDING_WARMUP_BARS} bars): "
+    f"funding={_fund_cov_raw:.1%} oi_contracts={_oi_cov_raw:.1%}"
+)
+assert _fund_cov_raw >= MIN_REAL_FUND_FRACTION, (
+    f"Funding merge coverage too low: {_fund_cov_raw:.1%} < {MIN_REAL_FUND_FRACTION:.0%}. "
+    "Extend FUNDING_LOOKBACK_HOURS or check FUNDING:{symbol} API."
+)
+assert _oi_cov_raw >= MIN_REAL_OI_FRACTION, (
+    f"OI merge coverage too low: {_oi_cov_raw:.1%} < {MIN_REAL_OI_FRACTION:.0%}. "
+    "Check OI:{symbol} candle fetch."
+)
 
 os.environ["V43_ALLOW_EMPTY_OI_FOR_TRAINING"] = "false"
 v43_feat = build_v43_feature_matrix(
@@ -349,7 +425,6 @@ if v43_feat.empty:
     raise RuntimeError("v43 feature matrix empty — check OHLCV/OI inputs")
 
 df_feat = build_mso_feature_matrix(v43_feat, df_ohlcv=df_5m)
-# Align close to feature rows before dropna (critical for label builders)
 close_series = pd.to_numeric(df_5m["close"], errors="coerce").iloc[: len(df_feat)].reset_index(drop=True)
 df_feat = df_feat.reset_index(drop=True)
 
@@ -362,12 +437,13 @@ keep = df_feat[feat_cols].notna().all(axis=1)
 df_feat = df_feat.loc[keep].reset_index(drop=True)
 close = close_series.loc[keep].reset_index(drop=True)
 
-oi_real = (df_feat["oi_zscore"].notna() & (df_feat["oi_zscore"] != 0)).mean()
-fund_real = (df_feat["funding_zscore"].notna() & (df_feat["funding_zscore"] != 0)).mean()
-assert oi_real >= MIN_REAL_OI_FRACTION, f"OI synthetic too high: {1 - oi_real:.1%}"
-assert fund_real >= MIN_REAL_FUND_FRACTION, f"Funding synthetic too high: {1 - fund_real:.1%}"
-
-print("Clean training rows:", len(df_feat), "features:", len(feat_cols))
+# Diagnostic only — do NOT gate on zscore==0 (v43 fills warmup with 0.0)
+_zscore_zero_frac = float((df_feat["funding_zscore"] == 0).mean()) if "funding_zscore" in df_feat.columns else 0.0
+print(
+    "Clean training rows:", len(df_feat),
+    "features:", len(feat_cols),
+    f"(funding_zscore==0 on { _zscore_zero_frac:.1%} rows — warmup/flat funding, OK if raw coverage passed)",
+)
 """
 )
 
@@ -381,20 +457,36 @@ split_idx = int(len(df_feat) * (1.0 - VAL_FRAC))
 if split_idx < MIN_TRAIN_ROWS:
     raise RuntimeError(f"Too few train rows after split: {split_idx}")
 
-df_train = df_feat.iloc[:split_idx].copy()
-df_val = df_feat.iloc[split_idx:].copy()
+df_train = df_feat.iloc[:split_idx].copy().reset_index(drop=True)
+df_val = df_feat.iloc[split_idx:].copy().reset_index(drop=True)
+close_train = close.iloc[:split_idx].reset_index(drop=True)
+close_val = close.iloc[split_idx:].reset_index(drop=True)
 
 bundle_dict: dict = {}
 label_encoders: dict = {}
 class_orders: dict = {}
 f1_scores: dict = {}
+LGB_DEVICE_USED = LGB_DEVICE
+
+
+def _is_lgb_device_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(k in msg for k in ("cuda", "cudap", "gpu tree learner", "opencl"))
+
 
 def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
+    global LGB_DEVICE_USED
     callbacks = []
     eval_set = None
-    if len(X_va) >= 50 and len(np.unique(y_va)) >= 2:
+    tr_u = set(np.unique(y_tr))
+    va_u = set(np.unique(y_va)) if len(y_va) else set()
+    # Early stopping requires every val class to appear in train (LightGBM/sklearn check)
+    if len(X_va) >= 50 and len(va_u) >= 2 and va_u.issubset(tr_u):
         eval_set = [(X_va, y_va)]
         callbacks = [lgb.early_stopping(50, verbose=False)]
+    elif len(va_u - tr_u) > 0:
+        missing = sorted(va_u - tr_u)
+        print(f"  note: val classes {missing} absent in train — training without early stopping")
 
     def _make_clf(device: str):
         return lgb.LGBMClassifier(
@@ -419,9 +511,10 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
             eval_set=eval_set,
             callbacks=callbacks if eval_set else None,
         )
+        LGB_DEVICE_USED = device
         return clf
     except Exception as exc:
-        if device == "cpu":
+        if device == "cpu" or not _is_lgb_device_error(exc):
             raise
         print(f"LightGBM device={device} failed ({exc!r}); retrying on CPU")
         clf = _make_clf("cpu")
@@ -431,6 +524,7 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
             eval_set=eval_set,
             callbacks=callbacks if eval_set else None,
         )
+        LGB_DEVICE_USED = "cpu"
         return clf
 
 
@@ -476,10 +570,12 @@ for hk, fb in HORIZON_MAP.items():
                 )
             )
             f1_scores[hk][dim] = f1
-            print(hk, dim, "val F1", round(f1, 4), "device", LGB_DEVICE)
+            print(hk, dim, "val F1", round(f1, 4), "device", LGB_DEVICE_USED)
         else:
             f1_scores[hk][dim] = None
             print(hk, dim, "val skipped (insufficient val rows)")
+
+print("Training completed on device:", LGB_DEVICE_USED)
 
 # Export gate (primary horizons)
 for hk in ("scalp_10m", "intraday_30m"):
@@ -502,7 +598,10 @@ mso_bundle = MarketStateBundleExport(
     class_orders=class_orders,
     training_metadata={
         "f1_scores": f1_scores,
-        "lgb_device": LGB_DEVICE,
+        "lgb_device_requested": LGB_DEVICE,
+        "lgb_device_used": LGB_DEVICE_USED,
+        "raw_funding_coverage": _fund_cov_raw,
+        "raw_oi_coverage": _oi_cov_raw,
     },
 )
 artifact_path = EXPORT_DIR / "model_artifact_mso_v50.pkl"
@@ -520,12 +619,16 @@ metadata = {
     "state_dimensions": list(MSO_STATE_DIMENSIONS),
     "horizon_keys": list(HORIZON_MAP.keys()),
     "f1_scores": f1_scores,
-    "training_device": LGB_DEVICE,
+    "training_device_requested": LGB_DEVICE,
+    "training_device_used": LGB_DEVICE_USED,
+    "raw_funding_coverage": _fund_cov_raw,
+    "raw_oi_coverage": _oi_cov_raw,
     "training_date": datetime.now(timezone.utc).isoformat(),
 }
 meta_path = EXPORT_DIR / "metadata_mso_v50.json"
 meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 print("Exported:", artifact_path, meta_path)
+print("Device used:", LGB_DEVICE_USED)
 """
 )
 
