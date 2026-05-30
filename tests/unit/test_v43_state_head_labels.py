@@ -36,6 +36,18 @@ def test_build_regime_labels_returns_four_classes():
     assert labeled.isin(V43_REGIME_CLASSES).all()
 
 
+def test_build_regime_labels_adaptive_hurst_allows_trending():
+    n = 800
+    rng = np.random.default_rng(9)
+    df = _synthetic_feat(n)
+    df["hurst_60"] = 0.02 + rng.random(n) * 0.04
+    df["adx_14"] = 25.0 + rng.random(n) * 10.0
+    df["trend_mom"] = rng.choice([-0.01, 0.01], n)
+    _labels, stats = build_regime_labels(df, n_bars=1)
+    counts = stats["class_counts"]
+    assert counts.get("trending_up", 0) + counts.get("trending_down", 0) > 0
+
+
 def test_build_vol_expansion_labels_binary():
     n = 400
     close = pd.Series(np.cumprod(1 + np.random.default_rng(1).normal(0, 0.002, n)))

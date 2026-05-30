@@ -72,8 +72,10 @@ def _predict_regressor_sklearn_compat(est: Any, Xs: np.ndarray) -> Optional[np.n
 def _predict_proba_sklearn_compat(est: Any, Xs: np.ndarray) -> Optional[np.ndarray]:
     try:
         p = np.asarray(est.predict_proba(Xs), dtype=np.float64)
-        if p.ndim == 2 and p.shape[1] >= 2:
+        if p.ndim == 2 and p.shape[1] == 2:
             return p[:, 1]
+        if p.ndim == 2:
+            return p
         return p.ravel()
     except TypeError as exc:
         if not _is_sklearn_array_compat_error(exc):

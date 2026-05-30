@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -18,6 +20,8 @@ V43_REGIME_CLASSES: Tuple[str, ...] = (
 # Appendix B feature tiers for state-head training.
 # Phase 5: horizon-specialised masks (populate after importance analysis).
 V43_HORIZON_FEATURE_MASKS: Dict[str, Tuple[str, ...]] = {}
+
+V43_PRIMARY_SIGNAL_MODES: Tuple[str, ...] = ("conditions", "returns", "hybrid")
 
 V43_STATE_HEAD_FEATURE_TIERS: Dict[str, Tuple[str, ...]] = {
     "regime": (
@@ -68,6 +72,14 @@ V43_STATE_HEAD_FEATURE_TIERS: Dict[str, Tuple[str, ...]] = {
         "price_ema100",
     ),
 }
+
+
+def resolve_v43_primary_signal_mode() -> str:
+    """Training/inference signal priority: conditions | returns | hybrid."""
+    raw = os.environ.get("V43_PRIMARY_SIGNAL_MODE", "conditions").strip().lower()
+    if raw in V43_PRIMARY_SIGNAL_MODES:
+        return raw
+    return "conditions"
 
 
 def build_forward_labels(close: pd.Series, forward_bars: int) -> pd.Series:
@@ -156,17 +168,20 @@ def _classify_regime_row(
     atr_pct: float,
     vol_q80: float,
     atr_q90: float,
+    *,
+    hurst_thr: float,
+    adx_thr: float,
 ) -> str:
-    """Deterministic regime label for one bar (migration spec §1.1)."""
+    """Deterministic regime label for one bar (adaptive trend/vol thresholds)."""
     if np.isfinite(vol_regime) and vol_regime > vol_q80:
         return "vol_expansion"
     if np.isfinite(atr_pct) and atr_pct > atr_q90:
         return "vol_expansion"
     if (
         np.isfinite(adx)
-        and adx > 22.0
+        and adx > adx_thr
         and np.isfinite(hurst)
-        and hurst > 0.55
+        and hurst > hurst_thr
         and np.isfinite(trend_mom)
     ):
         if trend_mom > 0:
@@ -192,8 +207,12 @@ def build_regime_labels(
 
     vol_s = pd.to_numeric(work["vol_regime"], errors="coerce")
     atr_s = pd.to_numeric(work["atr_pct"], errors="coerce")
+    adx_s = pd.to_numeric(work["adx_14"], errors="coerce")
+    hurst_s = pd.to_numeric(work["hurst_60"], errors="coerce")
     vol_q80 = vol_s.rolling(vol_regime_window, min_periods=200).quantile(0.80)
     atr_q90 = atr_s.rolling(atr_window, min_periods=200).quantile(0.90)
+    hurst_q60 = hurst_s.rolling(vol_regime_window, min_periods=200).quantile(0.60)
+    adx_q60 = adx_s.rolling(atr_window, min_periods=200).quantile(0.60)
 
     labels: List[Optional[str]] = []
     idx = work.index
@@ -203,6 +222,11 @@ def build_regime_labels(
             labels.append(None)
             continue
         row = work.iloc[j]
+        h_thr = float(hurst_q60.iloc[j]) if pd.notna(hurst_q60.iloc[j]) else np.nan
+        a_thr = float(adx_q60.iloc[j]) if pd.notna(adx_q60.iloc[j]) else 22.0
+        if not np.isfinite(h_thr):
+            h_thr = 0.5
+        a_thr = float(max(15.0, a_thr))
         lab = _classify_regime_row(
             float(row["adx_14"]),
             float(row["hurst_60"]),
@@ -211,6 +235,8 @@ def build_regime_labels(
             float(row["atr_pct"]),
             float(vol_q80.iloc[j]) if pd.notna(vol_q80.iloc[j]) else np.inf,
             float(atr_q90.iloc[j]) if pd.notna(atr_q90.iloc[j]) else np.inf,
+            hurst_thr=h_thr,
+            adx_thr=a_thr,
         )
         labels.append(lab)
 
@@ -223,6 +249,7 @@ def build_regime_labels(
         "n_bars": n_shift,
         "labeled_fraction": float(valid.mean()) if len(out) else 0.0,
         "class_counts": counts,
+        "threshold_mode": "rolling_p60_hurst_adx",
     }
     return out, stats
 

@@ -995,6 +995,14 @@ class Settings(BaseSettings):
             "to a small return proxy."
         ),
     )
+    jacksparrow_v43_primary_signal_mode: str = Field(
+        default="conditions",
+        env="JACKSPARROW_V43_PRIMARY_SIGNAL_MODE",
+        description=(
+            "v43 signal priority: conditions (state heads), returns (forward-return heads), "
+            "or hybrid (blend)."
+        ),
+    )
     jacksparrow_v43_state_heads_enabled: bool = Field(
         default=False,
         env="JACKSPARROW_V43_STATE_HEADS_ENABLED",

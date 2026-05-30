@@ -72,6 +72,26 @@ _ENV_MIN_CORR_KEYS: Dict[str, str] = {
 }
 
 
+def primary_signal_mode_from_meta(meta: Mapping[str, Any]) -> str:
+    """Resolved signal priority stored at export (conditions | returns | hybrid)."""
+    raw = str(meta.get("primary_signal_mode") or "returns").strip().lower()
+    if raw in ("conditions", "returns", "hybrid"):
+        return raw
+    return "returns"
+
+
+def resolve_train_return_horizons() -> List[str]:
+    """Which return-regression heads to train (env ``V43_TRAIN_RETURN_HEADS``)."""
+    train = os.environ.get("V43_TRAIN_RETURN_HEADS", "minimal").strip().lower()
+    if train in ("none", "false", "0", "skip"):
+        return []
+    if train in ("full", "all"):
+        return list(V43_HORIZON_KEYS)
+    pb = int(os.environ.get("V43_PRIMARY_EXECUTION_HORIZON_BARS", "12"))
+    key = {int(v): k for k, v in V43_HORIZON_KEY_TO_BARS.items()}.get(pb, "trend_1h")
+    return [key]
+
+
 def resolve_min_meta_auc_by_horizon() -> Dict[str, float]:
     """Production minimums with optional per-horizon env overrides."""
     out = dict(V43_MIN_META_AUC_BY_HORIZON)
@@ -173,7 +193,13 @@ def validate_v43_multihead_metadata(meta: Mapping[str, Any]) -> None:
             "v43 multi-head metadata missing non-empty horizons{} "
             "(retrain with jacksparrow_v43_multihead export)"
         )
-    for key in V43_HORIZON_KEYS:
+    mode = primary_signal_mode_from_meta(meta)
+    state_heads = meta.get("state_heads")
+    if mode in ("conditions", "hybrid") and isinstance(state_heads, dict):
+        required_horizons = [primary_horizon_key_from_meta(meta)]
+    else:
+        required_horizons = list(V43_HORIZON_KEYS)
+    for key in required_horizons:
         block = horizons.get(key)
         if not isinstance(block, dict):
             raise ValueError(f"v43 horizons missing block for {key!r}")
@@ -190,6 +216,10 @@ def validate_v43_multihead_metadata(meta: Mapping[str, Any]) -> None:
             raise ValueError(f"horizons[{key!r}] missing validation_metrics")
         if vm.get("dynamic_threshold") is None:
             raise ValueError(f"horizons[{key!r}] missing dynamic_threshold in validation_metrics")
+    if mode in ("conditions", "hybrid"):
+        sh_failures = validate_v43_state_heads_metadata(meta)
+        if sh_failures:
+            raise ValueError("; ".join(sh_failures))
     feats = meta.get("features")
     if isinstance(feats, list) and feats:
         from feature_store.jacksparrow_v43_contract import resolve_v43_feature_contract
@@ -228,6 +258,12 @@ def parse_horizons_from_metadata(meta: Mapping[str, Any]) -> Dict[str, Dict[str,
         block.setdefault("horizon_label", prof.label)
         out[key] = block
     return out
+
+
+def primary_horizon_key_from_meta(meta: Mapping[str, Any]) -> str:
+    """Map ``primary_execution_horizon_bars`` to canonical horizon key."""
+    bars = primary_execution_horizon_bars(meta)
+    return {int(v): k for k, v in V43_HORIZON_KEY_TO_BARS.items()}.get(int(bars), "trend_1h")
 
 
 def primary_execution_horizon_bars(meta: Mapping[str, Any]) -> int:

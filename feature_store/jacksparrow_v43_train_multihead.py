@@ -713,8 +713,12 @@ def train_multihead_from_feature_matrix(
     leverage: int = 3,
     cost_aware_labels: bool = False,
     use_meta_stack: bool = False,
+    horizon_keys: Optional[List[str]] = None,
 ) -> Tuple[MultiHeadBundle, Dict[str, Any]]:
-    """Train all horizon heads on shared features.
+    """Train return-regression heads on forward-return labels (optional / diagnostic).
+
+    When ``horizon_keys`` is empty (``V43_TRAIN_RETURN_HEADS=none``), returns a bundle with
+    no horizon models — use with ``V43_PRIMARY_SIGNAL_MODE=conditions`` and state heads.
 
     When ``use_meta_stack`` is False, each head uses the mean of base regressors only
     (``inference_path=regressor_mean``) with no LGBMClassifier meta-learner or Ridge calibrator.
@@ -724,6 +728,8 @@ def train_multihead_from_feature_matrix(
     Position sizing applies leverage separately via
     ``jacksparrow_v43_max_position_pct * jacksparrow_v43_leverage_assumption``.
     """
+    from feature_store.jacksparrow_v43_labels import resolve_v43_primary_signal_mode
+    from feature_store.jacksparrow_v43_multihead import resolve_train_return_horizons
     cols = list(feat_cols or V43_CANONICAL_FEATURES)
     missing = [c for c in cols if c not in df_feat.columns]
     if missing:
@@ -738,8 +744,11 @@ def train_multihead_from_feature_matrix(
     bundle = MultiHeadBundle()
     horizons_meta: Dict[str, Any] = {}
     split_meta_global: Dict[str, Any] = {}
+    keys_to_train = list(horizon_keys if horizon_keys is not None else resolve_train_return_horizons())
 
-    for hkey in V43_HORIZON_KEYS:
+    for hkey in keys_to_train:
+        if hkey not in V43_HORIZON_KEY_TO_BARS:
+            raise ValueError(f"unknown horizon key {hkey!r}")
         fb = int(V43_HORIZON_KEY_TO_BARS[hkey])
         label_mode_horizon = "cost_aware" if cost_aware_labels else "gross_forward_return"
         cost_scale = float(V43_HORIZON_COST_SCALE.get(fb, 1.0))
@@ -823,6 +832,8 @@ def train_multihead_from_feature_matrix(
         "target_definition": (
             "cost_aware_forward_return" if cost_aware_labels else "simple_forward_return"
         ),
+        "primary_signal_mode": resolve_v43_primary_signal_mode(),
+        "return_heads_trained": keys_to_train,
         "primary_execution_horizon_bars": int(
             os.environ.get(
                 "V43_PRIMARY_EXECUTION_HORIZON_BARS",

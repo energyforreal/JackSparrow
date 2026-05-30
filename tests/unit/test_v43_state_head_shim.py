@@ -12,15 +12,21 @@ pytest.importorskip("sklearn")
 from agent.models.v43_pickle_shims import MultiHeadBundle, StateHeadModel
 
 
-class _StubClf:
+class _StubBinaryClf:
     def predict_proba(self, X):
         p1 = np.full(len(X), 0.7, dtype=np.float64)
         return np.column_stack([1.0 - p1, p1])
 
 
+class _StubMulticlassClf:
+    def predict_proba(self, X):
+        n = len(X)
+        return np.tile(np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float64), (n, 1))
+
+
 def test_state_head_model_predict_scalar_score():
     model = StateHeadModel()
-    model.classifier = _StubClf()
+    model.classifier = _StubBinaryClf()
     model.feature_cols = [f"f{i}" for i in range(5)]
     model.head_key = "trade_quality"
     model.head_type = "binary"
@@ -31,9 +37,24 @@ def test_state_head_model_predict_scalar_score():
     assert score == pytest.approx(0.7, abs=0.01)
 
 
+def test_state_head_regime_multiclass_proba_not_collapsed():
+    model = StateHeadModel()
+    model.classifier = _StubMulticlassClf()
+    model.feature_cols = [f"f{i}" for i in range(5)]
+    model.head_key = "regime"
+    model.head_type = "regime"
+    model.classes_ = ["trending_up", "trending_down", "ranging", "vol_expansion"]
+    model._is_fitted = True
+    X = np.zeros((1, 5), dtype=np.float32)
+    proba = model.predict_proba(X)
+    assert proba.shape == (1, 4)
+    score = model.predict_scalar_score(X)
+    assert score == pytest.approx(0.7, abs=0.01)
+
+
 def test_state_head_resolve_feature_cols_from_wide_x_df():
     model = StateHeadModel()
-    model.classifier = _StubClf()
+    model.classifier = _StubBinaryClf()
     cols = [f"f{i}" for i in range(5)]
     model.feature_cols = cols
     model.head_key = "vol_expansion"
@@ -48,7 +69,7 @@ def test_state_head_resolve_feature_cols_from_wide_x_df():
 
 def test_state_head_rejects_wrong_feature_width_without_x_df():
     model = StateHeadModel()
-    model.classifier = _StubClf()
+    model.classifier = _StubBinaryClf()
     model.feature_cols = [f"f{i}" for i in range(5)]
     model.head_key = "regime"
     model._is_fitted = True

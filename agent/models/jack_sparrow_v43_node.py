@@ -45,9 +45,11 @@ from feature_store.jacksparrow_v43_horizon import (
     forward_bars_to_minutes,
     resolve_training_forward_bars,
 )
+from feature_store.jacksparrow_v43_labels import V43_REGIME_CLASSES
 from feature_store.jacksparrow_v43_multihead import (
     V43_HORIZON_KEY_TO_BARS,
     V43_HORIZON_KEYS,
+    primary_signal_mode_from_meta,
     head_thresholds,
     primary_execution_horizon_bars as meta_primary_horizon_bars,
 )
@@ -57,6 +59,48 @@ logger = structlog.get_logger()
 
 # Heuristic: classifier P(class=1) often sits in [0,1] with span < 0.85
 _PROB_RETURN_SCALE = 0.04
+
+
+def _condition_expected_return_from_state_heads(
+    multi_bundle: MultiHeadBundle,
+    df_feat: pd.DataFrame,
+    use_cols: List[str],
+) -> Optional[float]:
+    """Signed edge from state conditions: (P_up - P_down) * p_vol * p_quality."""
+    sh_reg = multi_bundle.get_state_head("regime")
+    sh_vol = multi_bundle.get_state_head("vol_expansion")
+    if sh_reg is None or sh_vol is None:
+        return None
+
+    def _row(sh_model: Any) -> Tuple[pd.DataFrame, List[str]]:
+        cols = list(getattr(sh_model, "feature_cols", None) or use_cols)
+        use = [c for c in cols if c in df_feat.columns]
+        return df_feat[use].iloc[[-2]], use
+
+    Xr, _ = _row(sh_reg)
+    proba = np.asarray(sh_reg.predict_proba(Xr.values, X_df=Xr), dtype=np.float64)
+    if proba.ndim != 2 or proba.shape[1] < 2:
+        return None
+    classes = list(getattr(sh_reg, "classes_", None) or V43_REGIME_CLASSES)
+    idx_up = classes.index("trending_up") if "trending_up" in classes else 0
+    idx_dn = classes.index("trending_down") if "trending_down" in classes else 1
+    p_up = float(proba[0, idx_up]) if idx_up < proba.shape[1] else 0.0
+    p_dn = float(proba[0, idx_dn]) if idx_dn < proba.shape[1] else 0.0
+    direction = p_up - p_dn
+
+    Xv, _ = _row(sh_vol)
+    p_vol = float(
+        multi_bundle.predict_state_score("vol_expansion", Xv.values, X_df=Xv)
+    )
+    p_qual = 0.55
+    sh_tq = multi_bundle.get_state_head("trade_quality")
+    if sh_tq is not None:
+        Xt, _ = _row(sh_tq)
+        p_qual = float(
+            multi_bundle.predict_state_score("trade_quality", Xt.values, X_df=Xt)
+        )
+    edge = direction * p_vol * p_qual
+    return float(np.clip(edge, -0.05, 0.05))
 
 
 def _v43_head_confidence(edge: float, threshold: float, unc_scale: float) -> float:
@@ -277,6 +321,7 @@ class JackSparrowV43Node(MCPModelNode):
         # Protect bundle init/reload from concurrent state mutation.
         self._bundle_lock: Optional[asyncio.Lock] = None
         self._training_forward_bars: int = V43_FORWARD_TARGET_BARS_DEFAULT
+        self._primary_signal_mode: str = "returns"
 
     def _get_predict_lock(self) -> asyncio.Lock:
         if self._predict_lock is None:
@@ -420,8 +465,12 @@ class JackSparrowV43Node(MCPModelNode):
                         },
                     )
         self._training_forward_bars = meta_primary_horizon_bars(self._bundle_metadata)
+        self._primary_signal_mode = primary_signal_mode_from_meta(self._bundle_metadata)
         self._ensemble = self._multihead.get_head(self._training_forward_bars)
-        if self._ensemble is None:
+        if self._ensemble is None and self._primary_signal_mode not in (
+            "conditions",
+            "hybrid",
+        ):
             raise ValueError(
                 f"multi-head bundle missing primary head {self._training_forward_bars}"
             )
@@ -799,11 +848,15 @@ class JackSparrowV43Node(MCPModelNode):
         state_enabled = bool(
             getattr(settings, "jacksparrow_v43_state_heads_enabled", False)
         )
+        state_run = state_enabled or self._primary_signal_mode in (
+            "conditions",
+            "hybrid",
+        )
         p_regime_favorable: Optional[float] = None
         p_setup_quality: Optional[float] = None
         p_vol_expansion: Optional[float] = None
         state_head_payloads: Dict[str, Any] = {}
-        if state_enabled and self._multihead is not None:
+        if state_run and self._multihead is not None:
             for sh_key in ("regime", "vol_expansion", "trade_quality"):
                 sh_model = self._multihead.get_state_head(sh_key)
                 if sh_model is None:
@@ -833,6 +886,26 @@ class JackSparrowV43Node(MCPModelNode):
                     p_setup_quality = score
                 elif sh_key == "vol_expansion":
                     p_vol_expansion = score
+
+        cond_er = _condition_expected_return_from_state_heads(
+            self._multihead, df_feat, use_cols
+        )
+        if cond_er is not None and self._primary_signal_mode == "conditions":
+            primary_proba = float(cond_er)
+            primary_pred_val = float(np.tanh((primary_proba - primary_thr) * 80.0))
+            primary_conf = _v43_head_confidence(
+                primary_proba - primary_thr, primary_thr, primary_u_scale
+            )
+            reasoning = (
+                f"v43 conditions primary={primary_fb}bars "
+                f"edge={primary_proba:.5f} thr={primary_thr:.5f}"
+            )
+        elif cond_er is not None and self._primary_signal_mode == "hybrid":
+            primary_proba = float(0.5 * primary_proba + 0.5 * cond_er)
+            primary_pred_val = float(np.tanh((primary_proba - primary_thr) * 80.0))
+            primary_conf = _v43_head_confidence(
+                primary_proba - primary_thr, primary_thr, primary_u_scale
+            )
 
         out_ctx: Dict[str, Any] = {
             "format": "jacksparrow_v43_multihead",
