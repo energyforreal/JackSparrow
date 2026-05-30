@@ -647,6 +647,19 @@ class IntelligentAgent:
 
 ---
 
+## MSO v50 (Market State Oracle) — optional second node
+
+When `MSO_MODEL_ENABLED=true` and `metadata_mso_v50.json` is present in `MODEL_DIR`, **`MarketStateOracleNode`** registers alongside **`JackSparrowV43Node`**.
+
+| Output | Description |
+|--------|-------------|
+| `market_state` | Per-horizon dict: trend, vol, breakout, liquidity, momentum, compression (+ `_proba` maps) |
+| Scalar `prediction` | Backward-compatible signed edge from 30m trend head (for legacy gates) |
+
+**Policy:** `synthesize_market_state_intelligence()` in the agent policy engine applies liquidity vetoes and MTF trend boosts. **`InsufficientRealDataError`** blocks MSO inference when OI is stale/zero (no synthetic fallback).
+
+---
+
 ## Model Discovery and Registration
 
 ### Automatic Model Discovery

@@ -972,13 +972,15 @@ class ExecutionEngine:
                     reasoning_chain_id=trade.get("reasoning_chain_id"),
                 )
 
-            # Execute the order
+            # Execute the order (optional atomic bracket SL/TP on Delta)
             order_result = await self._place_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
                 order_type=order_type,
-                price=price
+                price=price,
+                bracket_stop_loss_price=float(stop_loss) if stop_loss is not None else None,
+                bracket_take_profit_price=float(take_profit) if take_profit is not None else None,
             )
 
             if not order_result["success"]:
@@ -1886,11 +1888,20 @@ class ExecutionEngine:
             return "MARKET"
         return "MARKET"
 
-    async def _place_order(self, symbol: str, side: str, quantity: float,
-                          order_type: str, price: Optional[float] = None,
-                          stop_price: Optional[float] = None,
-                          reduce_only: bool = False) -> Dict[str, Any]:
-        """Place market/limit/stop orders on Delta testnet via delta_client.place_order()."""
+    async def _place_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str,
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        reduce_only: bool = False,
+        *,
+        bracket_stop_loss_price: Optional[float] = None,
+        bracket_take_profit_price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Place market/limit/stop orders on Delta testnet via delta_client."""
         try:
             order_id = str(uuid.uuid4())[:8]
             normalized_type = str(order_type or "market").lower()
@@ -1922,16 +1933,36 @@ class ExecutionEngine:
                 float(stop_price) if normalized_type == "stop" and stop_price is not None else None
             )
 
-            result = await self.delta_client.place_order(
-                symbol=symbol,
-                side=side.upper(),
-                quantity=quantity,
-                order_type=delta_order_type,
-                price=limit_price,
-                stop_price=trigger_price,
-                reduce_only=reduce_only,
-                client_order_id=client_order_id,
+            use_bracket = (
+                bool(getattr(settings, "use_bracket_orders", True))
+                and not reduce_only
+                and bracket_stop_loss_price is not None
+                and bracket_take_profit_price is not None
+                and normalized_type == "market"
             )
+            if use_bracket:
+                result = await self.delta_client.place_bracket_order(
+                    symbol=symbol,
+                    side=side.upper(),
+                    quantity=quantity,
+                    order_type=delta_order_type,
+                    price=limit_price,
+                    bracket_stop_loss_price=bracket_stop_loss_price,
+                    bracket_take_profit_price=bracket_take_profit_price,
+                    reduce_only=reduce_only,
+                    client_order_id=client_order_id,
+                )
+            else:
+                result = await self.delta_client.place_order(
+                    symbol=symbol,
+                    side=side.upper(),
+                    quantity=quantity,
+                    order_type=delta_order_type,
+                    price=limit_price,
+                    stop_price=trigger_price,
+                    reduce_only=reduce_only,
+                    client_order_id=client_order_id,
+                )
             order_obj = self._parse_delta_order_result(result)
             exchange_order_id = order_obj.get("id")
             if exchange_order_id is not None:

@@ -24,7 +24,19 @@ This document describes how ML models are managed, uploaded, discovered, and int
 
 ---
 
-## Runtime discovery (JackSparrow v43 — current branch)
+## Runtime discovery (JackSparrow v43 + optional MSO v50)
+
+Point **`MODEL_DIR`** at the bundle directory containing **`metadata_v43.json`** and model artefacts. **`ModelDiscovery`** registers **`JackSparrowV43Node`** (required) and optionally **`MarketStateOracleNode`** when **`metadata_mso_v50.json`** exists and **`MSO_MODEL_ENABLED=true`**.
+
+### MSO v50 (market-state oracle)
+
+- **Family:** `market_state_oracle_v50`
+- **Artifacts:** `metadata_mso_v50.json`, `model_artifact_mso_v50.pkl`
+- **Output:** structured `market_state` dict per horizon (trend, vol, breakout, liquidity, momentum, compression)
+- **Training:** [`notebooks/jacksparrow_mso_v50_training.ipynb`](../notebooks/jacksparrow_mso_v50_training.ipynb) (branch `MAJOR-REWORK-2`)
+- **Policy:** `synthesize_market_state_intelligence()` in [`agent/core/agent_policy_engine.py`](../agent/core/agent_policy_engine.py)
+
+### v43 (scalar gate — primary)
 
 Point **`MODEL_DIR`** at the bundle directory containing **`metadata_v43.json`** and the model artefacts (see `JackSparrow_v43_models_BTCUSD/` layout below). **`ModelDiscovery`** registers a single **`JackSparrowV43Node`** loading one **`MultiHeadBundle`** with four intraday heads (`scalp_10m` 2 bars, `intraday_30m` 6, `trend_1h` 12, `swing_2h` 24). Legacy single-horizon (`training_forward_bars=120`) bundles are rejected at metadata validation. Train/export via `notebooks/jacksparrow_v43_delta_india_training.ipynb` or `scripts/train_v43_multihead_export.py`. **`MODEL_PATH` is ignored** (see [`agent/models/model_discovery.py`](../agent/models/model_discovery.py)). Sections that describe **`metadata_BTCUSD_*.json`**, **`PipelineV15Node`**, or multi-node v5 loaders are retained as **historical training and parity references** unless you revive that code path locally.
 

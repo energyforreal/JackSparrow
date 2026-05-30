@@ -21,6 +21,33 @@ from agent.core.logging_utils import log_error_with_context, log_warning_with_co
 
 logger = structlog.get_logger()
 
+
+class RateLimiter:
+    """Token-bucket rate limiter for Delta API calls."""
+
+    def __init__(self, max_calls: int, window_seconds: float):
+        self.max_calls = max(1, int(max_calls))
+        self.window_seconds = max(0.01, float(window_seconds))
+        self._timestamps: List[float] = []
+
+    async def acquire(self) -> None:
+        now = time.time()
+        cutoff = now - self.window_seconds
+        self._timestamps = [t for t in self._timestamps if t > cutoff]
+        if len(self._timestamps) >= self.max_calls:
+            sleep_s = self._timestamps[0] + self.window_seconds - now
+            if sleep_s > 0:
+                await asyncio.sleep(sleep_s)
+            now = time.time()
+            cutoff = now - self.window_seconds
+            self._timestamps = [t for t in self._timestamps if t > cutoff]
+        self._timestamps.append(time.time())
+
+
+# Public: 20 req/s; private: 10 req/s (conservative defaults)
+_PUBLIC_RATE_LIMITER = RateLimiter(max_calls=20, window_seconds=1.0)
+_PRIVATE_RATE_LIMITER = RateLimiter(max_calls=10, window_seconds=1.0)
+
 # Import settings from config
 try:
     from agent.core.config import settings
@@ -313,6 +340,7 @@ class DeltaExchangeClient:
 
         url = f"{self.base_url}{clean_endpoint}"
         query_string = self._build_query_string(params) if params else ""
+        await _PUBLIC_RATE_LIMITER.acquire()
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout, follow_redirects=True
@@ -353,6 +381,7 @@ class DeltaExchangeClient:
         """
         
         async def _request(attempt: int = 0):
+            await _PRIVATE_RATE_LIMITER.acquire()
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 # Ensure endpoint doesn't contain query parameters
                 # Query params should be passed separately via params argument
@@ -736,6 +765,85 @@ class DeltaExchangeClient:
             data["stop_order_type"] = str(stop_order_type or "stop_loss_order")
 
         return await self._make_request("POST", "/v2/orders", data=data)
+
+    async def place_bracket_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "MARKET",
+        price: Optional[float] = None,
+        *,
+        bracket_stop_loss_price: Optional[float] = None,
+        bracket_take_profit_price: Optional[float] = None,
+        bracket_trail_amount: Optional[float] = None,
+        product_id: Optional[int] = None,
+        reduce_only: bool = False,
+        client_order_id: Optional[str] = None,
+        use_product_symbol_only: bool = False,
+    ) -> Dict[str, Any]:
+        """Place entry order with atomic bracket SL/TP on Delta Exchange."""
+        if quantity != int(quantity):
+            raise DeltaExchangeError(
+                "Order size must be a whole number (integer lots); fractional lots are not allowed"
+            )
+        lots = int(quantity)
+        if lots < 1:
+            raise DeltaExchangeError("Order size must be at least 1 lot")
+
+        delta_order_type = self._normalize_order_type(order_type)
+        pid = product_id
+        if pid is None and not use_product_symbol_only:
+            pid = await self.resolve_product_id(symbol)
+
+        data: Dict[str, Any] = {
+            "size": lots,
+            "side": side.lower(),
+            "order_type": delta_order_type,
+        }
+        if use_product_symbol_only or pid is None:
+            sym = (symbol or "").strip().upper()
+            if not sym:
+                raise DeltaExchangeError("product_symbol is required when product_id is not set")
+            data["product_symbol"] = sym
+        else:
+            data["product_id"] = int(pid)
+
+        if reduce_only:
+            data["reduce_only"] = "true"
+        if client_order_id:
+            data["client_order_id"] = str(client_order_id)[:32]
+        if delta_order_type == "limit_order" and price is not None:
+            data["limit_price"] = str(price)
+        if bracket_stop_loss_price is not None:
+            sl = str(bracket_stop_loss_price)
+            data["bracket_stop_loss_price"] = sl
+            data["bracket_stop_loss_limit_price"] = sl
+        if bracket_take_profit_price is not None:
+            tp = str(bracket_take_profit_price)
+            data["bracket_take_profit_price"] = tp
+            data["bracket_take_profit_limit_price"] = tp
+        if bracket_trail_amount is not None:
+            data["bracket_trail_amount"] = str(bracket_trail_amount)
+
+        return await self._make_request("POST", "/v2/orders", data=data)
+
+    async def get_fills(
+        self,
+        product_ids: Optional[str] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        page_size: int = 100,
+    ) -> Dict[str, Any]:
+        """GET /v2/fills — trade fill history for P&L reconciliation."""
+        params: Dict[str, Any] = {"page_size": int(page_size)}
+        if product_ids:
+            params["product_ids"] = product_ids
+        if start_time is not None:
+            params["start_time"] = int(start_time)
+        if end_time is not None:
+            params["end_time"] = int(end_time)
+        return await self._make_request("GET", "/v2/fills", params=params)
 
     async def get_orders(
         self,

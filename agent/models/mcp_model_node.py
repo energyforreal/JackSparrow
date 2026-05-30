@@ -5,10 +5,19 @@ Base interface for all ML model nodes implementing MCP Model Protocol.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TypedDict
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class MarketStateIntelligence(TypedDict, total=False):
+    """Per-horizon market state predictions from MSO v50."""
+
+    scalp_10m: Dict[str, Any]
+    intraday_30m: Dict[str, Any]
+    trend_1h: Dict[str, Any]
+    swing_2h: Dict[str, Any]
 
 
 class MCPModelRequest(BaseModel):

@@ -21,6 +21,14 @@
 
 ## Core Trading Agent Features
 
+### MSO structural features (v50)
+
+When **MSO** is enabled, the agent uses **58 features** (49 v43 base columns excluding live-only microstructure + 12 structural features). See [`feature_store/jacksparrow_mso_feature_extensions.py`](../feature_store/jacksparrow_mso_feature_extensions.py).
+
+**Excluded from MSO** (no historical real data): `bid_ask_imbalance`, `spread_bps`, `funding_predicted_zscore`.
+
+**Strict data policy:** training and inference hard-fail on synthetic OI/funding; warmup NaN rows are dropped, not zero-filled.
+
 ### 1. Autonomous Market Analysis
 
 **Description**: The agent continuously monitors and analyzes market conditions without human intervention.

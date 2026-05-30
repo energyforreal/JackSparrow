@@ -1,9 +1,8 @@
 """
-JackSparrow v43-only model discovery.
+JackSparrow model discovery (v43 primary + optional MSO v50).
 
-Loads exactly one bundle from ``settings.model_dir`` (default:
-``agent/model_storage/JackSparrow_v43_models_BTCUSD``) containing
-``metadata_v43.json`` and a model artifact.
+Loads v43 bundle from ``settings.model_dir`` and optionally
+``metadata_mso_v50.json`` + ``model_artifact_mso_v50.pkl`` when present.
 """
 
 import structlog
@@ -12,11 +11,13 @@ from typing import List, Optional
 
 from agent.core.config import settings
 from agent.models.jack_sparrow_v43_node import JackSparrowV43Node
+from agent.models.market_state_node import MarketStateOracleNode
 from agent.models.mcp_model_registry import MCPModelRegistry
 
 logger = structlog.get_logger()
 
 _SUPPORTED_METADATA_FILENAMES = ("metadata_v43.json", "metadata_v44.json")
+_MSO_METADATA_FILENAME = "metadata_mso_v50.json"
 
 
 def _resolve_bundle_metadata_path(model_dir: Path) -> Optional[Path]:
@@ -29,7 +30,7 @@ def _resolve_bundle_metadata_path(model_dir: Path) -> Optional[Path]:
 
 
 class ModelDiscovery:
-    """v43-only discovery — registers :class:`JackSparrowV43Node`."""
+    """Discovers v43 bundle and optional MSO market-state oracle."""
 
     def __init__(self, registry: MCPModelRegistry):
         self.registry = registry
@@ -44,11 +45,11 @@ class ModelDiscovery:
         discovery_attempted = True
 
         logger.info(
-            "model_discovery_v43_only",
+            "model_discovery_start",
             model_dir=str(self.model_dir),
             model_path=self.model_path,
             auto_register=self.auto_register,
-            message="JackSparrow v43-only discovery",
+            mso_enabled=bool(getattr(settings, "mso_model_enabled", False)),
         )
 
         try:
@@ -119,6 +120,34 @@ class ModelDiscovery:
                 message="v43 model load failed",
             )
 
+        mso_meta = self.model_dir / _MSO_METADATA_FILENAME
+        if mso_meta.is_file() and bool(getattr(settings, "mso_model_enabled", False)):
+            try:
+                mso_node = MarketStateOracleNode.from_metadata_path(mso_meta)
+                await mso_node.initialize()
+                self._handle_discovered_model_mso(mso_node, discovered_models)
+                logger.info(
+                    "model_discovered_mso",
+                    model_name=mso_node.model_name,
+                    model_path=str(mso_meta),
+                )
+            except Exception as exc:
+                failed_models.append(str(mso_meta))
+                failed_reasons.append(f"{mso_meta.name}: {type(exc).__name__}: {exc}")
+                logger.error(
+                    "model_discovery_mso_failed",
+                    model_path=str(mso_meta),
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    exc_info=True,
+                )
+        elif mso_meta.is_file():
+            logger.info(
+                "model_discovery_mso_skipped",
+                reason="MSO_MODEL_ENABLED=false",
+                metadata=str(mso_meta),
+            )
+
         self.registry.record_discovery_summary(
             discovered_models,
             failed_models,
@@ -130,6 +159,23 @@ class ModelDiscovery:
     def _handle_discovered_model(
         self,
         model_node: JackSparrowV43Node,
+        discovered_models: List[str],
+    ) -> None:
+        discovered_models.append(model_node.model_name)
+        if self.auto_register:
+            self.registry.register_model(model_node)
+        else:
+            self.registry.add_pending_model(model_node)
+            logger.info(
+                "model_discovery_pending_model",
+                model_name=model_node.model_name,
+                model_type=model_node.model_type,
+                reason="model_auto_register disabled",
+            )
+
+    def _handle_discovered_model_mso(
+        self,
+        model_node: MarketStateOracleNode,
         discovered_models: List[str],
     ) -> None:
         discovered_models.append(model_node.model_name)

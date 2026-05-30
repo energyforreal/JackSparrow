@@ -354,10 +354,10 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 ### Intelligence Layer Components
 
 #### MCP Model Registry
-- **Responsibility**: Manage all ML model nodes
+- **Responsibility**: Manage all ML model nodes (v43 scalar gate + optional MSO v50 market-state oracle)
 - **Protocol**: MCP Model Protocol
 - **Dependencies**: Model nodes, Performance tracker
-- **Output**: Aggregated model predictions
+- **Output**: Aggregated model predictions; MSO adds `market_state` intelligence per horizon for policy synthesis
 
 #### MCP Reasoning Engine
 - **Responsibility**: Generate structured reasoning chains

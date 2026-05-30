@@ -14,6 +14,19 @@ Single source of truth for **generic** JackSparrow feature names used by legacy 
 
 [`agent/data/feature_server.py`](../agent/data/feature_server.py) uses `FeatureEngineering` (→ `UnifiedFeatureEngine`) for generic MCP feature rows. For **v43 named features** on HTTP/MCP paths without the pickled `feature_engineer`, it uses [`feature_store/jacksparrow_v43_mcp_row.py`](../feature_store/jacksparrow_v43_mcp_row.py) (`build_v43_last_row`), which is kept in lockstep with [`feature_store/jacksparrow_v43_contract.py`](../feature_store/jacksparrow_v43_contract.py) (`V43_CANONICAL_FEATURES`).
 
+## JackSparrow MSO v50 market-state oracle (optional)
+
+**Training notebook:** [`notebooks/jacksparrow_mso_v50_training.ipynb`](../notebooks/jacksparrow_mso_v50_training.ipynb) (Colab: branch **`MAJOR-REWORK-2`**). **Promotion:** copy `metadata_mso_v50.json` + `model_artifact_mso_v50.pkl` into `MODEL_DIR`; set `MSO_MODEL_ENABLED=true`.
+
+| Stage | Location |
+|-------|----------|
+| Structural labels (6 dimensions) | [`feature_store/jacksparrow_mso_labels.py`](../feature_store/jacksparrow_mso_labels.py) |
+| MSO feature extensions + live row | [`feature_store/jacksparrow_mso_feature_extensions.py`](../feature_store/jacksparrow_mso_feature_extensions.py) (`build_mso_last_row`) |
+| Pickle shim | [`agent/models/market_state_shims.py`](../agent/models/market_state_shims.py) |
+| MCP node | [`agent/models/market_state_node.py`](../agent/models/market_state_node.py) |
+
+Strict real-data policy: MSO excludes live-only microstructure features; inference raises `InsufficientRealDataError` on stale/zero OI (no synthetic fallback).
+
 ## JackSparrow v43 closed-bar inference (primary production path)
 
 **Training notebook:** [`notebooks/jacksparrow_v43_delta_india_training.ipynb`](../notebooks/jacksparrow_v43_delta_india_training.ipynb) (Colab: clone branch **`major-rework`**). **Promotion:** copy export into `agent/model_storage/JackSparrow_v43_models_BTCUSD/`, run [`scripts/patch_v43_model_artifact.py`](../scripts/patch_v43_model_artifact.py) — see [ML models — Operational Workflow](../docs/03-ml-models.md#operational-workflow-bundle-first).

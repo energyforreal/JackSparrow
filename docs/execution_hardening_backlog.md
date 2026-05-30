@@ -2,6 +2,12 @@
 
 This backlog tracks gaps called out in the architecture report against the current [`agent/core/execution.py`](../agent/core/execution.py) implementation. Items are ordered roughly by live-trading severity.
 
+## Resolved (MAJOR-REWORK-2)
+
+- **Atomic bracket SL/TP** — `DeltaExchangeClient.place_bracket_order()`; `ExecutionEngine` uses it when `USE_BRACKET_ORDERS=true`.
+- **Fill history** — `DeltaExchangeClient.get_fills()`; `fetch_delta_fills_for_audit()` in adaptive controller.
+- **Rate limiting** — token-bucket `RateLimiter` on public/private Delta API calls in [`agent/data/delta_client.py`](../agent/data/delta_client.py).
+
 ## Critical
 
 1. **Order state machine** — Explicit transitions (`pending` → `open` → `partially_filled` → `filled` / `cancelled` / `rejected`) with a single authority for transitions; align internal `Order` objects with exchange-reported state on every tick or poll.

@@ -24,9 +24,15 @@ This document describes how ML models are managed, uploaded, discovered, and int
 
 ---
 
-## Model Storage Overview
+## Runtime discovery (v43 + optional MSO v50)
 
-JackSparrow stores all trained ML models in the **`agent/model_storage/` directory**. Models are automatically discovered and registered on agent startup through the model discovery system.
+- **v43 (required):** `metadata_v43.json` + `JackSparrowV43Node`
+- **MSO (optional):** `metadata_mso_v50.json` + `MarketStateOracleNode` when `MSO_MODEL_ENABLED=true`
+- **Training:** [`notebooks/jacksparrow_mso_v50_training.ipynb`](../../notebooks/jacksparrow_mso_v50_training.ipynb) on branch `MAJOR-REWORK-2`
+
+---
+
+## Model Storage Overview
 
 ### `agent/models` Redundancy Audit (2026-04-01)
 

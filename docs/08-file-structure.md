@@ -93,6 +93,8 @@ JackSparrow/
 │   ├── jacksparrow_v43_contract.py   # v43 training contract: `V43_CANONICAL_FEATURES`, horizon constant
 │   ├── jacksparrow_v43_build_matrix.py  # `build_v43_feature_matrix` (training + shim transform)
 │   ├── jacksparrow_v43_mcp_row.py     # Ordered MCP feature row builder for v43 inference
+│   ├── jacksparrow_mso_labels.py      # MSO structural label builders (6 dimensions)
+│   ├── jacksparrow_mso_feature_extensions.py  # MSO features + build_mso_last_row
 │   ├── perpetual_features.py          # Perpetual-specific feature computation
 │   └── ...
 │   │   ├── mcp_orchestrator.py         # MCP Orchestrator (NEW - complete implementation)
@@ -109,8 +111,10 @@ JackSparrow/
 │   │   ├── __init__.py
 │   │   ├── mcp_model_node.py          # Base MCP model node interface
 │   │   ├── mcp_model_registry.py      # MCP Model Registry
-│   │   ├── model_discovery.py          # JackSparrow v43 bundle discovery (metadata_v43.json)
-│   │   ├── jack_sparrow_v43_node.py   # v43 MCP model node (+ inference + pickle shims used at load time)
+│   │   ├── model_discovery.py          # v43 + optional MSO discovery
+│   │   ├── jack_sparrow_v43_node.py   # v43 MCP model node
+│   │   ├── market_state_node.py      # MSO v50 market-state oracle node
+│   │   ├── market_state_shims.py     # MSO pickle shim (Colab export)
 │   │   ├── xgboost_node.py            # XGBoost implementation
 │   │   ├── lstm_node.py               # LSTM implementation
 │   │   ├── transformer_node.py        # Transformer implementation
@@ -305,7 +309,7 @@ Each directory has a clear, single responsibility:
 - `agent/scripts/dev_watcher.py` is active in Docker development flow (`Dockerfile.dev`), so it should be retained.
 - `backend/api/websocket/manager.py` is not used by `backend/api/main.py` runtime paths (which use `unified_manager.py`); treat it as legacy until removed.
 - `backend/services/feature_service.py` is currently not imported by backend runtime code paths; remove or wire it explicitly.
-- `notebooks/` holds **`jacksparrow_v43_delta_india_training.ipynb`** (v43 Delta India training, contract-aligned export). Legacy multi-notebook sets were removed; see `docs/03-ml-models.md` for archival bundle notes.
+- `notebooks/` holds **`jacksparrow_v43_delta_india_training.ipynb`** and **`jacksparrow_mso_v50_training.ipynb`** (MSO branch `MAJOR-REWORK-2`). See `docs/03-ml-models.md`.
 
 ### Module Boundaries
 

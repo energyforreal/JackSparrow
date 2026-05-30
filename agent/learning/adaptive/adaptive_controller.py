@@ -565,3 +565,27 @@ async def run_adaptive_retrain_tick(mcp_orchestrator: Optional[Any] = None) -> D
     if any_accepted and mcp_orchestrator is not None:
         refresh = await hot_reload_models(mcp_orchestrator)
     return {"ran": True, "results": results, "refresh_models": refresh}
+
+
+async def fetch_delta_fills_for_audit(
+    delta_client: Any,
+    *,
+    product_ids: Optional[str] = None,
+    start_time: Optional[int] = None,
+    end_time: Optional[int] = None,
+    page_size: int = 100,
+) -> Dict[str, Any]:
+    """Fetch Delta /v2/fills for P&L reconciliation (testnet private API)."""
+    if delta_client is None or not hasattr(delta_client, "get_fills"):
+        return {"success": False, "error": "delta_client.get_fills unavailable"}
+    try:
+        payload = await delta_client.get_fills(
+            product_ids=product_ids,
+            start_time=start_time,
+            end_time=end_time,
+            page_size=page_size,
+        )
+        return {"success": True, "payload": payload}
+    except Exception as exc:
+        logger.warning("adaptive_retrain_fills_fetch_failed", error=str(exc))
+        return {"success": False, "error": str(exc)}

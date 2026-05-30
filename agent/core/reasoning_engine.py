@@ -121,6 +121,15 @@ class MCPReasoningEngine:
         preds = MCPReasoningEngine._get_model_predictions(normalized)
         if preds:
             normalized["model_predictions"] = preds
+        if "market_state" not in normalized:
+            for p in preds:
+                if not isinstance(p, dict):
+                    continue
+                ctx = p.get("context") if isinstance(p.get("context"), dict) else {}
+                ms = ctx.get("market_state")
+                if isinstance(ms, dict) and ms:
+                    normalized["market_state"] = ms
+                    break
         return normalized
 
     @staticmethod

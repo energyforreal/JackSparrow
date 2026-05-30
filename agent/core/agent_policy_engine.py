@@ -28,6 +28,78 @@ _ENTRY_SIGNALS = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
 _POLICY_MODES = frozenset(
     {"ml_only", "thesis_only", "ml_or_thesis", "ml_and_thesis", "thesis_veto_ml"}
 )
+_MOMENTUM_BREAKOUT_STATES = frozenset({"BREAKOUT_FORMING", "BREAKOUT_CONFIRMED"})
+
+
+def synthesize_market_state_intelligence(
+    market_context: Dict[str, Any],
+    *,
+    entry_signal: str = "HOLD",
+) -> Dict[str, Any]:
+    """
+    Apply MSO market-state vetoes/boosts to policy context.
+
+    Returns dict with keys: veto (bool), boost (float), reasons (list), state (dict).
+    """
+    if not bool(getattr(settings, "mso_model_enabled", False)):
+        return {"veto": False, "boost": 0.0, "reasons": [], "state": {}}
+
+    state = market_context.get("market_state")
+    if not isinstance(state, dict):
+        preds = market_context.get("model_predictions") or []
+        if isinstance(preds, list):
+            for p in preds:
+                if not isinstance(p, dict):
+                    continue
+                ctx = p.get("context") if isinstance(p.get("context"), dict) else {}
+                ms = ctx.get("market_state")
+                if isinstance(ms, dict):
+                    state = ms
+                    break
+    if not isinstance(state, dict) or not state:
+        return {"veto": False, "boost": 0.0, "reasons": ["mso_no_state"], "state": {}}
+
+    reasons: List[str] = []
+    veto = False
+    boost = 0.0
+    primary = state.get("intraday_30m") or state.get("scalp_10m") or {}
+    confirm = state.get("trend_1h") or {}
+
+    liq = str(primary.get("liquidity_condition") or "BALANCED")
+    veto_raw = str(getattr(settings, "mso_liquidity_veto_classes", "") or "")
+    veto_classes = {x.strip() for x in veto_raw.split(",") if x.strip()}
+    if liq in veto_classes and entry_signal in _ENTRY_SIGNALS:
+        veto = True
+        reasons.append(f"mso_liquidity_veto:{liq}")
+
+    breakout = str(primary.get("breakout_state") or "NO_BREAKOUT")
+    br_proba = primary.get("breakout_state_proba")
+    br_score = 0.0
+    if isinstance(br_proba, dict):
+        br_score = float(br_proba.get("BREAKOUT_FORMING", 0)) + float(
+            br_proba.get("BREAKOUT_CONFIRMED", 0)
+        )
+    min_br = float(getattr(settings, "mso_breakout_min_prob", 0.55) or 0.55)
+    if entry_signal in _ENTRY_SIGNALS and breakout not in _MOMENTUM_BREAKOUT_STATES:
+        if br_score < min_br:
+            reasons.append(f"mso_breakout_weak:{breakout}:{br_score:.2f}")
+
+    if bool(getattr(settings, "mso_require_trend_regime", False)):
+        trend = str(primary.get("trend_regime") or "RANGE")
+        if trend == "RANGE" and entry_signal in _ENTRY_SIGNALS:
+            veto = True
+            reasons.append("mso_trend_regime_range_veto")
+
+    t30 = str(primary.get("trend_regime") or "")
+    t1h = str(confirm.get("trend_regime") or "")
+    if t30 and t1h and t30 == t1h and "BULL" in t30 and entry_signal in ("BUY", "STRONG_BUY"):
+        boost = 0.05
+        reasons.append("mso_mtf_trend_align_bull")
+    elif t30 and t1h and t30 == t1h and "BEAR" in t30 and entry_signal in ("SELL", "STRONG_SELL"):
+        boost = 0.05
+        reasons.append("mso_mtf_trend_align_bear")
+
+    return {"veto": veto, "boost": boost, "reasons": reasons, "state": state}
 
 
 def conclusion_to_ml_signal_and_size(conclusion: str) -> Tuple[str, float]:
@@ -68,6 +140,7 @@ def build_ml_evidence_from_orchestrator_result(result: Dict[str, Any]) -> MLEvid
             "strategy_candidate",
             "trade_score",
             "market_structure",
+            "market_state",
         ):
             if k in mc:
                 excerpt[k] = mc[k]
@@ -614,6 +687,32 @@ class AgentPolicyEngine:
         regime = ml_evidence.v43_regime or mc.get("regime") or mc.get("v43_regime")
         thesis = self._thesis_engine.evaluate(regime, mc)
         verdict = _fuse_signals(ml_evidence, thesis, mode, conclusion, market_context=mc)
+
+        mso_adj = synthesize_market_state_intelligence(
+            mc, entry_signal=str(verdict.signal or "HOLD")
+        )
+        if mso_adj.get("state"):
+            mc = {**mc, "market_state": mso_adj["state"]}
+        if mso_adj.get("veto") and verdict.signal in _ENTRY_SIGNALS:
+            verdict = verdict.model_copy(
+                update={
+                    "signal": "HOLD",
+                    "position_size": 0.0,
+                    "reason_codes": list(verdict.reason_codes)
+                    + list(mso_adj.get("reasons") or [])
+                    + ["mso_veto"],
+                }
+            )
+        elif mso_adj.get("boost") and verdict.signal in _ENTRY_SIGNALS:
+            verdict = verdict.model_copy(
+                update={
+                    "confidence": min(
+                        1.0, float(verdict.confidence) + float(mso_adj.get("boost") or 0)
+                    ),
+                    "reason_codes": list(verdict.reason_codes)
+                    + list(mso_adj.get("reasons") or []),
+                }
+            )
         memory_scale = _memory_size_scale_from_reasoning(reasoning_chain)
         if memory_scale < 1.0 and verdict.position_size > 0:
             verdict = verdict.model_copy(

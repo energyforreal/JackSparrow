@@ -722,6 +722,47 @@ class Settings(BaseSettings):
             "bundle under MODEL_DIR. Kept for env compat."
         ),
     )
+
+    # JackSparrow MSO v50 market-state oracle (optional alongside v43)
+    mso_model_enabled: bool = Field(
+        default=False,
+        env="MSO_MODEL_ENABLED",
+        description="Load MarketStateOracleNode when metadata_mso_v50.json exists in MODEL_DIR.",
+    )
+    mso_require_trend_regime: bool = Field(
+        default=False,
+        env="MSO_REQUIRE_TREND_REGIME",
+        description="When True, block entries unless intraday_30m trend regime is directional.",
+    )
+    mso_breakout_min_prob: float = Field(
+        default=0.55,
+        env="MSO_BREAKOUT_MIN_PROB",
+        ge=0.0,
+        le=1.0,
+        description="Minimum P(BREAKOUT_FORMING|CONFIRMED) for momentum-style entries.",
+    )
+    mso_liquidity_veto_classes: str = Field(
+        default="STOP_HUNT_ENV,LIQ_SWEEP_ACTIVE",
+        env="MSO_LIQUIDITY_VETO_CLASSES",
+        description="Comma-separated liquidity_condition labels that veto new entries.",
+    )
+    mso_oi_max_staleness_seconds: int = Field(
+        default=600,
+        env="MSO_OI_MAX_STALENESS_SECONDS",
+        ge=60,
+        description="Block MSO inference if OI snapshot older than this (seconds).",
+    )
+    mso_require_real_oi: bool = Field(
+        default=True,
+        env="MSO_REQUIRE_REAL_OI",
+        description="Raise InsufficientRealDataError on zero/stale OI (no synthetic fallback).",
+    )
+    use_bracket_orders: bool = Field(
+        default=True,
+        env="USE_BRACKET_ORDERS",
+        description="Use Delta bracket SL/TP on entry order when stop and target prices are set.",
+    )
+
     jacksparrow_v43_artifact_basename: str = Field(
         default="model_artifact_v43_patched.pkl",
         env="JACKSPARROW_V43_ARTIFACT_BASENAME",
