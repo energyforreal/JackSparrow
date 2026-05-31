@@ -78,3 +78,25 @@ def test_predict_horizon_uses_head_feature_cols():
     row = pd.DataFrame([[1.0, 2.0, 3.0, 4.0]], columns=full_cols)
     out = bundle.predict_horizon("intraday_30m", row.values, X_df=row)
     assert out["trend_regime"] == "RANGE"
+
+
+def test_predict_horizon_infers_trend_cols_without_head_feature_cols():
+    import pandas as pd
+
+    full_cols = ["adx_14", "a", "b", "trend_mom", "hurst_60"]
+    trend_cols = ["a", "b"]
+
+    class _TrendModel(_MockMulticlassModel):
+        n_features_in_ = 2
+        n_features_ = 2
+
+    clf = _TrendModel(pred_code=1, proba=np.array([0.1, 0.8, 0.1]))
+    bundle = MarketStateBundleExport(
+        horizon_models={"intraday_30m": {"trend_regime": clf}},
+        feature_cols=full_cols,
+        state_dimensions=("trend_regime",),
+        class_orders={"intraday_30m:trend_regime": ("BULL", "RANGE", "BEAR")},
+    )
+    row = pd.DataFrame([[1.0, 2.0, 3.0, 4.0, 5.0]], columns=full_cols)
+    out = bundle.predict_horizon("intraday_30m", row.values, X_df=row)
+    assert out["trend_regime"] == "RANGE"

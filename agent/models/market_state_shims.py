@@ -10,6 +10,9 @@ import pandas as pd
 
 from feature_store.jacksparrow_mso_labels import MSO_STATE_DIMENSIONS
 
+# Default trend feature exclusions (must match training notebook MSO_TREND_EXCLUDED_FEATURES).
+_DEFAULT_TREND_EXCLUDED: Tuple[str, ...] = ("adx_14", "trend_mom", "hurst_60")
+
 
 def _unwrap_estimator(model: Any) -> Any:
     """Return inner fitted estimator when wrapped by CalibratedClassifierCV."""
@@ -79,16 +82,43 @@ class MarketStateBundleExport:
         self.head_feature_cols: Dict[str, List[str]] = dict(head_feature_cols or {})
         self.training_metadata: Dict[str, Any] = dict(training_metadata or {})
 
+    def _resolve_head_columns(
+        self,
+        head_key: str,
+        dim: str,
+        model: Any,
+    ) -> List[str]:
+        stored = self.head_feature_cols.get(head_key)
+        if stored:
+            return list(stored)
+        full = list(self.feature_cols)
+        est = _unwrap_estimator(model)
+        n_feat = getattr(est, "n_features_in_", None)
+        if n_feat is None:
+            n_feat = getattr(est, "n_features_", None)
+        if n_feat is None or n_feat == len(full):
+            return full
+        if dim == "trend_regime":
+            cand = [c for c in full if c not in _DEFAULT_TREND_EXCLUDED]
+            if len(cand) == int(n_feat):
+                return cand
+        raise ValueError(
+            f"MSO head {head_key}: model expects {n_feat} features but bundle has "
+            f"{len(full)} and head_feature_cols is missing — re-run training or "
+            f"reload a bundle exported after per-head feature tracking was added."
+        )
+
     def _feature_matrix_for_head(
         self,
         horizon_key: str,
         dim: str,
         X: np.ndarray,
+        model: Any,
         *,
         X_df: Optional[pd.DataFrame] = None,
     ) -> np.ndarray:
         head_key = f"{horizon_key}:{dim}"
-        head_cols = self.head_feature_cols.get(head_key) or self.feature_cols
+        head_cols = self._resolve_head_columns(head_key, dim, model)
         if X_df is not None and len(X_df):
             missing = [c for c in head_cols if c not in X_df.columns]
             if missing:
@@ -122,7 +152,7 @@ class MarketStateBundleExport:
             model = models.get(dim)
             if model is None:
                 continue
-            Xs = self._feature_matrix_for_head(horizon_key, dim, X, X_df=X_df)
+            Xs = self._feature_matrix_for_head(horizon_key, dim, X, model, X_df=X_df)
             proba = np.asarray(model.predict_proba(Xs), dtype=np.float64)
             class_order = self.class_orders.get(f"{horizon_key}:{dim}")
             if not class_order:

@@ -969,6 +969,13 @@ Compare with v43 notebook §4d, which runs regression correlation + simulated va
 code(
     """from sklearn.metrics import classification_report, confusion_matrix
 
+# Rebuild per-head feature lists if validation runs without re-training (or old session).
+if not head_feature_cols:
+    head_feature_cols = {}
+    for _hk, _dims in bundle_dict.items():
+        for _dim in _dims:
+            head_feature_cols[f"{_hk}:{_dim}"] = list(_feature_cols_for_dim(_dim))
+
 mso_bundle_eval = MarketStateBundleExport(
     horizon_models=bundle_dict,
     feature_cols=feat_cols,
@@ -1042,6 +1049,7 @@ for _hk in PRIMARY_HORIZONS:
         continue
     _fb = HORIZON_MAP[_hk]
     _classes = _classes_for_training(_dim)
+    print(f"  (eval classes: {_classes})")
     _y_val = _labels_for_eval(_dim, _fb)
     _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
     if int(_m.sum()) < 20:
