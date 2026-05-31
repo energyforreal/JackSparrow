@@ -8,8 +8,11 @@ import pandas as pd
 from feature_store.jacksparrow_mso_labels import (
     MSO_STATE_DIMENSIONS,
     build_liquidity_condition_labels,
+    build_momentum_quality_labels,
     build_mso_label,
     build_trend_regime_labels,
+    build_vol_regime_labels,
+    build_compression_expansion_labels,
     classes_for_dimension,
 )
 
@@ -107,3 +110,52 @@ def test_liquidity_not_all_balanced():
     balanced_frac = stats["class_counts"]["BALANCED"] / len(labels)
     assert balanced_frac < 0.95
     assert stats["class_counts"]["BALANCED"] > 0
+
+
+def test_vol_regime_uses_real_high_low():
+    n = 250
+    rng = np.random.default_rng(11)
+    close = pd.Series(100 + np.cumsum(rng.normal(0, 0.3, n)))
+    spread = rng.uniform(2.0, 5.0, n)
+    df_wide = pd.DataFrame(
+        {
+            "high": close + spread,
+            "low": close - spread,
+        }
+    )
+    df_narrow = pd.DataFrame({"high": close * 1.0001, "low": close * 0.9999})
+    _, stats_wide = build_vol_regime_labels(df_wide, close, forward_bars=6)
+    _, stats_narrow = build_vol_regime_labels(df_narrow, close, forward_bars=6)
+    labeled_wide = sum(stats_wide["class_counts"].values())
+    labeled_narrow = sum(stats_narrow["class_counts"].values())
+    assert labeled_wide > 0 and labeled_narrow > 0
+    assert stats_wide["class_counts"] != stats_narrow["class_counts"]
+
+
+def test_momentum_else_assigns_healthy():
+    n = 50
+    df = _synthetic_feat(n)
+    df["rsi_14"] = 55.0
+    df["rsi_mom"] = 0.6
+    df["trend_mom"] = 0.001
+    df["oi_price_divergence"] = 0.0
+    labels, _ = build_momentum_quality_labels(df, forward_bars=6)
+    assert labels.iloc[0] == "HEALTHY"
+
+
+def test_compression_post_expansion_exists():
+    n = 300
+    rng = np.random.default_rng(13)
+    close = pd.Series(100 + np.cumsum(rng.normal(0, 0.2, n)))
+    spread = rng.uniform(0.5, 1.5, n)
+    df = _synthetic_feat(n)
+    df["high"] = close + spread
+    df["low"] = close - spread
+    df["bb_width"] = 0.02
+    df.loc[100:150, "bb_width"] = 0.08
+    df.loc[151:200, "bb_width"] = 0.015
+    labels, stats = build_compression_expansion_labels(df, close, forward_bars=12)
+    assert stats["class_counts"].get("POST_EXPANSION", 0) > 0 or stats["class_counts"].get(
+        "PRE_EXPANSION", 0
+    ) > 0
+    assert stats["class_counts"].get("COMPRESSION", 0) < n

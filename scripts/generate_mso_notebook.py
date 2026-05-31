@@ -212,7 +212,8 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import requests
-from sklearn.metrics import balanced_accuracy_score, f1_score
+from sklearn.metrics import balanced_accuracy_score, f1_score, recall_score
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import LabelEncoder
 
 from feature_store.jacksparrow_v43_build_matrix import build_v43_feature_matrix
@@ -551,15 +552,32 @@ MSO_BLOCK_EXPORT_ON_FAIL = os.environ.get("MSO_BLOCK_EXPORT_ON_FAIL", "true").st
     "true",
     "yes",
 )
+MSO_CALIBRATE = os.environ.get("MSO_CALIBRATE", "true").strip().lower() in ("1", "true", "yes")
 PRIMARY_HORIZONS = ("scalp_10m", "intraday_30m")
+_RARE_CLASS_WATCH = (
+    "FAKE_BREAKOUT",
+    "LIQ_SWEEP_ACTIVE",
+    "STRONG_BULL",
+    "STRONG_BEAR",
+    "STOP_HUNT_ENV",
+)
 
+MAX_FORWARD_BARS = max(HORIZON_MAP.values())
+GAP = int(os.environ.get("MSO_SPLIT_GAP_BARS", str(MAX_FORWARD_BARS)))
 split_idx = int(len(df_feat) * (1.0 - VAL_FRAC))
-if split_idx < MIN_TRAIN_ROWS:
-    raise RuntimeError(f"Too few train rows after split: {split_idx}")
+train_end_idx = split_idx - GAP
+if train_end_idx < MIN_TRAIN_ROWS:
+    raise RuntimeError(
+        f"Too few train rows after purge gap: {train_end_idx} (gap={GAP}, split={split_idx})"
+    )
+print(
+    f"Chronological split: train [0,{train_end_idx}) "
+    f"purged [{train_end_idx},{split_idx}) val [{split_idx},{len(df_feat)})"
+)
 
-df_train = df_feat.iloc[:split_idx].copy().reset_index(drop=True)
+df_train = df_feat.iloc[:train_end_idx].copy().reset_index(drop=True)
 df_val = df_feat.iloc[split_idx:].copy().reset_index(drop=True)
-close_train = close.iloc[:split_idx].reset_index(drop=True)
+close_train = close.iloc[:train_end_idx].reset_index(drop=True)
 close_val = close.iloc[split_idx:].reset_index(drop=True)
 
 bundle_dict: dict = {}
@@ -601,6 +619,7 @@ def _val_metrics(y_true_str, y_pred_str, classes: list) -> dict:
     counts = np.array([(yt == c).sum() for c in cls], dtype=float)
     total = float(counts.sum())
     majority_baseline = float(counts.max() / total) if total > 0 else 0.0
+    recalls = recall_score(yt, yp, labels=cls, average=None, zero_division=0)
     return {
         "f1_weighted": float(
             f1_score(yt, yp, labels=cls, average="weighted", zero_division=0)
@@ -610,6 +629,7 @@ def _val_metrics(y_true_str, y_pred_str, classes: list) -> dict:
         "majority_baseline": majority_baseline,
         "pred_mode": str(pd.Series(yp).mode().iloc[0]) if len(yp) else None,
         "true_mode": str(pd.Series(yt).mode().iloc[0]) if len(yt) else None,
+        "recall_per_class": {c: float(r) for c, r in zip(cls, recalls)},
     }
 
 
@@ -655,7 +675,6 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
             callbacks=callbacks if eval_set else None,
         )
         LGB_DEVICE_USED = device
-        return clf
     except Exception as exc:
         if device == "cpu" or not _is_lgb_device_error(exc):
             raise
@@ -668,7 +687,17 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
             callbacks=callbacks if eval_set else None,
         )
         LGB_DEVICE_USED = "cpu"
-        return clf
+
+    calibrated = False
+    if MSO_CALIBRATE and len(X_va) >= 50 and len(set(np.unique(y_va))) >= 2:
+        try:
+            cal = CalibratedClassifierCV(clf, method="isotonic", cv="prefit")
+            cal.fit(X_va, y_va)
+            clf = cal
+            calibrated = True
+        except Exception as exc:
+            print(f"  note: calibration failed ({exc!r}); using uncalibrated model")
+    return clf, calibrated
 
 
 def _run_export_gates() -> list:
@@ -698,12 +727,12 @@ for hk, fb in HORIZON_MAP.items():
     f1_scores[hk] = {}
     for dim in MSO_STATE_DIMENSIONS:
         labels, label_stats = build_mso_label(
-            df_feat, close, dim, fb, train_end_idx=split_idx
+            df_feat, close, dim, fb, train_end_idx=train_end_idx
         )
         classes = list(classes_for_dimension(dim))
         n_class = len(classes)
 
-        y_train = labels.iloc[:split_idx].reset_index(drop=True)
+        y_train = labels.iloc[:train_end_idx].reset_index(drop=True)
         y_val = labels.iloc[split_idx:].reset_index(drop=True)
 
         m_tr = y_train.notna() & y_train.astype(str).isin(classes)
@@ -748,7 +777,7 @@ for hk, fb in HORIZON_MAP.items():
         y_va = le.transform(y_val.loc[m_va].astype(str)) if m_va.any() else np.array([], dtype=int)
         y_va_str = y_val.loc[m_va].astype(str).values if m_va.any() else np.array([], dtype=str)
 
-        model = _fit_classifier(X_tr, y_tr, X_va, y_va, n_class)
+        model, calibrated = _fit_classifier(X_tr, y_tr, X_va, y_va, n_class)
         bundle_dict[hk][dim] = model
         label_encoders[f"{hk}:{dim}"] = {c: int(i) for i, c in enumerate(le.classes_)}
         class_orders[f"{hk}:{dim}"] = tuple(classes)
@@ -756,9 +785,15 @@ for hk, fb in HORIZON_MAP.items():
         if len(y_va_str) >= 10:
             pred_str = _lgb_pred_to_labels(model, model.predict(X_va), tuple(classes))
             metrics = _val_metrics(y_va_str, pred_str, classes)
+            metrics["calibrated"] = calibrated
             f1_scores[hk][dim] = metrics
             if metrics["f1_macro"] <= metrics["majority_baseline"] + 0.02:
                 print(f"  WARNING: {hk}/{dim} trivial/collapsed head (macro F1 ~ majority baseline)")
+            if hk in PRIMARY_HORIZONS:
+                rpc = metrics.get("recall_per_class", {})
+                for rc in _RARE_CLASS_WATCH:
+                    if rc in classes and train_counts.get(rc, 0) >= MIN_CLASS_COUNT:
+                        print(f"  recall {rc}: {rpc.get(rc, 0.0):.3f}")
             print(
                 hk,
                 dim,
@@ -772,6 +807,8 @@ for hk, fb in HORIZON_MAP.items():
                 metrics["pred_mode"],
                 "true",
                 metrics["true_mode"],
+                "calibrated",
+                calibrated,
                 "device",
                 LGB_DEVICE_USED,
             )
@@ -907,7 +944,7 @@ for _hk in PRIMARY_HORIZONS:
     _fb = HORIZON_MAP[_hk]
     _classes = list(classes_for_dimension(_dim))
     _labels, _ = build_mso_label(
-        df_feat, close, _dim, _fb, train_end_idx=split_idx
+        df_feat, close, _dim, _fb, train_end_idx=train_end_idx
     )
     _y_val = _labels.iloc[split_idx:].reset_index(drop=True)
     _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
@@ -922,6 +959,17 @@ for _hk in PRIMARY_HORIZONS:
     _cm = confusion_matrix(_y_true, _y_pred, labels=_classes)
     print(pd.DataFrame(_cm, index=_classes, columns=_classes).to_string())
     print(classification_report(_y_true, _y_pred, labels=_classes, zero_division=0))
+    _mobj = f1_scores.get(_hk, {}).get(_dim)
+    if isinstance(_mobj, dict):
+        _rpc = _mobj.get("recall_per_class", {})
+        _zero = [
+            c
+            for c in _classes
+            if _rpc.get(c, 0.0) == 0.0
+            and sum(1 for yt in _y_true if yt == c) >= MIN_CLASS_COUNT
+        ]
+        if _zero:
+            print(f"  ZERO RECALL (val, train-supported): {_zero}")
 
 # --- 3) Sample oracle snapshot (last 8 validation bars, intraday_30m) ---
 _EVAL_HK = "intraday_30m"
@@ -941,7 +989,7 @@ if _EVAL_HK in bundle_dict:
         for _dim in MSO_STATE_DIMENSIONS:
             _fb = HORIZON_MAP[_EVAL_HK]
             _lab, _ = build_mso_label(
-                df_feat, close, _dim, _fb, train_end_idx=split_idx
+                df_feat, close, _dim, _fb, train_end_idx=train_end_idx
             )
             _actual = _lab.iloc[split_idx + _i]
             if pd.notna(_actual):
@@ -958,7 +1006,7 @@ if _SIM_HK in bundle_dict and _SIM_DIM in bundle_dict[_SIM_HK]:
     _fb = HORIZON_MAP[_SIM_HK]
     _classes = list(classes_for_dimension(_SIM_DIM))
     _trend_lab, _ = build_mso_label(
-        df_feat, close, _SIM_DIM, _fb, train_end_idx=split_idx
+        df_feat, close, _SIM_DIM, _fb, train_end_idx=train_end_idx
     )
     _y_val = _trend_lab.iloc[split_idx:].reset_index(drop=True)
     _m = _y_val.notna() & _y_val.astype(str).isin(_classes)

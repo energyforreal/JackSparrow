@@ -84,12 +84,16 @@ def build_mso_structural_features(
     oi = pd.to_numeric(df_feat.get("oi_zscore", np.nan), errors="coerce")
     if "oi_contracts" in df_feat.columns:
         oi_raw = pd.to_numeric(df_feat["oi_contracts"], errors="coerce")
-        out["oi_velocity"] = oi_raw.diff(1)
-        out["oi_acceleration_mso"] = oi_raw.diff(1).diff(1)
+        oi_vel = oi_raw.pct_change(1).clip(-0.05, 0.05)
+        out["oi_velocity"] = oi_vel
+        out["oi_acceleration_mso"] = oi_vel.diff(1).clip(-0.05, 0.05)
     else:
-        out["oi_velocity"] = oi.diff(1)
+        oi_vel = oi.diff(1)
+        oi_std = oi.rolling(200, min_periods=30).std().replace(0, np.nan)
+        out["oi_velocity"] = (oi_vel / oi_std).clip(-5, 5)
         oi_chg = pd.to_numeric(df_feat.get("oi_change_6", np.nan), errors="coerce")
-        out["oi_acceleration_mso"] = oi_chg.diff(1)
+        oi_acc = oi_chg.diff(1)
+        out["oi_acceleration_mso"] = (oi_acc / oi_std).clip(-5, 5)
 
     upper_wick = h - pd.concat([o, c], axis=1).max(axis=1)
     rng = (h - l).replace(0, np.nan)

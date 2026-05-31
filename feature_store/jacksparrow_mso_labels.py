@@ -84,6 +84,19 @@ def _atr_series(high: pd.Series, low: pd.Series, close: pd.Series, window: int =
     return tr.rolling(window, min_periods=max(2, window // 2)).mean()
 
 
+def _resolve_ohlcv(df_feat: pd.DataFrame, close: pd.Series) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """Resolve high/low/close for ATR; use df_feat OHLCV when present."""
+    c = close.astype(float)
+    if "high" in df_feat.columns and "low" in df_feat.columns:
+        high = pd.to_numeric(df_feat["high"], errors="coerce")
+        low = pd.to_numeric(df_feat["low"], errors="coerce")
+    else:
+        ret = c.pct_change(fill_method=None).fillna(0)
+        high = c * (1 + ret.abs())
+        low = c * (1 - ret.abs())
+    return high, low, c
+
+
 def build_trend_regime_labels(
     df_feat: pd.DataFrame,
     *,
@@ -122,7 +135,7 @@ def build_trend_regime_labels(
             out[i] = "RANGE"
 
     series = pd.Series(out, index=df_feat.index, dtype=object)
-    counts = {c: int((series == c).sum()) for c in TREND_REGIME_CLASSES}
+    counts = {cls: int((series == cls).sum()) for cls in TREND_REGIME_CLASSES}
     stats = {
         "forward_bars": fb,
         "labeled_fraction": float(series.notna().mean()),
@@ -136,6 +149,7 @@ def build_trend_regime_labels(
 
 
 def build_vol_regime_labels(
+    df_feat: pd.DataFrame,
     close: pd.Series,
     *,
     forward_bars: int,
@@ -143,13 +157,9 @@ def build_vol_regime_labels(
     baseline_window: int = 200,
 ) -> Tuple[pd.Series, Dict[str, Any]]:
     """4-class volatility regime from future vs historical ATR."""
-    c = close.astype(float)
-    high = c * 1.001
-    low = c * 0.999
-    if "high" in close.index.names:
-        pass
+    high, low, c = _resolve_ohlcv(df_feat, close)
     fb = int(forward_bars)
-    atr = _atr_series(c, c, c, window=atr_window)
+    atr = _atr_series(high, low, c, window=atr_window)
     n = len(c)
     out = pd.Series(np.nan, index=c.index, dtype=object)
     baseline = atr.rolling(baseline_window, min_periods=50).median()
@@ -174,7 +184,7 @@ def build_vol_regime_labels(
         else:
             out.iloc[i] = "LOW_VOL"
 
-    counts = {c: int((out == c).sum()) for c in VOL_REGIME_CLASSES}
+    counts = {cls: int((out == cls).sum()) for cls in VOL_REGIME_CLASSES}
     return out, {
         "forward_bars": fb,
         "labeled_fraction": float(out.notna().mean()),
@@ -229,7 +239,7 @@ def build_breakout_state_labels(
         else:
             out.iloc[i] = "NO_BREAKOUT"
 
-    counts = {c: int((out == c).sum()) for c in BREAKOUT_CLASSES}
+    counts = {cls: int((out == cls).sum()) for cls in BREAKOUT_CLASSES}
     return out, {
         "forward_bars": fb,
         "labeled_fraction": float(out.notna().mean()),
@@ -275,7 +285,7 @@ def build_liquidity_condition_labels(
             out.append("BALANCED")
 
     series = pd.Series(out, index=df_feat.index, dtype=object)
-    counts = {c: int((series == c).sum()) for c in LIQUIDITY_CLASSES}
+    counts = {cls: int((series == cls).sum()) for cls in LIQUIDITY_CLASSES}
     return series, {"labeled_fraction": 1.0, "class_counts": counts}
 
 
@@ -310,11 +320,13 @@ def build_momentum_quality_labels(
             out[i] = "DIVERGING"
         elif abs(rm) < 0.25:
             out[i] = "WEAK"
+        elif t * (r - 50) > 0:
+            out[i] = "HEALTHY"
         else:
             out[i] = "WEAK"
 
     series = pd.Series(out, index=df_feat.index, dtype=object)
-    counts = {c: int((series == c).sum()) for c in MOMENTUM_CLASSES}
+    counts = {cls: int((series == cls).sum()) for cls in MOMENTUM_CLASSES}
     return series, {
         "forward_bars": fb,
         "labeled_fraction": float(series.notna().mean()),
@@ -329,7 +341,7 @@ def build_compression_expansion_labels(
     forward_bars: int,
 ) -> Tuple[pd.Series, Dict[str, Any]]:
     """Compression/expansion cycle from BB width percentile and future ATR."""
-    c = close.astype(float)
+    high, low, c = _resolve_ohlcv(df_feat, close)
     bb_w = pd.to_numeric(df_feat.get("bb_width", np.nan), errors="coerce")
     atr_pct = pd.to_numeric(df_feat.get("atr_pct", np.nan), errors="coerce")
     fb = int(forward_bars)
@@ -338,7 +350,7 @@ def build_compression_expansion_labels(
         lambda x: float((x.iloc[-1] <= x).mean()) if len(x) else np.nan,
         raw=False,
     )
-    atr = _atr_series(c, c, c)
+    atr = _atr_series(high, low, c)
     out = pd.Series(np.nan, index=c.index, dtype=object)
 
     for i in range(n - fb):
@@ -356,12 +368,16 @@ def build_compression_expansion_labels(
             out.iloc[i] = "EXPANSION"
         elif exp_ratio < 0.9 and np.isfinite(pct) and pct > 0.7:
             out.iloc[i] = "POST_EXPANSION"
-        elif np.isfinite(pct) and pct < 0.25 and (not np.isfinite(ap) or ap < 0.5):
+        elif exp_ratio > 1.05 and np.isfinite(pct) and pct < 0.40:
+            out.iloc[i] = "PRE_EXPANSION"
+        elif exp_ratio < 0.95 and np.isfinite(pct) and pct > 0.55:
+            out.iloc[i] = "POST_EXPANSION"
+        elif np.isfinite(pct) and pct < 0.25:
             out.iloc[i] = "COMPRESSION"
         else:
-            out.iloc[i] = "COMPRESSION"
+            out.iloc[i] = "PRE_EXPANSION"
 
-    counts = {c: int((out == c).sum()) for c in COMPRESSION_CLASSES}
+    counts = {cls: int((out == cls).sum()) for cls in COMPRESSION_CLASSES}
     return out, {
         "forward_bars": fb,
         "labeled_fraction": float(out.notna().mean()),
@@ -370,7 +386,9 @@ def build_compression_expansion_labels(
 
 
 _LABEL_BUILDERS = {
-    "vol_regime": lambda df, close, fb: build_vol_regime_labels(close, forward_bars=fb),
+    "vol_regime": lambda df, close, fb: build_vol_regime_labels(
+        df, close, forward_bars=fb
+    ),
     "breakout_state": lambda df, close, fb: build_breakout_state_labels(
         df, close, forward_bars=fb
     ),
