@@ -602,6 +602,7 @@ close_val = close.iloc[split_idx:].reset_index(drop=True)
 bundle_dict: dict = {}
 label_encoders: dict = {}
 class_orders: dict = {}
+head_feature_cols: dict = {}
 f1_scores: dict = {}
 class_balance_rows: list = []
 export_gate_results: list = []
@@ -866,6 +867,7 @@ for hk, fb in HORIZON_MAP.items():
         bundle_dict[hk][dim] = model
         label_encoders[f"{hk}:{dim}"] = {c: int(i) for i, c in enumerate(le.classes_)}
         class_orders[f"{hk}:{dim}"] = tuple(classes)
+        head_feature_cols[f"{hk}:{dim}"] = list(dim_feat_cols)
 
         if len(y_va_str) >= 10:
             pred_str = _lgb_pred_to_labels(model, model.predict(X_va), tuple(classes))
@@ -973,8 +975,16 @@ mso_bundle_eval = MarketStateBundleExport(
     state_dimensions=MSO_STATE_DIMENSIONS,
     label_encoders=label_encoders,
     class_orders=class_orders,
+    head_feature_cols=head_feature_cols,
     training_metadata={"f1_scores": f1_scores},
 )
+
+
+def _labels_for_eval(dim: str, fb: int) -> pd.Series:
+    _lab, _ = build_mso_label(df_feat, close, dim, fb, train_end_idx=train_end_idx)
+    if dim == "trend_regime" and MSO_TREND_3CLASS:
+        _lab = collapse_trend_regime_labels(_lab)
+    return _lab.iloc[split_idx:].reset_index(drop=True)
 
 
 def _trend_position(label: str) -> int:
@@ -1031,16 +1041,14 @@ for _hk in PRIMARY_HORIZONS:
         print(f"SKIP confusion {_hk}/{_dim}: model missing")
         continue
     _fb = HORIZON_MAP[_hk]
-    _classes = list(classes_for_dimension(_dim))
-    _labels, _ = build_mso_label(
-        df_feat, close, _dim, _fb, train_end_idx=train_end_idx
-    )
-    _y_val = _labels.iloc[split_idx:].reset_index(drop=True)
+    _classes = _classes_for_training(_dim)
+    _y_val = _labels_for_eval(_dim, _fb)
     _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
     if int(_m.sum()) < 20:
         print(f"SKIP confusion {_hk}/{_dim}: too few val rows")
         continue
-    _X = df_val.loc[_m, feat_cols].to_numpy(dtype=np.float64)
+    _dim_cols = _feature_cols_for_dim(_dim)
+    _X = df_val.loc[_m, _dim_cols].to_numpy(dtype=np.float64)
     _model = bundle_dict[_hk][_dim]
     _y_true = _y_val.loc[_m].astype(str).values
     _y_pred = _lgb_pred_to_labels(_model, _model.predict(_X), tuple(_classes))
@@ -1070,13 +1078,15 @@ if _EVAL_HK in bundle_dict:
     if not _has_trend:
         print(f"Sample oracle: {_EVAL_HK}/{_EVAL_DIM} model missing — trend_pred=N/A")
     for _i in range(_start, len(df_val)):
-        _x = df_val.iloc[[_i]][feat_cols]
-        _state = mso_bundle_eval.predict_horizon(_EVAL_HK, _x.values, X_df=_x)
+        _x_full = df_val.iloc[[_i]][feat_cols]
+        _state = mso_bundle_eval.predict_horizon(_EVAL_HK, _x_full.values, X_df=_x_full)
         if _has_trend:
+            _trend_cols = _feature_cols_for_dim(_EVAL_DIM)
+            _x_trend = df_val.iloc[[_i]][_trend_cols]
             _trend_model = bundle_dict[_EVAL_HK][_EVAL_DIM]
             _trend_pred = _lgb_pred_to_labels(
                 _trend_model,
-                _trend_model.predict(_x.to_numpy(dtype=np.float64)),
+                _trend_model.predict(_x_trend.to_numpy(dtype=np.float64)),
                 class_orders[f"{_EVAL_HK}:{_EVAL_DIM}"],
             )[0]
         else:
@@ -1084,17 +1094,17 @@ if _EVAL_HK in bundle_dict:
         _row = {"bar": _i, "trend_pred": _trend_pred}
         for _dim in MSO_STATE_DIMENSIONS:
             _fb = HORIZON_MAP[_EVAL_HK]
-            _lab, _ = build_mso_label(
-                df_feat, close, _dim, _fb, train_end_idx=train_end_idx
-            )
-            _actual = _lab.iloc[split_idx + _i]
+            _lab = _labels_for_eval(_dim, _fb)
+            _actual = _lab.iloc[_i]
             if pd.notna(_actual):
                 _row[f"{_dim}_actual"] = str(_actual)
             if _dim in bundle_dict.get(_EVAL_HK, {}):
                 _pred_model = bundle_dict[_EVAL_HK][_dim]
+                _dim_cols = _feature_cols_for_dim(_dim)
+                _x_dim = df_val.iloc[[_i]][_dim_cols]
                 _pred = _lgb_pred_to_labels(
                     _pred_model,
-                    _pred_model.predict(_x.to_numpy(dtype=np.float64)),
+                    _pred_model.predict(_x_dim.to_numpy(dtype=np.float64)),
                     class_orders[f"{_EVAL_HK}:{_dim}"],
                 )[0]
                 _row[f"{_dim}_pred"] = _pred
@@ -1110,13 +1120,11 @@ _SIM_HK = "intraday_30m"
 _SIM_DIM = "trend_regime"
 if _SIM_HK in bundle_dict and _SIM_DIM in bundle_dict[_SIM_HK]:
     _fb = HORIZON_MAP[_SIM_HK]
-    _classes = list(classes_for_dimension(_SIM_DIM))
-    _trend_lab, _ = build_mso_label(
-        df_feat, close, _SIM_DIM, _fb, train_end_idx=train_end_idx
-    )
-    _y_val = _trend_lab.iloc[split_idx:].reset_index(drop=True)
+    _classes = _classes_for_training(_SIM_DIM)
+    _y_val = _labels_for_eval(_SIM_DIM, _fb)
     _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
-    _X = df_val.loc[_m, feat_cols].to_numpy(dtype=np.float64)
+    _sim_cols = _feature_cols_for_dim(_SIM_DIM)
+    _X = df_val.loc[_m, _sim_cols].to_numpy(dtype=np.float64)
     _close_v = close_val.loc[_m].reset_index(drop=True)
     _fwd = (_close_v.shift(-_fb) / _close_v - 1.0).iloc[: len(_X) - _fb]
     _sim_model = bundle_dict[_SIM_HK][_SIM_DIM]
@@ -1201,6 +1209,7 @@ mso_bundle = MarketStateBundleExport(
     state_dimensions=MSO_STATE_DIMENSIONS,
     label_encoders=label_encoders,
     class_orders=class_orders,
+    head_feature_cols=head_feature_cols,
     training_metadata={
         "f1_scores": f1_scores,
         "export_gate_results": export_gate_results,

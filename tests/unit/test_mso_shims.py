@@ -60,3 +60,21 @@ def test_proba_to_label_map_string_keys():
     assert prob_map["NO_BREAKOUT"] == 0.7
     assert prob_map["BREAKOUT_FORMING"] == 0.3
     assert "0" not in prob_map
+
+
+def test_predict_horizon_uses_head_feature_cols():
+    import pandas as pd
+
+    full_cols = ["a", "b", "c", "d"]
+    trend_cols = ["a", "b", "c"]
+    clf = _MockMulticlassModel(pred_code=1, proba=np.array([0.1, 0.8, 0.1]))
+    bundle = MarketStateBundleExport(
+        horizon_models={"intraday_30m": {"trend_regime": clf}},
+        feature_cols=full_cols,
+        state_dimensions=("trend_regime",),
+        class_orders={"intraday_30m:trend_regime": ("BULL", "RANGE", "BEAR")},
+        head_feature_cols={"intraday_30m:trend_regime": trend_cols},
+    )
+    row = pd.DataFrame([[1.0, 2.0, 3.0, 4.0]], columns=full_cols)
+    out = bundle.predict_horizon("intraday_30m", row.values, X_df=row)
+    assert out["trend_regime"] == "RANGE"

@@ -66,6 +66,7 @@ class MarketStateBundleExport:
         state_dimensions: Optional[Tuple[str, ...]] = None,
         label_encoders: Optional[Dict[str, Dict[str, int]]] = None,
         class_orders: Optional[Dict[str, Tuple[str, ...]]] = None,
+        head_feature_cols: Optional[Dict[str, List[str]]] = None,
         training_metadata: Optional[Dict[str, Any]] = None,
     ):
         self.horizon_models: Dict[str, Dict[str, Any]] = dict(horizon_models or {})
@@ -75,7 +76,37 @@ class MarketStateBundleExport:
         )
         self.label_encoders: Dict[str, Dict[str, int]] = dict(label_encoders or {})
         self.class_orders: Dict[str, Tuple[str, ...]] = dict(class_orders or {})
+        self.head_feature_cols: Dict[str, List[str]] = dict(head_feature_cols or {})
         self.training_metadata: Dict[str, Any] = dict(training_metadata or {})
+
+    def _feature_matrix_for_head(
+        self,
+        horizon_key: str,
+        dim: str,
+        X: np.ndarray,
+        *,
+        X_df: Optional[pd.DataFrame] = None,
+    ) -> np.ndarray:
+        head_key = f"{horizon_key}:{dim}"
+        head_cols = self.head_feature_cols.get(head_key) or self.feature_cols
+        if X_df is not None and len(X_df):
+            missing = [c for c in head_cols if c not in X_df.columns]
+            if missing:
+                raise ValueError(
+                    f"MSO head {head_key} missing features: {missing[:8]}"
+                )
+            return X_df.loc[:, head_cols].to_numpy(dtype=np.float64)
+        Xs = np.asarray(X, dtype=np.float64)
+        if Xs.ndim == 1:
+            Xs = Xs.reshape(1, -1)
+        if len(head_cols) == Xs.shape[1]:
+            return Xs
+        if self.feature_cols and Xs.shape[1] == len(self.feature_cols):
+            idx = [self.feature_cols.index(c) for c in head_cols]
+            return Xs[:, idx]
+        raise ValueError(
+            f"MSO head {head_key}: expected {len(head_cols)} features, got {Xs.shape[1]}"
+        )
 
     def predict_horizon(
         self,
@@ -87,13 +118,11 @@ class MarketStateBundleExport:
         """Run all state heads for one horizon; return labels + probas."""
         models = self.horizon_models.get(horizon_key) or {}
         out: Dict[str, Any] = {}
-        Xs = np.asarray(X, dtype=np.float64)
-        if X_df is not None and len(X_df):
-            Xs = X_df.values
         for dim in self.state_dimensions:
             model = models.get(dim)
             if model is None:
                 continue
+            Xs = self._feature_matrix_for_head(horizon_key, dim, X, X_df=X_df)
             proba = np.asarray(model.predict_proba(Xs), dtype=np.float64)
             class_order = self.class_orders.get(f"{horizon_key}:{dim}")
             if not class_order:
