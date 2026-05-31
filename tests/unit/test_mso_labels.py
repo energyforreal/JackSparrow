@@ -9,6 +9,7 @@ from feature_store.jacksparrow_mso_labels import (
     MSO_STATE_DIMENSIONS,
     build_liquidity_condition_labels,
     build_mso_label,
+    build_trend_regime_labels,
     classes_for_dimension,
 )
 
@@ -52,3 +53,14 @@ def test_build_mso_label_dispatch():
     for dim in MSO_STATE_DIMENSIONS:
         labels, _ = build_mso_label(df, close, dim, 6)
         assert len(classes_for_dimension(dim)) >= 4
+
+
+def test_trend_train_end_idx_changes_adx_thresholds():
+    n = 400
+    df = _synthetic_feat(n)
+    df.loc[:200, "adx_14"] = 10.0
+    df.loc[201:, "adx_14"] = 45.0
+    _, stats_full = build_trend_regime_labels(df, forward_bars=6)
+    _, stats_train = build_trend_regime_labels(df, forward_bars=6, train_end_idx=200)
+    assert stats_full["adx_thr_strong"] != stats_train["adx_thr_strong"]
+    assert stats_train["train_end_idx"] == 200

@@ -212,7 +212,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import requests
-from sklearn.metrics import f1_score
+from sklearn.metrics import balanced_accuracy_score, f1_score
 from sklearn.preprocessing import LabelEncoder
 
 from feature_store.jacksparrow_v43_build_matrix import build_v43_feature_matrix
@@ -542,7 +542,16 @@ code(
     """HORIZON_MAP = horizon_keys_and_bars()
 VAL_FRAC = float(os.environ.get("MSO_VALIDATION_FRACTION", "0.20"))
 MIN_TRAIN_ROWS = int(os.environ.get("MSO_MIN_TRAIN_ROWS", "5000"))
-MIN_F1_EXPORT = float(os.environ.get("MSO_MIN_F1_EXPORT", "0.35"))
+MIN_CLASS_COUNT = int(os.environ.get("MSO_MIN_CLASS_COUNT", "50"))
+MSO_MIN_F1_MACRO = float(os.environ.get("MSO_MIN_F1_MACRO", "0.40"))
+MSO_MIN_BALANCED_ACC = float(os.environ.get("MSO_MIN_BALANCED_ACC", "0.35"))
+MSO_MIN_F1_MACRO_TREND = float(os.environ.get("MSO_MIN_F1_MACRO_TREND", "0.50"))
+MSO_BLOCK_EXPORT_ON_FAIL = os.environ.get("MSO_BLOCK_EXPORT_ON_FAIL", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PRIMARY_HORIZONS = ("scalp_10m", "intraday_30m")
 
 split_idx = int(len(df_feat) * (1.0 - VAL_FRAC))
 if split_idx < MIN_TRAIN_ROWS:
@@ -557,7 +566,51 @@ bundle_dict: dict = {}
 label_encoders: dict = {}
 class_orders: dict = {}
 f1_scores: dict = {}
+class_balance_rows: list = []
+export_gate_results: list = []
 LGB_DEVICE_USED = LGB_DEVICE
+
+
+def _class_counts(series: pd.Series, classes: list) -> dict:
+    s = series.dropna().astype(str)
+    return {c: int((s == c).sum()) for c in classes}
+
+
+def _lgb_pred_to_labels(model, pred_codes, class_order: tuple) -> np.ndarray:
+    order = list(class_order)
+    lgb_classes = list(getattr(model, "classes_", []))
+    names = []
+    for p in np.atleast_1d(pred_codes):
+        code = int(p)
+        if lgb_classes and code >= len(order):
+            if code < len(lgb_classes):
+                code = int(lgb_classes[code])
+        if 0 <= code < len(order):
+            names.append(order[code])
+        elif str(code) in order:
+            names.append(str(code))
+        else:
+            names.append(str(code))
+    return np.array(names, dtype=object)
+
+
+def _val_metrics(y_true_str, y_pred_str, classes: list) -> dict:
+    yt = np.asarray(y_true_str, dtype=str)
+    yp = np.asarray(y_pred_str, dtype=str)
+    cls = list(classes)
+    counts = np.array([(yt == c).sum() for c in cls], dtype=float)
+    total = float(counts.sum())
+    majority_baseline = float(counts.max() / total) if total > 0 else 0.0
+    return {
+        "f1_weighted": float(
+            f1_score(yt, yp, labels=cls, average="weighted", zero_division=0)
+        ),
+        "f1_macro": float(f1_score(yt, yp, labels=cls, average="macro", zero_division=0)),
+        "balanced_accuracy": float(balanced_accuracy_score(yt, yp)),
+        "majority_baseline": majority_baseline,
+        "pred_mode": str(pd.Series(yp).mode().iloc[0]) if len(yp) else None,
+        "true_mode": str(pd.Series(yt).mode().iloc[0]) if len(yt) else None,
+    }
 
 
 def _is_lgb_device_error(exc: BaseException) -> bool:
@@ -571,7 +624,6 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
     eval_set = None
     tr_u = set(np.unique(y_tr))
     va_u = set(np.unique(y_va)) if len(y_va) else set()
-    # Early stopping requires every val class to appear in train (LightGBM/sklearn check)
     if len(X_va) >= 50 and len(va_u) >= 2 and va_u.issubset(tr_u):
         eval_set = [(X_va, y_va)]
         callbacks = [lgb.early_stopping(50, verbose=False)]
@@ -619,11 +671,35 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
         return clf
 
 
+def _run_export_gates() -> list:
+    failures = []
+    for hk in PRIMARY_HORIZONS:
+        for dim in MSO_STATE_DIMENSIONS:
+            metrics = f1_scores.get(hk, {}).get(dim)
+            if not isinstance(metrics, dict):
+                failures.append(f"{hk}/{dim}: no metrics (head skipped or insufficient val)")
+                continue
+            f1m = float(metrics.get("f1_macro", 0.0))
+            bal = float(metrics.get("balanced_accuracy", 0.0))
+            min_f1 = MSO_MIN_F1_MACRO_TREND if dim == "trend_regime" else MSO_MIN_F1_MACRO
+            if f1m < min_f1:
+                failures.append(f"{hk}/{dim}: f1_macro {f1m:.3f} < {min_f1:.3f}")
+            if bal < MSO_MIN_BALANCED_ACC:
+                failures.append(
+                    f"{hk}/{dim}: balanced_accuracy {bal:.3f} < {MSO_MIN_BALANCED_ACC:.3f}"
+                )
+    export_gate_results.clear()
+    export_gate_results.extend(failures)
+    return failures
+
+
 for hk, fb in HORIZON_MAP.items():
     bundle_dict[hk] = {}
     f1_scores[hk] = {}
     for dim in MSO_STATE_DIMENSIONS:
-        labels, _stats = build_mso_label(df_feat, close, dim, fb)
+        labels, label_stats = build_mso_label(
+            df_feat, close, dim, fb, train_end_idx=split_idx
+        )
         classes = list(classes_for_dimension(dim))
         n_class = len(classes)
 
@@ -631,49 +707,120 @@ for hk, fb in HORIZON_MAP.items():
         y_val = labels.iloc[split_idx:].reset_index(drop=True)
 
         m_tr = y_train.notna() & y_train.astype(str).isin(classes)
+        m_va = y_val.notna() & y_val.astype(str).isin(classes)
+        train_counts = _class_counts(y_train.loc[m_tr], classes)
+        val_counts = _class_counts(y_val.loc[m_va], classes)
+        class_balance_rows.append(
+            {
+                "horizon": hk,
+                "dimension": dim,
+                "train_counts": train_counts,
+                "val_counts": val_counts,
+            }
+        )
+        n_train_classes = sum(1 for c in classes if train_counts.get(c, 0) >= MIN_CLASS_COUNT)
         if int(m_tr.sum()) < 100:
             print(f"SKIP {hk}/{dim}: too few train labels ({int(m_tr.sum())})")
             continue
+        if n_train_classes < 2:
+            print(
+                f"SKIP {hk}/{dim}: fewer than 2 train classes with >={MIN_CLASS_COUNT} samples "
+                f"(train={train_counts})"
+            )
+            continue
+
+        if hk in PRIMARY_HORIZONS:
+            print(f"{hk} {dim} train: {train_counts} val: {val_counts}")
+        val_unique = sum(1 for c in classes if val_counts.get(c, 0) > 0)
+        if val_unique <= 1:
+            print(f"  WARNING: {hk}/{dim} single-class val — F1 not meaningful")
 
         le = LabelEncoder()
         le.fit(classes)
         X_tr = df_train.loc[m_tr, feat_cols].to_numpy(dtype=np.float64)
         y_tr = le.transform(y_train.loc[m_tr].astype(str))
 
-        m_va = y_val.notna() & y_val.astype(str).isin(classes)
-        X_va = df_val.loc[m_va, feat_cols].to_numpy(dtype=np.float64) if m_va.any() else np.empty((0, len(feat_cols)))
+        X_va = (
+            df_val.loc[m_va, feat_cols].to_numpy(dtype=np.float64)
+            if m_va.any()
+            else np.empty((0, len(feat_cols)))
+        )
         y_va = le.transform(y_val.loc[m_va].astype(str)) if m_va.any() else np.array([], dtype=int)
+        y_va_str = y_val.loc[m_va].astype(str).values if m_va.any() else np.array([], dtype=str)
 
         model = _fit_classifier(X_tr, y_tr, X_va, y_va, n_class)
         bundle_dict[hk][dim] = model
         label_encoders[f"{hk}:{dim}"] = {c: int(i) for i, c in enumerate(le.classes_)}
         class_orders[f"{hk}:{dim}"] = tuple(classes)
 
-        if len(y_va) >= 10:
-            pred = model.predict(X_va)
-            f1 = float(
-                f1_score(
-                    y_va,
-                    pred,
-                    average="weighted",
-                    labels=list(range(n_class)),
-                    zero_division=0,
-                )
+        if len(y_va_str) >= 10:
+            pred_str = _lgb_pred_to_labels(model, model.predict(X_va), tuple(classes))
+            metrics = _val_metrics(y_va_str, pred_str, classes)
+            f1_scores[hk][dim] = metrics
+            if metrics["f1_macro"] <= metrics["majority_baseline"] + 0.02:
+                print(f"  WARNING: {hk}/{dim} trivial/collapsed head (macro F1 ~ majority baseline)")
+            print(
+                hk,
+                dim,
+                "F1w",
+                round(metrics["f1_weighted"], 4),
+                "F1macro",
+                round(metrics["f1_macro"], 4),
+                "bal_acc",
+                round(metrics["balanced_accuracy"], 4),
+                "pred",
+                metrics["pred_mode"],
+                "true",
+                metrics["true_mode"],
+                "device",
+                LGB_DEVICE_USED,
             )
-            f1_scores[hk][dim] = f1
-            print(hk, dim, "val F1", round(f1, 4), "device", LGB_DEVICE_USED)
         else:
             f1_scores[hk][dim] = None
             print(hk, dim, "val skipped (insufficient val rows)")
 
 print("Training completed on device:", LGB_DEVICE_USED)
 
-# Export gate (primary horizons)
-for hk in ("scalp_10m", "intraday_30m"):
-    for dim in MSO_STATE_DIMENSIONS:
-        sc = f1_scores.get(hk, {}).get(dim)
-        if sc is not None and sc < MIN_F1_EXPORT:
-            print(f"WARNING: {hk}/{dim} F1 {sc:.3f} below MIN_F1_EXPORT {MIN_F1_EXPORT}")
+_gate_failures = _run_export_gates()
+if _gate_failures:
+    print("\\nExport gate failures (primary horizons):")
+    for _msg in _gate_failures:
+        print(" ", _msg)
+else:
+    print("\\nExport gates: all primary-horizon checks passed")
+"""
+)
+
+md(
+    """## Label and class balance audit (primary horizons)
+
+Train/val class counts logged during training for `scalp_10m` and `intraday_30m`. Skipped heads have fewer than two classes with sufficient train samples.
+"""
+)
+
+code(
+    """_audit_rows = []
+for row in class_balance_rows:
+    if row["horizon"] not in PRIMARY_HORIZONS:
+        continue
+    tr = row["train_counts"]
+    va = row["val_counts"]
+    _audit_rows.append(
+        {
+            "horizon": row["horizon"],
+            "dimension": row["dimension"],
+            "train_n": sum(tr.values()),
+            "val_n": sum(va.values()),
+            "train_classes": sum(1 for v in tr.values() if v > 0),
+            "val_classes": sum(1 for v in va.values() if v > 0),
+            "train_top": max(tr, key=tr.get) if tr else None,
+            "val_top": max(va, key=va.get) if va else None,
+        }
+    )
+if _audit_rows:
+    print(pd.DataFrame(_audit_rows).to_string(index=False))
+else:
+    print("No class balance rows (run training cell first)")
 """
 )
 
@@ -704,14 +851,6 @@ mso_bundle_eval = MarketStateBundleExport(
 )
 
 
-def _label_from_code(hk: str, dim: str, code) -> str:
-    order = class_orders.get(f"{hk}:{dim}") or classes_for_dimension(dim)
-    idx = int(code)
-    if 0 <= idx < len(order):
-        return str(order[idx])
-    return str(code)
-
-
 def _trend_position(label: str) -> int:
     if label in ("STRONG_BULL", "WEAK_BULL"):
         return 1
@@ -720,36 +859,65 @@ def _trend_position(label: str) -> int:
     return 0
 
 
-# --- 1) F1 summary table ---
+# --- 1) Recomputed metrics summary table ---
 _rows = []
 for hk in HORIZON_MAP:
     for dim in MSO_STATE_DIMENSIONS:
-        sc = f1_scores.get(hk, {}).get(dim)
-        _rows.append({"horizon": hk, "dimension": dim, "val_f1": sc})
-summary_df = pd.DataFrame(_rows)
+        metrics = f1_scores.get(hk, {}).get(dim)
+        if isinstance(metrics, dict):
+            _rows.append(
+                {
+                    "horizon": hk,
+                    "dimension": dim,
+                    "f1_weighted": metrics.get("f1_weighted"),
+                    "f1_macro": metrics.get("f1_macro"),
+                    "bal_acc": metrics.get("balanced_accuracy"),
+                    "maj_baseline": metrics.get("majority_baseline"),
+                }
+            )
+        else:
+            _rows.append(
+                {
+                    "horizon": hk,
+                    "dimension": dim,
+                    "f1_weighted": None,
+                    "f1_macro": None,
+                    "bal_acc": None,
+                    "maj_baseline": None,
+                }
+            )
+_recomp_df = pd.DataFrame(_rows)
 print("=" * 72)
-print("MSO validation F1 (chronological holdout, weighted)")
+print("MSO validation metrics (chronological holdout, string labels)")
 print("=" * 72)
-print(summary_df.pivot(index="dimension", columns="horizon", values="val_f1").round(4).to_string())
+print(
+    _recomp_df.pivot(index="dimension", columns="horizon", values="f1_macro")
+    .round(4)
+    .to_string()
+)
+print("\\nBalanced accuracy:")
+print(_recomp_df.pivot(index="dimension", columns="horizon", values="bal_acc").round(4).to_string())
 
 # --- 2) Trend regime confusion matrices ---
-for _hk in ("scalp_10m", "intraday_30m"):
+for _hk in PRIMARY_HORIZONS:
     _dim = "trend_regime"
     if _hk not in bundle_dict or _dim not in bundle_dict[_hk]:
         print(f"SKIP confusion {_hk}/{_dim}: model missing")
         continue
     _fb = HORIZON_MAP[_hk]
     _classes = list(classes_for_dimension(_dim))
-    _labels, _ = build_mso_label(df_feat, close, _dim, _fb)
+    _labels, _ = build_mso_label(
+        df_feat, close, _dim, _fb, train_end_idx=split_idx
+    )
     _y_val = _labels.iloc[split_idx:].reset_index(drop=True)
     _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
     if int(_m.sum()) < 20:
         print(f"SKIP confusion {_hk}/{_dim}: too few val rows")
         continue
     _X = df_val.loc[_m, feat_cols].to_numpy(dtype=np.float64)
-    _pred = bundle_dict[_hk][_dim].predict(_X)
+    _model = bundle_dict[_hk][_dim]
     _y_true = _y_val.loc[_m].astype(str).values
-    _y_pred = np.array([_label_from_code(_hk, _dim, c) for c in _pred])
+    _y_pred = _lgb_pred_to_labels(_model, _model.predict(_X), tuple(_classes))
     print("\\n", _hk, _dim, "confusion matrix (rows=actual, cols=pred)")
     _cm = confusion_matrix(_y_true, _y_pred, labels=_classes)
     print(pd.DataFrame(_cm, index=_classes, columns=_classes).to_string())
@@ -763,13 +931,18 @@ if _EVAL_HK in bundle_dict:
     for _i in range(_start, len(df_val)):
         _x = df_val.iloc[[_i]][feat_cols]
         _state = mso_bundle_eval.predict_horizon(_EVAL_HK, _x.values, X_df=_x)
-        _row = {
-            "bar": _i,
-            "trend_pred": _label_from_code(_EVAL_HK, "trend_regime", _state.get("trend_regime")),
-        }
+        _trend_model = bundle_dict[_EVAL_HK]["trend_regime"]
+        _trend_pred = _lgb_pred_to_labels(
+            _trend_model,
+            _trend_model.predict(_x.to_numpy(dtype=np.float64)),
+            class_orders[f"{_EVAL_HK}:trend_regime"],
+        )[0]
+        _row = {"bar": _i, "trend_pred": _trend_pred}
         for _dim in MSO_STATE_DIMENSIONS:
             _fb = HORIZON_MAP[_EVAL_HK]
-            _lab, _ = build_mso_label(df_feat, close, _dim, _fb)
+            _lab, _ = build_mso_label(
+                df_feat, close, _dim, _fb, train_end_idx=split_idx
+            )
             _actual = _lab.iloc[split_idx + _i]
             if pd.notna(_actual):
                 _row[f"{_dim}_actual"] = str(_actual)
@@ -784,47 +957,67 @@ _SIM_DIM = "trend_regime"
 if _SIM_HK in bundle_dict and _SIM_DIM in bundle_dict[_SIM_HK]:
     _fb = HORIZON_MAP[_SIM_HK]
     _classes = list(classes_for_dimension(_SIM_DIM))
-    _trend_lab, _ = build_mso_label(df_feat, close, _SIM_DIM, _fb)
+    _trend_lab, _ = build_mso_label(
+        df_feat, close, _SIM_DIM, _fb, train_end_idx=split_idx
+    )
     _y_val = _trend_lab.iloc[split_idx:].reset_index(drop=True)
     _m = _y_val.notna() & _y_val.astype(str).isin(_classes)
     _X = df_val.loc[_m, feat_cols].to_numpy(dtype=np.float64)
     _close_v = close_val.loc[_m].reset_index(drop=True)
     _fwd = (_close_v.shift(-_fb) / _close_v - 1.0).iloc[: len(_X) - _fb]
-    _pred = bundle_dict[_SIM_HK][_SIM_DIM].predict(_X[: len(_fwd)])
-    _pos = np.array([_trend_position(_label_from_code(_SIM_HK, _SIM_DIM, c)) for c in _pred])
-    _round_trip = float(os.environ.get("MSO_ROUND_TRIP_COST_PCT", "0.0012"))
-    _gross = np.where(_pos == 1, _fwd.values, np.where(_pos == -1, -_fwd.values, 0.0))
-    _entries = np.diff(np.r_[0, _pos]) != 0
-    _net = _gross.copy()
-    _net[_entries & (_pos != 0)] -= _round_trip / 2.0
-    _net[_entries & (np.r_[0, _pos[:-1]] != 0)] -= _round_trip / 2.0
-    _active = _pos != 0
-    _hit = float((_gross[_active] > 0).mean()) if _active.any() else 0.0
-    _cum = np.cumsum(_net)
-    _total = float(_cum[-1]) if len(_cum) else 0.0
-    _peak = np.maximum.accumulate(_cum) if len(_cum) else np.array([0.0])
-    _max_dd = float(np.min(_cum - _peak)) if len(_cum) else 0.0
-    print("\\n" + "=" * 72)
-    print(f"Regime-direction simulation — {_SIM_HK} / {_SIM_DIM} (n={len(_fwd)}, fb={_fb})")
-    print("=" * 72)
-    print(f"  Active bars: {int(_active.sum())} / {len(_pos)} ({100*_active.mean():.1f}%)")
-    print(f"  Direction hit rate (gross, active only): {_hit:.1%}")
-    print(f"  Total net return (sum): {_total * 100:.2f}%")
-    print(f"  Max drawdown (net cum): {_max_dd * 100:.2f}%")
-    print(f"  Round-trip cost assumed: {_round_trip:.4%} per entry/exit")
-    try:
-        import matplotlib.pyplot as plt
+    _sim_model = bundle_dict[_SIM_HK][_SIM_DIM]
+    _pred_str = _lgb_pred_to_labels(
+        _sim_model, _sim_model.predict(_X[: len(_fwd)]), tuple(_classes)
+    )
+    _pos = np.array([_trend_position(p) for p in _pred_str])
+    _trend_metrics = f1_scores.get(_SIM_HK, {}).get(_SIM_DIM) or {}
+    _bal_acc = float(_trend_metrics.get("balanced_accuracy", 0.0))
+    _n_pred_classes = len(set(_pred_str))
+    _skip_sim = _n_pred_classes <= 1 or _bal_acc < MSO_MIN_BALANCED_ACC
+    if _skip_sim:
+        print(
+            f"\\nSKIP regime simulation: collapsed trend head "
+            f"(pred_classes={_n_pred_classes}, bal_acc={_bal_acc:.3f})"
+        )
+    else:
+        _round_trip = float(os.environ.get("MSO_ROUND_TRIP_COST_PCT", "0.0012"))
+        _gross = np.where(_pos == 1, _fwd.values, np.where(_pos == -1, -_fwd.values, 0.0))
+        _entries = np.diff(np.r_[0, _pos]) != 0
+        _net = _gross.copy()
+        _net[_entries & (_pos != 0)] -= _round_trip / 2.0
+        _net[_entries & (np.r_[0, _pos[:-1]] != 0)] -= _round_trip / 2.0
+        _active = _pos != 0
+        _flat = _pos == 0
+        _hit = float((_gross[_active] > 0).mean()) if _active.any() else 0.0
+        _cum_sum = np.cumsum(_net)
+        _equity = np.cumprod(1.0 + _net)
+        _total_sum = float(_cum_sum[-1]) if len(_cum_sum) else 0.0
+        _total_comp = float(_equity[-1] - 1.0) if len(_equity) else 0.0
+        _peak = np.maximum.accumulate(_cum_sum) if len(_cum_sum) else np.array([0.0])
+        _max_dd = float(np.min(_cum_sum - _peak)) if len(_cum_sum) else 0.0
+        print("\\n" + "=" * 72)
+        print(f"Regime-direction simulation — {_SIM_HK} / {_SIM_DIM} (n={len(_fwd)}, fb={_fb})")
+        print("=" * 72)
+        print(f"  Active bars: {int(_active.sum())} / {len(_pos)} ({100*_active.mean():.1f}%)")
+        print(f"  Flat bars: {int(_flat.sum())} / {len(_pos)} ({100*_flat.mean():.1f}%)")
+        print(f"  Direction hit rate (gross, active only): {_hit:.1%}")
+        print(f"  Total net return (sum): {_total_sum * 100:.2f}%")
+        print(f"  Total net return (compounded): {_total_comp * 100:.2f}%")
+        print(f"  Max drawdown (net sum cum): {_max_dd * 100:.2f}%")
+        print(f"  Round-trip cost assumed: {_round_trip:.4%} per entry/exit")
+        try:
+            import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots(figsize=(10, 3))
-        ax.plot(_cum * 100.0, color="#1f77b4", linewidth=1.2)
-        ax.set_title(f"MSO regime sim cumulative net return — {_SIM_HK}")
-        ax.set_xlabel("Validation bar")
-        ax.set_ylabel("Cumulative return (%)")
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
-    except ImportError:
-        print("  (install matplotlib for cumulative return chart)")
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.plot((_equity - 1.0) * 100.0, color="#1f77b4", linewidth=1.2)
+            ax.set_title(f"MSO regime sim cumulative net return (compounded) — {_SIM_HK}")
+            ax.set_xlabel("Validation bar")
+            ax.set_ylabel("Cumulative return (compounded %)")
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.show()
+        except ImportError:
+            print("  (install matplotlib for cumulative return chart)")
 else:
     print("SKIP regime simulation: trend_regime head missing for", _SIM_HK)
 """
@@ -834,6 +1027,17 @@ md("## Export artifacts")
 
 code(
     """EXPORT_DIR = Path(os.environ.get("MSO_EXPORT_DIR", "/content/mso_export"))
+
+_gate_failures = _run_export_gates()
+if MSO_BLOCK_EXPORT_ON_FAIL and _gate_failures:
+    raise RuntimeError(
+        "MSO export blocked — primary horizon gates failed:\\n"
+        + "\\n".join(f"  - {m}" for m in _gate_failures)
+        + "\\nSet MSO_BLOCK_EXPORT_ON_FAIL=false to export anyway (debug only)."
+    )
+if _gate_failures:
+    print("WARNING: exporting despite gate failures (MSO_BLOCK_EXPORT_ON_FAIL=false)")
+
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 mso_bundle = MarketStateBundleExport(
@@ -844,6 +1048,7 @@ mso_bundle = MarketStateBundleExport(
     class_orders=class_orders,
     training_metadata={
         "f1_scores": f1_scores,
+        "export_gate_results": export_gate_results,
         "lgb_device_requested": LGB_DEVICE,
         "lgb_device_used": LGB_DEVICE_USED,
         "raw_funding_coverage": _fund_cov_raw,
@@ -865,6 +1070,8 @@ metadata = {
     "state_dimensions": list(MSO_STATE_DIMENSIONS),
     "horizon_keys": list(HORIZON_MAP.keys()),
     "f1_scores": f1_scores,
+    "export_gate_results": export_gate_results,
+    "export_gate_passed": len(export_gate_results) == 0,
     "training_device_requested": LGB_DEVICE,
     "training_device_used": LGB_DEVICE_USED,
     "raw_funding_coverage": _fund_cov_raw,
@@ -875,6 +1082,7 @@ meta_path = EXPORT_DIR / "metadata_mso_v50.json"
 meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 print("Exported:", artifact_path, meta_path)
 print("Device used:", LGB_DEVICE_USED)
+print("Export gates passed:", len(export_gate_results) == 0)
 print("Run the next cell to download jacksparrow_mso_v50_bundle.zip")
 """
 )

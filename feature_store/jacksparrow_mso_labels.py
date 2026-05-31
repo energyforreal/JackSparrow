@@ -82,6 +82,7 @@ def build_trend_regime_labels(
     df_feat: pd.DataFrame,
     *,
     forward_bars: int,
+    train_end_idx: Optional[int] = None,
 ) -> Tuple[pd.Series, Dict[str, Any]]:
     """5-class trend regime at t+forward_bars from ADX, trend_mom, hurst."""
     fb = int(forward_bars)
@@ -94,8 +95,16 @@ def build_trend_regime_labels(
     adx = pd.to_numeric(df_feat["adx_14"], errors="coerce")
     tm = pd.to_numeric(df_feat["trend_mom"], errors="coerce")
     hurst = pd.to_numeric(df_feat["hurst_60"], errors="coerce")
-    adx_thr_strong = float(adx.quantile(0.70)) if adx.notna().any() else 28.0
-    adx_thr_weak = float(adx.quantile(0.45)) if adx.notna().any() else 20.0
+    if train_end_idx is not None:
+        adx_fit = adx.iloc[: int(train_end_idx)]
+    else:
+        adx_fit = adx
+    if len(adx_fit) >= 100 and adx_fit.notna().any():
+        adx_thr_strong = float(adx_fit.quantile(0.70))
+        adx_thr_weak = float(adx_fit.quantile(0.45))
+    else:
+        adx_thr_strong = 28.0
+        adx_thr_weak = 20.0
 
     for i in range(n - fb):
         j = i + fb
@@ -118,6 +127,9 @@ def build_trend_regime_labels(
         "forward_bars": fb,
         "labeled_fraction": float(series.notna().mean()),
         "class_counts": counts,
+        "adx_thr_strong": adx_thr_strong,
+        "adx_thr_weak": adx_thr_weak,
+        "train_end_idx": train_end_idx,
     }
     return series, stats
 
@@ -353,7 +365,6 @@ def build_compression_expansion_labels(
 
 
 _LABEL_BUILDERS = {
-    "trend_regime": lambda df, close, fb: build_trend_regime_labels(df, forward_bars=fb),
     "vol_regime": lambda df, close, fb: build_vol_regime_labels(close, forward_bars=fb),
     "breakout_state": lambda df, close, fb: build_breakout_state_labels(
         df, close, forward_bars=fb
@@ -375,12 +386,18 @@ def build_mso_label(
     close: pd.Series,
     state_dimension: str,
     forward_bars: int,
+    train_end_idx: Optional[int] = None,
 ) -> Tuple[pd.Series, Dict[str, Any]]:
     """Dispatch label builder for one state dimension."""
     key = str(state_dimension).strip()
+    fb = int(forward_bars)
+    if key == "trend_regime":
+        return build_trend_regime_labels(
+            df_feat, forward_bars=fb, train_end_idx=train_end_idx
+        )
     if key not in _LABEL_BUILDERS:
         raise ValueError(f"Unknown MSO state dimension: {key!r}")
-    return _LABEL_BUILDERS[key](df_feat, close, int(forward_bars))
+    return _LABEL_BUILDERS[key](df_feat, close, fb)
 
 
 def classes_for_dimension(state_dimension: str) -> Tuple[str, ...]:
