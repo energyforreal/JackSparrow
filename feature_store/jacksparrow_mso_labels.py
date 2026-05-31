@@ -132,8 +132,8 @@ def build_trend_regime_labels(
     forward_bars: int,
     train_end_idx: Optional[int] = None,
 ) -> Tuple[pd.Series, Dict[str, Any]]:
-    """5-class trend regime at t+forward_bars from ADX, trend_mom, hurst."""
-    fb = int(forward_bars)
+    """5-class trend regime at bar t from ADX and trend_mom (current state, not forward peek)."""
+    _ = forward_bars
     n = len(df_feat)
     out: List[Optional[str]] = [None] * n
     for col in ("adx_14", "trend_mom", "hurst_60"):
@@ -142,23 +142,18 @@ def build_trend_regime_labels(
 
     adx = pd.to_numeric(df_feat["adx_14"], errors="coerce")
     tm = pd.to_numeric(df_feat["trend_mom"], errors="coerce")
-    hurst = pd.to_numeric(df_feat["hurst_60"], errors="coerce")
-    # Fixed absolute ADX gates (leak-free, stable class mix vs train quantiles)
-    adx_thr_strong = TREND_ADX_STRONG
-    adx_thr_weak = TREND_ADX_WEAK
-    threshold_mode = "fixed"
+    adx_thr_weak = _train_quantile(adx, train_end_idx, 0.55, fallback=TREND_ADX_WEAK)
+    adx_thr_strong = _train_quantile(adx, train_end_idx, 0.75, fallback=TREND_ADX_STRONG)
+    tm_strong = _train_quantile(tm.abs(), train_end_idx, 0.65, fallback=TREND_STRONG_MOM)
+    threshold_mode = "train_quantile_at_t"
 
-    for i in range(n - fb):
-        j = i + fb
-        a = float(adx.iloc[j]) if pd.notna(adx.iloc[j]) else np.nan
-        t = float(tm.iloc[j]) if pd.notna(tm.iloc[j]) else np.nan
-        h = float(hurst.iloc[j]) if pd.notna(hurst.iloc[j]) else np.nan
+    for i in range(n):
+        a = float(adx.iloc[i]) if pd.notna(adx.iloc[i]) else np.nan
+        t = float(tm.iloc[i]) if pd.notna(tm.iloc[i]) else np.nan
         if not np.isfinite(a) or not np.isfinite(t):
             continue
-        strong_trend = a > adx_thr_strong and abs(t) > TREND_STRONG_MOM
-        weak_trend = a > adx_thr_weak and (
-            strong_trend or not np.isfinite(h) or h > TREND_HURST_MIN
-        )
+        strong_trend = a > adx_thr_strong and abs(t) > tm_strong
+        weak_trend = a > adx_thr_weak
         if strong_trend:
             out[i] = "STRONG_BULL" if t > 0 else "STRONG_BEAR"
         elif weak_trend:
@@ -169,11 +164,12 @@ def build_trend_regime_labels(
     series = pd.Series(out, index=df_feat.index, dtype=object)
     counts = {cls: int((series == cls).sum()) for cls in TREND_REGIME_CLASSES}
     stats = {
-        "forward_bars": fb,
+        "forward_bars": int(forward_bars),
         "labeled_fraction": float(series.notna().mean()),
         "class_counts": counts,
         "adx_thr_strong": adx_thr_strong,
         "adx_thr_weak": adx_thr_weak,
+        "tm_strong": tm_strong,
         "threshold_mode": threshold_mode,
         "train_end_idx": train_end_idx,
     }
@@ -370,33 +366,33 @@ def build_momentum_quality_labels(
     forward_bars: int,
     train_end_idx: Optional[int] = None,
 ) -> Tuple[pd.Series, Dict[str, Any]]:
-    """Momentum quality from RSI structure and price/OI divergence at t+N."""
-    fb = int(forward_bars)
+    """Momentum quality from RSI structure at bar t; DIVERGING via train top-decile score."""
+    _ = forward_bars
     n = len(df_feat)
     rsi = pd.to_numeric(df_feat.get("rsi_14", 50), errors="coerce")
     rsi_mom = pd.to_numeric(df_feat.get("rsi_mom", 0), errors="coerce")
     tm = pd.to_numeric(df_feat.get("trend_mom", 0), errors="coerce")
     oi_div = pd.to_numeric(df_feat.get("oi_price_divergence", 0), errors="coerce")
-    div_thr = _train_quantile(oi_div.abs(), train_end_idx, 0.90, fallback=0.025)
+
+    rsi_conflict = ((rsi > 65) & (tm < 0)) | ((rsi < 35) & (tm > 0))
+    div_score = oi_div.abs() + rsi_conflict.astype(float) * 0.01
+    div_thr = _train_quantile(div_score, train_end_idx, 0.90, fallback=0.015)
     tm_healthy = _train_quantile(tm.abs(), train_end_idx, 0.65, fallback=0.00035)
     rm_healthy = _train_quantile(rsi_mom.abs(), train_end_idx, 0.65, fallback=0.25)
+
     out: List[Optional[str]] = [None] * n
+    for i in range(n):
+        r = float(rsi.iloc[i]) if pd.notna(rsi.iloc[i]) else 50.0
+        rm = float(rsi_mom.iloc[i]) if pd.notna(rsi_mom.iloc[i]) else 0.0
+        t = float(tm.iloc[i]) if pd.notna(tm.iloc[i]) else 0.0
+        ds = float(div_score.iloc[i]) if pd.notna(div_score.iloc[i]) else 0.0
 
-    for i in range(n - fb):
-        j = i + fb
-        r = float(rsi.iloc[j]) if pd.notna(rsi.iloc[j]) else 50.0
-        rm = float(rsi_mom.iloc[j]) if pd.notna(rsi_mom.iloc[j]) else 0.0
-        t = float(tm.iloc[j]) if pd.notna(tm.iloc[j]) else 0.0
-        d = float(oi_div.iloc[j]) if pd.notna(oi_div.iloc[j]) else 0.0
-
-        if abs(t) > tm_healthy and abs(rm) > rm_healthy and 35 <= r <= 65 and abs(d) < div_thr:
-            out[i] = "HEALTHY"
+        if ds >= div_thr and div_thr > 0:
+            out[i] = "DIVERGING"
         elif (r > 72 or r < 28) and abs(rm) < 0.8:
             out[i] = "EXHAUSTED"
-        elif (r > 65 and t < -tm_healthy) or (r < 35 and t > tm_healthy) or (
-            abs(d) > div_thr and abs(t) > tm_healthy * 0.5
-        ):
-            out[i] = "DIVERGING"
+        elif abs(t) > tm_healthy and abs(rm) > rm_healthy and 35 <= r <= 65:
+            out[i] = "HEALTHY"
         elif abs(rm) < rm_healthy * 0.5:
             out[i] = "WEAK"
         elif t * (r - 50) > 0:
@@ -407,10 +403,11 @@ def build_momentum_quality_labels(
     series = pd.Series(out, index=df_feat.index, dtype=object)
     counts = {cls: int((series == cls).sum()) for cls in MOMENTUM_CLASSES}
     return series, {
-        "forward_bars": fb,
+        "forward_bars": int(forward_bars),
         "labeled_fraction": float(series.notna().mean()),
         "class_counts": counts,
-        "threshold_mode": "train_quantile",
+        "threshold_mode": "train_quantile_at_t",
+        "div_score_p90": div_thr,
         "train_end_idx": train_end_idx,
     }
 

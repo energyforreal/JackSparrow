@@ -554,7 +554,7 @@ MSO_BLOCK_EXPORT_ON_FAIL = os.environ.get("MSO_BLOCK_EXPORT_ON_FAIL", "true").st
     "yes",
 )
 MSO_CALIBRATE = os.environ.get("MSO_CALIBRATE", "true").strip().lower() in ("1", "true", "yes")
-MSO_CLASS_WEIGHT_MAJORITY = float(os.environ.get("MSO_CLASS_WEIGHT_MAJORITY", "0.80"))
+MSO_CLASS_WEIGHT_MAJORITY = float(os.environ.get("MSO_CLASS_WEIGHT_MAJORITY", "0.60"))
 PRIMARY_HORIZONS = ("scalp_10m", "intraday_30m")
 _RARE_CLASS_WATCH = (
     "FAKE_BREAKOUT",
@@ -754,15 +754,38 @@ for hk, fb in HORIZON_MAP.items():
         m_va = y_val.notna() & y_val.astype(str).isin(classes)
         train_counts = _class_counts(y_train.loc[m_tr], classes)
         val_counts = _class_counts(y_val.loc[m_va], classes)
+
+        if dim == "breakout_state":
+            _rare = {c for c in classes if train_counts.get(c, 0) < MIN_CLASS_COUNT}
+            if _rare:
+                _remap = {c: "NO_BREAKOUT" for c in _rare}
+                y_train = y_train.replace(_remap)
+                y_val = y_val.replace(_remap)
+                m_tr = y_train.notna() & y_train.astype(str).isin(classes)
+                m_va = y_val.notna() & y_val.astype(str).isin(classes)
+                train_counts = _class_counts(y_train.loc[m_tr], classes)
+                val_counts = _class_counts(y_val.loc[m_va], classes)
+                if hk in PRIMARY_HORIZONS:
+                    print(f"  note: {hk}/{dim} remapped rare train classes {_rare} -> NO_BREAKOUT")
+
+        n_train_classes = sum(1 for c in classes if train_counts.get(c, 0) >= MIN_CLASS_COUNT)
+        _cw = _class_weight_for_train(train_counts, classes)
+        _train_total = sum(train_counts.values())
+        _train_top = max(train_counts, key=train_counts.get) if train_counts else None
+        _train_top_pct = (
+            float(train_counts[_train_top] / _train_total) if _train_total and _train_top else None
+        )
         class_balance_rows.append(
             {
                 "horizon": hk,
                 "dimension": dim,
                 "train_counts": train_counts,
                 "val_counts": val_counts,
+                "train_top_pct": _train_top_pct,
+                "class_weight_used": _cw,
+                "single_class_val": sum(1 for v in val_counts.values() if v > 0) <= 1,
             }
         )
-        n_train_classes = sum(1 for c in classes if train_counts.get(c, 0) >= MIN_CLASS_COUNT)
         if int(m_tr.sum()) < 100:
             print(f"SKIP {hk}/{dim}: too few train labels ({int(m_tr.sum())})")
             continue
@@ -792,7 +815,6 @@ for hk, fb in HORIZON_MAP.items():
         y_va = le.transform(y_val.loc[m_va].astype(str)) if m_va.any() else np.array([], dtype=int)
         y_va_str = y_val.loc[m_va].astype(str).values if m_va.any() else np.array([], dtype=str)
 
-        _cw = _class_weight_for_train(train_counts, classes)
         if hk in PRIMARY_HORIZONS and _cw is None:
             _tot = sum(train_counts.values())
             _top = max(train_counts, key=train_counts.get)
@@ -879,6 +901,9 @@ for row in class_balance_rows:
             "val_classes": sum(1 for v in va.values() if v > 0),
             "train_top": max(tr, key=tr.get) if tr else None,
             "val_top": max(va, key=va.get) if va else None,
+            "train_top_pct": row.get("train_top_pct"),
+            "class_weight_used": row.get("class_weight_used"),
+            "SINGLE_CLASS_VAL": row.get("single_class_val", False),
         }
     )
 if _audit_rows:

@@ -58,29 +58,55 @@ def test_build_mso_label_dispatch():
         assert len(classes_for_dimension(dim)) >= 4
 
 
-def test_trend_uses_fixed_adx_thresholds():
+def test_trend_uses_train_quantiles_at_t():
     n = 400
     df = _synthetic_feat(n)
     _, stats = build_trend_regime_labels(df, forward_bars=6, train_end_idx=200)
-    assert stats["threshold_mode"] == "fixed"
-    assert stats["adx_thr_strong"] == 28.0
-    assert stats["adx_thr_weak"] == 18.0
+    assert stats["threshold_mode"] == "train_quantile_at_t"
+    assert stats["adx_thr_strong"] > 0
+    assert stats["adx_thr_weak"] > 0
+    assert stats["labeled_fraction"] == 1.0
 
 
-def test_trend_labels_multi_class_on_varied_adx():
-    n = 500
+def test_trend_labels_at_t_multi_class():
+    n = 600
+    rng = np.random.default_rng(42)
     df = _synthetic_feat(n)
     df["adx_14"] = np.concatenate(
-        [np.full(100, 15.0), np.full(150, 25.0), np.full(150, 32.0), np.full(100, 18.0)]
+        [
+            rng.uniform(12, 17, 200),
+            rng.uniform(22, 26, 200),
+            rng.uniform(30, 38, 200),
+        ]
     )
     df["trend_mom"] = np.concatenate(
-        [np.full(100, -0.001), np.full(150, 0.0006), np.full(150, -0.0012), np.full(100, 0.0002)]
+        [
+            rng.uniform(-0.001, 0.001, 200),
+            rng.uniform(0.0003, 0.001, 100),
+            rng.uniform(-0.001, -0.0003, 100),
+            rng.uniform(0.0008, 0.002, 100),
+            rng.uniform(-0.002, -0.0008, 100),
+        ]
     )
-    labels, stats = build_trend_regime_labels(df, forward_bars=6)
+    labels, stats = build_trend_regime_labels(df, forward_bars=6, train_end_idx=480)
     counts = stats["class_counts"]
-    non_range = sum(v for k, v in counts.items() if k != "RANGE")
-    assert non_range > 50
-    assert len([k for k, v in counts.items() if v >= 50 and k != "RANGE"]) >= 2
+    non_range_classes = [k for k, v in counts.items() if k != "RANGE" and v >= 50]
+    assert len(non_range_classes) >= 2
+    assert stats["labeled_fraction"] == 1.0
+
+
+def test_momentum_diverging_below_50pct():
+    df = _synthetic_feat(2000)
+    rng = np.random.default_rng(7)
+    df["rsi_14"] = rng.uniform(25, 75, 2000)
+    df["rsi_mom"] = rng.uniform(-1.5, 1.5, 2000)
+    df["trend_mom"] = rng.uniform(-0.002, 0.002, 2000)
+    df["oi_price_divergence"] = rng.uniform(-0.03, 0.03, 2000)
+    labels, stats = build_momentum_quality_labels(df, forward_bars=6, train_end_idx=1600)
+    top = max(stats["class_counts"], key=stats["class_counts"].get)
+    top_frac = stats["class_counts"][top] / max(1, labels.notna().sum())
+    assert top_frac < 0.55
+    assert stats["threshold_mode"] == "train_quantile_at_t"
 
 
 def test_momentum_not_single_class_dominant():
