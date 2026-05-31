@@ -973,18 +973,25 @@ for _hk in PRIMARY_HORIZONS:
 
 # --- 3) Sample oracle snapshot (last 8 validation bars, intraday_30m) ---
 _EVAL_HK = "intraday_30m"
+_EVAL_DIM = "trend_regime"
 if _EVAL_HK in bundle_dict:
     _snap_rows = []
     _start = max(0, len(df_val) - 8)
+    _has_trend = _EVAL_DIM in bundle_dict.get(_EVAL_HK, {})
+    if not _has_trend:
+        print(f"Sample oracle: {_EVAL_HK}/{_EVAL_DIM} model missing — trend_pred=N/A")
     for _i in range(_start, len(df_val)):
         _x = df_val.iloc[[_i]][feat_cols]
         _state = mso_bundle_eval.predict_horizon(_EVAL_HK, _x.values, X_df=_x)
-        _trend_model = bundle_dict[_EVAL_HK]["trend_regime"]
-        _trend_pred = _lgb_pred_to_labels(
-            _trend_model,
-            _trend_model.predict(_x.to_numpy(dtype=np.float64)),
-            class_orders[f"{_EVAL_HK}:trend_regime"],
-        )[0]
+        if _has_trend:
+            _trend_model = bundle_dict[_EVAL_HK][_EVAL_DIM]
+            _trend_pred = _lgb_pred_to_labels(
+                _trend_model,
+                _trend_model.predict(_x.to_numpy(dtype=np.float64)),
+                class_orders[f"{_EVAL_HK}:{_EVAL_DIM}"],
+            )[0]
+        else:
+            _trend_pred = "N/A (model missing)"
         _row = {"bar": _i, "trend_pred": _trend_pred}
         for _dim in MSO_STATE_DIMENSIONS:
             _fb = HORIZON_MAP[_EVAL_HK]
@@ -994,10 +1001,20 @@ if _EVAL_HK in bundle_dict:
             _actual = _lab.iloc[split_idx + _i]
             if pd.notna(_actual):
                 _row[f"{_dim}_actual"] = str(_actual)
+            if _dim in bundle_dict.get(_EVAL_HK, {}):
+                _pred_model = bundle_dict[_EVAL_HK][_dim]
+                _pred = _lgb_pred_to_labels(
+                    _pred_model,
+                    _pred_model.predict(_x.to_numpy(dtype=np.float64)),
+                    class_orders[f"{_EVAL_HK}:{_dim}"],
+                )[0]
+                _row[f"{_dim}_pred"] = _pred
         _snap_rows.append(_row)
     if _snap_rows:
         print("\\nSample MSO oracle (_EVAL_HK, last validation bars):")
         print(pd.DataFrame(_snap_rows).to_string(index=False))
+else:
+    print(f"SKIP sample oracle: {_EVAL_HK} not in bundle_dict")
 
 # --- 4) Regime-direction simulation (intraday_30m trend → forward return) ---
 _SIM_HK = "intraday_30m"
