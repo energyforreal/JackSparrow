@@ -91,6 +91,39 @@ print("Repo ready on branch", _BRANCH)
 )
 
 code(
+    """# Verify pulled commit and key MSO flags exist in repo (restart runtime if stale).
+import subprocess
+from pathlib import Path
+
+_repo = Path("/content/trading-agent")
+_r = subprocess.run(
+    ["git", "-C", str(_repo), "log", "-1", "--oneline"],
+    capture_output=True,
+    text=True,
+    check=True,
+)
+print("Git HEAD:", (_r.stdout or "").strip())
+for _rel in (
+    "feature_store/jacksparrow_mso_labels.py",
+    "scripts/generate_mso_notebook.py",
+    "agent/models/market_state_shims.py",
+):
+    _p = _repo / _rel
+    print("  ok" if _p.is_file() else "  MISSING", _rel)
+_labels = _repo / "feature_store/jacksparrow_mso_labels.py"
+if _labels.is_file():
+    _txt = _labels.read_text(encoding="utf-8")
+    for _needle in ("collapse_trend_regime_labels", "train_quantile_adaptive"):
+        if _needle not in _txt:
+            print(f"  WARNING: {_needle!r} not in jacksparrow_mso_labels.py — git pull may be stale")
+_shims = _repo / "agent/models/market_state_shims.py"
+if _shims.is_file() and "_resolve_head_columns" not in _shims.read_text(encoding="utf-8"):
+    print("  WARNING: market_state_shims missing per-head feature resolve — restart runtime after pull")
+print("If you pulled mid-session, use Runtime → Restart session before training.")
+"""
+)
+
+code(
     """import os
 import sys
 from pathlib import Path
@@ -206,6 +239,7 @@ import os
 import time
 import warnings
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import joblib
@@ -616,7 +650,13 @@ def _class_counts(series: pd.Series, classes: list) -> dict:
 
 def _lgb_pred_to_labels(model, pred_codes, class_order: tuple) -> np.ndarray:
     order = list(class_order)
-    lgb_classes = list(getattr(model, "classes_", []))
+    base = model
+    if hasattr(model, "calibrated_classifiers_"):
+        try:
+            base = model.calibrated_classifiers_[0].estimator
+        except (IndexError, AttributeError, TypeError):
+            pass
+    lgb_classes = list(getattr(base, "classes_", []))
     names = []
     for p in np.atleast_1d(pred_codes):
         code = int(p)
@@ -684,6 +724,16 @@ def _gate_horizons_and_dims() -> list:
     if MSO_GATE_SCOPE == "full":
         return [(hk, dim) for hk in PRIMARY_HORIZONS for dim in MSO_STATE_DIMENSIONS]
     return [(hk, dim) for hk in POLICY_HORIZONS for dim in POLICY_DIMENSIONS]
+
+
+print(
+    "Training config:",
+    f"MSO_TREND_3CLASS={MSO_TREND_3CLASS}",
+    f"MSO_GATE_SCOPE={MSO_GATE_SCOPE}",
+    f"MSO_USE_CLASS_WEIGHT={MSO_USE_CLASS_WEIGHT}",
+    f"MSO_CALIBRATE={MSO_CALIBRATE}",
+    f"trend_features={len(_feature_cols_for_dim('trend_regime'))}/{len(feat_cols)}",
+)
 
 
 def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int, *, class_weight=None):
@@ -908,11 +958,11 @@ print("Training completed on device:", LGB_DEVICE_USED)
 
 _gate_failures = _run_export_gates()
 if _gate_failures:
-    print("\\nExport gate failures (primary horizons):")
+    print(f"\\nExport gate failures (scope={MSO_GATE_SCOPE}):")
     for _msg in _gate_failures:
         print(" ", _msg)
 else:
-    print("\\nExport gates: all primary-horizon checks passed")
+    print(f"\\nExport gates passed (scope={MSO_GATE_SCOPE})")
 """
 )
 
@@ -969,12 +1019,60 @@ Compare with v43 notebook §4d, which runs regression correlation + simulated va
 code(
     """from sklearn.metrics import classification_report, confusion_matrix
 
+_required = (
+    "bundle_dict",
+    "feat_cols",
+    "head_feature_cols",
+    "class_orders",
+    "MSO_TREND_3CLASS",
+    "_feature_cols_for_dim",
+    "_classes_for_training",
+    "collapse_trend_regime_labels",
+)
+_missing = [n for n in _required if n not in globals()]
+if _missing:
+    raise RuntimeError(
+        "Post-train validation requires the training cell first. Missing: "
+        + ", ".join(_missing)
+    )
+
 # Rebuild per-head feature lists if validation runs without re-training (or old session).
 if not head_feature_cols:
     head_feature_cols = {}
     for _hk, _dims in bundle_dict.items():
         for _dim in _dims:
             head_feature_cols[f"{_hk}:{_dim}"] = list(_feature_cols_for_dim(_dim))
+
+_breakout_rare_remap_cache: dict = {}
+
+
+def _breakout_rare_remap_for_fb(fb: int) -> dict:
+    if fb in _breakout_rare_remap_cache:
+        return _breakout_rare_remap_cache[fb]
+    _brk_classes = list(classes_for_dimension("breakout_state"))
+    _brk_lab, _ = build_mso_label(
+        df_feat, close, "breakout_state", fb, train_end_idx=train_end_idx
+    )
+    _brk_tr = _brk_lab.iloc[:train_end_idx]
+    _brk_counts = _class_counts(_brk_tr.dropna(), _brk_classes)
+    _remap = {
+        c: "NO_BREAKOUT" for c in _brk_classes if _brk_counts.get(c, 0) < MIN_CLASS_COUNT
+    }
+    _breakout_rare_remap_cache[fb] = _remap
+    return _remap
+
+
+def _labels_for_eval(dim: str, fb: int) -> pd.Series:
+    _lab, _ = build_mso_label(df_feat, close, dim, fb, train_end_idx=train_end_idx)
+    if dim == "trend_regime" and MSO_TREND_3CLASS:
+        _lab = collapse_trend_regime_labels(_lab)
+    _y = _lab.iloc[split_idx:].reset_index(drop=True)
+    if dim == "breakout_state":
+        _remap = _breakout_rare_remap_for_fb(fb)
+        if _remap:
+            _y = _y.replace(_remap)
+    return _y
+
 
 mso_bundle_eval = MarketStateBundleExport(
     horizon_models=bundle_dict,
@@ -985,13 +1083,6 @@ mso_bundle_eval = MarketStateBundleExport(
     head_feature_cols=head_feature_cols,
     training_metadata={"f1_scores": f1_scores},
 )
-
-
-def _labels_for_eval(dim: str, fb: int) -> pd.Series:
-    _lab, _ = build_mso_label(df_feat, close, dim, fb, train_end_idx=train_end_idx)
-    if dim == "trend_regime" and MSO_TREND_3CLASS:
-        _lab = collapse_trend_regime_labels(_lab)
-    return _lab.iloc[split_idx:].reset_index(drop=True)
 
 
 def _trend_position(label: str) -> int:
