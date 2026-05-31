@@ -64,6 +64,12 @@ MSO_FEATURE_VERSION = "jacksparrow_mso_features_v1"
 
 _EPS = 1e-12
 
+# Fixed trend thresholds (no global quantiles — avoids RANGE collapse on train-only fit)
+TREND_ADX_STRONG = 28.0
+TREND_ADX_WEAK = 20.0
+TREND_STRONG_MOM = 0.0008
+TREND_HURST_MIN = 0.52
+
 
 def _atr_series(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
     prev = close.shift(1)
@@ -95,16 +101,10 @@ def build_trend_regime_labels(
     adx = pd.to_numeric(df_feat["adx_14"], errors="coerce")
     tm = pd.to_numeric(df_feat["trend_mom"], errors="coerce")
     hurst = pd.to_numeric(df_feat["hurst_60"], errors="coerce")
-    if train_end_idx is not None:
-        adx_fit = adx.iloc[: int(train_end_idx)]
-    else:
-        adx_fit = adx
-    if len(adx_fit) >= 100 and adx_fit.notna().any():
-        adx_thr_strong = float(adx_fit.quantile(0.70))
-        adx_thr_weak = float(adx_fit.quantile(0.45))
-    else:
-        adx_thr_strong = 28.0
-        adx_thr_weak = 20.0
+    # Fixed absolute ADX gates (leak-free, stable class mix vs train quantiles)
+    adx_thr_strong = TREND_ADX_STRONG
+    adx_thr_weak = TREND_ADX_WEAK
+    threshold_mode = "fixed"
 
     for i in range(n - fb):
         j = i + fb
@@ -113,8 +113,8 @@ def build_trend_regime_labels(
         h = float(hurst.iloc[j]) if pd.notna(hurst.iloc[j]) else np.nan
         if not np.isfinite(a) or not np.isfinite(t):
             continue
-        trending = a > adx_thr_weak and (not np.isfinite(h) or h > 0.52)
-        if trending and a > adx_thr_strong and abs(t) > 0.0008:
+        trending = a > adx_thr_weak and (not np.isfinite(h) or h > TREND_HURST_MIN)
+        if trending and a > adx_thr_strong and abs(t) > TREND_STRONG_MOM:
             out[i] = "STRONG_BULL" if t > 0 else "STRONG_BEAR"
         elif trending:
             out[i] = "WEAK_BULL" if t > 0 else "WEAK_BEAR"
@@ -129,6 +129,7 @@ def build_trend_regime_labels(
         "class_counts": counts,
         "adx_thr_strong": adx_thr_strong,
         "adx_thr_weak": adx_thr_weak,
+        "threshold_mode": threshold_mode,
         "train_end_idx": train_end_idx,
     }
     return series, stats
@@ -262,13 +263,13 @@ def build_liquidity_condition_labels(
         t = float(tm.iloc[i]) if pd.notna(tm.iloc[i]) else 0.0
         r3 = float(ret3.iloc[i]) if pd.notna(ret3.iloc[i]) else 0.0
 
-        if abs(wk) > 0.6 and abs(oa) > 0.008 and abs(r3) > 0.004:
+        if abs(wk) > 0.45 and abs(oa) > 0.005 and abs(r3) > 0.003:
             out.append("STOP_HUNT_ENV")
-        elif oz > 2.0 and abs(r3) > 0.01 and oa > 0.01:
+        elif oz > 1.5 and abs(r3) > 0.008 and oa > 0.006:
             out.append("LIQ_SWEEP_ACTIVE")
-        elif oz > 1.8 and fz > 1.2 and t > 0:
+        elif oz > 1.5 and fz > 0.9 and t > 0.0003:
             out.append("LONG_LIQ_RISK")
-        elif oz > 1.8 and fz < -1.2 and t < 0:
+        elif oz > 1.5 and fz < -0.9 and t < -0.0003:
             out.append("SHORT_LIQ_RISK")
         else:
             out.append("BALANCED")
@@ -299,12 +300,16 @@ def build_momentum_quality_labels(
         t = float(tm.iloc[j]) if pd.notna(tm.iloc[j]) else 0.0
         d = float(oi_div.iloc[j]) if pd.notna(oi_div.iloc[j]) else 0.0
 
-        if (r > 70 and t < 0) or (r < 30 and t > 0) or abs(d) > 0.02:
-            out[i] = "DIVERGING"
-        elif (r > 75 or r < 25) and abs(rm) < 0.5:
-            out[i] = "EXHAUSTED"
-        elif abs(t) > 0.0005 and abs(rm) > 0.3:
+        if abs(t) > 0.0008 and abs(rm) > 0.5 and 35 <= r <= 65 and abs(d) < 0.02:
             out[i] = "HEALTHY"
+        elif (r > 72 or r < 28) and abs(rm) < 0.8:
+            out[i] = "EXHAUSTED"
+        elif (r > 65 and t < -0.0008) or (r < 35 and t > 0.0008) or (
+            abs(d) > 0.06 and abs(t) > 0.0005
+        ):
+            out[i] = "DIVERGING"
+        elif abs(rm) < 0.25:
+            out[i] = "WEAK"
         else:
             out[i] = "WEAK"
 
