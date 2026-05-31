@@ -64,7 +64,7 @@ def test_trend_uses_fixed_adx_thresholds():
     _, stats = build_trend_regime_labels(df, forward_bars=6, train_end_idx=200)
     assert stats["threshold_mode"] == "fixed"
     assert stats["adx_thr_strong"] == 28.0
-    assert stats["adx_thr_weak"] == 20.0
+    assert stats["adx_thr_weak"] == 18.0
 
 
 def test_trend_labels_multi_class_on_varied_adx():
@@ -159,3 +159,41 @@ def test_compression_post_expansion_exists():
         "PRE_EXPANSION", 0
     ) > 0
     assert stats["class_counts"].get("COMPRESSION", 0) < n
+
+
+def test_vol_regime_multi_class_with_train_quantiles():
+    n = 2000
+    rng = np.random.default_rng(21)
+    close = pd.Series(45000 + np.cumsum(rng.normal(0, 15, n)))
+    high = close + rng.uniform(20, 120, n)
+    low = close - rng.uniform(20, 120, n)
+    df = pd.DataFrame({"high": high.values, "low": low.values})
+    split = int(n * 0.8)
+    _, stats = build_vol_regime_labels(df, close, forward_bars=2, train_end_idx=split)
+    counts = stats["class_counts"]
+    assert stats["threshold_mode"] == "train_quantile"
+    assert sum(1 for v in counts.values() if v >= 50) >= 3
+    assert counts.get("LOW_VOL", 0) > 0
+    assert counts.get("EXPANDING_VOL", 0) > 0
+
+
+def test_liquidity_train_quantiles_not_all_balanced():
+    n = 2000
+    rng = np.random.default_rng(22)
+    close = pd.Series(45000 + np.cumsum(rng.normal(0, 15, n)))
+    df = pd.DataFrame(
+        {
+            "oi_zscore": rng.normal(0.3, 0.5, n),
+            "funding_zscore": rng.normal(0.1, 0.4, n),
+            "wick_asym": rng.normal(0, 0.2, n),
+            "oi_acceleration": rng.normal(0, 0.0015, n),
+            "trend_mom": rng.normal(0, 0.00025, n),
+        }
+    )
+    split = int(n * 0.8)
+    labels, stats = build_liquidity_condition_labels(
+        df, close, forward_bars=6, train_end_idx=split
+    )
+    balanced_frac = stats["class_counts"]["BALANCED"] / len(labels)
+    assert balanced_frac < 0.95
+    assert stats["threshold_mode"] == "train_quantile"

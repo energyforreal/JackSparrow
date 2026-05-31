@@ -206,6 +206,7 @@ import os
 import time
 import warnings
 from datetime import datetime, timezone
+from typing import Optional
 
 import joblib
 import lightgbm as lgb
@@ -553,6 +554,7 @@ MSO_BLOCK_EXPORT_ON_FAIL = os.environ.get("MSO_BLOCK_EXPORT_ON_FAIL", "true").st
     "yes",
 )
 MSO_CALIBRATE = os.environ.get("MSO_CALIBRATE", "true").strip().lower() in ("1", "true", "yes")
+MSO_CLASS_WEIGHT_MAJORITY = float(os.environ.get("MSO_CLASS_WEIGHT_MAJORITY", "0.80"))
 PRIMARY_HORIZONS = ("scalp_10m", "intraday_30m")
 _RARE_CLASS_WATCH = (
     "FAKE_BREAKOUT",
@@ -638,7 +640,17 @@ def _is_lgb_device_error(exc: BaseException) -> bool:
     return any(k in msg for k in ("cuda", "cudap", "gpu tree learner", "opencl"))
 
 
-def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
+def _class_weight_for_train(train_counts: dict, classes: list) -> Optional[str]:
+    total = sum(int(train_counts.get(c, 0)) for c in classes)
+    if total <= 0:
+        return "balanced"
+    top_frac = max(int(train_counts.get(c, 0)) for c in classes) / float(total)
+    if top_frac >= MSO_CLASS_WEIGHT_MAJORITY:
+        return None
+    return "balanced"
+
+
+def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int, *, class_weight=None):
     global LGB_DEVICE_USED
     callbacks = []
     eval_set = None
@@ -652,16 +664,19 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int):
         print(f"  note: val classes {missing} absent in train — training without early stopping")
 
     def _make_clf(device: str):
+        kw: dict = {}
+        if class_weight is not None:
+            kw["class_weight"] = class_weight
         return lgb.LGBMClassifier(
             n_estimators=400,
             learning_rate=0.03,
             num_leaves=63,
-            class_weight="balanced",
             objective="multiclass",
             num_class=n_class,
             random_state=42,
             verbose=-1,
             device=device,
+            **kw,
             **LGB_DEVICE_KW,
         )
 
@@ -777,7 +792,18 @@ for hk, fb in HORIZON_MAP.items():
         y_va = le.transform(y_val.loc[m_va].astype(str)) if m_va.any() else np.array([], dtype=int)
         y_va_str = y_val.loc[m_va].astype(str).values if m_va.any() else np.array([], dtype=str)
 
-        model, calibrated = _fit_classifier(X_tr, y_tr, X_va, y_va, n_class)
+        _cw = _class_weight_for_train(train_counts, classes)
+        if hk in PRIMARY_HORIZONS and _cw is None:
+            _tot = sum(train_counts.values())
+            _top = max(train_counts, key=train_counts.get)
+            print(
+                f"  note: {hk}/{dim} class_weight=None "
+                f"(train top {_top} {_tot and train_counts[_top] / _tot:.0%})"
+            )
+
+        model, calibrated = _fit_classifier(
+            X_tr, y_tr, X_va, y_va, n_class, class_weight=_cw
+        )
         bundle_dict[hk][dim] = model
         label_encoders[f"{hk}:{dim}"] = {c: int(i) for i, c in enumerate(le.classes_)}
         class_orders[f"{hk}:{dim}"] = tuple(classes)
@@ -786,6 +812,7 @@ for hk, fb in HORIZON_MAP.items():
             pred_str = _lgb_pred_to_labels(model, model.predict(X_va), tuple(classes))
             metrics = _val_metrics(y_va_str, pred_str, classes)
             metrics["calibrated"] = calibrated
+            metrics["class_weight"] = _cw
             f1_scores[hk][dim] = metrics
             if metrics["f1_macro"] <= metrics["majority_baseline"] + 0.02:
                 print(f"  WARNING: {hk}/{dim} trivial/collapsed head (macro F1 ~ majority baseline)")
