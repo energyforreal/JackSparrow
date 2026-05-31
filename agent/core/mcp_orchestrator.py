@@ -560,6 +560,24 @@ class MCPOrchestrator:
             "current_price": context.get("current_price"),
             "symbol": symbol,
         }
+        if isinstance(df_oi, pd.DataFrame) and not df_oi.empty:
+            last_oi = df_oi.iloc[-1]
+            oi_val = last_oi.get("oi_contracts") if hasattr(last_oi, "get") else None
+            if oi_val is None and "oi_contracts" in df_oi.columns:
+                oi_val = last_oi["oi_contracts"]
+            if oi_val is not None:
+                try:
+                    mctx["mso_oi_contracts"] = float(oi_val)
+                except (TypeError, ValueError):
+                    pass
+            ts_raw = last_oi.get("timestamp") if hasattr(last_oi, "get") else None
+            if ts_raw is None and "timestamp" in df_oi.columns:
+                ts_raw = last_oi["timestamp"]
+            if ts_raw is not None:
+                try:
+                    mctx["mso_oi_snapshot_ts"] = float(pd.Timestamp(ts_raw).timestamp())
+                except (TypeError, ValueError):
+                    pass
         if not contract_state.is_operational:
             mctx["v43_market_health_hold"] = True
             mctx["v43_market_health_reason"] = (

@@ -25,6 +25,16 @@ TREND_REGIME_CLASSES: Tuple[str, ...] = (
     "WEAK_BEAR",
     "STRONG_BEAR",
 )
+TREND_REGIME_CLASSES_3: Tuple[str, ...] = ("BULL", "RANGE", "BEAR")
+TREND_TO_3CLASS: Dict[str, str] = {
+    "STRONG_BULL": "BULL",
+    "WEAK_BULL": "BULL",
+    "RANGE": "RANGE",
+    "WEAK_BEAR": "BEAR",
+    "STRONG_BEAR": "BEAR",
+    "BULL": "BULL",
+    "BEAR": "BEAR",
+}
 VOL_REGIME_CLASSES: Tuple[str, ...] = (
     "LOW_VOL",
     "EXPANDING_VOL",
@@ -91,6 +101,36 @@ def _train_quantile(
     if len(fit) < _MIN_TRAIN_FOR_QUANTILES:
         return float(fallback)
     return float(fit.quantile(q))
+
+
+def _adaptive_train_quantile(
+    series: pd.Series,
+    train_end_idx: Optional[int],
+    start_q: float,
+    *,
+    fallback: float,
+    min_samples: int = 50,
+    min_q: float = 0.80,
+) -> float:
+    """Lower quantile until enough train-slice samples exceed threshold (or min_q)."""
+    q = float(start_q)
+    fit = _train_fit_slice(series, train_end_idx).dropna()
+    if len(fit) < _MIN_TRAIN_FOR_QUANTILES:
+        return float(fallback)
+    while q >= min_q:
+        thr = float(fit.quantile(q))
+        if thr <= 0:
+            return float(fallback)
+        if int((fit >= thr).sum()) >= min_samples:
+            return thr
+        q -= 0.02
+    thr = float(fit.quantile(min_q))
+    return thr if thr > 0 else float(fallback)
+
+
+def collapse_trend_regime_labels(labels: pd.Series) -> pd.Series:
+    """Map 5-class trend labels to BULL / RANGE / BEAR for training."""
+    return labels.astype(object).replace(TREND_TO_3CLASS)
 
 
 def _top_class_fraction(counts: Dict[str, int]) -> float:
@@ -275,9 +315,9 @@ def build_breakout_state_labels(
             continue
         expansion_s.iloc[i] = float(fut_atr.mean()) / cur_atr
 
-    exp_form = _train_quantile(expansion_s, train_end_idx, 0.75, fallback=1.12)
-    exp_conf = _train_quantile(expansion_s, train_end_idx, 0.90, fallback=1.25)
-    exp_exhaust = _train_quantile(expansion_s, train_end_idx, 0.15, fallback=0.95)
+    exp_form = _train_quantile(expansion_s, train_end_idx, 0.80, fallback=1.15)
+    exp_conf = _train_quantile(expansion_s, train_end_idx, 0.92, fallback=1.30)
+    exp_exhaust = _train_quantile(expansion_s, train_end_idx, 0.12, fallback=0.92)
 
     for i in range(n - fb):
         expansion = float(expansion_s.iloc[i]) if pd.notna(expansion_s.iloc[i]) else np.nan
@@ -293,7 +333,7 @@ def build_breakout_state_labels(
                 out.iloc[i] = "BREAKOUT_CONFIRMED"
         elif expansion > exp_form:
             out.iloc[i] = "BREAKOUT_FORMING"
-        elif expansion < exp_exhaust and i + fb < n:
+        elif expansion < exp_exhaust and abs(ret_fwd) < 0.0015 and i + fb < n:
             out.iloc[i] = "BREAKOUT_EXHAUSTION"
         else:
             out.iloc[i] = "NO_BREAKOUT"
@@ -332,16 +372,22 @@ def build_liquidity_condition_labels(
     long_score = oi_z.clip(lower=0) * pressure.clip(lower=0) * tm.clip(lower=0)
     short_score = oi_z.clip(lower=0) * (-pressure).clip(lower=0) * (-tm).clip(lower=0)
 
-    stop_thr = _train_quantile(stop_score, train_end_idx, 0.95, fallback=0.0)
-    sweep_thr = _train_quantile(sweep_score, train_end_idx, 0.95, fallback=0.0)
-    long_thr = _train_quantile(long_score, train_end_idx, 0.93, fallback=0.0)
-    short_thr = _train_quantile(short_score, train_end_idx, 0.93, fallback=0.0)
+    stop_thr = _adaptive_train_quantile(
+        stop_score, train_end_idx, 0.90, fallback=0.0, min_samples=50, min_q=0.80
+    )
+    sweep_thr = _adaptive_train_quantile(
+        sweep_score, train_end_idx, 0.90, fallback=0.0, min_samples=50, min_q=0.80
+    )
+    long_thr = _train_quantile(long_score, train_end_idx, 0.88, fallback=0.0)
+    short_thr = _train_quantile(short_score, train_end_idx, 0.88, fallback=0.0)
 
     out: List[str] = []
     for i in range(n):
-        if float(stop_score.iloc[i]) >= stop_thr and stop_thr > 0:
+        ss = float(stop_score.iloc[i])
+        sw = float(sweep_score.iloc[i])
+        if ss >= stop_thr and stop_thr > 0:
             out.append("STOP_HUNT_ENV")
-        elif float(sweep_score.iloc[i]) >= sweep_thr and sweep_thr > 0:
+        elif sw >= sweep_thr and sweep_thr > 0:
             out.append("LIQ_SWEEP_ACTIVE")
         elif float(long_score.iloc[i]) >= long_thr and long_thr > 0:
             out.append("LONG_LIQ_RISK")
@@ -355,7 +401,9 @@ def build_liquidity_condition_labels(
     return series, {
         "labeled_fraction": 1.0,
         "class_counts": counts,
-        "threshold_mode": "train_quantile",
+        "threshold_mode": "train_quantile_adaptive",
+        "stop_thr": stop_thr,
+        "sweep_thr": sweep_thr,
         "train_end_idx": train_end_idx,
     }
 
@@ -499,8 +547,14 @@ def build_mso_label(
     return _LABEL_BUILDERS[key](df_feat, close, fb, train_end_idx)
 
 
-def classes_for_dimension(state_dimension: str) -> Tuple[str, ...]:
+def classes_for_dimension(
+    state_dimension: str,
+    *,
+    trend_3class: bool = False,
+) -> Tuple[str, ...]:
     """Return ordered class names for a state dimension."""
+    if state_dimension == "trend_regime" and trend_3class:
+        return TREND_REGIME_CLASSES_3
     mapping = {
         "trend_regime": TREND_REGIME_CLASSES,
         "vol_regime": VOL_REGIME_CLASSES,

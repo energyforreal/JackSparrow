@@ -3,12 +3,57 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
 from feature_store.jacksparrow_mso_labels import MSO_STATE_DIMENSIONS
+
+
+def _unwrap_estimator(model: Any) -> Any:
+    """Return inner fitted estimator when wrapped by CalibratedClassifierCV."""
+    calibrated = getattr(model, "calibrated_classifiers_", None)
+    if calibrated:
+        try:
+            return calibrated[0].estimator
+        except (IndexError, AttributeError, TypeError):
+            pass
+    base = getattr(model, "base_estimator", None)
+    if base is not None:
+        return base
+    estimator = getattr(model, "estimator", None)
+    if estimator is not None:
+        return estimator
+    return model
+
+
+def _decode_class_code(code: int, class_order: Tuple[str, ...], model: Any) -> str:
+    """Map LightGBM integer prediction to canonical string label."""
+    order = list(class_order)
+    lgb_classes = list(getattr(_unwrap_estimator(model), "classes_", []))
+    c = int(code)
+    if lgb_classes and c >= len(order) and c < len(lgb_classes):
+        c = int(lgb_classes[c])
+    if 0 <= c < len(order):
+        return str(order[c])
+    if str(c) in order:
+        return str(c)
+    return str(c)
+
+
+def _proba_to_label_map(
+    proba_row: np.ndarray,
+    class_order: Tuple[str, ...],
+    model: Any,
+) -> Dict[str, float]:
+    """Build string-keyed probability map aligned with class_order."""
+    order = list(class_order)
+    proba_row = np.asarray(proba_row, dtype=np.float64).ravel()
+    prob_map: Dict[str, float] = {str(c): 0.0 for c in order}
+    for col_idx in range(min(len(proba_row), len(order))):
+        prob_map[str(order[col_idx])] = float(proba_row[col_idx])
+    return prob_map
 
 
 class MarketStateBundleExport:
@@ -50,13 +95,17 @@ class MarketStateBundleExport:
             if model is None:
                 continue
             proba = np.asarray(model.predict_proba(Xs), dtype=np.float64)
-            classes = list(getattr(model, "classes_", []))
-            idx = int(np.argmax(proba[0]))
-            label = str(classes[idx]) if idx < len(classes) else str(idx)
-            prob_map = {
-                str(classes[i]): float(proba[0, i])
-                for i in range(min(len(classes), proba.shape[1]))
-            }
+            class_order = self.class_orders.get(f"{horizon_key}:{dim}")
+            if not class_order:
+                class_order = tuple(
+                    str(c)
+                    for c in getattr(_unwrap_estimator(model), "classes_", [])
+                )
+            proba_row = proba[0] if proba.ndim > 1 else proba
+            pred_codes = model.predict(Xs)
+            code = int(np.atleast_1d(pred_codes)[0])
+            label = _decode_class_code(code, tuple(class_order), model)
+            prob_map = _proba_to_label_map(proba_row, tuple(class_order), model)
             out[dim] = label
             out[f"{dim}_proba"] = prob_map
         return out

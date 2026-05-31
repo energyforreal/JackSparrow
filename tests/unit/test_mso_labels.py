@@ -58,6 +58,21 @@ def test_build_mso_label_dispatch():
         assert len(classes_for_dimension(dim)) >= 4
 
 
+def test_collapse_trend_regime_labels():
+    from feature_store.jacksparrow_mso_labels import collapse_trend_regime_labels
+
+    labels = pd.Series(["STRONG_BULL", "WEAK_BEAR", "RANGE"])
+    collapsed = collapse_trend_regime_labels(labels)
+    assert list(collapsed) == ["BULL", "BEAR", "RANGE"]
+
+
+def test_classes_for_dimension_trend_3class():
+    from feature_store.jacksparrow_mso_labels import classes_for_dimension
+
+    assert classes_for_dimension("trend_regime", trend_3class=True) == ("BULL", "RANGE", "BEAR")
+    assert len(classes_for_dimension("trend_regime", trend_3class=False)) == 5
+
+
 def test_trend_uses_train_quantiles_at_t():
     n = 400
     df = _synthetic_feat(n)
@@ -222,4 +237,4 @@ def test_liquidity_train_quantiles_not_all_balanced():
     )
     balanced_frac = stats["class_counts"]["BALANCED"] / len(labels)
     assert balanced_frac < 0.95
-    assert stats["threshold_mode"] == "train_quantile"
+    assert stats["threshold_mode"] == "train_quantile_adaptive"

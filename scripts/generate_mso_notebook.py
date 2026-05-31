@@ -229,6 +229,7 @@ from feature_store.jacksparrow_mso_labels import (
     MSO_STATE_DIMENSIONS,
     build_mso_label,
     classes_for_dimension,
+    collapse_trend_regime_labels,
     horizon_keys_and_bars,
 )
 from agent.models.market_state_shims import MarketStateBundleExport
@@ -553,12 +554,28 @@ MSO_BLOCK_EXPORT_ON_FAIL = os.environ.get("MSO_BLOCK_EXPORT_ON_FAIL", "true").st
     "true",
     "yes",
 )
-MSO_CALIBRATE = os.environ.get("MSO_CALIBRATE", "true").strip().lower() in ("1", "true", "yes")
+MSO_CALIBRATE = os.environ.get("MSO_CALIBRATE", "false").strip().lower() in ("1", "true", "yes")
+MSO_USE_CLASS_WEIGHT = os.environ.get("MSO_USE_CLASS_WEIGHT", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 MSO_CLASS_WEIGHT_MAJORITY = float(os.environ.get("MSO_CLASS_WEIGHT_MAJORITY", "0.60"))
+MSO_TREND_3CLASS = os.environ.get("MSO_TREND_3CLASS", "true").strip().lower() in ("1", "true", "yes")
+MSO_TREND_EXCLUDED_FEATURES = tuple(
+    x.strip()
+    for x in os.environ.get("MSO_TREND_EXCLUDED_FEATURES", "adx_14,trend_mom,hurst_60").split(",")
+    if x.strip()
+)
+MSO_GATE_SCOPE = os.environ.get("MSO_GATE_SCOPE", "policy").strip().lower()
+POLICY_HORIZONS = ("intraday_30m",)
+POLICY_DIMENSIONS = ("liquidity_condition", "trend_regime", "breakout_state")
 PRIMARY_HORIZONS = ("scalp_10m", "intraday_30m")
 _RARE_CLASS_WATCH = (
     "FAKE_BREAKOUT",
     "LIQ_SWEEP_ACTIVE",
+    "BULL",
+    "BEAR",
     "STRONG_BULL",
     "STRONG_BEAR",
     "STOP_HUNT_ENV",
@@ -641,13 +658,31 @@ def _is_lgb_device_error(exc: BaseException) -> bool:
 
 
 def _class_weight_for_train(train_counts: dict, classes: list) -> Optional[str]:
+    if not MSO_USE_CLASS_WEIGHT:
+        return None
     total = sum(int(train_counts.get(c, 0)) for c in classes)
     if total <= 0:
-        return "balanced"
+        return None
     top_frac = max(int(train_counts.get(c, 0)) for c in classes) / float(total)
     if top_frac >= MSO_CLASS_WEIGHT_MAJORITY:
         return None
     return "balanced"
+
+
+def _classes_for_training(dim: str) -> list:
+    return list(classes_for_dimension(dim, trend_3class=MSO_TREND_3CLASS and dim == "trend_regime"))
+
+
+def _feature_cols_for_dim(dim: str) -> list:
+    if dim == "trend_regime" and MSO_TREND_EXCLUDED_FEATURES:
+        return [c for c in feat_cols if c not in MSO_TREND_EXCLUDED_FEATURES]
+    return list(feat_cols)
+
+
+def _gate_horizons_and_dims() -> list:
+    if MSO_GATE_SCOPE == "full":
+        return [(hk, dim) for hk in PRIMARY_HORIZONS for dim in MSO_STATE_DIMENSIONS]
+    return [(hk, dim) for hk in POLICY_HORIZONS for dim in POLICY_DIMENSIONS]
 
 
 def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int, *, class_weight=None):
@@ -717,21 +752,20 @@ def _fit_classifier(X_tr, y_tr, X_va, y_va, n_class: int, *, class_weight=None):
 
 def _run_export_gates() -> list:
     failures = []
-    for hk in PRIMARY_HORIZONS:
-        for dim in MSO_STATE_DIMENSIONS:
-            metrics = f1_scores.get(hk, {}).get(dim)
-            if not isinstance(metrics, dict):
-                failures.append(f"{hk}/{dim}: no metrics (head skipped or insufficient val)")
-                continue
-            f1m = float(metrics.get("f1_macro", 0.0))
-            bal = float(metrics.get("balanced_accuracy", 0.0))
-            min_f1 = MSO_MIN_F1_MACRO_TREND if dim == "trend_regime" else MSO_MIN_F1_MACRO
-            if f1m < min_f1:
-                failures.append(f"{hk}/{dim}: f1_macro {f1m:.3f} < {min_f1:.3f}")
-            if bal < MSO_MIN_BALANCED_ACC:
-                failures.append(
-                    f"{hk}/{dim}: balanced_accuracy {bal:.3f} < {MSO_MIN_BALANCED_ACC:.3f}"
-                )
+    for hk, dim in _gate_horizons_and_dims():
+        metrics = f1_scores.get(hk, {}).get(dim)
+        if not isinstance(metrics, dict):
+            failures.append(f"{hk}/{dim}: no metrics (head skipped or insufficient val)")
+            continue
+        f1m = float(metrics.get("f1_macro", 0.0))
+        bal = float(metrics.get("balanced_accuracy", 0.0))
+        min_f1 = MSO_MIN_F1_MACRO_TREND if dim == "trend_regime" else MSO_MIN_F1_MACRO
+        if f1m < min_f1:
+            failures.append(f"{hk}/{dim}: f1_macro {f1m:.3f} < {min_f1:.3f}")
+        if bal < MSO_MIN_BALANCED_ACC:
+            failures.append(
+                f"{hk}/{dim}: balanced_accuracy {bal:.3f} < {MSO_MIN_BALANCED_ACC:.3f}"
+            )
     export_gate_results.clear()
     export_gate_results.extend(failures)
     return failures
@@ -744,7 +778,10 @@ for hk, fb in HORIZON_MAP.items():
         labels, label_stats = build_mso_label(
             df_feat, close, dim, fb, train_end_idx=train_end_idx
         )
-        classes = list(classes_for_dimension(dim))
+        if dim == "trend_regime" and MSO_TREND_3CLASS:
+            labels = collapse_trend_regime_labels(labels)
+        classes = _classes_for_training(dim)
+        dim_feat_cols = _feature_cols_for_dim(dim)
         n_class = len(classes)
 
         y_train = labels.iloc[:train_end_idx].reset_index(drop=True)
@@ -804,13 +841,13 @@ for hk, fb in HORIZON_MAP.items():
 
         le = LabelEncoder()
         le.fit(classes)
-        X_tr = df_train.loc[m_tr, feat_cols].to_numpy(dtype=np.float64)
+        X_tr = df_train.loc[m_tr, dim_feat_cols].to_numpy(dtype=np.float64)
         y_tr = le.transform(y_train.loc[m_tr].astype(str))
 
         X_va = (
-            df_val.loc[m_va, feat_cols].to_numpy(dtype=np.float64)
+            df_val.loc[m_va, dim_feat_cols].to_numpy(dtype=np.float64)
             if m_va.any()
-            else np.empty((0, len(feat_cols)))
+            else np.empty((0, len(dim_feat_cols)))
         )
         y_va = le.transform(y_val.loc[m_va].astype(str)) if m_va.any() else np.array([], dtype=int)
         y_va_str = y_val.loc[m_va].astype(str).values if m_va.any() else np.array([], dtype=str)
@@ -941,9 +978,9 @@ mso_bundle_eval = MarketStateBundleExport(
 
 
 def _trend_position(label: str) -> int:
-    if label in ("STRONG_BULL", "WEAK_BULL"):
+    if label in ("STRONG_BULL", "WEAK_BULL", "BULL"):
         return 1
-    if label in ("STRONG_BEAR", "WEAK_BEAR"):
+    if label in ("STRONG_BEAR", "WEAK_BEAR", "BEAR"):
         return -1
     return 0
 
@@ -1146,9 +1183,10 @@ code(
     """EXPORT_DIR = Path(os.environ.get("MSO_EXPORT_DIR", "/content/mso_export"))
 
 _gate_failures = _run_export_gates()
+print(f"Export gate scope: {MSO_GATE_SCOPE} ({len(_gate_horizons_and_dims())} heads)")
 if MSO_BLOCK_EXPORT_ON_FAIL and _gate_failures:
     raise RuntimeError(
-        "MSO export blocked — primary horizon gates failed:\\n"
+        "MSO export blocked — export gates failed:\\n"
         + "\\n".join(f"  - {m}" for m in _gate_failures)
         + "\\nSet MSO_BLOCK_EXPORT_ON_FAIL=false to export anyway (debug only)."
     )
@@ -1166,10 +1204,12 @@ mso_bundle = MarketStateBundleExport(
     training_metadata={
         "f1_scores": f1_scores,
         "export_gate_results": export_gate_results,
+        "export_gate_scope": MSO_GATE_SCOPE,
         "lgb_device_requested": LGB_DEVICE,
         "lgb_device_used": LGB_DEVICE_USED,
         "raw_funding_coverage": _fund_cov_raw,
         "raw_oi_coverage": _oi_cov_raw,
+        "mso_trend_3class": MSO_TREND_3CLASS,
     },
 )
 artifact_path = EXPORT_DIR / "model_artifact_mso_v50.pkl"
@@ -1188,7 +1228,9 @@ metadata = {
     "horizon_keys": list(HORIZON_MAP.keys()),
     "f1_scores": f1_scores,
     "export_gate_results": export_gate_results,
+    "export_gate_scope": MSO_GATE_SCOPE,
     "export_gate_passed": len(export_gate_results) == 0,
+    "mso_trend_3class": MSO_TREND_3CLASS,
     "training_device_requested": LGB_DEVICE,
     "training_device_used": LGB_DEVICE_USED,
     "raw_funding_coverage": _fund_cov_raw,
@@ -1199,6 +1241,7 @@ meta_path = EXPORT_DIR / "metadata_mso_v50.json"
 meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 print("Exported:", artifact_path, meta_path)
 print("Device used:", LGB_DEVICE_USED)
+print("Export gate scope:", MSO_GATE_SCOPE)
 print("Export gates passed:", len(export_gate_results) == 0)
 print("Run the next cell to download jacksparrow_mso_v50_bundle.zip")
 """

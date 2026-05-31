@@ -99,6 +99,12 @@ def synthesize_market_state_intelligence(
         boost = 0.05
         reasons.append("mso_mtf_trend_align_bear")
 
+    if bool(getattr(settings, "mso_shadow_mode", False)):
+        shadow_reasons = list(reasons)
+        if shadow_reasons:
+            reasons = shadow_reasons + ["mso_shadow_mode"]
+        return {"veto": False, "boost": 0.0, "reasons": reasons, "state": state}
+
     return {"veto": veto, "boost": boost, "reasons": reasons, "state": state}
 
 

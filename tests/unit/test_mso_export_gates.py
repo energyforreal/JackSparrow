@@ -42,6 +42,24 @@ def _export_blocked(failures: list[str]) -> bool:
     return block and bool(failures)
 
 
+def test_export_policy_scope_only_checks_policy_heads():
+    f1_scores = {
+        "intraday_30m": {
+            "liquidity_condition": {"f1_macro": 0.55, "balanced_accuracy": 0.48},
+            "trend_regime": {"f1_macro": 0.55, "balanced_accuracy": 0.48},
+            "breakout_state": {"f1_macro": 0.55, "balanced_accuracy": 0.48},
+            "vol_regime": {"f1_macro": 0.10, "balanced_accuracy": 0.10},
+        },
+    }
+    policy_pairs = [("intraday_30m", d) for d in ("liquidity_condition", "trend_regime", "breakout_state")]
+    failures = _run_export_gates(
+        f1_scores,
+        primary_horizons=("intraday_30m",),
+        dimensions=("liquidity_condition", "trend_regime", "breakout_state"),
+    )
+    assert failures == []
+
+
 def test_export_blocked_by_default_when_gates_fail():
     f1_scores = {
         "scalp_10m": {

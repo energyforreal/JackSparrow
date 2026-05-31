@@ -757,6 +757,16 @@ class Settings(BaseSettings):
         env="MSO_REQUIRE_REAL_OI",
         description="Raise InsufficientRealDataError on zero/stale OI (no synthetic fallback).",
     )
+    mso_require_export_gates: bool = Field(
+        default=True,
+        env="MSO_REQUIRE_EXPORT_GATES",
+        description="Refuse MSO node init when metadata export_gate_passed is false.",
+    )
+    mso_shadow_mode: bool = Field(
+        default=False,
+        env="MSO_SHADOW_MODE",
+        description="Log MSO policy vetoes/boosts without applying them (paper validation).",
+    )
     use_bracket_orders: bool = Field(
         default=True,
         env="USE_BRACKET_ORDERS",

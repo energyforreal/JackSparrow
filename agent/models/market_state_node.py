@@ -74,13 +74,23 @@ def _scalar_from_trend_proba(horizon_state: Dict[str, Any]) -> float:
         mapping = {
             "STRONG_BULL": 0.85,
             "WEAK_BULL": 0.45,
+            "BULL": 0.55,
             "RANGE": 0.0,
             "WEAK_BEAR": -0.45,
             "STRONG_BEAR": -0.85,
+            "BEAR": -0.55,
         }
         return float(mapping.get(label, 0.0))
-    p_up = float(proba.get("STRONG_BULL", 0)) + float(proba.get("WEAK_BULL", 0))
-    p_dn = float(proba.get("STRONG_BEAR", 0)) + float(proba.get("WEAK_BEAR", 0))
+    p_up = (
+        float(proba.get("STRONG_BULL", 0))
+        + float(proba.get("WEAK_BULL", 0))
+        + float(proba.get("BULL", 0))
+    )
+    p_dn = (
+        float(proba.get("STRONG_BEAR", 0))
+        + float(proba.get("WEAK_BEAR", 0))
+        + float(proba.get("BEAR", 0))
+    )
     return float(np.clip(p_up - p_dn, -1.0, 1.0))
 
 
@@ -169,6 +179,16 @@ class MarketStateOracleNode(MCPModelNode):
             )
 
     async def initialize(self) -> None:
+        if bool(getattr(settings, "mso_require_export_gates", True)):
+            passed = self._metadata.get("export_gate_passed")
+            if passed is False:
+                scope = self._metadata.get("export_gate_scope", "unknown")
+                results = self._metadata.get("export_gate_results") or []
+                preview = "; ".join(str(r) for r in results[:5])
+                raise RuntimeError(
+                    f"MSO bundle failed export gates (scope={scope}). "
+                    f"Refusing to load. Failures: {preview}"
+                )
         artifact_path = self._resolve_artifact_path()
         loaded = _load(artifact_path)
         if isinstance(loaded, MarketStateBundleExport):
