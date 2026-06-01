@@ -9,7 +9,7 @@ from typing import Any, Optional
 def decision_payload_timestamp_epoch_seconds(ts: Any) -> Optional[float]:
     """Convert decision payload `timestamp` to Unix seconds for age checks.
 
-    Naive datetimes are treated as UTC. The pipeline uses `datetime.utcnow()` for
+    Naive datetimes are treated as UTC. The pipeline uses `datetime.now(timezone.utc)` for
     decision times; on Windows, `datetime.timestamp()` treats naive values as
     *local* time, which skews age by the host timezone offset (~19800s on IST).
     """

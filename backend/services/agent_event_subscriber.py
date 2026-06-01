@@ -125,8 +125,11 @@ async def _append_signal_edge_history_redis(symbol: str, signal_data: Dict[str, 
         )
         await r.lpush(key, entry)
         await r.ltrim(key, 0, 199)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            "signal_audit_redis_push_failed",
+            error=str(e),
+        )
 
 
 def _model_consensus_row(
@@ -717,9 +720,9 @@ class AgentEventSubscriber:
                 try:
                     timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                 except Exception:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.now(timezone.utc)
             elif not isinstance(timestamp, datetime):
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
 
             # Initialize position_id variable for use after try block
             position_id = None
@@ -909,9 +912,9 @@ class AgentEventSubscriber:
                 try:
                     timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                 except Exception:
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.now(timezone.utc)
             elif not isinstance(timestamp, datetime):
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
             
             # Update position in database
             try:
@@ -1667,8 +1670,12 @@ class AgentEventSubscriber:
                 reflection_message,
                 channel="agent_update",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "position_reflection_broadcast_failed",
+                error=str(e),
+                exc_info=True,
+            )
 
     async def _handle_position_closed_consolidated(self, payload: Dict[str, Any]):
         """Handle position_closed events with simplified logic."""

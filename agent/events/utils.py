@@ -7,7 +7,7 @@ Provides helper functions for event handling.
 import json
 import uuid
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from agent.events.schemas import BaseEvent
 
@@ -28,7 +28,7 @@ def create_correlation_context(parent_event_id: Optional[str] = None) -> Dict[st
     """
     context = {
         "correlation_id": parent_event_id or generate_event_id(),
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
     if parent_event_id:

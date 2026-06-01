@@ -6,7 +6,7 @@ See ``docs/canonical_events.md`` for handler wiring and pipeline overview.
 """
 
 from typing import Dict, Any, Optional, List, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pydantic import BaseModel, Field, ConfigDict
 import uuid
@@ -69,7 +69,7 @@ class BaseEvent(BaseModel):
     
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     event_type: EventType
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     source: str = Field(..., description="Component that emitted the event")
     payload: Dict[str, Any] = Field(default_factory=dict)
     correlation_id: Optional[str] = Field(default=None, description="Correlation ID for event chains")

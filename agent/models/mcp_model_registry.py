@@ -5,7 +5,7 @@ Manages all ML model nodes and implements MCP Model Protocol.
 """
 
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import asyncio
 import structlog
@@ -162,7 +162,7 @@ class MCPModelRegistry:
             "failed_models": len(failed_files),
             "failed_files": failed_files[:5],
             "last_error_messages": error_messages[-5:],  # keep recent
-            "last_attempt_at": datetime.utcnow().isoformat() if discovery_attempted else None,
+            "last_attempt_at": datetime.now(timezone.utc).isoformat() if discovery_attempted else None,
             "pending_models": len(self._pending_models),
             "pending_model_names": list(self._pending_models.keys())[:10],
             "model_integration": "jacksparrow_ic",
@@ -458,7 +458,7 @@ class MCPModelRegistry:
             consensus_confidence=consensus_confidence,
             healthy_models=len(healthy_predictions),
             total_models=len(self.models),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
     async def record_prediction_outcome(self, request_id: str, actual_outcome: float,
@@ -478,7 +478,7 @@ class MCPModelRegistry:
         # Store outcome for potential future use
         self._outcome_history[request_id] = {
             "outcome": actual_outcome,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "market_context": market_context or {}
         }
 

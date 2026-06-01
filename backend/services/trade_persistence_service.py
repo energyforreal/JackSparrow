@@ -6,7 +6,7 @@ Integrates trading execution with portfolio management.
 """
 
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, case, cast, String
@@ -115,7 +115,7 @@ class TradePersistenceService:
         
         async with AsyncSessionLocal() as session:
             try:
-                executed_at = executed_at or datetime.utcnow()
+                executed_at = executed_at or datetime.now(timezone.utc)
                 
                 # Convert side to TradeSide enum
                 trade_side = TradeSide.BUY if side.upper() == "BUY" else TradeSide.SELL
@@ -323,7 +323,7 @@ class TradePersistenceService:
 
         async with AsyncSessionLocal() as session:
             try:
-                closed_at = closed_at or datetime.utcnow()
+                closed_at = closed_at or datetime.now(timezone.utc)
                 
                 # Find position - prioritize fallback lookup by symbol when available
                 position = None

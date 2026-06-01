@@ -14,6 +14,68 @@ from agent.events.event_bus import event_bus
 
 logger = structlog.get_logger()
 
+_reconcile_healthy: bool = True
+_reconcile_block_reason: Optional[str] = None
+_reconcile_divergence: List[str] = []
+
+
+def is_reconcile_healthy() -> bool:
+    """False when local vs exchange position sets disagree (blocks new entries)."""
+    if not bool(getattr(settings, "exchange_position_reconcile_enabled", True)):
+        return True
+    if not bool(getattr(settings, "block_entries_on_reconcile_divergence", True)):
+        return True
+    return _reconcile_healthy
+
+
+def get_reconcile_block_reason() -> str:
+    return _reconcile_block_reason or "Position reconcile unhealthy — new entries blocked"
+
+
+def get_reconcile_divergence() -> List[str]:
+    return list(_reconcile_divergence)
+
+
+def _set_reconcile_health(healthy: bool, reason: Optional[str] = None, divergence: Optional[List[str]] = None) -> None:
+    global _reconcile_healthy, _reconcile_block_reason, _reconcile_divergence
+    _reconcile_healthy = healthy
+    _reconcile_block_reason = reason
+    _reconcile_divergence = list(divergence or [])
+
+
+def detect_position_divergence(
+    execution_module: Any,
+    exchange_rows: List[Dict[str, Any]],
+) -> List[str]:
+    """Return human-readable divergence messages (empty if aligned)."""
+    issues: List[str] = []
+    ex_map = exchange_open_symbols(exchange_rows)
+    pm = execution_module.position_manager
+    local_open = {
+        sym: pos
+        for sym, pos in pm.get_all_positions().items()
+        if pos and str(pos.get("status") or "").lower() == "open"
+    }
+    for sym in set(local_open.keys()) | set(ex_map.keys()):
+        local = local_open.get(sym)
+        ex_row = ex_map.get(sym)
+        if local and not ex_row:
+            issues.append(f"{sym}: local OPEN, exchange flat")
+        elif ex_row and not local:
+            issues.append(f"{sym}: exchange OPEN, local flat")
+        elif local and ex_row:
+            ex_size = _coerce_float(ex_row.get("size"))
+            local_side = str(local.get("side") or "").lower()
+            ex_side = _side_from_signed_size(ex_size)
+            if local_side and ex_side and local_side != ex_side:
+                issues.append(f"{sym}: side mismatch local={local_side} exchange={ex_side}")
+            local_lots = _coerce_float(local.get("lots") or local.get("quantity"))
+            if local_lots > 0 and abs(abs(ex_size) - local_lots) > max(0.01, local_lots * 0.05):
+                issues.append(
+                    f"{sym}: size mismatch local_lots={local_lots} exchange_size={ex_size}"
+                )
+    return issues
+
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -85,6 +147,7 @@ async def reconcile_positions_with_exchange(execution_module: Any) -> Dict[str, 
 
     if not bool(getattr(settings, "exchange_position_reconcile_enabled", True)):
         summary["skipped"].append("disabled")
+        _set_reconcile_health(True)
         return summary
 
     try:
@@ -92,9 +155,18 @@ async def reconcile_positions_with_exchange(execution_module: Any) -> Dict[str, 
     except Exception as exc:
         logger.warning("position_reconcile_fetch_failed", error=str(exc))
         summary["skipped"].append("fetch_failed")
+        if bool(getattr(settings, "block_entries_on_reconcile_divergence", True)):
+            _set_reconcile_health(
+                False,
+                reason=f"Exchange position fetch failed: {exc}",
+            )
         return summary
 
     rows = parse_margined_rows(view)
+    pre_divergence = detect_position_divergence(execution_module, rows)
+    if pre_divergence:
+        logger.warning("position_reconcile_pre_divergence", issues=pre_divergence)
+        summary["pre_divergence"] = pre_divergence
     ex_map = exchange_open_symbols(rows)
     ex_syms: Set[str] = set(ex_map.keys())
 
@@ -212,6 +284,18 @@ async def reconcile_positions_with_exchange(execution_module: Any) -> Dict[str, 
 
     if summary["adopted"] or summary["closed_exchange"] or summary["cleared_local"]:
         logger.info("position_reconcile_complete", **summary)
+
+    post_divergence = detect_position_divergence(execution_module, rows)
+    summary["post_divergence"] = post_divergence
+    if post_divergence and bool(getattr(settings, "block_entries_on_reconcile_divergence", True)):
+        _set_reconcile_health(
+            False,
+            reason="; ".join(post_divergence[:5]),
+            divergence=post_divergence,
+        )
+        logger.error("position_reconcile_unresolved_divergence", issues=post_divergence)
+    else:
+        _set_reconcile_health(True)
 
     try:
         from agent.core.mcp_orchestrator import mark_position_reconcile_completed

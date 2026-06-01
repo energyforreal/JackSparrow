@@ -3,10 +3,6 @@ xgboost==2.0.2
 lightgbm==4.1.0
 scikit-learn==1.6.1
 
-# Deep Learning (Optional)
-tensorflow==2.16.1
-torch==2.2.0
-
 # Data Processing
 numpy==1.26.4
 pandas==2.1.3

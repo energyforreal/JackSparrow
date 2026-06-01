@@ -7,6 +7,7 @@ Provides portfolio calculations and performance metrics.
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import statistics
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, desc, select, case, cast, String, delete
 from sqlalchemy.types import Numeric
@@ -24,6 +25,17 @@ logger = structlog.get_logger()
 
 class PortfolioService:
     """Service for portfolio calculations."""
+
+    @staticmethod
+    def _compute_sharpe_ratio(pnls: List[float]) -> float:
+        """Sharpe on per-trade PnL; annualized with sqrt(365*24) (hourly-scale heuristic)."""
+        if len(pnls) < 2:
+            return 0.0
+        mean_pnl = statistics.mean(pnls)
+        std_pnl = statistics.stdev(pnls)
+        if std_pnl <= 0:
+            return 0.0
+        return (mean_pnl / std_pnl) * (365 * 24) ** 0.5
 
     @staticmethod
     def _compute_duration_seconds(opened_at: Optional[datetime], closed_at: Optional[datetime]) -> int:
@@ -423,6 +435,20 @@ class PortfolioService:
                 result = await db.execute(metrics_query)
                 row = result.first()
 
+                pnl_list_query = select(pnl_col).where(
+                    cast(Position.status, String) == PositionStatus.CLOSED.value,
+                    Position.closed_at.isnot(None),
+                    Position.closed_at >= start_date,
+                    Position.closed_at <= end_date,
+                )
+                pnl_rows = await db.execute(pnl_list_query)
+                pnls = [
+                    float(r[0])
+                    for r in pnl_rows.fetchall()
+                    if r[0] is not None
+                ]
+                sharpe_ratio = self._compute_sharpe_ratio(pnls)
+
                 total_trades = int(row.total_trades or 0)
                 winning_trades = int(row.winning_trades or 0)
                 losing_trades = int(row.losing_trades or 0)
@@ -463,7 +489,7 @@ class PortfolioService:
                     "average_win": average_win,
                     "average_loss": average_loss,
                     "profit_factor": profit_factor,
-                    "sharpe_ratio": 0,
+                    "sharpe_ratio": sharpe_ratio,
                 }
                 
                 # Cache result for 30 seconds

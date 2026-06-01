@@ -68,7 +68,7 @@ class AgentStateMachine:
         """Initialize state machine."""
         self.current_state = AgentState.INITIALIZING
         self.previous_state: Optional[AgentState] = None
-        self.state_entry_time = datetime.utcnow()
+        self.state_entry_time = datetime.now(timezone.utc)
         self.transitions: Dict[AgentState, List[StateTransition]] = {}
         self.state_handlers: Dict[AgentState, Callable] = {}
         self.context_manager = context_manager
@@ -264,7 +264,7 @@ class AgentStateMachine:
         from_state = self.current_state
         self.previous_state = self.current_state
         self.current_state = new_state
-        self.state_entry_time = datetime.utcnow()
+        self.state_entry_time = datetime.now(timezone.utc)
         
         # Update context
         await self.context_manager.update_state({"state": new_state})
@@ -277,7 +277,7 @@ class AgentStateMachine:
                 "from_state": from_state.value,
                 "to_state": new_state.value,
                 "reason": reason,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             }
         )
         
@@ -442,21 +442,21 @@ class AgentStateMachine:
         if possible_state == new_state:
             self.previous_state = self.current_state
             self.current_state = new_state
-            self.state_entry_time = datetime.utcnow()
+            self.state_entry_time = datetime.now(timezone.utc)
             return True
         
         # Allow direct transition to EMERGENCY_STOP from any state
         if new_state == AgentState.EMERGENCY_STOP:
             self.previous_state = self.current_state
             self.current_state = new_state
-            self.state_entry_time = datetime.utcnow()
+            self.state_entry_time = datetime.now(timezone.utc)
             return True
         
         # Allow manual transitions in development (can be restricted)
         if context.get("manual_transition", False):
             self.previous_state = self.current_state
             self.current_state = new_state
-            self.state_entry_time = datetime.utcnow()
+            self.state_entry_time = datetime.now(timezone.utc)
             return True
         
         return False
@@ -467,7 +467,7 @@ class AgentStateMachine:
             "current_state": self.current_state.value,
             "previous_state": self.previous_state.value if self.previous_state else None,
             "state_entry_time": self.state_entry_time.isoformat(),
-            "time_in_state_seconds": (datetime.utcnow() - self.state_entry_time).total_seconds()
+            "time_in_state_seconds": (datetime.now(timezone.utc) - self.state_entry_time).total_seconds()
         }
     
     def is_operational(self) -> bool:

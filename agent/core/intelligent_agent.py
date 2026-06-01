@@ -474,9 +474,11 @@ class IntelligentAgent:
         # Fire-and-forget warmup to avoid the UI staying in model_nodes DEGRADED
         # until the first successful prediction runs.
         try:
-            asyncio.create_task(self._model_nodes_health_warmup())
-        except Exception:
-            pass
+            from agent.core.async_tasks import fire_and_forget
+
+            fire_and_forget(self._model_nodes_health_warmup(), name="model_nodes_health_warmup")
+        except Exception as e:
+            logger.warning("model_nodes_warmup_schedule_failed", error=str(e))
 
         # Position monitoring loop is started in start() after self.running = True
         # so the loop does not exit immediately (while self.running).
@@ -676,6 +678,13 @@ class IntelligentAgent:
             environment=settings.environment,
         )
         self.running = False
+
+        try:
+            from agent.core.async_tasks import cancel_background_tasks
+
+            await cancel_background_tasks()
+        except Exception as e:
+            logger.warning("background_tasks_cancel_failed", error=str(e))
 
         if getattr(self, "_threshold_adapter_task", None):
             self._threshold_adapter_task.cancel()
@@ -894,7 +903,7 @@ class IntelligentAgent:
                     "from_state": "INITIALIZING",
                     "to_state": "OBSERVING",
                     "reason": "Agent initialization completed successfully",
-                    "timestamp": datetime.utcnow()
+                    "timestamp": datetime.now(timezone.utc)
                 }
             )
             await event_bus.publish(initial_state_event)
@@ -1191,7 +1200,7 @@ class IntelligentAgent:
 
         fill_price = result.details.get("average_fill_price") or price or 0
         order_id = result.order_id or str(uuid.uuid4())[:8]
-        trade_id = f"trade_{order_id}_{datetime.utcnow().timestamp()}"
+        trade_id = f"trade_{order_id}_{datetime.now(timezone.utc).timestamp()}"
 
         # Publish OrderFillEvent for backend persistence and WebSocket broadcast
         from agent.events.schemas import OrderFillEvent
@@ -1530,6 +1539,27 @@ class IntelligentAgent:
         elif action == "stop":
             self.running = False
         elif action == "emergency_stop":
+            from agent.core.trading_controls import activate_kill_switch
+            from agent.events.event_bus import event_bus
+            from agent.events.schemas import EmergencyStopEvent
+
+            reason = str(params.get("reason") or "admin_emergency_stop")
+            triggered_by = str(params.get("triggered_by") or "control_api")
+            activate_kill_switch(reason, persist_context=True)
+            await event_bus.publish(
+                EmergencyStopEvent(
+                    source="intelligent_agent",
+                    payload={
+                        "reason": reason,
+                        "triggered_by": triggered_by,
+                        "timestamp": datetime.now(timezone.utc),
+                    },
+                )
+            )
+            await self.state_machine._transition_to(
+                AgentState.EMERGENCY_STOP,
+                f"Emergency stop: {reason}",
+            )
             close_result = await execution_module.close_all_positions(exit_reason="emergency_exit")
             self.running = False
             return {
@@ -1621,6 +1651,13 @@ class IntelligentAgent:
                 websocket_connected = getattr(self.market_data_service, '_websocket_connected', False)
                 streaming_running = getattr(self.market_data_service, 'streaming_running', False)
 
+                try:
+                    from agent.core.latency_metrics import latency_snapshot
+
+                    latency_stats = latency_snapshot()
+                except Exception:
+                    latency_stats = {}
+
                 logger.info(
                     "agent_periodic_status",
                     service="agent",
@@ -1632,6 +1669,7 @@ class IntelligentAgent:
                     streaming_running=streaming_running,
                     decisions_last_hour=decisions_last_hour,
                     candle_closes_last_hour=candles_last_hour,
+                    latency_metrics=latency_stats,
                     last_staleness_trigger_at=(
                         last_staleness_trigger_at.isoformat()
                         if last_staleness_trigger_at is not None
@@ -1639,6 +1677,29 @@ class IntelligentAgent:
                     ),
                     message="Agent periodic status check - decision generation monitoring"
                 )
+
+                agent_symbol = str(getattr(settings, "agent_symbol", "BTCUSD") or "BTCUSD")
+                open_count = 0
+                try:
+                    open_count = len(execution_module.position_manager.get_all_positions())
+                except Exception:
+                    pass
+                if (
+                    open_count > 0
+                    and self.market_data_service
+                    and hasattr(self.market_data_service, "is_ticker_stale_for_symbol")
+                    and self.market_data_service.is_ticker_stale_for_symbol(agent_symbol)
+                ):
+                    stale_s = self.market_data_service.seconds_since_last_good_tick(agent_symbol)
+                    logger.error(
+                        "market_data_stale_with_open_positions",
+                        symbol=agent_symbol,
+                        open_positions=open_count,
+                        stale_seconds=stale_s,
+                        threshold_seconds=getattr(
+                            settings, "market_data_stale_rest_poll_seconds", 15
+                        ),
+                    )
 
                 # Log warning if no decisions generated in last 30 minutes
                 if time_since_last_decision and time_since_last_decision > 1800:

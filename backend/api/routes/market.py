@@ -120,7 +120,7 @@ async def get_perpetual_stats(symbol: str = Query("BTCUSD", description="Trading
             "funding_rate": float(ticker.get("funding_rate", 0.0)),
             "open_interest": float(ticker.get("open_interest", 0.0)),
             "next_funding_time": ticker.get("next_funding_time"),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:

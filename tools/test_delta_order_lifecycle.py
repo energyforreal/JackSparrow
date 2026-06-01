@@ -2,8 +2,8 @@
 """
 Delta testnet order lifecycle smoke test.
 
-Exercises: resolve product_id, place market order, list active orders,
-read position, cancel all orders (optional), close via reduce_only market order.
+Exercises: resolve product_id, GET/POST order leverage, place market order,
+list active orders, read position, close via reduce_only market order.
 
 Usage:
   python tools/test_delta_order_lifecycle.py --allow-live
@@ -47,6 +47,25 @@ async def run_smoke(symbol: str, skip_place: bool) -> int:
 
     product_id = await client.resolve_product_id(symbol)
     print(f"Resolved product_id: {product_id}")
+
+    print("Order leverage (GET)...")
+    try:
+        lev_get = await client.get_order_leverage(product_id=product_id)
+        current = client._parse_order_leverage_value(lev_get)
+        print(f"  current leverage={current}")
+    except DeltaExchangeError as exc:
+        print(f"  GET leverage failed (may be unset): {exc}")
+        current = None
+
+    target_leverage = 10
+    print(f"Order leverage sync (ensure {target_leverage})...")
+    lev_set = await client.ensure_order_leverage(symbol, target_leverage)
+    synced = client._parse_order_leverage_value(lev_set)
+    print(f"  synced leverage={synced}")
+
+    lev_verify = await client.get_order_leverage(product_id=product_id)
+    verified = client._parse_order_leverage_value(lev_verify)
+    print(f"  verified leverage={verified}")
 
     if not skip_place:
         print("Placing 1-lot market buy (testnet)...")

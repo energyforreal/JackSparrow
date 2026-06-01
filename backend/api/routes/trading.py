@@ -6,7 +6,7 @@ Handles prediction requests and trade execution.
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Any, Optional
 
@@ -205,7 +205,7 @@ async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
                     chain_id=reasoning_chain_dict.get("chain_id", "unknown"),
                     timestamp=datetime.fromisoformat(
                         reasoning_chain_dict["timestamp"].replace("Z", "+00:00")
-                    ) if "timestamp" in reasoning_chain_dict else datetime.utcnow(),
+                    ) if "timestamp" in reasoning_chain_dict else datetime.now(timezone.utc),
                     steps=reasoning_steps,
                     conclusion=reasoning_chain_dict.get("conclusion", "No conclusion"),
                     final_confidence=float(reasoning_chain_dict.get("final_confidence", 0.0))
@@ -214,7 +214,7 @@ async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
                 # Create minimal reasoning chain if missing
                 reasoning_chain = ReasoningChain(
                     chain_id="unknown",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     steps=[],
                     conclusion="No reasoning chain available",
                     final_confidence=0.0
@@ -242,11 +242,11 @@ async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
                     if isinstance(timestamp_str, str):
                         timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
                     else:
-                        timestamp = datetime.utcnow()
+                        timestamp = datetime.now(timezone.utc)
                 except (ValueError, AttributeError):
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.now(timezone.utc)
             else:
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(timezone.utc)
             
             # Extract market_context (may include features, etc.)
             market_context = decision_data.get("market_context", {}) or {}

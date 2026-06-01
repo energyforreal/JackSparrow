@@ -6,7 +6,7 @@ position sizing, drawdown control, and Kelly Criterion calculations.
 """
 
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import statistics
 import structlog
 
@@ -172,7 +172,7 @@ class Portfolio:
         """Record a completed trade."""
         self.trade_history.append({
             **trade_details,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "portfolio_value_before": self.current_portfolio_value
         })
 
@@ -323,8 +323,17 @@ class RiskManager:
                 assessment.emergency_actions.append(
                     f"Daily drawdown halt: {drawdown * 100:.2f}% >= {daily_halt_pct:.1f}%"
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "daily_drawdown_halt_check_failed",
+                error=str(e),
+                drawdown=drawdown,
+                exc_info=True,
+            )
+            assessment.can_trade = False
+            assessment.emergency_actions.append(
+                "Daily drawdown halt check failed — trading denied (fail-safe)"
+            )
 
         if drawdown > self.risk_limits["max_drawdown"]:
             risk_score += 0.4
@@ -613,6 +622,30 @@ class RiskManager:
             "warnings": [],
             "stop_loss_required": stop_loss is None
         }
+
+        try:
+            from agent.core.position_reconcile import (
+                get_reconcile_block_reason,
+                is_reconcile_healthy,
+            )
+
+            if not is_reconcile_healthy():
+                result["approved"] = False
+                result["reason"] = get_reconcile_block_reason()
+                return result
+        except ImportError:
+            pass
+
+        try:
+            from agent.core.trading_controls import should_block_new_orders
+
+            blocked, halt_reason = should_block_new_orders()
+            if blocked:
+                result["approved"] = False
+                result["reason"] = halt_reason
+                return result
+        except ImportError:
+            pass
 
         # Check portfolio risk
         risk_assessment = await self.assess_portfolio_risk()

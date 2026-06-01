@@ -44,6 +44,9 @@ demo keys delta.txt
 colab_file_upload/delta_credentials.txt
 colab_file_upload/*credentials*
 
+# Accidental Cursor IDE screenshot placeholders
+assets/c__Users_*
+
 # Temp / debug artifacts
 _tmp_*.py
 temp_fix.py

@@ -6,7 +6,7 @@ based on historical trading results.
 """
 
 from typing import Dict, List, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import structlog
 import statistics
@@ -65,7 +65,7 @@ class ModelPerformanceTracker:
                 "avg_pnl": 0.0,
                 "sharpe_ratio": 0.0,
                 "recent_performance": [],
-                "last_updated": datetime.utcnow()
+                "last_updated": datetime.now(timezone.utc)
             }
 
         stats = self.model_stats[model_name]
@@ -99,7 +99,7 @@ class ModelPerformanceTracker:
                 std_return = statistics.stdev(recent_returns) if len(recent_returns) > 1 else 1.0
                 stats["sharpe_ratio"] = mean_return / std_return if std_return > 0 else 0.0
 
-        stats["last_updated"] = datetime.utcnow()
+        stats["last_updated"] = datetime.now(timezone.utc)
 
         # Keep global recent trades for cross-model analysis
         self.recent_trades.append(outcome)
@@ -107,7 +107,7 @@ class ModelPerformanceTracker:
             self.recent_trades = self.recent_trades[-100:]
 
         # Clean old trades
-        cutoff_date = datetime.utcnow() - timedelta(days=self.max_history_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.max_history_days)
         self.recent_trades = [t for t in self.recent_trades if t.exit_time > cutoff_date]
 
         logger.info("model_performance_updated",
@@ -233,7 +233,7 @@ class LearningSystem:
             out_stats[model_name] = ss
 
         return {
-            "saved_at": datetime.utcnow().isoformat(),
+            "saved_at": datetime.now(timezone.utc).isoformat(),
             "model_stats": out_stats,
             "calibration_factors": dict(self.confidence_calibration.calibration_factors),
             "strategy_params": dict(self.strategy_adapter.strategy_params),
@@ -410,7 +410,7 @@ class LearningSystem:
     @staticmethod
     def _trade_outcome_from_reflection(reflection: Dict[str, Any]) -> TradeOutcome:
         """Build a minimal TradeOutcome for calibrator updates from reflection."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         pnl = float(reflection.get("pnl") or 0.0)
         return TradeOutcome(
             trade_id=str(reflection.get("position_id") or ""),
@@ -627,7 +627,7 @@ class ConfidenceCalibrator:
                 "quality_score": quality,
                 "calibration_bucket": bucket,
                 "was_profitable": bool(reflection.get("was_profitable")),
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
             }
         )
         if len(self.reflection_history) > 200:
@@ -681,7 +681,7 @@ class ConfidenceCalibrator:
             self.confidence_history[model_name].append({
                 "confidence": confidence,
                 "correct": predicted_correctly,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             })
 
             # Keep only recent history
@@ -794,7 +794,7 @@ class StrategyAdapter:
         self.performance_history.append({
             "outcome": trade_outcome,
             "models": list(participating_models),
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone.utc)
         })
 
         # Keep recent history

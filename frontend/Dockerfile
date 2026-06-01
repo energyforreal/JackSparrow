@@ -9,13 +9,13 @@ ARG NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 ARG NEXT_PUBLIC_BACKEND_PROXY_BASE=/api/backend
 
 # Stage 1: Dependencies
-FROM node:20-bullseye-slim AS deps
+FROM node:20.17.0-bullseye-slim AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
 # Stage 2: Builder
-FROM node:20-bullseye-slim AS builder
+FROM node:20.17.0-bullseye-slim AS builder
 WORKDIR /app
 
 # Re-declare build-time arguments for Next.js environment variables
@@ -42,7 +42,7 @@ COPY . ./
 RUN npm run build
 
 # Stage 3: Runtime
-FROM node:20-bullseye-slim AS runner
+FROM node:20.17.0-bullseye-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \

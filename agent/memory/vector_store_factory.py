@@ -26,8 +26,8 @@ async def create_vector_store() -> Any:
                 max_memory_size=max_size,
                 similarity_threshold=threshold,
                 collection_name=str(
-                    getattr(settings, "agent_vector_store_qdrant_collection", "decision_contexts")
-                    or "decision_contexts"
+                    getattr(settings, "agent_vector_store_qdrant_collection", "decision_contexts_v43")
+                    or "decision_contexts_v43"
                 ),
                 url=getattr(settings, "qdrant_url", None),
                 api_key=getattr(settings, "qdrant_api_key", None),

@@ -6,7 +6,7 @@ ARG VERSION=latest
 ARG COMMIT_SHA=unknown
 
 # Stage 1: Dependencies builder
-FROM python:3.11-slim AS builder
+FROM python:3.11.9-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -27,7 +27,7 @@ RUN pip install --upgrade pip && \
     pip install --user --no-warn-script-location -r /tmp/requirements.txt
 
 # Stage 2: Runtime
-FROM python:3.11-slim AS runtime
+FROM python:3.11.9-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

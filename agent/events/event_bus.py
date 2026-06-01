@@ -7,7 +7,7 @@ Provides event-driven communication using Redis Streams.
 import json
 import asyncio
 from typing import Dict, Callable, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import structlog
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError, ConnectionError
@@ -109,8 +109,14 @@ class EventBus:
                 id="0",
                 mkstream=True
             )
-        except Exception:
-            pass
+        except Exception as e:
+            error_str = str(e).upper()
+            if "BUSYGROUP" not in error_str:
+                logger.warning(
+                    "event_bus_dlq_group_create_failed",
+                    stream=self._dead_letter_stream,
+                    error=str(e),
+                )
         
         logger.info(
             "event_bus_initialized",
@@ -252,7 +258,7 @@ class EventBus:
                         "type": "agent_event",
                         "event_type": event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
                         "payload": event_data.get("payload", event_data),
-                        "timestamp": event_data.get("timestamp", datetime.utcnow().isoformat()),
+                        "timestamp": event_data.get("timestamp", datetime.now(timezone.utc).isoformat()),
                         "event_id": event.event_id,
                         "correlation_id": event.correlation_id,
                     }
@@ -376,14 +382,18 @@ class EventBus:
                         event_data_str = event_json_bytes.decode("utf-8", errors="replace")
                     else:
                         event_data_str = str(event_json_bytes)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "event_bus_dlq_event_decode_failed",
+                    message_id=message_id,
+                    error=str(e),
+                )
             
             await redis.xadd(
                 self._dead_letter_stream,
                 {
                     "original_message_id": message_id,
-                    "failed_at": datetime.utcnow().isoformat() + "Z",
+                    "failed_at": datetime.now(timezone.utc).isoformat() + "Z",
                     "reason": reason,
                     "event_data": event_data_str[:1000]  # Limit size
                 }
@@ -697,7 +707,7 @@ class EventBus:
                             "event": json.dumps(event_data, default=str),
                             "retry_count": str(new_retry_count),
                             "original_message_id": message_id,
-                            "retry_at": datetime.utcnow().isoformat()
+                            "retry_at": datetime.now(timezone.utc).isoformat()
                         }
                     )
                     
@@ -728,7 +738,7 @@ class EventBus:
                     {
                         "original_message_id": message_id,
                         "retry_count": str(current_retry_count),
-                        "failed_at": datetime.utcnow().isoformat(),
+                        "failed_at": datetime.now(timezone.utc).isoformat(),
                         "event": json.dumps(event.dict(), default=str) if event else "{}"
                     }
                 )

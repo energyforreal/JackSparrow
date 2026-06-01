@@ -6,7 +6,7 @@ and operational context across restarts.
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import asyncio
@@ -22,8 +22,8 @@ class AgentState:
     def __init__(self):
         self.agent_id: str = "jack_sparrow_v1"
         self.version: str = "1.0.0"
-        self.startup_time: datetime = datetime.utcnow()
-        self.last_update: datetime = datetime.utcnow()
+        self.startup_time: datetime = datetime.now(timezone.utc)
+        self.last_update: datetime = datetime.now(timezone.utc)
 
         # Operational state
         self.is_active: bool = False
@@ -190,7 +190,7 @@ class AgentState:
             self.max_drawdown = max(self.max_drawdown, drawdown)
 
         self.portfolio_value = current_value
-        self.last_update = datetime.utcnow()
+        self.last_update = datetime.now(timezone.utc)
 
     def can_trade(self) -> bool:
         """Check if agent is allowed to place trades."""
@@ -351,7 +351,7 @@ class ContextManager:
                 self.current_state = AgentState.from_dict(state_data)
 
                 # Update startup time for this session
-                self.current_state.startup_time = datetime.utcnow()
+                self.current_state.startup_time = datetime.now(timezone.utc)
 
                 logger.info("agent_state_loaded",
                            file=str(self.state_file),
@@ -372,7 +372,7 @@ class ContextManager:
     async def _create_backup(self):
         """Create a backup of the current state file."""
         try:
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             backup_file = self.backup_dir / f"agent_state_{timestamp}.json"
 
             # Copy current state file
@@ -434,7 +434,7 @@ class ContextManager:
                     elif hasattr(self.current_state, key):
                         setattr(self.current_state, key, value)
 
-                self.current_state.last_update = datetime.utcnow()
+                self.current_state.last_update = datetime.now(timezone.utc)
 
                 # Auto-save critical updates immediately (lock already held)
                 if any(

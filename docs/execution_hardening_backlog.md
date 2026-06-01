@@ -10,16 +10,16 @@ This backlog tracks gaps called out in the architecture report against the curre
 
 ## Critical
 
-1. **Order state machine** — Explicit transitions (`pending` → `open` → `partially_filled` → `filled` / `cancelled` / `rejected`) with a single authority for transitions; align internal `Order` objects with exchange-reported state on every tick or poll.
-2. **Position reconciliation** — Periodic pull of exchange positions vs `PositionManager`; alert and block new risk-approved orders on divergence until reconciled.
-3. **Idempotent order protection** — Client-supplied idempotency keys (or deterministic hash of symbol/side/qty/correlation_id) to prevent duplicate submissions on retries or double event delivery.
-4. **Partial fill handling** — Policy for remaining quantity (cancel rest, leave working, hedge); today `Order.update_fill` supports partials; execution path must enforce exchange-specific rules and timeouts.
-5. **Exchange failover** — Circuit breaker when REST/WebSocket unhealthy; read-only mode or halt `RISK_APPROVED` consumption until gateway recovers ([`agent/core/exchange_gateway.py`](../agent/core/exchange_gateway.py) integration).
+1. **Order state machine** — **Partial:** `Order.transition_to()` in [`agent/core/execution.py`](../agent/core/execution.py); JSON + exchange rehydrate on startup ([`agent/core/order_persistence.py`](../agent/core/order_persistence.py)). Still need continuous exchange-state sync on every poll.
+2. **Position reconciliation** — **Done:** reconcile + `BLOCK_ENTRIES_ON_RECONCILE_DIVERGENCE` ([`agent/core/position_reconcile.py`](../agent/core/position_reconcile.py)).
+3. **Idempotent order protection** — **Partial:** `client_order_id` from `correlation_id` / `idempotency_key` on place order.
+4. **Partial fill handling** — **Partial:** retry remainder, cancel rest on timeout, close position ([`execution.py`](../agent/core/execution.py) `_handle_partial_fill`).
+5. **Exchange failover** — **Partial:** halt `RISK_APPROVED` when Delta circuit breaker OPEN ([`agent/core/trading_controls.py`](../agent/core/trading_controls.py)).
 
 ## High
 
-6. **Slippage policy** — Configurable max slip vs mid for market orders; reject or re-quote when violated (beyond paper-mode randomization).
-7. **Latency monitoring** — Histogram of `RISK_APPROVED` → `ORDER_FILL` (or reject); SLO alerts.
+6. **Slippage policy** — **Partial:** reject fill when `ENFORCE_EXECUTION_SLIPPAGE_BPS` exceeded vs reference price.
+7. **Latency monitoring** — **Partial:** p50/p95 snapshot in [`agent/core/latency_metrics.py`](../agent/core/latency_metrics.py); logged in agent periodic status.
 8. **Dead-letter / retry queue** — Failed publishes or exchange errors routed to DLQ with capped exponential backoff (complements event bus DLQ in [`agent/events/event_bus.py`](../agent/events/event_bus.py)).
 
 ## Medium

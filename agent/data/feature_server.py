@@ -5,9 +5,10 @@ Implements MCP Feature Protocol for standardized feature communication.
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pydantic import BaseModel, ConfigDict
+import asyncio
 import time
 import uuid
 import structlog
@@ -93,6 +94,7 @@ class MCPFeatureServer:
             "volatility": "1.0.0"
         }
         self._computing: Dict[str, bool] = {}  # Track ongoing computations
+        self._computing_lock = asyncio.Lock()
     
     async def initialize(self):
         """Initialize feature server."""
@@ -116,18 +118,17 @@ class MCPFeatureServer:
             symbol = payload.get("symbol")
             feature_names = payload.get("feature_names", [])
             
-            # Check if already computing for this symbol
             computation_key = f"{symbol}:{','.join(sorted(feature_names))}"
-            if self._computing.get(computation_key, False):
-                logger.debug(
-                    "feature_computation_already_in_progress",
-                    symbol=symbol,
-                    computation_key=computation_key
-                )
-                return
-            
-            self._computing[computation_key] = True
-            
+            async with self._computing_lock:
+                if self._computing.get(computation_key, False):
+                    logger.debug(
+                        "feature_computation_already_in_progress",
+                        symbol=symbol,
+                        computation_key=computation_key,
+                    )
+                    return
+                self._computing[computation_key] = True
+
             try:
                 # Create MCP request
                 request = MCPFeatureRequest(
@@ -145,9 +146,9 @@ class MCPFeatureServer:
                 
             finally:
                 if computation_key:
-                    # Remove completed key to avoid unbounded growth.
-                    self._computing.pop(computation_key, None)
-                
+                    async with self._computing_lock:
+                        self._computing.pop(computation_key, None)
+
         except Exception as e:
             logger.error(
                 "feature_request_event_handler_error",
@@ -156,8 +157,9 @@ class MCPFeatureServer:
                 exc_info=True
             )
             if computation_key:
-                self._computing.pop(computation_key, None)
-    
+                async with self._computing_lock:
+                    self._computing.pop(computation_key, None)
+
     async def _emit_feature_computed_event(self, request_event: FeatureRequestEvent, response: MCPFeatureResponse):
         """Emit feature computed event.
         
@@ -204,7 +206,7 @@ class MCPFeatureServer:
     async def get_features(self, request: MCPFeatureRequest) -> MCPFeatureResponse:
         """Compute MCP features for REST/event request paths."""
         request_id = str(uuid.uuid4())
-        timestamp = request.timestamp or datetime.utcnow()
+        timestamp = request.timestamp or datetime.now(timezone.utc)
 
         features: List[MCPFeature] = []
         names = list(request.feature_names)
@@ -387,7 +389,7 @@ class MCPFeatureServer:
             features=features,
             quality_score=quality_score,
             overall_quality=overall_quality,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             request_id=request_id
         )
     

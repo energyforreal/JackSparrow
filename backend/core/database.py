@@ -4,7 +4,7 @@ Database connection and SQLAlchemy models.
 Provides database session management and ORM models.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Dict, Any, AsyncGenerator
 from sqlalchemy import (
@@ -126,7 +126,7 @@ class Trade(Base):
     order_type = Column(PostgresEnum(OrderType, name='ordertype', create_type=True), nullable=False)
     status = Column(PostgresEnum(TradeStatus, name='tradestatus', create_type=True), nullable=False, default=TradeStatus.PENDING)
     executed_at = Column(TIMESTAMPTZ, nullable=False, index=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
     reasoning_chain_id = Column(String(255), nullable=True)
     model_predictions = Column(JSONB, nullable=True)
     metadata_json = Column("metadata", JSONB, nullable=True)
@@ -155,8 +155,8 @@ class Position(Base):
     status = Column(PostgresEnum(PositionStatus, name='positionstatus', create_type=True), nullable=False, default=PositionStatus.OPEN)
     stop_loss = Column(DECIMAL(18, 8), nullable=True)
     take_profit = Column(DECIMAL(18, 8), nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
-    updated_at = Column(TIMESTAMPTZ, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Composite index for common query pattern: symbol + status
     __table_args__ = (
@@ -178,7 +178,7 @@ class Decision(Base):
     reasoning_chain = Column(JSONB, nullable=False)
     model_predictions = Column(JSONB, nullable=True)
     market_context = Column(JSONB, nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
     
     # Composite index for common query pattern: symbol + timestamp
     __table_args__ = (
@@ -197,7 +197,7 @@ class PerformanceMetric(Base):
     metric_name = Column(String(100), nullable=False)
     value = Column(DECIMAL(18, 8), nullable=False)
     metadata_json = Column("metadata", JSONB, nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
 
 class ModelPerformance(Base):
@@ -214,7 +214,7 @@ class ModelPerformance(Base):
     total_predictions = Column(Integer, default=0)
     correct_predictions = Column(Integer, default=0)
     metadata_json = Column("metadata", JSONB, nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
 
 class ModelRegistry(Base):
@@ -228,8 +228,8 @@ class ModelRegistry(Base):
     artifact_path = Column(String(512), nullable=True)
     status = Column(String(32), nullable=False, default="registered", index=True)  # registered, active, deprecated
     metadata_json = Column("metadata", JSONB, nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
-    updated_at = Column(TIMESTAMPTZ, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     __table_args__ = (
         Index("idx_model_registry_name_version", "name", "version", unique=True),
@@ -246,7 +246,7 @@ class ModelDeployment(Base):
     environment = Column(String(64), nullable=True)  # dev, staging, production
     status = Column(String(32), nullable=False, default="active", index=True)  # active, superseded
     metadata_json = Column("metadata", JSONB, nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
 
 class TradeOutcomeRecord(Base):
@@ -266,9 +266,9 @@ class TradeOutcomeRecord(Base):
     pnl_pct = Column(DECIMAL(12, 6), nullable=True)
     close_reason = Column(String(64), nullable=True)
     opened_at = Column(TIMESTAMPTZ, nullable=True)
-    closed_at = Column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    closed_at = Column(TIMESTAMPTZ, nullable=False, default=lambda: datetime.now(timezone.utc))
     metadata_json = Column("metadata", JSONB, nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_trade_outcomes_symbol_closed", "symbol", "closed_at"),
@@ -288,7 +288,7 @@ class PredictionAudit(Base):
     source = Column(String(32), nullable=True, index=True)  # model_service, agent
     outcome_reference = Column(String(255), nullable=True)  # e.g. decision_id or trade_id for later linkage
     metadata_json = Column("metadata", JSONB, nullable=True)
-    created_at = Column(TIMESTAMPTZ, default=datetime.utcnow)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
     
     __table_args__ = (
         Index("idx_prediction_audit_symbol_created", "symbol", "created_at"),

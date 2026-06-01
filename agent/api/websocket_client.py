@@ -13,7 +13,7 @@ import asyncio
 import errno
 import json
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 import structlog
 
@@ -297,7 +297,7 @@ class AgentWebSocketClient:
 
         message = {
             "type": "pong",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         await self.send_event(message)
 

@@ -8,12 +8,15 @@ similar situations for enhanced reasoning and decision making.
 from typing import Dict, List, Any, Optional, Tuple
 import asyncio
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import structlog
 import json
 import hashlib
 
-from feature_store.feature_registry import FEATURE_LIST, EXPECTED_FEATURE_COUNT
+from feature_store.jacksparrow_v43_contract import (
+    V43_CANONICAL_FEATURES as FEATURE_LIST,
+    V43_EXPECTED_FEATURE_COUNT as EXPECTED_FEATURE_COUNT,
+)
 
 logger = structlog.get_logger()
 
@@ -82,7 +85,7 @@ class DecisionContext:
 
     def compute_embedding(self) -> np.ndarray:
         """Compute vector embedding from features and context."""
-        # Create feature vector using canonical FEATURE_LIST order.
+        # Create feature vector using V43 canonical order (aligned with IC / inference).
         # Missing features are filled with 0.0 to keep a fixed length.
         feature_values: List[float] = []
         for name in FEATURE_LIST:
@@ -416,7 +419,7 @@ class VectorMemoryStore:
         Returns:
             Analysis of decision patterns and outcomes
         """
-        cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
 
         # Filter contexts
         relevant_contexts = [
@@ -491,7 +494,7 @@ class VectorMemoryStore:
             removed_count = len(self.contexts)
             self.contexts.clear()
         else:
-            cutoff_date = datetime.utcnow() - timedelta(days=older_than_days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=older_than_days)
             original_count = len(self.contexts)
             self.contexts = [ctx for ctx in self.contexts if ctx.timestamp >= cutoff_date]
             removed_count = original_count - len(self.contexts)

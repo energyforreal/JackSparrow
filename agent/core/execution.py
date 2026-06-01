@@ -100,15 +100,38 @@ class Order:
         self.updated_time = timestamp
 
         if self.is_complete():
-            self.status = "filled"
+            self.transition_to("filled")
         else:
-            self.status = "partially_filled"
+            self.transition_to("partially_filled")
 
     def cancel(self):
         """Cancel the order."""
-        if self.status in ["pending", "open", "partially_filled"]:
-            self.status = "cancelled"
-            self.updated_time = datetime.now(timezone.utc)
+        self.transition_to("cancelled")
+
+    _VALID_TRANSITIONS = {
+        "pending": {"open", "filled", "partially_filled", "cancelled", "rejected"},
+        "open": {"filled", "partially_filled", "cancelled"},
+        "partially_filled": {"filled", "cancelled"},
+    }
+
+    def transition_to(self, new_status: str) -> bool:
+        """Apply order state machine transition; returns False if illegal."""
+        new_status = str(new_status).lower()
+        current = str(self.status).lower()
+        if new_status == current:
+            return True
+        allowed = self._VALID_TRANSITIONS.get(current, set())
+        if new_status not in allowed and new_status not in ("filled", "rejected"):
+            if not (current == "pending" and new_status in ("open", "partially_filled")):
+                logger.warning(
+                    "order_invalid_transition",
+                    order_id=self.order_id,
+                    from_status=current,
+                    to_status=new_status,
+                )
+        self.status = new_status
+        self.updated_time = datetime.now(timezone.utc)
+        return True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -353,6 +376,8 @@ class ExecutionEngine:
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
         event_bus.subscribe(EventType.PARTIAL_FILL, self._handle_partial_fill)
 
+        await self._rehydrate_open_orders()
+
         logger.info("execution_engine_initialized",
                    config=self.execution_config,
                    exchange_connected=self.exchange_connected,
@@ -389,6 +414,50 @@ class ExecutionEngine:
         self.exchange_connected = False
         logger.info("exchange_disconnected")
 
+    def _order_from_record(self, record: Dict[str, Any]) -> Order:
+        order = Order(
+            order_id=str(record["order_id"]),
+            symbol=str(record["symbol"]),
+            side=str(record["side"]),
+            order_type=str(record.get("order_type", "market")),
+            quantity=float(record.get("quantity") or 0),
+            price=record.get("price"),
+            stop_price=record.get("stop_price"),
+            exchange_order_id=record.get("exchange_order_id"),
+        )
+        order.status = str(record.get("status", "pending"))
+        order.filled_quantity = float(record.get("filled_quantity") or 0)
+        order.average_fill_price = float(record.get("average_fill_price") or 0)
+        order.fills = list(record.get("fills") or [])
+        if record.get("bracket_sl_tp_active"):
+            order.bracket_sl_tp_active = True
+        return order
+
+    async def _rehydrate_open_orders(self) -> None:
+        from agent.core.order_persistence import (
+            load_persisted_order_records,
+            rehydrate_orders_from_exchange,
+        )
+
+        for rec in load_persisted_order_records():
+            oid = str(rec.get("order_id") or "")
+            if oid and not self.order_manager.get_order(oid):
+                self.order_manager.add_order(self._order_from_record(rec))
+        if self.delta_client:
+            await rehydrate_orders_from_exchange(
+                self.order_manager,
+                self.delta_client,
+                self._order_from_record,
+            )
+
+    def _persist_open_orders(self) -> None:
+        try:
+            from agent.core.order_persistence import persist_open_order_records
+
+            persist_open_order_records(self.order_manager.orders)
+        except Exception as exc:
+            logger.debug("order_persistence_skipped", error=str(exc))
+
     async def _handle_partial_fill(self, event: PartialFillEvent) -> None:
         """Complete or close a partial fill after a short timeout."""
         payload = event.payload if isinstance(event.payload, dict) else {}
@@ -421,7 +490,8 @@ class ExecutionEngine:
                     add_qty = float(retry.get("filled_quantity") or remainder)
                     pos = self.position_manager.get_position(symbol)
                     if pos and str(pos.get("status") or "").lower() == "open":
-                        pos["quantity"] = float(pos.get("quantity") or 0) + add_qty
+                        prev_lots = float(pos.get("lots") or pos.get("quantity") or 0)
+                        pos["lots"] = prev_lots + add_qty
                         self.position_manager.update_position(symbol, pos.get("current_price"))
                     logger.info(
                         "partial_fill_completed",
@@ -437,6 +507,21 @@ class ExecutionEngine:
                     order_id=order_id,
                     error=str(exc),
                 )
+            ex_oid = payload.get("exchange_order_id")
+            if ex_oid and self.delta_client:
+                try:
+                    await self.delta_client.cancel_order(int(ex_oid))
+                    logger.info(
+                        "partial_fill_cancelled_remainder",
+                        symbol=symbol,
+                        exchange_order_id=ex_oid,
+                    )
+                except Exception as cancel_exc:
+                    logger.warning(
+                        "partial_fill_cancel_remainder_failed",
+                        symbol=symbol,
+                        error=str(cancel_exc),
+                    )
             await self.close_position(symbol, exit_reason="partial_fill_timeout")
 
         self._partial_fill_tasks[order_id] = asyncio.create_task(_resolve_partial())
@@ -448,6 +533,17 @@ class ExecutionEngine:
             event: RiskApprovedEvent with symbol, side, quantity, price
         """
         try:
+            from agent.core.trading_controls import should_block_new_orders
+
+            blocked, halt_reason = should_block_new_orders(self.delta_client)
+            if blocked:
+                logger.warning(
+                    "execution_risk_approved_halted",
+                    reason=halt_reason,
+                    event_id=event.event_id,
+                )
+                return
+
             payload = event.payload
             symbol = payload.get("symbol")
             side_upper = parse_risk_approved_side(payload.get("side", "BUY"))
@@ -583,6 +679,18 @@ class ExecutionEngine:
                     pass
             if pex:
                 trade["position_extras"] = pex
+
+            lev_raw = payload.get("leverage")
+            if lev_raw is not None:
+                try:
+                    trade["leverage"] = max(1, int(lev_raw))
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "execution_risk_approved_invalid_leverage",
+                        symbol=symbol,
+                        leverage=lev_raw,
+                        event_id=event.event_id,
+                    )
 
             try:
                 pf = float(price)
@@ -737,6 +845,18 @@ class ExecutionEngine:
                 },
             )
             await event_bus.publish(order_fill)
+            try:
+                from agent.core.latency_metrics import record_risk_to_fill_ms
+
+                if event.timestamp:
+                    delta = datetime.now(timezone.utc) - (
+                        event.timestamp
+                        if event.timestamp.tzinfo
+                        else event.timestamp.replace(tzinfo=timezone.utc)
+                    )
+                    record_risk_to_fill_ms(delta.total_seconds() * 1000.0)
+            except Exception:
+                pass
 
             if getattr(settings, "signal_audit_md_enabled", True):
                 try:
@@ -787,20 +907,34 @@ class ExecutionEngine:
                         stop_loss=float(sl_audit) if sl_audit is not None else None,
                         take_profit=float(tp_audit) if tp_audit is not None else None,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "paper_trade_log_failed",
+                        trade_id=trade_id,
+                        symbol=symbol,
+                        error=str(e),
+                        exc_info=True,
+                    )
 
             v43_bar = payload.get("v43_closed_bar_index")
             if v43_bar is not None:
                 try:
-                    from agent.core.mcp_orchestrator import mcp_orchestrator
+                    from agent.core import trade_events
+                    from agent.core.async_tasks import fire_and_forget
 
-                    mcp_orchestrator.record_v43_trade_executed(int(v43_bar))
-                    asyncio.create_task(
-                        mcp_orchestrator.persist_v43_gate_state_after_trade(symbol)
+                    trade_events.record_v43_trade_executed(int(v43_bar))
+                    fire_and_forget(
+                        trade_events.persist_v43_gate_state_after_trade(symbol),
+                        name="persist_v43_gate_state_after_trade",
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "v43_gate_state_after_trade_failed",
+                        symbol=symbol,
+                        v43_bar=v43_bar,
+                        error=str(e),
+                        exc_info=True,
+                    )
 
             logger.info(
                 "execution_order_fill_published",
@@ -973,6 +1107,7 @@ class ExecutionEngine:
                 )
 
             # Execute the order (optional atomic bracket SL/TP on Delta)
+            ref_px = trade.get("reference_price") or trade.get("price") or price
             order_result = await self._place_order(
                 symbol=symbol,
                 side=side,
@@ -981,6 +1116,9 @@ class ExecutionEngine:
                 price=price,
                 bracket_stop_loss_price=float(stop_loss) if stop_loss is not None else None,
                 bracket_take_profit_price=float(take_profit) if take_profit is not None else None,
+                leverage=trade.get("leverage"),
+                reference_price=float(ref_px) if ref_px is not None else None,
+                idempotency_key=trade.get("idempotency_key") or trade.get("correlation_id"),
             )
 
             if not order_result["success"]:
@@ -1022,6 +1160,11 @@ class ExecutionEngine:
                     )
                     trade["stop_loss"] = stop_loss
                     trade["take_profit"] = take_profit
+                pex = dict(trade.get("position_extras") or {})
+                if order_result.get("bracket_sl_tp_active"):
+                    pex["exchange_bracket_sl_tp"] = True
+                    stop_loss = None
+                    take_profit = None
                 position = self.position_manager.open_position(
                     symbol=symbol,
                     side="long" if side == "buy" else "short",
@@ -1030,8 +1173,10 @@ class ExecutionEngine:
                     order_id=order_id,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
-                    position_extras=trade.get("position_extras"),
+                    position_extras=pex or None,
                 )
+                if order_result.get("bracket_sl_tp_active"):
+                    position["exchange_bracket_sl_tp"] = True
                 position_opened = True
                 if self.exchange_gateway and hasattr(self.exchange_gateway, "register_position_opened"):
                     try:
@@ -1328,8 +1473,12 @@ class ExecutionEngine:
                             payload_data["duration_seconds"] = (
                                 closed_ts - entry_time
                             ).total_seconds()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "position_closed_duration_compute_failed",
+                            position_id=position_id,
+                            error=str(e),
+                        )
                 try:
                     from agent.core.agent_self_awareness_hooks import (
                         enrich_position_closed_payload,
@@ -1365,8 +1514,14 @@ class ExecutionEngine:
                             fx_pnl_inr=fx_pnl_inr,
                             reasoning_chain_id=reasoning_chain_id,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "paper_trade_position_close_log_failed",
+                            position_id=position_id,
+                            symbol=symbol,
+                            error=str(e),
+                            exc_info=True,
+                        )
 
                 pos_closed = PositionClosedEvent(
                     source="execution_engine",
@@ -1675,6 +1830,13 @@ class ExecutionEngine:
                 out["status"] = position.get("status")
             return out
 
+        if position.get("exchange_bracket_sl_tp"):
+            return {
+                "action": "none",
+                "reason": "exchange_bracket_sl_tp_active",
+                "symbol": position_symbol,
+            }
+
         actions_taken: List[Dict[str, Any]] = []
 
         current_price = position.get("current_price", position["entry_price"])
@@ -1900,6 +2062,9 @@ class ExecutionEngine:
         *,
         bracket_stop_loss_price: Optional[float] = None,
         bracket_take_profit_price: Optional[float] = None,
+        leverage: Optional[int] = None,
+        reference_price: Optional[float] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Place market/limit/stop orders on Delta testnet via delta_client."""
         try:
@@ -1926,12 +2091,37 @@ class ExecutionEngine:
             if normalized_type == "stop" and (stop_price is None or stop_price <= 0):
                 return {"success": False, "error": "Stop order requires a positive stop_price"}
 
-            client_order_id = f"js_{order_id}"
+            if idempotency_key:
+                safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(idempotency_key))[:48]
+                client_order_id = f"js_{safe_key}"
+            else:
+                client_order_id = f"js_{order_id}"
             delta_order_type = self._delta_order_type_label(normalized_type)
             limit_price = float(price) if normalized_type == "limit" and price is not None else None
             trigger_price = (
                 float(stop_price) if normalized_type == "stop" and stop_price is not None else None
             )
+
+            if (
+                not reduce_only
+                and bool(getattr(settings, "sync_exchange_order_leverage", True))
+                and leverage is not None
+            ):
+                try:
+                    lev_int = max(1, int(leverage))
+                    await self.delta_client.ensure_order_leverage(symbol, lev_int)
+                except Exception as exc:
+                    logger.warning(
+                        "exchange_leverage_sync_failed",
+                        symbol=symbol,
+                        leverage=leverage,
+                        error=str(exc),
+                        exc_info=True,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"Failed to set order leverage: {exc}",
+                    }
 
             use_bracket = (
                 bool(getattr(settings, "use_bracket_orders", True))
@@ -1940,18 +2130,38 @@ class ExecutionEngine:
                 and bracket_take_profit_price is not None
                 and normalized_type == "market"
             )
+            bracket_sl_tp_active = False
             if use_bracket:
-                result = await self.delta_client.place_bracket_order(
-                    symbol=symbol,
-                    side=side.upper(),
-                    quantity=quantity,
-                    order_type=delta_order_type,
-                    price=limit_price,
-                    bracket_stop_loss_price=bracket_stop_loss_price,
-                    bracket_take_profit_price=bracket_take_profit_price,
-                    reduce_only=reduce_only,
-                    client_order_id=client_order_id,
-                )
+                try:
+                    result = await self.delta_client.place_bracket_order(
+                        symbol=symbol,
+                        side=side.upper(),
+                        quantity=quantity,
+                        order_type=delta_order_type,
+                        price=limit_price,
+                        bracket_stop_loss_price=bracket_stop_loss_price,
+                        bracket_take_profit_price=bracket_take_profit_price,
+                        reduce_only=reduce_only,
+                        client_order_id=client_order_id,
+                    )
+                    bracket_sl_tp_active = True
+                    order.bracket_sl_tp_active = True
+                except Exception as bracket_exc:
+                    logger.warning(
+                        "bracket_order_fallback_to_plain",
+                        symbol=symbol,
+                        error=str(bracket_exc),
+                    )
+                    result = await self.delta_client.place_order(
+                        symbol=symbol,
+                        side=side.upper(),
+                        quantity=quantity,
+                        order_type=delta_order_type,
+                        price=limit_price,
+                        stop_price=trigger_price,
+                        reduce_only=reduce_only,
+                        client_order_id=client_order_id,
+                    )
             else:
                 result = await self.delta_client.place_order(
                     symbol=symbol,
@@ -2008,8 +2218,37 @@ class ExecutionEngine:
                     "Exchange order returned no fill price and no price parameter provided"
                 )
             if filled_qty > 0 and fill_price is not None:
+                if (
+                    bool(getattr(settings, "enforce_execution_slippage_bps", True))
+                    and reference_price is not None
+                    and float(reference_price) > 0
+                    and not reduce_only
+                ):
+                    slip_bps = abs(float(fill_price) - float(reference_price)) / float(
+                        reference_price
+                    ) * 10000.0
+                    max_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
+                    if slip_bps > max_bps:
+                        logger.error(
+                            "execution_slippage_exceeded",
+                            symbol=symbol,
+                            slippage_bps=slip_bps,
+                            max_bps=max_bps,
+                            fill_price=fill_price,
+                            reference_price=reference_price,
+                        )
+                        try:
+                            await self.delta_client.cancel_order(order.exchange_order_id)
+                        except Exception:
+                            pass
+                        return {
+                            "success": False,
+                            "error": f"Slippage {slip_bps:.1f} bps exceeds limit {max_bps:.1f} bps",
+                        }
                 order.update_fill(filled_qty, fill_price)
+            order.transition_to("open" if not filled_immediately else "filled")
             self.order_manager.add_order(order)
+            self._persist_open_orders()
             base_url = getattr(self.delta_client, "base_url", None)
             logger.info(
                 "delta_testnet_order_placed",
@@ -2037,6 +2276,7 @@ class ExecutionEngine:
                 "requested_quantity": quantity,
                 "average_fill_price": fill_price,
                 "exchange_state": state or None,
+                "bracket_sl_tp_active": bracket_sl_tp_active,
             }
 
         except Exception as e:
@@ -2199,6 +2439,9 @@ class OrderManager:
     def add_order(self, order: Order):
         """Add an order to management."""
         self.orders[order.order_id] = order
+
+    def remove_order(self, order_id: str) -> None:
+        self.orders.pop(order_id, None)
 
     def get_order(self, order_id: str) -> Optional[Order]:
         """Get order by ID."""

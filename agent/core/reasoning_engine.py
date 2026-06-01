@@ -417,7 +417,7 @@ class MCPReasoningEngine:
             )
 
         chain_id = str(uuid.uuid4())
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         steps: List[ReasoningStep] = []
         step_timings_ms: Dict[str, float] = {}
 
@@ -549,7 +549,7 @@ class MCPReasoningEngine:
             description=desc,
             evidence=evidence,
             confidence=conf,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
     
     async def _step1_situational_assessment(self, request: MCPReasoningRequest) -> ReasoningStep:
@@ -647,7 +647,7 @@ class MCPReasoningEngine:
             description="Current market conditions analyzed",
             evidence=evidence or ["Market conditions stable"],
             confidence=confidence,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             data_freshness_seconds=data_freshness_seconds,
             feature_quality_score=quality_score if quality_score > 0 else None
         )
@@ -669,7 +669,7 @@ class MCPReasoningEngine:
                 query_context = DecisionContext(
                     context_id=f"query-{chain_id}",
                     symbol=request.symbol,
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     features=request.market_context.get("features", {}),
                     market_context=request.market_context,
                     decision={}  # Empty decision for query context
@@ -735,7 +735,7 @@ class MCPReasoningEngine:
             description="Similar historical situations retrieved",
             evidence=evidence,
             confidence=confidence,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             similarity_score=avg_similarity if similar_contexts else None,
             step_metadata=step_metadata,
         )
@@ -820,7 +820,7 @@ class MCPReasoningEngine:
             description="Multi-model predictions aggregated",
             evidence=evidence,
             confidence=avg_confidence if model_predictions else 0.0,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             data_freshness_seconds=data_freshness_seconds
         )
     
@@ -910,7 +910,7 @@ class MCPReasoningEngine:
             description=f"Risk level: {risk_level}",
             evidence=evidence,
             confidence=confidence,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             data_freshness_seconds=data_freshness_seconds,
         )
     
@@ -937,7 +937,7 @@ class MCPReasoningEngine:
                 description=conclusion,
                 evidence=evidence,
                 confidence=float(strat.get("confidence") or 0.5),
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 data_freshness_seconds=data_freshness_seconds,
             )
 
@@ -956,7 +956,7 @@ class MCPReasoningEngine:
                 description=conclusion,
                 evidence=evidence,
                 confidence=max(0.0, min(1.0, avg_confidence)),
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 data_freshness_seconds=data_freshness_seconds,
             )
 
@@ -1020,7 +1020,7 @@ class MCPReasoningEngine:
                     description=conclusion,
                     evidence=evidence,
                     confidence=max(0.0, min(1.0, float(avg_confidence))),
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     data_freshness_seconds=data_freshness_seconds,
                 )
 
@@ -1223,7 +1223,7 @@ class MCPReasoningEngine:
             description=conclusion,
             evidence=evidence,
             confidence=avg_confidence,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             data_freshness_seconds=data_freshness_seconds
         )
     
@@ -1400,7 +1400,7 @@ class MCPReasoningEngine:
                 f"Fallback scenario: {is_fallback_scenario}",
             ],
             confidence=final_confidence,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             data_freshness_seconds=None,
             similarity_score=None,
             feature_quality_score=None,

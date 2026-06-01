@@ -72,7 +72,7 @@ services:
     image: qdrant/qdrant:v1.13.2
     container_name: jacksparrow-qdrant
     environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in .env}
     volumes:
       - qdrant-data:/qdrant/storage
     healthcheck:
@@ -134,7 +134,7 @@ services:
       TZ: Asia/Kolkata
       BACKEND_WS_URL: ws://backend:8000/ws/agent
       QDRANT_URL: http://qdrant:6333
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in .env}
     volumes:
       # Source bind mounts: pick up local code without rebuilding the image (models still from model_storage mount)
       - ./agent:/app/agent
@@ -213,7 +213,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000}
       CORS_INTERNAL_ORIGINS: ${CORS_INTERNAL_ORIGINS:-http://frontend:3000}
       QDRANT_URL: http://qdrant:6333
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:?QDRANT_API_KEY must be set in .env}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

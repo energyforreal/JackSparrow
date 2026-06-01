@@ -5,7 +5,7 @@ Provides comprehensive health status for all system components.
 """
 
 from fastapi import APIRouter, Depends, Request, HTTPException, status
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import time
@@ -671,7 +671,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
         "agent_state": agent_state,
         "degradation_reasons": degradation_reasons,
         "trading_ready": trading_ready,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(timezone.utc),
     }
     
     await set_cache(cache_key, result, ttl=30)

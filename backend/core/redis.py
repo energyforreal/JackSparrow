@@ -59,59 +59,54 @@ async def _check_redis_health(client: Redis) -> bool:
 
 
 async def _reconnect_redis(required: bool = False) -> Optional[Redis]:
-    """Reconnect to Redis with exponential backoff.
-    
+    """Reconnect to Redis with exponential backoff (iterative, not recursive).
+
     Args:
         required: When True, raise if Redis is unavailable.
-        
+
     Returns:
         Redis client or None if connection failed and not required.
     """
-    global _redis_client, _redis_connection_failed, _reconnection_attempts, _last_reconnection_attempt
-    
-    # Calculate exponential backoff delay
-    if _reconnection_attempts > 0:
-        delay = _base_backoff_seconds * (2 ** (_reconnection_attempts - 1))
-        # Cap max delay at 60 seconds
-        delay = min(delay, 60.0)
-        
-        # Only wait if enough time has passed since last attempt
-        time_since_last = time.time() - _last_reconnection_attempt
-        if time_since_last < delay:
-            await asyncio.sleep(delay - time_since_last)
-    
-    _last_reconnection_attempt = time.time()
-    
-    try:
-        client = await aioredis.from_url(
-            settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=3,
-            retry_on_error=[ConnectionError, TimeoutError],
-            retry_on_timeout=True,
-        )
-        
-        # Verify connection with ping
-        if await _check_redis_health(client):
-            _redis_client = client
-            _redis_connection_failed = False
-            _reconnection_attempts = 0
-            logger.info(
-                "redis_reconnected",
-                service="backend",
-                attempts=_reconnection_attempts
-            )
-            return client
-        else:
-            # Ping failed, close and retry
+    global _redis_client, _redis_pool, _redis_connection_failed, _reconnection_attempts, _last_reconnection_attempt
+
+    while _reconnection_attempts < _max_reconnection_attempts:
+        delay = min(_base_backoff_seconds * (2 ** _reconnection_attempts), 60.0)
+        if _reconnection_attempts > 0:
+            time_since_last = time.time() - _last_reconnection_attempt
+            if time_since_last < delay:
+                await asyncio.sleep(delay - time_since_last)
+
+        _last_reconnection_attempt = time.time()
+        try:
+            if _redis_pool is None:
+                pool_size = settings.redis_max_connections
+                _redis_pool = aioredis.ConnectionPool.from_url(
+                    settings.redis_url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                    max_connections=pool_size,
+                    socket_connect_timeout=3,
+                    retry_on_error=[ConnectionError, TimeoutError],
+                    retry_on_timeout=True,
+                )
+
+            client = aioredis.Redis(connection_pool=_redis_pool)
+
+            if await _check_redis_health(client):
+                _redis_client = client
+                _redis_connection_failed = False
+                _reconnection_attempts = 0
+                logger.info(
+                    "redis_reconnected",
+                    service="backend",
+                    attempts=_reconnection_attempts,
+                )
+                return client
+
             await client.close()
             raise ConnectionError("Redis ping failed")
-            
-    except Exception as e:
-        _reconnection_attempts += 1
-        
-        if _reconnection_attempts < _max_reconnection_attempts:
+        except Exception as e:
+            _reconnection_attempts += 1
             logger.warning(
                 "redis_reconnection_failed",
                 service="backend",
@@ -120,21 +115,17 @@ async def _reconnect_redis(required: bool = False) -> Optional[Redis]:
                 error=str(e),
                 exc_info=True,
             )
-            # Retry with exponential backoff
-            return await _reconnect_redis(required)
-        else:
-            logger.error(
-                "redis_reconnection_exhausted",
-                service="backend",
-                attempts=_reconnection_attempts,
-                redis_url=settings.redis_url,
-                error=str(e),
-                exc_info=True,
-            )
-            _redis_connection_failed = True
-            if required or settings.redis_required:
-                raise
-            return None
+
+    _redis_connection_failed = True
+    logger.error(
+        "redis_reconnection_exhausted",
+        service="backend",
+        attempts=_reconnection_attempts,
+        redis_url=settings.redis_url,
+    )
+    if required or settings.redis_required:
+        raise ConnectionError("Redis unavailable after max retries")
+    return None
 
 
 async def get_redis(required: bool = False) -> Optional[Redis]:

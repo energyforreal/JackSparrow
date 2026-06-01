@@ -143,8 +143,13 @@ class TradingEventHandler:
                 event_id=event_id,
                 extra=dict(context) if context else None,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "signal_audit_entry_rejected_append_failed",
+                symbol=symbol,
+                reason=reason,
+                error=str(e),
+            )
 
     def _reasoning_pipeline_diagnostics(
         self, reasoning_chain: Optional[Dict[str, Any]]
@@ -347,8 +352,14 @@ class TradingEventHandler:
                             **diagnostics_base,
                         )
                         return
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "stale_signal_age_check_failed",
+                        symbol=symbol,
+                        event_id=event.event_id,
+                        error=str(e),
+                        exc_info=True,
+                    )
 
             signal_path_diag: Dict[str, Any] = {}
             if minimal_entry:
@@ -398,8 +409,13 @@ class TradingEventHandler:
                         if await _exchange_has_open_position_async(symbol):
                             await reconcile_positions_with_exchange(self.execution_module)
                             open_pos = self.execution_module.position_manager.get_position(symbol)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "exchange_position_reconcile_failed",
+                            symbol=symbol,
+                            error=str(e),
+                            exc_info=True,
+                        )
                 if open_pos and open_pos.get("status") == "open":
                     pos_side = open_pos.get("side", "")
                     if (pos_side == "long" and signal in ("STRONG_SELL", "SELL")) or (
@@ -517,8 +533,13 @@ class TradingEventHandler:
                                 **diagnostics_base,
                             )
                             return
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "entry_volatility_gate_failed",
+                            symbol=symbol,
+                            error=str(e),
+                            exc_info=True,
+                        )
                 min_atr_pct = float(getattr(settings, "entry_min_atr_pct_of_price", 0.0) or 0.0)
                 if min_atr_pct > 0 and entry_price > 0 and not v43_exec_enabled:
                     atr_raw = features.get("atr_14")
@@ -541,7 +562,54 @@ class TradingEventHandler:
             min_lot_size = max(1, int(getattr(settings, "min_lot_size", 1) or 1))
             fixed_lots = max(1, int(getattr(settings, "fixed_lot_size", 1) or 1))
             fixed_lots = max(min_lot_size, fixed_lots)
-            leverage = int(getattr(settings, "isolated_margin_leverage", 5) or 5)
+
+            try:
+                conf_f = float(confidence) if confidence is not None else 0.5
+            except (TypeError, ValueError):
+                conf_f = 0.5
+            conf_f = max(0.0, min(1.0, conf_f))
+
+            vol_f = 0.0
+            if features.get("volatility") is not None:
+                try:
+                    vol_f = float(features.get("volatility"))
+                except (TypeError, ValueError):
+                    vol_f = 0.0
+            funding_f = 0.0
+            if features.get("funding_rate") is not None:
+                try:
+                    funding_f = float(features.get("funding_rate"))
+                except (TypeError, ValueError):
+                    funding_f = 0.0
+
+            if not self.risk_manager or not getattr(self.risk_manager, "_initialized", False):
+                self._log_entry_rejected(
+                    "risk_sizing_unavailable",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    **diagnostics_base,
+                )
+                return
+
+            sizing = self.risk_manager.calculate_position_size(
+                mark_price=entry_price,
+                confidence=conf_f,
+                funding_rate=funding_f,
+                volatility=vol_f,
+                return_dict=True,
+            )
+            if not sizing or int(sizing.get("leverage") or 0) < 1:
+                self._log_entry_rejected(
+                    "risk_sizing_unavailable",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    **diagnostics_base,
+                )
+                return
+            leverage = max(1, int(sizing["leverage"]))
+
             usdinr_rate = await self._get_usdinr_rate(state)
             available_cash_inr = self._get_available_cash_inr(state)
 
@@ -554,12 +622,6 @@ class TradingEventHandler:
                 else getattr(settings, "taker_fee_rate", 0.0005)
             )
             slip_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
-
-            try:
-                conf_f = float(confidence) if confidence is not None else 0.5
-            except (TypeError, ValueError):
-                conf_f = 0.5
-            conf_f = max(0.0, min(1.0, conf_f))
 
             if v43_exec_enabled and isinstance(v43_ex, dict):
                 alloc_frac = max(
@@ -643,6 +705,18 @@ class TradingEventHandler:
                 0.01,
                 min(required_margin_inr / max(available_cash_inr, 1.0), settings.max_position_size),
             )
+
+            if bool(getattr(settings, "exchange_position_reconcile_enabled", True)):
+                try:
+                    from agent.core.position_reconcile import (
+                        is_reconcile_healthy,
+                        reconcile_positions_with_exchange,
+                    )
+
+                    if not is_reconcile_healthy() and self.execution_module:
+                        await reconcile_positions_with_exchange(self.execution_module)
+                except Exception as exc:
+                    logger.warning("pre_entry_reconcile_failed", error=str(exc))
 
             # Validate trade with risk manager (always — agent-first authority; no bypass in live/paper)
             validation = await self.risk_manager.validate_trade(
@@ -1023,6 +1097,8 @@ class TradingEventHandler:
                 "contract_value_btc": cv,
                 "tick_size": tick_sz,
                 "product_id": specs.product_id,
+                "leverage": leverage,
+                "margin_usd": sizing.get("margin_usd"),
             }
             if signal_path_diag:
                 risk_payload["signal_path_diagnostics"] = signal_path_diag
@@ -1072,8 +1148,8 @@ class TradingEventHandler:
                     data={"event_id": event.event_id, "runId": "post-fix"},
                     run_id="post-fix",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("debug_session_log_failed", error=str(e))
             # #endregion
             try:
                 from agent.core.signal_audit_md import append_risk_approved
@@ -1088,8 +1164,12 @@ class TradingEventHandler:
                     if isinstance(payload.get("reasoning_chain"), dict)
                     else None,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "signal_audit_risk_approved_append_failed",
+                    symbol=symbol,
+                    error=str(e),
+                )
 
         except Exception as e:
             logger.error(
@@ -1138,16 +1218,16 @@ class TradingEventHandler:
                         val = md.get(key)
                         if val is not None and float(val) > 0:
                             return float(val)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("usdinr_context_lookup_failed", error=str(e))
         try:
             cached = await get_cache("fx:usdinr:last")
             if isinstance(cached, dict):
                 val = cached.get("rate")
                 if val is not None and float(val) > 0:
                     return float(val)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("usdinr_cache_lookup_failed", error=str(e))
         return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
 
     def _get_available_cash_inr(self, state: Optional[Any]) -> float:
@@ -1157,8 +1237,8 @@ class TradingEventHandler:
                 val = float(state.portfolio_value)
                 if val > 0:
                     return val
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("portfolio_value_parse_failed", error=str(e))
         return float(getattr(settings, "initial_balance", 20000.0) or 20000.0)
 
     async def register_handlers(self):

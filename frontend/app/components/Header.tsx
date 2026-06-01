@@ -3,6 +3,7 @@
 import Image from 'next/image'
 
 import { Badge } from '@/components/ui/badge'
+import { EmergencyStopButton } from './EmergencyStopButton'
 import { SystemClock } from './SystemClock'
 import { cn } from '@/lib/utils'
 import { useTestnetContext } from '@/hooks/useTestnetContext'
@@ -40,6 +41,7 @@ export function Header({ isConnected = false, health }: HeaderProps) {
         <div className="flex w-full flex-col gap-3 sm:w-auto sm:items-end">
           <SystemClock className="w-full sm:w-auto" />
           <div className="flex flex-wrap items-center gap-2 self-start sm:self-end">
+            <EmergencyStopButton />
             {isTestnet && (
               <Badge
                 variant="outline"

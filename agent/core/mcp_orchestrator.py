@@ -547,7 +547,7 @@ class MCPOrchestrator:
             ticker_row = df_oi.iloc[-1].to_dict()
         contract_state = await get_contract_state(symbol, ticker_row=ticker_row)
 
-        req_id = f"pred_v43_{symbol}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        req_id = f"pred_v43_{symbol}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         mctx = {
             **context,
             "v43_df5m": df5,
@@ -922,7 +922,7 @@ class MCPOrchestrator:
             "multi_horizon_evidence": mh_evidence.to_dict(),
         }
 
-        ts = datetime.utcnow()
+        ts = datetime.now(timezone.utc)
         feat_list = [
             MCPFeature(
                 name=str(k),
@@ -1155,7 +1155,7 @@ class MCPOrchestrator:
 
         result = {
             "symbol": symbol,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "features": {
                 "data": [{"name": f.name, "value": f.value, "quality": f.quality.value}
                        for f in feature_response.features],
@@ -1459,7 +1459,7 @@ class MCPOrchestrator:
         """
         return {
             "symbol": symbol,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "success": False,
             "error_code": "NO_FEATURES",
             "error": "No features available for prediction",
@@ -1486,7 +1486,7 @@ class MCPOrchestrator:
         """Create explicit error response when models cannot provide predictions."""
         return {
             "symbol": symbol,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "success": False,
             "error_code": error_code,
             "error": error_message,
@@ -1506,7 +1506,7 @@ class MCPOrchestrator:
         """Create error prediction response."""
         return {
             "symbol": symbol,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "error": error,
             "features": {"count": 0, "quality_score": 0.0},
             "models": {"predictions": [], "consensus_prediction": 0.0, "healthy_models": 0, "total_models": 0},
@@ -1878,7 +1878,9 @@ class MCPOrchestrator:
             )
 
         try:
-            asyncio.create_task(_run(), name="prediction_audit_write")
+            from agent.core.async_tasks import fire_and_forget
+
+            fire_and_forget(_run(), name="prediction_audit_write")
         except Exception as e:
             logger.warning("prediction_audit_schedule_failed", error=str(e))
 
@@ -1912,7 +1914,7 @@ class MCPOrchestrator:
             if isinstance(decision, dict) and decision.get("signal") is not None:
                 reasoning = result.get("reasoning") or {}
                 decision_symbol = result.get("symbol") or symbol
-                timestamp = result.get("timestamp") or datetime.utcnow()
+                timestamp = result.get("timestamp") or datetime.now(timezone.utc)
 
                 pv_raw = result.get("policy_verdict")
                 if isinstance(pv_raw, dict) and pv_raw.get("signal"):
@@ -2029,7 +2031,7 @@ class MCPOrchestrator:
                     ml_evidence=ml_evidence,
                     market_context=mctx,
                     chain_id=str(reasoning.get("chain_id", "unknown")),
-                    timestamp=timestamp if isinstance(timestamp, datetime) else datetime.utcnow(),
+                    timestamp=timestamp if isinstance(timestamp, datetime) else datetime.now(timezone.utc),
                     decision_for_store={
                         "signal": signal,
                         "confidence": confidence,
@@ -2122,7 +2124,7 @@ class MCPOrchestrator:
                     "symbol": symbol,
                     "reasoning_chain": reasoning_chain_payload,
                     "final_confidence": reasoning_chain.final_confidence,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                 },
             )
             await event_bus.publish(completion_event)
@@ -2142,7 +2144,7 @@ class MCPOrchestrator:
                 conclusion=reasoning_chain.conclusion,
                 market_context=market_context if isinstance(market_context, dict) else {},
             )
-            ts_decision = datetime.utcnow()
+            ts_decision = datetime.now(timezone.utc)
 
             evidence_event = EvidenceReadyEvent(
                 source="agent_policy_engine",

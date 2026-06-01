@@ -966,6 +966,124 @@ class DeltaExchangeClient:
         """Get wallet balances (GET /v2/wallet/balances)."""
         return await self._make_request("GET", "/v2/wallet/balances")
 
+    @staticmethod
+    def _order_leverage_endpoint(product_id: int) -> str:
+        return f"/v2/products/{int(product_id)}/orders/leverage"
+
+    @staticmethod
+    def _parse_order_leverage_value(response: Dict[str, Any]) -> Optional[int]:
+        """Extract integer leverage from Delta GET/POST orders/leverage response."""
+        if not isinstance(response, dict):
+            return None
+        result = response.get("result")
+        if not isinstance(result, dict):
+            return None
+        lev = result.get("leverage")
+        if lev is None:
+            return None
+        try:
+            return int(float(str(lev)))
+        except (TypeError, ValueError):
+            return None
+
+    def _clamp_order_leverage(self, leverage: int) -> int:
+        min_lev = max(1, int(getattr(settings, "min_leverage", 1) or 1))
+        max_lev = max(min_lev, int(getattr(settings, "max_leverage", 20) or 20))
+        return max(min_lev, min(max_lev, int(leverage)))
+
+    async def _resolve_leverage_product_id(
+        self,
+        *,
+        product_id: Optional[int] = None,
+        product_symbol: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ) -> int:
+        if product_id is not None:
+            return int(product_id)
+        sym = (product_symbol or symbol or "").strip().upper()
+        if not sym:
+            raise DeltaExchangeError(
+                "order leverage requires product_id, product_symbol, or symbol"
+            )
+        return await self.resolve_product_id(sym)
+
+    async def get_order_leverage(
+        self,
+        *,
+        product_id: Optional[int] = None,
+        product_symbol: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get current order leverage (GET /v2/products/{product_id}/orders/leverage)."""
+        pid = await self._resolve_leverage_product_id(
+            product_id=product_id,
+            product_symbol=product_symbol,
+            symbol=symbol,
+        )
+        return await self._make_request("GET", self._order_leverage_endpoint(pid))
+
+    async def set_order_leverage(
+        self,
+        leverage: int,
+        *,
+        product_id: Optional[int] = None,
+        product_symbol: Optional[str] = None,
+        symbol: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Set order leverage (POST /v2/products/{product_id}/orders/leverage)."""
+        pid = await self._resolve_leverage_product_id(
+            product_id=product_id,
+            product_symbol=product_symbol,
+            symbol=symbol,
+        )
+        target = self._clamp_order_leverage(leverage)
+        data = {"leverage": str(target)}
+        return await self._make_request(
+            "POST", self._order_leverage_endpoint(pid), data=data
+        )
+
+    async def ensure_order_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
+        """Set order leverage on the exchange when it differs from the target (testnet/live)."""
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            raise DeltaExchangeError("symbol is required for ensure_order_leverage")
+        target = self._clamp_order_leverage(leverage)
+        pid = await self.resolve_product_id(sym)
+        try:
+            current_resp = await self.get_order_leverage(product_id=pid)
+            current = self._parse_order_leverage_value(current_resp)
+            if current == target:
+                logger.info(
+                    "exchange_leverage_unchanged",
+                    symbol=sym,
+                    product_id=pid,
+                    leverage=target,
+                    component="delta_client",
+                )
+                return current_resp
+        except DeltaExchangeError:
+            pass
+
+        result = await self.set_order_leverage(target, product_id=pid)
+        if result.get("success") is False:
+            raise DeltaExchangeError(f"set_order_leverage failed: {result}")
+        parsed = self._parse_order_leverage_value(result)
+        if parsed is not None and parsed != target:
+            raise DeltaExchangeError(
+                f"Leverage sync mismatch: requested {target}, exchange returned {parsed}"
+            )
+        logger.info(
+            "exchange_leverage_synced",
+            symbol=sym,
+            product_id=pid,
+            leverage=target,
+            order_margin=(result.get("result") or {}).get("order_margin")
+            if isinstance(result.get("result"), dict)
+            else None,
+            component="delta_client",
+        )
+        return result
+
     async def change_margin(self, product_symbol: str, margin: float) -> Dict[str, Any]:
         """Adjust isolated position margin."""
         data = {"product_symbol": product_symbol, "margin": margin}

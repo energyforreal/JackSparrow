@@ -112,6 +112,17 @@ class MarketDataService:
             return True
         return (time.monotonic() - last) > threshold
 
+    def seconds_since_last_good_tick(self, symbol: str) -> Optional[float]:
+        """Seconds since last trusted WS ticker (None if never received)."""
+        last = self._last_good_tick_monotonic.get(symbol)
+        if last is None:
+            return None
+        return time.monotonic() - last
+
+    def is_ticker_stale_for_symbol(self, symbol: str) -> bool:
+        """Public alias for stale ticker detection (SL/TP and health dashboards)."""
+        return self._ticker_stale(symbol)
+
     def _rest_fallback_reason_code(self) -> str:
         if not self._websocket_enabled:
             return "websocket_disabled"

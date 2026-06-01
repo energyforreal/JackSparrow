@@ -290,6 +290,36 @@ class Settings(BaseSettings):
             "and during the position monitor loop."
         ),
     )
+    block_entries_on_reconcile_divergence: bool = Field(
+        default=True,
+        env="BLOCK_ENTRIES_ON_RECONCILE_DIVERGENCE",
+        description="Block new entries when local and exchange positions diverge after reconcile.",
+    )
+    trading_kill_switch: bool = Field(
+        default=False,
+        env="TRADING_KILL_SWITCH",
+        description="When True, block all new order placement (fail closed).",
+    )
+    halt_trading_on_circuit_breaker: bool = Field(
+        default=True,
+        env="HALT_TRADING_ON_CIRCUIT_BREAKER",
+        description="Block new orders while Delta API circuit breaker is OPEN.",
+    )
+    order_persistence_enabled: bool = Field(
+        default=True,
+        env="ORDER_PERSISTENCE_ENABLED",
+        description="Persist open orders to data/agent_open_orders.json.",
+    )
+    enforce_execution_slippage_bps: bool = Field(
+        default=True,
+        env="ENFORCE_EXECUTION_SLIPPAGE_BPS",
+        description="Reject fills when slippage vs reference price exceeds SLIPPAGE_BPS.",
+    )
+    data_dir: str = Field(
+        default="data",
+        env="DATA_DIR",
+        description="Directory for agent_state.json, open orders snapshot, etc.",
+    )
     require_ml_signal_for_orders: bool = Field(
         default=True,
         env="REQUIRE_ML_SIGNAL_FOR_ORDERS",
@@ -1168,10 +1198,15 @@ class Settings(BaseSettings):
     funding_interval_hours: int = Field(8, env="FUNDING_INTERVAL_HOURS")
     funding_interest_rate: float = Field(0.0001, env="FUNDING_INTEREST_RATE")
 
-    # Leverage (set manually in exchange UI)
+    # Leverage (RiskManager sizing + optional Delta order-leverage sync before entries)
     default_leverage: int = Field(5, env="DEFAULT_LEVERAGE")
     max_leverage: int = Field(20, env="MAX_LEVERAGE")
     min_leverage: int = Field(1, env="MIN_LEVERAGE")
+    sync_exchange_order_leverage: bool = Field(
+        default=True,
+        env="SYNC_EXCHANGE_ORDER_LEVERAGE",
+        description="POST /v2/products/{id}/orders/leverage before entry orders (fail closed on error)",
+    )
 
     # Order execution limits
     slippage_bps: float = Field(5.0, env="SLIPPAGE_BPS")
@@ -1195,7 +1230,7 @@ class Settings(BaseSettings):
     isolated_margin_leverage: int = Field(
         default=5,
         env="ISOLATED_MARGIN_LEVERAGE",
-        description="Leverage assumption for isolated margin checks",
+        description="Fallback leverage for portfolio display when exchange leverage is unknown",
     )
     usdinr_fallback_rate: float = Field(
         default=83.0,
@@ -1947,9 +1982,9 @@ class Settings(BaseSettings):
         description="Vector memory backend: memory (in-process) or qdrant.",
     )
     agent_vector_store_qdrant_collection: str = Field(
-        default="decision_contexts",
+        default="decision_contexts_v43",
         env="AGENT_VECTOR_STORE_QDRANT_COLLECTION",
-        description="Qdrant collection name for decision context vectors.",
+        description="Qdrant collection name for decision context vectors (V43 embedding dim).",
     )
     portfolio_intelligence_enabled: bool = Field(
         default=False,

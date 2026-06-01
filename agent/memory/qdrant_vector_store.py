@@ -9,7 +9,7 @@ import numpy as np
 import structlog
 
 from agent.memory.vector_store import DecisionContext, VectorMemoryStore
-from feature_store.feature_registry import EXPECTED_FEATURE_COUNT
+from feature_store.jacksparrow_v43_contract import V43_EXPECTED_FEATURE_COUNT as EXPECTED_FEATURE_COUNT
 
 logger = structlog.get_logger()
 
@@ -24,7 +24,7 @@ class QdrantVectorStore(VectorMemoryStore):
         max_memory_size: int = 10000,
         similarity_threshold: float = 0.5,
         *,
-        collection_name: str = "decision_contexts",
+        collection_name: str = "decision_contexts_v43",
         url: Optional[str] = None,
         api_key: Optional[str] = None,
     ):
@@ -44,6 +44,17 @@ class QdrantVectorStore(VectorMemoryStore):
             self._client = QdrantClient(url=self.url, api_key=self.api_key)
             collections = self._client.get_collections().collections
             names = {c.name for c in collections}
+            if self.collection_name in names:
+                existing_dim = self._collection_vector_size()
+                if existing_dim is not None and existing_dim != EMBEDDING_DIM:
+                    logger.warning(
+                        "qdrant_collection_dim_mismatch_recreating",
+                        collection=self.collection_name,
+                        existing_dim=existing_dim,
+                        expected_dim=EMBEDDING_DIM,
+                    )
+                    self._client.delete_collection(collection_name=self.collection_name)
+                    names.discard(self.collection_name)
             if self.collection_name not in names:
                 self._client.create_collection(
                     collection_name=self.collection_name,
@@ -93,6 +104,28 @@ class QdrantVectorStore(VectorMemoryStore):
             self.contexts = loaded[-self.max_memory_size :]
         except Exception as e:
             logger.warning("qdrant_hydrate_cache_failed", error=str(e))
+
+    def _collection_vector_size(self) -> Optional[int]:
+        """Return configured vector dimension for the collection, or None if unknown."""
+        if not self._client:
+            return None
+        try:
+            info = self._client.get_collection(collection_name=self.collection_name)
+            vectors = getattr(getattr(info, "config", None), "params", None)
+            vectors = getattr(vectors, "vectors", None) if vectors is not None else None
+            if vectors is not None:
+                size = getattr(vectors, "size", None)
+                if size is not None:
+                    return int(size)
+            # Older / alternate qdrant-client shapes
+            raw = info.dict() if hasattr(info, "dict") else {}
+            params = raw.get("config", {}).get("params", {})
+            vec = params.get("vectors") or params.get("vector")
+            if isinstance(vec, dict) and "size" in vec:
+                return int(vec["size"])
+        except Exception as e:
+            logger.debug("qdrant_collection_size_lookup_failed", error=str(e))
+        return None
 
     def _point_id(self, context_id: str) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, context_id))

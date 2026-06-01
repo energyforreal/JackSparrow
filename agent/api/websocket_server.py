@@ -16,7 +16,7 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set
 
 import structlog
@@ -278,21 +278,21 @@ class AgentWebSocketServer:
             payload=parameters
         )
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # Handle command directly (similar to _process_command but return response instead of sending it)
         try:
             response = await self._handle_command_request(command, parameters)
 
             # Calculate latency
-            latency_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            latency_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             # Add latency to response for logging
             response["_latency_ms"] = latency_ms
 
         except Exception as exc:
             # Calculate latency for error case
-            latency_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+            latency_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             log_error_with_context(
                 "agent_websocket_command_error",
@@ -390,7 +390,7 @@ class AgentWebSocketServer:
             "command": command,
             "success": response.get("success", True),
             "data": response.get("data", response),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         # Log outbound response to backend
@@ -412,7 +412,7 @@ class AgentWebSocketServer:
             "request_id": request_id,
             "success": False,
             "error": error_message,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         # Log outbound error response
@@ -432,7 +432,7 @@ class AgentWebSocketServer:
         message = {
             "type": "pong",
             "request_id": request_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         # Log outbound pong response
