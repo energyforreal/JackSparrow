@@ -2240,6 +2240,10 @@ class MCPOrchestrator:
         """Stamp v43 debounce after a gated BUY/SELL signal (before fill)."""
         self._v43_gate_state.note_signal_decision(int(bar_index))
 
+    def rollback_v43_signal_decision(self, bar_index: Optional[int] = None) -> None:
+        """Roll back debounce when execution fails after policy entry."""
+        self._v43_gate_state.note_entry_failed(bar_index)
+
     def record_v43_trade_executed(self, bar_index: int) -> None:
         """Stamp v43 frequency state after a fill."""
         self._v43_gate_state.note_entry(int(bar_index), datetime.now(timezone.utc))

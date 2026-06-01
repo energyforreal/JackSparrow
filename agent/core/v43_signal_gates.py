@@ -154,6 +154,14 @@ class V43GateState:
         """Stamp debounce after a gated BUY/SELL signal (before fill)."""
         self.last_signal_bar_index = int(bar_index)
 
+    def note_entry_failed(self, bar_index: Optional[int] = None) -> None:
+        """Roll back debounce when execution fails after policy stamped the bar."""
+        if bar_index is None:
+            self.last_signal_bar_index = None
+            return
+        if self.last_signal_bar_index == int(bar_index):
+            self.last_signal_bar_index = None
+
     def note_entry(self, bar_index: int, ts: datetime) -> None:
         self.last_entry_bar_index = int(bar_index)
         self.trade_timestamps_utc.append(ts)
@@ -238,9 +246,11 @@ def round_trip_cost_pct() -> float:
     compares ``edge = expected_return - threshold`` to this cost hurdle. Leverage
     affects position sizing elsewhere — it must not inflate the edge-vs-cost gate.
     """
+    taker = float(getattr(settings, "jacksparrow_v43_taker_fee_rate", 0.0005) or 0.0)
     maker = float(getattr(settings, "jacksparrow_v43_maker_fee_rate", 0.0002) or 0.0)
+    fee = max(maker, taker)
     slip = float(getattr(settings, "jacksparrow_v43_slippage_pct", 0.0003) or 0.0)
-    return 2.0 * (maker + slip)
+    return 2.0 * (fee + slip)
 
 
 @dataclass(frozen=True)
@@ -337,13 +347,13 @@ def apply_post_threshold_gates_short(
     cutoff_h = now - timedelta(hours=1)
     recent = [t for t in state.trade_timestamps_utc if t > cutoff_h]
     state.trade_timestamps_utc = recent
-    max_h = int(getattr(settings, "jacksparrow_v43_max_trades_per_hour", 2) or 2)
+    max_h = int(getattr(settings, "jacksparrow_v43_max_trades_per_hour", 6) or 6)
     if len(recent) >= max_h:
         state.counters.rejected_freq_cap += 1
         return V43GateResult(allow=False, reject_reason="freq_hourly")
 
     today = now.strftime("%Y-%m-%d")
-    max_d = int(getattr(settings, "jacksparrow_v43_max_trades_per_day", 6) or 6)
+    max_d = int(getattr(settings, "jacksparrow_v43_max_trades_per_day", 20) or 20)
     if state.trades_by_date.get(today, 0) >= max_d:
         state.counters.rejected_freq_cap += 1
         return V43GateResult(allow=False, reject_reason="freq_daily")
@@ -437,13 +447,13 @@ def apply_post_threshold_gates(
     cutoff_h = now - timedelta(hours=1)
     recent = [t for t in state.trade_timestamps_utc if t > cutoff_h]
     state.trade_timestamps_utc = recent
-    max_h = int(getattr(settings, "jacksparrow_v43_max_trades_per_hour", 2) or 2)
+    max_h = int(getattr(settings, "jacksparrow_v43_max_trades_per_hour", 6) or 6)
     if len(recent) >= max_h:
         state.counters.rejected_freq_cap += 1
         return V43GateResult(allow=False, reject_reason="freq_hourly")
 
     today = now.strftime("%Y-%m-%d")
-    max_d = int(getattr(settings, "jacksparrow_v43_max_trades_per_day", 6) or 6)
+    max_d = int(getattr(settings, "jacksparrow_v43_max_trades_per_day", 20) or 20)
     if state.trades_by_date.get(today, 0) >= max_d:
         state.counters.rejected_freq_cap += 1
         return V43GateResult(allow=False, reject_reason="freq_daily")

@@ -1,7 +1,7 @@
 """Canonical v43 training contract (JackSparrow notebook ↔ agent parity).
 
 Feature order must match exported ``metadata_v*.json`` ``features`` array and
-notebook ``FEATURE_COLS_V25``. Default label horizon: 6×5m bars (~30m simple return).
+notebook ``FEATURE_COLS_V25``. Default label horizon: 2×5m bars (10m simple return).
 
 Train/serve map: see ``docs/feature_entrypoints_audit.md``.
 """
@@ -156,7 +156,7 @@ def resolve_v43_feature_contract(
         f"(expected v1={V43_LEGACY_EXPECTED_FEATURE_COUNT}, "
         f"v2={V43_LEGACY_V2_EXPECTED_FEATURE_COUNT}, or "
         f"v3={V43_LEGACY_V3_EXPECTED_FEATURE_COUNT}, "
-        f"v4={V43_EXPECTED_FEATURE_COUNT} features)"
+        f"v4={V43_LEGACY_V4_EXPECTED_FEATURE_COUNT} features)"
     )
 
 

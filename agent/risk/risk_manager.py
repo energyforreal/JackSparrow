@@ -654,26 +654,25 @@ class RiskManager:
             result["reason"] = f"Trading not allowed: {risk_assessment.overall_risk_level} risk level"
             return result
         
-        # Check budget constraints for BUY trades
-        if side == 'long' or side == 'buy':
-            budget_check = await self.validate_budget_constraint(
-                proposed_size,
-                entry_price,
-                side,
-                proposed_size_is_fraction=True,
-            )
-            if not budget_check["approved"]:
-                result["approved"] = False
-                result["reason"] = budget_check["reason"]
-                result["budget_check"] = budget_check
-                logger.warning(
-                    "trade_rejected_insufficient_budget",
-                    symbol=symbol,
-                    required=budget_check["required_balance"],
-                    available=budget_check["available_balance"]
-                )
-                return result
+        # Check budget / margin constraints for long and short entries
+        budget_check = await self.validate_budget_constraint(
+            proposed_size,
+            entry_price,
+            side,
+            proposed_size_is_fraction=True,
+        )
+        if not budget_check["approved"]:
+            result["approved"] = False
+            result["reason"] = budget_check["reason"]
             result["budget_check"] = budget_check
+            logger.warning(
+                "trade_rejected_insufficient_budget",
+                symbol=symbol,
+                required=budget_check["required_balance"],
+                available=budget_check["available_balance"],
+            )
+            return result
+        result["budget_check"] = budget_check
 
         # Check position size limits
         max_allowed_size = risk_assessment.max_position_size
