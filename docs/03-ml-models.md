@@ -24,9 +24,13 @@ This document describes how ML models are managed, uploaded, discovered, and int
 
 ---
 
-## Runtime discovery (JackSparrow v43 + optional MSO v50)
+## Runtime discovery (NO-ML: Intelligence Component)
 
-Point **`MODEL_DIR`** at the bundle directory containing **`metadata_v43.json`** and model artefacts. **`ModelDiscovery`** registers **`JackSparrowV43Node`** (required) and optionally **`MarketStateOracleNode`** when **`metadata_mso_v50.json`** exists and **`MSO_MODEL_ENABLED=true`**.
+Point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_IC_BTCUSD/`** containing **`metadata_ic.json`** only (no `.pkl` artifacts). Set **`IC_MODE=true`** (default). **`ModelDiscovery`** registers **`RuleBasedIntelligenceNode`** from [`agent/intelligence/ic_node.py`](../agent/intelligence/ic_node.py). Features are computed at runtime via [`feature_store/jacksparrow_v43_build_matrix.py`](../feature_store/jacksparrow_v43_build_matrix.py); policy fusion uses **`AGENT_POLICY_MODE=ml_or_thesis`** with **`REQUIRE_ML_SIGNAL_FOR_ORDERS=false`** for paper/live without legacy ML guards.
+
+### Archived: JackSparrow v43 XGBoost + MSO v50
+
+The following applied before branch **`NO-ML`** and is retained for historical reference only.
 
 ### MSO v50 (market-state oracle)
 

@@ -320,22 +320,22 @@ class MCPOrchestrator:
                     logger.critical(
                         "mcp_orchestrator_no_models_loaded",
                         discovered_count=len(discovered_models),
-                        discovery_mode="jacksparrow_v43",
+                        discovery_mode="rule_based_ic",
                         message=(
-                            "No ML models loaded during initialization with "
-                            "require_models_on_startup=True (JackSparrow v43 bundle)."
+                            "No intelligence models loaded during initialization with "
+                            "require_models_on_startup=True (IC bundle)."
                         ),
                     )
                     raise RuntimeError(
-                        "MCP Orchestrator initialization failed: no v43 ML model loaded."
+                        "MCP Orchestrator initialization failed: no IC model loaded."
                     )
                 else:
                     logger.warning(
                         "mcp_orchestrator_no_models_loaded_monitoring_mode",
                         discovered_count=len(discovered_models),
-                        discovery_mode="jacksparrow_v43",
+                        discovery_mode="rule_based_ic",
                         message=(
-                            "No v43 ML model loaded during initialization and "
+                            "No IC model loaded during initialization and "
                             "require_models_on_startup=False. "
                             "Agent will continue in monitoring mode until MODEL_DIR bundle is valid."
                         ),
@@ -500,8 +500,8 @@ class MCPOrchestrator:
             if isinstance(candidate, dict) and isinstance(candidate.get("horizons"), dict):
                 return candidate
         raise ValueError(
-            f"v43 bundle metadata unavailable for model {model_name!r}; "
-            "ensure metadata_v43.json is loaded on the JackSparrowV43Node"
+            f"bundle metadata unavailable for model {model_name!r}; "
+            "ensure metadata_ic.json is loaded on RuleBasedIntelligenceNode"
         )
 
     async def _process_jacksparrow_v43_prediction(

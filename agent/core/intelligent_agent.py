@@ -555,9 +555,7 @@ class IntelligentAgent:
                 )
 
     async def _adaptive_retrain_loop(self) -> None:
-        """Hourly drift + warm-start retrain (parquet labeled data) with model refresh."""
-        from agent.learning.adaptive.adaptive_controller import run_adaptive_retrain_tick
-
+        """Disabled: ML adaptive retrain removed on NO-ML branch."""
         interval = int(
             getattr(settings, "adaptive_retrain_check_interval_seconds", 3600) or 3600
         )
@@ -567,16 +565,7 @@ class IntelligentAgent:
                 await asyncio.sleep(interval)
                 if not self.running:
                     break
-                if not getattr(settings, "adaptive_retrain_enabled", False):
-                    continue
-                orch = getattr(self, "mcp_orchestrator", None)
-                summary = await run_adaptive_retrain_tick(orch)
-                if summary.get("ran"):
-                    logger.info(
-                        "adaptive_retrain_tick_complete",
-                        service="agent",
-                        summary=summary,
-                    )
+                continue
             except asyncio.CancelledError:
                 break
             except Exception as e:

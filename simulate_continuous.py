@@ -517,7 +517,7 @@ class ContinuousSimulator:
         self.warmup_bars  = warmup_bars
         self.window_5m    = window_5m
         self.metadata_path = metadata_path or (
-            _REPO / "agent/model_storage/JackSparrow_v43_models_BTCUSD/metadata_v43.json"
+            _REPO / "agent/model_storage/JackSparrow_IC_BTCUSD/metadata_ic.json"
         )
         self._node = None
         self.records: List[BarRecord] = []
@@ -528,9 +528,10 @@ class ContinuousSimulator:
     def _load_model(self) -> None:
         if self._node is not None:
             return
-        from agent.models.jack_sparrow_v43_node import JackSparrowV43Node
-        print(f"  Loading model from {self.metadata_path} ...", flush=True)
-        self._node = JackSparrowV43Node.from_metadata_path(self.metadata_path)
+        from agent.intelligence.ic_node import RuleBasedIntelligenceNode
+
+        print(f"  Loading IC from {self.metadata_path} ...", flush=True)
+        self._node = RuleBasedIntelligenceNode.from_metadata_path(self.metadata_path)
         print(f"  Model loaded (forward_bars={self._node.training_forward_bars})", flush=True)
 
     # ── single bar pipeline ────────────────────────────────────────────────

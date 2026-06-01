@@ -1,4 +1,4 @@
-"""Vectorized JackSparrow v43 feature matrix for :func:`v43_pickle_shims.set_v43_build_feature_matrix`.
+"""Vectorized JackSparrow v43 feature matrix for runtime IC and MCP paths.
 
 Mirrors :func:`build_v43_last_row` / :mod:`feature_store.jacksparrow_v43_mcp_row` on the full 5m grid
 (resampled 15m/1h from primary). Separate ``df_15m`` / ``df_1h`` args are accepted for API parity but not

@@ -92,12 +92,12 @@ The Intelligence Layer contains the "brain" of the trading agent:
 
 Trade *intent* on the event bus is issued only after the **Agent Policy** stage (`AgentPolicyEngine` in code): ML outputs are packaged as **evidence** (`EVIDENCE_READY` / `MLEvidenceSnapshot`), then the policy layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation; in `TRADING_MODE=live`, a non-empty `manual_trade_audit_reason` is required unless disabled via settings.
 
-**Strategy-first pipeline (v43 production default)**
+**Strategy-first pipeline (NO-ML / IC default)**
 
-Default fusion mode is `AGENT_POLICY_MODE=ml_and_thesis`: the agent does not treat v43 `expected_return` alone as executable intent.
+Default fusion mode is `AGENT_POLICY_MODE=ml_or_thesis` with `IC_MODE=true`: the **RuleBasedIntelligenceNode** produces the same `MLValidationSnapshot` shape as legacy v43 (no pickle load).
 
 1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
-2. **ML validation** — `JackSparrowV43Node` produces `MLValidationSnapshot` (thresholds, `confirms_long` / `confirms_short`, gates).
+2. **Intelligence validation** — `RuleBasedIntelligenceNode` produces `MLValidationSnapshot` (thresholds, `confirms_long` / `confirms_short`, gates).
 3. **Market structure** — `classify_market_structure()` (trending / ranging / low-vol / crisis) from closed-bar features.
 4. **Agent thesis** — `AgentThesisEngine` proposes breakout / trend / mean-reversion candidates (deterministic rules).
 5. **Trade score** — `score_trade_setup()` confluence gate (`AGENT_TRADE_SCORE_MIN`, default 70).
@@ -105,7 +105,7 @@ Default fusion mode is `AGENT_POLICY_MODE=ml_and_thesis`: the agent does not tre
 7. **Reasoning** — includes **Trade Adjudication** step; primary `decision.signal` comes from `PolicyVerdict`, not reasoning text alone.
 8. **Execution guard** — `ml_signal_guard` requires healthy ML predictions + policy reason `agent_thesis_confirms_ml` when `REQUIRE_STRATEGY_ML_AGREEMENT=true`.
 
-Rollback to ML-primary behavior: set `AGENT_POLICY_MODE=ml_only`.
+Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_ML_SIGNAL_FOR_ORDERS=false`.
 
 **Learning Module**
 - Performance tracking per model

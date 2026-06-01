@@ -554,6 +554,20 @@ def format_export_gate_summary(
 
 
 def head_thresholds(meta: Mapping[str, Any], horizon_key: str) -> Tuple[float, float]:
+    family = str(meta.get("model_family") or "").strip()
+    if family == "jacksparrow_ic_rule_based":
+        horizons = meta.get("horizons")
+        block = horizons.get(horizon_key, {}) if isinstance(horizons, dict) else {}
+        vm = (
+            block.get("validation_metrics")
+            if isinstance(block.get("validation_metrics"), dict)
+            else block
+        )
+        default_thr = float(meta.get("default_threshold", 0.005) or 0.005)
+        dt = float(vm.get("dynamic_threshold", block.get("dynamic_threshold", default_thr)) or default_thr)
+        st = vm.get("short_threshold", block.get("short_threshold"))
+        short_mag = abs(float(st)) if st is not None else dt
+        return dt, short_mag
     block = parse_horizons_from_metadata(meta).get(horizon_key, {})
     vm = block.get("validation_metrics") if isinstance(block.get("validation_metrics"), dict) else block
     dt = float(vm.get("dynamic_threshold", block.get("dynamic_threshold", 0.005)) or 0.005)

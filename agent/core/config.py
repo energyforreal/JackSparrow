@@ -135,12 +135,22 @@ class Settings(BaseSettings):
         description="Path to production model file"
     )
     model_dir: str = Field(
-        default="./agent/model_storage/JackSparrow_v43_models_BTCUSD",
+        default="./agent/model_storage/JackSparrow_IC_BTCUSD",
         env="MODEL_DIR",
         description=(
-            "JackSparrow v43 bundle directory (supports metadata_v43.json or "
-            "metadata_v44.json + model_artifact_v43*/v44*.pkl)."
+            "Intelligence Component bundle directory (metadata_ic.json). "
+            "Legacy v43 ML bundles are no longer loaded."
         ),
+    )
+    ic_mode: bool = Field(
+        default=True,
+        env="IC_MODE",
+        description="Use rule-based Intelligence Component instead of ML model artifacts.",
+    )
+    ic_default_threshold: float = Field(
+        default=0.005,
+        env="IC_DEFAULT_THRESHOLD",
+        description="Default long/short threshold for IC horizon heads when metadata omits values.",
     )
     model_discovery_recursive: bool = Field(
         default=False,
@@ -179,10 +189,10 @@ class Settings(BaseSettings):
         description="Auto-register discovered models"
     )
     model_format: str = Field(
-        default="jacksparrow_v43",
+        default="jacksparrow_ic",
         env="MODEL_FORMAT",
         description=(
-            "Integration label (health/API). Runtime is always JackSparrow v43 bundle discovery."
+            "Integration label (health/API). Runtime uses rule-based IC bundle discovery."
         ),
     )
     model_prediction_timeout_seconds: float = Field(

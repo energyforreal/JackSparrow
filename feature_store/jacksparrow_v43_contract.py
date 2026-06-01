@@ -182,6 +182,11 @@ def validate_v43_metadata_compatibility(meta: Mapping[str, Any]) -> None:
             )
     _ = ordered
     family = str(meta.get("model_family") or "").strip()
+    if family == "jacksparrow_ic_rule_based":
+        horizons = meta.get("horizons")
+        if not isinstance(horizons, dict) or not horizons:
+            raise ValueError("IC metadata missing non-empty horizons{}")
+        return
     if family == V43_MULTIHEAD_MODEL_FAMILY or isinstance(meta.get("horizons"), dict):
         validate_v43_multihead_metadata(meta)
     else:

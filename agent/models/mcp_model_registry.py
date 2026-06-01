@@ -15,7 +15,6 @@ from pydantic import BaseModel
 
 from agent.core.config import settings
 from agent.models.mcp_model_node import MCPModelNode, MCPModelRequest, MCPModelPrediction
-from agent.models.advanced_consensus import AdvancedConsensusEngine, ConsensusConfig, ModelPrediction as ConsensusModelPrediction
 from agent.events.event_bus import event_bus
 from agent.events.schemas import (
     ModelPredictionRequestEvent,
@@ -57,8 +56,6 @@ class MCPModelRegistry:
         # Health tracking
         self._prediction_latencies: Dict[str, List[float]] = {}  # Track prediction latencies per model
         self._prediction_errors: Dict[str, int] = {}  # Track error counts per model
-        # Advanced consensus engine
-        self.consensus_engine = AdvancedConsensusEngine(ConsensusConfig())
         self._outcome_history: Dict[str, float] = {}  # Store outcomes for learning
         self._prediction_successes: Dict[str, int] = {}  # Track success counts per model
         self._pending_models: Dict[str, MCPModelNode] = {}
@@ -70,7 +67,7 @@ class MCPModelRegistry:
             "failed_files": [],
             "last_error_messages": [],
             "last_attempt_at": None,
-            "model_integration": "jacksparrow_v43",
+            "model_integration": "jacksparrow_ic",
         }
     
     async def initialize(self):
@@ -168,7 +165,7 @@ class MCPModelRegistry:
             "last_attempt_at": datetime.utcnow().isoformat() if discovery_attempted else None,
             "pending_models": len(self._pending_models),
             "pending_model_names": list(self._pending_models.keys())[:10],
-            "model_integration": "jacksparrow_v43",
+            "model_integration": "jacksparrow_ic",
         }
     
     def _normalize_weights(self):
@@ -433,79 +430,26 @@ class MCPModelRegistry:
                 "No model predictions are available for consensus calculation."
             )
 
-        # Calculate advanced consensus using sophisticated algorithms
-        try:
-            # Convert MCP predictions to consensus engine format
-            consensus_predictions = []
-            for pred in healthy_predictions:
-                consensus_pred = ConsensusModelPrediction(
-                    model_name=pred.model_name,
-                    prediction=pred.prediction,
-                    confidence=pred.confidence,
-                    timestamp=datetime.utcnow(),
-                    model_type=self.models[pred.model_name].model_type
-                    if pred.model_name in self.models
-                    else "unknown",
-                    feature_importance=getattr(pred, "feature_importance", None),
-                    metadata={
-                        "health_status": pred.health_status,
-                        "computation_time_ms": getattr(pred, "computation_time_ms", 0),
-                        "model_version": getattr(pred, "model_version", "unknown"),
-                    },
-                )
-                consensus_predictions.append(consensus_pred)
-
-            # Extract market context for regime detection
-            market_context = request.context if hasattr(request, "context") else {}
-            current_price = market_context.get("current_price", 50000.0)
-            market_context.update(
-                {
-                    "volatility": market_context.get("volatility", 0.02),
-                    "trend_strength": market_context.get("trend_strength", 0.5),
-                    "volume_ratio": market_context.get("volume_ratio", 1.0),
-                }
+        total_weight = sum(max(0.01, float(p.confidence)) for p in healthy_predictions)
+        if total_weight <= 0:
+            consensus_prediction = sum(p.prediction for p in healthy_predictions) / len(
+                healthy_predictions
             )
-
-            # Calculate advanced consensus
-            consensus_result = await self.consensus_engine.calculate_consensus(
-                predictions=consensus_predictions,
-                market_context=market_context,
-                consensus_method="adaptive",
+            consensus_confidence = sum(p.confidence for p in healthy_predictions) / len(
+                healthy_predictions
             )
-
-            consensus_prediction = consensus_result.final_prediction
-            consensus_confidence = consensus_result.confidence
-
-            # Log advanced consensus details
-            logger.info(
-                "advanced_consensus_calculated",
-                request_id=request.request_id,
-                method=consensus_result.consensus_method,
-                final_prediction=round(consensus_prediction, 4),
-                confidence=round(consensus_confidence, 4),
-                model_weights={
-                    k: round(v, 3) for k, v in consensus_result.model_weights.items()
-                },
-                reasoning=consensus_result.reasoning,
-                risk_level=consensus_result.risk_assessment.get("risk_level", "unknown"),
-            )
-
-        except Exception as e:
-            logger.error(
-                "advanced_consensus_failed",
-                request_id=request.request_id,
-                error=str(e),
-                message="Falling back to simple consensus based on available model predictions.",
-            )
-
-            # Fallback to simple average that is still based on actual model
-            # predictions (never fabricating a zero-confidence decision).
+        else:
             consensus_prediction = sum(
-                pred.prediction for pred in healthy_predictions
-            ) / len(healthy_predictions)
-            consensus_confidence = sum(
-                pred.confidence for pred in healthy_predictions
-            ) / len(healthy_predictions)
+                p.prediction * max(0.01, float(p.confidence)) for p in healthy_predictions
+            ) / total_weight
+            consensus_confidence = total_weight / len(healthy_predictions)
+        logger.info(
+            "ic_consensus_calculated",
+            request_id=request.request_id,
+            final_prediction=round(consensus_prediction, 4),
+            confidence=round(consensus_confidence, 4),
+            healthy_models=len(healthy_predictions),
+        )
 
         return MCPModelResponse(
             request_id=request.request_id,
@@ -538,43 +482,24 @@ class MCPModelRegistry:
             "market_context": market_context or {}
         }
 
-        # If we have the original predictions, use them for learning
         if request_id in self._pending_predictions:
             predictions = self._pending_predictions[request_id]
-
-            # Convert to consensus engine format and record outcome
-            consensus_predictions = []
-            for pred in predictions:
-                consensus_pred = ConsensusModelPrediction(
-                    model_name=pred.model_name,
-                    prediction=pred.prediction,
-                    confidence=pred.confidence,
-                    timestamp=getattr(pred, 'timestamp', datetime.utcnow()),
-                    model_type=self.models[pred.model_name].model_type if pred.model_name in self.models else "unknown"
+            if len(self._pending_predictions) > 1000:
+                sorted_requests = sorted(
+                    self._pending_predictions.keys(),
+                    key=lambda x: self._outcome_history.get(x, {}).get(
+                        "timestamp", datetime.min
+                    ),
                 )
-                consensus_predictions.append(consensus_pred)
-
-            # Record outcome for learning
-            await self.consensus_engine.record_outcome(
-                predictions=consensus_predictions,
-                actual_outcome=actual_outcome,
-                market_context=market_context or {}
-            )
-
-            # Clean up pending predictions after some time
-            if len(self._pending_predictions) > 1000:  # Keep last 1000 for memory management
-                # Remove oldest entries
-                sorted_requests = sorted(self._pending_predictions.keys(),
-                                       key=lambda x: self._outcome_history.get(x, {}).get("timestamp", datetime.min))
-                to_remove = sorted_requests[:-1000]
-                for req_id in to_remove:
+                for req_id in sorted_requests[:-1000]:
                     self._pending_predictions.pop(req_id, None)
-
-            logger.info("prediction_outcome_recorded",
-                       request_id=request_id,
-                       actual_outcome=round(actual_outcome, 4),
-                       models_used=len(consensus_predictions),
-                       market_context_keys=list(market_context.keys()) if market_context else [])
+            logger.info(
+                "prediction_outcome_recorded",
+                request_id=request_id,
+                actual_outcome=round(actual_outcome, 4),
+                models_used=len(predictions),
+                market_context_keys=list(market_context.keys()) if market_context else [],
+            )
 
     async def _get_prediction_safe(
         self,
@@ -918,7 +843,7 @@ class MCPModelRegistry:
             "model_statuses": health_statuses,
             "registry_health": registry_health,  # Keep for backward compatibility
             "discovery": self._discovery_summary,
-            "model_format": str(getattr(settings, "model_format", "jacksparrow_v43") or "jacksparrow_v43"),
+            "model_format": str(getattr(settings, "model_format", "jacksparrow_ic") or "jacksparrow_ic"),
         }
     
     def _record_prediction_result(self, model_name: str, latency_ms: float, success: bool):

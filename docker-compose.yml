@@ -119,7 +119,8 @@ services:
       TRADING_MODE: ${TRADING_MODE:-testnet}
       DELTA_ENV: ${DELTA_ENV:-india_testnet}
       # In-container path; override with AGENT_MODEL_DIR in root .env if bundle folder name changes
-      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_v43_models_BTCUSD}
+      MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_IC_BTCUSD}
+      IC_MODE: ${IC_MODE:-true}
       REQUIRE_MODELS_ON_STARTUP: ${REQUIRE_MODELS_ON_STARTUP:-true}
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}

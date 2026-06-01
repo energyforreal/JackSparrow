@@ -1,4 +1,4 @@
-"""Unit tests for JackSparrow v43-only model discovery."""
+"""Unit tests for IC model discovery."""
 
 from __future__ import annotations
 
@@ -15,9 +15,11 @@ os.environ.setdefault("DELTA_EXCHANGE_API_SECRET", "test-secret")
 os.environ.setdefault("MODEL_DIR", "./test_models")
 os.environ.setdefault("MODEL_PATH", "")
 
-from agent.models.jack_sparrow_v43_node import JackSparrowV43Node
+from agent.intelligence.ic_node import IC_MODEL_FAMILY, RuleBasedIntelligenceNode
 from agent.models.model_discovery import ModelDiscovery
 from agent.models.mcp_model_registry import MCPModelRegistry
+from feature_store.jacksparrow_v43_contract import V43_CANONICAL_FEATURES, V43_COMPATIBLE_FEATURE_VERSION
+from feature_store.jacksparrow_v43_multihead import V43_HORIZON_KEY_TO_BARS, V43_HORIZON_KEYS
 
 
 @pytest.fixture
@@ -30,29 +32,28 @@ def model_registry() -> MCPModelRegistry:
     return MCPModelRegistry()
 
 
-def _write_meta(model_dir: Path, name: str = "test_v43") -> Path:
-    meta = model_dir / "metadata_v43.json"
+def _write_ic_meta(model_dir: Path, name: str = "test_ic") -> Path:
+    thr = 0.005
+    horizons = {
+        key: {
+            "forward_bars": V43_HORIZON_KEY_TO_BARS[key],
+            "horizon_minutes": V43_HORIZON_KEY_TO_BARS[key] * 5,
+            "horizon_key": key,
+            "validation_metrics": {"dynamic_threshold": thr, "short_threshold": thr},
+        }
+        for key in V43_HORIZON_KEYS
+    }
+    meta = model_dir / "metadata_ic.json"
     meta.write_text(
         json.dumps(
             {
                 "model_name": name,
-                "version": "v43",
-                "features": ["ret_1"],
-            }
-        ),
-        encoding="utf-8",
-    )
-    return meta
-
-
-def _write_meta_v44(model_dir: Path, name: str = "test_v44") -> Path:
-    meta = model_dir / "metadata_v44.json"
-    meta.write_text(
-        json.dumps(
-            {
-                "model_name": name,
-                "version": "v44",
-                "features": ["ret_1"],
+                "version": "ic_v1",
+                "model_family": IC_MODEL_FAMILY,
+                "compatible_feature_version": V43_COMPATIBLE_FEATURE_VERSION,
+                "features": list(V43_CANONICAL_FEATURES),
+                "primary_execution_horizon_bars": 2,
+                "horizons": horizons,
             }
         ),
         encoding="utf-8",
@@ -61,13 +62,13 @@ def _write_meta_v44(model_dir: Path, name: str = "test_v44") -> Path:
 
 
 @pytest.mark.asyncio
-async def test_discover_v43_registers_when_auto_register(
+async def test_discover_ic_registers_when_auto_register(
     temp_model_dir: Path, model_registry: MCPModelRegistry
 ) -> None:
-    _write_meta(temp_model_dir)
-    mock_node = MagicMock(spec=JackSparrowV43Node)
-    mock_node.model_name = "test_v43"
-    mock_node.model_type = "jacksparrow_v43"
+    _write_ic_meta(temp_model_dir)
+    mock_node = MagicMock(spec=RuleBasedIntelligenceNode)
+    mock_node.model_name = "test_ic"
+    mock_node.model_type = "rule_based_intelligence"
     mock_node.initialize = AsyncMock()
 
     with patch("agent.models.model_discovery.settings") as mock_settings:
@@ -75,41 +76,19 @@ async def test_discover_v43_registers_when_auto_register(
         mock_settings.model_path = None
         mock_settings.model_auto_register = True
 
-        with patch.object(JackSparrowV43Node, "from_metadata_path", return_value=mock_node):
+        with patch.object(
+            RuleBasedIntelligenceNode, "from_metadata_path", return_value=mock_node
+        ):
             discovery = ModelDiscovery(model_registry)
             discovered = await discovery.discover_models()
 
-    assert discovered == ["test_v43"]
+    assert discovered == ["test_ic"]
     mock_node.initialize.assert_awaited_once()
-    assert model_registry.get_model("test_v43") is mock_node
+    assert model_registry.get_model("test_ic") is mock_node
 
 
 @pytest.mark.asyncio
-async def test_discover_v43_pending_when_auto_register_off(
-    temp_model_dir: Path, model_registry: MCPModelRegistry
-) -> None:
-    _write_meta(temp_model_dir)
-    mock_node = MagicMock(spec=JackSparrowV43Node)
-    mock_node.model_name = "test_v43"
-    mock_node.model_type = "jacksparrow_v43"
-    mock_node.initialize = AsyncMock()
-
-    with patch("agent.models.model_discovery.settings") as mock_settings:
-        mock_settings.model_dir = str(temp_model_dir)
-        mock_settings.model_path = None
-        mock_settings.model_auto_register = False
-
-        with patch.object(JackSparrowV43Node, "from_metadata_path", return_value=mock_node):
-            discovery = ModelDiscovery(model_registry)
-            discovered = await discovery.discover_models()
-
-    assert discovered == ["test_v43"]
-    assert model_registry.get_model("test_v43") is None
-    assert "test_v43" in model_registry.list_pending_models()
-
-
-@pytest.mark.asyncio
-async def test_discover_empty_when_metadata_missing(
+async def test_discover_empty_when_metadata_ic_missing(
     temp_model_dir: Path, model_registry: MCPModelRegistry
 ) -> None:
     with patch("agent.models.model_discovery.settings") as mock_settings:
@@ -122,40 +101,3 @@ async def test_discover_empty_when_metadata_missing(
 
     assert discovered == []
     assert model_registry.list_models() == []
-
-
-@pytest.mark.asyncio
-async def test_discover_empty_when_model_dir_missing(model_registry: MCPModelRegistry) -> None:
-    with patch("agent.models.model_discovery.settings") as mock_settings:
-        mock_settings.model_dir = "/nonexistent/jacksparrow_bundle"
-        mock_settings.model_path = None
-        mock_settings.model_auto_register = True
-
-        discovery = ModelDiscovery(model_registry)
-        discovered = await discovery.discover_models()
-
-    assert discovered == []
-    assert model_registry.list_models() == []
-
-
-@pytest.mark.asyncio
-async def test_discover_v44_metadata_is_accepted(
-    temp_model_dir: Path, model_registry: MCPModelRegistry
-) -> None:
-    meta_path = _write_meta_v44(temp_model_dir)
-    mock_node = MagicMock(spec=JackSparrowV43Node)
-    mock_node.model_name = "test_v44"
-    mock_node.model_type = "jacksparrow_v43"
-    mock_node.initialize = AsyncMock()
-
-    with patch("agent.models.model_discovery.settings") as mock_settings:
-        mock_settings.model_dir = str(temp_model_dir)
-        mock_settings.model_path = None
-        mock_settings.model_auto_register = True
-
-        with patch.object(JackSparrowV43Node, "from_metadata_path", return_value=mock_node) as factory:
-            discovery = ModelDiscovery(model_registry)
-            discovered = await discovery.discover_models()
-
-    assert discovered == ["test_v44"]
-    factory.assert_called_once_with(meta_path)

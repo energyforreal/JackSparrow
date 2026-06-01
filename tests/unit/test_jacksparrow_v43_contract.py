@@ -34,31 +34,35 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _default_metadata_path() -> Path:
+def _default_ic_metadata_path() -> Path:
     return (
         _repo_root()
         / "agent"
         / "model_storage"
-        / "JackSparrow_v43_models_BTCUSD"
-        / "metadata_v43.json"
+        / "JackSparrow_IC_BTCUSD"
+        / "metadata_ic.json"
     )
+
+
+def _default_metadata_path() -> Path:
+    return _default_ic_metadata_path()
 
 
 @pytest.fixture
 def metadata_v43():
-    p = _default_metadata_path()
+    p = _default_ic_metadata_path()
     if not p.is_file():
         pytest.skip(f"No metadata at {p}")
     with p.open(encoding="utf-8") as f:
         return json.load(f)
 
 
-def test_repo_metadata_v43_must_exist() -> None:
-    """CI guard: shipped bundle metadata must be present (no silent skip)."""
-    p = _default_metadata_path()
+def test_repo_metadata_ic_must_exist() -> None:
+    """CI guard: shipped IC bundle metadata must be present (no silent skip)."""
+    p = _default_ic_metadata_path()
     assert p.is_file(), (
         f"Required metadata missing at {p}. "
-        "Ship JackSparrow v43 bundle before merge."
+        "Ship JackSparrow IC bundle (metadata_ic.json) before merge."
     )
     with p.open(encoding="utf-8") as f:
         meta = json.load(f)
@@ -150,19 +154,21 @@ def test_validate_v43_metadata_rejects_feature_order_mismatch() -> None:
         validate_v43_metadata_compatibility({"features": feats})
 
 
-def test_jacksparrow_v43_node_rejects_bad_metadata(tmp_path) -> None:
-    from agent.models.jack_sparrow_v43_node import JackSparrowV43Node
+def test_ic_node_rejects_bad_metadata(tmp_path) -> None:
+    from agent.intelligence.ic_node import RuleBasedIntelligenceNode
 
     bad = {
         "model_name": "x",
-        "version": "v43",
+        "version": "ic_v1",
+        "model_family": "jacksparrow_ic_rule_based",
         "features": list(V43_CANONICAL_FEATURES),
         "compatible_feature_version": "nope",
+        "horizons": {"scalp_10m": {"forward_bars": 2, "validation_metrics": {"dynamic_threshold": 0.005}}},
     }
-    p = tmp_path / "metadata.json"
+    p = tmp_path / "metadata_ic.json"
     p.write_text(json.dumps(bad), encoding="utf-8")
     with pytest.raises(ValueError, match="incompatible"):
-        JackSparrowV43Node.from_metadata_path(p)
+        RuleBasedIntelligenceNode.from_metadata_path(p)
 
 
 def test_audit_v43_metadata_warns_zero_short_candidates() -> None:

@@ -3,7 +3,7 @@ Scenario Runner — replicates the full MCP orchestrator pipeline
 with synthetic injected market frames (no exchange connection required).
 
 Pipeline executed in order:
-  1. v43 model inference   (JackSparrowV43Node.predict)
+  1. IC model inference   (RuleBasedIntelligenceNode.predict)
   2. Multi-horizon evidence (build_multi_horizon_evidence)
   3. Market structure       (classify_market_structure)
   4. Thesis engine          (agent_thesis_engine.evaluate)
@@ -33,7 +33,7 @@ logger = structlog.get_logger()
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_META = (
     _REPO_ROOT
-    / "agent/model_storage/JackSparrow_v43_models_BTCUSD/metadata_v43.json"
+    / "agent/model_storage/JackSparrow_IC_BTCUSD/metadata_ic.json"
 )
 
 
@@ -107,15 +107,16 @@ class ScenarioRunner:
     ) -> None:
         self.metadata_path = Path(metadata_path or _DEFAULT_META)
         self.symbol = symbol
-        self._node: Any = None   # JackSparrowV43Node — loaded on first use
+        self._node: Any = None   # RuleBasedIntelligenceNode — loaded on first use
 
     # ── lazy model load ────────────────────────────────────────────────────
 
     def _load_model(self) -> None:
         if self._node is not None:
             return
-        from agent.models.jack_sparrow_v43_node import JackSparrowV43Node
-        self._node = JackSparrowV43Node.from_metadata_path(self.metadata_path)
+        from agent.intelligence.ic_node import RuleBasedIntelligenceNode
+
+        self._node = RuleBasedIntelligenceNode.from_metadata_path(self.metadata_path)
         logger.info(
             "scenario_runner_model_loaded",
             path=str(self.metadata_path),

@@ -1,67 +1,36 @@
 ---
-description: ML model management and MCP protocol standards
+description: Intelligence Component (IC) bundle and MCP protocol standards
 globs:
   - "agent/models/**/*.py"
+  - "agent/intelligence/**/*.py"
   - "agent/model_storage/**/*"
 alwaysApply: false
 ---
 
-# ML Model Management Standards
+# Intelligence Component (IC) Standards
 
 ## Model File Organization
 
-- **Default v43 inference bundle (current)**: `agent/model_storage/JackSparrow_v43_models_BTCUSD/` — flat folder with `metadata_v43.json` + `model_artifact_v43.pkl` (and optional `regime_models_v43.pkl`). `MODEL_DIR` / `AGENT_MODEL_DIR` should point at this directory (see `agent/core/config.py`, `docker-compose.yml`). Promote notebook/Colab exports into this path unless you intentionally use a separate bundle directory.
-- **Default Docker bundle (v15 pipeline — archival)**: `agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/` with `5m/` and `15m/` subfolders (`pipeline_*_v14.pkl` + metadata). Not loaded by current v43-only `ModelDiscovery`. Runtime **adaptive** retrain may add `pipeline_{tf}_latest.pkl`, `pipeline_{tf}_v_auto_*.pkl`, and `retrain_log.json` beside each `metadata_BTCUSD_{tf}.json` when `ADAPTIVE_RETRAIN_ENABLED=true` (see `agent/learning/adaptive/` and `docs/03-ml-models.md`).
-- **Legacy v5 bundle**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` (slim 5m+15m export; see metadata `artifacts`).
-- **Full multi-TF bundle (reference)**: `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` (five horizons; entry+exit per TF when exported).
-- **Discovery contract (v4 loader)**: `metadata_BTCUSD_*.json` is discovered under `MODEL_DIR`; with `MODEL_DISCOVERY_RECURSIVE=true` (default), subfolders such as `jacksparrow_v5_BTCUSD_*/` are scanned so `MODEL_DIR` may be `./agent/model_storage`.
-- **Artefact set per timeframe**: depends on export — classic `entry_model`/`exit_model` joblibs **or** binary `entry_long`/`entry_short` only; always `metadata_*.json` (+ optional `features_*.json`).
-- Legacy model directories (`xgboost/`, `lstm/`, `custom/`) may exist historically but are not the primary v4 path
+- **Default runtime bundle**: `agent/model_storage/JackSparrow_IC_BTCUSD/` — `metadata_ic.json` only (no pickle artifacts).
+- **`MODEL_DIR`** / **`AGENT_MODEL_DIR`**: Must point at the IC bundle directory.
+- **`IC_MODE`**: Default `true`; discovery loads `RuleBasedIntelligenceNode` only.
+- **Feature contract**: Same canonical feature list as v43 (`feature_store/jacksparrow_v43_contract.py`); matrix built by `jacksparrow_v43_build_matrix.py`.
 
 ## Environment Variables
 
-- **`MODEL_DIR`** / **`AGENT_MODEL_DIR`**: Must be the **bundle directory** that contains **`metadata_v43.json`** (default `./agent/model_storage/JackSparrow_v43_models_BTCUSD`). Not the parent `agent/model_storage` unless that folder itself holds `metadata_v43.json`.
-- **`MODEL_FORMAT`**: Defaults to **`jacksparrow_v43`** (integration label); discovery is v43-only in this codebase.
-- **`MODEL_DISCOVERY_RECURSIVE`**: Typically **false** for v43 (flat bundle). Legacy forks used recursive `metadata_BTCUSD_*.json` scans.
-- **`MODEL_DISCOVERY_ENABLED`**, **`MODEL_AUTO_REGISTER`**: Control discovery and MCP registration (defaults **true**).
+- **`MODEL_FORMAT`**: `jacksparrow_ic` (health/API label).
+- **`AGENT_POLICY_MODE`**: `ml_or_thesis` or `thesis_only` recommended.
+- **`REQUIRE_ML_SIGNAL_FOR_ORDERS`**: `false` when IC drives the pipeline.
+- **`REQUIRE_V43_GATES_FOR_ENTRY`**: `false` or ensure IC populates `final_long`/`final_short`.
 
 ## Model Implementation
 
-All models must implement `MCPModelNode` interface:
+All intelligence nodes implement `MCPModelNode`:
 
-- Predictions normalized to -1.0 to +1.0 range
-- Human-readable reasoning/explanations
-- Confidence scores
-- Feature importance tracking
+- `predict()` must emit `context["multi_horizon_heads"]` for orchestrator compatibility.
+- Predictions normalized to -1.0 to +1.0; include confidence and reasoning.
 
-## Model Metadata
+## Tests
 
-**Required Fields**:
-
-- `model_name`: Unique identifier
-- `model_type`: Model type (xgboost, lstm, transformer, etc.)
-- `version`: Semantic version (MAJOR.MINOR.PATCH)
-- `features_required`: List of required feature names
-- `description`: Model description
-
-## Training Authority and Parity Checklist
-
-- **JackSparrow v43 (current discovery)**: Train and export with `notebooks/jacksparrow_v43_delta_india_training.ipynb` (Delta Exchange India candles, `build_v43_feature_matrix` in `feature_store/jacksparrow_v43_build_matrix.py`, `FeatureEngineer` / ensemble shims in `agent/models/v43_pickle_shims.py`; optional alternate helpers in `feature_store/jacksparrow_v43_feature_engineer.py`). Artefacts: `metadata_v43.json` + `model_artifact_v43.pkl` under your bundle directory.
-- **v15 full pipeline (archival / adaptive retrain)**: Artefacts are `pipeline_{5m|15m}_v14.pkl` plus `metadata_BTCUSD_*.json`; the old Colab notebook was removed from `notebooks/`—see `docs/03-ml-models.md` for parity rules if you revive a v15 bundle under `agent/model_storage/`.
-- **v4 / v5 / v6 expanded bundles** (archival): parity rules in `docs/03-ml-models.md`; training notebooks no longer live in `notebooks/`.
-
-**Train–serve parity (pick the rule that matches your bundle):**
-
-- **Expanded-feature bundles (v5/v6/v4 ensemble path)**: `metadata_*.json` `features` / `features_required` must align with `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` (order and length as emitted by training).
-- **v15 pipeline path**: `metadata_*.json` `features` must match `V15_FEATURES_5M` or `V15_FEATURES_15M` in `feature_store/feature_registry.py` for that timeframe—same names and order as the export. Runtime rows are built in `feature_store/v15_feature_compute.py` and served when the MCP request matches a full v15 name set (`agent/data/feature_server.py`).
-
-- Point `MODEL_DIR` / `AGENT_MODEL_DIR` at the bundle root that contains the metadata files you trained.
-- Run `pytest tests/unit/test_feature_parity.py tests/unit/test_v15_feature_registry.py` after training and before promotion (plus `scripts/test_model_inference.py` against the bundle when practical).
-
-## Model Versioning
-
-- Use semantic versioning (MAJOR.MINOR.PATCH)
-- Keep old versions for rollback capability
-- Document version changes in metadata
-- Test new versions before activation
-- **v15 adaptive exports**: keep timestamped `pipeline_{tf}_v_auto_*` files; `pipeline_{tf}_latest.pkl` is the active pointer loaded by `PipelineV15Node` when present. Roll back by overwriting `latest` with a known-good pickle and refreshing models.
+- `pytest tests/unit/test_intelligence_ic_node.py`
+- `pytest tests/unit/trading_agent_tests/test_model_discovery.py`
