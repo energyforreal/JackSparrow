@@ -768,24 +768,24 @@ class ExecutionEngine:
 
             if not result.success:
                 v43_bar = payload.get("v43_closed_bar_index")
-                if v43_bar is not None:
-                    try:
-                        from agent.core import trade_events
-                        from agent.core.async_tasks import fire_and_forget
+                try:
+                    from agent.core import trade_events
+                    from agent.core.async_tasks import fire_and_forget
 
-                        trade_events.rollback_v43_signal_decision(int(v43_bar))
-                        fire_and_forget(
-                            trade_events.persist_v43_gate_state_after_trade(symbol),
-                            name="persist_v43_gate_state_after_failed_trade",
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "v43_gate_state_rollback_failed",
-                            symbol=symbol,
-                            v43_bar=v43_bar,
-                            error=str(e),
-                            exc_info=True,
-                        )
+                    rollback_bar = int(v43_bar) if v43_bar is not None else None
+                    trade_events.rollback_v43_signal_decision(rollback_bar)
+                    fire_and_forget(
+                        trade_events.persist_v43_gate_state_after_trade(symbol),
+                        name="persist_v43_gate_state_after_failed_trade",
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "v43_gate_state_rollback_failed",
+                        symbol=symbol,
+                        v43_bar=v43_bar,
+                        error=str(e),
+                        exc_info=True,
+                    )
                 logger.warning(
                     "execution_risk_approved_trade_failed",
                     symbol=symbol,

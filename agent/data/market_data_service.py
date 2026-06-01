@@ -48,6 +48,8 @@ class MarketDataService:
         self._tick_force_emit_interval = 2.0  # Force emit tick every 2 seconds for real-time display
         # New: Track last major price change for fluctuation threshold
         self._last_major_price: Dict[str, float] = {}
+        self._last_major_price_monotonic: Dict[str, float] = {}
+        self._last_fluctuation_pipeline_at: Dict[str, float] = {}
         self._price_fluctuation_threshold_pct = settings.price_fluctuation_threshold_pct
         # Cache for 24h stats fetched from REST API (fallback when WebSocket doesn't provide them)
         self._24h_stats_cache: Dict[str, Dict[str, Any]] = {}
@@ -122,6 +124,23 @@ class MarketDataService:
     def is_ticker_stale_for_symbol(self, symbol: str) -> bool:
         """Public alias for stale ticker detection (SL/TP and health dashboards)."""
         return self._ticker_stale(symbol)
+
+    def get_cached_headline_price(self, symbol: str) -> Optional[float]:
+        """Best-effort mark/LTP from the in-memory ticker cache (no REST call)."""
+        ticker = self._last_ticker_cache.get(symbol)
+        if not isinstance(ticker, dict):
+            return None
+        for key in ("mark_price", "price", "close", "spot_price"):
+            raw = ticker.get(key)
+            if raw is None:
+                continue
+            try:
+                v = float(raw)
+                if v > 0:
+                    return v
+            except (TypeError, ValueError):
+                continue
+        return None
 
     def _rest_fallback_reason_code(self) -> str:
         if not self._websocket_enabled:
@@ -495,6 +514,15 @@ class MarketDataService:
             await self._check_and_emit_ticker_from_data(symbol, ticker_data)
 
             # Now check for major price fluctuations that should trigger ML pipeline
+            now_mono = time.monotonic()
+            baseline_max_age = float(
+                getattr(settings, "price_fluctuation_baseline_max_age_seconds", 900.0) or 900.0
+            )
+            baseline_set_at = self._last_major_price_monotonic.get(symbol)
+            if baseline_set_at is not None and (now_mono - baseline_set_at) > baseline_max_age:
+                self._last_major_price[symbol] = current_price
+                self._last_major_price_monotonic[symbol] = now_mono
+
             last_major_price = self._last_major_price.get(symbol)
 
             if last_major_price is not None:
@@ -503,21 +531,34 @@ class MarketDataService:
 
                 # Check if change exceeds fluctuation threshold
                 if price_change_pct >= self._price_fluctuation_threshold_pct:
-                    # Emit fluctuation event for ML pipeline
-                    await self._on_price_fluctuation(
-                        symbol=symbol,
-                        current_price=current_price,
-                        previous_price=last_major_price,
-                        change_pct=price_change_pct,
-                        volume=ticker_data["volume"],
-                        threshold_pct=self._price_fluctuation_threshold_pct
+                    min_interval = float(
+                        getattr(settings, "price_fluctuation_min_interval_seconds", 60.0) or 60.0
                     )
-
-                    # Update last major price
-                    self._last_major_price[symbol] = current_price
+                    last_pipeline = self._last_fluctuation_pipeline_at.get(symbol, 0.0)
+                    if (now_mono - last_pipeline) >= min_interval:
+                        self._last_fluctuation_pipeline_at[symbol] = now_mono
+                        await self._on_price_fluctuation(
+                            symbol=symbol,
+                            current_price=current_price,
+                            previous_price=last_major_price,
+                            change_pct=price_change_pct,
+                            volume=ticker_data["volume"],
+                            threshold_pct=self._price_fluctuation_threshold_pct,
+                        )
+                        self._last_major_price[symbol] = current_price
+                        self._last_major_price_monotonic[symbol] = now_mono
+                    else:
+                        logger.debug(
+                            "price_fluctuation_pipeline_rate_limited",
+                            symbol=symbol,
+                            change_pct=round(price_change_pct, 4),
+                            seconds_since_last=round(now_mono - last_pipeline, 2),
+                            min_interval_seconds=min_interval,
+                        )
             else:
                 # First price reading - set baseline
                 self._last_major_price[symbol] = current_price
+                self._last_major_price_monotonic[symbol] = now_mono
 
         except Exception as e:
             logger.error(
@@ -898,6 +939,30 @@ class MarketDataService:
                 error=str(e),
                 exc_info=True
             )
+
+    async def warm_multi_timeframe_caches(
+        self,
+        symbol: str,
+        intervals: List[str],
+        *,
+        limit: int = 100,
+    ) -> None:
+        """Prefetch OHLCV for configured timeframes so feature/MCP paths see fresh MTF data."""
+        seen: set[str] = set()
+        for raw_iv in intervals or []:
+            iv = str(raw_iv or "").strip().lower()
+            if not iv or iv in seen:
+                continue
+            seen.add(iv)
+            try:
+                await self.get_market_data(symbol, iv, limit=limit)
+            except Exception as e:
+                logger.debug(
+                    "market_data_mtf_warm_failed",
+                    symbol=symbol,
+                    interval=iv,
+                    error=str(e),
+                )
 
     async def get_market_data(
         self,

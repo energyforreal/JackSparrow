@@ -128,7 +128,12 @@ class MarketDataEventHandler:
                     "current_price": payload.get("close"),
                     "feature_names": runtime_feature_names,
                     "timestamp": payload.get("timestamp"),
-                    "version": "latest"
+                    "version": "latest",
+                    "context": {
+                        "trigger": "candle_closed",
+                        "interval": interval,
+                        "active_timeframes": settings.resolved_agent_timeframes(),
+                    },
                 }
             )
             
@@ -198,7 +203,11 @@ class MarketDataEventHandler:
                     "current_price": payload.get("price"),
                     "feature_names": runtime_feature_names,
                     "timestamp": payload.get("timestamp"),
-                    "version": "latest"
+                    "version": "latest",
+                    "context": {
+                        "trigger": "price_fluctuation",
+                        "active_timeframes": settings.resolved_agent_timeframes(),
+                    },
                 }
             )
 

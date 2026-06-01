@@ -1111,7 +1111,25 @@ class MCPOrchestrator:
         )
 
         _entry_signals = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
-        if policy_verdict.signal in _entry_signals and not trade_score.passed:
+        _gated_adopt_codes = frozenset(
+            {
+                "fusion_ml_gated_thesis_neutral",
+                "fusion_ml_or_thesis_gated_neutral",
+                "fusion_ml_or_thesis_ml",
+            }
+        )
+        score_min = float(getattr(settings, "agent_trade_score_min", 70.0) or 70.0)
+        if any(c in _gated_adopt_codes for c in (policy_verdict.reason_codes or [])):
+            score_min = min(
+                score_min,
+                float(
+                    getattr(settings, "agent_trade_score_min_gated_ml_adoption", 45.0) or 45.0
+                ),
+            )
+        score_ok = trade_score.passed or (
+            float(trade_score.score) >= score_min and (final_long or final_short)
+        )
+        if policy_verdict.signal in _entry_signals and not score_ok:
             policy_verdict = PolicyVerdict(
                 signal="HOLD",
                 confidence=policy_verdict.confidence,

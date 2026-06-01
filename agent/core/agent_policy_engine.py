@@ -315,6 +315,32 @@ def _ml_gated_from_context(
     return False
 
 
+def _entry_signal_from_gated_context(
+    market_context: Optional[Dict[str, Any]],
+    ml_evidence: MLEvidenceSnapshot,
+) -> Optional[str]:
+    """Map v43 final_long/final_short to BUY/SELL when ML candidate label is still HOLD."""
+    mc = market_context if isinstance(market_context, dict) else {}
+    excerpt = ml_evidence.market_context_excerpt or {}
+    ml_val = mc.get("ml_validation")
+    if not isinstance(ml_val, dict) and isinstance(excerpt, dict):
+        ml_val = excerpt.get("ml_validation")
+    if not isinstance(ml_val, dict):
+        v43 = excerpt.get("v43_dedicated_decision") if isinstance(excerpt, dict) else None
+        if isinstance(v43, dict):
+            if v43.get("final_short"):
+                return "SELL"
+            if v43.get("final_long"):
+                return "BUY"
+        return None
+    if ml_val.get("final_short") and not ml_val.get("final_long"):
+        return "SELL"
+    if ml_val.get("final_long") and not ml_val.get("final_short"):
+        return "BUY"
+    cand = str(ml_val.get("ml_candidate_signal") or ml_evidence.ml_candidate_signal or "")
+    return cand if _is_entry(_normalize_signal(cand)) else None
+
+
 def _state_head_scores_from_context(
     market_context: Optional[Dict[str, Any]],
     ml_evidence: MLEvidenceSnapshot,
@@ -526,10 +552,6 @@ def _fuse_signals(
         )
 
     if mode == "ml_or_thesis":
-        if ml_entry:
-            return _verdict_from_ml(
-                ml_evidence, ml_sig, conclusion, reasons + ["fusion_ml_or_thesis_ml"]
-            )
         if th_entry:
             reasons.append("agent_thesis_entry")
             return PolicyVerdict(
@@ -539,6 +561,27 @@ def _fuse_signals(
                 reason_codes=reasons + ["fusion_ml_or_thesis_thesis", "agent_thesis_origin"],
                 ml_evidence_id=ml_evidence.evidence_id,
                 adopted_ml_candidate=False,
+            )
+        adopt_sig = ml_sig
+        gated_neutral = (
+            th_sig == "HOLD"
+            and bool(getattr(settings, "agent_policy_adopt_gated_ml_when_thesis_neutral", True))
+            and (
+                bool(ml_evidence.ml_confirms)
+                or _ml_gated_from_context(market_context, ml_evidence)
+            )
+            and not _thesis_blocks_gated_ml_adoption(thesis)
+        )
+        if gated_neutral and not ml_entry:
+            adopt_sig = _entry_signal_from_gated_context(market_context, ml_evidence) or ml_sig
+        if ml_entry or (gated_neutral and _is_entry(adopt_sig)):
+            fusion_tag = (
+                "fusion_ml_or_thesis_gated_neutral"
+                if gated_neutral and not ml_entry
+                else "fusion_ml_or_thesis_ml"
+            )
+            return _verdict_from_ml(
+                ml_evidence, adopt_sig, conclusion, reasons + [fusion_tag]
             )
         return PolicyVerdict(
             signal="HOLD",

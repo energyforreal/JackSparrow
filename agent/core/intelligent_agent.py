@@ -637,22 +637,40 @@ class IntelligentAgent:
                         position = execution_module.position_manager.get_position(symbol)
                         if not position or str(position.get("status") or "").lower() != "open":
                             continue
-                        ticker = await self.delta_client.get_ticker(symbol)
-                        result = ticker.get("result") or ticker
-                        if isinstance(result, dict):
-                            mp = result.get("mark_price")
-                            cl = result.get("close")
-                            close = mp if mp is not None else cl
-                            if close is not None:
-                                current_price = float(close)
-                                execution_module.position_manager.update_position(
-                                    symbol, current_price
+                        current_price = None
+                        try:
+                            ticker = await self.delta_client.get_ticker(symbol)
+                            result = ticker.get("result") or ticker
+                            if isinstance(result, dict):
+                                mp = result.get("mark_price")
+                                cl = result.get("close")
+                                close = mp if mp is not None else cl
+                                if close is not None:
+                                    current_price = float(close)
+                        except Exception as ticker_err:
+                            if self.market_data_service:
+                                current_price = (
+                                    self.market_data_service.get_cached_headline_price(
+                                        symbol
+                                    )
                                 )
-                                last_ws = float(
-                                    execution_module._last_ws_sltp_check_ts.get(symbol, 0.0)
+                            if current_price is None:
+                                logger.debug(
+                                    "position_monitor_ticker_fallback_failed",
+                                    symbol=symbol,
+                                    error=str(ticker_err),
+                                    service="agent",
                                 )
-                                if (time.time() - last_ws) >= 0.5:
-                                    await execution_module.manage_position(symbol)
+                                continue
+                        if current_price is not None:
+                            execution_module.position_manager.update_position(
+                                symbol, current_price
+                            )
+                            last_ws = float(
+                                execution_module._last_ws_sltp_check_ts.get(symbol, 0.0)
+                            )
+                            if (time.time() - last_ws) >= 0.5:
+                                await execution_module.manage_position(symbol)
                     except Exception as e:
                         logger.debug(
                             "position_monitor_tick_error",
@@ -1802,7 +1820,17 @@ class IntelligentAgent:
                 try:
                     stale_minutes_cfg = getattr(settings, "signal_staleness_minutes", 10) or 10
                     stale_seconds = max(60, stale_minutes_cfg * 60)
-                    if time_since_last_decision and time_since_last_decision > stale_seconds:
+                    staleness_cooldown_ok = True
+                    if last_staleness_trigger_at is not None:
+                        elapsed_since_trigger = (
+                            datetime.now(timezone.utc) - last_staleness_trigger_at
+                        ).total_seconds()
+                        staleness_cooldown_ok = elapsed_since_trigger >= stale_seconds
+                    if (
+                        time_since_last_decision
+                        and time_since_last_decision > stale_seconds
+                        and staleness_cooldown_ok
+                    ):
                         logger.info(
                             "agent_triggering_stale_signal_refresh",
                             service="agent",
@@ -1812,26 +1840,42 @@ class IntelligentAgent:
                             staleness_threshold_seconds=stale_seconds,
                             message=(
                                 "No decisions generated recently; emitting "
-                                "ModelPredictionRequestEvent for fresh signal"
+                                "FeatureRequestEvent for fresh feature+model pipeline"
                             ),
                         )
                         last_staleness_trigger_at = datetime.now(timezone.utc)
-                        from agent.events.schemas import ModelPredictionRequestEvent
+                        from agent.events.handlers.market_data_handler import (
+                            MarketDataEventHandler,
+                        )
+                        from agent.events.schemas import FeatureRequestEvent
 
-                        prediction_event = ModelPredictionRequestEvent(
+                        runtime_feature_names = (
+                            MarketDataEventHandler._get_runtime_feature_names()
+                        )
+                        cached_price = None
+                        if self.market_data_service:
+                            cached_price = (
+                                self.market_data_service.get_cached_headline_price(
+                                    self.default_symbol
+                                )
+                            )
+                        feature_request = FeatureRequestEvent(
                             source="intelligent_agent",
                             payload={
                                 "symbol": self.default_symbol,
-                                "features": {},
+                                "current_price": cached_price,
+                                "feature_names": runtime_feature_names,
+                                "timestamp": datetime.now(timezone.utc),
+                                "version": "latest",
                                 "context": {
                                     "symbol": self.default_symbol,
                                     "trigger": "staleness_watchdog",
                                     "requested_at": datetime.now(timezone.utc),
+                                    "interval": self.primary_interval,
                                 },
-                                "require_explanation": True,
                             },
                         )
-                        await event_bus.publish(prediction_event)
+                        await event_bus.publish(feature_request)
                 except Exception as trigger_error:
                     logger.warning(
                         "agent_stale_signal_refresh_failed",

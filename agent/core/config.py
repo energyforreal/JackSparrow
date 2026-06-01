@@ -1909,6 +1909,16 @@ class Settings(BaseSettings):
         le=100.0,
         description="Minimum confluence score (0-100) before policy may emit entry.",
     )
+    agent_trade_score_min_gated_ml_adoption: float = Field(
+        default=45.0,
+        env="AGENT_TRADE_SCORE_MIN_GATED_ML_ADOPTION",
+        ge=0.0,
+        le=100.0,
+        description=(
+            "Lower confluence floor when policy adopts gated ML with neutral thesis "
+            "(ml_and_thesis / ml_or_thesis adoption paths)."
+        ),
+    )
     require_strategy_ml_agreement: bool = Field(
         default=True,
         env="REQUIRE_STRATEGY_ML_AGREEMENT",
@@ -2261,6 +2271,23 @@ class Settings(BaseSettings):
         default=True,
         env="PRICE_FLUCTUATION_TRIGGER_ENABLED",
         description="Enable price-fluctuation event path to trigger ML decision pipeline.",
+    )
+    price_fluctuation_min_interval_seconds: float = Field(
+        default=60.0,
+        env="PRICE_FLUCTUATION_MIN_INTERVAL_SECONDS",
+        ge=5.0,
+        le=3600.0,
+        description="Minimum seconds between price-fluctuation ML pipeline triggers per symbol.",
+    )
+    price_fluctuation_baseline_max_age_seconds: float = Field(
+        default=900.0,
+        env="PRICE_FLUCTUATION_BASELINE_MAX_AGE_SECONDS",
+        ge=60.0,
+        le=86400.0,
+        description=(
+            "Reset fluctuation baseline price if no fluctuation trigger fired within this window "
+            "(avoids stale cumulative drift without firing)."
+        ),
     )
     # Signal staleness configuration
     signal_staleness_minutes: int = Field(

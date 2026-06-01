@@ -130,6 +130,22 @@ class MCPFeatureServer:
                 self._computing[computation_key] = True
 
             try:
+                trigger = str((payload.get("context") or {}).get("trigger") or "")
+                if trigger not in ("staleness_watchdog",):
+                    try:
+                        mtf = settings.resolved_agent_timeframes()
+                        if mtf:
+                            await self.market_data_service.warm_multi_timeframe_caches(
+                                str(symbol),
+                                mtf,
+                            )
+                    except Exception as warm_err:
+                        logger.debug(
+                            "feature_server_mtf_warm_skipped",
+                            symbol=symbol,
+                            error=str(warm_err),
+                        )
+
                 # Create MCP request
                 request = MCPFeatureRequest(
                     feature_names=feature_names,
@@ -137,7 +153,7 @@ class MCPFeatureServer:
                     timestamp=payload.get("timestamp"),
                     version=payload.get("version", "latest")
                 )
-                
+
                 # Get features
                 response = await self.get_features(request)
                 
