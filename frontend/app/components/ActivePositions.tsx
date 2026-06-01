@@ -35,6 +35,13 @@ function resolveMarkPriceUsd(position: Position): number | null {
   return null
 }
 
+function formatLeverage(leverage: number | string | undefined): string {
+  if (leverage === undefined || leverage === null) return '—'
+  const parsed = typeof leverage === 'number' ? leverage : parseFloat(String(leverage))
+  if (!Number.isFinite(parsed) || parsed <= 0) return '—'
+  return `${parsed % 1 === 0 ? parsed.toFixed(0) : parsed.toFixed(1)}×`
+}
+
 export function ActivePositions({
   positions,
   isLoading = false,
@@ -53,9 +60,11 @@ export function ActivePositions({
                 <TableRow>
                   <TableHead>Symbol</TableHead>
                   <TableHead>Side</TableHead>
-                  <TableHead>Quantity</TableHead>
-                  <TableHead>Entry Price</TableHead>
-                  <TableHead>Current Price</TableHead>
+                  <TableHead>Lev.</TableHead>
+                  <TableHead>Lots</TableHead>
+                  <TableHead>Entry</TableHead>
+                  <TableHead>Mark</TableHead>
+                  <TableHead>Liq.</TableHead>
                   <TableHead>PnL</TableHead>
                   <TableHead>Duration</TableHead>
                 </TableRow>
@@ -70,7 +79,13 @@ export function ActivePositions({
                       <div className="h-6 bg-muted rounded-md w-12" />
                     </TableCell>
                     <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-8" />
+                    </TableCell>
+                    <TableCell>
                       <div className="h-4 bg-muted rounded-md w-10" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-20" />
                     </TableCell>
                     <TableCell>
                       <div className="h-4 bg-muted rounded-md w-20" />
@@ -175,6 +190,7 @@ export function ActivePositions({
               <TableRow>
                 <TableHead>Symbol</TableHead>
                 <TableHead>Side</TableHead>
+                <TableHead title="Exchange-reported position leverage">Lev.</TableHead>
                 <TableHead>Lots</TableHead>
                 <TableHead>Entry</TableHead>
                 <TableHead>Mark</TableHead>
@@ -189,6 +205,9 @@ export function ActivePositions({
                   <TableCell className="font-medium">{position.symbol}</TableCell>
                   <TableCell>
                     <Badge variant={sideBadgeVariant(position.side)}>{position.side}</Badge>
+                  </TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {formatLeverage(position.leverage)}
                   </TableCell>
                   <TableCell>
                     {formatQuantity(position.lots ?? position.quantity)}
