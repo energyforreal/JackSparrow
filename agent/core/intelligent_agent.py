@@ -630,10 +630,6 @@ class IntelligentAgent:
                 if not monitor_symbols:
                     continue
 
-                from agent.core.v43_runtime_horizon import effective_max_position_hold_hours
-
-                max_hold_s = effective_max_position_hold_hours() * 3600
-                now = datetime.now(timezone.utc)
                 for symbol in monitor_symbols:
                     if not self.running:
                         break
@@ -641,17 +637,6 @@ class IntelligentAgent:
                         position = execution_module.position_manager.get_position(symbol)
                         if not position or str(position.get("status") or "").lower() != "open":
                             continue
-                        entry_time = position.get("entry_time")
-                        if entry_time is not None:
-                            et = entry_time
-                            if getattr(et, "tzinfo", None) is None and hasattr(et, "replace"):
-                                et = et.replace(tzinfo=timezone.utc)
-                            held_s = (now - et).total_seconds()
-                            if held_s > max_hold_s:
-                                await execution_module.close_position(
-                                    symbol, exit_reason="time_limit"
-                                )
-                                continue
                         ticker = await self.delta_client.get_ticker(symbol)
                         result = ticker.get("result") or ticker
                         if isinstance(result, dict):

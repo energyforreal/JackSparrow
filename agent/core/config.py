@@ -1312,7 +1312,10 @@ class Settings(BaseSettings):
     max_position_hold_hours: int = Field(
         default=24,
         env="MAX_POSITION_HOLD_HOURS",
-        description="Force-close positions after this many hours"
+        description=(
+            "Legacy hint for v43 execution profile metadata only; "
+            "positions are not force-closed by hold duration."
+        ),
     )
     websocket_sl_tp_enabled: bool = Field(
         default=True,
