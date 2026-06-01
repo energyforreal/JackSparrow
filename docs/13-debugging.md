@@ -201,7 +201,7 @@ jq 'select(.level == "ERROR")' logs/backend/2025-11-13.log
 2. **Health**: `python tools/commands/health_check.py` or `validate-health.py` once services are up.
 3. **Unicode / encoding on Windows**: if scripts print Unicode to a legacy console, set UTF-8 mode (`chcp 65001`) or run from Windows Terminal; prefer structured logs in `logs/` over console-only traces.
 4. **Model load failures**: check `MODEL_DIR`, metadata paths, and `xgboost` version vs training; see [ML Models Troubleshooting](03-ml-models.md#troubleshooting).
-5. **Docker**: `docker compose ps`, `docker compose logs -f <service>`, full rebuild `docker compose build --pull && docker compose up -d --force-recreate` ([Deployment](10-deployment.md)).
+5. **Docker**: `docker compose ps`, `docker compose logs -f <service>`. After code changes, **rebuild images** (production compose does not bind-mount `./agent` or `./feature_store`): `docker compose build --pull && docker compose up -d --force-recreate`. Check `GET /api/v1/health` for `services.market_data` (stale if no ticks >30s) and `services.execution_latency`. Dev hot reload: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` ([Deployment](10-deployment.md)).
 6. **Event deduplication**: duplicate agent events on Redis + WS use `processed_event:{event_id}`—if the UI “misses” an event, confirm it was not deduped as a duplicate ID.
 
 ---

@@ -172,24 +172,33 @@ MIN_CONFIDENCE_THRESHOLD=0.70
 
 ### ML Models in Docker
 
-When running under Docker, the agent container mounts the host `agent/model_storage/` directory.
+**Production compose** (`docker-compose.yml`):
 
-- **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service).
-- **Default in-container `MODEL_DIR`**: Compose sets **`MODEL_DIR=${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_IC_BTCUSD}`** and **`IC_MODE=true`** unless overridden in the root `.env`.
-- **Delta WebSocket**: Compose sets **`WEBSOCKET_URL=${WEBSOCKET_URL:-wss://socket-ind.testnet.deltaex.org}`** on the agent service (socket host, not REST CDN).
+- **Model bind mount only**: `./agent/model_storage:/app/agent/model_storage` — IC metadata and bundles live on the host; no application code bind mount.
+- **Default in-container `MODEL_DIR`**: **`MODEL_DIR=${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_IC_BTCUSD}`**, **`IC_MODE=true`** unless overridden in root `.env`.
+- **Delta WebSocket**: **`WEBSOCKET_URL=${WEBSOCKET_URL:-wss://socket-ind.testnet.deltaex.org}`** (socket host, not REST CDN).
+- **Vector store**: default **`AGENT_VECTOR_STORE_BACKEND=memory`**; Qdrant is optional (`docker compose --profile full`).
 
-To use a different IC bundle folder, set **`AGENT_MODEL_DIR`** to that path inside the bind mount:
+To use a different IC bundle folder on the host:
 
 ```bash
 AGENT_MODEL_DIR=/app/agent/model_storage/MyCustom_IC_BTCUSD
 ```
 
-Then recreate or restart the agent service.
+Then recreate the agent container (no image rebuild required for model-only changes):
 
-This means:
+```bash
+docker compose up -d --force-recreate agent
+```
 
-- Artefacts you place under `agent/model_storage/` on the host are visible in-container without rebuilding images.
-- Updating models: copy files on the host, then `docker compose restart agent`.
+**Application code changes** require rebuilding the agent image:
+
+```bash
+docker compose build agent
+docker compose up -d --force-recreate agent
+```
+
+**Development overlay** (`docker-compose.dev.yml`) additionally bind-mounts `./agent` and `./feature_store` for hot reload — see [Deployment – Docker development hot reload](10-deployment.md#docker-development-hot-reload).
 
 **Verification steps before `docker compose up`:**
 
@@ -258,7 +267,7 @@ The agent can run a **separate** path from trade-outcome retraining: KS drift on
 | **Artifacts** | On accept: `pipeline_{tf}_v_auto_<unix>.pkl` (archive), `pipeline_{tf}_latest.pkl` (pointer), `retrain_log.json` append next to metadata, and `metadata` JSON updated (`train_median`, `adaptive` audit fields). |
 | **Cooldown** | Per-TF timestamps in `ADAPTIVE_RETRAIN_STATE_PATH` (respects `LOGS_ROOT` when set). |
 | **Hot reload** | After any TF accepts in a tick, `await mcp_orchestrator.refresh_models()` reloads discovery without restarting the process. Programmatic use: `from agent.learning.adaptive.adaptive_controller import hot_reload_models`. |
-| **Rollback** | Copy a known-good `pipeline_{tf}_v14.pkl` or versioned pickle over `pipeline_{tf}_latest.pkl`, then trigger a refresh (restart agent or call `hot_reload_models` from an async context). Use `retrain_log.json` to pick a version. |
+| **Rollback** | Copy a known-good `pipeline_{tf}_v14.pkl` or versioned pickle over `pipeline_{tf}_latest.pkl`, then rebuild/recreate the agent container in Docker production (`docker compose build agent && docker compose up -d --force-recreate agent`) or call `hot_reload_models` when running with dev bind mounts. Use `retrain_log.json` to pick a version. |
 | **Tests** | `tests/unit/test_adaptive_*.py`, `tests/unit/test_pipeline_v15_resolve_latest.py`. |
 | **Env reference** | Root [`.env.example`](../.env.example) and [Deployment – Agent env](10-deployment.md#agent-environment-variables). |
 

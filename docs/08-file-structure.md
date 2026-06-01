@@ -45,6 +45,7 @@ JackSparrow/
 │   │   │   ├── __init__.py
 │   │   │   ├── auth.py                 # Authentication middleware
 │   │   │   ├── rate_limit.py           # Rate limiting middleware
+│   │   │   ├── admin_rate_limit.py     # Admin / emergency-stop rate limit (5/min per IP)
 │   │   │   ├── cors.py                 # CORS configuration
 │   │   │   └── logging.py              # Request logging middleware
 │   │   ├── models/
@@ -98,10 +99,12 @@ JackSparrow/
 │   ├── perpetual_features.py          # Perpetual-specific feature computation
 │   └── ...
 │   │   ├── mcp_orchestrator.py         # MCP Orchestrator (NEW - complete implementation)
-│   │   ├── learning_system.py          # Learning module (TODO - needs implementation)
+│   │   ├── learning_system.py          # Learning module (outcome tracking, calibration)
 │   │   ├── state_machine.py            # Agent state machine (see [Logic & Reasoning Documentation](05-logic-reasoning.md#enhanced-agent-state-machine))
-│   │   ├── context_manager.py         # Context management (TODO - needs implementation)
-│   │   └── execution.py                # Trade execution engine (TODO - needs implementation)
+│   │   ├── context_manager.py         # Agent state persistence (60s auto-save + fill/close hooks)
+│   │   ├── operational_metrics.py    # Redis publishers (market tick, latency, exchange health)
+│   │   ├── order_persistence.py       # Open-order JSON + exchange sync
+│   │   └── execution.py                # Trade execution engine
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── websocket_server.py         # Backend→agent command WebSocket bridge (active)

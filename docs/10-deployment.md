@@ -319,7 +319,7 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 > The root `.env.example` is already organized into sections (Infrastructure & Shared Services, Delta Exchange Credentials, Backend Security & API, Agent Configuration with Risk Management/Trading Session defaults, Frontend, and Optional Services). Copy it verbatim to `.env` and only change the values so every service reads the same structured configuration.
 
 > **Agent Risk Controls**  
-> Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Current defaults are `INITIAL_BALANCE=20000`, `MIN_CONFIDENCE_THRESHOLD=0.70`, `MIN_LOT_SIZE=1`, and `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC on Delta BTCUSD perpetual).
+> Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Current defaults are `INITIAL_BALANCE=20000`, `MIN_CONFIDENCE_THRESHOLD=0.70`, `MIN_LOT_SIZE=1`, and `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC on Delta BTCUSD perpetual). **SL/TP defaults** in `.env.example` are `STOP_LOSS_PERCENTAGE=0.008` (0.8%) and `TAKE_PROFIT_PERCENTAGE=0.016` (1.6%) for BTCUSD 15m volatility. **Market data recovery:** `MARKET_DATA_STALE_REST_POLL_SECONDS=30`, `AGENT_NO_CANDLE_RESTART_MINUTES=2`. **API:** `ENABLE_DEPRECATED_REST_TRADING=false` disables legacy REST predict/execute (410 Gone).
 >
 > **Optional execution overrides** (defaults live in `agent/core/config.py` if unset): `ENFORCE_FIXED_LOT_SIZE`, `FIXED_LOT_SIZE`, `ISOLATED_MARGIN_LEVERAGE`, and `USDINR_FALLBACK_RATE` (used when live/cached FX is unavailable). Uncomment or set these in `.env` only when you need to deviate from code defaults.
 
@@ -423,7 +423,6 @@ Docker deployment detail is in this document under [Docker Compose Deployment](#
 **1. Prepare persistent assets:**
 ```bash
 mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_IC_BTCUSD
-touch kubera_pokisham.db
 ```
 
 **2. Create environment file:**
@@ -437,13 +436,19 @@ cp .env.example .env
 
 **3. Build and start services:**
 ```bash
-# Using deployment scripts (recommended)
+# Production stack (postgres, redis, agent, backend, frontend — Qdrant optional)
+docker compose build --pull
+docker compose up -d --force-recreate
+
+# Optional vector store (not required for IC / in-memory vector backend)
+docker compose --profile full up -d --force-recreate
+
+# Or using deployment scripts (recommended)
 ./scripts/docker/build.sh
 ./scripts/docker/deploy.sh up
-
-# Or using docker-compose directly
-docker compose up --build -d
 ```
+
+> **Code changes require image rebuild.** Production `docker-compose.yml` does **not** bind-mount `./agent` or `./feature_store`; application code is baked into images. After pulling or editing Python/TS sources, run `docker compose build` then `docker compose up -d --force-recreate`.
 
 **4. Verify deployment:**
 ```bash
@@ -471,13 +476,16 @@ Before running `docker compose up` (or the deployment scripts) on a new host:
 
 ### Service Architecture
 
-| Service   | Image/Build                     | Port | Resource Limits | Notes |
-|-----------|---------------------------------|------|-----------------|-------|
-| postgres  | `timescale/timescaledb:2.25.1-pg15` (see `docker-compose.yml`) | 5432 | 2 CPU, 2GB RAM | Health-checked, persistent volume |
-| redis     | `redis:7.2-alpine`              | 6379 | 1 CPU, 512MB RAM | Append-only mode, persistent volume |
-| agent     | `agent/Dockerfile`              | 8002 | 4 CPU, 4GB RAM | Multi-stage build, ML-optimized, embeds Feature Server on 8002 |
-| backend   | `backend/Dockerfile`            | 8000 | 2 CPU, 2GB RAM | Multi-stage build, non-root user |
-| frontend  | `frontend/Dockerfile`           | 3000 | 1 CPU, 1GB RAM | Multi-stage build, production-ready |
+| Service   | Image/Build                     | Host ports (production) | Resource limits | Notes |
+|-----------|---------------------------------|-------------------------|-----------------|-------|
+| postgres  | `timescale/timescaledb:2.26.3-pg15` | internal only | 2 CPU, 2GB RAM | Health-checked; `postgres-data` volume |
+| redis     | `redis:7.2-alpine`              | internal only | 1 CPU, 1GB RAM | `--requirepass`; `redis-data` volume |
+| agent     | `agent/Dockerfile`              | **none** (8002 feature HTTP, 8003 command WS on Docker network only) | 4 CPU, 4GB RAM | Embeds feature server + agent WS; healthcheck: Redis + ports + optional Delta REST probe |
+| backend   | `backend/Dockerfile`            | `${BACKEND_PORT:-8000}` | 2 CPU, 2GB RAM | Outbound WS to `ws://agent:8003` with background reconnect monitor |
+| frontend  | `frontend/Dockerfile`           | `${FRONTEND_PORT:-3000}` | 1 CPU, 1GB RAM | Proxies API via `NEXT_PUBLIC_BACKEND_PROXY_BASE` |
+| qdrant    | `qdrant/qdrant:v1.13.2`         | internal only | — | **Optional** — `docker compose --profile full` or `--profile vector-store` |
+
+**Startup order:** `postgres` + `redis` healthy → `agent` healthy → `backend` healthy → `frontend`.
 
 ### Docker Environment Overrides
 
@@ -488,8 +496,13 @@ All application containers load the root `.env` via `env_file: - .env` and then 
   - `REDIS_URL=redis://redis:6379/0`
 - **Feature Server**
   - Local default: `FEATURE_SERVER_URL=http://localhost:8002`
-  - Docker override: `FEATURE_SERVER_URL=http://agent:8002`
-  - Agent container exposes its embedded Feature Server on internal port `8002` and maps it to host `${FEATURE_SERVER_PORT:-8002}:8002`
+  - Docker override: `FEATURE_SERVER_URL=http://agent:8002` (internal DNS; not published on the host in production compose)
+- **Agent command WebSocket**
+  - Backend: `AGENT_WS_URL=ws://agent:8003` (internal only in production compose)
+  - Agent → backend events: `BACKEND_WS_URL=ws://backend:8000/ws/agent`
+- **Vector memory (optional)**
+  - Default: `AGENT_VECTOR_STORE_BACKEND=memory` (no Qdrant container required)
+  - With profile `full`: set `QDRANT_URL=http://qdrant:6333` and start the `qdrant` service
 - **Agent ↔ Backend WebSocket**
   - Local: `BACKEND_WS_URL=ws://localhost:8000/ws/agent`
   - Docker (agent env): `BACKEND_WS_URL=ws://backend:8000/ws/agent`
@@ -546,7 +559,7 @@ If you place the stack behind a reverse proxy or different hostname, update thes
 - Resource limits to prevent resource exhaustion
 - Health checks for automatic container management
 - Restart policies (`unless-stopped`) for automatic recovery
-- Log rotation (10MB max size, 3 files retention)
+- Log rotation (50MB max size, 10 files retention per service)
 
 #### Restart behaviour & crash loops
 
@@ -560,12 +573,14 @@ If you place the stack behind a reverse proxy or different hostname, update thes
   - Fix the offending environment variables (usually in `.env`).
   - Run `docker compose up -d` again once the configuration has been corrected, rather than trying to “heal” the stack by repeated restarts.
 
-**Volume Management:**
-- `./agent/model_storage` → `/app/agent/model_storage` (bind-mounted for agent model access)
-- `./logs/<service>` → `/logs` (structured logs from each container)
-- `./kubera_pokisham.db` → `/data/kubera_pokisham.db` (legacy SQLite support)
-- `postgres-data` volume (TimescaleDB persistent storage)
-- `redis-data` volume (Redis persistent storage)
+**Volume Management (production compose):**
+- `./agent/model_storage` → `/app/agent/model_storage` (IC bundle / model artefacts on host)
+- `./logs/agent`, `./logs/backend`, `./logs/frontend` → `/logs` per service
+- `postgres-data`, `redis-data`, `qdrant-data` (when Qdrant profile is enabled)
+
+**Not bind-mounted in production:** `./agent` source tree and `./feature_store` — rebuild images after code changes.
+
+**Development overlay:** `docker-compose.dev.yml` restores source bind mounts, exposes agent ports `8002`/`8003` on the host, and enables hot reload — see [Docker development hot reload](#docker-development-hot-reload).
 
 **Network Isolation:**
 - All services communicate on isolated Docker network (`jacksparrow-network`)
@@ -623,7 +638,7 @@ For longer-term history and structured JSON logs, the recommended locations on t
 - `logs/paper_trades/` – **paper trade ledger** (`paper_trades.log`: `TRADE|` / `CLOSE|` lines for fills and PnL audit)
 - `logs/frontend/` – frontend server logs
 
-Each container writes to `/logs` internally, which is bind-mounted to these host directories by `docker-compose.yml`. The agent service additionally mounts `./logs/paper_trades` to `/logs/paper_trades` so the paper ledger has a dedicated host folder. When diagnosing issues, use `docker compose logs` for a quick snapshot and the files under `logs/` for full-session investigations. For paper/signal audit semantics and `docker cp` examples, see [`reference/ai-signal-action-audit-log.md`](../reference/ai-signal-action-audit-log.md).
+Each container writes to `/logs` internally, which is bind-mounted to `./logs/<service>/` on the host via `docker-compose.yml`. When diagnosing issues, use `docker compose logs` for a quick snapshot and the files under `logs/` for full-session investigations. For paper/signal audit semantics and `docker cp` examples, see [`reference/ai-signal-action-audit-log.md`](../reference/ai-signal-action-audit-log.md).
 
 **Execute commands in containers:**
 ```bash
@@ -690,9 +705,10 @@ See [Troubleshooting](#troubleshooting) in this document for Docker-related issu
 - Recovery from degraded model state typically involves:
   1. Copying or fixing model artefacts under `agent/model_storage/...` on the host.
   2. Re-running `python scripts/test_model_inference.py` until it passes.
-  3. Restarting only the agent container:
+  3. Rebuild and recreate the agent image (production compose does not bind-mount application code):
      ```bash
-     docker compose restart agent
+     docker compose build agent
+     docker compose up -d --force-recreate agent
      ```
 
 ### Production Deployment
@@ -2425,13 +2441,21 @@ When deploying to production with Docker:
 
 Containers on Docker bridge **`jacksparrow-network`** (service DNS names):
 
-| Service | Role | Typical host ports |
-|--------|------|--------------------|
-| `postgres` | TimescaleDB/PostgreSQL | `${POSTGRES_PORT:-5432}` → 5432 |
-| `redis` | Cache / queues | `${REDIS_PORT:-6379}` → 6379 |
-| `agent` | Feature HTTP + agent command WS | `${FEATURE_SERVER_PORT:-8002}` → 8002, `${AGENT_WS_PORT:-8003}` → 8003 |
+| Service | Role | Host ports (production `docker-compose.yml`) |
+|--------|------|-----------------------------------------------|
+| `postgres` | TimescaleDB/PostgreSQL | internal (expose in `docker-compose.dev.yml` if needed) |
+| `redis` | Cache / queues / operational metrics keys | internal |
+| `agent` | Feature HTTP `:8002`, command WS `:8003` | **not published** — backend uses `http://agent:8002` and `ws://agent:8003` |
 | `backend` | FastAPI + dashboard WS | `${BACKEND_PORT:-8000}` → 8000 |
 | `frontend` | Next.js | `${FRONTEND_PORT:-3000}` → 3000 |
+| `qdrant` | Vector DB (optional) | internal when `--profile full` is used |
+
+**Operational Redis keys (agent → backend health):**
+- `market_data:last_tick:{SYMBOL}` — last tick timestamp (TTL 60s)
+- `exchange:connectivity` — Delta REST probe from agent healthcheck
+- `metrics:latency:execution` — risk-approved → fill latency snapshot
+
+**Health API:** `GET /api/v1/health` includes `services.market_data` and `services.execution_latency` when Redis is available.
 
 **Backend ↔ agent**
 
@@ -2465,7 +2489,18 @@ python tools/commands/monitor-system.py   # optional continuous checks
 
 ## Docker development hot reload
 
-Use `docker-compose.dev.yml` with source bind mounts: backend `uvicorn --reload`, agent `watchdog` restarts, frontend Next.js HMR. Validate with `scripts/docker/validate-hot-reload.sh` or `scripts/docker/validate-hot-reload.ps1`; start via `scripts/docker/dev-start.sh` / `dev-start.ps1` or `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build`.
+Use `docker-compose.dev.yml` as an overlay on production compose:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+The dev overlay:
+- Bind-mounts `./agent`, `./feature_store`, `./backend`, and `./frontend` for live edits
+- Publishes agent ports `${FEATURE_SERVER_PORT:-8002}` and `${AGENT_WS_PORT:-8003}` on localhost
+- Uses dev Dockerfiles (`Dockerfile.dev`) with `uvicorn --reload`, agent file watcher, and Next.js dev server
+
+Validate with `scripts/docker/validate-hot-reload.sh` or `scripts/docker/validate-hot-reload.ps1`; start via `scripts/docker/dev-start.sh` / `dev-start.ps1` when available.
 
 ## Related Documentation
 

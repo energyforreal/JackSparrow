@@ -679,7 +679,8 @@ The system employs a comprehensive 4-step startup sequence managed by `start_par
 
 #### Health Check Components
 - **Backend Health**: `GET http://localhost:8000/api/v1/health`
-- **Feature Server Health**: `GET http://localhost:8001/health` (local default) or `GET http://localhost:8002/health` (common Docker mapping)
+- **Feature Server Health**: `GET http://localhost:8001/health` (local default) or `GET http://agent:8002/health` inside Docker (not published on host in production compose)
+- **Aggregate health**: `GET /api/v1/health` includes Redis-backed `market_data` freshness and `execution_latency` metrics from the agent
 - **Frontend Accessibility**: HTTP connectivity check on configured port
 
 ### Monitoring Architecture

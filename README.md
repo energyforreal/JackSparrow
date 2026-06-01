@@ -137,20 +137,25 @@ All 24/7 services now run via Docker images orchestrated with Compose.
 
    ```bash
    mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_IC_BTCUSD
-   touch kubera_pokisham.db
    ```
 
 3. Build and start the stack:
 
    ```bash
-   docker compose up --build -d
-   ```
-
-   For a clean rebuild of all images (e.g. after frontend or backend changes), use:
-
-   ```bash
    docker compose build --pull
    docker compose up -d --force-recreate
+   ```
+
+   Optional Qdrant (vector store profile — not required for default IC mode):
+
+   ```bash
+   docker compose --profile full up -d --force-recreate
+   ```
+
+   For local development with hot reload and exposed agent ports `8002`/`8003`:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
    ```
 
    If the frontend image was still building when `up` ran, pick up the latest tag with `docker compose up -d --force-recreate frontend`.
@@ -162,7 +167,7 @@ All 24/7 services now run via Docker images orchestrated with Compose.
    docker compose logs -f backend
    ```
 
-The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on **`8002`**, agent WS on **`8003`** per default compose ports), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./agent/model_storage`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
+The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature HTTP on **`:8002`** and command WebSocket on **`:8003`** inside the Docker network), FastAPI backend (`8000` on the host), and Next.js frontend (`3000` on the host). Named volumes keep Postgres and Redis durable; bind mounts keep **`./agent/model_storage`** and **`./logs/*`** on the host. Application source is **baked into images** in production — rebuild after code changes. Agent ports are **not** published on the host unless you use **`docker-compose.dev.yml`**.
 
 ## Intelligence Component (NO-ML default)
 

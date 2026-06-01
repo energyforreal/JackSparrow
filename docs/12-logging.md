@@ -582,7 +582,7 @@ Operational analysis uses **three layers** (structlog is separate from the pipe/
 | Markdown stream | AI signal → gates → paper echo | `{LOGS_ROOT}/signal_audit/live_audit.md` — [`agent/core/signal_audit_md.py`](../agent/core/signal_audit_md.py) |
 | Timestamps | IST primary, UTC companion | [`agent/core/audit_time.py`](../agent/core/audit_time.py) (`ZoneInfo("Asia/Kolkata")`); Docker sets `TZ=Asia/Kolkata` on the agent service |
 
-With default Docker Compose, `LOGS_ROOT` is `/logs` in the agent container: **`signal_audit/`** and other agent files under the bind mount land on the host as **`logs/agent/...`**, while **`logs/paper_trades/`** is mounted separately to **`/logs/paper_trades`** (same `paper_trades.log` on the host either way).
+With default Docker Compose, `LOGS_ROOT` is `/logs` in the agent container: structured logs land on the host under **`logs/agent/`** via the `./logs/agent:/logs` volume. Production compose does not bind-mount application source; only **`./logs/*`** and **`./agent/model_storage`** are host-mounted on the agent service. Log rotation per container: **50MB × 10 files** (see `docker-compose.yml`).
 
 For field mapping from `logs/agent.log` / structlog, retrieval commands, and reconciliation tips, see the full runbook:
 

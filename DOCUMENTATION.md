@@ -21,7 +21,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 07 | [Frontend](docs/07-frontend.md) | Next.js, `useTradingData`, WebSocket UI, portfolio ROE % (`portfolioMetrics`) |
 | 08 | [File structure](docs/08-file-structure.md) | Repository layout |
 | 09 | [UI/UX](docs/09-ui-ux.md) | Dashboard design, accessibility |
-| 10 | [Deployment](docs/10-deployment.md) | Env, Docker, DB, validation, runtime topology, hot reload |
+| 10 | [Deployment](docs/10-deployment.md) | Env, Docker (production vs dev overlay, optional Qdrant), DB, health/Redis metrics, hot reload |
 | 11 | [Build guide](docs/11-build-guide.md) | End-to-end setup, tests, commands |
 | 12 | [Logging](docs/12-logging.md) | Structured logging, container triage, `trading_entry_rejected` reasons, paper/signal audit (IST ledger + `live_audit.md`), risk-approval reconciliation CLI |
 | 13 | [Debugging](docs/13-debugging.md) | Diagnostics, Windows/local issues |
@@ -46,7 +46,9 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | Goal | Where to look |
 |------|----------------|
 | Start / validate stack | [Build guide – Project commands](docs/11-build-guide.md#project-commands), [Deployment – Validation](docs/10-deployment.md#validation-and-monitoring-commands) |
-| Docker runtime ports & paths | [Deployment – Docker runtime topology](docs/10-deployment.md#docker-runtime-topology-reference) |
+| Docker runtime ports & paths | [Deployment – Docker runtime topology](docs/10-deployment.md#docker-runtime-topology-reference) (agent 8002/8003 internal in production; dev overlay exposes host ports) |
+| Operational health (market data, latency) | [Deployment – Docker runtime topology](docs/10-deployment.md#docker-runtime-topology-reference), [Backend – Health](docs/06-backend.md#health--status) |
+| Deprecated REST predict/execute | [Backend – Trading operations](docs/06-backend.md#trading-operations), `ENABLE_DEPRECATED_REST_TRADING` in `.env.example` |
 | Model bundles & `MODEL_DIR` | [ML models – IC discovery](docs/03-ml-models.md#runtime-discovery-no-ml-intelligence-component), [Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults) |
 | Delta WebSocket (testnet) | [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), `.env.example` (`socket-ind` host, `key-auth`) |
 | Adaptive drift / warm-start retrain (v15) | [ML models – Runtime adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional), [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), [.env.example](.env.example) |
@@ -61,4 +63,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-05-22 — Deterministic self-awareness: introspection on `DECISION_READY`, memory outcome backfill, advisory reflection on `POSITION_CLOSED`, WS/API types.
+**Last updated**: 2026-06-01 — Docker production compose (image-baked code, internal agent ports, optional Qdrant profile), operational health via Redis, testnet DB persistence, deprecated REST trading gate, emergency stop reason + rate limits.

@@ -290,6 +290,12 @@ interface PerformanceChartProps {
 
 ### HealthMonitor Component
 
+**File**: `app/components/EmergencyStopButton.tsx`
+
+- Header control that calls `POST /api/v1/admin/agent/emergency-stop` via the Next.js backend proxy (`NEXT_PUBLIC_BACKEND_PROXY_BASE`).
+- Prompts for a **required reason**, then a confirmation dialog; sends `{ "reason": "..." }` as JSON.
+- Requires backend auth (proxy injects `BACKEND_API_KEY`); subject to admin rate limit (5 req/min per IP).
+
 **File**: `app/components/HealthMonitor.tsx`
 
 **Purpose**: Display system health status.

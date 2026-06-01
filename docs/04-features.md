@@ -262,7 +262,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Automatic trading halt after consecutive losses
 - Portfolio protection at drawdown thresholds
 - Service failure protection
-- Manual emergency stop capability
+- Manual emergency stop (dashboard button with required audit reason; rate-limited admin API)
 
 **Risk Metrics**:
 - Real-time portfolio heat calculation

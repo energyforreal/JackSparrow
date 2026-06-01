@@ -10,7 +10,7 @@ This backlog tracks gaps called out in the architecture report against the curre
 
 ## Critical
 
-1. **Order state machine** — **Partial:** `Order.transition_to()` in [`agent/core/execution.py`](../agent/core/execution.py); JSON + exchange rehydrate on startup ([`agent/core/order_persistence.py`](../agent/core/order_persistence.py)). Still need continuous exchange-state sync on every poll.
+1. **Order state machine** — **Partial:** `Order.transition_to()` in [`agent/core/execution.py`](../agent/core/execution.py); JSON + exchange rehydrate on startup; **continuous sync** in position monitor via [`sync_open_orders_with_exchange()`](../agent/core/order_persistence.py) (poll open orders against Delta).
 2. **Position reconciliation** — **Done:** reconcile + `BLOCK_ENTRIES_ON_RECONCILE_DIVERGENCE` ([`agent/core/position_reconcile.py`](../agent/core/position_reconcile.py)).
 3. **Idempotent order protection** — **Partial:** `client_order_id` from `correlation_id` / `idempotency_key` on place order.
 4. **Partial fill handling** — **Partial:** retry remainder, cancel rest on timeout, close position ([`execution.py`](../agent/core/execution.py) `_handle_partial_fill`).
@@ -19,7 +19,7 @@ This backlog tracks gaps called out in the architecture report against the curre
 ## High
 
 6. **Slippage policy** — **Partial:** reject fill when `ENFORCE_EXECUTION_SLIPPAGE_BPS` exceeded vs reference price.
-7. **Latency monitoring** — **Partial:** p50/p95 snapshot in [`agent/core/latency_metrics.py`](../agent/core/latency_metrics.py); logged in agent periodic status.
+7. **Latency monitoring** — **Partial:** p50/p95 snapshot in [`agent/core/latency_metrics.py`](../agent/core/latency_metrics.py); published to Redis `metrics:latency:execution` and exposed on `GET /api/v1/health` as `services.execution_latency`.
 8. **Dead-letter / retry queue** — Failed publishes or exchange errors routed to DLQ with capped exponential backoff (complements event bus DLQ in [`agent/events/event_bus.py`](../agent/events/event_bus.py)).
 
 ## Medium

@@ -108,13 +108,25 @@ Comprehensive health check endpoint that tests all services.
       "status": "up",
       "healthy_models": 5,
       "total_models": 5
+    },
+    "market_data": {
+      "status": "up",
+      "latency_ms": 1200,
+      "details": { "symbol": "BTCUSD", "last_tick": "2026-06-01T12:00:00+00:00" }
+    },
+    "execution_latency": {
+      "status": "up",
+      "details": { "risk_approved_to_fill_ms": { "count": 12, "p50": 320, "p95": 680 } }
     }
   },
   "agent_state": "MONITORING",
   "degradation_reasons": [],
+  "trading_ready": true,
   "timestamp": "2025-01-12T10:30:00Z"
 }
 ```
+
+`market_data` and `execution_latency` are populated from Redis keys written by the agent (`market_data:last_tick:*`, `metrics:latency:execution`). Stale ticks (>30s) report `market_data.status: degraded`.
 
 #### Model Nodes Troubleshooting
 
@@ -233,6 +245,8 @@ Status Codes:
 ### Trading Operations
 
 #### POST `/api/v1/predict`
+
+**Deprecated.** Returns **410 Gone** unless `ENABLE_DEPRECATED_REST_TRADING=true` in root `.env`. Prefer WebSocket command `predict` on `/ws` (see [WebSocket Protocol](#websocket-protocol)).
 
 Request AI prediction for current market conditions.
 
@@ -538,13 +552,25 @@ Stop the trading agent.
 
 #### POST `/api/v1/admin/agent/emergency-stop`
 
-Emergency stop - immediately halt all trading.
+Emergency stop — immediately halt all trading. Requires authentication (`API_KEY` / Bearer). Rate-limited to **5 requests per minute per IP** (shared with `/api/v1/admin/agent/control`).
+
+**Request body** (optional JSON):
+
+```json
+{
+  "reason": "Manual halt — volatility spike"
+}
+```
+
+The dashboard **Emergency stop** button prompts for a required reason and sends this body via the Next.js backend proxy.
 
 **Response**:
 ```json
 {
   "status": "emergency_stopped",
   "agent_state": "EMERGENCY_STOP",
+  "reason": "Manual halt — volatility spike",
+  "message": "Emergency stop completed",
   "timestamp": "2025-01-12T10:30:00Z"
 }
 ```
@@ -1296,6 +1322,9 @@ Refer to [Logging Documentation](12-logging.md) for rotation policy, retention s
 **Key Backend Variables:**
 
 ```bash
+# Legacy REST trading (disabled by default — use WebSocket commands)
+ENABLE_DEPRECATED_REST_TRADING=false
+
 # Database (REQUIRED)
 DATABASE_URL=postgresql://user:pass@localhost/trading_agent
 
