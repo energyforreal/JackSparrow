@@ -182,9 +182,10 @@ def build_trend_regime_labels(
 
     adx = pd.to_numeric(df_feat["adx_14"], errors="coerce")
     tm = pd.to_numeric(df_feat["trend_mom"], errors="coerce")
-    adx_thr_weak = _train_quantile(adx, train_end_idx, 0.55, fallback=TREND_ADX_WEAK)
-    adx_thr_strong = _train_quantile(adx, train_end_idx, 0.75, fallback=TREND_ADX_STRONG)
-    tm_strong = _train_quantile(tm.abs(), train_end_idx, 0.65, fallback=TREND_STRONG_MOM)
+    # Slightly lower weak/strong cutoffs to avoid over-collapse into RANGE/BEAR on noisy periods.
+    adx_thr_weak = _train_quantile(adx, train_end_idx, 0.50, fallback=TREND_ADX_WEAK)
+    adx_thr_strong = _train_quantile(adx, train_end_idx, 0.72, fallback=TREND_ADX_STRONG)
+    tm_strong = _train_quantile(tm.abs(), train_end_idx, 0.62, fallback=TREND_STRONG_MOM)
     threshold_mode = "train_quantile_at_t"
 
     for i in range(n):
@@ -203,10 +204,12 @@ def build_trend_regime_labels(
 
     series = pd.Series(out, index=df_feat.index, dtype=object)
     counts = {cls: int((series == cls).sum()) for cls in TREND_REGIME_CLASSES}
+    counts_3 = {cls: int((collapse_trend_regime_labels(series) == cls).sum()) for cls in TREND_REGIME_CLASSES_3}
     stats = {
         "forward_bars": int(forward_bars),
         "labeled_fraction": float(series.notna().mean()),
         "class_counts": counts,
+        "class_counts_3": counts_3,
         "adx_thr_strong": adx_thr_strong,
         "adx_thr_weak": adx_thr_weak,
         "tm_strong": tm_strong,
@@ -373,10 +376,10 @@ def build_liquidity_condition_labels(
     short_score = oi_z.clip(lower=0) * (-pressure).clip(lower=0) * (-tm).clip(lower=0)
 
     stop_thr = _adaptive_train_quantile(
-        stop_score, train_end_idx, 0.90, fallback=0.0, min_samples=50, min_q=0.80
+        stop_score, train_end_idx, 0.88, fallback=0.0, min_samples=50, min_q=0.80
     )
     sweep_thr = _adaptive_train_quantile(
-        sweep_score, train_end_idx, 0.90, fallback=0.0, min_samples=50, min_q=0.80
+        sweep_score, train_end_idx, 0.88, fallback=0.0, min_samples=50, min_q=0.80
     )
     long_thr = _train_quantile(long_score, train_end_idx, 0.88, fallback=0.0)
     short_thr = _train_quantile(short_score, train_end_idx, 0.88, fallback=0.0)
@@ -398,12 +401,16 @@ def build_liquidity_condition_labels(
 
     series = pd.Series(out, index=df_feat.index, dtype=object)
     counts = {cls: int((series == cls).sum()) for cls in LIQUIDITY_CLASSES}
+    fit_stop = _train_fit_slice(stop_score, train_end_idx).dropna()
+    fit_sweep = _train_fit_slice(sweep_score, train_end_idx).dropna()
     return series, {
         "labeled_fraction": 1.0,
         "class_counts": counts,
         "threshold_mode": "train_quantile_adaptive",
         "stop_thr": stop_thr,
         "sweep_thr": sweep_thr,
+        "stop_support_train": int((fit_stop >= stop_thr).sum()) if stop_thr > 0 else 0,
+        "sweep_support_train": int((fit_sweep >= sweep_thr).sum()) if sweep_thr > 0 else 0,
         "train_end_idx": train_end_idx,
     }
 

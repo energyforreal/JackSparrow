@@ -48,7 +48,7 @@ Train **multi-horizon market-state classifiers** (not return regression).
 
 **Strict policy:** training validates **raw merged** OI/funding on the 5m grid (not `funding_zscore != 0`, which flags warmup zeros incorrectly).
 
-**Quick smoke test:** `MSO_COLAB_QUICK=true` (smaller history pull).
+**Quick smoke test:** `MSO_COLAB_QUICK=true` (smaller history pull) with `MSO_TRAIN_SCOPE=policy_core`.
 """
 )
 
@@ -602,6 +602,8 @@ MSO_TREND_EXCLUDED_FEATURES = tuple(
     if x.strip()
 )
 MSO_GATE_SCOPE = os.environ.get("MSO_GATE_SCOPE", "policy").strip().lower()
+MSO_TRAIN_SCOPE = os.environ.get("MSO_TRAIN_SCOPE", "policy_core").strip().lower()
+MSO_VERBOSE_EVAL = os.environ.get("MSO_VERBOSE_EVAL", "false").strip().lower() in ("1", "true", "yes")
 POLICY_HORIZONS = ("intraday_30m",)
 POLICY_DIMENSIONS = ("liquidity_condition", "trend_regime", "breakout_state")
 PRIMARY_HORIZONS = ("scalp_10m", "intraday_30m")
@@ -720,18 +722,34 @@ def _feature_cols_for_dim(dim: str) -> list:
     return list(feat_cols)
 
 
+def _train_horizons_and_dims() -> list:
+    if MSO_TRAIN_SCOPE == "policy_core":
+        return [(hk, dim) for hk in POLICY_HORIZONS for dim in POLICY_DIMENSIONS]
+    return [(hk, dim) for hk in HORIZON_MAP for dim in MSO_STATE_DIMENSIONS]
+
+
 def _gate_horizons_and_dims() -> list:
     if MSO_GATE_SCOPE == "full":
         return [(hk, dim) for hk in PRIMARY_HORIZONS for dim in MSO_STATE_DIMENSIONS]
     return [(hk, dim) for hk in POLICY_HORIZONS for dim in POLICY_DIMENSIONS]
 
 
+def _entropy_from_counts(counts: dict) -> float:
+    vals = np.asarray([float(v) for v in counts.values() if float(v) > 0], dtype=float)
+    if vals.size == 0:
+        return 0.0
+    p = vals / vals.sum()
+    return float(-(p * np.log(p + 1e-12)).sum())
+
+
 print(
     "Training config:",
+    f"MSO_TRAIN_SCOPE={MSO_TRAIN_SCOPE}",
     f"MSO_TREND_3CLASS={MSO_TREND_3CLASS}",
     f"MSO_GATE_SCOPE={MSO_GATE_SCOPE}",
     f"MSO_USE_CLASS_WEIGHT={MSO_USE_CLASS_WEIGHT}",
     f"MSO_CALIBRATE={MSO_CALIBRATE}",
+    f"MSO_VERBOSE_EVAL={MSO_VERBOSE_EVAL}",
     f"trend_features={len(_feature_cols_for_dim('trend_regime'))}/{len(feat_cols)}",
 )
 
@@ -822,137 +840,158 @@ def _run_export_gates() -> list:
     return failures
 
 
-for hk, fb in HORIZON_MAP.items():
+for hk in HORIZON_MAP:
     bundle_dict[hk] = {}
     f1_scores[hk] = {}
-    for dim in MSO_STATE_DIMENSIONS:
-        labels, label_stats = build_mso_label(
-            df_feat, close, dim, fb, train_end_idx=train_end_idx
-        )
-        if dim == "trend_regime" and MSO_TREND_3CLASS:
-            labels = collapse_trend_regime_labels(labels)
-        classes = _classes_for_training(dim)
-        dim_feat_cols = _feature_cols_for_dim(dim)
-        n_class = len(classes)
 
-        y_train = labels.iloc[:train_end_idx].reset_index(drop=True)
-        y_val = labels.iloc[split_idx:].reset_index(drop=True)
+for hk, dim in _train_horizons_and_dims():
+    fb = HORIZON_MAP[hk]
+    if hk not in bundle_dict:
+        bundle_dict[hk] = {}
+    if hk not in f1_scores:
+        f1_scores[hk] = {}
+    labels, label_stats = build_mso_label(
+        df_feat, close, dim, fb, train_end_idx=train_end_idx
+    )
+    if dim == "trend_regime" and MSO_TREND_3CLASS:
+        labels = collapse_trend_regime_labels(labels)
+    classes = _classes_for_training(dim)
+    dim_feat_cols = _feature_cols_for_dim(dim)
+    n_class = len(classes)
 
-        m_tr = y_train.notna() & y_train.astype(str).isin(classes)
-        m_va = y_val.notna() & y_val.astype(str).isin(classes)
-        train_counts = _class_counts(y_train.loc[m_tr], classes)
-        val_counts = _class_counts(y_val.loc[m_va], classes)
+    y_train = labels.iloc[:train_end_idx].reset_index(drop=True)
+    y_val = labels.iloc[split_idx:].reset_index(drop=True)
 
-        if dim == "breakout_state":
-            _rare = {c for c in classes if train_counts.get(c, 0) < MIN_CLASS_COUNT}
-            if _rare:
-                _remap = {c: "NO_BREAKOUT" for c in _rare}
-                y_train = y_train.replace(_remap)
-                y_val = y_val.replace(_remap)
-                m_tr = y_train.notna() & y_train.astype(str).isin(classes)
-                m_va = y_val.notna() & y_val.astype(str).isin(classes)
-                train_counts = _class_counts(y_train.loc[m_tr], classes)
-                val_counts = _class_counts(y_val.loc[m_va], classes)
-                if hk in PRIMARY_HORIZONS:
-                    print(f"  note: {hk}/{dim} remapped rare train classes {_rare} -> NO_BREAKOUT")
+    m_tr = y_train.notna() & y_train.astype(str).isin(classes)
+    m_va = y_val.notna() & y_val.astype(str).isin(classes)
+    train_counts = _class_counts(y_train.loc[m_tr], classes)
+    val_counts = _class_counts(y_val.loc[m_va], classes)
 
-        n_train_classes = sum(1 for c in classes if train_counts.get(c, 0) >= MIN_CLASS_COUNT)
-        _cw = _class_weight_for_train(train_counts, classes)
-        _train_total = sum(train_counts.values())
-        _train_top = max(train_counts, key=train_counts.get) if train_counts else None
-        _train_top_pct = (
-            float(train_counts[_train_top] / _train_total) if _train_total and _train_top else None
-        )
-        class_balance_rows.append(
-            {
-                "horizon": hk,
-                "dimension": dim,
-                "train_counts": train_counts,
-                "val_counts": val_counts,
-                "train_top_pct": _train_top_pct,
-                "class_weight_used": _cw,
-                "single_class_val": sum(1 for v in val_counts.values() if v > 0) <= 1,
-            }
-        )
-        if int(m_tr.sum()) < 100:
-            print(f"SKIP {hk}/{dim}: too few train labels ({int(m_tr.sum())})")
-            continue
-        if n_train_classes < 2:
-            print(
-                f"SKIP {hk}/{dim}: fewer than 2 train classes with >={MIN_CLASS_COUNT} samples "
-                f"(train={train_counts})"
-            )
-            continue
-
-        if hk in PRIMARY_HORIZONS:
-            print(f"{hk} {dim} train: {train_counts} val: {val_counts}")
-        val_unique = sum(1 for c in classes if val_counts.get(c, 0) > 0)
-        if val_unique <= 1:
-            print(f"  WARNING: {hk}/{dim} single-class val — F1 not meaningful")
-
-        le = LabelEncoder()
-        le.fit(classes)
-        X_tr = df_train.loc[m_tr, dim_feat_cols].to_numpy(dtype=np.float64)
-        y_tr = le.transform(y_train.loc[m_tr].astype(str))
-
-        X_va = (
-            df_val.loc[m_va, dim_feat_cols].to_numpy(dtype=np.float64)
-            if m_va.any()
-            else np.empty((0, len(dim_feat_cols)))
-        )
-        y_va = le.transform(y_val.loc[m_va].astype(str)) if m_va.any() else np.array([], dtype=int)
-        y_va_str = y_val.loc[m_va].astype(str).values if m_va.any() else np.array([], dtype=str)
-
-        if hk in PRIMARY_HORIZONS and _cw is None:
-            _tot = sum(train_counts.values())
-            _top = max(train_counts, key=train_counts.get)
-            print(
-                f"  note: {hk}/{dim} class_weight=None "
-                f"(train top {_top} {_tot and train_counts[_top] / _tot:.0%})"
-            )
-
-        model, calibrated = _fit_classifier(
-            X_tr, y_tr, X_va, y_va, n_class, class_weight=_cw
-        )
-        bundle_dict[hk][dim] = model
-        label_encoders[f"{hk}:{dim}"] = {c: int(i) for i, c in enumerate(le.classes_)}
-        class_orders[f"{hk}:{dim}"] = tuple(classes)
-        head_feature_cols[f"{hk}:{dim}"] = list(dim_feat_cols)
-
-        if len(y_va_str) >= 10:
-            pred_str = _lgb_pred_to_labels(model, model.predict(X_va), tuple(classes))
-            metrics = _val_metrics(y_va_str, pred_str, classes)
-            metrics["calibrated"] = calibrated
-            metrics["class_weight"] = _cw
-            f1_scores[hk][dim] = metrics
-            if metrics["f1_macro"] <= metrics["majority_baseline"] + 0.02:
-                print(f"  WARNING: {hk}/{dim} trivial/collapsed head (macro F1 ~ majority baseline)")
+    if dim == "breakout_state":
+        _rare = {c for c in classes if train_counts.get(c, 0) < MIN_CLASS_COUNT}
+        if _rare:
+            _remap = {c: "NO_BREAKOUT" for c in _rare}
+            y_train = y_train.replace(_remap)
+            y_val = y_val.replace(_remap)
+            m_tr = y_train.notna() & y_train.astype(str).isin(classes)
+            m_va = y_val.notna() & y_val.astype(str).isin(classes)
+            train_counts = _class_counts(y_train.loc[m_tr], classes)
+            val_counts = _class_counts(y_val.loc[m_va], classes)
             if hk in PRIMARY_HORIZONS:
-                rpc = metrics.get("recall_per_class", {})
-                for rc in _RARE_CLASS_WATCH:
-                    if rc in classes and train_counts.get(rc, 0) >= MIN_CLASS_COUNT:
-                        print(f"  recall {rc}: {rpc.get(rc, 0.0):.3f}")
+                print(f"  note: {hk}/{dim} remapped rare train classes {_rare} -> NO_BREAKOUT")
+    if dim == "trend_regime":
+        _low_support = [c for c in classes if train_counts.get(c, 0) < MIN_CLASS_COUNT]
+        if _low_support:
             print(
-                hk,
-                dim,
-                "F1w",
-                round(metrics["f1_weighted"], 4),
-                "F1macro",
-                round(metrics["f1_macro"], 4),
-                "bal_acc",
-                round(metrics["balanced_accuracy"], 4),
-                "pred",
-                metrics["pred_mode"],
-                "true",
-                metrics["true_mode"],
-                "calibrated",
-                calibrated,
-                "device",
-                LGB_DEVICE_USED,
+                f"  WARNING: {hk}/{dim} low train support near collapse for classes {_low_support} "
+                f"(min required={MIN_CLASS_COUNT})"
             )
-        else:
-            f1_scores[hk][dim] = None
-            print(hk, dim, "val skipped (insufficient val rows)")
+
+    n_train_classes = sum(1 for c in classes if train_counts.get(c, 0) >= MIN_CLASS_COUNT)
+    _cw = _class_weight_for_train(train_counts, classes)
+    _train_total = sum(train_counts.values())
+    _train_top = max(train_counts, key=train_counts.get) if train_counts else None
+    _train_top_pct = (
+        float(train_counts[_train_top] / _train_total) if _train_total and _train_top else None
+    )
+    class_balance_rows.append(
+        {
+            "horizon": hk,
+            "dimension": dim,
+            "train_counts": train_counts,
+            "val_counts": val_counts,
+            "train_top_pct": _train_top_pct,
+            "class_weight_used": _cw,
+            "single_class_val": sum(1 for v in val_counts.values() if v > 0) <= 1,
+            "train_entropy": _entropy_from_counts(train_counts),
+            "val_entropy": _entropy_from_counts(val_counts),
+        }
+    )
+    if int(m_tr.sum()) < 100:
+        print(f"SKIP {hk}/{dim}: too few train labels ({int(m_tr.sum())})")
+        continue
+    if n_train_classes < 2:
+        print(
+            f"SKIP {hk}/{dim}: fewer than 2 train classes with >={MIN_CLASS_COUNT} samples "
+            f"(train={train_counts})"
+        )
+        continue
+
+    if hk in PRIMARY_HORIZONS:
+        print(f"{hk} {dim} train: {train_counts} val: {val_counts}")
+    val_unique = sum(1 for c in classes if val_counts.get(c, 0) > 0)
+    if val_unique <= 1:
+        print(f"  WARNING: {hk}/{dim} single-class val — F1 not meaningful")
+
+    le = LabelEncoder()
+    le.fit(classes)
+    X_tr = df_train.loc[m_tr, dim_feat_cols].to_numpy(dtype=np.float64)
+    y_tr = le.transform(y_train.loc[m_tr].astype(str))
+
+    X_va = (
+        df_val.loc[m_va, dim_feat_cols].to_numpy(dtype=np.float64)
+        if m_va.any()
+        else np.empty((0, len(dim_feat_cols)))
+    )
+    y_va = le.transform(y_val.loc[m_va].astype(str)) if m_va.any() else np.array([], dtype=int)
+    y_va_str = y_val.loc[m_va].astype(str).values if m_va.any() else np.array([], dtype=str)
+
+    if hk in PRIMARY_HORIZONS and _cw is None:
+        _tot = sum(train_counts.values())
+        _top = max(train_counts, key=train_counts.get)
+        print(
+            f"  note: {hk}/{dim} class_weight=None "
+            f"(train top {_top} {_tot and train_counts[_top] / _tot:.0%})"
+        )
+
+    model, calibrated = _fit_classifier(
+        X_tr, y_tr, X_va, y_va, n_class, class_weight=_cw
+    )
+    bundle_dict[hk][dim] = model
+    label_encoders[f"{hk}:{dim}"] = {c: int(i) for i, c in enumerate(le.classes_)}
+    class_orders[f"{hk}:{dim}"] = tuple(classes)
+    head_feature_cols[f"{hk}:{dim}"] = list(dim_feat_cols)
+
+    if len(y_va_str) >= 10:
+        pred_str = _lgb_pred_to_labels(model, model.predict(X_va), tuple(classes))
+        metrics = _val_metrics(y_va_str, pred_str, classes)
+        metrics["calibrated"] = calibrated
+        metrics["class_weight"] = _cw
+        pred_counts = {c: int((pred_str == c).sum()) for c in classes}
+        metrics["pred_counts"] = pred_counts
+        metrics["pred_top_pct"] = (
+            float(max(pred_counts.values()) / max(1, len(pred_str))) if pred_counts else 0.0
+        )
+        metrics["pred_entropy"] = _entropy_from_counts(pred_counts)
+        f1_scores[hk][dim] = metrics
+        if metrics["f1_macro"] <= metrics["majority_baseline"] + 0.02:
+            print(f"  WARNING: {hk}/{dim} trivial/collapsed head (macro F1 ~ majority baseline)")
+        if hk in PRIMARY_HORIZONS:
+            rpc = metrics.get("recall_per_class", {})
+            for rc in _RARE_CLASS_WATCH:
+                if rc in classes and train_counts.get(rc, 0) >= MIN_CLASS_COUNT:
+                    print(f"  recall {rc}: {rpc.get(rc, 0.0):.3f}")
+        print(
+            hk,
+            dim,
+            "F1w",
+            round(metrics["f1_weighted"], 4),
+            "F1macro",
+            round(metrics["f1_macro"], 4),
+            "bal_acc",
+            round(metrics["balanced_accuracy"], 4),
+            "pred",
+            metrics["pred_mode"],
+            "true",
+            metrics["true_mode"],
+            "calibrated",
+            calibrated,
+            "device",
+            LGB_DEVICE_USED,
+        )
+    else:
+        f1_scores[hk][dim] = None
+        print(hk, dim, "val skipped (insufficient val rows)")
 
 print("Training completed on device:", LGB_DEVICE_USED)
 
@@ -967,7 +1006,19 @@ else:
 )
 
 md(
-    """## Label and class balance audit (primary horizons)
+    """## Fast policy-core operating loop
+
+Use this sequence to reduce iteration time without weakening policy gates:
+
+1. Set `MSO_TRAIN_SCOPE=policy_core` (default) and `MSO_COLAB_QUICK=true` for quick diagnosis.
+2. Require non-zero trend recall on train-supported classes.
+3. Re-run with full data (`MSO_COLAB_QUICK=false`) while keeping `MSO_BLOCK_EXPORT_ON_FAIL=true`.
+4. Only after policy gates pass, set `MSO_TRAIN_SCOPE=full` for full-suite retraining.
+"""
+)
+
+md(
+    """## Label and collapse audit (primary horizons)
 
 Train/val class counts logged during training for `scalp_10m` and `intraday_30m`. Skipped heads have fewer than two classes with sufficient train samples.
 """
@@ -991,6 +1042,8 @@ for row in class_balance_rows:
             "train_top": max(tr, key=tr.get) if tr else None,
             "val_top": max(va, key=va.get) if va else None,
             "train_top_pct": row.get("train_top_pct"),
+            "train_entropy": row.get("train_entropy"),
+            "val_entropy": row.get("val_entropy"),
             "class_weight_used": row.get("class_weight_used"),
             "SINGLE_CLASS_VAL": row.get("single_class_val", False),
         }
@@ -999,6 +1052,32 @@ if _audit_rows:
     print(pd.DataFrame(_audit_rows).to_string(index=False))
 else:
     print("No class balance rows (run training cell first)")
+
+_metric_rows = []
+for _hk in HORIZON_MAP:
+    for _dim in MSO_STATE_DIMENSIONS:
+        _m = f1_scores.get(_hk, {}).get(_dim)
+        if isinstance(_m, dict):
+            _metric_rows.append(
+                {
+                    "horizon": _hk,
+                    "dimension": _dim,
+                    "f1_macro": float(_m.get("f1_macro", np.nan)),
+                    "bal_acc": float(_m.get("balanced_accuracy", np.nan)),
+                }
+            )
+if _metric_rows:
+    _m_df = pd.DataFrame(_metric_rows)
+    for _dim, _grp in _m_df.groupby("dimension"):
+        if len(_grp) < 2:
+            continue
+        _f1_span = float(_grp["f1_macro"].max() - _grp["f1_macro"].min())
+        _bal_span = float(_grp["bal_acc"].max() - _grp["bal_acc"].min())
+        if _f1_span < 0.005 and _bal_span < 0.005:
+            print(
+                f"WARNING: horizon-invariance suspected for {_dim} "
+                f"(f1 span={_f1_span:.4f}, bal span={_bal_span:.4f})"
+            )
 """
 )
 
@@ -1010,7 +1089,7 @@ md(
 1. **F1 summary table** — all 24 heads (6 dimensions × 4 horizons).
 2. **Trend regime confusion matrix** — primary horizons `scalp_10m` and `intraday_30m`.
 3. **Sample oracle rows** — decoded predictions vs actual labels on recent validation bars.
-4. **Regime-direction simulation** — maps `intraday_30m` trend predictions to long/short/flat and scores forward returns (illustrates how the agent interprets MSO; not a production P&L claim).
+4. **Regime-direction simulation** — optional (`MSO_VERBOSE_EVAL=true`), maps `intraday_30m` trend predictions to long/short/flat and scores forward returns (illustrative only).
 
 Compare with v43 notebook §4d, which runs regression correlation + simulated validation P&L on return heads.
 """
@@ -1146,11 +1225,13 @@ for _hk in PRIMARY_HORIZONS:
     if int(_m.sum()) < 20:
         print(f"SKIP confusion {_hk}/{_dim}: too few val rows")
         continue
-    _dim_cols = _feature_cols_for_dim(_dim)
-    _X = df_val.loc[_m, _dim_cols].to_numpy(dtype=np.float64)
-    _model = bundle_dict[_hk][_dim]
     _y_true = _y_val.loc[_m].astype(str).values
-    _y_pred = _lgb_pred_to_labels(_model, _model.predict(_X), tuple(_classes))
+    _y_pred = []
+    for _idx in np.flatnonzero(_m.to_numpy()):
+        _x_full = df_val.iloc[[_idx]][feat_cols]
+        _state = mso_bundle_eval.predict_horizon(_hk, _x_full.values, X_df=_x_full)
+        _y_pred.append(str(_state.get(_dim, "NA")))
+    _y_pred = np.asarray(_y_pred, dtype=object)
     print("\\n", _hk, _dim, "confusion matrix (rows=actual, cols=pred)")
     _cm = confusion_matrix(_y_true, _y_pred, labels=_classes)
     print(pd.DataFrame(_cm, index=_classes, columns=_classes).to_string())
@@ -1179,17 +1260,7 @@ if _EVAL_HK in bundle_dict:
     for _i in range(_start, len(df_val)):
         _x_full = df_val.iloc[[_i]][feat_cols]
         _state = mso_bundle_eval.predict_horizon(_EVAL_HK, _x_full.values, X_df=_x_full)
-        if _has_trend:
-            _trend_cols = _feature_cols_for_dim(_EVAL_DIM)
-            _x_trend = df_val.iloc[[_i]][_trend_cols]
-            _trend_model = bundle_dict[_EVAL_HK][_EVAL_DIM]
-            _trend_pred = _lgb_pred_to_labels(
-                _trend_model,
-                _trend_model.predict(_x_trend.to_numpy(dtype=np.float64)),
-                class_orders[f"{_EVAL_HK}:{_EVAL_DIM}"],
-            )[0]
-        else:
-            _trend_pred = "N/A (model missing)"
+        _trend_pred = str(_state.get(_EVAL_DIM, "N/A (model missing)"))
         _row = {"bar": _i, "trend_pred": _trend_pred}
         for _dim in MSO_STATE_DIMENSIONS:
             _fb = HORIZON_MAP[_EVAL_HK]
@@ -1198,15 +1269,7 @@ if _EVAL_HK in bundle_dict:
             if pd.notna(_actual):
                 _row[f"{_dim}_actual"] = str(_actual)
             if _dim in bundle_dict.get(_EVAL_HK, {}):
-                _pred_model = bundle_dict[_EVAL_HK][_dim]
-                _dim_cols = _feature_cols_for_dim(_dim)
-                _x_dim = df_val.iloc[[_i]][_dim_cols]
-                _pred = _lgb_pred_to_labels(
-                    _pred_model,
-                    _pred_model.predict(_x_dim.to_numpy(dtype=np.float64)),
-                    class_orders[f"{_EVAL_HK}:{_dim}"],
-                )[0]
-                _row[f"{_dim}_pred"] = _pred
+                _row[f"{_dim}_pred"] = str(_state.get(_dim, "NA"))
         _snap_rows.append(_row)
     if _snap_rows:
         print("\\nSample MSO oracle (_EVAL_HK, last validation bars):")
@@ -1217,7 +1280,9 @@ else:
 # --- 4) Regime-direction simulation (intraday_30m trend → forward return) ---
 _SIM_HK = "intraday_30m"
 _SIM_DIM = "trend_regime"
-if _SIM_HK in bundle_dict and _SIM_DIM in bundle_dict[_SIM_HK]:
+if not MSO_VERBOSE_EVAL:
+    print("SKIP regime simulation: set MSO_VERBOSE_EVAL=true to run this section")
+elif _SIM_HK in bundle_dict and _SIM_DIM in bundle_dict[_SIM_HK]:
     _fb = HORIZON_MAP[_SIM_HK]
     _classes = _classes_for_training(_SIM_DIM)
     _y_val = _labels_for_eval(_SIM_DIM, _fb)
