@@ -1289,30 +1289,10 @@ class Settings(BaseSettings):
         env="TAKE_PROFIT_PERCENTAGE",
         description="Take profit as fraction of price (e.g. 0.015 = 1.5%; default for medium-term strategy)"
     )
-    use_atr_scaled_sl_tp: bool = Field(
-        default=True,
-        env="USE_ATR_SCALED_SL_TP",
-        description="Use ATR-scaled stop loss / take profit when available"
-    )
-    atr_sl_distance_mult: float = Field(
-        default=1.0,
-        env="ATR_SL_DISTANCE_MULT",
-        description="ATR multiplier for stop loss distance"
-    )
-    atr_tp_distance_mult: float = Field(
-        default=1.5,
-        env="ATR_TP_DISTANCE_MULT",
-        description="ATR multiplier for take profit distance"
-    )
     entry_min_atr_pct_of_price: float = Field(
         default=0.003,
         env="ENTRY_MIN_ATR_PCT_OF_PRICE",
         description="Minimum ATR% of price required to authorize new entry (market regime filter)"
-    )
-    min_risk_reward_ratio: float = Field(
-        default=1.2,
-        env="MIN_RISK_REWARD_RATIO",
-        description="Minimum risk/reward ratio to allow a trade"
     )
     enforce_ema200_trend_filter: bool = Field(
         default=True,
@@ -2253,7 +2233,7 @@ class Settings(BaseSettings):
         description="REST API polling interval when WebSocket is unavailable (seconds)"
     )
     market_data_stale_rest_poll_seconds: float = Field(
-        default=15.0,
+        default=30.0,
         env="MARKET_DATA_STALE_REST_POLL_SECONDS",
         ge=3.0,
         le=300.0,
@@ -2288,7 +2268,7 @@ class Settings(BaseSettings):
 
     # Market data recovery configuration
     agent_no_candle_restart_minutes: int = Field(
-        default=10,
+        default=2,
         env="AGENT_NO_CANDLE_RESTART_MINUTES",
         description="Minutes without candle closes before attempting a market data stream restart"
     )

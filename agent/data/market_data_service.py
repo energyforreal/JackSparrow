@@ -257,6 +257,12 @@ class MarketDataService:
         # Update cache
         self._last_ticker_cache[symbol] = ticker_data
         self._last_tick_time[symbol] = datetime.now(timezone.utc)
+        try:
+            from agent.core.operational_metrics import publish_market_data_tick
+
+            await publish_market_data_tick(symbol)
+        except Exception:
+            pass
 
     async def shutdown(self):
         """Shutdown market data service."""

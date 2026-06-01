@@ -20,9 +20,48 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # No-op baseline: existing deployments rely on SQLAlchemy create_all / inline migrations.
-    # Future revisions should use autogenerate against backend.core.database models.
-    pass
+    """Enable TimescaleDB hypertables for time-series tables when extension is present."""
+    op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'trade_outcomes'
+            ) THEN
+                PERFORM create_hypertable(
+                    'trade_outcomes', 'closed_at', if_not_exists => TRUE, migrate_data => TRUE
+                );
+            END IF;
+        EXCEPTION
+            WHEN undefined_function THEN
+                RAISE NOTICE 'TimescaleDB create_hypertable unavailable; skipping trade_outcomes';
+            WHEN others THEN
+                RAISE NOTICE 'trade_outcomes hypertable skipped: %', SQLERRM;
+        END $$;
+        """
+    )
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_name = 'prediction_audit'
+            ) THEN
+                PERFORM create_hypertable(
+                    'prediction_audit', 'created_at', if_not_exists => TRUE, migrate_data => TRUE
+                );
+            END IF;
+        EXCEPTION
+            WHEN undefined_function THEN
+                RAISE NOTICE 'TimescaleDB create_hypertable unavailable; skipping prediction_audit';
+            WHEN others THEN
+                RAISE NOTICE 'prediction_audit hypertable skipped: %', SQLERRM;
+        END $$;
+        """
+    )
 
 
 def downgrade() -> None:

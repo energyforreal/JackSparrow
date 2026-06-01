@@ -240,8 +240,9 @@ class ContextManager:
         self.backup_dir = Path("data") / backup_dir
         self.current_state: Optional[AgentState] = None
         self._state_lock: Optional[asyncio.Lock] = None
-        self.auto_save_interval = 300  # 5 minutes
+        self.auto_save_interval = 60
         self._auto_save_task: Optional[asyncio.Task] = None
+        self._event_hooks_registered = False
         self._initialized = False
 
         # Ensure directories exist
@@ -266,6 +267,8 @@ class ContextManager:
         # Start auto-save task
         if start_auto_save:
             self._auto_save_task = asyncio.create_task(self._auto_save_loop())
+
+        self._register_trade_event_hooks()
 
         logger.info("context_manager_initialized",
                    state_file=str(self.state_file),
@@ -389,6 +392,24 @@ class ContextManager:
 
         except Exception as e:
             logger.warning("agent_state_backup_failed", error=str(e))
+
+    def _register_trade_event_hooks(self) -> None:
+        """Persist state immediately after fills and position closes."""
+        if self._event_hooks_registered:
+            return
+        try:
+            from agent.events.event_bus import event_bus
+            from agent.events.schemas import EventType
+
+            async def _persist_on_trade_event(event) -> None:
+                if self._initialized and self.current_state:
+                    await self.save_state()
+
+            event_bus.subscribe(EventType.ORDER_FILL, _persist_on_trade_event)
+            event_bus.subscribe(EventType.POSITION_CLOSED, _persist_on_trade_event)
+            self._event_hooks_registered = True
+        except Exception as exc:
+            logger.warning("context_manager_event_hooks_failed", error=str(exc))
 
     async def _auto_save_loop(self):
         """Auto-save state at regular intervals."""

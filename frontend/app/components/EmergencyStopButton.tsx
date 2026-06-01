@@ -14,9 +14,20 @@ export function EmergencyStopButton() {
   const [message, setMessage] = useState<string | null>(null)
 
   const onEmergencyStop = useCallback(async () => {
+    const reason = window.prompt(
+      'Emergency stop will flatten all positions and halt the agent.\n\nEnter a reason (required):'
+    )
+    if (reason === null) {
+      return
+    }
+    const trimmed = reason.trim()
+    if (!trimmed) {
+      window.alert('A reason is required for emergency stop.')
+      return
+    }
     if (
       !window.confirm(
-        'Emergency stop will flatten all positions and halt the agent. Continue?'
+        `Confirm emergency stop?\n\nReason: ${trimmed}\n\nThis cannot be undone without manual resume.`
       )
     ) {
       return
@@ -26,12 +37,21 @@ export function EmergencyStopButton() {
     try {
       const res = await fetch(`${backendBase()}/api/v1/admin/agent/emergency-stop`, {
         method: 'POST',
-        headers: { Accept: 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
+        body: JSON.stringify({ reason: trimmed }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setMessage(body?.detail || `Emergency stop failed (${res.status})`)
+        const detail = body?.detail
+        setMessage(
+          typeof detail === 'string'
+            ? detail
+            : `Emergency stop failed (${res.status})`
+        )
         return
       }
       setMessage(body?.message || 'Emergency stop completed')

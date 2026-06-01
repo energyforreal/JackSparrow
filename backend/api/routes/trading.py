@@ -37,6 +37,19 @@ from backend.api.middleware.auth import require_auth
 router = APIRouter(dependencies=[Depends(require_auth)])
 logger = structlog.get_logger()
 
+_DEPRECATED_REST_DETAIL = (
+    "This REST endpoint is disabled. Use WebSocket: "
+    "{action: 'command', command: 'predict'|'execute_trade', request_id: '...', parameters: {...}}"
+)
+
+
+def _require_deprecated_rest_enabled() -> None:
+    if not bool(getattr(settings, "enable_deprecated_rest_trading", False)):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=_DEPRECATED_REST_DETAIL,
+        )
+
 
 @router.post("/predict", response_model=PredictResponse)
 async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
@@ -85,7 +98,8 @@ async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
     }
     ```
     """
-    
+    _require_deprecated_rest_enabled()
+
     try:
         logger.info(
             "predict_request_received",
@@ -447,7 +461,8 @@ async def execute_trade(
     
     **Note:** Orders are placed on Delta Exchange India testnet (real testnet execution, not local simulation).
     """
-    
+    _require_deprecated_rest_enabled()
+
     try:
         from backend.services.portfolio_fetch import TestnetExchangeUnavailableError, require_testnet_exchange
 

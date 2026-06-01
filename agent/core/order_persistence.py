@@ -117,3 +117,76 @@ async def rehydrate_orders_from_exchange(
     if added:
         logger.info("order_rehydrate_exchange_complete", symbol=sym, added=added)
     return added
+
+
+async def sync_open_orders_with_exchange(
+    order_manager: Any,
+    delta_client: Any,
+    symbol: Optional[str] = None,
+) -> int:
+    """Reconcile in-flight local orders against Delta open-order state."""
+    if delta_client is None or order_manager is None:
+        return 0
+    sym = symbol or str(getattr(settings, "agent_symbol", "BTCUSD") or "BTCUSD")
+    open_local = {
+        oid: order
+        for oid, order in getattr(order_manager, "orders", {}).items()
+        if str(getattr(order, "status", "")).lower() in _OPEN_STATUSES
+    }
+    if not open_local:
+        return 0
+    try:
+        result = await delta_client.get_orders(states="open")
+    except Exception as exc:
+        logger.debug("order_sync_exchange_failed", error=str(exc))
+        return 0
+    rows: List[Dict[str, Any]] = []
+    if isinstance(result, dict):
+        payload = result.get("result")
+        if isinstance(payload, list):
+            rows = [r for r in payload if isinstance(r, dict)]
+    exchange_by_id: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        row_sym = str(row.get("product_symbol") or row.get("symbol") or "").strip().upper()
+        if row_sym and row_sym != sym.upper():
+            continue
+        ex_id = row.get("id")
+        if ex_id is not None:
+            exchange_by_id[f"ex_{ex_id}"] = row
+    updated = 0
+    for order_id, order in list(open_local.items()):
+        ex_id = getattr(order, "exchange_order_id", None)
+        lookup_id = order_id
+        if ex_id is not None:
+            lookup_id = f"ex_{ex_id}"
+        row = exchange_by_id.get(lookup_id)
+        if row is None:
+            if ex_id is not None and f"ex_{ex_id}" not in exchange_by_id:
+                order.transition_to("filled")
+                updated += 1
+            continue
+        state = str(row.get("state") or "open").lower()
+        if state in ("closed", "filled"):
+            try:
+                fill_px = float(row.get("average_fill_price") or row.get("limit_price") or 0)
+            except (TypeError, ValueError):
+                fill_px = 0.0
+            try:
+                fill_qty = float(row.get("size") or order.quantity or 0)
+            except (TypeError, ValueError):
+                fill_qty = float(getattr(order, "quantity", 0) or 0)
+            if fill_qty > 0 and fill_px > 0 and hasattr(order, "update_fill"):
+                order.update_fill(fill_qty, fill_px)
+            else:
+                order.transition_to("filled")
+            updated += 1
+        elif state in ("cancelled", "rejected"):
+            order.transition_to(state)
+            updated += 1
+    if updated:
+        logger.info("order_sync_exchange_complete", symbol=sym, updated=updated)
+        try:
+            persist_open_order_records(order_manager.orders)
+        except Exception:
+            pass
+    return updated

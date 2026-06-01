@@ -4,6 +4,7 @@ import asyncio
 import socket
 import structlog
 from typing import Optional
+from urllib.parse import urljoin
 
 from agent.core.config import settings
 from agent.core.redis_config import get_redis, close_redis
@@ -90,6 +91,39 @@ async def _check_websocket_port(host: str, port: int) -> bool:
         return False
 
 
+async def _check_delta_exchange_reachable(client) -> None:
+    """Non-fatal Delta REST probe; records connectivity in Redis for dashboards."""
+    base = str(getattr(settings, "delta_exchange_base_url", "") or "").rstrip("/")
+    if not base:
+        return
+    symbol = str(getattr(settings, "agent_symbol", "BTCUSD") or "BTCUSD")
+    url = urljoin(f"{base}/", f"v2/tickers/{symbol}")
+    ok = False
+    detail = ""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=3.0) as http:
+            resp = await http.get(url)
+            ok = resp.status_code < 500
+            if not ok:
+                detail = f"HTTP {resp.status_code}"
+    except Exception as exc:
+        detail = str(exc)
+        logger.warning(
+            "agent_healthcheck_delta_unreachable",
+            service="agent",
+            url=url,
+            error=detail,
+        )
+    try:
+        from agent.core.operational_metrics import publish_exchange_connectivity
+
+        await publish_exchange_connectivity(ok, detail=detail or None)
+    except Exception:
+        pass
+
+
 async def _check_websocket_any_port(host: str, port: int) -> bool:
     """Check for a WebSocket handshake on the configured port (and a small fallback range).
 
@@ -142,6 +176,8 @@ async def _run_check() -> int:
         if not feature_ok or not ws_ok:
             # Treat missing ports as a hard failure so Docker keeps waiting.
             return 2
+
+        await _check_delta_exchange_reachable(client)
 
         logger.debug("agent_healthcheck_passed", service="agent")
         return 0

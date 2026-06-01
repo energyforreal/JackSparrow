@@ -9,11 +9,19 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import time
+import json
 from collections import defaultdict
 from typing import Any, Dict, Optional, Tuple
 
 from backend.core.database import get_db
-from backend.core.redis import redis_health_check, get_cache, set_cache, set_model_health_heartbeat, get_model_health_heartbeat
+from backend.core.redis import (
+    redis_health_check,
+    get_cache,
+    set_cache,
+    set_model_health_heartbeat,
+    get_model_health_heartbeat,
+    get_redis,
+)
 from backend.core.config import settings
 from backend.api.models.responses import HealthResponse, HealthServiceStatus
 from backend.services.agent_service import agent_service
@@ -28,6 +36,62 @@ router = APIRouter()
 _health_rate_limit: Dict[str, list] = defaultdict(list)
 _health_rate_limit_requests = 100
 _health_rate_limit_window = 60  # 60 seconds
+
+
+async def check_market_data_freshness() -> HealthServiceStatus:
+    """Check agent-published market tick freshness from Redis."""
+    symbol = str(getattr(settings, "agent_symbol", "BTCUSD") or "BTCUSD").upper()
+    stale_threshold_s = 30.0
+    try:
+        client = await get_redis(required=False)
+        if client is None:
+            return HealthServiceStatus(
+                status="unknown",
+                details={"note": "Redis unavailable; cannot read market_data:last_tick"},
+            )
+        raw = await client.get(f"market_data:last_tick:{symbol}")
+        if not raw:
+            return HealthServiceStatus(
+                status="degraded",
+                error="No recent market ticks recorded",
+                details={"symbol": symbol, "stale_threshold_seconds": stale_threshold_s},
+            )
+        ts_raw = raw.decode() if isinstance(raw, bytes) else str(raw)
+        last_tick = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+        age_s = (datetime.now(timezone.utc) - last_tick).total_seconds()
+        if age_s > stale_threshold_s:
+            return HealthServiceStatus(
+                status="degraded",
+                latency_ms=round(age_s * 1000, 2),
+                error=f"Market data stale ({age_s:.1f}s since last tick)",
+                details={"symbol": symbol, "last_tick": ts_raw},
+            )
+        return HealthServiceStatus(
+            status="up",
+            latency_ms=round(age_s * 1000, 2),
+            details={"symbol": symbol, "last_tick": ts_raw},
+        )
+    except Exception as exc:
+        return HealthServiceStatus(status="unknown", error=str(exc))
+
+
+async def check_execution_latency_metrics() -> HealthServiceStatus:
+    """Read agent-published execution latency snapshot from Redis."""
+    try:
+        client = await get_redis(required=False)
+        if client is None:
+            return HealthServiceStatus(status="unknown", details={"note": "Redis unavailable"})
+        raw = await client.get("metrics:latency:execution")
+        if not raw:
+            return HealthServiceStatus(
+                status="unknown",
+                details={"note": "No latency metrics published yet"},
+            )
+        text = raw.decode() if isinstance(raw, bytes) else str(raw)
+        payload = json.loads(text)
+        return HealthServiceStatus(status="up", details=payload)
+    except Exception as exc:
+        return HealthServiceStatus(status="unknown", error=str(exc))
 
 
 async def check_database_health(db: AsyncSession) -> HealthServiceStatus:
@@ -591,6 +655,9 @@ async def check_overall_health(db: AsyncSession) -> dict:
             degradation_reasons.append("Delta Exchange API is down")
         health_scores.append(0.0)
     
+    market_data_health = await check_market_data_freshness()
+    latency_health = await check_execution_latency_metrics()
+
     # Check reasoning engine
     reasoning_health = await check_reasoning_engine_health(raw_agent_status)
     reasoning_weight = 0.15
@@ -604,12 +671,17 @@ async def check_overall_health(db: AsyncSession) -> dict:
         health_scores.append(0.0)
     
     health_score = sum(health_scores)
+    if market_data_health.status == "degraded":
+        degradation_reasons.append("Market data feed is stale or missing")
+
     if health_score >= 0.9:
         status_str = "healthy"
     elif health_score >= 0.6:
         status_str = "degraded"
     else:
         status_str = "unhealthy"
+    if market_data_health.status == "degraded" and status_str == "healthy":
+        status_str = "degraded"
     
     def _to_dict(obj):
         return obj.model_dump() if hasattr(obj, "model_dump") else obj
@@ -667,6 +739,8 @@ async def check_overall_health(db: AsyncSession) -> dict:
             "model_nodes": _to_dict(model_health),
             "delta_exchange": _to_dict(delta_health),
             "reasoning_engine": _to_dict(reasoning_health),
+            "market_data": _to_dict(market_data_health),
+            "execution_latency": _to_dict(latency_health),
         },
         "agent_state": agent_state,
         "degradation_reasons": degradation_reasons,

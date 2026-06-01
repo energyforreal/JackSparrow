@@ -4,15 +4,27 @@ Admin and control endpoints.
 Provides agent control and system administration functions.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from datetime import datetime, timezone
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 from backend.api.models.requests import AgentControlRequest
 from backend.api.models.responses import AgentStatusResponse
 from backend.services.agent_service import agent_service
 from backend.api.middleware.auth import require_auth
+from backend.api.middleware.admin_rate_limit import enforce_admin_rate_limit
 
 router = APIRouter(dependencies=[Depends(require_auth)])
+
+
+class EmergencyStopRequest(BaseModel):
+    reason: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Human-readable reason for emergency stop (audit trail)",
+    )
 
 
 @router.get("/agent/status", response_model=AgentStatusResponse)
@@ -44,7 +56,8 @@ async def get_agent_status():
 
 
 @router.post("/agent/control")
-async def control_agent(request: AgentControlRequest):
+async def control_agent(request: AgentControlRequest, http_request: Request):
+    enforce_admin_rate_limit(http_request)
     """
     Control agent (start, stop, pause, resume, restart).
     
@@ -145,15 +158,22 @@ async def stop_agent():
 
 
 @router.post("/agent/emergency-stop")
-async def emergency_stop():
+async def emergency_stop(
+    http_request: Request,
+    body: EmergencyStopRequest = EmergencyStopRequest(),
+):
     """
     Emergency stop - immediately halt all trading.
     
     Immediately stops all trading operations.
     """
-    
+    enforce_admin_rate_limit(http_request)
+
     try:
-        result = await agent_service.control_agent(action="emergency_stop", parameters={})
+        params = {}
+        if body.reason:
+            params["reason"] = body.reason.strip()
+        result = await agent_service.control_agent(action="emergency_stop", parameters=params)
         
         if not result:
             raise HTTPException(
@@ -164,7 +184,9 @@ async def emergency_stop():
         return {
             "status": "emergency_stopped",
             "agent_state": result.get("state", "EMERGENCY_STOP"),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "reason": body.reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": result.get("message", "Emergency stop completed"),
         }
         
     except HTTPException:

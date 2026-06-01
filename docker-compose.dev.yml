@@ -28,8 +28,12 @@ services:
     build:
       context: .
       dockerfile: agent/Dockerfile.dev
+    ports:
+      - "${FEATURE_SERVER_PORT:-8002}:8002"
+      - "${AGENT_WS_PORT:-8003}:8003"
     volumes:
       - ./agent:/app/agent:rw
+      - ./feature_store:/app/feature_store:rw
       - ./agent/model_storage:/app/agent/model_storage:rw
       - ./logs/agent:/logs:rw
     environment:

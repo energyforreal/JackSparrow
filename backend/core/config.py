@@ -106,6 +106,11 @@ class Settings(BaseSettings):
         env="BLOCK_MANUAL_EXECUTE_TRADE",
         description="When True, reject manual execute_trade API/WebSocket commands.",
     )
+    enable_deprecated_rest_trading: bool = Field(
+        default=False,
+        env="ENABLE_DEPRECATED_REST_TRADING",
+        description="When True, allow legacy REST /predict and /trade/execute endpoints.",
+    )
     delta_environment: str = Field(
         default="testnet",
         env="DELTA_ENVIRONMENT",

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import asyncio
 import os
 import sys
 import time
@@ -161,6 +162,7 @@ async def _reset_paper_trade_state() -> None:
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
     # Startup
+    reconnect_task = None
     logger.info("backend_starting", service="backend")
     
     # Initialize database — connection is required; schema creation errors must not be swallowed when enabled
@@ -271,6 +273,31 @@ async def lifespan(app: FastAPI):
             message="Health poller failed to start",
         )
     
+    if settings.use_agent_websocket:
+        from backend.services.agent_service import agent_service
+
+        async def _agent_ws_reconnect_monitor() -> None:
+            """Keep outbound agent WebSocket alive across agent container restarts."""
+            while True:
+                try:
+                    await asyncio.sleep(15.0)
+                    if not settings.use_agent_websocket:
+                        return
+                    if agent_service._websocket_connected and agent_service._websocket is not None:
+                        continue
+                    await agent_service.warmup_outbound_websocket(attempts=3, delay_s=1.0)
+                except asyncio.CancelledError:
+                    return
+                except Exception as exc:
+                    logger.debug(
+                        "backend_agent_ws_reconnect_monitor_tick_failed",
+                        service="backend",
+                        error=str(exc),
+                    )
+
+        reconnect_task = asyncio.create_task(_agent_ws_reconnect_monitor())
+        logger.info("backend_agent_ws_reconnect_monitor_started", service="backend")
+
     logger.info("backend_started_successfully", service="backend")
     
     yield
@@ -278,6 +305,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("backend_shutting_down", service="backend")
     try:
+        if reconnect_task is not None:
+            reconnect_task.cancel()
+            try:
+                await reconnect_task
+            except asyncio.CancelledError:
+                pass
+
         # Stop agent event subscriber
         try:
             await agent_event_subscriber.stop()

@@ -599,6 +599,21 @@ class IntelligentAgent:
                         )
                     last_reconcile_at = now_mono
 
+                if bool(getattr(settings, "order_persistence_enabled", True)):
+                    try:
+                        from agent.core.order_persistence import sync_open_orders_with_exchange
+
+                        await sync_open_orders_with_exchange(
+                            execution_module.order_manager,
+                            self.delta_client,
+                        )
+                    except Exception as exc:
+                        logger.debug(
+                            "position_monitor_order_sync_failed",
+                            error=str(exc),
+                            service="agent",
+                        )
+
                 from agent.core.position_reconcile import symbols_to_monitor
 
                 monitor_symbols = symbols_to_monitor(execution_module)
@@ -1653,8 +1668,10 @@ class IntelligentAgent:
 
                 try:
                     from agent.core.latency_metrics import latency_snapshot
+                    from agent.core.operational_metrics import publish_latency_metrics
 
                     latency_stats = latency_snapshot()
+                    await publish_latency_metrics(latency_stats)
                 except Exception:
                     latency_stats = {}
 
