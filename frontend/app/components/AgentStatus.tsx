@@ -29,7 +29,7 @@ const getStateConfig = (state: string) => {
       return {
         color: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
         icon: Brain,
-        label: 'Analyzing Signals',
+        label: 'Analyzing Market',
         bgColor: 'bg-blue-500',
       }
     case 'EXECUTING':

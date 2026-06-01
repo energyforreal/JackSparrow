@@ -96,16 +96,6 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
   const rollupVariant =
     rollup === 'healthy' ? 'default' : rollup === 'degraded' ? 'secondary' : 'destructive'
 
-  const ml = health.ml_models
-  const mlLoaded =
-    ml && typeof (ml as { loaded_count?: unknown }).loaded_count === 'number'
-      ? (ml as { loaded_count: number }).loaded_count
-      : null
-  const mlHealthy =
-    ml && typeof (ml as { healthy_count?: unknown }).healthy_count === 'number'
-      ? (ml as { healthy_count: number }).healthy_count
-      : null
-
   const modeLabel =
     health.trading_mode === 'testnet' || health.delta_environment === 'testnet'
       ? 'Delta testnet'
@@ -139,14 +129,7 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
           </p>
         )}
 
-        {mlLoaded != null && (
-          <p className="text-xs text-muted-foreground">
-            Models:{' '}
-            <span className="font-medium text-foreground tabular-nums">
-              {mlHealthy != null ? `${mlHealthy}/${mlLoaded} healthy` : `${mlLoaded} loaded`}
-            </span>
-          </p>
-        )}
+
 
         <div className="space-y-2">
           {servicesArray.map((service) => {
@@ -156,13 +139,14 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
             const totalModels =
               typeof details.total_models === 'number' ? details.total_models : undefined
             const note = typeof details.note === 'string' ? details.note : undefined
-            const hasModelCounts =
-              healthyModels !== undefined && totalModels !== undefined
+            const hasUnitCounts =
+              healthyModels !== undefined &&
+              totalModels !== undefined &&
+              service.name !== 'model_serving' &&
+              service.name !== 'model_nodes'
             const shouldShowDetails =
-              Boolean(note || hasModelCounts) &&
-              (service.status === 'unknown' ||
-                service.status === 'degraded' ||
-                (service.name === 'model_nodes' && note))
+              Boolean(note || hasUnitCounts) &&
+              (service.status === 'unknown' || service.status === 'degraded')
 
             return (
               <div
@@ -203,9 +187,9 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
                 </div>
                 {shouldShowDetails && (
                   <div className="mt-2 text-xs text-muted-foreground space-y-1">
-                    {healthyModels !== undefined && totalModels !== undefined && (
+                    {hasUnitCounts && (
                       <p>
-                        Healthy models: {healthyModels}/{totalModels}
+                        Healthy units: {healthyModels}/{totalModels}
                       </p>
                     )}
                     {note && <p>{note}</p>}
@@ -216,17 +200,7 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
           })}
         </div>
 
-        {(() => {
-          const modelServing = servicesArray.find((s) => s.name === 'model_serving')
-          if (modelServing && modelServing.status !== 'up') {
-            return (
-              <p className="text-xs text-muted-foreground mt-2">
-                When model serving is unavailable, predictions use the agent fallback path. Signal card will show &quot;Agent fallback&quot; or &quot;Degraded&quot; when applicable.
-              </p>
-            )
-          }
-          return null
-        })()}
+
 
         {health.degradation_reasons &&
           Array.isArray(health.degradation_reasons) &&

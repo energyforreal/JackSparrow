@@ -37,8 +37,8 @@ const reflection: ReflectionSnapshot = {
 describe('SelfAwarenessPanel', () => {
   it('renders introspection and reflection sections', () => {
     render(<SelfAwarenessPanel introspection={introspection} reflection={reflection} />)
-    expect(screen.getByText('Self-Awareness')).toBeInTheDocument()
-    expect(screen.getByText('Decision introspection')).toBeInTheDocument()
+    expect(screen.getByText('Agent Diagnostics')).toBeInTheDocument()
+    expect(screen.getByText('Decision context')).toBeInTheDocument()
     expect(screen.getByText('Post-trade reflection')).toBeInTheDocument()
     expect(screen.getByText('advisory only')).toBeInTheDocument()
     expect(screen.getByText(/Reason codes \(1\)/)).toBeInTheDocument()

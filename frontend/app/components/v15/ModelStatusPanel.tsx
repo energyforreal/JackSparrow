@@ -4,20 +4,13 @@ import { useEffect, useState } from 'react'
 import { getBackendProxyBase } from '@/lib/backendProxy'
 import { cn } from '@/lib/utils'
 
-interface ModelsStatusPayload {
+interface AgentStatusPayload {
   available?: boolean
   agent_state?: string
-  model_format?: string | null
-  model_nodes?: {
-    status?: string
-    total_models?: number
-    healthy_models?: number
-    model_format?: string
-  }
 }
 
 export function ModelStatusPanel({ className }: { className?: string }) {
-  const [data, setData] = useState<ModelsStatusPayload | null>(null)
+  const [data, setData] = useState<AgentStatusPayload | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -28,43 +21,34 @@ export function ModelStatusPanel({ className }: { className?: string }) {
       try {
         const res = await fetch(url, { cache: 'no-store' })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const j = (await res.json()) as ModelsStatusPayload
+        const j = (await res.json()) as AgentStatusPayload
         if (!cancelled) setData(j)
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'fetch failed')
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [])
 
   if (err) {
     return (
       <p className={cn('text-xs text-muted-foreground', className)}>
-        Model status unavailable ({err})
+        Agent status unavailable ({err})
       </p>
     )
   }
   if (!data) {
-    return <p className={cn('text-xs text-muted-foreground', className)}>Loading model status…</p>
+    return <p className={cn('text-xs text-muted-foreground', className)}>Loading agent status…</p>
   }
-  const mn = data.model_nodes || {}
-  const fmt = data.model_format ?? mn.model_format
+
   return (
     <div className={cn('rounded-md border bg-card p-2 text-xs', className)}>
-      <p className="font-medium">ML models</p>
+      <p className="font-medium">Agent status</p>
       <dl className="mt-1 grid grid-cols-2 gap-1">
-        <dt className="text-muted-foreground">Agent</dt>
+        <dt className="text-muted-foreground">State</dt>
         <dd>{data.agent_state ?? '—'}</dd>
-        <dt className="text-muted-foreground">Registry</dt>
-        <dd>{mn.status ?? '—'}</dd>
-        <dt className="text-muted-foreground">Loaded</dt>
-        <dd>
-          {mn.healthy_models ?? 0}/{mn.total_models ?? 0} healthy
-        </dd>
-        <dt className="text-muted-foreground">Format</dt>
-        <dd className="font-mono">{fmt ?? '—'}</dd>
+        <dt className="text-muted-foreground">Available</dt>
+        <dd>{data.available == null ? '—' : data.available ? 'yes' : 'no'}</dd>
       </dl>
     </div>
   )

@@ -30,7 +30,7 @@ const ReasoningChainView = dynamic(
     loading: () => (
       <Card>
         <CardHeader>
-          <CardTitle>Agent Reasoning Chain</CardTitle>
+          <CardTitle>Signal Rationale</CardTitle>
         </CardHeader>
         <CardContent>
           <LoadingSkeleton className="h-40 w-full" />
@@ -67,7 +67,6 @@ export function Dashboard() {
     signal,
     portfolio,
     recentTrades,
-    modelData,
     health,
     agentState,
     isConnected,
@@ -210,7 +209,6 @@ export function Dashboard() {
                   <SignalIndicator
                     signal={signal || undefined}
                     lastReflection={lastReflection}
-                    modelData={modelData || undefined}
                   />
                   <p className="text-[10px] text-muted-foreground text-center px-1">
                     Press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">P</kbd> for
@@ -281,7 +279,7 @@ export function Dashboard() {
               </AccordionItem>
             </Accordion>
 
-            {/* Self-Awareness telemetry */}
+            {/* Agent Diagnostics */}
             <ErrorBoundary>
               <SelfAwarenessPanel
                 introspection={signal?.agent_introspection}
@@ -289,18 +287,13 @@ export function Dashboard() {
               />
             </ErrorBoundary>
 
-            {/* Reasoning Chain Viewer with Integrated Model Reasoning */}
+            {/* Signal Rationale */}
             <ErrorBoundary>
               <ReasoningChainView
                 reasoningChain={signal?.reasoning_chain || []}
                 chainMeta={reasoningChainMeta ?? signal?.reasoning_chain_full}
                 overallConfidence={signal?.confidence}
                 isLoading={isLoading}
-                modelConsensus={signal?.model_consensus}
-                individualModelReasoning={signal?.individual_model_reasoning}
-                modelVersion={signal?.model_version ?? modelData?.model_version}
-                inferenceLatencyMs={signal?.inference_latency_ms ?? modelData?.inference_latency_ms}
-                inferenceMode={signal?.inference_mode ?? modelData?.inference_mode}
                 v43ExpectedReturn={
                   signal?.expected_return != null ? Number(signal.expected_return) : undefined
                 }

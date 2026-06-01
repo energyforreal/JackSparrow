@@ -9,7 +9,7 @@ export interface DisplayConfidenceResult {
   source: ConfidenceSource
   /** True when final_confidence was absent and policy confidence was used. */
   usedPolicyFallback: boolean
-  /** Optional policy/ML confidence when reasoning confidence is shown separately. */
+  /** Optional policy/raw score when reasoning confidence is shown separately. */
   policyPercent?: number
 }
 
@@ -20,7 +20,7 @@ type ConfidenceCarrier = {
 }
 
 /**
- * Resolve the confidence shown on the AI Signal card.
+ * Resolve the confidence shown on the Trading Signal card.
  * Prefers calibrated reasoning confidence when available.
  */
 export function resolveDisplayConfidence(

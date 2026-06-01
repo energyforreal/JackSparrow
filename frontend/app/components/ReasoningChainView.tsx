@@ -7,40 +7,34 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion'
-import { ConfidenceProgress } from './ConfidenceProgress'
 import { Badge } from '@/components/ui/badge'
-import {
-  ModelConsensus,
-  ModelReasoning,
-  ReasoningChain,
-  ReasoningStep,
-} from '@/types'
-import {
-  normalizeConfidenceToPercent,
-  formatConfidence,
-  getDataFreshnessColor,
-  formatDateTime,
-} from '@/utils/formatters'
+import { ConfidenceProgress } from './ConfidenceProgress'
+import { ReasoningChain, ReasoningStep } from '@/types'
+import { normalizeConfidenceToPercent, formatConfidence, formatDateTime } from '@/utils/formatters'
 import { LoadingSkeleton } from './LoadingSpinner'
-import { ModelReasoningView } from './ModelReasoningView'
+import { CheckCircle2, Circle, AlertCircle } from 'lucide-react'
 
 interface ReasoningChainViewProps {
   reasoningChain?: ReasoningStep[]
   chainMeta?: ReasoningChain
   overallConfidence?: number
   isLoading?: boolean
-  modelConsensus?: ModelConsensus[]
-  individualModelReasoning?: ModelReasoning[]
-  /** Model version or ensemble descriptor */
+  // Kept for API compatibility but no longer rendered as ML model rows
+  modelConsensus?: unknown[]
+  individualModelReasoning?: unknown[]
   modelVersion?: string
-  /** Inference latency in ms */
   inferenceLatencyMs?: number
-  /** primary | fallback | degraded */
   inferenceMode?: string
-  /** JackSparrow v43 regression economics (simple-return scale) */
   v43ExpectedReturn?: number
   v43Threshold?: number
   v43GateReject?: string
+}
+
+const stepStatusIcon = (confidence: number) => {
+  const pct = normalizeConfidenceToPercent(confidence)
+  if (pct >= 65) return <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+  if (pct >= 40) return <Circle className="h-4 w-4 text-amber-500 shrink-0" />
+  return <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
 }
 
 export function ReasoningChainView({
@@ -48,11 +42,6 @@ export function ReasoningChainView({
   chainMeta,
   overallConfidence,
   isLoading = false,
-  modelConsensus,
-  individualModelReasoning,
-  modelVersion,
-  inferenceLatencyMs,
-  inferenceMode,
   v43ExpectedReturn,
   v43Threshold,
   v43GateReject,
@@ -61,13 +50,9 @@ export function ReasoningChainView({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Agent Reasoning Chain</CardTitle>
+          <CardTitle>Signal Rationale</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <LoadingSkeleton className="h-4 w-32" />
-            <LoadingSkeleton className="h-4 w-24" />
-          </div>
           <div className="space-y-3">
             {[1, 2, 3, 4, 5, 6].map((stepNum) => (
               <div key={stepNum} className="border rounded-lg p-4 space-y-2">
@@ -76,395 +61,144 @@ export function ReasoningChainView({
                   <LoadingSkeleton className="h-4 w-16" />
                 </div>
                 <LoadingSkeleton className="h-4 w-full" />
-                <LoadingSkeleton className="h-4 w-3/4" />
               </div>
             ))}
-          </div>
-          <div className="flex justify-center">
-            <LoadingSkeleton className="h-8 w-48" />
           </div>
         </CardContent>
       </Card>
     )
   }
 
-  if (!reasoningChain || reasoningChain.length === 0) {
+  const hasSteps = reasoningChain && reasoningChain.length > 0
+
+  if (!hasSteps && !v43ExpectedReturn && !v43GateReject) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Agent Reasoning Chain</CardTitle>
+          <CardTitle>Signal Rationale</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            No reasoning chain available yet. Trigger a prediction to see the agent&apos;s
-            6-step reasoning process from situational assessment through confidence
-            calibration.
+            No rationale available yet. Trigger a prediction to see the agent&apos;s step-by-step
+            reasoning from market assessment through confidence calibration.
           </p>
         </CardContent>
       </Card>
     )
   }
 
-  const sortedSteps = [...reasoningChain].sort(
-    (a, b) => a.step_number - b.step_number
-  )
+  const sortedSteps = hasSteps
+    ? [...reasoningChain!].sort((a, b) => a.step_number - b.step_number)
+    : []
 
   const finalConfidencePercent =
     chainMeta?.final_confidence !== undefined
       ? normalizeConfidenceToPercent(chainMeta.final_confidence)
       : normalizeConfidenceToPercent(overallConfidence ?? 0)
 
-  const stepConfidences = sortedSteps.map((step) =>
-    normalizeConfidenceToPercent(step.confidence)
-  )
-  const averageStepConfidence =
-    stepConfidences.length > 0
-      ? stepConfidences.reduce((sum, c) => sum + c, 0) / stepConfidences.length
-      : 0
-
-  // Simple consistency metric based on variance of step confidences.
-  let consistencyScore = 0
-  if (stepConfidences.length <= 1) {
-    consistencyScore = 100
-  } else {
-    const mean = averageStepConfidence
-    const variance =
-      stepConfidences.reduce((sum, c) => sum + (c - mean) ** 2, 0) /
-      stepConfidences.length
-    const stdDev = Math.sqrt(variance)
-    // Map stdDev (0–50+) to a 0–100 score where lower deviation = higher consistency.
-    const normalized = Math.max(0, Math.min(1, 1 - stdDev / 50))
-    consistencyScore = normalized * 100
-  }
-
-  const step7ForEvidence = sortedSteps.find((s) => s.step_number === 7)
-  const fallbackScenarioFromEvidence =
-    step7ForEvidence?.evidence?.some((e) =>
-      /fallback scenario:\s*true/i.test(String(e))
-    ) ?? false
-  const steps345 = sortedSteps.filter((s) => [3, 4, 5].includes(s.step_number))
-  const avgStep345Confidence =
-    steps345.length > 0
-      ? steps345.reduce(
-          (acc, s) => acc + normalizeConfidenceToPercent(s.confidence),
-          0
-        ) / steps345.length
-      : 0
-  const showConfidenceCalibFallbackBanner =
-    fallbackScenarioFromEvidence ||
-    (finalConfidencePercent >= 49 &&
-      finalConfidencePercent <= 51 &&
-      avgStep345Confidence < 1 &&
-      steps345.length >= 1)
-
-  const STEP_TITLES: Record<number, string> = {
-    1: 'Situational Assessment',
-    2: 'Historical Context Retrieval',
-    3: 'Model Consensus Analysis',
-    4: 'Risk Assessment',
-    5: 'Decision Synthesis',
-    6: 'Trade Adjudication',
-    7: 'Confidence Calibration',
-  }
-
-  // Generate confidence tooltip text for each step
-  const getConfidenceTooltip = (step: ReasoningStep): string => {
-    const confidencePercent = normalizeConfidenceToPercent(step.confidence)
-
-    switch (step.step_number) {
-      case 1:
-        return `Situational Assessment confidence (${confidencePercent.toFixed(1)}%) based on market data quality and feature completeness. Higher scores indicate better data reliability.`
-      case 2:
-        return `Historical Context confidence (${confidencePercent.toFixed(1)}%) based on similarity to past market situations. Higher scores indicate stronger historical precedents.`
-      case 3:
-        return `Model Consensus confidence (${confidencePercent.toFixed(1)}%) represents average confidence across all ML models. Higher scores indicate more reliable predictions.`
-      case 4:
-        return `Risk Assessment confidence (${confidencePercent.toFixed(1)}%) based on completeness of risk data (volatility, portfolio, metrics). Higher scores indicate more comprehensive risk evaluation.`
-      case 5:
-        return `Decision Synthesis confidence (${confidencePercent.toFixed(1)}%) based on model prediction strength and consistency. Higher scores indicate clearer trading signals.`
-      case 6:
-        return `Trade Adjudication confidence (${confidencePercent.toFixed(1)}%) reflects agreement between strategy thesis and ML validation. This step determines the final BUY/SELL/HOLD gate.`
-      case 7:
-        return `Confidence Calibration (${confidencePercent.toFixed(1)}%) is the final calibrated confidence after considering step consistency and historical performance.`
-      default:
-        return `Step confidence: ${confidencePercent.toFixed(1)}%`
-    }
-  }
-
-  // Generate dynamic summaries based on actual step data
-  const generateStepSummary = (step: ReasoningStep): string => {
-    const baseSummaries: Record<number, string> = {
-      1: 'Analyzes current market conditions and data quality.',
-      2: 'Searches for similar historical market situations.',
-      3: 'Aggregates predictions from multiple ML models.',
-      4: 'Assesses trading risks and portfolio exposure.',
-      5: 'Synthesizes all inputs into a trading decision.',
-      6: 'Adjudicates strategy thesis against ML validation.',
-      7: 'Calibrates final confidence based on step consistency.',
-    }
-
-    let summary = baseSummaries[step.step_number] || 'Processing step analysis.'
-
-    // Add dynamic elements based on evidence and metadata
-    if (step.evidence && step.evidence.length > 0) {
-      switch (step.step_number) {
-        case 1: // Situational Assessment
-          if (step.feature_quality_score !== undefined) {
-            summary += ` Data quality: ${(step.feature_quality_score * 100).toFixed(0)}%.`
-          }
-          break
-        case 2: // Historical Context
-          const similarContexts = step.evidence.find(e => e.includes('similar historical contexts'))
-          if (similarContexts) {
-            const match = similarContexts.match(/Found (\d+)/)
-            if (match) {
-              summary += ` Found ${match[1]} relevant cases.`
-            }
-          }
-          if (step.similarity_score !== undefined) {
-            summary += ` Avg similarity: ${(step.similarity_score * 100).toFixed(0)}%.`
-          }
-          break
-        case 3: // Model Consensus
-          const consensusMatch = step.evidence.find(e => e.includes('models, avg confidence'))
-          if (consensusMatch) {
-            const match = consensusMatch.match(/(\d+) models/)
-            if (match) {
-              summary += ` Using ${match[1]} model predictions.`
-            }
-          }
-          break
-        case 4: // Risk Assessment
-          const riskLevel = step.description.match(/Risk level: (\w+)/)?.[1]
-          if (riskLevel) {
-            summary += ` Current risk: ${riskLevel}.`
-          }
-          break
-        case 5: // Decision Synthesis
-          if (step.description && !step.description.includes('HOLD')) {
-            summary += ` Recommends: ${step.description.split(' - ')[0]}.`
-          }
-          break
-      }
-    }
-
-    // Add confidence level indicator
-    const confidencePercent = normalizeConfidenceToPercent(step.confidence)
-    if (confidencePercent >= 75) {
-      summary += ' (High confidence)'
-    } else if (confidencePercent >= 50) {
-      summary += ' (Medium confidence)'
-    } else {
-      summary += ' (Low confidence)'
-    }
-
-    return summary
-  }
-
-  const conclusionText =
-    chainMeta?.conclusion ??
-    sortedSteps[sortedSteps.length - 1]?.description ??
-    'No conclusion available.'
-
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <CardTitle>Agent Reasoning Chain</CardTitle>
-          <div className="flex items-center gap-3 flex-wrap">
-            {(modelVersion != null || inferenceLatencyMs != null || inferenceMode) && (
-              <span className="text-xs text-muted-foreground">
-                {modelVersion && <span>{modelVersion}</span>}
-                {modelVersion && inferenceLatencyMs != null && ' · '}
-                {inferenceLatencyMs != null && <span>{Math.round(inferenceLatencyMs)}ms</span>}
-                {inferenceMode && (modelVersion != null || inferenceLatencyMs != null ? ' · ' : '') + inferenceMode}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>Signal Rationale</CardTitle>
+          {finalConfidencePercent > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Final confidence</span>
+              <span className="font-semibold tabular-nums">
+                {formatConfidence(finalConfidencePercent)}
               </span>
-            )}
-            {finalConfidencePercent > 0 && (
-              <Badge variant="outline" className="text-sm">
-                Confidence: {formatConfidence(finalConfidencePercent)}
-              </Badge>
-            )}
-            {chainMeta?.timestamp && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>Generated:</span>
-                <span className={getDataFreshnessColor(chainMeta.timestamp)}>
-                  {formatDateTime(chainMeta.timestamp)}
-                </span>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Structured 6-step reasoning from situational assessment to calibrated confidence,
-          using market context, historical memories, model consensus, and risk analysis.
-        </p>
-        {(v43ExpectedReturn != null ||
-          v43Threshold != null ||
-          (v43GateReject != null && v43GateReject !== '')) && (
-          <div className="mt-2 rounded-md border border-border/50 bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground tabular-nums">
-            <span className="font-medium text-foreground">v43 </span>
-            {v43ExpectedReturn != null && Number.isFinite(v43ExpectedReturn) && (
-              <span>E[R]={v43ExpectedReturn.toFixed(5)} </span>
-            )}
-            {v43Threshold != null && Number.isFinite(v43Threshold) && (
-              <span>thr={v43Threshold.toFixed(5)} </span>
-            )}
-            {v43GateReject != null && v43GateReject !== '' && (
-              <span className="text-amber-700 dark:text-amber-500">
-                gate: {v43GateReject}
-              </span>
-            )}
-          </div>
+        {chainMeta?.timestamp && (
+          <p className="text-xs text-muted-foreground mt-1">
+            {formatDateTime(chainMeta.timestamp)}
+          </p>
         )}
       </CardHeader>
-      <CardContent>
-        {showConfidenceCalibFallbackBanner && (
-          <div
-            role="status"
-            className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-muted-foreground"
-          >
-            <span className="font-medium text-foreground">Confidence calibration fallback:</span>{' '}
-            Steps 3–5 near 0% while overall stays ~50% usually means model predictions had zero confidence and the agent applied its neutral floor (not stronger evidence). Check model inference and{' '}
-            <span className="font-medium text-foreground">model_nodes</span> health if this repeats.
+      <CardContent className="space-y-4">
+        {/* v43 economics summary */}
+        {(v43ExpectedReturn != null || v43Threshold != null || v43GateReject) && (
+          <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
+            <p className="font-medium text-foreground">Decision economics</p>
+            <ul className="list-inside list-disc space-y-0.5 tabular-nums">
+              {v43ExpectedReturn != null && Number.isFinite(v43ExpectedReturn) && (
+                <li>
+                  Expected return:{' '}
+                  <span className="text-foreground font-medium">
+                    {v43ExpectedReturn.toFixed(5)}
+                  </span>
+                </li>
+              )}
+              {v43Threshold != null && Number.isFinite(v43Threshold) && (
+                <li>
+                  Threshold:{' '}
+                  <span className="text-foreground">{v43Threshold.toFixed(5)}</span>
+                </li>
+              )}
+              {v43GateReject && v43GateReject !== '' && (
+                <li>
+                  Gate reject:{' '}
+                  <span className="text-foreground">{v43GateReject}</span>
+                </li>
+              )}
+            </ul>
           </div>
         )}
-        <Accordion type="single" collapsible className="w-full" aria-label="Reasoning steps">
-          {sortedSteps.map((step) => {
-            const stepConfidence = normalizeConfidenceToPercent(step.confidence)
-            const title = STEP_TITLES[step.step_number] ?? step.step_name
-            const summary = generateStepSummary(step)
 
-            return (
-              <AccordionItem
-                key={step.step_number}
-                value={`step-${step.step_number}`}
-              >
-                <AccordionTrigger>
-                  <div className="flex items-center justify-between w-full pr-4">
-                    <div className="flex flex-col items-start gap-1 text-left">
-                      <span className="text-sm font-medium">
-                        Step {step.step_number}: {title}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {summary}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-xs text-muted-foreground cursor-help"
-                        title={getConfidenceTooltip(step)}
-                      >
-                        {formatConfidence(stepConfidence)}
-                      </span>
-                      <div
-                        className="w-20 h-2 cursor-help"
-                        title={getConfidenceTooltip(step)}
-                      >
-                        <ConfidenceProgress value={stepConfidence} variant="reasoningStep" />
-                      </div>
-                    </div>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-3 pt-2">
-                    <div className="max-h-96 overflow-y-auto pr-2">
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
-                        {step.description}
-                      </p>
-                    </div>
-                    {step.evidence && step.evidence.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {step.evidence.map((evidence, index) => (
-                          <Badge
-                            key={index}
-                            variant="outline"
-                            className="text-[0.65rem]"
-                          >
-                            {evidence}
+        {/* Reasoning steps */}
+        {sortedSteps.length > 0 && (
+          <Accordion type="single" collapsible defaultValue="steps">
+            <AccordionItem value="steps">
+              <AccordionTrigger className="text-sm font-medium">
+                Reasoning steps ({sortedSteps.length})
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-3 mt-2">
+                  {sortedSteps.map((step) => {
+                    const pct = normalizeConfidenceToPercent(step.confidence)
+                    return (
+                      <div key={step.step_number} className="border rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            {stepStatusIcon(step.confidence)}
+                            <span className="text-sm font-medium">
+                              {step.step_number}. {step.step_name}
+                            </span>
+                          </div>
+                          <Badge variant="outline" className="text-xs tabular-nums shrink-0">
+                            {formatConfidence(pct)}
                           </Badge>
-                        ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground pl-6">{step.description}</p>
+                        <div className="pl-6">
+                          <ConfidenceProgress value={pct} className="h-1.5" />
+                        </div>
+                        {step.evidence && step.evidence.length > 0 && (
+                          <ul className="pl-6 space-y-0.5">
+                            {step.evidence.map((e, i) => (
+                              <li key={i} className="text-[10px] text-muted-foreground">
+                                • {e}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            )
-          })}
-        </Accordion>
-
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Card className="bg-background/40 border-border/60">
-            <CardContent className="py-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  Average step confidence
-                </span>
-                <span className="text-sm font-medium">
-                  {formatConfidence(averageStepConfidence)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-background/40 border-border/60">
-            <CardContent className="py-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  Consistency score
-                </span>
-                <span className="text-sm font-medium">
-                  {formatConfidence(consistencyScore)}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Model Reasoning Section - Integrated */}
-        {(modelConsensus || individualModelReasoning) && (
-          <div className="mt-4">
-            <Accordion type="single" collapsible defaultValue="">
-              <AccordionItem value="model-reasoning">
-                <AccordionTrigger className="text-left">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <span>Model Reasoning Details</span>
-                    <Badge variant="outline" className="text-xs">
-                      {(() => {
-                        const n = Array.isArray(modelConsensus) ? modelConsensus.length : 0
-                        return `${n} ${n === 1 ? 'Model' : 'Models'}`
-                      })()}
-                    </Badge>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="pt-2">
-                    <ModelReasoningView
-                      modelConsensus={modelConsensus}
-                      individualModelReasoning={individualModelReasoning}
-                      modelVersion={modelVersion}
-                      inferenceLatencyMs={inferenceLatencyMs}
-                    />
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-          </div>
+                    )
+                  })}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         )}
 
-        <Card className="mt-4 bg-accent/50 border-accent">
-          <CardHeader className="py-3">
-            <CardTitle className="text-sm font-semibold">
-              Conclusion
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-64 overflow-y-auto pr-2">
-              <p className="text-sm text-foreground whitespace-pre-wrap break-words">
-                {conclusionText}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Chain conclusion */}
+        {chainMeta?.conclusion && (
+          <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground mb-1">Conclusion</p>
+            <p>{chainMeta.conclusion}</p>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

@@ -25,15 +25,15 @@ export function SelfAwarenessPanel({ introspection, reflection }: SelfAwarenessP
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Self-Awareness</CardTitle>
+        <CardTitle className="text-base">Agent Diagnostics</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-xs">
         {introspection && (
           <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 space-y-1.5">
-            <p className="font-medium text-foreground text-sm">Decision introspection</p>
+            <p className="font-medium text-foreground text-sm">Decision context</p>
             <ul className="grid gap-1 tabular-nums text-muted-foreground sm:grid-cols-2">
               <li>
-                Policy:{' '}
+                Policy signal:{' '}
                 <span className="text-foreground font-medium">{introspection.policy_signal}</span>{' '}
                 ({formatPercent(introspection.policy_confidence)})
               </li>
@@ -56,12 +56,12 @@ export function SelfAwarenessPanel({ introspection, reflection }: SelfAwarenessP
               )}
               {introspection.v43_regime && (
                 <li>
-                  v43 regime: <span className="text-foreground">{introspection.v43_regime}</span>
+                  Regime: <span className="text-foreground">{introspection.v43_regime}</span>
                 </li>
               )}
               {introspection.v43_gate_reject && (
                 <li>
-                  v43 gate: <span className="text-foreground">{introspection.v43_gate_reject}</span>
+                  Gate reject: <span className="text-foreground">{introspection.v43_gate_reject}</span>
                 </li>
               )}
               {introspection.portfolio_guard_action && (
