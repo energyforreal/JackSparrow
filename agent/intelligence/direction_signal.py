@@ -15,8 +15,15 @@ _SIGNAL_TO_RETURN = {
     "STRONG_SELL": -0.025,
 }
 
+# Thesis confidence is already in [~0.6, 0.92]; avoid double-shrinking magnitude vs threshold.
+_CONFIDENCE_FLOOR = 0.5
+
 
 def compute_direction_signal(thesis: "ThesisVerdict") -> float:
+    """Map thesis signal to signed expected_return for IC heads."""
     base = _SIGNAL_TO_RETURN.get(str(thesis.signal).upper(), 0.0)
+    if base == 0.0:
+        return 0.0
     conf = float(getattr(thesis, "confidence", 0.0) or 0.0)
-    return float(base * conf)
+    scale = max(conf, _CONFIDENCE_FLOOR)
+    return float(base * scale)

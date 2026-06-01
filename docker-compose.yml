@@ -116,6 +116,7 @@ services:
       DELTA_EXCHANGE_API_KEY: ${DELTA_EXCHANGE_API_KEY}
       DELTA_EXCHANGE_API_SECRET: ${DELTA_EXCHANGE_API_SECRET}
       DELTA_EXCHANGE_BASE_URL: ${DELTA_EXCHANGE_BASE_URL:-https://cdn-ind.testnet.deltaex.org}
+      WEBSOCKET_URL: ${WEBSOCKET_URL:-wss://socket-ind.testnet.deltaex.org}
       TRADING_MODE: ${TRADING_MODE:-testnet}
       DELTA_ENV: ${DELTA_ENV:-india_testnet}
       # In-container path; override with AGENT_MODEL_DIR in root .env if bundle folder name changes

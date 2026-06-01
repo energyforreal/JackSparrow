@@ -1,4 +1,4 @@
-"""Setup quality score (0–1) from structure and thesis confidence."""
+"""Setup quality score (0–1) from structural features only."""
 
 from __future__ import annotations
 
@@ -10,8 +10,10 @@ if TYPE_CHECKING:
 
 def estimate_setup_quality(
     features: Dict[str, Any],
-    thesis_verdict: "ThesisVerdict",
+    thesis_verdict: "ThesisVerdict | None" = None,
 ) -> float:
+    """Structural setup quality; thesis confidence is applied elsewhere in the pipeline."""
+    _ = thesis_verdict
     adx = float(features.get("adx_14", 0.0) or 0.0)
     spread_bps = float(features.get("spread_bps", 99.0) or 99.0)
     squeeze = max(
@@ -22,5 +24,4 @@ def estimate_setup_quality(
     squeeze_clear = squeeze < 0.3
     adx_score = min(1.0, adx / 40.0)
     quality = adx_score * 0.5 + (0.25 if spread_ok else 0.0) + (0.25 if squeeze_clear else 0.0)
-    conf = float(getattr(thesis_verdict, "confidence", 0.0) or 0.0)
-    return float(max(0.0, min(1.0, quality * max(conf, 0.35))))
+    return float(max(0.0, min(1.0, quality)))

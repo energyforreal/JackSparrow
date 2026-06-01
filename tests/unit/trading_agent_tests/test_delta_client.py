@@ -20,6 +20,7 @@ assert spec and spec.loader
 delta_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(delta_module)
 DeltaExchangeClient = delta_module.DeltaExchangeClient
+DeltaExchangeWebSocketClient = delta_module.DeltaExchangeWebSocketClient
 DeltaExchangeError = delta_module.DeltaExchangeError
 
 
@@ -180,4 +181,22 @@ async def test_make_request_raises_on_http_error(monkeypatch):
 
     with pytest.raises(DeltaExchangeError):
         await client._make_request("GET", "/v2/tickers/BTCUSD", params={}, data=None)
+
+
+def test_websocket_auth_payload_uses_live_path_and_seconds(monkeypatch):
+    monkeypatch.setattr(delta_module.time, "time", lambda: 1700000000.0)
+    ws_client = DeltaExchangeWebSocketClient(
+        api_key="test-key",
+        api_secret="test-secret",
+        base_url="wss://socket-ind.testnet.deltaex.org",
+    )
+    auth = ws_client.build_websocket_auth_payload()
+    assert auth["type"] == "key-auth"
+    assert auth["payload"]["api-key"] == "test-key"
+    assert auth["payload"]["timestamp"] == "1700000000"
+    expected_message = "GET1700000000/live"
+    expected_signature = hmac.new(
+        b"test-secret", expected_message.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    assert auth["payload"]["signature"] == expected_signature
 

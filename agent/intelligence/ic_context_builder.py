@@ -7,6 +7,7 @@ from typing import Any, Dict, Mapping, Tuple
 import numpy as np
 
 from agent.core.agent_thesis_engine import AgentThesisEngine, ThesisVerdict
+from agent.core.config import settings
 from agent.intelligence.direction_signal import compute_direction_signal
 from agent.intelligence.mtf_synthesizer import compute_mtf_alignment
 from agent.intelligence.regime_classifier import classify_regime
@@ -37,23 +38,52 @@ def head_confidence(edge: float, threshold: float, unc_scale: float) -> float:
 
 
 def _thesis_from_htf_bias(features: Dict[str, Any], prefix: str) -> ThesisVerdict:
-    """Lightweight HTF bias thesis for MTF alignment (no full rule stack)."""
+    """Lightweight HTF bias thesis for MTF alignment (thresholds from settings)."""
+    adx_min = float(getattr(settings, "agent_thesis_htf_adx_min", 15.0) or 15.0)
+    trend_bull = float(getattr(settings, "agent_thesis_htf_trend_bull_min", 0.002) or 0.002)
+    trend_bear = float(getattr(settings, "agent_thesis_htf_trend_bear_max", -0.002) or -0.002)
+    rsi_bull = float(getattr(settings, "agent_thesis_htf_rsi_bull_min", 52.0) or 52.0)
+    rsi_bear = float(getattr(settings, "agent_thesis_htf_rsi_bear_max", 48.0) or 48.0)
+    htf_conf = float(getattr(settings, "agent_thesis_htf_confidence", 0.55) or 0.55)
+
     if prefix == "h1":
         trend = float(features.get("h1_trend", 0.0) or 0.0)
         rsi = float(features.get("h1_rsi_14", 50.0) or 50.0)
         adx = float(features.get("h1_adx", 0.0) or 0.0)
+        tag = "h1"
     else:
         trend = float(features.get("h_trend", 0.0) or 0.0)
         rsi = float(features.get("h_rsi_14", 50.0) or 50.0)
         adx = float(features.get("adx_14", 0.0) or 0.0)
+        tag = "h"
 
-    if adx < 15:
-        return ThesisVerdict(signal="HOLD", confidence=0.2, position_size=0.0, reason_codes=["ic_htf_flat"])
-    if trend > 0.002 and rsi > 52:
-        return ThesisVerdict(signal="BUY", confidence=0.55, position_size=0.03, reason_codes=["ic_htf_bull"])
-    if trend < -0.002 and rsi < 48:
-        return ThesisVerdict(signal="SELL", confidence=0.55, position_size=0.03, reason_codes=["ic_htf_bear"])
-    return ThesisVerdict(signal="HOLD", confidence=0.25, position_size=0.0, reason_codes=["ic_htf_neutral"])
+    if adx < adx_min:
+        return ThesisVerdict(
+            signal="HOLD",
+            confidence=0.2,
+            position_size=0.0,
+            reason_codes=[f"ic_htf_{tag}_flat"],
+        )
+    if trend > trend_bull and rsi > rsi_bull:
+        return ThesisVerdict(
+            signal="BUY",
+            confidence=htf_conf,
+            position_size=0.03,
+            reason_codes=[f"ic_htf_{tag}_bull"],
+        )
+    if trend < trend_bear and rsi < rsi_bear:
+        return ThesisVerdict(
+            signal="SELL",
+            confidence=htf_conf,
+            position_size=0.03,
+            reason_codes=[f"ic_htf_{tag}_bear"],
+        )
+    return ThesisVerdict(
+        signal="HOLD",
+        confidence=0.25,
+        position_size=0.0,
+        reason_codes=[f"ic_htf_{tag}_neutral"],
+    )
 
 
 def build_ic_prediction_context(

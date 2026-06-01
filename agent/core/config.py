@@ -54,7 +54,8 @@ DELTA_TESTNET_ALLOWED_HOSTS: Tuple[str, ...] = (
     "api.testnet.delta.exchange",
 )
 DELTA_TESTNET_BASE_URL_DEFAULT = "https://cdn-ind.testnet.deltaex.org"
-DELTA_TESTNET_WEBSOCKET_URL_DEFAULT = "wss://cdn-ind.testnet.deltaex.org"
+# REST CDN host (cdn-ind) is not the WebSocket endpoint — use socket-ind for WSS.
+DELTA_TESTNET_WEBSOCKET_URL_DEFAULT = "wss://socket-ind.testnet.deltaex.org"
 
 
 def _root_env_files() -> tuple[str, ...] | None:
@@ -2090,6 +2091,42 @@ class Settings(BaseSettings):
     agent_thesis_trend_hurst_min: float = Field(
         default=0.52,
         env="AGENT_THESIS_TREND_HURST_MIN",
+    )
+    agent_thesis_trend_short_rsi_lo: float = Field(
+        default=35.0,
+        env="AGENT_THESIS_TREND_SHORT_RSI_LO",
+        description="Min RSI for short trend-continuation thesis.",
+    )
+    agent_thesis_trend_short_rsi_hi: float = Field(
+        default=58.0,
+        env="AGENT_THESIS_TREND_SHORT_RSI_HI",
+        description="Max RSI for short trend-continuation thesis.",
+    )
+    agent_thesis_htf_adx_min: float = Field(
+        default=15.0,
+        env="AGENT_THESIS_HTF_ADX_MIN",
+        description="Min ADX for IC HTF bias (15m/1h) alignment legs.",
+    )
+    agent_thesis_htf_trend_bull_min: float = Field(
+        default=0.002,
+        env="AGENT_THESIS_HTF_TREND_BULL_MIN",
+    )
+    agent_thesis_htf_trend_bear_max: float = Field(
+        default=-0.002,
+        env="AGENT_THESIS_HTF_TREND_BEAR_MAX",
+    )
+    agent_thesis_htf_rsi_bull_min: float = Field(
+        default=52.0,
+        env="AGENT_THESIS_HTF_RSI_BULL_MIN",
+    )
+    agent_thesis_htf_rsi_bear_max: float = Field(
+        default=48.0,
+        env="AGENT_THESIS_HTF_RSI_BEAR_MAX",
+    )
+    agent_thesis_htf_confidence: float = Field(
+        default=0.55,
+        env="AGENT_THESIS_HTF_CONFIDENCE",
+        description="Confidence assigned to IC HTF bias BUY/SELL legs.",
     )
     agent_thesis_mr_rsi_max: float = Field(
         default=32.0,

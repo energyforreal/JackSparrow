@@ -535,11 +535,21 @@ class AgentThesisEngine:
         h = _feat(features, "h_trend")
         rsi = _feat(features, "rsi_14", 50.0)
         hurst = _feat(features, "hurst_60", 0.5)
-        rsi_lo = float(getattr(settings, "agent_thesis_trend_rsi_lo", 40.0) or 40.0)
-        rsi_hi = float(getattr(settings, "agent_thesis_trend_rsi_hi", 65.0) or 65.0)
+        rsi_short_lo = float(
+            getattr(settings, "agent_thesis_trend_short_rsi_lo", 35.0) or 35.0
+        )
+        rsi_short_hi = float(
+            getattr(settings, "agent_thesis_trend_short_rsi_hi", 58.0) or 58.0
+        )
         hurst_min = float(getattr(settings, "agent_thesis_trend_hurst_min", 0.52) or 0.52)
 
-        if h1 >= 0 or h >= 0 or rsi < rsi_lo or rsi > rsi_hi or hurst < hurst_min:
+        if (
+            h1 >= 0
+            or h >= 0
+            or rsi < rsi_short_lo
+            or rsi > rsi_short_hi
+            or hurst < hurst_min
+        ):
             return None
 
         conf = min(0.88, 0.6 + 0.15 * min(abs(h1) * 100, 1.0))

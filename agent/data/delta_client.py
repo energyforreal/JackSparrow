@@ -1195,6 +1195,8 @@ class DeltaExchangeClient:
 class DeltaExchangeWebSocketClient:
     """WebSocket client for real-time Delta Exchange data streaming."""
 
+    WS_AUTH_PATH = "/live"
+
     def __init__(self, api_key: str, api_secret: str, base_url: Optional[str] = None,
                  max_reconnect_attempts: int = 5, reconnect_delay: float = 5.0,
                  heartbeat_interval: float = 30.0,
@@ -1246,8 +1248,28 @@ class DeltaExchangeWebSocketClient:
                     reason=reason,
                 )
 
+    def build_websocket_auth_payload(self) -> Dict[str, Any]:
+        """Build Delta ``key-auth`` payload (GET + unix_seconds + /live)."""
+        method = "GET"
+        path = self.WS_AUTH_PATH
+        timestamp = str(int(time.time()))
+        signature_data = f"{method}{timestamp}{path}"
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"),
+            signature_data.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return {
+            "type": "key-auth",
+            "payload": {
+                "api-key": self.api_key,
+                "signature": signature,
+                "timestamp": timestamp,
+            },
+        }
+
     async def connect(self) -> None:
-        """Establish WebSocket connection with authentication."""
+        """Establish WebSocket connection and send Delta key-auth message."""
         self._manual_disconnect = False
         try:
             if not self._credentials_valid:
@@ -1258,26 +1280,16 @@ class DeltaExchangeWebSocketClient:
                 )
                 return
 
-            # Generate authentication headers for WebSocket
-            timestamp = str(int(time.time() * 1000))
-            method = "GET"
-            endpoint = "/socket.io/"
-
-            # Create signature for authentication
-            message = f"{method}{endpoint}{timestamp}"
-            signature = hmac.new(
-                self.api_secret.encode('utf-8'),
-                message.encode('utf-8'),
-                hashlib.sha256
-            ).hexdigest()
-
-            # WebSocket URL with authentication parameters
-            auth_url = f"{self.base_url}?api-key={self.api_key}&signature={signature}&timestamp={timestamp}"
-
             logger.info("delta_websocket_connecting", url=self.base_url)
 
-            # Use circuit breaker to protect the connection
-            await self._circuit_breaker.call(self._connect_websocket, auth_url)
+            await self._circuit_breaker.call(self._connect_websocket, self.base_url)
+
+            auth_payload = self.build_websocket_auth_payload()
+            await self.websocket.send(json.dumps(auth_payload))
+            logger.info(
+                "delta_websocket_key_auth_sent",
+                auth_path=self.WS_AUTH_PATH,
+            )
 
             self.connected = True
             logger.info("delta_websocket_connected")
@@ -1507,6 +1519,17 @@ class DeltaExchangeWebSocketClient:
         """Process incoming WebSocket message."""
         try:
             message_type = message.get("type", "unknown")
+
+            if message_type in ("key-auth", "auth", "authenticated"):
+                success = message.get("success")
+                if success is False:
+                    logger.error(
+                        "delta_websocket_auth_rejected",
+                        payload=message.get("payload") or message,
+                    )
+                else:
+                    logger.info("delta_websocket_auth_confirmed", type=message_type)
+                return
 
             # Handle subscription confirmations
             if message_type == "subscription":

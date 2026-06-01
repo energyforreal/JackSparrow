@@ -202,6 +202,14 @@ class RuleBasedIntelligenceNode(MCPModelNode):
         )
 
         use_cols = [c for c in self._feature_names if c in df_feat.columns]
+        if len(use_cols) < len(self._feature_names) * 0.9:
+            missing = sorted(set(self._feature_names) - set(use_cols))[:12]
+            logger.warning(
+                "ic_feature_columns_partial",
+                found=len(use_cols),
+                expected=len(self._feature_names),
+                missing_sample=missing,
+            )
         return MCPModelPrediction(
             model_name=self._model_name,
             model_version=self._model_version,
