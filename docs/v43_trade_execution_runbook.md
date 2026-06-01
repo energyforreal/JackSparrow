@@ -1,6 +1,6 @@
 # JackSparrow v43 — trade execution runbook
 
-Operational guide for tuning v43 entry frequency while keeping rollback discipline (**one environment knob change per deploy window**). Pair with [`.env.example`](../.env.example) and code in [`agent/core/v43_signal_gates.py`](../agent/core/v43_signal_gates.py), [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py), [`agent/core/config.py`](../agent/core/config.py).
+Operational guide for tuning **v43 signal gates** and entry frequency while keeping rollback discipline (**one environment knob change per deploy window**). On branch **NO-ML**, the **Intelligence Component (IC)** drives predictions at runtime (no pickle load); gate env vars in [`agent/core/v43_signal_gates.py`](../agent/core/v43_signal_gates.py) still apply. Pair with [`.env.example`](../.env.example), [ML models – IC discovery](03-ml-models.md#runtime-discovery-no-ml-intelligence-component), and [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py).
 
 ---
 
@@ -12,10 +12,10 @@ Operational guide for tuning v43 entry frequency while keeping rollback discipli
 |------|-----------------|--------|
 | `TRADING_MODE` | `.env` / compose | Must be `testnet` (local paper simulation removed). |
 | `EXCHANGE_BACKEND` | `.env` | Must be `delta_live` (orders hit Delta testnet APIs). |
-| Delta cluster | `DELTA_EXCHANGE_BASE_URL`, `WEBSOCKET_URL` | Must both point at India testnet (see `.env.example`). |
-| Model bundle | `MODEL_DIR`, `AGENT_MODEL_DIR` | Must contain `metadata_v43.json` with **`horizons{}`** (2/6/12/24 bars) and `model_artifact_v43.pkl` (`MultiHeadBundle`). |
-| v43 artifact | `JACKSPARROW_V43_ARTIFACT_BASENAME` | Default in code: `model_artifact_v43_patched.pkl`. Confirm file exists under `MODEL_DIR`. |
-| Threshold patch | Agent startup logs | When using an unpatched artifact, runtime may still apply a patch — watch for `v43_threshold_patch_applied` or related model-load logs in [`jack_sparrow_v43_node.py`](../agent/models/jack_sparrow_v43_node.py). |
+| Delta cluster | `DELTA_EXCHANGE_BASE_URL`, `WEBSOCKET_URL` | REST on CDN host; WSS on **socket** host (see `.env.example`). |
+| Model bundle (NO-ML) | `MODEL_DIR`, `IC_MODE` | `metadata_ic.json` under `JackSparrow_IC_BTCUSD/`; logs **`model_discovered_ic`**. |
+| Model bundle (archived v43) | `metadata_v43.json` + pickles | Only on forks that still load XGBoost artefacts. |
+| WSS auth | Agent logs | `delta_websocket_key_auth_sent` / `delta_websocket_auth_rejected` — whitelist host IP on API key if needed. |
 
 ### Success metrics (pick 2–3 and record “before” values)
 

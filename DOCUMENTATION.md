@@ -14,7 +14,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 |---|----------|--------|
 | 01 | [Architecture](docs/01-architecture.md) | System design, tiers, communication, startup |
 | 02 | [MCP layer](docs/02-mcp-layer.md) | Feature / model / reasoning protocols |
-| 03 | [ML models](docs/03-ml-models.md) | Discovery (**JackSparrow v43** `metadata_v43.json`), training notebook (`jacksparrow_v43_delta_india_training.ipynb`), **`feature_store/jacksparrow_v43_contract.py`** parity, optional **SHORT execution** gate, Docker **`MODEL_DIR` / `AGENT_MODEL_DIR`**, optional **adaptive retrain** (v15 parquet only) |
+| 03 | [ML models](docs/03-ml-models.md) | **IC / NO-ML** (`metadata_ic.json`, `RuleBasedIntelligenceNode`), v43 feature contract, archived XGBoost bundles, Delta **REST vs WSS** hosts, Docker **`MODEL_DIR` / `WEBSOCKET_URL`**, optional **adaptive retrain** (v15 parquet only) |
 | 04 | [Features](docs/04-features.md) | Product capabilities, signal triggers |
 | 05 | [Logic & reasoning](docs/05-logic-reasoning.md) | Six-step chain, consensus, vector memory, **deterministic self-awareness** (introspection / outcome backfill / advisory reflection) |
 | 06 | [Backend](docs/06-backend.md) | FastAPI, REST, WebSocket contract, services |
@@ -27,7 +27,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 13 | [Debugging](docs/13-debugging.md) | Diagnostics, Windows/local issues |
 | 14 | [Project rules](docs/14-project-rules.md) | Standards and contribution |
 | 15 | [Audit report](docs/15-audit-report.md) | Audit workflow, gaps, remediation, ML confidence checks |
-| 16 | [v43 trade execution runbook](docs/v43_trade_execution_runbook.md) | v43 gate tuning, metrics, rollback, log analysis script |
+| 16 | [v43 trade execution runbook](docs/v43_trade_execution_runbook.md) | v43 **signal gate** tuning (IC + archived ML), metrics, rollback, log analysis |
 
 ---
 
@@ -47,7 +47,8 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 |------|----------------|
 | Start / validate stack | [Build guide – Project commands](docs/11-build-guide.md#project-commands), [Deployment – Validation](docs/10-deployment.md#validation-and-monitoring-commands) |
 | Docker runtime ports & paths | [Deployment – Docker runtime topology](docs/10-deployment.md#docker-runtime-topology-reference) |
-| Model bundles & `MODEL_DIR` | [ML models – Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults), [Smoke – jacksparrow v43](docs/jacksparrow_v43_smoke.md) |
+| Model bundles & `MODEL_DIR` | [ML models – IC discovery](docs/03-ml-models.md#runtime-discovery-no-ml-intelligence-component), [Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults) |
+| Delta WebSocket (testnet) | [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), `.env.example` (`socket-ind` host, `key-auth`) |
 | Adaptive drift / warm-start retrain (v15) | [ML models – Runtime adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional), [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), [.env.example](.env.example) |
 | WebSocket message shape | [Backend – WebSocket](docs/06-backend.md#websocket-protocol), [Frontend – WebSocket](docs/07-frontend.md#websocket-integration) |
 | Self-awareness flags & telemetry | [Logic & reasoning – Self-awareness](docs/05-logic-reasoning.md#deterministic-self-awareness), [Canonical events](docs/canonical_events.md), `.env.example` |

@@ -355,8 +355,11 @@ cp .env.example .env
 These variables can be added to the root `.env` file if you need to customize agent behavior:
 
 ```bash
-# Model Configuration — JackSparrow v43 bundle (must contain metadata_v43.json)
-MODEL_DIR=./agent/model_storage/JackSparrow_v43_models_BTCUSD
+# Model Configuration — Intelligence Component (metadata_ic.json only)
+IC_MODE=true
+MODEL_DIR=./agent/model_storage/JackSparrow_IC_BTCUSD
+AGENT_POLICY_MODE=ml_or_thesis
+REQUIRE_ML_SIGNAL_FOR_ORDERS=false
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 
@@ -819,8 +822,11 @@ python scripts/validate_model_files.py
 # Or run pre-deployment validation (legacy v15 pipeline bundles: 5m/15m metadata + pkl)
 python scripts/validate_models_before_deployment.py
 
-# Primary v43 smoke — requires closed-bar feature path + metadata_v43.json bundle
-python scripts/smoke_test_v43.py
+# IC unit tests (NO-ML default)
+pytest tests/unit/test_intelligence_ic_node.py tests/unit/test_intelligence_ic_signals.py tests/unit/trading_agent_tests/test_model_discovery.py -q
+
+# Archived v43 smoke (pickle bundles only)
+# python scripts/smoke_test_v43.py
 
 # With backend running — REST smoke (health, models/status) for historical v15 tooling
 python scripts/smoke_test_v15.py
@@ -828,10 +834,11 @@ python scripts/smoke_test_v15.py
 
 See [ML Models Documentation](03-ml-models.md#model-training) for detailed training guide.
 
-**Post-train parity checklist (required before deployment)**:
-1. **`MODEL_DIR`** must be the **JackSparrow v43** bundle directory containing **`metadata_v43.json`** and the pickle artefacts.
-2. Confirm **`metadata_v43.json`** lists **`features`** in the same order/count as **`V43_CANONICAL_FEATURES`** and includes **`horizons`** for 2/6/12/24-bar heads.
-3. Run `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py -q` (plus `test_jacksparrow_v43_inference.py` / `test_jack_sparrow_v43_node_ctx.py` as needed).
+**Pre-deploy parity checklist (NO-ML / IC)**:
+1. **`MODEL_DIR`** must contain **`metadata_ic.json`** (default: **`JackSparrow_IC_BTCUSD/`**).
+2. Run `pytest tests/unit/test_intelligence_ic_node.py tests/unit/test_intelligence_ic_signals.py tests/unit/trading_agent_tests/test_model_discovery.py -q`.
+3. Run `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py -q` to lock the feature contract used by the IC matrix builder.
+4. After `docker compose up`, confirm health shows **`model_format`: `jacksparrow_ic`** and agent logs show **`model_discovered_ic`**.
 
 **Historical v5 / expanded bundles** (when validating archived exports): confirm `metadata_*` includes `features` / `features_required` matching **`feature_store/feature_registry.py`** **`EXPANDED_FEATURE_LIST`** order and count where applicable; run `pytest tests/unit/test_feature_parity.py -q`.
 

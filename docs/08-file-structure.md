@@ -904,28 +904,32 @@ pydantic==2.5.0
 
 ### Model Storage Location
 
-JackSparrow ships trained ML artefacts under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (**`AGENT_MODEL_DIR`** in Docker). **Current discovery loads a single JackSparrow v43 bundle**: path must contain **`metadata_v43.json`**. The checked-in default bundle root is **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`**; promote Colab exports (`metadata_v43.json`, `model_artifact_v43.pkl`) there unless you point **`MODEL_DIR`** at another folder. Older layouts with **`metadata_BTCUSD_*.json`** remain in the tree as **historical** exports; **`MODEL_FORMAT` defaults to `jacksparrow_v43`** (health/integration label—not a loader switch).
+JackSparrow stores intelligence bundles under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (**`AGENT_MODEL_DIR`** in Docker). **Current discovery (NO-ML)** loads **`metadata_ic.json`** and registers **`RuleBasedIntelligenceNode`**. The checked-in default is **`agent/model_storage/JackSparrow_IC_BTCUSD/`**. Archived v43 pickle folders may remain on disk; **`MODEL_FORMAT` defaults to `jacksparrow_ic`** in health payloads.
 
 **Typical layouts**:
 
-- **v43 regression (Compose default)**: **`JackSparrow_v43_models_BTCUSD/`** — flat folder: **`metadata_v43.json`** + **`model_artifact_v43*.pkl`** (+ optional `feature_engineer.pkl`, `regime_models_v43.pkl`) — **`JackSparrowV43Node`**.
+- **IC (Compose default)**: **`JackSparrow_IC_BTCUSD/`** — **`metadata_ic.json`** only; logic in **`agent/intelligence/`**.
+- **v43 regression (archived)**: **`JackSparrow_v43_models_BTCUSD/`** — **`metadata_v43.json`** + **`model_artifact_v43*.pkl`** — not loaded by current discovery.
 - **Historical v5 / v4 ensemble** (entry + exit joblibs per timeframe), e.g. `jacksparrow_v5_BTCUSD_2026-03-19/` — **`V4EnsembleNode`** in forks only.
 - **Historical v15 pipeline** (single `pipeline_{tf}_v14.pkl` per TF), e.g. `jacksparrow_v15_BTCUSD_2026-04-05/{5m,15m}/` — retained for parquet **adaptive retrain**, not paired with today's v43 **`ModelDiscovery`**.
 
-Example v43 tree:
+Example IC tree (production):
+
+```
+agent/model_storage/JackSparrow_IC_BTCUSD/
+└── metadata_ic.json               # horizon thresholds + feature contract reference
+```
+
+Example archived v43 tree:
 
 ```
 agent/model_storage/JackSparrow_v43_models_BTCUSD/
-├── metadata_v43.json              # promotion metadata + validation_metrics
-├── model_artifact_v43.pkl         # Colab export (base)
-├── model_artifact_v43_patched.pkl # runtime default (patch script output)
-├── model_artifact_v43_old_*.pkl   # local rollback copies (optional, not always in git)
-├── metadata_v43_old_*.json
-├── feature_engineer.pkl           # optional sidecar
-└── regime_models_v43.pkl          # optional
+├── metadata_v43.json
+├── model_artifact_v43.pkl
+└── ...
 ```
 
-Promote Colab exports with [`scripts/patch_v43_model_artifact.py`](../scripts/patch_v43_model_artifact.py); see [ML models — Operational Workflow](03-ml-models.md#operational-workflow-bundle-first).
+See [ML models — Runtime discovery](03-ml-models.md#runtime-discovery-no-ml-intelligence-component).
 
 Example legacy v5 tree:
 
@@ -949,7 +953,7 @@ agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/
 
 ### Model Discovery
 
-- **`agent/models/model_discovery.py`** resolves **`MODEL_DIR/metadata_v43.json`** and registers **`JackSparrowV43Node`** (`MODEL_AUTO_REGISTER=true` by default). **`MODEL_PATH` is ignored.**
+- **`agent/models/model_discovery.py`** resolves **`MODEL_DIR/metadata_ic.json`** when **`IC_MODE=true`** and registers **`RuleBasedIntelligenceNode`**. **`MODEL_PATH` is ignored.**
 - Legacy recursive scans for **`metadata_BTCUSD_*.json`** apply only when running an older checkout or patched discovery—see **[ML Models](03-ml-models.md#historical-multi-node-flow-forks-only)**.
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).

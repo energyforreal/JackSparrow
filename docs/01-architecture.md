@@ -47,6 +47,7 @@ The Data Layer is responsible for:
 - Retrieves historical OHLCV data for analysis
 - Implements circuit breakers for API failures
 - Caches frequently accessed data
+- **Delta WebSocket**: connect to **`WEBSOCKET_URL`** (India testnet: `wss://socket-ind.testnet.deltaex.org` — not the REST CDN host). After connect, send **`key-auth`** signed as `GET{unix_seconds}/live`. Falls back to REST polling when WSS is down or auth fails (e.g. IP not whitelisted on the API key).
 
 **Feature Store (MCP Feature Server)**
 - Computes technical indicators and ML features
@@ -70,11 +71,11 @@ The Data Layer is responsible for:
 
 The Intelligence Layer contains the "brain" of the trading agent:
 
-**Signal Generation Engine**
-- Multi-model ML inference system
-- Ensemble of models: XGBoost, LightGBM, LSTM, Transformer, Random Forest
-- Parallel model execution
-- Model health monitoring
+**Signal Generation Engine (Intelligence Component — default)**
+- **`RuleBasedIntelligenceNode`** (`agent/intelligence/`) — rule-based regime, direction, MTF, setup quality, uncertainty (no pickle inference on branch **NO-ML**)
+- v43 feature matrix + **`v43_signal_gates`** at runtime; outputs **`multi_horizon_heads`** for MCP orchestrator compatibility
+- Discovery via **`metadata_ic.json`** in **`MODEL_DIR`** when **`IC_MODE=true`**
+- Legacy multi-model ML ensembles (XGBoost, LightGBM, LSTM, etc.) are **archived** — see [ML models](03-ml-models.md#runtime-discovery-no-ml-intelligence-component)
 
 **Decision Engine (MCP Reasoning Engine)**
 - 6-step structured reasoning chain
@@ -341,9 +342,9 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 
 #### Market Data Service
 - **Responsibility**: Fetch and cache market data from Delta Exchange
-- **Protocol**: Delta Exchange REST API
+- **Protocol**: Delta Exchange REST API + optional WSS (`DeltaExchangeWebSocketClient` in `agent/data/delta_client.py`)
 - **Dependencies**: Delta Exchange API, Redis cache
-- **Output**: OHLCV data, ticker data
+- **Output**: OHLCV data, ticker data, `MarketTickEvent` / `CandleClosedEvent`
 
 #### Vector Memory Store
 - **Responsibility**: Store and retrieve similar decision contexts
@@ -354,10 +355,10 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 ### Intelligence Layer Components
 
 #### MCP Model Registry
-- **Responsibility**: Manage all ML model nodes (v43 scalar gate + optional MSO v50 market-state oracle)
+- **Responsibility**: Register intelligence nodes discovered from **`MODEL_DIR`** (default: **`RuleBasedIntelligenceNode`** via **`metadata_ic.json`**)
 - **Protocol**: MCP Model Protocol
-- **Dependencies**: Model nodes, Performance tracker
-- **Output**: Aggregated model predictions; MSO adds `market_state` intelligence per horizon for policy synthesis
+- **Dependencies**: Model discovery, feature server, performance tracker
+- **Output**: Model predictions packaged as MCP evidence for policy + reasoning (archived v43 XGBoost / MSO paths documented in [ML models](03-ml-models.md))
 
 #### MCP Reasoning Engine
 - **Responsibility**: Generate structured reasoning chains

@@ -19,9 +19,11 @@ alwaysApply: false
 ## Environment Variables
 
 - **`MODEL_FORMAT`**: `jacksparrow_ic` (health/API label).
+- **`WEBSOCKET_URL`**: `wss://socket-ind.testnet.deltaex.org` for India testnet (not the REST CDN host).
 - **`AGENT_POLICY_MODE`**: `ml_or_thesis` or `thesis_only` recommended.
 - **`REQUIRE_ML_SIGNAL_FOR_ORDERS`**: `false` when IC drives the pipeline.
 - **`REQUIRE_V43_GATES_FOR_ENTRY`**: `false` or ensure IC populates `final_long`/`final_short`.
+- **Docker**: `docker-compose.yml` agent service sets `WEBSOCKET_URL` and `MODEL_DIR` defaults when unset.
 
 ## Model Implementation
 

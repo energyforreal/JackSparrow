@@ -112,6 +112,8 @@ DELTA_EXCHANGE_BASE_URL=https://cdn-ind.testnet.deltaex.org
 WEBSOCKET_URL=wss://socket-ind.testnet.deltaex.org
 ```
 
+REST uses the **CDN host** (`cdn-ind`); market **WebSocket** uses the **socket host** (`socket-ind`). Compose sets `WEBSOCKET_URL` when unset. Whitelist your host egress IP in Delta testnet API settings if private-channel auth is rejected.
+
 ### Monitoring Dashboard
 
 The startup system includes a real-time monitoring dashboard that provides:
@@ -134,7 +136,7 @@ All 24/7 services now run via Docker images orchestrated with Compose.
 2. Prepare persistent host paths before the first deployment:
 
    ```bash
-   mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/xgboost
+   mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_IC_BTCUSD
    touch kubera_pokisham.db
    ```
 
@@ -162,15 +164,19 @@ All 24/7 services now run via Docker images orchestrated with Compose.
 
 The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature server on **`8002`**, agent WS on **`8003`** per default compose ports), FastAPI backend (`8000`), and Next.js frontend (`3000`). Named volumes keep Postgres and Redis durable, while bind mounts (`./agent/model_storage`, `./logs/*`, `./kubera_pokisham.db`) keep artifacts accessible on the host.
 
-## Model Training
+## Intelligence Component (NO-ML default)
 
-Inference loads a **JackSparrow v43 regression bundle**: point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_v43_models_BTCUSD/`** (must contain **`metadata_v43.json`** plus the pickled artefacts). Docker Compose defaults **`MODEL_DIR`** from **`AGENT_MODEL_DIR`** to **`/app/agent/model_storage/JackSparrow_v43_models_BTCUSD`** unless you override it. Train and export v43 bundles from **`notebooks/jacksparrow_v43_delta_india_training.ipynb`** (Google Colab or local Jupyter); keep **`features`** order aligned with **`feature_store/jacksparrow_v43_contract.py`**. Historical **v15** / **v5** bundles may still exist under **`agent/model_storage/`** for archival tests and **v15 parquet adaptive retrain**, but they are **not** multi-node discovery peers in this checkout—see **[ML models](docs/03-ml-models.md#runtime-discovery-jacksparrow-v43--current-branch)** and **[Bundle profiles](docs/03-ml-models.md#bundle-profiles-and-docker-defaults)**.
+Inference uses the **rule-based Intelligence Component (IC)** — no pickle load at runtime:
 
-**Optional runtime adaptive retrain (v15 parquet only)**: KS drift + warm-start XGBoost beside **`metadata_BTCUSD_*.json`**; does **not** mutate the v43 weights. Configure **`ADAPTIVE_RETRAIN_*`** in `.env` (see [.env.example](.env.example) and [ML models – adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional)).
+- **`MODEL_DIR`** → **`agent/model_storage/JackSparrow_IC_BTCUSD/`** (must contain **`metadata_ic.json`** only).
+- **`IC_MODE=true`**, **`AGENT_POLICY_MODE=ml_or_thesis`**, **`REQUIRE_ML_SIGNAL_FOR_ORDERS=false`** (see [.env.example](.env.example)).
+- Features: same v43 contract (`feature_store/jacksparrow_v43_contract.py`), built by **`jacksparrow_v43_build_matrix.py`**, scored by **`agent/intelligence/`** modules.
 
-See [ML Models Documentation](docs/03-ml-models.md) for contracts, discovery, training, and adaptive retrain.
+Docker Compose defaults **`MODEL_DIR`** from **`AGENT_MODEL_DIR`** to **`/app/agent/model_storage/JackSparrow_IC_BTCUSD`** and sets **`WEBSOCKET_URL`** to **`wss://socket-ind.testnet.deltaex.org`** when unset.
 
-Legacy v15 / v5 / v6 Colab flows are described in **[ML models](docs/03-ml-models.md)**; older training notebooks were removed from the repo in favour of **`notebooks/jacksparrow_v43_delta_india_training.ipynb`**.
+Archived **v43 XGBoost** bundles and training notebooks are documented under **[ML models – archived v43](docs/03-ml-models.md#archived-jacksparrow-v43-xgboost--mso-v50)**. Historical **v15** / **v5** artefacts may remain for parity tests and optional **v15 parquet adaptive retrain** only.
+
+See [ML Models Documentation](docs/03-ml-models.md) for discovery, Docker bundle layout, and troubleshooting.
 
 ## Testing
 

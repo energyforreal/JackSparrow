@@ -1,5 +1,7 @@
 # JackSparrow v43 smoke checklist
 
+> **Archived:** This smoke guide applies to **v43 XGBoost pickle** bundles only. On branch **NO-ML**, use **`JackSparrow_IC_BTCUSD/metadata_ic.json`** and `pytest tests/unit/test_intelligence_ic_node.py` instead ([ML models — IC](03-ml-models.md#runtime-discovery-no-ml-intelligence-component)).
+
 Run with **`MODEL_DIR`** set to **`agent/model_storage/JackSparrow_v43_models_BTCUSD`** (or your custom bundle folder—**not** a parent that lacks `metadata_v43.json`). Ensure Delta credentials are set. Optional: **`JACKSPARROW_V43_SHORT_EXECUTION_ENABLED=true`** if you are explicitly testing symmetric shorts (default **OFF**). **`JACKSPARROW_V43_MODE_ENABLED`** is retained for env compatibility (default **true**, marked deprecated in **`agent/core/config.py`** because v43 is the only path). See [`.env.example`](../.env.example).
 
 After Colab’s **`jacksparrow_v43_bundle.zip`** unpack (e.g. `%USERPROFILE%\Downloads\jacksparrow_v43_bundle(1)\`):

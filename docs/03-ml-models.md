@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes how ML models are managed, uploaded, discovered, and integrated into **JackSparrow's** AI reasoning system. The agent intelligently interacts with models to understand their capabilities and reason with them for better trading signals.
+This document describes how intelligence bundles are managed, discovered, and integrated into **JackSparrow's** AI reasoning system. On branch **NO-ML**, runtime uses the **Intelligence Component (IC)** — rule-based signals with the v43 feature contract — not pickle-based XGBoost inference. Archived ML training and v43 bundle sections remain for reference and forks.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -48,20 +48,17 @@ Point **`MODEL_DIR`** at the bundle directory containing **`metadata_v43.json`**
 
 ## Model Storage Overview
 
-JackSparrow ships trained artefacts under **`agent/model_storage/`**. On startup the agent discovers the **JackSparrow v43** bundle in `MODEL_DIR` and registers **`JackSparrowV43Node`**.
+JackSparrow ships bundles under **`agent/model_storage/`**. On branch **NO-ML**, startup discovers **`metadata_ic.json`** in **`MODEL_DIR`** and registers **`RuleBasedIntelligenceNode`**. Archived v43 pickle bundles remain on disk for reference but are not loaded by current discovery.
 
-### `agent/models` Redundancy Audit (2026-04-01)
+### `agent/models` layout (NO-ML branch)
 
-Current runtime-critical files in `agent/models/` include:
+Current runtime-critical paths:
 
-- `jack_sparrow_v43_node.py` / `jacksparrow_v43_inference.py` / `v43_pickle_shims.py` (**v43**)
-- `model_discovery.py`
-- `mcp_model_registry.py`
-- `mcp_model_node.py`
-- `v4_ensemble_node.py`
-- `consolidated_model_node.py` (single-model cutover mode)
-- `xgboost_node.py`
-- `advanced_consensus.py`
+- **`agent/intelligence/`** — IC modules + **`ic_node.py`** (`RuleBasedIntelligenceNode`)
+- **`agent/models/model_discovery.py`** — IC discovery via **`metadata_ic.json`**
+- **`agent/models/mcp_model_registry.py`**, **`mcp_model_node.py`**
+
+Removed on **NO-ML**: v43 node modules, pickle shims, training notebooks, and generic **`xgboost_node`** / **`advanced_consensus`** loaders (see git history on branch **`NO-ML`**).
 
 Legacy compatibility wrappers that are currently redundant in this checkout:
 
@@ -83,7 +80,7 @@ Operational guidance:
 
 ### Training Authority and Train-Serve Parity
 
-There are **three** training/export families documented here. **Deployed inference loads family C** (see Runtime discovery).
+There are **four** training/export families documented here. **Deployed inference on branch NO-ML loads family D (IC)**. Family **C (v43 XGBoost)** is archived.
 
 **A — v15 full pipeline (5m / 15m, XGBoost sklearn pipeline per TF)**  
 - **Notebook**: removed from `notebooks/` (archival); parity rules below still apply if you keep v15 artefacts under `agent/model_storage/`.  
@@ -96,7 +93,7 @@ There are **three** training/export families documented here. **Deployed inferen
 - **Notebooks**: historical Colab flows were removed from `notebooks/`; expanded-feature parity remains documented here if you revive old bundles.  
 - These use `UnifiedFeatureEngine`, validate coverage against `EXPANDED_FEATURE_LIST` / registry, fee-aware TP/SL labeling, and export timeframe artefacts (`entry_*`, `exit_*`, scaler files, `features_*.json`, `metadata_*.json`) per bundle style.
 
-**C — JackSparrow v43 regression bundle (Compose default)**  
+**C — JackSparrow v43 regression bundle (archived — pre-NO-ML)**  
 - **Notebook / export**: `notebooks/jacksparrow_v43_delta_india_training.ipynb` (Delta Exchange India historical candles, `V43_CANONICAL_FEATURES` + contract-aligned export).  
 - **Typical bundle**: `agent/model_storage/JackSparrow_v43_models_BTCUSD/` — flat folder with **`metadata_v43.json`**, **`model_artifact_v43.pkl`** (basename override **`JACKSPARROW_V43_ARTIFACT_BASENAME`**), optional `feature_engineer.pkl`, **`regime_models_v43.pkl`**.  
 - **Training labels**: Per-head simple forward returns on **5m** candles for **2 / 6 / 12 / 24** bars (`horizons{}` in metadata). **`metadata.features`** matches **`V43_CANONICAL_FEATURES`** (**40** names, fixed order) in **`feature_store/jacksparrow_v43_contract.py`**; MCP alignment in **`feature_store/jacksparrow_v43_mcp_row.py`**.  
@@ -105,7 +102,13 @@ There are **three** training/export families documented here. **Deployed inferen
 - **Pattern 3 meta-stacking (§4c)**: (1) base **regressors** (LGBM + XGB + RF) → stacked features; (2) **LGBMClassifier** `ensemble.meta` → direction probability; (3) **Ridge** `ensemble.calibrator` → expected-return scale for gate-5. **`EnsembleModel.predict()`** in [`agent/models/v43_pickle_shims.py`](../agent/models/v43_pickle_shims.py) feeds the calibrator **2D** input (`reshape(-1, 1)`) and clips output to **[-0.10, 0.10]**. Without `calibrator`, raw meta probabilities must not reach the gates.  
 - **Promotion checklist (Pattern 3, multi-head)**: each `horizons.{key}.validation_metrics` uses `inference_path` = `"meta_calibrator"`. **Colab default export**: `V43_EXPORT_GATES_STRICT=true` + `V43_EXPORT_STRICT_PRIMARY_ONLY=true` — strict mins on scalp_10m (**0.54**) and intraday_30m (**0.53**); trend_1h/swing_2h only require meta_auc ≥ **0.50** (warnings if below aspirational 0.58/0.60). **Full strict** (all four heads at production mins): set `V43_EXPORT_STRICT_PRIMARY_ONLY=false`. Training labels use **cost-aware** suppression with horizon cost scale on 1h/2h. Gross hit rates remain **warnings**, not hard blocks.  
 - **Runtime**: **`JackSparrowV43Node`**, gated path in **`agent/core/mcp_orchestrator.py`** + **`agent/core/v43_signal_gates.py`**. **`v43_df5m`** and **`v43_df_funding`** must be real `pandas.DataFrame` instances; **`v43_df15m`** / **`v43_df1h`** may be omitted or **`None`** (normalized to empty frames)—`build_v43_feature_matrix` resamples higher timeframes from **5m** only, so those frames are optional for inference. Optional **`JACKSPARROW_V43_SHORT_EXECUTION_ENABLED=true`** allows symmetric SHORT firing when negatives pass gates (see `.env.example`). Operational tuning: [v43 trade execution runbook](v43_trade_execution_runbook.md) and **`scripts/analyze_v43_gate_rejects.py`**.  
-- **Checks**: `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py tests/unit/test_jacksparrow_v43_inference.py tests/unit/test_jack_sparrow_v43_node_ctx.py tests/unit/test_v43_pickle_shims.py`; `python scripts/smoke_test_v43.py`; manual [`jacksparrow_v43_smoke.md`](jacksparrow_v43_smoke.md).
+- **Checks**: `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py` (contract/matrix parity); historical v43 node tests removed on **NO-ML**.
+
+**D — Intelligence Component (IC — Compose / NO-ML default)**  
+- **Bundle**: `agent/model_storage/JackSparrow_IC_BTCUSD/` — **`metadata_ic.json`** only (four horizon heads: `scalp_10m`, `intraday_30m`, `trend_1h`, `swing_2h`).  
+- **Runtime**: **`RuleBasedIntelligenceNode`** when **`IC_MODE=true`**; policy via **`AGENT_POLICY_MODE=ml_or_thesis`** and **`REQUIRE_ML_SIGNAL_FOR_ORDERS=false`**.  
+- **Features**: **`build_v43_feature_matrix`** + **`V43_CANONICAL_FEATURES`**; gates in **`agent/core/v43_signal_gates.py`**.  
+- **Checks**: `pytest tests/unit/test_intelligence_ic_node.py tests/unit/test_intelligence_ic_signals.py tests/unit/trading_agent_tests/test_model_discovery.py -q`.
 
 Parity requirements before deployment (family **B**, historical artefacts):
 
@@ -113,7 +116,7 @@ Parity requirements before deployment (family **B**, historical artefacts):
 2. Metadata `features` and `features_required` must match what that training run emitted—typically aligned with `feature_store/feature_registry.py` `EXPANDED_FEATURE_LIST` in order and length for expanded bundles.
 3. Run `tests/unit/test_feature_parity.py` and review pattern-feature importances from the notebook report outputs where applicable.
 
-Legacy notebook variants (`train_models_colab`, `train_xgboost_colab`, and older `JackSparrow_Trading_Colab_v3/v4`) were removed from this workspace during the 2026-04 cleanup. For **deployed inference** ship **family C**. Families **A** and **B** remain useful for archival bundles, regression tests, and optional **adaptive retrain** parquet flows (**v15** only — not wired for v43).
+Legacy notebook variants were removed during the 2026-04 / **NO-ML** cleanups. For **deployed inference** ship **family D (IC)**. Families **A** and **B** remain useful for archival bundles and optional **v15 adaptive retrain** parquet flows. Family **C** is documented for forks that still load v43 pickles.
 
 ### Model Storage Location
 
@@ -125,13 +128,14 @@ Legacy notebook variants (`train_models_colab`, `train_xgboost_colab`, and older
 
 | Directory | Role |
 |-----------|------|
-| `agent/model_storage/JackSparrow_v43_models_BTCUSD/` | **`MODEL_DIR` for production** — v43 artefacts + `metadata_v43.json`; **JackSparrowV43Node** (Docker Compose defaults this path in-container unless `AGENT_MODEL_DIR` overrides). |
+| `agent/model_storage/JackSparrow_IC_BTCUSD/` | **`MODEL_DIR` for production (NO-ML)** — `metadata_ic.json` only; **RuleBasedIntelligenceNode** (Docker Compose defaults this path in-container unless `AGENT_MODEL_DIR` overrides). |
+| `agent/model_storage/JackSparrow_v43_models_BTCUSD/` | **Archived** v43 XGBoost bundle (`metadata_v43.json` + pickles) — not loaded by current discovery. |
 | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | **Historical** full v5 BTCUSD bundle (when present): five horizons (15m–4h) with entry + exit joblib artefacts per timeframe. Not loaded by current discovery. |
 | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | **Historical** slim bundle: 5m/15m metadata; binary `entry_long` / `entry_short` artifacts; not loaded by current discovery. |
 | `agent/model_storage/jacksparrow_v6_BTCUSD_<date>/` | **Historical** v6 unified model bundle — not loaded by current discovery. |
 | `agent/model_storage/jacksparrow_v15_BTCUSD_<date>/` | **Historical** v15 full pipeline bundle — **`metadata_BTCUSD_*.json`** + **`pipeline_*_v14.pkl`**; used mainly for parquet-based **adaptive retrain** and archived validation; not loaded as primary inference alongside v43. |
 
-- **`ModelDiscovery.discover_models()`** requires **`MODEL_DIR/metadata_v43.json`**; listdir is diagnostic only (`model_discovery_v43_only` logs). Recursive metadata globbing applies only to forks that still ship the older discovery scanner.
+- **`ModelDiscovery.discover_models()`** requires **`MODEL_DIR/metadata_ic.json`** when **`IC_MODE=true`**; logs **`model_discovered_ic`** / **`model_discovery_ic_failed`**. v43 pickle discovery is removed on **NO-ML**.
 
 ### Historical: multi-timeframe v5 nodes (legacy)
 
@@ -155,26 +159,29 @@ Each model is loaded from `metadata_BTCUSD_<timeframe>.json` and references:
 The root `.env` file (documented in [Deployment Documentation](10-deployment.md#environment-variables-reference)) configures model discovery:
 
 ```bash
-MODEL_DIR=./agent/model_storage/JackSparrow_v43_models_BTCUSD
+IC_MODE=true
+MODEL_DIR=./agent/model_storage/JackSparrow_IC_BTCUSD
+AGENT_POLICY_MODE=ml_or_thesis
+REQUIRE_ML_SIGNAL_FOR_ORDERS=false
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
-# MODEL_DISCOVERY_RECURSIVE=false
 MIN_CONFIDENCE_THRESHOLD=0.70
 ```
 
-`MODEL_DIR` must be the bundle directory containing **`metadata_v43.json`** (see [`.env.example`](../.env.example)). **`MODEL_FORMAT`** defaults to **`jacksparrow_v43`** and surfaces in health payloads as an integration label—it does **not** select alternate discovery loaders in this codebase.
+`MODEL_DIR` must contain **`metadata_ic.json`** (see [`.env.example`](../.env.example)). **`MODEL_FORMAT`** defaults to **`jacksparrow_ic`** in health payloads.
 
 ### ML Models in Docker
 
 When running under Docker, the agent container mounts the host `agent/model_storage/` directory.
 
 - **Bind mount**: `./agent/model_storage:/app/agent/model_storage` (see `docker-compose.yml` agent service).
-- **Default in-container `MODEL_DIR`**: Compose sets **`MODEL_DIR=${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_v43_models_BTCUSD}`** unless you override **`AGENT_MODEL_DIR`** in the root `.env`.
+- **Default in-container `MODEL_DIR`**: Compose sets **`MODEL_DIR=${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_IC_BTCUSD}`** and **`IC_MODE=true`** unless overridden in the root `.env`.
+- **Delta WebSocket**: Compose sets **`WEBSOCKET_URL=${WEBSOCKET_URL:-wss://socket-ind.testnet.deltaex.org}`** on the agent service (socket host, not REST CDN).
 
-To swap exports, drop a new **`metadata_v43.json`** bundle under `agent/model_storage/` and set **`AGENT_MODEL_DIR`** to that folder inside the bind mount:
+To use a different IC bundle folder, set **`AGENT_MODEL_DIR`** to that path inside the bind mount:
 
 ```bash
-AGENT_MODEL_DIR=/app/agent/model_storage/MyCustom_v43_bundle
+AGENT_MODEL_DIR=/app/agent/model_storage/MyCustom_IC_BTCUSD
 ```
 
 Then recreate or restart the agent service.
@@ -186,13 +193,15 @@ This means:
 
 **Verification steps before `docker compose up`:**
 
-1. Ensure **`metadata_v43.json`** plus model artefacts exist under `agent/model_storage/...`.
-2. After `docker compose up`, scan agent logs for **`model_discovered_v43`** (`model_discovery_v43_failed` means the pickle load failed—the agent stays up without that node).
-3. Confirm backend health/model status shows **`model_format`** ≈ **`jacksparrow_v43`** and prediction traffic flows (see frontend signal fields in [Frontend](07-frontend.md)).
+1. Ensure **`metadata_ic.json`** exists under `agent/model_storage/JackSparrow_IC_BTCUSD/` (or your **`AGENT_MODEL_DIR`** target).
+2. After `docker compose up`, scan agent logs for **`model_discovered_ic`** (`model_discovery_ic_failed` means metadata or IC init failed).
+3. Confirm backend **`/api/v1/health`** shows **`model_format`** ≈ **`jacksparrow_ic`**, **`healthy_models`: 1**, and Delta WSS logs (`delta_websocket_key_auth_sent`; fix IP whitelist if **`delta_websocket_auth_rejected`**).
 
-### XGBoost Dependency Requirements
+### XGBoost Dependency Requirements (archived ML path)
 
-- Runtime environments must install `xgboost==2.0.2` (see `agent/requirements.txt`) so that `XGBClassifier` and `XGBRegressor` remain available for deserializing the trained models.
+- **NO-ML / IC runtime** does not load pickles; **`IC_MODE=true`** uses rule-based inference only.
+- The agent Docker image still installs `xgboost`, `tensorflow`, and `torch` from `agent/requirements.txt` (large image) for forks and archival scripts. To slim the image on a pure-IC deployment, trim `agent/requirements.txt` in a dedicated branch.
+- When deserializing legacy v43/v15 pickles, keep `xgboost==2.0.2` aligned with the training environment.
 - If you rebuild or upgrade the models, ensure `requirements*.txt` stay synchronized with the version used during training.
 - When the validator reports `ModuleNotFoundError: No module named 'XGBClassifier'`, re-run `pip install -r agent/requirements.txt` inside the active environment before retrying the load.
 
@@ -259,7 +268,7 @@ The agent can run a **separate** path from trade-outcome retraining: KS drift on
 
 ### Training (this workspace)
 
-Production **inference** artefacts are **`JackSparrow_v43_models_BTCUSD/`** (train/export via **`notebooks/jacksparrow_v43_delta_india_training.ipynb`**) and loaded by **`agent/models/model_discovery.py`**. Older v5/v6/v15 bundles may still exist under `agent/model_storage/` for reference, regression tests, or **v15-only** adaptive parquet retrain—**not** for multi-node discovery alongside v43 unless you restore legacy discovery code locally.
+Production **inference** on **NO-ML** uses **`JackSparrow_IC_BTCUSD/metadata_ic.json`** and **`RuleBasedIntelligenceNode`**. Archived **`JackSparrow_v43_models_BTCUSD/`** pickles and training notebooks are documented under [Archived v43](#archived-jacksparrow-v43-xgboost--mso-v50). Older v5/v6/v15 bundles remain for reference or **v15-only** adaptive parquet retrain.
 
 ### Prerequisites
 
@@ -1280,18 +1289,19 @@ Common bundle layouts; always point **`MODEL_DIR` / `AGENT_MODEL_DIR`** at the f
 
 | Profile | Typical path | Contents |
 |--------|--------------|----------|
-| **v43 regression (Compose default today)** | `agent/model_storage/JackSparrow_v43_models_BTCUSD/` | Flat folder: **`metadata_v43.json`**, **`model_artifact_v43*.pkl`**; **`JackSparrowV43Node`**; **40** features; **`horizons`** scalp_10m (2), intraday_30m (6), trend_1h (12), swing_2h (24) on 5 m bars. |
+| **IC (Compose default — NO-ML)** | `agent/model_storage/JackSparrow_IC_BTCUSD/` | **`metadata_ic.json`** only; **`RuleBasedIntelligenceNode`**; v43 feature contract + gates at runtime. |
+| **v43 regression (archived)** | `agent/model_storage/JackSparrow_v43_models_BTCUSD/` | **`metadata_v43.json`** + pickles; not loaded by current discovery. |
 | **Historical v15 pipeline** | `agent/model_storage/jacksparrow_v15_BTCUSD_<date>/` | **5m + 15m** subfolders: `metadata_BTCUSD_*.json` + `pipeline_*_v14.pkl`; used for parquet **adaptive retrain** tooling and archived validation—not primary discovery in this branch. |
 | **Historical full multi-TF v5** | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/` | Five horizons (15m–4h) with entry + exit joblib per timeframe (when exported). |
 | **Historical slim v5** | `agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-21/` | Often **5m + 15m** metadata; binary long/short entry heads; **no ML exit** in metadata by default—see each `metadata_*.json` `artifacts` and `exit_policy_note`. |
 
-Override **`AGENT_MODEL_DIR`** when you duplicate the v43 folder under a different name (see **[Deployment — Agent Environment Variables](10-deployment.md#agent-environment-variables)**).
+Override **`AGENT_MODEL_DIR`** when you duplicate the IC bundle folder under a different name (see **[Deployment — Agent Environment Variables](10-deployment.md#agent-environment-variables)**).
 
 ## Inference MCP flow (runtime)
 
 1. `MCPOrchestrator.initialize()` creates `MCPFeatureServer`, `MCPModelRegistry`, and `MCPReasoningEngine`.
-2. `ModelDiscovery.discover_models()` loads **`MODEL_DIR/metadata_v43.json`**, instantiates **`JackSparrowV43Node`**, and registers it when `MODEL_AUTO_REGISTER=true`.
-3. On each closed bar, the orchestrator requests features (including the v43 MCP row path), runs **`JackSparrowV43Node.predict`**, applies **dynamic percentile thresholding** plus **`v43_signal_gates`** gate state (`apply_post_threshold_gates` / optional short path **`apply_post_threshold_gates_short`**), and merges **`expected_return`**, **`regime`**, **`v43_training_forward_bars`**, **`v43_gate_reject`**, **`v43_decision`**, and **`desired_side`** into market context exposed to downstream reasoning/events.
+2. `ModelDiscovery.discover_models()` loads **`MODEL_DIR/metadata_ic.json`**, instantiates **`RuleBasedIntelligenceNode`**, and registers it when `IC_MODE=true` and `MODEL_AUTO_REGISTER=true`.
+3. On each closed bar, the orchestrator requests features (v43 MCP row path), runs **`RuleBasedIntelligenceNode.predict`**, applies **`v43_signal_gates`**, and merges **`expected_return`**, **`regime`**, gate fields, and **`desired_side`** into market context for policy and reasoning.
 4. WebSocket payloads to the frontend are enriched in **`backend/services/agent_event_subscriber.py`** (**`expected_return`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`**) and persisted under Redis key **`jacksparrow:v43:signal_history:<symbol>`** for recent-tail diagnostics.
 
 ### Historical multi-node flow (forks only)
@@ -1330,7 +1340,7 @@ This was the **full-pipeline** artefact path (one XGBoost/sklearn pipeline per t
 - **Train–serve checklist**: After each Colab export, confirm the `features` array in each `metadata_BTCUSD_*.json` equals the corresponding `V15_FEATURES_*` list in the repo (update `feature_registry.py` first if you intentionally changed the training feature set). The shipped `pipeline_*_v14.pkl` was fit on those columns in that order; do not reorder metadata without retraining.
 - **Environment** (see root `.env.example`, mostly commented for v15): `CONFIDENCE_PERCENTILE`, `EDGE_FLOOR`, `ATR_TRAILING_MULT`, `MIN_HOLD_BARS`, `EDGE_DECAY_THRESHOLD`, `VOLATILITY_FILTER_ENABLED`, `V15_ATR_PCT_FLOOR`, `V15_ADX_RANGING_MAX`, `V15_SIGNAL_LOGIC_ENABLED`, `V15_DISABLE_MTF_SYNTHESIS`, `V15_FILTER_FEATURE_SOURCE_TF`, `HTF_CACHE_TTL_SECONDS`.
 - **Validation**: `python scripts/validate_models_before_deployment.py [<bundle_root>]` — loads metadata feature order + `predict_proba` shape `(1,3)`. **Tests**: `pytest tests/unit/test_v15_signal.py tests/unit/test_v15_feature_registry.py -q`. **Smoke** (backend up): `python scripts/smoke_test_v15.py`.
-- **Rollback / promotion**: To return to **v43**, point **`MODEL_DIR`** at **`JackSparrow_v43_models_BTCUSD/`**, clear stale env overrides, restart the agent, and follow **`docs/jacksparrow_v43_smoke.md`**.
+- **Rollback / promotion (archived v43)**: On a fork that still loads pickles, point **`MODEL_DIR`** at **`JackSparrow_v43_models_BTCUSD/`** and follow **`docs/jacksparrow_v43_smoke.md`**. On **NO-ML**, use **`JackSparrow_IC_BTCUSD/`** and IC unit tests instead.
 
 ## Runtime hardening (learning and reasoning)
 

@@ -21,7 +21,7 @@ alwaysApply: false
 |-----|---------|
 | 01 | Architecture, startup, communication |
 | 02 | MCP protocols |
-| 03 | Models, `MODEL_DIR`, bundles, training notebook |
+| 03 | IC / `MODEL_DIR`, `metadata_ic.json`, archived v43, Docker + WSS |
 | 04–05 | Features, reasoning, HOLD/MTF |
 | 06–07 | Backend API, WebSocket, frontend |
 | 08–09 | Layout, UI/UX |

@@ -326,7 +326,8 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 > **Delta testnet trading (required)**  
 > Runtime places **real orders on Delta Exchange India testnet**; local paper simulation is removed.
 > - `TRADING_MODE=testnet`, `EXCHANGE_BACKEND=delta_live`, `DELTA_ENV=india_testnet`
-> - `DELTA_EXCHANGE_BASE_URL` and `WEBSOCKET_URL` must point at India testnet (see `.env.example`)
+> - `DELTA_EXCHANGE_BASE_URL` (REST CDN, e.g. `https://cdn-ind.testnet.deltaex.org`) and `WEBSOCKET_URL` (socket host, e.g. `wss://socket-ind.testnet.deltaex.org`) must both point at India testnet — **do not** use the CDN host for WebSocket
+> - Whitelist the host egress IP in Delta testnet API settings if agent logs show `delta_websocket_auth_rejected`
 > - Do **not** set `PAPER_TRADING_MODE` or `EXCHANGE_BACKEND=delta_paper_sim` (startup fails)
 
 ---
@@ -421,7 +422,7 @@ Docker deployment detail is in this document under [Docker Compose Deployment](#
 
 **1. Prepare persistent assets:**
 ```bash
-mkdir -p logs/backend logs/agent logs/frontend models
+mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_IC_BTCUSD
 touch kubera_pokisham.db
 ```
 
@@ -504,6 +505,8 @@ All application containers load the root `.env` via `env_file: - .env` and then 
 - The same root `.env` controls trading for local and Docker via `TRADING_MODE=testnet` and `DELTA_ENV=india_testnet`.
 - Runtime places **real orders on Delta testnet** (`EXCHANGE_BACKEND=delta_live`); local paper simulation is removed.
 - Compose defaults `DELTA_EXCHANGE_BASE_URL` to `https://cdn-ind.testnet.deltaex.org` when unset.
+- Compose defaults agent `WEBSOCKET_URL` to `wss://socket-ind.testnet.deltaex.org` when unset (socket endpoint, not the REST CDN host).
+- Compose defaults `MODEL_DIR` / `IC_MODE` for the IC bundle (`JackSparrow_IC_BTCUSD`) — see `docker-compose.yml` agent `environment:` block.
 - Removed: `PAPER_TRADING_MODE`, `RESET_PAPER_STATE_ON_STARTUP`, and `EXCHANGE_BACKEND=delta_paper_sim`.
 
 ### Frontend URLs (Docker vs Local)
@@ -918,10 +921,13 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | https://api.india.delta.exchange |
 | `QDRANT_URL` | Qdrant vector database URL | No | http://localhost:6333 |
 | `QDRANT_API_KEY` | Qdrant API key | No | - |
-| `MODEL_DIR` | Directory for JackSparrow **v43** bundle — must contain **`metadata_v43.json`** | No | `./agent/model_storage/JackSparrow_v43_models_BTCUSD` (local); Docker Compose sets in-container default to **`/app/agent/model_storage/JackSparrow_v43_models_BTCUSD`** via `AGENT_MODEL_DIR` |
+| `IC_MODE` | When `true`, load **RuleBasedIntelligenceNode** from **`metadata_ic.json`** (NO-ML default) | No | `true` |
+| `MODEL_DIR` | Directory for IC bundle — must contain **`metadata_ic.json`** | No | `./agent/model_storage/JackSparrow_IC_BTCUSD` (local); Docker: **`/app/agent/model_storage/JackSparrow_IC_BTCUSD`** via `AGENT_MODEL_DIR` |
 | `AGENT_MODEL_DIR` | Docker-only override for in-container `MODEL_DIR` | No | See `docker-compose.yml` agent service |
-| `MODEL_FORMAT` | Integration label for health payloads (`jacksparrow_v43` default); does **not** swap discovery loaders | No | `jacksparrow_v43` |
-| `JACKSPARROW_V43_ARTIFACT_BASENAME` | Optional artefact filename inside the v43 bundle when not using default `model_artifact_v43.pkl` | No | *(unset — default basename in metadata)* |
+| `MODEL_FORMAT` | Integration label for health payloads | No | `jacksparrow_ic` |
+| `AGENT_POLICY_MODE` | Policy fusion mode (`ml_or_thesis`, `thesis_only`, etc.) | No | `ml_or_thesis` |
+| `REQUIRE_ML_SIGNAL_FOR_ORDERS` | When `false`, IC/thesis path is not blocked by legacy ML-only guards | No | `false` |
+| `JACKSPARROW_V43_ARTIFACT_BASENAME` | *(Archived v43 only)* Optional pickle basename inside a v43 bundle | No | *(unused on NO-ML)* |
 | `JACKSPARROW_V43_SHORT_EXECUTION_ENABLED` | When `true`, allow symmetric **SELL** entries when strong negative edge passes v43 gates | No | `false` |
 | `ADAPTIVE_RETRAIN_ENABLED` | When `true`, agent runs periodic KS drift + optional warm-start retrain (v15 parquet path) | No | `false` |
 | `ADAPTIVE_RETRAIN_CHECK_INTERVAL_SECONDS` | Seconds between adaptive evaluations | No | `3600` |
@@ -931,7 +937,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `ADAPTIVE_RETRAIN_TIMEFRAMES` | Comma-separated TFs to evaluate | No | `5m,15m` |
 | `ADAPTIVE_RETRAIN_STATE_PATH` | JSON cooldown state filename (under `LOGS_ROOT` if set) | No | `adaptive_retrain_state.json` |
 | `ADAPTIVE_DRIFT_ALPHA` / `ADAPTIVE_DRIFT_STAT_THRESHOLD` / `ADAPTIVE_DRIFT_FEATURE_LIMIT` | KS drift gate (see [ML models – Learning](03-ml-models.md#learning-control-modules-agent-runtime)) | No | `0.01` / `0.10` / `5` |
-| `MODEL_PATH` | **Ignored** with v43-only discovery — use `MODEL_DIR` | No | *(unused)* |
+| `MODEL_PATH` | **Ignored** — use `MODEL_DIR` | No | *(unused)* |
 | `LOG_LEVEL` | Agent logging level | No | INFO |
 | `LOG_DIR` | Agent log directory | No | `./logs/agent` |
 | `LOG_RETENTION_DAYS` | Days to retain agent logs | No | 7 |
@@ -940,7 +946,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `LOG_FORWARDING_ENABLED` | Toggle remote log forwarding | No | false |
 | `LOG_FORWARDING_ENDPOINT` | Remote logging endpoint | No | - |
 | `LOG_INCLUDE_STACKTRACE` | Include stack traces in production logs | No | false |
-| `WEBSOCKET_URL` | Delta public WebSocket URL (must match REST cluster/region) | No | `wss://socket.india.delta.exchange` |
+| `WEBSOCKET_URL` | Delta **socket** WebSocket URL (India testnet: `wss://socket-ind.testnet.deltaex.org`; not the REST CDN host) | No | `wss://socket-ind.testnet.deltaex.org` (code + Compose default) |
 | `WEBSOCKET_ENABLED` | Enable Delta market WebSocket stream | No | true |
 | `WEBSOCKET_RECONNECT_ATTEMPTS` | Max WebSocket reconnect attempts | No | 5 |
 | `WEBSOCKET_RECONNECT_DELAY` | Seconds between reconnect attempts | No | 5.0 |
@@ -1476,7 +1482,7 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 **Problem**: Models fail to load
 
 **Solutions**:
-1. Verify **`metadata_v43.json`** and pickle artefacts exist under **`MODEL_DIR`** (see [ML models](03-ml-models.md#bundle-profiles-and-docker-defaults)); **`MODEL_PATH` is ignored**.
+1. Verify **`metadata_ic.json`** exists under **`MODEL_DIR`** (see [ML models – Docker](03-ml-models.md#ml-models-in-docker)); scan logs for **`model_discovered_ic`**. **`MODEL_PATH` is ignored**.
 2. Check model file permissions
 3. Verify model format compatibility
 4. Check available memory
@@ -2435,7 +2441,7 @@ Containers on Docker bridge **`jacksparrow-network`** (service DNS names):
 
 **Frontend ↔ backend**: Browser uses `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` (e.g. `ws://localhost:8000/ws`). Unified envelopes: `data_update`, `agent_update`, `system_update` (see [Frontend](07-frontend.md)).
 
-**Agent ↔ Delta Exchange**: REST and optional WSS (`DELTA_EXCHANGE_BASE_URL`, `WEBSOCKET_URL`, credentials in agent env).
+**Agent ↔ Delta Exchange**: REST (`DELTA_EXCHANGE_BASE_URL`, HMAC `METHOD+timestamp+path+query+payload`) and optional WSS (`WEBSOCKET_URL` on the **socket** host). WSS auth: connect, then send JSON `key-auth` with signature `GET{unix_seconds}/live`. Credentials and IP whitelist in agent env.
 
 ## Database maintenance
 
