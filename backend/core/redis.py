@@ -395,6 +395,8 @@ async def get_cache(key: str) -> Optional[Any]:
     """
     try:
         client = await get_redis()
+        if client is None:
+            return None
         value = await client.get(key)
         if value:
             # Cache hit - increment hit counter
@@ -426,6 +428,8 @@ async def set_cache(key: str, value: Any, ttl: int = 60) -> bool:
     """
     try:
         client = await get_redis()
+        if client is None:
+            return False
         await client.setex(key, ttl, json.dumps(value, default=_json_default_encoder))
         # Track cache sets
         try:
@@ -464,6 +468,8 @@ async def get_cache_keys(pattern: str) -> List[str]:
     """Get cache keys matching pattern."""
     try:
         client = await get_redis()
+        if client is None:
+            return []
         keys = await client.keys(pattern)
         return keys
     except Exception as e:

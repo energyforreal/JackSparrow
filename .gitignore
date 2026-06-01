@@ -41,6 +41,15 @@ build/
 # Local credential files (never commit)
 demo keys delta.txt
 *delta*keys*.txt
+colab_file_upload/delta_credentials.txt
+colab_file_upload/*credentials*
+
+# Temp / debug artifacts
+_tmp_*.py
+temp_fix.py
+test_output.txt
+retraining_state.json
+dump.rdb
 
 # IDE
 .vscode/

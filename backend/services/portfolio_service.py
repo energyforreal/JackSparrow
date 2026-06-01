@@ -400,27 +400,38 @@ class PortfolioService:
         # Use transaction to ensure consistent snapshot of data
         async with db.begin():
             try:
-                # Calculate date range
-                end_date = datetime.utcnow()
+                end_date = datetime.now(timezone.utc)
                 start_date = end_date - timedelta(days=days)
-                
-                # Use SQL aggregation for performance metrics
-                # Note: This assumes Trade model has pnl field or we calculate from positions
-                # For now, we'll use SQL aggregation for trade counts and basic metrics
+
+                pnl_col = cast(Position.realized_pnl, Numeric)
                 metrics_query = select(
-                    func.count(Trade.id).label('total_trades'),
-                    # Note: Actual PnL calculation would require trade outcomes or position data
-                    # This is a placeholder structure for when trade PnL tracking is implemented
+                    func.count(Position.id).label("total_trades"),
+                    func.sum(case((pnl_col > 0, 1), else_=0)).label("winning_trades"),
+                    func.sum(case((pnl_col < 0, 1), else_=0)).label("losing_trades"),
+                    func.sum(pnl_col).label("total_return"),
+                    func.avg(case((pnl_col > 0, pnl_col), else_=None)).label("average_win"),
+                    func.avg(case((pnl_col < 0, pnl_col), else_=None)).label("average_loss"),
+                    func.sum(case((pnl_col > 0, pnl_col), else_=0)).label("gross_profit"),
+                    func.sum(case((pnl_col < 0, -pnl_col), else_=0)).label("gross_loss"),
                 ).where(
-                    Trade.executed_at >= start_date,
-                    Trade.status == TradeStatus.EXECUTED
+                    cast(Position.status, String) == PositionStatus.CLOSED.value,
+                    Position.closed_at.isnot(None),
+                    Position.closed_at >= start_date,
+                    Position.closed_at <= end_date,
                 )
-                
+
                 result = await db.execute(metrics_query)
-                metrics = result.first()
-                
-                total_trades = metrics.total_trades or 0
-                
+                row = result.first()
+
+                total_trades = int(row.total_trades or 0)
+                winning_trades = int(row.winning_trades or 0)
+                losing_trades = int(row.losing_trades or 0)
+                total_return = float(row.total_return or 0)
+                average_win = float(row.average_win or 0)
+                average_loss = float(row.average_loss or 0)
+                gross_profit = float(row.gross_profit or 0)
+                gross_loss = float(row.gross_loss or 0)
+
                 if total_trades == 0:
                     return {
                         "total_return": 0,
@@ -432,29 +443,27 @@ class PortfolioService:
                         "average_win": 0,
                         "average_loss": 0,
                         "profit_factor": 0,
-                        "sharpe_ratio": 0
+                        "sharpe_ratio": 0,
                     }
-                
-                # TODO: When trade PnL tracking is implemented, use SQL aggregation:
-                # winning_trades = func.sum(case((Trade.pnl > 0, 1), else_=0))
-                # losing_trades = func.sum(case((Trade.pnl < 0, 1), else_=0))
-                # total_profit = func.sum(case((Trade.pnl > 0, Trade.pnl), else_=0))
-                # total_loss = func.sum(case((Trade.pnl < 0, abs(Trade.pnl)), else_=0))
-                # average_win = func.avg(case((Trade.pnl > 0, Trade.pnl), else_=None))
-                # average_loss = func.avg(case((Trade.pnl < 0, Trade.pnl), else_=None))
-                
-                # Placeholder metrics until trade PnL tracking is implemented
+
+                win_rate = winning_trades / total_trades if total_trades else 0.0
+                profit_factor = (
+                    gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+                )
+                initial_balance = float(getattr(settings, "initial_balance", 20000.0) or 20000.0)
+                total_return_pct = (total_return / initial_balance * 100.0) if initial_balance > 0 else 0.0
+
                 metrics = {
-                    "total_return": 0,
-                    "total_return_pct": 0,
-                    "win_rate": 0,
+                    "total_return": total_return,
+                    "total_return_pct": total_return_pct,
+                    "win_rate": win_rate,
                     "total_trades": total_trades,
-                    "winning_trades": 0,
-                    "losing_trades": 0,
-                    "average_win": 0,
-                    "average_loss": 0,
-                    "profit_factor": 0,
-                    "sharpe_ratio": 0
+                    "winning_trades": winning_trades,
+                    "losing_trades": losing_trades,
+                    "average_win": average_win,
+                    "average_loss": average_loss,
+                    "profit_factor": profit_factor,
+                    "sharpe_ratio": 0,
                 }
                 
                 # Cache result for 30 seconds

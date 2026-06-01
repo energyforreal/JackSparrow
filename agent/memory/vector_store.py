@@ -14,14 +14,15 @@ import json
 import hashlib
 
 from feature_store.feature_registry import FEATURE_LIST, EXPECTED_FEATURE_COUNT
+
+logger = structlog.get_logger()
+
 try:
     from sklearn.metrics.pairwise import cosine_similarity
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
     logger.warning("sklearn not available - vector similarity will be limited")
-
-logger = structlog.get_logger()
 
 
 class DecisionContext:

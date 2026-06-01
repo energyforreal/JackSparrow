@@ -5,7 +5,7 @@ Provides agent control and system administration functions.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.api.models.requests import AgentControlRequest
 from backend.api.models.responses import AgentStatusResponse
@@ -68,7 +68,7 @@ async def control_agent(request: AgentControlRequest):
             "action": request.action,
             "agent_state": result.get("state"),
             "message": result.get("message", ""),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except HTTPException:
@@ -100,7 +100,7 @@ async def start_agent():
         return {
             "status": "started",
             "agent_state": result.get("state", "UNKNOWN"),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except HTTPException:
@@ -132,7 +132,7 @@ async def stop_agent():
         return {
             "status": "stopped",
             "agent_state": result.get("state", "STOPPED"),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except HTTPException:
@@ -164,7 +164,7 @@ async def emergency_stop():
         return {
             "status": "emergency_stopped",
             "agent_state": result.get("state", "EMERGENCY_STOP"),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
     except HTTPException:

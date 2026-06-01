@@ -11,10 +11,9 @@ Legacy note:
 """
 
 import os
-import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -23,10 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import structlog
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
+from agent.core.config import settings
 from agent.data.feature_server import MCPFeatureRequest
 from agent.models.mcp_model_registry import MCPModelRequest
 from agent.core.mcp_orchestrator import MCPOrchestrator
@@ -41,7 +37,7 @@ orchestrator: Optional[MCPOrchestrator] = None
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str = Field(..., description="Service status")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     version: str = "1.0.0"
     services: Dict[str, Any] = Field(default_factory=dict)
 
@@ -219,8 +215,10 @@ async def get_agent_status():
     return AgentStatusResponse(
         state="RUNNING",
         available=True,
-        last_update=datetime.utcnow(),
-        active_symbols=["BTCUSD"],  # TODO: Get from orchestrator
+        last_update=datetime.now(timezone.utc),
+        active_symbols=[
+            str(getattr(settings, "agent_symbol", "BTCUSD") or "BTCUSD").strip() or "BTCUSD"
+        ],
         model_count=len(orchestrator.model_registry.models) if orchestrator.model_registry else 0,
         health_status="healthy",
         message="Agent operational"
@@ -233,7 +231,7 @@ async def compute_features(request: FeatureComputeRequest):
     if not orchestrator or not orchestrator.feature_server:
         raise HTTPException(status_code=503, detail="Feature server not available")
 
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
 
     try:
         # Create MCP feature request
@@ -246,7 +244,7 @@ async def compute_features(request: FeatureComputeRequest):
         # Compute features
         response = await orchestrator.feature_server.compute_features(mcp_request)
 
-        computation_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        computation_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         return FeatureComputeResponse(
             symbol=request.symbol,
@@ -267,7 +265,7 @@ async def get_predictions(request: ModelPredictionRequest):
     if not orchestrator or not orchestrator.model_registry:
         raise HTTPException(status_code=503, detail="Model registry not available")
 
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
 
     try:
         # Create MCP model request
@@ -280,7 +278,7 @@ async def get_predictions(request: ModelPredictionRequest):
         # Get predictions
         response = await orchestrator.model_registry.get_predictions(mcp_request)
 
-        computation_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        computation_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
         return ModelPredictionResponse(
             symbol=request.symbol,

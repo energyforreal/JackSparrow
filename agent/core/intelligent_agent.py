@@ -6,6 +6,7 @@ Orchestrates all agent components and provides main agent loop.
 
 import asyncio
 import os
+import signal
 import sys
 import time
 import uuid
@@ -16,11 +17,6 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import json
 import structlog
-
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
 
 def _configure_utf8_stdio() -> None:
     """Ensure Windows consoles use UTF-8 to avoid encoding crashes."""
@@ -1837,20 +1833,47 @@ class IntelligentAgent:
             )
 
 
+async def _shutdown_agent(agent: IntelligentAgent, reason: str) -> None:
+    logger.info("agent_shutdown_requested", service="agent", reason=reason)
+    await agent.shutdown()
+
+
+def _install_signal_handlers(agent: IntelligentAgent) -> None:
+    """Register SIGTERM/SIGINT for graceful shutdown (Docker stop, Ctrl+C)."""
+    loop = asyncio.get_running_loop()
+
+    def _schedule_shutdown(signame: str) -> None:
+        asyncio.create_task(_shutdown_agent(agent, signame))
+
+    if sys.platform != "win32":
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, lambda s=sig.name: _schedule_shutdown(s))
+            except (NotImplementedError, RuntimeError):
+                pass
+    else:
+        def _win_handler(signum, _frame):
+            name = signal.Signals(signum).name
+            loop.call_soon_threadsafe(lambda: _schedule_shutdown(name))
+
+        signal.signal(signal.SIGTERM, _win_handler)
+        signal.signal(signal.SIGINT, _win_handler)
+
+
 async def main():
     """Main entry point."""
     print("AGENT: Starting main function")
     agent = IntelligentAgent()
     print("AGENT: IntelligentAgent created")
+    _install_signal_handlers(agent)
 
     try:
         logger.info("agent_about_to_initialize_mcp_orchestrator")
-        # Initialize the global MCP orchestrator first
         from agent.core.mcp_orchestrator import mcp_orchestrator
+
         await mcp_orchestrator.initialize()
         logger.info("agent_mcp_orchestrator_initialized")
 
-        # Update agent's orchestrator reference to the initialized instance
         agent.mcp_orchestrator = mcp_orchestrator
 
         logger.info("agent_about_to_call_initialize")
@@ -1861,15 +1884,17 @@ async def main():
         await agent.start()
         logger.info("agent_start_completed")
 
-    except KeyboardInterrupt:
-        logger.info("agent_shutdown_requested", service="agent")
+    except asyncio.CancelledError:
+        logger.info("agent_cancelled_graceful_shutdown", service="agent")
         await agent.shutdown()
+    except KeyboardInterrupt:
+        await _shutdown_agent(agent, "keyboard_interrupt")
     except Exception as e:
         logger.error(
             "agent_startup_error",
             service="agent",
             error=str(e),
-            exc_info=True
+            exc_info=True,
         )
         await agent.shutdown()
         sys.exit(1)
