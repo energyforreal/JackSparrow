@@ -17,6 +17,7 @@ import { formatClockTime, formatCurrency, formatUsdCurrency } from '@/utils/form
 import {
   computeTradeDurationSeconds,
   formatTradeDuration,
+  isExchangeFillTrade,
   isLongSide,
   parseFiniteNumber,
   resolveContractValueBtc,
@@ -27,11 +28,34 @@ import {
 const INITIAL_VISIBLE_TRADES = 10
 const VISIBLE_TRADES_STEP = 10
 
+const TABLE_HEADS = [
+  'Entry Time',
+  'Exit Time',
+  'Duration',
+  'Side',
+  'Symbol',
+  'Quantity',
+  'Entry Price',
+  'Exit Price',
+  'PnL',
+  'Order ID',
+  'Fill ID',
+  'Role',
+  'Commission',
+  'Type',
+  'Status',
+] as const
+
 interface RecentTradesProps {
   trades?: Trade[]
   isLoading?: boolean
   usdInrRate?: number | string
   contractValueBtc?: number | string
+}
+
+function truncateId(id: string | undefined, max = 10): string {
+  if (!id) return '—'
+  return id.length > max ? `${id.slice(0, max)}…` : id
 }
 
 export function RecentTrades({
@@ -53,51 +77,19 @@ export function RecentTrades({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Entry Time</TableHead>
-                  <TableHead>Exit Time</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Side</TableHead>
-                  <TableHead>Symbol</TableHead>
-                  <TableHead>Quantity</TableHead>
-                  <TableHead>Entry Price</TableHead>
-                  <TableHead>Exit Price</TableHead>
-                  <TableHead>PnL</TableHead>
-                  <TableHead>Status</TableHead>
+                  {TABLE_HEADS.map((head) => (
+                    <TableHead key={head}>{head}</TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {[1, 2, 3, 4, 5].map((row) => (
                   <TableRow key={row}>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-4 w-14" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-4 w-14" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-4 w-10" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-6 w-12" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-4 w-10" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-4 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-6 w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <MotionSkeletonBar className="h-6 w-16" />
-                    </TableCell>
+                    {TABLE_HEADS.map((head) => (
+                      <TableCell key={head}>
+                        <MotionSkeletonBar className="h-4 w-14" />
+                      </TableCell>
+                    ))}
                   </TableRow>
                 ))}
               </TableBody>
@@ -115,9 +107,9 @@ export function RecentTrades({
           <CardTitle>Agent trades</CardTitle>
         </CardHeader>
         <CardContent className="rounded-xl border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">No agent-executed closed trades yet</p>
+          <p className="text-sm text-muted-foreground">No agent-executed trades yet</p>
           <p className="text-xs mt-2 text-muted-foreground/80">
-            Round-trip trades closed by Jack Sparrow will appear here with entry, exit, and PnL.
+            Closed round-trips and Delta testnet fills (agent orders) sync here when trades execute.
           </p>
         </CardContent>
       </Card>
@@ -143,15 +135,16 @@ export function RecentTrades({
 
   const formatPriceUsd = (price: number | string | undefined) => {
     const parsed = parseFiniteNumber(price)
-    if (parsed === null) return 'N/A'
+    if (parsed === null) return '—'
     return formatUsdCurrency(parsed)
   }
 
   const formatPnl = (trade: Trade): number | null => {
+    if (isExchangeFillTrade(trade as Record<string, unknown>)) return null
     const directPnl = parseFiniteNumber(trade.pnl)
-    if (directPnl !== null) return directPnl
+    if (directPnl !== null && directPnl !== 0) return directPnl
     const pnlUsd = parseFiniteNumber(trade.pnl_usd)
-    if (pnlUsd !== null) {
+    if (pnlUsd !== null && pnlUsd !== 0) {
       if (usdInr === null) return null
       return pnlUsd * usdInr
     }
@@ -163,6 +156,19 @@ export function RecentTrades({
       ? (exit - entry) * quantity
       : (entry - exit) * quantity
     return gross * contractBtc * usdInr
+  }
+
+  const formatCommission = (trade: Trade): string => {
+    const commission = parseFiniteNumber(trade.commission_usd)
+    if (commission === null) return '—'
+    return formatUsdCurrency(commission)
+  }
+
+  const formatFillType = (trade: Trade): string => {
+    const fillType = trade.fill_type
+    const orderType = trade.order_type
+    if (fillType && orderType) return `${fillType} / ${orderType}`
+    return fillType || orderType || '—'
   }
 
   const getStatusVariant = (status: string) => {
@@ -192,42 +198,37 @@ export function RecentTrades({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Entry Time</TableHead>
-                <TableHead>Exit Time</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Side</TableHead>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Quantity</TableHead>
-                <TableHead>Entry Price</TableHead>
-                <TableHead>Exit Price</TableHead>
-                <TableHead>PnL</TableHead>
-                <TableHead>Order ID</TableHead>
-                <TableHead>Status</TableHead>
+                {TABLE_HEADS.map((head) => (
+                  <TableHead key={head}>{head}</TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {visibleTrades.map((trade) => {
+                const isFill = isExchangeFillTrade(trade as Record<string, unknown>)
                 const entryTime = trade.entry_time as Date | string | undefined
                 const exitTime = (trade.exit_time ?? trade.executed_at ?? trade.timestamp) as
                   | Date
                   | string
-                const durationSec = computeTradeDurationSeconds(
-                  trade.duration_seconds,
-                  entryTime,
-                  exitTime
-                )
+                const durationSec = isFill
+                  ? null
+                  : computeTradeDurationSeconds(trade.duration_seconds, entryTime, exitTime)
+                const fillPrice = trade.exit_price ?? trade.price ?? trade.fill_price
+
                 return (
                   <TableRow key={trade.trade_id}>
-                    <TableCell className="text-muted-foreground">{formatDate(entryTime)}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {isFill ? '—' : formatDate(entryTime)}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{formatDate(exitTime)}</TableCell>
-                    <TableCell>{formatTradeDuration(durationSec)}</TableCell>
+                    <TableCell>{isFill ? '—' : formatTradeDuration(durationSec)}</TableCell>
                     <TableCell>
                       <Badge variant={sideBadgeVariant(trade.side)}>{trade.side}</Badge>
                     </TableCell>
                     <TableCell className="font-medium">{trade.symbol}</TableCell>
                     <TableCell>{formatQuantity(trade.quantity)}</TableCell>
-                    <TableCell>{formatPriceUsd(trade.entry_price)}</TableCell>
-                    <TableCell>{formatPriceUsd(trade.exit_price ?? trade.price)}</TableCell>
+                    <TableCell>{isFill ? '—' : formatPriceUsd(trade.entry_price)}</TableCell>
+                    <TableCell>{formatPriceUsd(fillPrice)}</TableCell>
                     <TableCell>
                       {(() => {
                         const pnl = formatPnl(trade)
@@ -239,11 +240,19 @@ export function RecentTrades({
                       })()}
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
-                      {trade.exchange_order_id
-                        ? trade.exchange_order_id.length > 10
-                          ? `${trade.exchange_order_id.slice(0, 10)}…`
-                          : trade.exchange_order_id
-                        : '—'}
+                      {truncateId(trade.exchange_order_id)}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {truncateId(trade.fill_id)}
+                    </TableCell>
+                    <TableCell className="text-xs capitalize text-muted-foreground">
+                      {trade.role ?? '—'}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatCommission(trade)}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatFillType(trade)}
                     </TableCell>
                     <TableCell>
                       <Badge variant={getStatusVariant(trade.status ?? 'CLOSED')}>

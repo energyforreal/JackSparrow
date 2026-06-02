@@ -1,5 +1,6 @@
 """Shared portfolio fetch helpers for REST and WebSocket handlers."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,7 @@ __all__ = [
     "clear_recent_trades_display",
     "fetch_portfolio_summary",
     "fetch_recent_closed_trades",
+    "merge_recent_trades",
     "is_testnet_trading_mode",
     "require_testnet_exchange",
 ]
@@ -91,6 +93,44 @@ async def clear_recent_trades_display() -> bool:
     return redis_ok
 
 
+def _trade_sort_key(row: Dict[str, Any]) -> datetime:
+    raw = row.get("executed_at") or row.get("exit_time") or row.get("entry_time")
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    if isinstance(raw, str):
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def merge_recent_trades(
+    ledger_rows: List[Dict[str, Any]],
+    fill_rows: List[Dict[str, Any]],
+    *,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Merge agent ledger round-trips with exchange fill rows, newest first."""
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for row in ledger_rows:
+        tid = str(row.get("trade_id") or "")
+        if not tid:
+            continue
+        enriched = dict(row)
+        enriched.setdefault("record_kind", "round_trip")
+        enriched.setdefault("data_source", "agent")
+        by_id[tid] = enriched
+    for row in fill_rows:
+        tid = str(row.get("trade_id") or "")
+        if not tid:
+            continue
+        by_id[tid] = row
+    combined = sorted(by_id.values(), key=_trade_sort_key, reverse=True)
+    return combined[:limit]
+
+
 async def fetch_recent_closed_trades(
     db: AsyncSession,
     *,
@@ -112,12 +152,25 @@ async def fetch_recent_closed_trades(
     if is_testnet_trading_mode():
         from backend.services.agent_trade_ledger_service import get_agent_closed_trades
 
-        rows = await get_agent_closed_trades(
+        ledger_rows = await get_agent_closed_trades(
             symbol=symbol,
-            limit=limit,
-            offset=offset,
+            limit=limit + offset,
+            offset=0,
         )
-        return rows
+        if offset:
+            ledger_rows = ledger_rows[offset:]
+
+        fill_rows: List[Dict[str, Any]] = []
+        try:
+            fill_rows = await testnet_portfolio_service.get_recent_fills_from_exchange(
+                symbol=symbol,
+                limit=limit + offset,
+            )
+        except TestnetExchangeUnavailableError:
+            pass
+
+        merged = merge_recent_trades(ledger_rows, fill_rows, limit=limit + offset)
+        return merged[offset : offset + limit]
     return await portfolio_service.get_recent_closed_trades(
         db=db,
         symbol=symbol,

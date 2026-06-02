@@ -72,6 +72,8 @@ class PortfolioService:
             "exit_time": exit_time,
             "duration_seconds": self._compute_duration_seconds(entry_time, exit_time),
             "executed_at": exit_time,
+            "record_kind": "round_trip",
+            "data_source": "agent",
         }
     
     def serialize_portfolio_summary(self, summary: Dict[str, Any]) -> Dict[str, Any]:

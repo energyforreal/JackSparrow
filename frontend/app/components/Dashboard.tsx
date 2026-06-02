@@ -78,6 +78,7 @@ export function Dashboard() {
     marketData,
     syncStatus,
     lastReflection,
+    modelEdge,
   } = useTradingData()
 
   const reasoningChainMeta = useMemo(() => reasoningChainMetaFromSignal(signal), [signal])
@@ -209,6 +210,7 @@ export function Dashboard() {
                   <SignalIndicator
                     signal={signal || undefined}
                     lastReflection={lastReflection}
+                    modelEdge={modelEdge}
                   />
                   <p className="text-[10px] text-muted-foreground text-center px-1">
                     Press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">P</kbd> for
@@ -292,7 +294,9 @@ export function Dashboard() {
               <ReasoningChainView
                 reasoningChain={signal?.reasoning_chain || []}
                 chainMeta={reasoningChainMeta ?? signal?.reasoning_chain_full}
-                overallConfidence={signal?.confidence}
+                overallConfidence={
+                  signal?.final_confidence ?? signal?.display_confidence ?? signal?.confidence
+                }
                 isLoading={isLoading}
                 v43ExpectedReturn={
                   signal?.expected_return != null ? Number(signal.expected_return) : undefined

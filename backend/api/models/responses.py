@@ -411,8 +411,8 @@ class ClosedTradeResponse(DecimalSerializerMixin, BaseModel):
         description="Synthetic closed-trade row ID",
         example="closed_pos_123456"
     )
-    position_id: str = Field(
-        ...,
+    position_id: Optional[str] = Field(
+        default="",
         description="Underlying position ID",
         example="pos_123456"
     )
@@ -431,23 +431,23 @@ class ClosedTradeResponse(DecimalSerializerMixin, BaseModel):
         description="Closed quantity",
         example=0.1
     )
-    entry_price: Decimal = Field(
-        ...,
+    entry_price: Optional[Decimal] = Field(
+        default=None,
         description="Entry price",
         example=50000.0
     )
-    exit_price: Decimal = Field(
-        ...,
-        description="Exit price at close",
+    exit_price: Optional[Decimal] = Field(
+        default=None,
+        description="Exit price at close or fill price",
         example=51250.0
     )
-    pnl: Decimal = Field(
-        ...,
+    pnl: Optional[Decimal] = Field(
+        default=Decimal("0"),
         description="Realized PnL in INR",
         example=1025.5
     )
-    pnl_usd: Decimal = Field(
-        ...,
+    pnl_usd: Optional[Decimal] = Field(
+        default=Decimal("0"),
         description="Realized PnL in USD",
         example=12.35
     )
@@ -456,16 +456,16 @@ class ClosedTradeResponse(DecimalSerializerMixin, BaseModel):
         description="Closed-trade status",
         example="CLOSED"
     )
-    entry_time: datetime = Field(
-        ...,
+    entry_time: Optional[datetime] = Field(
+        default=None,
         description="Position entry timestamp",
     )
-    exit_time: datetime = Field(
-        ...,
+    exit_time: Optional[datetime] = Field(
+        default=None,
         description="Position exit timestamp",
     )
-    duration_seconds: int = Field(
-        ...,
+    duration_seconds: Optional[int] = Field(
+        default=0,
         description="Trade duration in whole seconds",
         example=845
     )
@@ -480,6 +480,42 @@ class ClosedTradeResponse(DecimalSerializerMixin, BaseModel):
     fill_id: Optional[str] = Field(
         default=None,
         description="Delta fill id when available",
+    )
+    record_kind: Optional[str] = Field(
+        default="round_trip",
+        description="round_trip (agent ledger) or fill (exchange execution)",
+    )
+    data_source: Optional[str] = Field(
+        default=None,
+        description="agent or exchange_fill",
+    )
+    role: Optional[str] = Field(
+        default=None,
+        description="taker or maker (Delta fill)",
+    )
+    commission_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Commission in settling asset (USD/USDT)",
+    )
+    fill_type: Optional[str] = Field(
+        default=None,
+        description="Delta fill_type (normal, liquidation, etc.)",
+    )
+    order_type: Optional[str] = Field(
+        default=None,
+        description="Original order type from fill meta_data",
+    )
+    exit_reason: Optional[str] = Field(
+        default=None,
+        description="Agent exit reason for round-trip rows",
+    )
+    gross_pnl_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Gross PnL before fees (agent ledger)",
+    )
+    fees_usd: Optional[Decimal] = Field(
+        default=None,
+        description="Fees in USD (agent ledger)",
     )
 
 

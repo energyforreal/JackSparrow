@@ -42,6 +42,9 @@ export interface Position {
   opened_at: Date | string
   stop_loss?: number | string
   take_profit?: number | string
+  bracket_trail_amount?: number | string
+  bracket_sl_tp_updated_at?: string
+  exchange_bracket_sl_tp?: boolean
   exchange_position_id?: string
   product_id?: number
   lots?: number
@@ -76,6 +79,15 @@ export interface Trade {
   usd_inr_rate?: number | string
   exchange_order_id?: string
   fill_id?: string
+  /** round_trip (agent ledger) or fill (Delta execution) */
+  record_kind?: 'round_trip' | 'fill' | string
+  /** agent or exchange_fill */
+  data_source?: string
+  role?: string
+  commission_usd?: number | string
+  fill_type?: string
+  order_type?: string
+  exit_reason?: string
 }
 
 export interface ModelPrediction {
@@ -171,6 +183,16 @@ export interface Signal {
   final_confidence?: number
   /** Which confidence field is authoritative for the AI card display. */
   confidence_source?: 'policy' | 'reasoning'
+  /** Policy/ML candidate confidence (0-1 or 0-100). */
+  policy_confidence?: number
+  /** Calibrated display confidence for UI when split from policy. */
+  display_confidence?: number
+  calibrated_confidence?: number
+  raw_confidence?: number
+  /** False when signal is HOLD / non-entry. */
+  is_actionable_entry?: boolean
+  server_timestamp_ms?: number
+  decision_event_id?: string
   /** v43 JackSparrow: regime label from model context when surfaced on signal. */
   regime?: string
   /** v43: expected return from model context. */

@@ -378,6 +378,14 @@ class Settings(BaseSettings):
         env="EXCHANGE_POSITION_RECONCILE_INTERVAL_SECONDS",
         description="Minimum seconds between exchange reconciliation passes.",
     )
+    bracket_exit_poll_enabled: bool = Field(
+        default=True,
+        env="BRACKET_EXIT_POLL_ENABLED",
+        description=(
+            "When True, manage_position polls Delta margined positions for bracket "
+            "SL/TP exits instead of waiting only for periodic reconcile."
+        ),
+    )
     volatility_filter_enabled: bool = Field(
         default=True,
         env="VOLATILITY_FILTER_ENABLED",
@@ -812,6 +820,57 @@ class Settings(BaseSettings):
         default=True,
         env="USE_BRACKET_ORDERS",
         description="Use Delta bracket SL/TP on entry order when stop and target prices are set.",
+    )
+    use_bracket_on_entry_order: bool = Field(
+        default=False,
+        env="USE_BRACKET_ON_ENTRY_ORDER",
+        description=(
+            "When True, attach bracket fields on POST /v2/orders entry. "
+            "When False (default), use POST /v2/orders/bracket after fill."
+        ),
+    )
+    use_delta_position_bracket_api: bool = Field(
+        default=True,
+        env="USE_DELTA_POSITION_BRACKET_API",
+        description="Attach/update SL/TP via POST/PUT /v2/orders/bracket after fill.",
+    )
+    dynamic_sl_tp_enabled: bool = Field(
+        default=True,
+        env="DYNAMIC_SL_TP_ENABLED",
+        description="Recompute and PUT bracket SL/TP while position is open (throttled).",
+    )
+    dynamic_sl_tp_min_adjust_interval_seconds: int = Field(
+        default=60,
+        env="DYNAMIC_SL_TP_MIN_ADJUST_INTERVAL_SECONDS",
+        ge=5,
+        description="Minimum seconds between bracket PUT updates per position.",
+    )
+    dynamic_sl_tp_min_price_change_pct: float = Field(
+        default=0.002,
+        env="DYNAMIC_SL_TP_MIN_PRICE_CHANGE_PCT",
+        ge=0.0,
+        description="Minimum relative SL/TP price change before issuing bracket PUT.",
+    )
+    use_atr_trailing_stop: bool = Field(
+        default=False,
+        env="USE_ATR_TRAILING_STOP",
+        description="Send trail_amount on exchange bracket SL when ATR is available.",
+    )
+    atr_trailing_mult: float = Field(
+        default=1.0,
+        env="ATR_TRAILING_MULT",
+        ge=0.1,
+        description="ATR multiplier for bracket trail_amount when USE_ATR_TRAILING_STOP is on.",
+    )
+    bracket_stop_trigger_method: str = Field(
+        default="mark_price",
+        env="BRACKET_STOP_TRIGGER_METHOD",
+        description="Bracket trigger: mark_price, last_traded_price, or spot_price.",
+    )
+    bracket_fallback_local_sl_tp: bool = Field(
+        default=True,
+        env="BRACKET_FALLBACK_LOCAL_SL_TP",
+        description="When exchange bracket API fails, keep local manage_position SL/TP checks.",
     )
 
     jacksparrow_v43_artifact_basename: str = Field(

@@ -11,6 +11,7 @@ from agent.core.agent_order_registry import is_exchange_position_agent_attribute
 from agent.core.config import settings
 from agent.core.sl_tp import compute_stop_take_prices
 from agent.events.event_bus import event_bus
+from agent.events.schemas import PositionClosedEvent
 
 logger = structlog.get_logger()
 
@@ -99,6 +100,351 @@ def _parse_exchange_timestamp(value: Any) -> Optional[datetime]:
         except ValueError:
             return None
     return None
+
+
+def _compute_duration_seconds(entry_time: Any, exit_time: datetime) -> int:
+    entry_dt = _parse_exchange_timestamp(entry_time)
+    if entry_dt is None:
+        return 0
+    try:
+        return max(0, int((exit_time - entry_dt).total_seconds()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _infer_bracket_exit_reason(pos: Dict[str, Any], exit_price: float) -> str:
+    """Guess SL vs TP when exchange bracket closed the leg."""
+    sl = pos.get("stop_loss")
+    tp = pos.get("take_profit")
+    side = str(pos.get("side") or "").lower()
+    if exit_price <= 0:
+        return "exchange_bracket_exit"
+    tol = max(exit_price * 0.001, 1.0)
+
+    if sl is not None:
+        sl_f = float(sl)
+        if side == "long" and exit_price <= sl_f + tol:
+            return "stop_loss_hit"
+        if side == "short" and exit_price >= sl_f - tol:
+            return "stop_loss_hit"
+
+    if tp is not None:
+        tp_f = float(tp)
+        if side == "long" and exit_price >= tp_f - tol:
+            return "take_profit_hit"
+        if side == "short" and exit_price <= tp_f + tol:
+            return "take_profit_hit"
+
+    return "exchange_bracket_exit"
+
+
+def _estimate_pnl_usd(pos: Dict[str, Any], entry_px: float, exit_px: float) -> tuple[float, float, float]:
+    """Return (gross_pnl_usd, fees_usd, net_pnl_usd) using configured fee model."""
+    lots = _coerce_float(pos.get("lots") or pos.get("quantity"))
+    side = str(pos.get("side") or "long")
+    cv = _coerce_float(
+        pos.get("contract_value_btc") or getattr(settings, "contract_value_btc", 0.001),
+        0.001,
+    )
+    taker = float(getattr(settings, "taker_fee_rate", 0.0005) or 0.0005)
+    slip_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
+    if entry_px <= 0 or exit_px <= 0 or lots <= 0:
+        return 0.0, 0.0, 0.0
+    try:
+        from agent.core.futures_utils import net_pnl_usd_after_fees
+
+        gross, fees, net = net_pnl_usd_after_fees(
+            entry_px, exit_px, lots, side, cv, taker, slip_bps
+        )
+        return float(gross), float(fees), float(net)
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+
+async def _enrich_payload_from_fills(
+    execution_module: Any,
+    symbol: str,
+    payload: Dict[str, Any],
+) -> None:
+    """Best-effort: latest fill price, fill_id, commission from Delta GET /v2/fills."""
+    client = getattr(execution_module, "delta_client", None)
+    if client is None:
+        return
+    try:
+        product_id = await client.resolve_product_id(symbol)
+        fills_resp = await client.get_fills(
+            product_ids=str(product_id),
+            page_size=20,
+            contract_types="perpetual_futures",
+        )
+    except Exception as exc:
+        logger.debug("reconcile_fill_enrich_skipped", symbol=symbol, error=str(exc))
+        return
+
+    rows = fills_resp.get("result") if isinstance(fills_resp, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return
+
+    sym_u = symbol.upper()
+    latest: Optional[Dict[str, Any]] = None
+    latest_ts = 0.0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ps = str(row.get("product_symbol") or row.get("symbol") or "").upper()
+        if ps and ps != sym_u:
+            continue
+        created = row.get("created_at")
+        ts = 0.0
+        if isinstance(created, (int, float)):
+            ts = float(created)
+            if ts > 1e12:
+                ts /= 1_000_000.0
+        if ts >= latest_ts:
+            latest_ts = ts
+            latest = row
+
+    if not latest:
+        return
+
+    fill_px = _coerce_float(latest.get("price"))
+    if fill_px > 0:
+        payload["exit_price"] = fill_px
+    fill_id = latest.get("id")
+    if fill_id is not None:
+        payload["fill_id"] = str(fill_id)
+    commission = latest.get("commission")
+    if commission is not None:
+        try:
+            payload["commission_usd"] = float(commission)
+            payload["fees_usd"] = abs(float(commission))
+        except (TypeError, ValueError):
+            pass
+    order_id = latest.get("order_id")
+    if order_id is not None and not payload.get("exchange_order_id"):
+        payload["exchange_order_id"] = str(order_id)
+
+    meta = latest.get("meta_data")
+    if isinstance(meta, dict):
+        ot = str(meta.get("order_type") or "").lower()
+        if "stop" in ot and payload.get("exit_reason") == "exchange_bracket_exit":
+            payload["exit_reason"] = "stop_loss_hit"
+        elif "take" in ot or "profit" in ot:
+            if payload.get("exit_reason") == "exchange_bracket_exit":
+                payload["exit_reason"] = "take_profit_hit"
+
+
+def _build_position_closed_payload(
+    sym: str,
+    pos: Dict[str, Any],
+    *,
+    exit_price: float,
+    exit_reason: str,
+    closed_record: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    entry_px = float(pos.get("entry_price") or 0)
+    exit_px = exit_price if exit_price > 0 else float(pos.get("current_price") or entry_px)
+    if exit_px <= 0:
+        exit_px = entry_px
+    exit_time = datetime.now(timezone.utc)
+    entry_time = pos.get("entry_time") or pos.get("opened_at")
+    gross, fees, net = _estimate_pnl_usd(pos, entry_px, exit_px)
+
+    pos_id = f"pos_reconcile_{sym}"
+    if closed_record and isinstance(closed_record, dict):
+        eid = closed_record.get("entry_order_id") or closed_record.get("exit_order_id")
+        if eid:
+            pos_id = f"pos_{eid}"
+
+    payload: Dict[str, Any] = {
+        "position_id": pos_id,
+        "symbol": sym,
+        "side": pos.get("side", ""),
+        "entry_price": entry_px,
+        "exit_price": exit_px,
+        "quantity": float(pos.get("lots") or pos.get("quantity") or 0),
+        "pnl": net,
+        "gross_pnl_usd": gross,
+        "fees_usd": fees,
+        "pnl_usd": net,
+        "exit_reason": exit_reason,
+        "timestamp": exit_time,
+        "duration_seconds": float(_compute_duration_seconds(entry_time, exit_time)),
+    }
+    if entry_time is not None:
+        payload["entry_time"] = entry_time
+
+    if closed_record and isinstance(closed_record, dict):
+        order_id = closed_record.get("entry_order_id") or closed_record.get("exit_order_id")
+        if order_id:
+            payload["exchange_order_id"] = str(order_id)
+
+    for key in (
+        "reasoning_chain_id",
+        "model_predictions",
+        "predicted_signal",
+        "memory_context_id",
+        "agent_introspection_at_entry",
+        "confidence_at_entry",
+    ):
+        if pos.get(key) is not None:
+            payload[key] = pos.get(key)
+
+    return payload
+
+
+async def emit_position_closed_from_exchange_flat(
+    execution_module: Any,
+    symbol: str,
+    pos: Dict[str, Any],
+    *,
+    exit_price: Optional[float] = None,
+    exit_reason: str = "reconcile_exchange_flat",
+    closed_record: Optional[Dict[str, Any]] = None,
+    source: str = "position_reconcile",
+) -> bool:
+    """Publish PositionClosedEvent after exchange bracket / reconcile detected a flat leg."""
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return False
+
+    exit_px = float(exit_price) if exit_price is not None else 0.0
+    if exit_px <= 0:
+        exit_px = float(pos.get("current_price") or pos.get("entry_price") or 0)
+
+    payload = _build_position_closed_payload(
+        sym,
+        pos,
+        exit_price=exit_px,
+        exit_reason=exit_reason,
+        closed_record=closed_record,
+    )
+    await _enrich_payload_from_fills(execution_module, sym, payload)
+
+    try:
+        from agent.core.agent_self_awareness_hooks import enrich_position_closed_payload
+
+        await enrich_position_closed_payload(payload)
+    except Exception as exc:
+        logger.debug(
+            "position_reconcile_self_awareness_hooks_skipped",
+            symbol=sym,
+            error=str(exc),
+        )
+
+    try:
+        ev = PositionClosedEvent(source=source, payload=payload)
+        await event_bus.publish(ev)
+        logger.info(
+            "position_closed_event_published",
+            symbol=sym,
+            exit_reason=exit_reason,
+            source=source,
+            position_id=payload.get("position_id"),
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "position_reconcile_position_closed_event_failed",
+            symbol=sym,
+            error=str(exc),
+        )
+        return False
+
+
+async def is_exchange_position_flat(execution_module: Any, symbol: str) -> bool:
+    """True when Delta margined positions show no open size for symbol."""
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return False
+    try:
+        view = await execution_module.get_margined_positions_view()
+    except Exception:
+        return False
+    rows = parse_margined_rows(view)
+    ex_map = exchange_open_symbols(rows)
+    return sym not in ex_map
+
+
+async def notify_exchange_flat_position_closed(
+    execution_module: Any,
+    symbol: str,
+    pos: Dict[str, Any],
+    *,
+    exit_reason: Optional[str] = None,
+    close_local_if_open: bool = True,
+    source: str = "position_reconcile",
+) -> bool:
+    """Close local OPEN row (optional) and publish PositionClosedEvent."""
+    sym = str(symbol or "").strip().upper()
+    pm = execution_module.position_manager
+    current = pm.get_position(sym) or pos
+    entry_px = float(current.get("entry_price") or 0)
+    exit_px = float(current.get("current_price") or entry_px)
+    if exit_px <= 0:
+        exit_px = entry_px
+
+    reason = exit_reason or _infer_bracket_exit_reason(current, exit_px)
+
+    closed_record: Optional[Dict[str, Any]] = None
+    if close_local_if_open:
+        live = pm.get_position(sym)
+        if live and str(live.get("status") or "").lower() == "open":
+            closed_record = pm.close_position(
+                symbol=sym,
+                exit_price=exit_px,
+                exit_order_id="exchange_flat_detected",
+            )
+        elif live:
+            closed_record = live
+
+    return await emit_position_closed_from_exchange_flat(
+        execution_module,
+        sym,
+        current,
+        exit_price=exit_px,
+        exit_reason=reason,
+        closed_record=closed_record,
+        source=source,
+    )
+
+
+async def maybe_handle_exchange_bracket_flat_exit(
+    execution_module: Any,
+    symbol: str,
+    position: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """If exchange bracket closed the leg, sync local state and notify backend/UI."""
+    if not bool(getattr(settings, "bracket_exit_poll_enabled", True)):
+        return None
+
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return None
+
+    if not await is_exchange_position_flat(execution_module, sym):
+        return None
+
+    exit_px = float(position.get("current_price") or position.get("entry_price") or 0)
+    reason = _infer_bracket_exit_reason(position, exit_px)
+
+    published = await notify_exchange_flat_position_closed(
+        execution_module,
+        sym,
+        position,
+        exit_reason=reason,
+        close_local_if_open=True,
+        source="execution_bracket_poll",
+    )
+    if not published:
+        return None
+
+    return {
+        "action": "exchange_bracket_closed",
+        "symbol": sym,
+        "exit_reason": reason,
+        "position_status": "closed",
+    }
 
 
 def parse_margined_rows(view: Any) -> List[Dict[str, Any]]:
@@ -240,47 +586,21 @@ async def reconcile_positions_with_exchange(execution_module: Any) -> Dict[str, 
             entry_price=entry_px,
             exit_price=exit_px,
         )
-        closed = pm.close_position(
-            symbol=sym,
-            exit_price=exit_px,
-            exit_order_id="reconcile_local_stale",
+        reason = _infer_bracket_exit_reason(pos, exit_px)
+        if reason == "exchange_bracket_exit":
+            reason = "reconcile_exchange_flat"
+
+        published = await notify_exchange_flat_position_closed(
+            execution_module,
+            sym,
+            pos,
+            exit_reason=reason,
+            close_local_if_open=True,
+            source="position_reconcile",
         )
         summary["cleared_local"].append(sym)
-
-        # Emit PositionClosedEvent so the backend ledger, Redis and frontend
-        # all receive the close notification — prevents ghost open positions.
-        try:
-            from agent.events.event_types import PositionClosedEvent
-
-            pos_id = f"pos_reconcile_{sym}"
-            entry_time = pos.get("entry_time") or pos.get("opened_at")
-            payload: Dict[str, Any] = {
-                "position_id": pos_id,
-                "symbol": sym,
-                "side": pos.get("side", ""),
-                "entry_price": entry_px,
-                "exit_price": exit_px,
-                "quantity": float(pos.get("lots") or pos.get("quantity") or 0),
-                "pnl": 0.0,
-                "gross_pnl_usd": 0.0,
-                "fees_usd": 0.0,
-                "exit_reason": "reconcile_exchange_flat",
-                "timestamp": datetime.now(timezone.utc),
-            }
-            if entry_time is not None:
-                payload["entry_time"] = entry_time
-            if closed and isinstance(closed, dict):
-                order_id = closed.get("entry_order_id") or closed.get("exit_order_id")
-                if order_id:
-                    payload["exchange_order_id"] = str(order_id)
-            ev = PositionClosedEvent(source="position_reconcile", payload=payload)
-            await event_bus.publish(ev)
-        except Exception as _ev_err:
-            logger.warning(
-                "position_reconcile_position_closed_event_failed",
-                symbol=sym,
-                error=str(_ev_err),
-            )
+        if not published:
+            summary.setdefault("event_publish_failed", []).append(sym)
 
     if summary["adopted"] or summary["closed_exchange"] or summary["cleared_local"]:
         logger.info("position_reconcile_complete", **summary)

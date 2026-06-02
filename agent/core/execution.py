@@ -36,6 +36,11 @@ from agent.core.sl_tp import (
     parse_risk_approved_side,
     rebase_sl_tp_to_fill,
 )
+from agent.core.dynamic_sl_tp import (
+    compute_sl_tp_levels,
+    should_update_bracket,
+    to_delta_bracket_payload,
+)
 from agent.core.exchange_gateway import ExchangeGateway
 from agent.core.agent_order_registry import (
     AGENT_DECISION_AUTHORITY,
@@ -671,6 +676,11 @@ class ExecutionEngine:
                     pex["tick_size"] = float(payload["tick_size"])
                 except (TypeError, ValueError):
                     pass
+            if payload.get("atr_14") is not None:
+                try:
+                    pex["atr_14"] = float(payload["atr_14"])
+                except (TypeError, ValueError):
+                    pass
             uir = payload.get("usd_inr_rate")
             if uir is not None:
                 try:
@@ -1194,6 +1204,18 @@ class ExecutionEngine:
                 )
                 if order_result.get("bracket_sl_tp_active"):
                     position["exchange_bracket_sl_tp"] = True
+                elif bool(getattr(settings, "use_delta_position_bracket_api", True)):
+                    atr_pos = pex.get("atr_14")
+                    try:
+                        atr_f = float(atr_pos) if atr_pos is not None else None
+                    except (TypeError, ValueError):
+                        atr_f = None
+                    await self._attach_position_bracket(
+                        position,
+                        symbol,
+                        atr_14=atr_f,
+                        regime=pex.get("regime"),
+                    )
                 position_opened = True
                 if self.exchange_gateway and hasattr(self.exchange_gateway, "register_position_opened"):
                     try:
@@ -1631,6 +1653,59 @@ class ExecutionEngine:
             "order_history": order_history,
         }
 
+    async def get_exchange_fills_snapshot(
+        self,
+        symbol: Optional[str] = None,
+        *,
+        limit: int = 50,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Fetch executed fills from Delta (GET /v2/fills) for Recent Trades."""
+        symbol = symbol or str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD")
+        fills_payload: Dict[str, Any] = {"success": True, "result": []}
+        order_history: Dict[str, Any] = {"success": True, "result": []}
+        if not self.delta_client:
+            return {
+                "success": True,
+                "symbol": symbol,
+                "fills": fills_payload,
+                "order_history": order_history,
+            }
+        try:
+            product_id = await self.delta_client.resolve_product_id(symbol)
+            pid = str(product_id)
+            fills_payload = await self.delta_client.get_fills(
+                product_ids=pid,
+                page_size=max(1, min(int(limit), 100)),
+                start_time=start_time,
+                end_time=end_time,
+                contract_types="perpetual_futures",
+            )
+            order_history = await self.delta_client.get_orders_history(
+                product_ids=pid,
+                page_size=50,
+            )
+        except Exception as exc:
+            logger.warning(
+                "exchange_fills_snapshot_failed",
+                symbol=symbol,
+                error=str(exc),
+            )
+            return {
+                "success": False,
+                "symbol": symbol,
+                "error": str(exc),
+                "fills": fills_payload,
+                "order_history": order_history,
+            }
+        return {
+            "success": True,
+            "symbol": symbol,
+            "fills": fills_payload,
+            "order_history": order_history,
+        }
+
     async def adopt_exchange_position(
         self,
         symbol: str,
@@ -1833,6 +1908,161 @@ class ExecutionEngine:
                 failed[symbol] = str(res.error_message or "close_failed")
         return {"success": len(failed) == 0, "result": {"closed_symbols": closed, "failed": failed}}
 
+    async def _attach_position_bracket(
+        self,
+        position: Dict[str, Any],
+        symbol: str,
+        *,
+        atr_14: Optional[float] = None,
+        regime: Optional[str] = None,
+    ) -> None:
+        """POST /v2/orders/bracket after fill when entry order had no atomic bracket."""
+        if not getattr(settings, "use_delta_position_bracket_api", True) or not self.delta_client:
+            return
+        entry = float(position.get("entry_price") or 0)
+        if entry <= 0:
+            return
+        side = "BUY" if position.get("side") == "long" else "SELL"
+        tick_raw = position.get("tick_size")
+        tick_sz: Optional[float] = None
+        if tick_raw is not None:
+            try:
+                tick_sz = float(tick_raw)
+            except (TypeError, ValueError):
+                tick_sz = None
+        levels = compute_sl_tp_levels(
+            entry, side, atr_14, regime, settings, tick_size=tick_sz
+        )
+        if levels.stop_loss is None and levels.take_profit is None:
+            return
+        trigger = str(
+            getattr(settings, "bracket_stop_trigger_method", "mark_price") or "mark_price"
+        )
+        body = to_delta_bracket_payload(
+            levels,
+            trigger_method=trigger,
+            use_trailing=bool(getattr(settings, "use_atr_trailing_stop", False)),
+        )
+        try:
+            await self.delta_client.create_position_bracket(
+                symbol,
+                stop_loss_order=body.get("stop_loss_order"),
+                take_profit_order=body.get("take_profit_order"),
+                bracket_stop_trigger_method=body.get("bracket_stop_trigger_method", trigger),
+                use_product_symbol_only=True,
+            )
+            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            position["bracket_order_id"] = bid
+            position["exchange_bracket_sl_tp"] = True
+            position["bracket_trail_amount"] = levels.trail_amount
+            position["bracket_trigger_method"] = trigger
+            position["stop_loss"] = levels.stop_loss
+            position["take_profit"] = levels.take_profit
+            position["bracket_sl_tp_updated_at"] = datetime.now(timezone.utc).isoformat()
+            logger.info(
+                "position_bracket_attached",
+                symbol=symbol,
+                bracket_order_id=bid,
+                stop_loss=levels.stop_loss,
+                take_profit=levels.take_profit,
+            )
+        except Exception as exc:
+            logger.warning("position_bracket_attach_failed", symbol=symbol, error=str(exc))
+            if getattr(settings, "bracket_fallback_local_sl_tp", True):
+                position["bracket_api_degraded"] = True
+            else:
+                position["exchange_bracket_sl_tp"] = False
+
+    async def _maybe_update_dynamic_bracket(
+        self, symbol: str, position: Dict[str, Any]
+    ) -> None:
+        """PUT /v2/orders/bracket when ATR/regime levels move beyond throttle thresholds."""
+        if not getattr(settings, "dynamic_sl_tp_enabled", False):
+            return
+        if not getattr(settings, "use_delta_position_bracket_api", True) or not self.delta_client:
+            return
+        entry = float(position.get("entry_price") or 0)
+        if entry <= 0:
+            return
+        atr_14: Optional[float] = None
+        atr_raw = position.get("atr_14")
+        if atr_raw is not None:
+            try:
+                atr_14 = float(atr_raw)
+            except (TypeError, ValueError):
+                atr_14 = None
+        side = "BUY" if position.get("side") == "long" else "SELL"
+        tick_raw = position.get("tick_size")
+        tick_sz: Optional[float] = None
+        if tick_raw is not None:
+            try:
+                tick_sz = float(tick_raw)
+            except (TypeError, ValueError):
+                tick_sz = None
+        levels = compute_sl_tp_levels(
+            entry,
+            side,
+            atr_14,
+            position.get("regime"),
+            settings,
+            tick_size=tick_sz,
+        )
+        if not should_update_bracket(position, levels, settings):
+            return
+        bid = position.get("bracket_order_id")
+        if bid is None:
+            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            if bid is not None:
+                position["bracket_order_id"] = bid
+        trigger = str(
+            position.get("bracket_trigger_method")
+            or getattr(settings, "bracket_stop_trigger_method", "mark_price")
+            or "mark_price"
+        )
+        try:
+            if bid is not None:
+                await self.delta_client.update_bracket_order(
+                    int(bid),
+                    symbol,
+                    stop_loss_price=levels.stop_loss,
+                    take_profit_price=levels.take_profit,
+                    trail_amount=levels.trail_amount,
+                    bracket_stop_trigger_method=trigger,
+                    use_product_symbol_only=True,
+                )
+            else:
+                body = to_delta_bracket_payload(
+                    levels,
+                    trigger_method=trigger,
+                    use_trailing=bool(getattr(settings, "use_atr_trailing_stop", False)),
+                )
+                await self.delta_client.create_position_bracket(
+                    symbol,
+                    stop_loss_order=body.get("stop_loss_order"),
+                    take_profit_order=body.get("take_profit_order"),
+                    bracket_stop_trigger_method=trigger,
+                    use_product_symbol_only=True,
+                )
+                bid = await self.delta_client.find_open_bracket_order_id(symbol)
+                position["bracket_order_id"] = bid
+            position["stop_loss"] = levels.stop_loss
+            position["take_profit"] = levels.take_profit
+            position["bracket_trail_amount"] = levels.trail_amount
+            position["bracket_sl_tp_updated_at"] = datetime.now(timezone.utc).isoformat()
+            position["exchange_bracket_sl_tp"] = True
+            position.pop("bracket_api_degraded", None)
+            logger.info(
+                "sl_tp_adjusted",
+                symbol=symbol,
+                bracket_order_id=bid,
+                stop_loss=levels.stop_loss,
+                take_profit=levels.take_profit,
+            )
+        except Exception as exc:
+            logger.warning("dynamic_bracket_update_failed", symbol=symbol, error=str(exc))
+            if getattr(settings, "bracket_fallback_local_sl_tp", True):
+                position["bracket_api_degraded"] = True
+
     async def manage_position(self, position_symbol: str) -> Dict[str, Any]:
         """
         Manage an existing position (check stops, etc.).
@@ -1847,11 +2077,24 @@ class ExecutionEngine:
                 out["status"] = position.get("status")
             return out
 
+        exchange_bracket = bool(position.get("exchange_bracket_sl_tp"))
+        use_position_api = bool(getattr(settings, "use_delta_position_bracket_api", True))
+        if exchange_bracket and use_position_api:
+            await self._maybe_update_dynamic_bracket(position_symbol, position)
+
         if (
-            position.get("exchange_bracket_sl_tp")
-            and position.get("stop_loss") is None
-            and position.get("take_profit") is None
+            exchange_bracket
+            and use_position_api
+            and position.get("bracket_order_id")
+            and not position.get("bracket_api_degraded")
         ):
+            from agent.core.position_reconcile import maybe_handle_exchange_bracket_flat_exit
+
+            bracket_closed = await maybe_handle_exchange_bracket_flat_exit(
+                self, position_symbol, position
+            )
+            if bracket_closed is not None:
+                return bracket_closed
             return {
                 "action": "none",
                 "reason": "exchange_bracket_sl_tp_active",
@@ -2146,6 +2389,7 @@ class ExecutionEngine:
 
             use_bracket = (
                 bool(getattr(settings, "use_bracket_orders", True))
+                and bool(getattr(settings, "use_bracket_on_entry_order", False))
                 and not reduce_only
                 and bracket_stop_loss_price is not None
                 and bracket_take_profit_price is not None

@@ -63,4 +63,38 @@ describe('RecentTrades closed-only table', () => {
     expect(screen.getByText('$79,100.00')).toBeInTheDocument()
     expect(screen.queryByText(/₹6,5/)).not.toBeInTheDocument()
   })
+
+  it('renders exchange fill row with Delta fill columns', () => {
+    const trades: Trade[] = [
+      {
+        trade_id: 'fill_112233',
+        symbol: 'BTCUSD',
+        side: 'BUY',
+        quantity: 5,
+        price: 67200,
+        exit_price: 67200,
+        status: 'FILLED',
+        executed_at: '2026-04-14T12:00:00Z',
+        exit_time: '2026-04-14T12:00:00Z',
+        record_kind: 'fill',
+        data_source: 'exchange_fill',
+        exchange_order_id: '123456',
+        fill_id: '112233',
+        role: 'taker',
+        commission_usd: 0.0018,
+        fill_type: 'normal',
+        order_type: 'limit_order',
+      },
+    ]
+
+    render(<RecentTrades trades={trades} usdInrRate={83} contractValueBtc={0.001} />)
+
+    expect(screen.getByText('Fill ID')).toBeInTheDocument()
+    expect(screen.getByText('Role')).toBeInTheDocument()
+    expect(screen.getByText('Commission')).toBeInTheDocument()
+    expect(screen.getByText('taker')).toBeInTheDocument()
+    expect(screen.getByText('FILLED')).toBeInTheDocument()
+    expect(screen.getByText('$67,200.00')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
 })

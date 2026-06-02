@@ -246,11 +246,14 @@ class WebSocketManager:
             # for the next live event from the agent.
             try:
                 if self._last_signal:
-                    await self.send_personal_message(websocket, {
-                        "type": "data_update",
-                        "resource": "signal",
-                        "data": self._last_signal
-                    })
+                    from backend.api.websocket.unified_manager import _should_replay_cached_signal
+
+                    if _should_replay_cached_signal(self._last_signal):
+                        await self.send_personal_message(websocket, {
+                            "type": "data_update",
+                            "resource": "signal",
+                            "data": self._last_signal
+                        })
 
                 # Prefer BTCUSD market data if available, otherwise any symbol
                 market_snapshot: Optional[Dict[str, Any]] = None

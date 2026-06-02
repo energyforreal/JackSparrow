@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
 import { formatConfidence, formatCurrency, formatDateTime } from '@/utils/formatters'
+import { resolveDisplayConfidence } from '@/utils/signalConfidence'
 import {
   parseFiniteNumber,
   resolveContractValueBtc,
@@ -73,6 +74,7 @@ export function TradingDecision({
 }: TradingDecisionProps) {
   const hasSignal = signal && signal.signal
   const hasRecentTrade = recentTrade !== null && recentTrade !== undefined
+  const displayConfidence = signal ? resolveDisplayConfidence(signal) : null
 
   const formatTradeValueInr = (trade: Trade) => {
     const explicit = parseFiniteNumber(trade.trade_value_inr)
@@ -120,7 +122,13 @@ export function TradingDecision({
                     {getDecisionAction(signal.signal)}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
-                    Confidence: {formatConfidence(signal.confidence)}
+                    Confidence:{' '}
+                    {formatConfidence(displayConfidence?.percent ?? signal.confidence)}
+                    {displayConfidence && (
+                      <span className="ml-1 opacity-80">
+                        ({displayConfidence.source === 'reasoning' ? 'reasoning' : 'policy'})
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

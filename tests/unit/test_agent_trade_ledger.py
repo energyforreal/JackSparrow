@@ -34,6 +34,7 @@ async def test_build_closed_trade_from_position_event_round_trip():
     assert row["exit_price"] == 79000.0
     assert row["duration_seconds"] == 900
     assert row["data_source"] == "agent"
+    assert row["record_kind"] == "round_trip"
     assert row["pnl_usd"] == 15.5
 
 

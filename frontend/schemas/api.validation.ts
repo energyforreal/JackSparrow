@@ -153,6 +153,14 @@ export const PredictResponseSchema = z
       .min(0)
       .max(1)
       .describe('Confidence score (0.0 to 1.0)'),
+    policy_confidence: z.number().min(0).max(1).optional(),
+    display_confidence: z.number().min(0).max(1).optional(),
+    final_confidence: z.number().min(0).max(1).optional(),
+    calibrated_confidence: z.number().min(0).max(1).optional(),
+    raw_confidence: z.number().min(0).max(1).optional(),
+    is_actionable_entry: z.boolean().optional(),
+    server_timestamp_ms: z.number().optional(),
+    decision_event_id: z.string().optional(),
     position_size: DecimalSchema.optional(),
     reasoning_chain: ReasoningChainSchema,
     model_predictions: z

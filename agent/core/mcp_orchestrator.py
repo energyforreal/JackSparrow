@@ -221,6 +221,29 @@ def _merge_prediction_context_with_agent_state(
     return out
 
 
+def _enrich_confidence_semantics(payload: Dict[str, Any]) -> None:
+    """Split policy vs calibrated display confidence for dashboard consumers."""
+    reasoning_chain = payload.get("reasoning_chain")
+    policy_conf = float(payload.get("confidence") or 0.0)
+    chain_final: Optional[float] = None
+    if isinstance(reasoning_chain, dict):
+        fc = reasoning_chain.get("final_confidence")
+        if fc is not None:
+            try:
+                chain_final = float(fc)
+            except (TypeError, ValueError):
+                chain_final = None
+    display_conf = chain_final if chain_final is not None else policy_conf
+    signal = str(payload.get("signal") or "HOLD").upper()
+    actionable = signal in ("BUY", "SELL", "STRONG_BUY", "STRONG_SELL")
+    payload["policy_confidence"] = policy_conf
+    payload["display_confidence"] = display_conf
+    payload["is_actionable_entry"] = actionable
+    if chain_final is not None:
+        payload["calibrated_confidence"] = chain_final
+    payload["raw_confidence"] = policy_conf
+
+
 def _decision_ws_metadata(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Extra fields on DecisionReadyEvent.payload for dashboard WebSocket consumers."""
     if not result or not isinstance(result, dict):
@@ -1691,6 +1714,9 @@ class MCPOrchestrator:
         """Attach introspection + memory ids to DecisionReady payload before publish."""
         payload = decision_event.payload
         payload["decision_event_id"] = decision_event.event_id
+        payload["server_timestamp_ms"] = int(
+            timestamp.timestamp() * 1000 if isinstance(timestamp, datetime) else time.time() * 1000
+        )
 
         memory_context_id = await self._store_decision_context(
             symbol=symbol,
@@ -2033,6 +2059,7 @@ class MCPOrchestrator:
                         or None,
                 }
                 decision_payload.update(_decision_ws_metadata(result))
+                _enrich_confidence_semantics(decision_payload)
 
                 decision_event = DecisionReadyEvent(
                     source="agent_policy_engine",
@@ -2193,6 +2220,7 @@ class MCPOrchestrator:
                     {"model_predictions": model_predictions_for_reasoning}
                 )
             )
+            _enrich_confidence_semantics(decision_payload)
             decision_event = DecisionReadyEvent(
                 source="agent_policy_engine",
                 correlation_id=event.event_id,

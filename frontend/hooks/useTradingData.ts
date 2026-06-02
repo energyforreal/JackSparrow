@@ -65,6 +65,13 @@ export interface MarketData {
   low_24h?: number
 }
 
+/** Live model-channel snapshot (does not overwrite decision signal). */
+export interface ModelEdgeSnapshot {
+  signal?: SignalType
+  confidence: number
+  timestamp?: string
+}
+
 export interface ModelData {
   symbol: string
   consensus_signal?: SignalType
@@ -105,6 +112,7 @@ export interface TradingDataState {
   health: HealthData | null
   performanceData: Array<{ date: string; value: number }>
   lastReflection: ReflectionSnapshot | null
+  modelEdge: ModelEdgeSnapshot | null
 
   // Status
   agentState: string
@@ -149,6 +157,7 @@ const initialState: TradingDataState = {
   health: null,
   performanceData: [],
   lastReflection: null,
+  modelEdge: null,
   agentState: 'UNKNOWN',
   isConnected: false,
   lastUpdate: null,
@@ -167,16 +176,23 @@ function normalizeTradeRecord(raw: unknown): Trade | null {
   if (!TERMINAL_TRADE_STATUSES.has(status)) return null
   const exitTime = (r.exit_time ?? r.closed_at ?? r.executed_at ?? r.timestamp) as Trade['executed_at']
   if (!exitTime) return null
+  const isFill = r.record_kind === 'fill' || r.data_source === 'exchange_fill'
+  const entryTimeRaw = r.entry_time ?? r.opened_at
   return {
     ...(raw as Trade),
     trade_id: String(id),
     executed_at: exitTime,
     exit_time: (r.exit_time ?? r.closed_at ?? exitTime) as Trade['exit_time'],
-    entry_time: (r.entry_time ?? r.opened_at) as Trade['entry_time'],
+    entry_time: isFill
+      ? undefined
+      : (entryTimeRaw as Trade['entry_time']),
     status,
+    record_kind: (r.record_kind as Trade['record_kind']) ?? (isFill ? 'fill' : 'round_trip'),
     price: (r.price ?? r.exit_price ?? r.fill_price) as Trade['price'],
     exit_price: (r.exit_price ?? r.price ?? r.fill_price) as Trade['exit_price'],
-    entry_price: (r.entry_price ?? r.price) as Trade['entry_price'],
+    entry_price: isFill
+      ? undefined
+      : ((r.entry_price ?? r.price) as Trade['entry_price']),
     duration_seconds:
       typeof r.duration_seconds === 'number'
         ? r.duration_seconds
@@ -194,11 +210,46 @@ function parseReflectionSnapshot(raw: unknown): ReflectionSnapshot | null {
   return parsed.success ? parsed.data : (raw as ReflectionSnapshot)
 }
 
-function mergeAgentIntrospection(
+/** Merge WS signal payloads without retaining omitted confidence keys (BUG 2). */
+function mergeSignalPayload(
   signal: Signal | null,
   data: Record<string, unknown>
 ): Signal {
-  const merged = { ...signal, ...data } as Signal
+  const prev = signal
+  const out: Record<string, unknown> = prev
+    ? { ...prev }
+    : { signal: 'HOLD' as SignalType, confidence: 0 }
+
+  const incomingSignal =
+    data.signal != null ? String(data.signal) : undefined
+  const isHoldPatch = incomingSignal === 'HOLD'
+  const partialHold =
+    isHoldPatch && !('confidence' in data) && !('final_confidence' in data)
+
+  for (const [key, value] of Object.entries(data)) {
+    if (key === 'confidence' || key === 'final_confidence') continue
+    if (value !== undefined) out[key] = value
+  }
+
+  if ('confidence' in data && data.confidence !== undefined) {
+    out.confidence = data.confidence
+  } else if (!partialHold && prev) {
+    out.confidence = prev.confidence
+  } else if (partialHold) {
+    out.confidence = 0
+  }
+
+  if ('final_confidence' in data && data.final_confidence !== undefined) {
+    out.final_confidence = data.final_confidence
+  } else if (!partialHold && prev?.final_confidence !== undefined) {
+    out.final_confidence = prev.final_confidence
+  }
+
+  if (data.timestamp !== undefined) {
+    out.timestamp = data.timestamp as string
+  }
+
+  const merged = out as Signal
   const intro = data.agent_introspection
   if (intro && typeof intro === 'object') {
     const parsed = AgentIntrospectionSnapshotSchema.safeParse(intro)
@@ -225,7 +276,10 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
           case 'signal':
             // Merge signal data - may include reasoning chain, model data, etc.
             {
-              const mergedSignal = mergeAgentIntrospection(state.signal, data as Record<string, unknown>)
+              const mergedSignal = mergeSignalPayload(
+                state.signal,
+                data as Record<string, unknown>
+              )
 
               // If the signal doesn't yet have model consensus data but we've
               // already received it via the model channel, merge it in so the
@@ -238,36 +292,6 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
               ) {
                 mergedSignal.model_consensus = state.modelData.model_consensus
                 mergedSignal.individual_model_reasoning = state.modelData.individual_model_reasoning
-              }
-
-              // Prefer model consensus when decision confidence is 0 so main card shows
-              // real-time values, but only when the model data is recent. This prevents
-              // old consensus data from resurrecting as a pseudo-live signal.
-              const effectiveConf = mergedSignal.confidence ?? 0
-              const modelData = state.modelData
-              if ((effectiveConf === 0 || effectiveConf === undefined) && modelData) {
-                let modelTimestamp: Date | null = null
-                const rawTs = modelData.timestamp as Date | string | null | undefined
-                modelTimestamp = parseUtcTimestamp(rawTs)
-
-                let isFresh = false
-                if (modelTimestamp) {
-                  const ageMs = Date.now() - modelTimestamp.getTime()
-                  // Treat model consensus older than 30 seconds as stale for fallback purposes.
-                  isFresh = ageMs <= 30_000
-                }
-
-                if (isFresh) {
-                  const modelConf =
-                    modelData.consensus_confidence ?? modelData.confidence
-                  if (modelConf != null && modelConf > 0) {
-                    mergedSignal.confidence = modelConf
-                    const consensusSignal = modelData.consensus_signal
-                    if (consensusSignal != null) {
-                      mergedSignal.signal = consensusSignal
-                    }
-                  }
-                }
               }
 
               return {
@@ -405,33 +429,24 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
             }
             }
           case 'model': {
-            // Update model channel only; do not overwrite a live agent signal with stale model metadata.
-            const hasConsensus =
-              (data.consensus_confidence != null && data.consensus_confidence > 0) ||
-              (data.confidence != null && data.confidence > 0)
-            const currentConf = state.signal?.confidence ?? 0
-            const hasLiveSignal = Boolean(state.signal) && currentConf > 0
-            const modelMeta = {
-              inference_latency_ms: data.inference_latency_ms,
-              inference_source: data.inference_source,
-              inference_mode: data.inference_mode,
-              model_version: data.model_version,
-            }
-            const signalFromModel =
-              !hasLiveSignal && hasConsensus
+            const rawConf = data.consensus_confidence ?? data.confidence
+            const confNum =
+              rawConf != null && Number.isFinite(Number(rawConf)) ? Number(rawConf) : 0
+            const modelEdge: ModelEdgeSnapshot | null =
+              confNum > 0
                 ? {
-                    ...data,
-                    signal: data.consensus_signal ?? data.signal ?? state.signal?.signal ?? 'HOLD',
-                    confidence: data.consensus_confidence ?? data.confidence ?? 0,
-                    ...modelMeta,
+                    signal: (data.consensus_signal ?? data.signal) as SignalType | undefined,
+                    confidence: confNum,
+                    timestamp:
+                      typeof data.timestamp === 'string' ? data.timestamp : undefined,
                   }
-                : state.signal
+                : state.modelEdge
             return {
               ...state,
               modelData: data,
-              signal: signalFromModel,
+              modelEdge,
               lastUpdate: now,
-              dataSource: 'websocket'
+              dataSource: 'websocket',
             }
           }
           default:
@@ -1004,6 +1019,7 @@ export function useTradingData() {
     health: state.health,
     performanceData: state.performanceData,
     lastReflection: state.lastReflection,
+    modelEdge: state.modelEdge,
 
     // Status
     agentState: state.agentState,

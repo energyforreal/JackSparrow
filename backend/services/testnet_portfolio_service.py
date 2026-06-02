@@ -25,6 +25,7 @@ logger = structlog.get_logger()
 _CACHE_KEY = "portfolio:testnet:summary"
 _CACHE_TTL_SECONDS = 5
 _CONNECTIVITY_CACHE_KEY = "testnet:exchange:connected"
+_AGENT_CLIENT_ORDER_PREFIX = "js_"
 
 
 class TestnetExchangeUnavailableError(Exception):
@@ -162,6 +163,101 @@ def _parse_order_timestamp(value: Any) -> Optional[datetime]:
         except ValueError:
             return None
     return None
+
+
+def _order_row_is_agent(order: Dict[str, Any]) -> bool:
+    cid = str(
+        order.get("client_order_id")
+        or order.get("client_order_id_str")
+        or ""
+    )
+    if cid.startswith(_AGENT_CLIENT_ORDER_PREFIX):
+        return True
+    meta = order.get("meta_data") or order.get("metadata")
+    if isinstance(meta, dict):
+        inner = str(meta.get("client_order_id") or "")
+        if inner.startswith(_AGENT_CLIENT_ORDER_PREFIX):
+            return True
+    return False
+
+
+def _collect_agent_order_ids(order_history_payload: Any) -> set[str]:
+    """Order ids from history rows attributed to the agent (``js_`` client_order_id)."""
+    ids: set[str] = set()
+    for row in _extract_result_list(order_history_payload):
+        if not _order_row_is_agent(row):
+            continue
+        oid = row.get("id") or row.get("order_id")
+        if oid is not None:
+            ids.add(str(oid))
+    return ids
+
+
+def _parse_fill_timestamp(value: Any) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        if isinstance(value, (int, float)):
+            ts = float(value)
+            if ts > 1e12:
+                ts /= 1_000_000.0
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        raw = str(value).strip()
+        if raw.isdigit():
+            ts = float(raw)
+            if ts > 1e12:
+                ts /= 1_000_000.0
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return datetime.now(timezone.utc)
+
+
+def _map_delta_fill_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Map Delta GET /v2/fills row to ClosedTradeResponse-compatible dict."""
+    fill_id = row.get("id")
+    order_id = row.get("order_id")
+    symbol = str(row.get("product_symbol") or row.get("symbol") or "BTCUSD")
+    side_raw = str(row.get("side") or "buy").upper()
+    side = "BUY" if side_raw.startswith("B") else "SELL"
+    quantity = _coerce_float(row.get("size"))
+    fill_price = _coerce_float(row.get("price"))
+    executed_at = _parse_fill_timestamp(row.get("created_at"))
+    commission = _coerce_float(row.get("commission"))
+    meta = row.get("meta_data") if isinstance(row.get("meta_data"), dict) else {}
+    order_type = meta.get("order_type") if meta else None
+
+    trade_id = f"fill_{fill_id}" if fill_id is not None else f"fill_{symbol}_{int(executed_at.timestamp())}"
+
+    return {
+        "trade_id": trade_id,
+        "position_id": "",
+        "symbol": symbol,
+        "side": side,
+        "quantity": quantity,
+        "entry_price": 0.0,
+        "exit_price": fill_price,
+        "price": fill_price,
+        "fill_price": fill_price,
+        "pnl": 0.0,
+        "pnl_usd": 0.0,
+        "status": "FILLED",
+        "entry_time": None,
+        "exit_time": executed_at,
+        "duration_seconds": 0,
+        "executed_at": executed_at,
+        "exchange_order_id": str(order_id) if order_id is not None else None,
+        "fill_id": str(fill_id) if fill_id is not None else None,
+        "role": str(row.get("role") or "") or None,
+        "commission_usd": commission,
+        "fill_type": str(row.get("fill_type") or "") or None,
+        "order_type": str(order_type) if order_type else None,
+        "data_source": "exchange_fill",
+        "record_kind": "fill",
+    }
 
 
 def _map_order_history_row(row: Dict[str, Any], usdinr: Decimal) -> Dict[str, Any]:
@@ -411,6 +507,45 @@ class TestnetPortfolioService:
             positions = [p for p in positions if str(p.get("symbol", "")).upper() == sym]
         return positions
 
+    async def get_recent_fills_from_exchange(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        limit: int = 50,
+        db: Optional[AsyncSession] = None,
+    ) -> List[Dict[str, Any]]:
+        """Agent-attributed fills from Delta GET /v2/fills (testnet)."""
+        _ = db
+        symbol = symbol or str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD")
+        fills_snapshot = await agent_service.get_exchange_fills(symbol=symbol, limit=limit)
+        if not fills_snapshot:
+            raise TestnetExchangeUnavailableError()
+
+        if fills_snapshot.get("success") is False:
+            raise TestnetExchangeUnavailableError(
+                str(fills_snapshot.get("error") or "Delta fills unavailable")
+            )
+
+        fills_body = fills_snapshot.get("fills") or {}
+        order_history = fills_snapshot.get("order_history") or {}
+        agent_order_ids = _collect_agent_order_ids(order_history)
+
+        rows = _extract_result_list(fills_body)
+        mapped: List[Dict[str, Any]] = []
+        for row in rows:
+            order_id = row.get("order_id")
+            if agent_order_ids and order_id is not None and str(order_id) not in agent_order_ids:
+                continue
+            if not agent_order_ids:
+                continue
+            mapped.append(_map_delta_fill_row(row))
+
+        mapped.sort(
+            key=lambda r: r.get("executed_at") or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        return mapped[:limit]
+
     async def get_recent_closed_trades_from_exchange(
         self,
         *,
@@ -418,26 +553,12 @@ class TestnetPortfolioService:
         limit: int = 50,
         db: Optional[AsyncSession] = None,
     ) -> List[Dict[str, Any]]:
-        _ = db
-        snapshot = await self.fetch_exchange_snapshot(symbol=symbol)
-        if not snapshot:
-            raise TestnetExchangeUnavailableError()
-
-        usdinr_rate = Decimal(str(await get_usdinr_rate()))
-        history = snapshot.get("order_history") or {}
-        rows = _extract_result_list(history)
-        closed_states = {"closed", "filled"}
-        mapped: List[Dict[str, Any]] = []
-        for row in rows:
-            state = str(row.get("state") or row.get("status") or "").lower()
-            if state and state not in closed_states:
-                continue
-            mapped.append(_map_order_history_row(row, usdinr_rate))
-        mapped.sort(
-            key=lambda r: r.get("exit_time") or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
+        """Deprecated: use get_recent_fills_from_exchange for fill-level history."""
+        return await self.get_recent_fills_from_exchange(
+            symbol=symbol,
+            limit=limit,
+            db=db,
         )
-        return mapped[:limit]
 
 
 testnet_portfolio_service = TestnetPortfolioService()

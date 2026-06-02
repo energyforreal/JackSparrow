@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { Signal, SignalType, ReflectionSnapshot } from '@/types'
+import type { ModelEdgeSnapshot } from '@/hooks/useTradingData'
+import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
 import { resolveDisplayConfidence } from '@/utils/signalConfidence'
@@ -13,6 +15,7 @@ import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 interface SignalIndicatorProps {
   signal?: Signal
   lastReflection?: ReflectionSnapshot | null
+  modelEdge?: ModelEdgeSnapshot | null
 }
 
 const getSignalBadgeClasses = (signal: SignalType) => {
@@ -45,7 +48,7 @@ const getSignalIcon = (signal: SignalType) => {
   }
 }
 
-export function SignalIndicator({ signal, lastReflection }: SignalIndicatorProps) {
+export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalIndicatorProps) {
   if (!signal) {
     return (
       <Card>
@@ -111,15 +114,34 @@ export function SignalIndicator({ signal, lastReflection }: SignalIndicatorProps
               <span className="font-medium">{formatConfidence(overallConfidence)}</span>
             </div>
             <ConfidenceProgress value={overallConfidence} className="h-2" />
+            <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+              Source: {displayConfidence.source === 'reasoning' ? 'reasoning' : 'policy'}
+            </p>
             {displayConfidence.source === 'reasoning' &&
               policyConfidencePercent != null &&
               Math.abs(policyConfidencePercent - overallConfidence) >= 2 && (
                 <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight tabular-nums">
-                  Raw score: {formatConfidence(policyConfidencePercent)}
+                  Policy score: {formatConfidence(policyConfidencePercent)}
                 </p>
               )}
           </div>
         </div>
+
+        {modelEdge && modelEdge.confidence > 0 && (
+          <div className="rounded-md border border-dashed border-border/60 px-3 py-2">
+            <div className="flex justify-between text-xs mb-1">
+              <span className="text-muted-foreground">Model edge</span>
+              <span className="font-medium tabular-nums">
+                {formatConfidence(normalizeConfidenceToPercent(modelEdge.confidence))}
+                {modelEdge.signal ? ` · ${modelEdge.signal}` : ''}
+              </span>
+            </div>
+            <ConfidenceProgress
+              value={normalizeConfidenceToPercent(modelEdge.confidence)}
+              className="h-1.5 opacity-80"
+            />
+          </div>
+        )}
 
         {/* v43 Signal Economics */}
         {(signal.expected_return != null ||

@@ -818,6 +818,35 @@ class AgentService:
             return response.get("data")
         return response
 
+    async def get_exchange_fills(
+        self,
+        symbol: Optional[str] = None,
+        limit: int = 50,
+        timeout: int = 30,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch live exchange fill history from the agent (Delta testnet)."""
+        parameters: Dict[str, Any] = {"limit": limit}
+        if symbol:
+            parameters["symbol"] = symbol
+        if start_time is not None:
+            parameters["start_time"] = start_time
+        if end_time is not None:
+            parameters["end_time"] = end_time
+        response = await self._send_command(
+            "get_exchange_fills",
+            parameters=parameters,
+            timeout=timeout,
+        )
+        if not response:
+            return None
+        if isinstance(response, dict) and response.get("success") is False:
+            return None
+        if isinstance(response, dict) and "data" in response:
+            return response.get("data")
+        return response
+
     async def control_agent(
         self,
         action: str,

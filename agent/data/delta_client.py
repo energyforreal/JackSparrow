@@ -828,12 +828,142 @@ class DeltaExchangeClient:
 
         return await self._make_request("POST", "/v2/orders", data=data)
 
+    async def create_position_bracket(
+        self,
+        symbol: str,
+        *,
+        stop_loss_order: Optional[Dict[str, Any]] = None,
+        take_profit_order: Optional[Dict[str, Any]] = None,
+        bracket_stop_trigger_method: str = "mark_price",
+        product_id: Optional[int] = None,
+        use_product_symbol_only: bool = False,
+    ) -> Dict[str, Any]:
+        """POST /v2/orders/bracket — attach SL/TP to an open position (full size)."""
+        data: Dict[str, Any] = {}
+        if use_product_symbol_only or product_id is None:
+            sym = (symbol or "").strip().upper()
+            if not sym:
+                raise DeltaExchangeError("product_symbol is required for position bracket")
+            data["product_symbol"] = sym
+        else:
+            data["product_id"] = int(product_id)
+        if stop_loss_order:
+            data["stop_loss_order"] = stop_loss_order
+        if take_profit_order:
+            data["take_profit_order"] = take_profit_order
+        if bracket_stop_trigger_method:
+            data["bracket_stop_trigger_method"] = bracket_stop_trigger_method
+        return await self._make_request("POST", "/v2/orders/bracket", data=data)
+
+    async def update_bracket_order(
+        self,
+        order_id: int,
+        symbol: str,
+        *,
+        stop_loss_price: Optional[float] = None,
+        take_profit_price: Optional[float] = None,
+        trail_amount: Optional[float] = None,
+        bracket_stop_trigger_method: str = "mark_price",
+        product_id: Optional[int] = None,
+        use_product_symbol_only: bool = False,
+    ) -> Dict[str, Any]:
+        """PUT /v2/orders/bracket — amend bracket params on an existing bracket order."""
+        data: Dict[str, Any] = {"id": int(order_id)}
+        if use_product_symbol_only or product_id is None:
+            sym = (symbol or "").strip().upper()
+            if not sym:
+                raise DeltaExchangeError("product_symbol is required for bracket update")
+            data["product_symbol"] = sym
+        else:
+            data["product_id"] = int(product_id)
+        if stop_loss_price is not None:
+            sl = str(stop_loss_price)
+            data["bracket_stop_loss_price"] = sl
+            data["bracket_stop_loss_limit_price"] = sl
+        if take_profit_price is not None:
+            tp = str(take_profit_price)
+            data["bracket_take_profit_price"] = tp
+            data["bracket_take_profit_limit_price"] = tp
+        if trail_amount is not None:
+            data["bracket_trail_amount"] = str(trail_amount)
+        if bracket_stop_trigger_method:
+            data["bracket_stop_trigger_method"] = bracket_stop_trigger_method
+        return await self._make_request("PUT", "/v2/orders/bracket", data=data)
+
+    async def find_open_bracket_order_id(self, symbol: str) -> Optional[int]:
+        """Return open order id that carries bracket params for ``symbol``, if any."""
+        try:
+            pid = await self.resolve_product_id(symbol)
+        except Exception:
+            pid = None
+        params: Dict[str, Any] = {"page_size": 50, "states": "open"}
+        if pid is not None:
+            params["product_ids"] = str(pid)
+        resp = await self._make_request("GET", "/v2/orders", params=params)
+        rows = resp.get("result") if isinstance(resp, dict) else None
+        if not isinstance(rows, list):
+            return None
+        sym_u = (symbol or "").strip().upper()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            ps = str(row.get("product_symbol") or "").upper()
+            if sym_u and ps and ps != sym_u:
+                continue
+            if (
+                row.get("bracket_take_profit_price") is not None
+                or row.get("bracket_stop_loss_price") is not None
+                or row.get("meta_data", {}).get("bracket")
+            ):
+                oid = row.get("id")
+                if oid is not None:
+                    try:
+                        return int(oid)
+                    except (TypeError, ValueError):
+                        continue
+            meta = row.get("meta_data")
+            if isinstance(meta, dict) and meta.get("bracket"):
+                oid = row.get("id")
+                if oid is not None:
+                    try:
+                        return int(oid)
+                    except (TypeError, ValueError):
+                        continue
+        return None
+
+    @staticmethod
+    def parse_fill_timestamp(value: Any) -> Optional[datetime]:
+        """Parse Delta fill ``created_at`` (microseconds since epoch)."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        try:
+            if isinstance(value, (int, float)):
+                ts = float(value)
+                if ts > 1e12:
+                    ts /= 1_000_000.0
+                return datetime.fromtimestamp(ts, tz=timezone.utc)
+            raw = str(value).strip()
+            if raw.isdigit():
+                ts = float(raw)
+                if ts > 1e12:
+                    ts /= 1_000_000.0
+                return datetime.fromtimestamp(ts, tz=timezone.utc)
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            return None
+
     async def get_fills(
         self,
         product_ids: Optional[str] = None,
         start_time: Optional[int] = None,
         end_time: Optional[int] = None,
         page_size: int = 100,
+        contract_types: Optional[str] = None,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
     ) -> Dict[str, Any]:
         """GET /v2/fills — trade fill history for P&L reconciliation."""
         params: Dict[str, Any] = {"page_size": int(page_size)}
@@ -843,6 +973,12 @@ class DeltaExchangeClient:
             params["start_time"] = int(start_time)
         if end_time is not None:
             params["end_time"] = int(end_time)
+        if contract_types:
+            params["contract_types"] = contract_types
+        if after:
+            params["after"] = after
+        if before:
+            params["before"] = before
         return await self._make_request("GET", "/v2/fills", params=params)
 
     async def get_orders(

@@ -1059,6 +1059,9 @@ class IntelligentAgent:
             elif cmd == "get_exchange_portfolio":
                 result = await self._handle_get_exchange_portfolio(params)
                 await self._send_response(request_id, result.get("data", result))
+            elif cmd == "get_exchange_fills":
+                result = await self._handle_get_exchange_fills(params)
+                await self._send_response(request_id, result.get("data", result))
             else:
                 await self._send_response(
                     request_id,
@@ -1520,6 +1523,36 @@ class IntelligentAgent:
                 "get_exchange_portfolio_failed",
                 error=err,
                 exc_info=not expected,
+                service="agent",
+            )
+            return {"success": False, "error": err}
+
+    async def _handle_get_exchange_fills(
+        self, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Return Delta testnet fill history plus order history for agent attribution."""
+        params = params or {}
+        symbol = params.get("symbol", self.default_symbol)
+        limit = int(params.get("limit", 50) or 50)
+        start_time = params.get("start_time")
+        end_time = params.get("end_time")
+        if start_time is not None:
+            start_time = int(start_time)
+        if end_time is not None:
+            end_time = int(end_time)
+        try:
+            snapshot = await execution_module.get_exchange_fills_snapshot(
+                symbol=symbol,
+                limit=limit,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            return {"success": True, "data": snapshot}
+        except Exception as exc:
+            err = str(exc)
+            logger.warning(
+                "get_exchange_fills_failed",
+                error=err,
                 service="agent",
             )
             return {"success": False, "error": err}

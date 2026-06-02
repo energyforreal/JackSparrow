@@ -38,6 +38,27 @@ from backend.core.communication_logger import (
 logger = structlog.get_logger()
 
 
+def _should_replay_cached_signal(cached: Dict[str, Any]) -> bool:
+    """Skip misleading HOLD or empty-confidence snapshots on client connect."""
+    sig = str(cached.get("signal") or "").upper()
+    if sig == "HOLD":
+        return False
+    conf = cached.get("confidence")
+    fc = cached.get("final_confidence")
+    try:
+        c = float(conf) if conf is not None else 0.0
+    except (TypeError, ValueError):
+        c = 0.0
+    try:
+        f = float(fc) if fc is not None else 0.0
+    except (TypeError, ValueError):
+        f = 0.0
+    actionable = sig in ("BUY", "SELL", "STRONG_BUY", "STRONG_SELL")
+    if c <= 0 and f <= 0 and not actionable:
+        return False
+    return True
+
+
 def _json_default_encoder(obj: Any) -> Any:
     """JSON encoder for WebSocket payloads."""
     if isinstance(obj, (datetime, date)):
@@ -273,7 +294,7 @@ class UnifiedWebSocketManager:
                 websocket,
                 _envelope_to_legacy_dict(create_agent_state_update(state_data)),
             )
-            if self._last_signal:
+            if self._last_signal and _should_replay_cached_signal(self._last_signal):
                 # Only send cached signal if it is still fresh to avoid
                 # showing very old signals when a new client connects.
                 try:

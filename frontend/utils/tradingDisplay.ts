@@ -16,6 +16,15 @@ export function isShortSide(side: string | undefined | null): boolean {
   return s === 'SELL' || s === 'SHORT'
 }
 
+/** True when row is a Delta exchange fill (not agent round-trip ledger). */
+export function isExchangeFillTrade(trade: Record<string, unknown>): boolean {
+  return (
+    trade.record_kind === 'fill' ||
+    trade.data_source === 'exchange_fill' ||
+    String(trade.trade_id ?? '').startsWith('fill_')
+  )
+}
+
 export function sideBadgeVariant(side: string | undefined | null): 'default' | 'destructive' {
   return isLongSide(side) ? 'default' : 'destructive'
 }

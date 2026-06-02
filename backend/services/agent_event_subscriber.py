@@ -1471,7 +1471,7 @@ class AgentEventSubscriber:
     async def _handle_decision_ready_consolidated(self, payload: Dict[str, Any]):
         """Handle decision_ready events with simplified logic."""
         signal = payload.get("signal", "HOLD")
-        confidence = payload.get("confidence", 0.0)
+        confidence = payload.get("policy_confidence", payload.get("confidence", 0.0))
         symbol = payload.get("symbol", "BTCUSD")
         reasoning_chain = payload.get("reasoning_chain", {})
 
@@ -1479,6 +1479,30 @@ class AgentEventSubscriber:
         if confidence > 1.0:
             confidence = confidence / 100.0
         confidence = max(0.0, min(1.0, confidence))
+
+        display_conf_raw = payload.get("display_confidence")
+        display_conf: Optional[float] = None
+        if display_conf_raw is not None:
+            display_conf = float(display_conf_raw)
+            if display_conf > 1.0:
+                display_conf = display_conf / 100.0
+            display_conf = max(0.0, min(1.0, display_conf))
+
+        calibrated_raw = payload.get("calibrated_confidence")
+        calibrated_conf: Optional[float] = None
+        if calibrated_raw is not None:
+            calibrated_conf = float(calibrated_raw)
+            if calibrated_conf > 1.0:
+                calibrated_conf = calibrated_conf / 100.0
+            calibrated_conf = max(0.0, min(1.0, calibrated_conf))
+
+        raw_conf_raw = payload.get("raw_confidence")
+        raw_conf: Optional[float] = None
+        if raw_conf_raw is not None:
+            raw_conf = float(raw_conf_raw)
+            if raw_conf > 1.0:
+                raw_conf = raw_conf / 100.0
+            raw_conf = max(0.0, min(1.0, raw_conf))
 
         # Extract reasoning data
         reasoning_steps = reasoning_chain.get("steps", []) if isinstance(reasoning_chain, dict) else []
@@ -1565,9 +1589,15 @@ class AgentEventSubscriber:
         # - confidence: policy/ML confidence from decision_ready (entry gating source)
         # - final_confidence: calibrated reasoning confidence from reasoning_chain
         # - confidence_source: hints which field the UI should prioritize for display
+        is_actionable = payload.get("is_actionable_entry")
+        if is_actionable is None:
+            sig_u = str(signal or "").upper()
+            is_actionable = sig_u in ("BUY", "SELL", "STRONG_BUY", "STRONG_SELL")
+
         signal_data = {
             "signal": signal,
             "confidence": confidence,
+            "policy_confidence": confidence,
             "symbol": symbol,
             "reasoning_chain": reasoning_steps,
             "conclusion": conclusion,
@@ -1576,7 +1606,9 @@ class AgentEventSubscriber:
             "chain_id": chain_id,
             "final_confidence": chain_final,
             "confidence_source": "reasoning" if final_from_chain is not None else "policy",
+            "is_actionable_entry": bool(is_actionable),
             "timestamp": ts_str,
+            "server_timestamp_ms": payload.get("server_timestamp_ms"),
             "reasoning_chain_full": {
                 "chain_id": chain_id or "",
                 "timestamp": ts_str,
@@ -1593,11 +1625,20 @@ class AgentEventSubscriber:
             if v is not None:
                 signal_data[k] = v
 
+        if display_conf is not None:
+            signal_data["display_confidence"] = display_conf
+        if calibrated_conf is not None:
+            signal_data["calibrated_confidence"] = calibrated_conf
+        if raw_conf is not None:
+            signal_data["raw_confidence"] = raw_conf
+        trade_score_val = payload.get("trade_score")
+        if trade_score_val is not None:
+            signal_data["trade_score"] = trade_score_val
+
         for k in (
             "policy_verdict",
             "policy_reason_codes",
             "strategy_origin",
-            "trade_score",
             "thesis_signal",
             "ml_evidence_snapshot",
             "agent_introspection",
