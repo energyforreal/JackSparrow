@@ -161,70 +161,58 @@ def _estimate_pnl_usd(pos: Dict[str, Any], entry_px: float, exit_px: float) -> t
         return 0.0, 0.0, 0.0
 
 
-async def _enrich_payload_from_fills(
-    execution_module: Any,
-    symbol: str,
-    payload: Dict[str, Any],
-) -> None:
-    """Best-effort: latest fill price, fill_id, commission from Delta GET /v2/fills."""
-    client = getattr(execution_module, "delta_client", None)
-    if client is None:
-        return
-    try:
-        product_id = await client.resolve_product_id(symbol)
-        fills_resp = await client.get_fills(
-            product_ids=str(product_id),
-            page_size=20,
-            contract_types="perpetual_futures",
-        )
-    except Exception as exc:
-        logger.debug("reconcile_fill_enrich_skipped", symbol=symbol, error=str(exc))
-        return
+def _fill_timestamp_seconds(row: Dict[str, Any]) -> float:
+    created = row.get("created_at")
+    if isinstance(created, (int, float)):
+        ts = float(created)
+        if ts > 1e12:
+            ts /= 1_000_000.0
+        return ts
+    parsed = _parse_exchange_timestamp(created)
+    if parsed is not None:
+        return parsed.timestamp()
+    return 0.0
 
-    rows = fills_resp.get("result") if isinstance(fills_resp, dict) else None
-    if not isinstance(rows, list) or not rows:
-        return
 
-    sym_u = symbol.upper()
-    latest: Optional[Dict[str, Any]] = None
-    latest_ts = 0.0
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        ps = str(row.get("product_symbol") or row.get("symbol") or "").upper()
-        if ps and ps != sym_u:
-            continue
-        created = row.get("created_at")
-        ts = 0.0
-        if isinstance(created, (int, float)):
-            ts = float(created)
-            if ts > 1e12:
-                ts /= 1_000_000.0
-        if ts >= latest_ts:
-            latest_ts = ts
-            latest = row
+def _fill_is_closing_leg(row: Dict[str, Any], pos: Dict[str, Any]) -> bool:
+    """True when fill likely closes the given position (reduce-only or opposite side)."""
+    meta = row.get("meta_data")
+    if isinstance(meta, dict):
+        ro = meta.get("reduce_only")
+        if ro is True or str(ro).lower() in {"true", "1"}:
+            return True
+        ot = str(meta.get("order_type") or "").lower()
+        if ot and any(token in ot for token in ("stop", "take", "close", "liquidation")):
+            return True
 
-    if not latest:
-        return
+    pos_side = str(pos.get("side") or "").lower()
+    fill_side = str(row.get("side") or "").lower()
+    if pos_side == "long" and fill_side in {"sell", "short"}:
+        return True
+    if pos_side == "short" and fill_side in {"buy", "long"}:
+        return True
+    return False
 
-    fill_px = _coerce_float(latest.get("price"))
+
+def _apply_fill_metadata_to_payload(payload: Dict[str, Any], fill_row: Dict[str, Any]) -> None:
+    fill_px = _coerce_float(fill_row.get("price"))
     if fill_px > 0:
         payload["exit_price"] = fill_px
-    fill_id = latest.get("id")
+    fill_id = fill_row.get("id")
     if fill_id is not None:
         payload["fill_id"] = str(fill_id)
-    commission = latest.get("commission")
+    commission = fill_row.get("commission")
     if commission is not None:
         try:
             payload["commission_usd"] = float(commission)
             payload["fees_usd"] = abs(float(commission))
         except (TypeError, ValueError):
             pass
-    order_id = latest.get("order_id")
+    order_id = fill_row.get("order_id")
     if order_id is not None and not payload.get("exchange_order_id"):
         payload["exchange_order_id"] = str(order_id)
 
-    meta = latest.get("meta_data")
+    meta = fill_row.get("meta_data")
     if isinstance(meta, dict):
         ot = str(meta.get("order_type") or "").lower()
         if "stop" in ot and payload.get("exit_reason") == "exchange_bracket_exit":
@@ -232,6 +220,134 @@ async def _enrich_payload_from_fills(
         elif "take" in ot or "profit" in ot:
             if payload.get("exit_reason") == "exchange_bracket_exit":
                 payload["exit_reason"] = "take_profit_hit"
+
+
+async def _fetch_recent_fills(
+    execution_module: Any,
+    symbol: str,
+    *,
+    page_size: int = 20,
+    start_time: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    client = getattr(execution_module, "delta_client", None)
+    if client is None:
+        return []
+    try:
+        product_id = await client.resolve_product_id(symbol)
+        fills_resp = await client.get_fills(
+            product_ids=str(product_id),
+            page_size=page_size,
+            start_time=start_time,
+            contract_types="perpetual_futures",
+        )
+    except Exception as exc:
+        logger.debug("reconcile_fill_fetch_skipped", symbol=symbol, error=str(exc))
+        return []
+
+    rows = fills_resp.get("result") if isinstance(fills_resp, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+async def _resolve_exit_from_closing_fill(
+    execution_module: Any,
+    symbol: str,
+    pos: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Resolve exit price from the most recent closing fill on the exchange."""
+    sym_u = str(symbol or "").strip().upper()
+    if not sym_u:
+        return None
+
+    entry_time = pos.get("entry_time") or pos.get("opened_at")
+    entry_dt = _parse_exchange_timestamp(entry_time)
+    start_time: Optional[int] = None
+    if entry_dt is not None:
+        start_time = int(entry_dt.timestamp())
+
+    rows = await _fetch_recent_fills(
+        execution_module,
+        sym_u,
+        page_size=50,
+        start_time=start_time,
+    )
+    if not rows:
+        return None
+
+    closing_candidates: List[tuple[float, Dict[str, Any]]] = []
+    fallback_candidates: List[tuple[float, Dict[str, Any]]] = []
+    for row in rows:
+        ps = str(row.get("product_symbol") or row.get("symbol") or "").upper()
+        if ps and ps != sym_u:
+            continue
+        ts = _fill_timestamp_seconds(row)
+        fill_px = _coerce_float(row.get("price"))
+        if fill_px <= 0:
+            continue
+        if _fill_is_closing_leg(row, pos):
+            closing_candidates.append((ts, row))
+        else:
+            fallback_candidates.append((ts, row))
+
+    chosen: Optional[Dict[str, Any]] = None
+    if closing_candidates:
+        chosen = max(closing_candidates, key=lambda item: item[0])[1]
+    elif fallback_candidates:
+        chosen = max(fallback_candidates, key=lambda item: item[0])[1]
+
+    if not chosen:
+        return None
+
+    exit_px = _coerce_float(chosen.get("price"))
+    if exit_px <= 0:
+        return None
+
+    return {
+        "exit_price": exit_px,
+        "fill_row": chosen,
+        "source": "closing_fill" if closing_candidates else "latest_fill",
+    }
+
+
+async def _enrich_payload_from_fills(
+    execution_module: Any,
+    symbol: str,
+    payload: Dict[str, Any],
+    *,
+    pos: Optional[Dict[str, Any]] = None,
+    skip_if_resolved: bool = False,
+) -> None:
+    """Best-effort fill metadata; prefers closing fills over arbitrary latest fill."""
+    if skip_if_resolved and payload.get("exit_price_resolved_from_fill"):
+        return
+
+    sym_u = symbol.upper()
+    pos_ctx = pos or {"side": payload.get("side")}
+
+    resolved = await _resolve_exit_from_closing_fill(execution_module, sym_u, pos_ctx)
+    if resolved:
+        _apply_fill_metadata_to_payload(payload, resolved["fill_row"])
+        payload["exit_price_resolved_from_fill"] = True
+        return
+
+    rows = await _fetch_recent_fills(execution_module, sym_u, page_size=20)
+    if not rows:
+        return
+
+    latest: Optional[Dict[str, Any]] = None
+    latest_ts = 0.0
+    for row in rows:
+        ps = str(row.get("product_symbol") or row.get("symbol") or "").upper()
+        if ps and ps != sym_u:
+            continue
+        ts = _fill_timestamp_seconds(row)
+        if ts >= latest_ts:
+            latest_ts = ts
+            latest = row
+
+    if latest:
+        _apply_fill_metadata_to_payload(payload, latest)
 
 
 def _build_position_closed_payload(
@@ -302,6 +418,7 @@ async def emit_position_closed_from_exchange_flat(
     exit_reason: str = "reconcile_exchange_flat",
     closed_record: Optional[Dict[str, Any]] = None,
     source: str = "position_reconcile",
+    skip_fill_enrichment: bool = False,
 ) -> bool:
     """Publish PositionClosedEvent after exchange bracket / reconcile detected a flat leg."""
     sym = str(symbol or "").strip().upper()
@@ -319,7 +436,13 @@ async def emit_position_closed_from_exchange_flat(
         exit_reason=exit_reason,
         closed_record=closed_record,
     )
-    await _enrich_payload_from_fills(execution_module, sym, payload)
+    await _enrich_payload_from_fills(
+        execution_module,
+        sym,
+        payload,
+        pos=pos,
+        skip_if_resolved=skip_fill_enrichment,
+    )
 
     try:
         from agent.core.agent_self_awareness_hooks import enrich_position_closed_payload
@@ -380,9 +503,16 @@ async def notify_exchange_flat_position_closed(
     pm = execution_module.position_manager
     current = pm.get_position(sym) or pos
     entry_px = float(current.get("entry_price") or 0)
-    exit_px = float(current.get("current_price") or entry_px)
-    if exit_px <= 0:
-        exit_px = entry_px
+
+    resolved = await _resolve_exit_from_closing_fill(execution_module, sym, current)
+    exit_from_fill = False
+    if resolved:
+        exit_px = float(resolved["exit_price"])
+        exit_from_fill = True
+    else:
+        exit_px = float(current.get("current_price") or entry_px)
+        if exit_px <= 0:
+            exit_px = entry_px
 
     reason = exit_reason or _infer_bracket_exit_reason(current, exit_px)
 
@@ -406,6 +536,7 @@ async def notify_exchange_flat_position_closed(
         exit_reason=reason,
         closed_record=closed_record,
         source=source,
+        skip_fill_enrichment=exit_from_fill,
     )
 
 

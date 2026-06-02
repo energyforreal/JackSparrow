@@ -24,6 +24,12 @@ from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, 
 from agent.core.config import settings
 from agent.core.mtf_decision_engine import synthesize_mtf_trading_decision
 from agent.learning.dynamic_thresholds import apply_redis_hold_band_overrides
+from agent.core.confidence_dynamics import (
+    adjudication_confidence,
+    aggregate_entry_proba_strength,
+    margin_enhanced_confidence,
+    proportional_v43_entry_floor,
+)
 import structlog
 
 logger = structlog.get_logger()
@@ -55,6 +61,8 @@ class MCPReasoningChain(BaseModel):
     final_confidence: float
     model_predictions: List[Dict[str, Any]]
     feature_context: List[Dict[str, Any]]
+    # Peak conviction from entry_proba margins (0–1); may differ from calibrated final_confidence.
+    signal_strength: Optional[float] = None
 
 
 class MCPReasoningRequest(BaseModel):
@@ -103,6 +111,16 @@ class MCPReasoningEngine:
             )
         except (ValueError, TypeError):
             return None
+
+    @staticmethod
+    def _enhanced_avg_confidence(
+        model_predictions: List[Dict[str, Any]],
+        fallback_avg: float,
+    ) -> float:
+        """Blend mean model confidence with entry_proba margin when available."""
+        return margin_enhanced_confidence(
+            model_predictions, fallback_avg=fallback_avg
+        )
 
     @staticmethod
     def _get_model_predictions(market_context: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -478,6 +496,17 @@ class MCPReasoningEngine:
             step_timings_ms=step_timings_ms,
         )
 
+        strength_meta = (
+            step7.step_metadata if isinstance(step7.step_metadata, dict) else {}
+        )
+        signal_strength = strength_meta.get("signal_strength")
+        try:
+            signal_strength_f = (
+                float(signal_strength) if signal_strength is not None else None
+            )
+        except (TypeError, ValueError):
+            signal_strength_f = None
+
         return MCPReasoningChain(
             chain_id=chain_id,
             timestamp=timestamp,
@@ -486,7 +515,8 @@ class MCPReasoningEngine:
             conclusion=final_conclusion,
             final_confidence=step7.confidence,
             model_predictions=model_predictions,
-            feature_context=[{"name": k, "value": v} for k, v in feature_context.items()]
+            feature_context=[{"name": k, "value": v} for k, v in feature_context.items()],
+            signal_strength=signal_strength_f,
         )
     
     def _step_trade_adjudication(self, request: MCPReasoningRequest) -> ReasoningStep:
@@ -524,23 +554,23 @@ class MCPReasoningEngine:
 
         if entry and same_dir and ml_confirms and passed:
             desc = f"{thesis_sig} - trade adjudication: thesis and ML agree (score={score:.0f})"
-            conf = 0.75
+            conf = adjudication_confidence(score, verdict="agree")
             evidence.append("adjudication_verdict=agree")
         elif entry and not ml_confirms:
             desc = f"HOLD - trade adjudication: thesis {thesis_sig} lacks ML confirmation"
-            conf = 0.4
+            conf = adjudication_confidence(score, verdict="ml_reject")
             evidence.append("adjudication_verdict=ml_reject")
         elif entry and not same_dir:
             desc = f"HOLD - trade adjudication: thesis {thesis_sig} vs ML {ml_sig} conflict"
-            conf = 0.35
+            conf = adjudication_confidence(score, verdict="conflict")
             evidence.append("adjudication_verdict=conflict")
         elif entry and not passed:
             desc = f"HOLD - trade adjudication: score {score:.0f} below minimum"
-            conf = 0.3
+            conf = adjudication_confidence(score, verdict="score_reject")
             evidence.append("adjudication_verdict=score_reject")
         else:
             desc = "HOLD - trade adjudication: no aligned strategy+ML setup"
-            conf = 0.25
+            conf = adjudication_confidence(score, verdict="flat")
             evidence.append("adjudication_verdict=flat")
 
         return ReasoningStep(
@@ -814,12 +844,17 @@ class MCPReasoningEngine:
             request.market_context.get("timestamp")
         )
 
+        step3_conf = (
+            self._enhanced_avg_confidence(model_predictions, avg_confidence)
+            if model_predictions
+            else 0.0
+        )
         return ReasoningStep(
             step_number=3,
             step_name="Model Consensus Analysis",
             description="Multi-model predictions aggregated",
             evidence=evidence,
-            confidence=avg_confidence if model_predictions else 0.0,
+            confidence=step3_conf,
             timestamp=datetime.now(timezone.utc),
             data_freshness_seconds=data_freshness_seconds
         )
@@ -1014,12 +1049,15 @@ class MCPReasoningEngine:
                 data_freshness_seconds = self._compute_data_freshness_seconds(
                     request.market_context.get("timestamp")
                 )
+                synth_conf = self._enhanced_avg_confidence(
+                    model_predictions, float(avg_confidence)
+                )
                 return ReasoningStep(
                     step_number=5,
                     step_name="Decision Synthesis",
                     description=conclusion,
                     evidence=evidence,
-                    confidence=max(0.0, min(1.0, float(avg_confidence))),
+                    confidence=max(0.0, min(1.0, synth_conf)),
                     timestamp=datetime.now(timezone.utc),
                     data_freshness_seconds=data_freshness_seconds,
                 )
@@ -1217,12 +1255,15 @@ class MCPReasoningEngine:
             request.market_context.get("timestamp")
         )
 
+        synth_conf = self._enhanced_avg_confidence(
+            model_predictions, float(avg_confidence)
+        )
         return ReasoningStep(
             step_number=5,
             step_name="Decision Synthesis",
             description=conclusion,
             evidence=evidence,
-            confidence=avg_confidence,
+            confidence=max(0.0, min(1.0, synth_conf)),
             timestamp=datetime.now(timezone.utc),
             data_freshness_seconds=data_freshness_seconds
         )
@@ -1264,6 +1305,19 @@ class MCPReasoningEngine:
             step_weights.get(step.step_number, 0.1) for step in calibration_steps
         )
         base_confidence = weighted_sum / total_weight if total_weight > 0 else 0.0
+
+        strength_bundle = aggregate_entry_proba_strength(model_predictions)
+        signal_strength = strength_bundle.get("signal_strength")
+        margin_mean = float(strength_bundle.get("entry_proba_margin_mean") or 0.0)
+        if signal_strength is not None:
+            blend_w = 0.40
+            base_confidence = max(
+                0.0,
+                min(
+                    1.0,
+                    (1.0 - blend_w) * base_confidence + blend_w * float(signal_strength),
+                ),
+            )
 
         # Consistency adjustment (less aggressive)
         if calibration_steps:
@@ -1310,13 +1364,13 @@ class MCPReasoningEngine:
                     continue
                 prob_margins.append(abs(buy_p - sell_p))
 
-            margin_mean = sum(prob_margins) / len(prob_margins) if prob_margins else 0.0
+            if not margin_mean and prob_margins:
+                margin_mean = sum(prob_margins) / len(prob_margins)
             if margin_mean > 0.10 and not is_hold:
                 # Cap boost so confidence remains conservative.
                 final_confidence += min(0.08, (margin_mean - 0.10) * 0.4)
 
-        # v43 dedicated path: actionable BUY/SELL must clear AI minimal entry confidence
-        # after weighted calibration (single-model + step weights cap below 0.7 otherwise).
+        # v43 dedicated path: proportional floor from entry margin (not flat ~0.6895).
         mc = request.market_context or {}
         v43_dec = mc.get("v43_dedicated_decision")
         if (
@@ -1325,9 +1379,12 @@ class MCPReasoningEngine:
             and (v43_dec.get("final_long") or v43_dec.get("final_short"))
         ):
             ai_floor = float(getattr(settings, "ai_signal_min_entry_confidence", 0.7) or 0.7)
-            floor_threshold = ai_floor * 0.85
-            if base_confidence >= floor_threshold:
-                final_confidence = max(final_confidence, min(1.0, ai_floor * 0.985))
+            final_confidence = proportional_v43_entry_floor(
+                final_confidence,
+                base_confidence,
+                margin_mean,
+                ai_floor=ai_floor,
+            )
 
         # Detect fallback scenario for logging/diagnostics
         is_fallback_scenario = not model_predictions or all(
@@ -1372,6 +1429,8 @@ class MCPReasoningEngine:
             base_confidence=base_confidence,
             consistency_adjustment=consistency_adjustment,
             final_confidence=final_confidence,
+            signal_strength=signal_strength,
+            entry_proba_margin_mean=margin_mean if margin_mean else None,
             is_hold=is_hold,
             decision_step_number=getattr(decision_step, "step_number", None),
             is_fallback_scenario=is_fallback_scenario,
@@ -1388,6 +1447,15 @@ class MCPReasoningEngine:
             evidence_list.append(
                 f"Learning calibration: {learning_diagnostics}"
             )
+        if signal_strength is not None:
+            evidence_list.append(f"Signal strength (entry margin): {float(signal_strength):.2f}")
+
+        step_metadata = {
+            "signal_strength": signal_strength,
+            "entry_proba_margin_mean": strength_bundle.get("entry_proba_margin_mean"),
+            "entry_proba_margin_max": strength_bundle.get("entry_proba_margin_max"),
+            "calibrated_confidence": final_confidence,
+        }
 
         return ReasoningStep(
             step_number=7,
@@ -1404,6 +1472,7 @@ class MCPReasoningEngine:
             data_freshness_seconds=None,
             similarity_score=None,
             feature_quality_score=None,
+            step_metadata=step_metadata,
         )
 
     async def get_health_status(self) -> Dict[str, Any]:

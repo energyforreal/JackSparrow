@@ -1631,6 +1631,14 @@ class AgentEventSubscriber:
             signal_data["calibrated_confidence"] = calibrated_conf
         if raw_conf is not None:
             signal_data["raw_confidence"] = raw_conf
+        ss = payload.get("signal_strength")
+        if ss is None and isinstance(reasoning_chain, dict):
+            ss = reasoning_chain.get("signal_strength")
+        if ss is not None:
+            try:
+                signal_data["signal_strength"] = max(0.0, min(1.0, float(ss)))
+            except (TypeError, ValueError):
+                pass
         trade_score_val = payload.get("trade_score")
         if trade_score_val is not None:
             signal_data["trade_score"] = trade_score_val

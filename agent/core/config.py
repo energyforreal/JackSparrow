@@ -2279,6 +2279,11 @@ class Settings(BaseSettings):
         env="WEBSOCKET_ENABLED",
         description="Enable WebSocket streaming for real-time data (default: True)"
     )
+    use_delta_user_trades_ws: bool = Field(
+        default=True,
+        env="USE_DELTA_USER_TRADES_WS",
+        description="Subscribe to Delta v2/user_trades for real-time fill notifications (testnet)",
+    )
     websocket_url: str = Field(
         default=DELTA_TESTNET_WEBSOCKET_URL_DEFAULT,
         env="WEBSOCKET_URL",
@@ -2357,9 +2362,20 @@ class Settings(BaseSettings):
 
     # Market data recovery configuration
     agent_no_candle_restart_minutes: int = Field(
-        default=2,
+        default=8,
         env="AGENT_NO_CANDLE_RESTART_MINUTES",
-        description="Minutes without candle closes before attempting a market data stream restart"
+        description=(
+            "Minutes without candle closes before attempting a market data stream restart. "
+            "Runtime also enforces a floor of 2x primary candle interval + poll slack."
+        )
+    )
+    position_restore_skip_when_reconcile_enabled: bool = Field(
+        default=True,
+        env="POSITION_RESTORE_SKIP_WHEN_RECONCILE_ENABLED",
+        description=(
+            "When True and exchange reconcile is enabled, skip restoring OPEN DB positions "
+            "on startup so the exchange snapshot remains authoritative."
+        ),
     )
 
     @field_validator("trading_mode", mode="before")

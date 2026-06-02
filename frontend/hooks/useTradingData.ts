@@ -15,7 +15,6 @@ import { useCallback, useEffect, useReducer, useRef } from 'react'
 import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
-import { getBackendProxyBase } from '@/lib/backendProxy'
 import { resolveWebSocketUrl } from '@/lib/websocketUrl'
 import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
 import { mergeHealthPreserveFields, normalizeHealthPayload } from '@/lib/healthNormalize'
@@ -25,8 +24,6 @@ import {
   resolveUsdInrRate,
 } from '@/utils/tradingDisplay'
 import {
-  PortfolioSummaryResponseSchema,
-  validateResponse,
   ReflectionSnapshotSchema,
   AgentIntrospectionSnapshotSchema,
 } from '@/schemas/api.validation'
@@ -44,7 +41,7 @@ export type Signal = SharedSignal
 export type Portfolio = SharedPortfolio
 export type Trade = SharedTrade
 
-/** Max trades kept in UI state (matches REST bootstrap limit). */
+/** Max trades kept in UI state. */
 export const RECENT_TRADES_MAX = 50
 
 /** Terminal trade statuses accepted for the recent-closed-trades table. */
@@ -200,10 +197,6 @@ function normalizeTradeRecord(raw: unknown): Trade | null {
   }
 }
 
-function normalizeHealthFromRest(raw: unknown): HealthData | null {
-  return normalizeHealthPayload(raw)
-}
-
 function parseReflectionSnapshot(raw: unknown): ReflectionSnapshot | null {
   if (!raw || typeof raw !== 'object') return null
   const parsed = ReflectionSnapshotSchema.safeParse(raw)
@@ -224,15 +217,26 @@ function mergeSignalPayload(
     data.signal != null ? String(data.signal) : undefined
   const isHoldPatch = incomingSignal === 'HOLD'
   const partialHold =
-    isHoldPatch && !('confidence' in data) && !('final_confidence' in data)
+    isHoldPatch &&
+    !('confidence' in data) &&
+    !('final_confidence' in data) &&
+    !('signal_strength' in data)
 
   for (const [key, value] of Object.entries(data)) {
-    if (key === 'confidence' || key === 'final_confidence') continue
+    if (
+      key === 'confidence' ||
+      key === 'final_confidence' ||
+      key === 'signal_strength'
+    ) {
+      continue
+    }
     if (value !== undefined) out[key] = value
   }
 
   if ('confidence' in data && data.confidence !== undefined) {
     out.confidence = data.confidence
+  } else if (partialHold && prev?.confidence !== undefined) {
+    out.confidence = prev.confidence
   } else if (!partialHold && prev) {
     out.confidence = prev.confidence
   } else if (partialHold) {
@@ -241,8 +245,18 @@ function mergeSignalPayload(
 
   if ('final_confidence' in data && data.final_confidence !== undefined) {
     out.final_confidence = data.final_confidence
+  } else if (partialHold && prev?.final_confidence !== undefined) {
+    out.final_confidence = prev.final_confidence
   } else if (!partialHold && prev?.final_confidence !== undefined) {
     out.final_confidence = prev.final_confidence
+  }
+
+  if ('signal_strength' in data && data.signal_strength !== undefined) {
+    out.signal_strength = data.signal_strength
+  } else if (partialHold && prev?.signal_strength !== undefined) {
+    out.signal_strength = prev.signal_strength
+  } else if (!partialHold && prev?.signal_strength !== undefined) {
+    out.signal_strength = prev.signal_strength
   }
 
   if (data.timestamp !== undefined) {
@@ -632,36 +646,6 @@ export class TestnetConnectionError extends Error {
   }
 }
 
-async function fetchPortfolioSummaryViaRestProxy(): Promise<Portfolio | null> {
-  try {
-    const base = getBackendProxyBase()
-    const res = await fetch(`${base}/api/v1/portfolio/summary`, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-    if (res.status === 503) {
-      let detail = 'Delta testnet connection is down. Trading is halted.'
-      try {
-        const body = await res.json()
-        if (body && typeof body.detail === 'string') detail = body.detail
-      } catch {
-        /* ignore */
-      }
-      throw new TestnetConnectionError(detail)
-    }
-    if (!res.ok) return null
-    const raw = await res.json()
-    const data = validateResponse(PortfolioSummaryResponseSchema, raw) as Portfolio | null
-    if (!data || typeof data !== 'object') return null
-    return data
-  } catch (err) {
-    if (err instanceof TestnetConnectionError) throw err
-    return null
-  }
-}
-
 /**
  * Unified hook for all trading data management.
  *
@@ -713,7 +697,7 @@ export function useTradingData() {
   const { isConnected, lastMessage, sendMessage, error: wsError } = useWebSocket(WS_URL)
   const lastMessageRef = useRef(lastMessage)
   const lastToastedTradeIdRef = useRef<string | null>(null)
-  /** True after first mount REST bootstrap completes (success or failure). */
+  /** True after first WebSocket bootstrap completes (success or failure). */
   const portfolioLoadSettledRef = useRef(false)
   /** Tracks whether WebSocket has connected at least once (for reconnect-only refresh). */
   const hasConnectedOnceRef = useRef(false)
@@ -761,101 +745,15 @@ export function useTradingData() {
     dispatch({ type: 'SET_ERROR', payload: wsError })
   }, [wsError])
 
-  // REST bootstrap (health, portfolio, trades) without waiting for WebSocket
-  useEffect(() => {
-    let cancelled = false
-    const base = getBackendProxyBase()
-    const run = async () => {
-      try {
-        const [hRes, pRes, tRes] = await Promise.all([
-          fetch(`${base}/api/v1/health`, { headers: { Accept: 'application/json' } }),
-          fetch(`${base}/api/v1/portfolio/summary`, { headers: { Accept: 'application/json' } }),
-          fetch(`${base}/api/v1/portfolio/recent-closed-trades?limit=${RECENT_TRADES_MAX}`, {
-            headers: { Accept: 'application/json' },
-          }),
-        ])
-        if (cancelled) return
-        if (hRes.ok) {
-          const j = await hRes.json()
-          const h = normalizeHealthFromRest(j)
-          if (h) dispatch({ type: 'UPDATE_HEALTH', payload: h })
-        }
-        if (pRes.ok) {
-          const data = (await pRes.json()) as Portfolio
-          if (data && typeof data === 'object') {
-            dispatch({ type: 'UPDATE_PORTFOLIO', payload: data })
-          }
-        }
-        if (tRes.ok) {
-          const arr = (await tRes.json()) as unknown
-          if (Array.isArray(arr)) {
-            dispatch({
-              type: 'HYDRATE_TRADES',
-              payload: { trades: arr as Trade[], merge: false },
-            })
-          }
-        }
-      } catch {
-        // Non-fatal: backend may be unreachable until later
-      } finally {
-        if (!cancelled) {
-          portfolioLoadSettledRef.current = true
-          dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
-          dispatch({ type: 'SET_LOADING', payload: false })
-        }
-      }
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // Fetch initial data only when WebSocket is connected (sendCommand requires connection)
+  // Fetch initial data when WebSocket is connected (sendCommand requires connection)
   useEffect(() => {
     if (!isConnected) return
 
     const isReconnect = hasConnectedOnceRef.current
     hasConnectedOnceRef.current = true
-    const mountBootstrapDone = portfolioLoadSettledRef.current
 
     const fetchInitialData = async () => {
-      // First WS connect after mount REST bootstrap: only fetch WS-only fields.
-      if (!isReconnect && mountBootstrapDone) {
-        try {
-          const [performanceResult, agentStatusResult] = await Promise.allSettled([
-            apiClient.getPerformance(),
-            apiClient.getAgentStatus(),
-          ])
-          if (performanceResult.status === 'fulfilled') {
-            const performanceMetrics = performanceResult.value
-            if (performanceMetrics && typeof performanceMetrics === 'object') {
-              const totalReturn =
-                typeof (performanceMetrics as { total_return?: number }).total_return === 'number'
-                  ? (performanceMetrics as { total_return: number }).total_return
-                  : typeof (performanceMetrics as { total_return_pct?: number }).total_return_pct ===
-                      'number'
-                    ? (performanceMetrics as { total_return_pct: number }).total_return_pct
-                    : 0
-              dispatch({
-                type: 'SET_PERFORMANCE_DATA',
-                payload: [{ date: new Date().toISOString(), value: totalReturn }],
-              })
-            }
-          }
-          if (agentStatusResult.status === 'fulfilled') {
-            const agentStatus = agentStatusResult.value
-            if (agentStatus?.state) {
-              dispatch({ type: 'UPDATE_AGENT_STATE', payload: agentStatus.state })
-            }
-          }
-        } catch (error) {
-          console.warn('WS-only bootstrap failed:', error)
-        }
-        return
-      }
-
-      const isLightReconnect = isReconnect
+      const isLightReconnect = isReconnect && portfolioLoadSettledRef.current
       const showPortfolioSpinner = !portfolioLoadSettledRef.current && !isLightReconnect
 
       if (!isLightReconnect) {
@@ -903,7 +801,6 @@ export function useTradingData() {
           }
         } else {
           console.warn('Portfolio summary fetch failed:', portfolioResult.reason)
-          // Robust fallback path: retry WS command, then fallback to REST proxy.
           let portfolioRecovered: Portfolio | null = null
           for (let attempt = 1; attempt <= 2; attempt++) {
             try {
@@ -914,11 +811,8 @@ export function useTradingData() {
                 break
               }
             } catch {
-              // Continue to next retry/fallback
+              // Continue to next retry
             }
-          }
-          if (!portfolioRecovered) {
-            portfolioRecovered = await fetchPortfolioSummaryViaRestProxy()
           }
           if (portfolioRecovered) {
             dispatch({

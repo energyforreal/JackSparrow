@@ -36,6 +36,26 @@ def _configure_utf8_stdio() -> None:
 _configure_utf8_stdio()
 
 
+def _interval_to_minutes(interval: str) -> int:
+    """Convert candle interval string (e.g. 5m, 1h) to minutes."""
+    token = (interval or "5m").strip().lower()
+    if token.endswith("m"):
+        return max(1, int(token[:-1]))
+    if token.endswith("h"):
+        return max(1, int(token[:-1]) * 60)
+    if token.endswith("d"):
+        return max(1, int(token[:-1]) * 1440)
+    return 5
+
+
+def effective_no_candle_restart_minutes(primary_interval: str, configured_minutes: int) -> int:
+    """Minimum stale-candle threshold scaled to the primary candle interval."""
+    configured = max(1, int(configured_minutes or 8))
+    interval_mins = _interval_to_minutes(primary_interval)
+    interval_floor = max(6, (2 * interval_mins) + 2)
+    return max(configured, interval_floor)
+
+
 def _json_serializer(obj: Any) -> Any:
     """Serialize non-JSON-native objects for Redis responses."""
     if isinstance(obj, datetime):
@@ -270,15 +290,26 @@ class IntelligentAgent:
             exchange_gateway=self.exchange_gateway,
         )
         if bool(getattr(settings, "position_restore_on_startup", True)):
-            db_url = getattr(settings, "database_url", None)
-            if db_url:
-                n = await restore_open_positions_from_db(execution_module, str(db_url))
-                if n:
-                    logger.info(
-                        "agent_positions_restored_from_db",
-                        service="agent",
-                        count=n,
-                    )
+            skip_restore = (
+                bool(getattr(settings, "exchange_position_reconcile_enabled", True))
+                and bool(getattr(settings, "position_restore_skip_when_reconcile_enabled", True))
+            )
+            if skip_restore:
+                logger.info(
+                    "agent_position_restore_skipped_for_exchange_reconcile",
+                    service="agent",
+                    message="Skipping DB OPEN restore; exchange reconcile is authoritative on startup",
+                )
+            else:
+                db_url = getattr(settings, "database_url", None)
+                if db_url:
+                    n = await restore_open_positions_from_db(execution_module, str(db_url))
+                    if n:
+                        logger.info(
+                            "agent_positions_restored_from_db",
+                            service="agent",
+                            count=n,
+                        )
         if bool(getattr(settings, "exchange_position_reconcile_enabled", True)):
             from agent.core.position_reconcile import reconcile_positions_with_exchange
 
@@ -1685,7 +1716,11 @@ class IntelligentAgent:
                     time_since_last_candle = time.time() - last_candle_time
 
                 # How long we wait for candle closes before attempting a stream recovery.
-                no_candle_restart_minutes = getattr(settings, "agent_no_candle_restart_minutes", 10) or 10
+                configured_minutes = getattr(settings, "agent_no_candle_restart_minutes", 8) or 8
+                no_candle_restart_minutes = effective_no_candle_restart_minutes(
+                    self.primary_interval,
+                    int(configured_minutes),
+                )
                 no_candle_restart_seconds = max(60, no_candle_restart_minutes * 60)
 
                 # Rolling metrics for the last hour
@@ -1792,7 +1827,7 @@ class IntelligentAgent:
                                 message="Attempting to restart market data streaming due to missing candle closes",
                             )
                             try:
-                                await self.market_data_service.start_market_data_stream(
+                                await self.market_data_service.restart_market_data_stream(
                                     symbols=[self.default_symbol],
                                     interval=self.primary_interval
                                 )

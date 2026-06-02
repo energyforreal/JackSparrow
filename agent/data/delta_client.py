@@ -1479,6 +1479,8 @@ class DeltaExchangeWebSocketClient:
         self.websocket: Optional[websockets.WebSocketClientProtocol] = None
         self.connected = False
         self.subscribed_symbols: Set[str] = set()
+        self.subscribed_user_trade_symbols: Set[str] = set()
+        self._ws_authenticated = False
         self.message_handlers: Dict[str, List[Callable]] = {}
         self._reconnect_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
@@ -1525,6 +1527,7 @@ class DeltaExchangeWebSocketClient:
     async def connect(self) -> None:
         """Establish WebSocket connection and send Delta key-auth message."""
         self._manual_disconnect = False
+        self._ws_authenticated = False
         try:
             if not self._credentials_valid:
                 logger.warning(
@@ -1633,6 +1636,85 @@ class DeltaExchangeWebSocketClient:
             )
             raise DeltaExchangeError(f"Subscription failed: {e}") from e
 
+    async def subscribe_user_trades(self, symbols: List[str]) -> None:
+        """Subscribe to v2/user_trades for real-time fill notifications."""
+        from agent.core.config import settings
+
+        if not getattr(settings, "use_delta_user_trades_ws", True):
+            return
+
+        self.subscribed_user_trade_symbols.update(symbols)
+
+        if not self.connected or not self.websocket:
+            logger.debug(
+                "delta_websocket_user_trades_deferred",
+                symbols=symbols,
+                reason="not_connected",
+            )
+            return
+
+        subscription_message = {
+            "type": "subscribe",
+            "payload": {
+                "channels": [
+                    {
+                        "name": "v2/user_trades",
+                        "symbols": symbols,
+                    }
+                ]
+            },
+        }
+
+        try:
+            await self.websocket.send(json.dumps(subscription_message))
+            logger.info(
+                "delta_websocket_subscribed_user_trades",
+                symbols=symbols,
+                channel="v2/user_trades",
+            )
+        except Exception as e:
+            logger.error(
+                "delta_websocket_user_trades_subscription_failed",
+                error=str(e),
+                symbols=symbols,
+                channel="v2/user_trades",
+            )
+            raise DeltaExchangeError(f"User trades subscription failed: {e}") from e
+
+    async def unsubscribe_user_trades(self, symbols: List[str]) -> None:
+        """Unsubscribe from v2/user_trades channel."""
+        if not self.connected or not self.websocket:
+            raise DeltaExchangeError("WebSocket not connected")
+
+        unsubscription_message = {
+            "type": "unsubscribe",
+            "payload": {
+                "channels": [
+                    {
+                        "name": "v2/user_trades",
+                        "symbols": symbols,
+                    }
+                ]
+            },
+        }
+
+        try:
+            await self.websocket.send(json.dumps(unsubscription_message))
+            self.subscribed_user_trade_symbols.difference_update(symbols)
+            logger.info(
+                "delta_websocket_unsubscribed_user_trades",
+                symbols=symbols,
+                channel="v2/user_trades",
+            )
+        except Exception as e:
+            logger.error(
+                "delta_websocket_user_trades_unsubscription_failed",
+                error=str(e),
+                symbols=symbols,
+                channel="v2/user_trades",
+            )
+            raise DeltaExchangeError(f"User trades unsubscription failed: {e}") from e
+
     async def unsubscribe_ticker(self, symbols: List[str]) -> None:
         """Unsubscribe from v2/ticker channel.
 
@@ -1701,10 +1783,30 @@ class DeltaExchangeWebSocketClient:
 
     async def _resubscribe_all(self) -> None:
         """Resubscribe to all previously subscribed symbols after reconnection."""
+        from agent.core.config import settings
+
         if self.subscribed_symbols:
             symbols_list = list(self.subscribed_symbols)
             await self.subscribe_ticker(symbols_list)
             logger.info("delta_websocket_resubscribed", symbols=symbols_list)
+        if (
+            getattr(settings, "use_delta_user_trades_ws", True)
+            and self.subscribed_user_trade_symbols
+        ):
+            ut_symbols = list(self.subscribed_user_trade_symbols)
+            await self.subscribe_user_trades(ut_symbols)
+            logger.info("delta_websocket_resubscribed_user_trades", symbols=ut_symbols)
+
+    async def _on_ws_authenticated(self) -> None:
+        """Subscribe to private channels after key-auth succeeds."""
+        from agent.core.config import settings
+
+        self._ws_authenticated = True
+        if (
+            getattr(settings, "use_delta_user_trades_ws", True)
+            and self.subscribed_user_trade_symbols
+        ):
+            await self.subscribe_user_trades(list(self.subscribed_user_trade_symbols))
 
     async def _heartbeat_loop(self) -> None:
         """Send periodic heartbeat messages to keep connection alive."""
@@ -1783,11 +1885,16 @@ class DeltaExchangeWebSocketClient:
                     )
                 else:
                     logger.info("delta_websocket_auth_confirmed", type=message_type)
+                    await self._on_ws_authenticated()
                 return
 
             # Handle subscription confirmations
             if message_type == "subscription":
                 logger.info("delta_websocket_subscription_confirmed", payload=message.get("payload"))
+                return
+
+            if message_type == "v2/user_trades":
+                await self._dispatch_user_trades(message)
                 return
 
             # Handle ticker updates (both v2/ticker and ticker formats)
@@ -1827,6 +1934,176 @@ class DeltaExchangeWebSocketClient:
 
         except Exception as e:
             logger.error("delta_websocket_message_processing_error", error=str(e), message=message, exc_info=True)
+
+    async def _dispatch_user_trades(self, message: Dict[str, Any]) -> None:
+        """Parse v2/user_trades payload (single trade or batch) and handle each fill."""
+        payload = message.get("payload")
+        candidates: List[Dict[str, Any]] = []
+
+        if isinstance(payload, list):
+            candidates = [x for x in payload if isinstance(x, dict)]
+        elif isinstance(payload, dict):
+            nested = payload.get("trades") or payload.get("result")
+            if isinstance(nested, list):
+                candidates = [x for x in nested if isinstance(x, dict)]
+            else:
+                candidates = [payload]
+        elif isinstance(message, dict) and (
+            message.get("sy") or message.get("symbol") or message.get("f") or message.get("fill_id")
+        ):
+            candidates = [message]
+
+        for trade in candidates:
+            await self._handle_user_trade(trade)
+
+    async def _handle_user_trade(self, data: Dict[str, Any]) -> None:
+        """Publish OrderFillEvent for a Delta user trade (fill) message."""
+        from datetime import datetime, timezone
+
+        from agent.core.config import settings
+        from agent.data.symbols import normalize_symbol_for_delta_api
+
+        if not getattr(settings, "use_delta_user_trades_ws", True):
+            return
+
+        raw_sym = data.get("sy") or data.get("symbol") or data.get("product_symbol")
+        if not raw_sym:
+            return
+        symbol = normalize_symbol_for_delta_api(str(raw_sym))
+
+        fill_id = str(data.get("f") or data.get("fill_id") or data.get("id") or "")
+        order_id_raw = data.get("o") or data.get("order_id")
+        order_id = str(order_id_raw) if order_id_raw is not None else ""
+
+        side_raw = str(data.get("S") or data.get("side") or "").lower()
+        side = "buy" if side_raw.startswith("b") else "sell"
+
+        try:
+            size = float(data.get("s") or data.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0.0
+        try:
+            price = float(data.get("p") or data.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+
+        position_after_raw = data.get("po")
+        if position_after_raw is None:
+            position_after_raw = data.get("position") or data.get("position_size")
+        try:
+            position_after = (
+                float(position_after_raw) if position_after_raw is not None else -1.0
+            )
+        except (TypeError, ValueError):
+            position_after = -1.0
+
+        raw_commission = data.get("c") or data.get("commission")
+        commission_usd: Optional[float]
+        if raw_commission is None or raw_commission == "":
+            commission_usd = None
+        else:
+            try:
+                commission_usd = float(raw_commission)
+            except (TypeError, ValueError):
+                commission_usd = None
+
+        ts_raw = data.get("t") or data.get("timestamp") or data.get("created_at")
+        timestamp = DeltaExchangeClient.parse_fill_timestamp(ts_raw)
+        if timestamp is None:
+            timestamp = datetime.now(timezone.utc)
+
+        pnl_usd: Optional[float] = None
+        if position_after == 0.0 and price > 0 and size > 0:
+            try:
+                from agent.core.execution import execution_module
+                from agent.core.futures_utils import net_pnl_usd_after_fees
+
+                local_pos = execution_module.position_manager.get_position(symbol)
+                if local_pos and str(local_pos.get("status") or "").lower() == "open":
+                    entry_px = float(local_pos.get("entry_price") or 0)
+                    side_pos = str(local_pos.get("side") or "long")
+                    lots = float(
+                        local_pos.get("lots") or local_pos.get("quantity") or size
+                    )
+                    cv = float(
+                        local_pos.get("contract_value_btc")
+                        or getattr(settings, "contract_value_btc", 0.001)
+                    )
+                    taker = float(getattr(settings, "taker_fee_rate", 0.0005) or 0.0005)
+                    slip_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
+                    if entry_px > 0:
+                        _, _, net = net_pnl_usd_after_fees(
+                            entry_px, price, lots, side_pos, cv, taker, slip_bps
+                        )
+                        pnl_usd = float(net)
+            except Exception as exc:
+                logger.debug(
+                    "delta_websocket_user_trade_pnl_skipped",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+
+        trade_id = (
+            f"fill_{fill_id}"
+            if fill_id
+            else f"ws_fill_{symbol}_{int(timestamp.timestamp())}"
+        )
+
+        fill_payload: Dict[str, Any] = {
+            "order_id": order_id or trade_id,
+            "trade_id": trade_id,
+            "symbol": symbol,
+            "side": side,
+            "quantity": size,
+            "fill_price": price,
+            "timestamp": timestamp,
+            "fill_id": fill_id or None,
+            "exchange_order_id": order_id or None,
+            "commission_usd": commission_usd,
+            "role": str(data.get("r") or data.get("role") or "") or None,
+            "fill_type": str(data.get("ft") or data.get("fill_type") or "") or None,
+            "record_kind": "fill",
+            "data_source": "exchange_fill_ws",
+        }
+        if pnl_usd is not None:
+            fill_payload["pnl_usd"] = pnl_usd
+            fill_payload["pnl"] = pnl_usd
+
+        if size <= 0 or price <= 0:
+            logger.debug(
+                "delta_websocket_user_trade_skipped_invalid",
+                symbol=symbol,
+                size=size,
+                price=price,
+            )
+            return
+
+        try:
+            from agent.events.event_bus import event_bus
+            from agent.events.schemas import OrderFillEvent
+
+            await event_bus.publish(
+                OrderFillEvent(source="delta_websocket", payload=fill_payload)
+            )
+            logger.info(
+                "delta_websocket_user_trade_published",
+                symbol=symbol,
+                trade_id=trade_id,
+                fill_id=fill_id or None,
+                side=side,
+                size=size,
+                price=price,
+                position_after=position_after,
+                pnl_usd=pnl_usd,
+            )
+        except Exception as exc:
+            logger.error(
+                "delta_websocket_user_trade_publish_failed",
+                symbol=symbol,
+                trade_id=trade_id,
+                error=str(exc),
+                exc_info=True,
+            )
 
     async def _reconnect(self) -> None:
         """Handle reconnection logic."""

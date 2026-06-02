@@ -149,7 +149,7 @@ class AgentWebSocketClient:
                     self._connect_failure_streak <= self._transient_error_log_threshold
                     and _is_transient_backend_connect_error(exc)
                 ):
-                    logger.warning(
+                    logger.debug(
                         "agent_websocket_client_connection_retry",
                         service="agent",
                         component="agent_websocket_client",

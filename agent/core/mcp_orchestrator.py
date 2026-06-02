@@ -242,6 +242,13 @@ def _enrich_confidence_semantics(payload: Dict[str, Any]) -> None:
     if chain_final is not None:
         payload["calibrated_confidence"] = chain_final
     payload["raw_confidence"] = policy_conf
+    if isinstance(reasoning_chain, dict):
+        ss = reasoning_chain.get("signal_strength")
+        if ss is not None:
+            try:
+                payload["signal_strength"] = float(ss)
+            except (TypeError, ValueError):
+                pass
 
 
 def _decision_ws_metadata(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1228,6 +1235,7 @@ class MCPOrchestrator:
                 ],
                 "conclusion": reasoning_chain.conclusion,
                 "final_confidence": reasoning_chain.final_confidence,
+                "signal_strength": getattr(reasoning_chain, "signal_strength", None),
             },
             "decision": policy_decision,
             "policy_verdict": policy_verdict.model_dump(mode="json"),
@@ -2026,6 +2034,7 @@ class MCPOrchestrator:
                     "steps": reasoning.get("steps", []),
                     "conclusion": reasoning.get("conclusion"),
                     "final_confidence": reasoning.get("final_confidence"),
+                    "signal_strength": reasoning.get("signal_strength"),
                     "model_predictions": model_predictions_for_reasoning,
                     "market_context": result.get("market_context") or {},
                 }

@@ -73,6 +73,34 @@ def test_ticker_stale_true_when_old_tick(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_market_data_stream_noop_without_force():
+    mds = MarketDataService()
+    mds.streaming_running = True
+    mds._streaming_task = None
+
+    await mds.start_market_data_stream(["BTCUSD"], "5m", force=False)
+
+    assert mds.streaming_running is True
+
+
+@pytest.mark.asyncio
+async def test_start_market_data_stream_force_restarts_when_running(monkeypatch):
+    mds = MarketDataService()
+    mds.streaming_running = True
+    mds._last_candle_cache["BTCUSD:5m"] = {"timestamp": "old"}
+    mds._streaming_task = None
+    mds._websocket_enabled = False
+    mds._websocket_connected = False
+    monkeypatch.setattr(mds, "_connect_websocket", AsyncMock())
+
+    await mds.start_market_data_stream(["BTCUSD"], "5m", force=True)
+
+    assert mds._last_candle_cache == {}
+    assert mds.streaming_running is True
+    assert mds._streaming_task is not None
+
+
+@pytest.mark.asyncio
 async def test_poll_ticker_via_rest_when_stale_triggers_check(monkeypatch):
     mds = MarketDataService()
     mds._websocket_enabled = True

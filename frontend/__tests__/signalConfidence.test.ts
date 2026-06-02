@@ -31,4 +31,13 @@ describe('resolveDisplayConfidence', () => {
     expect(result.percent).toBeCloseTo(68, 5)
     expect(result.policyPercent).toBeCloseTo(30, 5)
   })
+
+  it('surfaces signal_strength when provided', () => {
+    const result = resolveDisplayConfidence({
+      confidence: 0.55,
+      final_confidence: 0.62,
+      signal_strength: 0.71,
+    })
+    expect(result.signalStrengthPercent).toBeCloseTo(71, 5)
+  })
 })

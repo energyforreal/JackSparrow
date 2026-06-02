@@ -11,12 +11,16 @@ export interface DisplayConfidenceResult {
   usedPolicyFallback: boolean
   /** Optional policy/raw score when reasoning confidence is shown separately. */
   policyPercent?: number
+  /** Entry-proba margin strength (0–100), when surfaced by agent. */
+  signalStrengthPercent?: number
 }
 
 type ConfidenceCarrier = {
   confidence?: number | null
   final_confidence?: number | null
   confidence_source?: ConfidenceSource | string | null
+  signal_strength?: number | null
+  calibrated_confidence?: number | null
 }
 
 /**
@@ -33,12 +37,18 @@ export function resolveDisplayConfidence(
     finalRaw !== undefined &&
     Number.isFinite(Number(finalRaw))
 
+  const strengthPercent =
+    signal?.signal_strength !== null && signal?.signal_strength !== undefined
+      ? normalizeConfidenceToPercent(signal.signal_strength)
+      : undefined
+
   if (hasFinal) {
     return {
       percent: normalizeConfidenceToPercent(finalRaw),
       source: 'reasoning',
       usedPolicyFallback: false,
       policyPercent,
+      signalStrengthPercent: strengthPercent,
     }
   }
 
@@ -50,5 +60,6 @@ export function resolveDisplayConfidence(
     percent: policyPercent,
     source,
     usedPolicyFallback: true,
+    signalStrengthPercent: strengthPercent,
   }
 }

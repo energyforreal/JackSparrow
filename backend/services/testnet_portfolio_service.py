@@ -226,7 +226,12 @@ def _map_delta_fill_row(row: Dict[str, Any]) -> Dict[str, Any]:
     quantity = _coerce_float(row.get("size"))
     fill_price = _coerce_float(row.get("price"))
     executed_at = _parse_fill_timestamp(row.get("created_at"))
-    commission = _coerce_float(row.get("commission"))
+    raw_commission = row.get("commission")
+    commission_usd: Optional[float]
+    if raw_commission is None or raw_commission == "":
+        commission_usd = None
+    else:
+        commission_usd = float(raw_commission)
     meta = row.get("meta_data") if isinstance(row.get("meta_data"), dict) else {}
     order_type = meta.get("order_type") if meta else None
 
@@ -252,7 +257,7 @@ def _map_delta_fill_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "exchange_order_id": str(order_id) if order_id is not None else None,
         "fill_id": str(fill_id) if fill_id is not None else None,
         "role": str(row.get("role") or "") or None,
-        "commission_usd": commission,
+        "commission_usd": commission_usd,
         "fill_type": str(row.get("fill_type") or "") or None,
         "order_type": str(order_type) if order_type else None,
         "data_source": "exchange_fill",
@@ -534,9 +539,9 @@ class TestnetPortfolioService:
         mapped: List[Dict[str, Any]] = []
         for row in rows:
             order_id = row.get("order_id")
+            # When attribution is available, only show agent-attributed fills.
+            # When unavailable (no js_ orders in recent history), show all fills.
             if agent_order_ids and order_id is not None and str(order_id) not in agent_order_ids:
-                continue
-            if not agent_order_ids:
                 continue
             mapped.append(_map_delta_fill_row(row))
 

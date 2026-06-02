@@ -14,6 +14,7 @@ from agent.intelligence.regime_classifier import classify_regime
 from agent.intelligence.setup_quality import estimate_setup_quality
 from agent.intelligence.uncertainty import estimate_uncertainty
 from agent.intelligence.vol_estimator import estimate_vol_expansion
+from agent.core.confidence_dynamics import synthetic_entry_proba_from_ic
 from feature_store.jacksparrow_v43_horizon import forward_bars_to_minutes
 from feature_store.jacksparrow_v43_multihead import (
     V43_HORIZON_KEY_TO_BARS,
@@ -154,8 +155,17 @@ def build_ic_prediction_context(
     primary_pred_val = float(np.tanh(edge * 80.0))
     primary_conf = head_confidence(edge, primary_thr, u_scale)
 
+    entry_proba = synthetic_entry_proba_from_ic(
+        str(thesis_5m.signal),
+        edge,
+        primary_thr,
+        u_scale,
+    )
+
     out_ctx: Dict[str, Any] = {
         "format": "jacksparrow_ic_rule_based",
+        "entry_proba": entry_proba,
+        "entry_confidence": primary_conf,
         "multi_horizon_heads": head_payloads,
         "expected_return": float(gate_head["expected_return"]),
         "threshold": primary_thr,

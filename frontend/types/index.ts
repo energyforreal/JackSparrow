@@ -189,6 +189,8 @@ export interface Signal {
   display_confidence?: number
   calibrated_confidence?: number
   raw_confidence?: number
+  /** Entry-proba margin strength (0–1), distinct from calibrated confidence. */
+  signal_strength?: number
   /** False when signal is HOLD / non-entry. */
   is_actionable_entry?: boolean
   server_timestamp_ms?: number

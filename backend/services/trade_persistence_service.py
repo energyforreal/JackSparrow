@@ -341,6 +341,21 @@ class TradePersistenceService:
                     )
                     await session.rollback()
                     return {"success": False, "error": "Position not found"}
+
+                if (
+                    entry_price is not None
+                    and float(entry_price) > 0
+                    and abs(float(position.entry_price) - float(entry_price))
+                    > max(0.01, float(position.entry_price) * 0.0001)
+                ):
+                    logger.warning(
+                        "position_close_entry_price_mismatch",
+                        position_id=position_id,
+                        symbol=position.symbol,
+                        db_entry_price=float(position.entry_price),
+                        payload_entry_price=float(entry_price),
+                        message="Event entry_price differs from database OPEN row",
+                    )
                 
                 if position.status == PositionStatus.CLOSED:
                     logger.warning(

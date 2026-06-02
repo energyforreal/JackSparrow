@@ -1480,6 +1480,7 @@ class ExecutionEngine:
                     "exit_price": exit_price,
                     "quantity": position.get("lots", position.get("quantity", 0)),
                     "pnl": net_usd,
+                    "pnl_usd": net_usd,
                     "gross_pnl_usd": gross_usd,
                     "fees_usd": fees_usd,
                     "usdinr_at_entry": usdinr_entry,

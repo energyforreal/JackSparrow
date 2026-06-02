@@ -75,7 +75,7 @@ export const normalizeConfidence = normalizeConfidenceToPercent
  */
 export function formatConfidence(value: number | null | undefined): string {
   const percent = normalizeConfidenceToPercent(value)
-  return `${percent.toFixed(1)}%`
+  return `${percent.toFixed(2)}%`
 }
 
 /**

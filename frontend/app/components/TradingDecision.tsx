@@ -130,6 +130,12 @@ export function TradingDecision({
                       </span>
                     )}
                   </div>
+                  {displayConfidence?.signalStrengthPercent !== undefined && (
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Signal strength:{' '}
+                      {formatConfidence(displayConfidence.signalStrengthPercent)}
+                    </div>
+                  )}
                 </div>
               </div>
 

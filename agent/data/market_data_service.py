@@ -297,16 +297,30 @@ class MarketDataService:
             except asyncio.CancelledError:
                 pass
     
-    async def start_market_data_stream(self, symbols: List[str], interval: str = "15m"):
+    async def start_market_data_stream(
+        self,
+        symbols: List[str],
+        interval: str = "15m",
+        *,
+        force: bool = False,
+    ):
         """Start streaming market data for symbols.
 
         Args:
             symbols: List of symbols to stream
             interval: Candle interval to monitor
+            force: When True, stop an existing stream and restart (recovery path)
         """
         if self.streaming_running:
-            logger.warning("market_data_stream_already_running")
-            return
+            if not force:
+                logger.warning("market_data_stream_already_running")
+                return
+            logger.info(
+                "market_data_stream_force_restart",
+                symbols=symbols,
+                interval=interval,
+            )
+            await self.stop_market_data_stream(clear_candle_cache=True)
 
         self.streaming_symbols = [normalize_symbol_for_delta_api(s) for s in symbols]
         self.streaming_running = True
@@ -316,6 +330,8 @@ class MarketDataService:
             try:
                 await self.websocket_client.subscribe_ticker(self.streaming_symbols)
                 self._ws_ticker_subscription_ok = True
+                if getattr(settings, "use_delta_user_trades_ws", True):
+                    await self.websocket_client.subscribe_user_trades(self.streaming_symbols)
                 logger.info("market_data_websocket_subscribed", symbols=self.streaming_symbols)
             except Exception as e:
                 self._ws_ticker_subscription_ok = False
@@ -335,7 +351,11 @@ class MarketDataService:
             websocket_enabled=self._websocket_connected
         )
     
-    async def stop_market_data_stream(self):
+    async def restart_market_data_stream(self, symbols: List[str], interval: str = "15m"):
+        """Force-restart market data streaming after stale candle detection."""
+        await self.start_market_data_stream(symbols, interval, force=True)
+
+    async def stop_market_data_stream(self, *, clear_candle_cache: bool = False):
         """Stop streaming market data."""
         self.streaming_running = False
         
@@ -345,6 +365,10 @@ class MarketDataService:
                 await self._streaming_task
             except asyncio.CancelledError:
                 pass
+            self._streaming_task = None
+
+        if clear_candle_cache:
+            self._last_candle_cache.clear()
         
         logger.info("market_data_stream_stopped")
     
@@ -399,6 +423,10 @@ class MarketDataService:
                             try:
                                 await self.websocket_client.subscribe_ticker(self.streaming_symbols)
                                 self._ws_ticker_subscription_ok = True
+                                if getattr(settings, "use_delta_user_trades_ws", True):
+                                    await self.websocket_client.subscribe_user_trades(
+                                        self.streaming_symbols
+                                    )
                                 logger.info(
                                     "market_data_websocket_reconnected_and_subscribed",
                                     symbols=self.streaming_symbols,

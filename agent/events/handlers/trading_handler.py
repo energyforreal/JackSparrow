@@ -175,7 +175,12 @@ class TradingEventHandler:
                     out["adjudication_step6_confidence"] = s.get("confidence")
                 elif sn == 7:
                     out["calibration_step7_confidence"] = s.get("confidence")
-                    out["calibration_step6_confidence"] = s.get("confidence")
+                    meta = s.get("step_metadata")
+                    if isinstance(meta, dict):
+                        out["signal_strength"] = meta.get("signal_strength")
+                        out["entry_proba_margin_mean"] = meta.get(
+                            "entry_proba_margin_mean"
+                        )
         hold_bucket = None
         conclusion = (out.get("reasoning_conclusion") or "").lower()
         if "dead zone" in conclusion:
@@ -190,6 +195,11 @@ class TradingEventHandler:
             hold_bucket = "consensus_in_hold_band"
         if hold_bucket:
             out["hold_bucket"] = hold_bucket
+        mc = reasoning_chain.get("market_context")
+        if isinstance(mc, dict):
+            bar_idx = mc.get("v43_closed_bar_index")
+            if bar_idx is not None:
+                out["v43_closed_bar_index"] = bar_idx
         return out
 
     def _summarize_model_entry_proba(
