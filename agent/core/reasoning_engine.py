@@ -486,7 +486,10 @@ class MCPReasoningEngine:
         steps.append(step7)
         
         if isinstance(request.market_context.get("strategy_candidate"), dict):
-            final_conclusion = step5b.description
+            step6 = next((s for s in steps if s.step_number == 6), None)
+            final_conclusion = (
+                step6.description if step6 is not None else step5b.description
+            )
         else:
             final_conclusion = step5.description
 
@@ -548,12 +551,29 @@ class MCPReasoningEngine:
         ]
 
         entry = thesis_sig in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL")
+        ml_entry = ml_sig in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL")
         same_dir = (
             (thesis_sig in ("BUY", "STRONG_BUY") and ml_sig in ("BUY", "STRONG_BUY"))
             or (thesis_sig in ("SELL", "STRONG_SELL") and ml_sig in ("SELL", "STRONG_SELL"))
         )
+        gated_floor = float(
+            getattr(settings, "agent_trade_score_min_gated_ml_adoption", 30.0) or 30.0
+        )
+        gated_ml_adopt = (
+            thesis_sig == "HOLD"
+            and ml_entry
+            and ml_confirms
+            and (passed or score >= gated_floor)
+        )
 
-        if entry and same_dir and ml_confirms and passed:
+        if gated_ml_adopt:
+            desc = (
+                f"{ml_sig} - trade adjudication: gated ML adoption "
+                f"(neutral thesis, score={score:.0f})"
+            )
+            conf = adjudication_confidence(score, verdict="agree")
+            evidence.append("adjudication_verdict=gated_ml_adopt")
+        elif entry and same_dir and ml_confirms and passed:
             desc = f"{thesis_sig} - trade adjudication: thesis and ML agree (score={score:.0f})"
             conf = adjudication_confidence(score, verdict="agree")
             evidence.append("adjudication_verdict=agree")
@@ -960,10 +980,34 @@ class MCPReasoningEngine:
             thesis_sig = str(strat.get("signal") or "HOLD")
             ts = request.market_context.get("trade_score") or {}
             score = float(ts.get("score") or 0.0) if isinstance(ts, dict) else 0.0
+            score_passed = bool(ts.get("passed", False)) if isinstance(ts, dict) else False
+            ml_val = request.market_context.get("ml_validation") or {}
+            ml_sig = "HOLD"
+            if isinstance(ml_val, dict):
+                ml_sig = str(
+                    (request.market_context.get("v43_dedicated_decision") or {}).get(
+                        "ml_candidate_signal"
+                    )
+                    or "HOLD"
+                ).upper()
             v43_dec = request.market_context.get("v43_dedicated_decision") or {}
             evidence = list(v43_dec.get("evidence") or []) if isinstance(v43_dec, dict) else []
             evidence.append(f"strategy-first synthesis thesis={thesis_sig} score={score:.0f}")
-            conclusion = f"HOLD - awaiting policy ({thesis_sig} thesis, score={score:.0f})"
+            gated_floor = float(
+                getattr(settings, "agent_trade_score_min_gated_ml_adoption", 30.0) or 30.0
+            )
+            ml_gated = bool(
+                isinstance(ml_val, dict)
+                and (ml_val.get("final_long") or ml_val.get("final_short"))
+            )
+            if (
+                ml_gated
+                and ml_sig in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL")
+                and (score_passed or score >= gated_floor)
+            ):
+                conclusion = f"{ml_sig} - gated ML candidate (thesis={thesis_sig}, score={score:.0f})"
+            else:
+                conclusion = f"HOLD - awaiting policy ({thesis_sig} thesis, score={score:.0f})"
             data_freshness_seconds = self._compute_data_freshness_seconds(
                 request.market_context.get("timestamp")
             )

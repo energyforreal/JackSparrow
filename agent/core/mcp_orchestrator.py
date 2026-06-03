@@ -708,9 +708,13 @@ class MCPOrchestrator:
         short_thr = float(gate_head.short_threshold)
         regime = str(gate_head.regime or pctx.get("regime", "neutral") or "neutral")
         u_scale = float(pctx.get("unc_scale", 1.0) or 1.0)
-        uncertainty_score = float(
-            pctx.get("uncertainty_score", pctx.get("uncertainty", 0.05)) or 0.05
-        )
+        _raw_unc = pctx.get("uncertainty_score", pctx.get("uncertainty"))
+        uncertainty_score: Optional[float] = None
+        if _raw_unc is not None:
+            try:
+                uncertainty_score = float(_raw_unc)
+            except (TypeError, ValueError):
+                uncertainty_score = None
         p_regime_favorable = pctx.get("p_regime_favorable")
         p_setup_quality = pctx.get("p_setup_quality")
         p_vol_expansion = pctx.get("p_vol_expansion")
@@ -1073,7 +1077,9 @@ class MCPOrchestrator:
             else None,
             p_setup_quality=float(p_setup_quality) if p_setup_quality is not None else None,
             p_vol_expansion=float(p_vol_expansion) if p_vol_expansion is not None else None,
-            uncertainty_score=float(uncertainty_score),
+            uncertainty_score=(
+                float(uncertainty_score) if uncertainty_score is not None else None
+            ),
         )
 
         from agent.core.portfolio_intelligence import (
@@ -1111,6 +1117,15 @@ class MCPOrchestrator:
             thesis_allowed
         )
 
+        policy_verdict = agent_policy_engine.evaluate(
+            ml_evidence=ml_evidence,
+            conclusion="",
+            market_context=market_context_for_reasoning,
+        )
+        market_context_for_reasoning["policy_verdict"] = policy_verdict.model_dump(
+            mode="json"
+        )
+
         reasoning_request = MCPReasoningRequest(
             symbol=symbol,
             market_context=market_context_for_reasoning,
@@ -1123,6 +1138,9 @@ class MCPOrchestrator:
             conclusion=reasoning_chain.conclusion or "",
             market_context=market_context_for_reasoning,
             reasoning_chain=reasoning_chain,
+        )
+        market_context_for_reasoning["policy_verdict"] = policy_verdict.model_dump(
+            mode="json"
         )
 
         portfolio_guard = evaluate_portfolio_guard(
@@ -1161,12 +1179,12 @@ class MCPOrchestrator:
                 "fusion_ml_or_thesis_ml",
             }
         )
-        score_min = float(getattr(settings, "agent_trade_score_min", 70.0) or 70.0)
+        score_min = float(getattr(settings, "agent_trade_score_min", 55.0) or 55.0)
         if any(c in _gated_adopt_codes for c in (policy_verdict.reason_codes or [])):
             score_min = min(
                 score_min,
                 float(
-                    getattr(settings, "agent_trade_score_min_gated_ml_adoption", 45.0) or 45.0
+                    getattr(settings, "agent_trade_score_min_gated_ml_adoption", 30.0) or 30.0
                 ),
             )
         score_ok = trade_score.passed or (
@@ -1198,7 +1216,6 @@ class MCPOrchestrator:
         }
         market_context_for_reasoning["v43_execution_profile"] = v43_exec
         if policy_entry:
-            self.record_v43_signal_decision(bar_idx)
             v43_decision["conclusion"] = (
                 f"{policy_verdict.signal} - strategy-first (thesis+ML policy)"
             )
@@ -1736,9 +1753,7 @@ class MCPOrchestrator:
         """Attach introspection + memory ids to DecisionReady payload before publish."""
         payload = decision_event.payload
         payload["decision_event_id"] = decision_event.event_id
-        payload["server_timestamp_ms"] = int(
-            timestamp.timestamp() * 1000 if isinstance(timestamp, datetime) else time.time() * 1000
-        )
+        payload["server_timestamp_ms"] = int(time.time() * 1000)
 
         memory_context_id = await self._store_decision_context(
             symbol=symbol,
@@ -2017,6 +2032,24 @@ class MCPOrchestrator:
                 )
                 mctx = result.get("market_context") if isinstance(result.get("market_context"), dict) else {}
                 v43_bar = mctx.get("v43_closed_bar_index")
+                bar_i_hold_skip: Optional[int] = None
+                if v43_bar is not None:
+                    try:
+                        bar_i_hold_skip = int(v43_bar)
+                    except (TypeError, ValueError):
+                        bar_i_hold_skip = None
+                if (
+                    signal == "HOLD"
+                    and bar_i_hold_skip is not None
+                    and self._v43_last_entry_decision_bar == bar_i_hold_skip
+                ):
+                    logger.info(
+                        "v43_decision_emit_skipped_hold_same_bar",
+                        symbol=decision_symbol,
+                        bar_idx=bar_i_hold_skip,
+                        correlation_id=event.event_id,
+                    )
+                    return
                 if signal in _entry_signals and v43_bar is not None:
                     try:
                         bar_i = int(v43_bar)
@@ -2314,8 +2347,10 @@ class MCPOrchestrator:
         self._v43_gate_state.note_entry_failed(bar_index)
 
     def record_v43_trade_executed(self, bar_index: int) -> None:
-        """Stamp v43 frequency state after a fill."""
-        self._v43_gate_state.note_entry(int(bar_index), datetime.now(timezone.utc))
+        """Stamp v43 frequency + debounce state after a fill."""
+        bar_i = int(bar_index)
+        self._v43_gate_state.note_signal_decision(bar_i)
+        self._v43_gate_state.note_entry(bar_i, datetime.now(timezone.utc))
         self._v43_gate_state.counters.trades_executed += 1
 
     async def persist_v43_gate_state_after_trade(self, symbol: str) -> None:

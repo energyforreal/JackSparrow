@@ -125,7 +125,7 @@ def build_introspection_snapshot(
         except (TypeError, ValueError):
             pass
 
-    min_score = float(getattr(settings, "agent_trade_score_min", 70.0) or 70.0)
+    min_score = float(getattr(settings, "agent_trade_score_min", 55.0) or 55.0)
     trade_pass: Optional[bool] = None
     if ts_val is not None:
         trade_pass = ts_val >= min_score

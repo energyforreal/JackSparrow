@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
 import { formatConfidence, formatCurrency, formatDateTime } from '@/utils/formatters'
-import { resolveDisplayConfidence } from '@/utils/signalConfidence'
+import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
 import {
   parseFiniteNumber,
   resolveContractValueBtc,
@@ -74,8 +74,6 @@ export function TradingDecision({
 }: TradingDecisionProps) {
   const hasSignal = signal && signal.signal
   const hasRecentTrade = recentTrade !== null && recentTrade !== undefined
-  const displayConfidence = signal ? resolveDisplayConfidence(signal) : null
-
   const formatTradeValueInr = (trade: Trade) => {
     const explicit = parseFiniteNumber(trade.trade_value_inr)
     if (explicit !== null) return formatCurrency(explicit)
@@ -121,23 +119,9 @@ export function TradingDecision({
                   <div className="text-sm font-medium">
                     {getDecisionAction(signal.signal)}
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Confidence:{' '}
-                    {formatConfidence(displayConfidence?.percent ?? signal.confidence)}
-                    {displayConfidence && (
-                      <span className="ml-1 opacity-80">
-                        ({displayConfidence.source === 'reasoning' ? 'reasoning' : 'policy'})
-                      </span>
-                    )}
-                  </div>
-                  {displayConfidence?.signalStrengthPercent !== undefined && (
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      Signal strength:{' '}
-                      {formatConfidence(displayConfidence.signalStrengthPercent)}
-                    </div>
-                  )}
                 </div>
               </div>
+              <SignalEntryMetricsBlock signal={signal} compact />
 
               {signal.symbol && (
                 <div className="text-sm text-muted-foreground">
@@ -154,9 +138,10 @@ export function TradingDecision({
                 </div>
               )}
 
-              {signal.timestamp && (
-                <DataFreshnessIndicator 
-                  timestamp={signal.timestamp} 
+              {(signal.timestamp || signal.server_timestamp_ms) && (
+                <DataFreshnessIndicator
+                  timestamp={signal.timestamp}
+                  serverTimestampMs={signal.server_timestamp_ms}
                   label="Decision time"
                 />
               )}

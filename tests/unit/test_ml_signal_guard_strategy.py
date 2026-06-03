@@ -48,3 +48,28 @@ def test_ml_and_thesis_rejects_no_agreement(monkeypatch: pytest.MonkeyPatch) -> 
         },
     )
     assert ok is False
+
+
+def test_strategy_ml_agreement_skipped_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(guard_mod.settings, "require_ml_signal_for_orders", True)
+    monkeypatch.setattr(guard_mod.settings, "agent_policy_mode", "ml_and_thesis")
+    monkeypatch.setattr(guard_mod.settings, "require_strategy_ml_agreement", False)
+    monkeypatch.setattr(guard_mod.settings, "require_v43_gates_for_entry", False)
+    monkeypatch.setattr(guard_mod.settings, "require_ml_consensus_alignment", False)
+
+    ok, reason = validate_ml_entry_signal(
+        signal="BUY",
+        side="BUY",
+        model_predictions=[{"model_name": "v43", "confidence": 0.8, "prediction": 0.5}],
+        market_context={
+            "trade_score": {"score": 50.0, "passed": False},
+            "ml_validation": {"final_long": True},
+        },
+        policy_verdict={
+            "signal": "BUY",
+            "adopted_ml_candidate": True,
+            "reason_codes": ["fusion_ml_and_thesis_no_agreement"],
+        },
+    )
+    assert ok is True
+    assert reason in ("strategy_ml_agreement_not_required", "ml_predictions_present")

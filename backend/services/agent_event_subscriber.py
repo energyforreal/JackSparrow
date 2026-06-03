@@ -50,7 +50,10 @@ def _jacksparrow_ws_fields_from_predictions(
         if not isinstance(p, dict):
             continue
         ctx = p.get("context") or {}
-        if not isinstance(ctx, dict) or ctx.get("format") != "jacksparrow_v43":
+        if not isinstance(ctx, dict) or ctx.get("format") not in (
+            "jacksparrow_v43",
+            "jacksparrow_ic_rule_based",
+        ):
             continue
         try:
             tanh_score = float(p.get("prediction", 0.0))
@@ -158,7 +161,7 @@ def _model_consensus_row(
         "prediction": prediction_value,
     }
     pctx = pred.get("context") or {}
-    if isinstance(pctx, dict) and pctx.get("format") == "jacksparrow_v43":
+    if isinstance(pctx, dict) and pctx.get("format") in ("jacksparrow_v43", "jacksparrow_ic_rule_based"):
         er = pctx.get("expected_return")
         if er is not None:
             try:
@@ -1586,6 +1589,7 @@ class AgentEventSubscriber:
             "symbol": symbol,
             "reasoning_chain": reasoning_steps,
             "conclusion": conclusion,
+            "agent_decision_reasoning": conclusion or "",
             "individual_model_reasoning": individual_reasoning,
             "model_consensus": model_consensus,
             "chain_id": chain_id,

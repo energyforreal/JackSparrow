@@ -144,7 +144,7 @@ def score_trade_setup(
     components["multi_horizon"] = mh_pts
 
     total = sum(components.values())
-    min_score = float(getattr(settings, "agent_trade_score_min", 70.0) or 70.0)
+    min_score = float(getattr(settings, "agent_trade_score_min", 55.0) or 55.0)
     passed = total >= min_score and direction != "FLAT"
     if not passed and direction != "FLAT":
         reasons.append(f"score_below_min={total:.1f}<{min_score:.1f}")

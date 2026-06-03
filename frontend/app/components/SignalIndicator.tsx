@@ -2,13 +2,12 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { ConfidenceProgress } from './ConfidenceProgress'
 import { Signal, SignalType, ReflectionSnapshot } from '@/types'
 import type { ModelEdgeSnapshot } from '@/hooks/useTradingData'
 import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
-import { resolveDisplayConfidence } from '@/utils/signalConfidence'
+import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
@@ -66,10 +65,6 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
     )
   }
 
-  const displayConfidence = resolveDisplayConfidence(signal)
-  const overallConfidence = displayConfidence.percent
-  const policyConfidencePercent = displayConfidence.policyPercent
-
   return (
     <Card>
       <CardHeader>
@@ -108,22 +103,8 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
               </span>
             )
           })()}
-          <div className="flex-1">
-            <div className="flex justify-between text-sm mb-1">
-              <span className="text-muted-foreground">Signal confidence</span>
-              <span className="font-medium">{formatConfidence(overallConfidence)}</span>
-            </div>
-            <ConfidenceProgress value={overallConfidence} className="h-2" />
-            <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
-              Source: {displayConfidence.source === 'reasoning' ? 'reasoning' : 'policy'}
-            </p>
-            {displayConfidence.source === 'reasoning' &&
-              policyConfidencePercent != null &&
-              Math.abs(policyConfidencePercent - overallConfidence) >= 2 && (
-                <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight tabular-nums">
-                  Policy score: {formatConfidence(policyConfidencePercent)}
-                </p>
-              )}
+          <div className="flex-1 min-w-0">
+            <SignalEntryMetricsBlock signal={signal} />
           </div>
         </div>
 
@@ -174,14 +155,13 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
-        {/* Agent introspection summary */}
         {signal.agent_introspection && (
           <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
-            <p className="font-medium text-foreground text-xs">Decision context</p>
+            <p className="font-medium text-foreground text-xs">Agent context</p>
             <p>
-              {signal.agent_introspection.policy_mode} · score{' '}
-              {signal.agent_introspection.trade_score ?? '—'} · memory{' '}
-              {signal.agent_introspection.memory_context_count}
+              {signal.agent_introspection.policy_mode} · thesis{' '}
+              {signal.thesis_signal ?? signal.agent_introspection.thesis_signal ?? '—'} ·
+              memory {signal.agent_introspection.memory_context_count}
             </p>
           </div>
         )}
@@ -209,8 +189,11 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
-        {signal.timestamp && (
-          <DataFreshnessIndicator timestamp={signal.timestamp} />
+        {(signal.timestamp || signal.server_timestamp_ms) && (
+          <DataFreshnessIndicator
+            timestamp={signal.timestamp}
+            serverTimestampMs={signal.server_timestamp_ms}
+          />
         )}
       </CardContent>
     </Card>

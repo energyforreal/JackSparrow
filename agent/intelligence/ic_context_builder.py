@@ -12,6 +12,7 @@ from agent.intelligence.direction_signal import compute_direction_signal
 from agent.intelligence.mtf_synthesizer import compute_mtf_alignment
 from agent.intelligence.regime_classifier import classify_regime
 from agent.intelligence.setup_quality import estimate_setup_quality
+from agent.intelligence.ic_micro_signal import apply_ic_micro_momentum_er
 from agent.intelligence.uncertainty import estimate_uncertainty
 from agent.intelligence.vol_estimator import estimate_vol_expansion
 from agent.core.confidence_dynamics import synthetic_entry_proba_from_ic
@@ -115,13 +116,24 @@ def build_ic_prediction_context(
     if alignment >= 0.6 and primary_er != 0.0:
         primary_er *= 1.0 + 0.15 * alignment
 
+    primary_fb = int(primary_execution_horizon_bars(bundle_metadata))
+    floor = float(bundle_metadata.get("default_threshold") or 0.005)
+    gate_thr_hint = float(floor)
+    primary_er = apply_ic_micro_momentum_er(
+        str(thesis_5m.signal),
+        primary_er,
+        closed_feats,
+        threshold=gate_thr_hint,
+        short_enabled=short_enabled,
+    )
+    ic_micro_applied = (
+        str(thesis_5m.signal).upper() == "HOLD" and primary_er != 0.0
+    )
+
     p_vol = estimate_vol_expansion(closed_feats)
     p_quality = estimate_setup_quality(closed_feats, thesis_5m)
     unc = estimate_uncertainty(closed_feats, regime)
     u_scale = uncertainty_scale(unc)
-
-    primary_fb = int(primary_execution_horizon_bars(bundle_metadata))
-    floor = float(bundle_metadata.get("default_threshold") or 0.005)
 
     head_payloads: Dict[str, Dict[str, Any]] = {}
     for hkey in V43_HORIZON_KEYS:
@@ -186,5 +198,10 @@ def build_ic_prediction_context(
         "ic_alignment_score": alignment,
         "ic_thesis_signal": thesis_5m.signal,
         "ic_reason_codes": list(thesis_5m.reason_codes),
+        "ic_micro_momentum_applied": ic_micro_applied,
     }
+    if ic_micro_applied:
+        out_ctx["ic_reason_codes"] = list(thesis_5m.reason_codes) + [
+            "ic_micro_momentum_fallback"
+        ]
     return out_ctx, primary_pred_val, primary_conf

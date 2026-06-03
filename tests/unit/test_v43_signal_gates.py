@@ -16,6 +16,7 @@ from agent.core.v43_signal_gates import (
     apply_gate5_min_edge,
     apply_post_threshold_gates,
     apply_post_threshold_gates_short,
+    apply_uncertainty_gate,
     gate5_edge_ok,
     gate5_long_edge_metrics,
     gate5_short_edge_metrics,
@@ -249,3 +250,20 @@ async def test_gate_state_redis_persist_roundtrip() -> None:
     await persist_gate_state("BTCUSD", st, redis, ttl=60)
     loaded = await load_gate_state_from_redis("BTCUSD", redis)
     assert loaded.last_entry_bar_index == 42
+
+
+def test_uncertainty_gate_skips_when_score_missing() -> None:
+    st = V43GateState()
+    result = apply_uncertainty_gate(None, st)
+    assert result.allow is True
+    assert result.reject_reason is None
+
+
+def test_uncertainty_gate_rejects_high_score(monkeypatch) -> None:
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "jacksparrow_v43_uncertainty_max", 0.08)
+    st = V43GateState()
+    result = apply_uncertainty_gate(0.10, st)
+    assert result.allow is False
+    assert result.reject_reason == "high_uncertainty"

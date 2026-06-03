@@ -148,6 +148,14 @@ class Settings(BaseSettings):
         env="IC_MODE",
         description="Use rule-based Intelligence Component instead of ML model artifacts.",
     )
+    ic_micro_momentum_enabled: bool = Field(
+        default=True,
+        env="IC_MICRO_MOMENTUM_ENABLED",
+        description=(
+            "When IC thesis is HOLD, derive expected_return from closed-bar momentum "
+            "features so v43 gates and ml_or_thesis adoption can proceed."
+        ),
+    )
     ic_default_threshold: float = Field(
         default=0.005,
         env="IC_DEFAULT_THRESHOLD",
@@ -329,7 +337,7 @@ class Settings(BaseSettings):
         ),
     )
     require_ml_consensus_alignment: bool = Field(
-        default=True,
+        default=False,
         env="REQUIRE_ML_CONSENSUS_ALIGNMENT",
         description=(
             "When True (non-v43 path), trade side must align with model consensus_signal."
@@ -387,7 +395,7 @@ class Settings(BaseSettings):
         ),
     )
     volatility_filter_enabled: bool = Field(
-        default=True,
+        default=False,
         env="VOLATILITY_FILTER_ENABLED",
         description="v15: skip entry when atr_pct is in bottom quartile / below floor.",
     )
@@ -402,7 +410,7 @@ class Settings(BaseSettings):
         description="v15: only enter when ADX <= this (ranging regime).",
     )
     v15_adx_regime_filter_enabled: bool = Field(
-        default=True,
+        default=False,
         env="V15_ADX_REGIME_FILTER_ENABLED",
         description=(
             "When True, v15 entry gate requires ADX <= v15_adx_ranging_max. "
@@ -988,7 +996,7 @@ class Settings(BaseSettings):
         ),
     )
     jacksparrow_v43_require_horizon_fusion_match: bool = Field(
-        default=True,
+        default=False,
         env="JACKSPARROW_V43_REQUIRE_HORIZON_FUSION_MATCH",
         description=(
             "When True, ml_and_thesis fusion requires thesis intended_horizon_bars "
@@ -1032,14 +1040,14 @@ class Settings(BaseSettings):
         description="When True, skip entries when regime_label is trending.",
     )
     jacksparrow_v43_threshold_oof_percentile: float = Field(
-        default=75.0,
+        default=60.0,
         env="JACKSPARROW_V43_THRESHOLD_OOF_PERCENTILE",
         ge=1.0,
         le=99.0,
         description="OOF percentile hint for diagnostics / collapse tuning (75 default).",
     )
     jacksparrow_v43_signal_threshold_floor: float = Field(
-        default=0.005,
+        default=0.003,
         env="JACKSPARROW_V43_SIGNAL_THRESHOLD_FLOOR",
         ge=0.0,
         description=(
@@ -1056,7 +1064,7 @@ class Settings(BaseSettings):
         ),
     )
     jacksparrow_v43_near_threshold_epsilon: float = Field(
-        default=0.0,
+        default=0.0015,
         env="JACKSPARROW_V43_NEAR_THRESHOLD_EPSILON",
         ge=0.0,
         description=(
@@ -1160,17 +1168,17 @@ class Settings(BaseSettings):
         description="When True, run state-intelligence heads at inference and apply policy gates.",
     )
     jacksparrow_v43_state_head_policy_enabled: bool = Field(
-        default=True,
+        default=False,
         env="JACKSPARROW_V43_STATE_HEAD_POLICY_ENABLED",
         description="When True, ml_and_thesis fusion enforces state-head probability minima.",
     )
     jacksparrow_v43_regime_min: float = Field(
-        default=0.60,
+        default=0.40,
         env="JACKSPARROW_V43_REGIME_MIN",
         description="Minimum p_regime_favorable for ML entry adoption.",
     )
     jacksparrow_v43_quality_min: float = Field(
-        default=0.60,
+        default=0.40,
         env="JACKSPARROW_V43_QUALITY_MIN",
         description="Minimum p_setup_quality for ML entry adoption.",
     )
@@ -1180,7 +1188,7 @@ class Settings(BaseSettings):
         description="Below this p_vol_expansion, reduce size or hold (policy layer).",
     )
     jacksparrow_v43_uncertainty_max: float = Field(
-        default=0.02,
+        default=0.08,
         env="JACKSPARROW_V43_UNCERTAINTY_MAX",
         description="Force hold when uncertainty_score exceeds this threshold.",
     )
@@ -1975,14 +1983,14 @@ class Settings(BaseSettings):
         ),
     )
     agent_trade_score_min: float = Field(
-        default=70.0,
+        default=55.0,
         env="AGENT_TRADE_SCORE_MIN",
         ge=0.0,
         le=100.0,
         description="Minimum confluence score (0-100) before policy may emit entry.",
     )
     agent_trade_score_min_gated_ml_adoption: float = Field(
-        default=45.0,
+        default=30.0,
         env="AGENT_TRADE_SCORE_MIN_GATED_ML_ADOPTION",
         ge=0.0,
         le=100.0,
@@ -1992,7 +2000,7 @@ class Settings(BaseSettings):
         ),
     )
     require_strategy_ml_agreement: bool = Field(
-        default=True,
+        default=False,
         env="REQUIRE_STRATEGY_ML_AGREEMENT",
         description="When True and policy mode is ml_and_thesis, execution requires thesis+ML agreement.",
     )

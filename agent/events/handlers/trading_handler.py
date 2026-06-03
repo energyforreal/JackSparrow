@@ -1149,20 +1149,6 @@ class TradingEventHandler:
                 event_id=event.event_id,
                 **diagnostics_base,
             )
-            # #region agent log
-            try:
-                from agent.core.debug_session_log import debug_session_log
-
-                debug_session_log(
-                    hypothesis_id="H1",
-                    location="trading_handler.py:handle_decision_ready_for_trading",
-                    message="success_log_after_risk_approved_ok",
-                    data={"event_id": event.event_id, "runId": "post-fix"},
-                    run_id="post-fix",
-                )
-            except Exception as e:
-                logger.debug("debug_session_log_failed", error=str(e))
-            # #endregion
             try:
                 from agent.core.signal_audit_md import append_risk_approved
 
