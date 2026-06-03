@@ -2,12 +2,14 @@
 """
 Delta testnet order lifecycle smoke test.
 
-Exercises: resolve product_id, GET/POST order leverage, place market order,
-list active orders, read position, close via reduce_only market order.
+Exercises: resolve product_id, place market order, list active orders,
+read position, close via reduce_only market order.
+Optional: GET/POST order leverage with --test-leverage-sync.
 
 Usage:
   python tools/test_delta_order_lifecycle.py --allow-live
   python tools/test_delta_order_lifecycle.py --allow-live --symbol BTCUSD --skip-place
+  python tools/test_delta_order_lifecycle.py --skip-place --test-leverage-sync
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ def _is_testnet_url(url: str) -> bool:
     return "testnet" in (url or "").lower()
 
 
-async def run_smoke(symbol: str, skip_place: bool) -> int:
+async def run_smoke(symbol: str, skip_place: bool, test_leverage_sync: bool) -> int:
     base = (
         os.getenv("DELTA_EXCHANGE_BASE_URL")
         or os.getenv("DELTA_API_URL")
@@ -48,24 +50,25 @@ async def run_smoke(symbol: str, skip_place: bool) -> int:
     product_id = await client.resolve_product_id(symbol)
     print(f"Resolved product_id: {product_id}")
 
-    print("Order leverage (GET)...")
-    try:
-        lev_get = await client.get_order_leverage(product_id=product_id)
-        current = client._parse_order_leverage_value(lev_get)
-        print(f"  current leverage={current}")
-    except DeltaExchangeError as exc:
-        print(f"  GET leverage failed (may be unset): {exc}")
-        current = None
+    if test_leverage_sync:
+        print("Order leverage (GET)...")
+        try:
+            lev_get = await client.get_order_leverage(product_id=product_id)
+            current = client._parse_order_leverage_value(lev_get)
+            print(f"  current leverage={current}")
+        except DeltaExchangeError as exc:
+            print(f"  GET leverage failed (may be unset): {exc}")
+            current = None
 
-    target_leverage = 10
-    print(f"Order leverage sync (ensure {target_leverage})...")
-    lev_set = await client.ensure_order_leverage(symbol, target_leverage)
-    synced = client._parse_order_leverage_value(lev_set)
-    print(f"  synced leverage={synced}")
+        target_leverage = 10
+        print(f"Order leverage sync (ensure {target_leverage})...")
+        lev_set = await client.ensure_order_leverage(symbol, target_leverage)
+        synced = client._parse_order_leverage_value(lev_set)
+        print(f"  synced leverage={synced}")
 
-    lev_verify = await client.get_order_leverage(product_id=product_id)
-    verified = client._parse_order_leverage_value(lev_verify)
-    print(f"  verified leverage={verified}")
+        lev_verify = await client.get_order_leverage(product_id=product_id)
+        verified = client._parse_order_leverage_value(lev_verify)
+        print(f"  verified leverage={verified}")
 
     if not skip_place:
         print("Placing 1-lot market buy (testnet)...")
@@ -130,6 +133,11 @@ def main() -> None:
     parser.add_argument("--symbol", default="BTCUSD")
     parser.add_argument("--skip-place", action="store_true", help="Skip opening leg; only read/close")
     parser.add_argument(
+        "--test-leverage-sync",
+        action="store_true",
+        help="Run GET/POST /orders/leverage smoke (off by default; agent uses portfolio lot sizing)",
+    )
+    parser.add_argument(
         "--allow-live",
         action="store_true",
         help="Required when base URL is production (not testnet)",
@@ -145,7 +153,9 @@ def main() -> None:
         sys.exit(2)
 
     try:
-        code = asyncio.run(run_smoke(args.symbol.upper(), args.skip_place))
+        code = asyncio.run(
+            run_smoke(args.symbol.upper(), args.skip_place, args.test_leverage_sync)
+        )
     except DeltaExchangeError as exc:
         print(f"FAILED: {exc}")
         sys.exit(1)

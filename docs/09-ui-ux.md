@@ -287,37 +287,38 @@ This combination provides:
 
 ### PerformanceChart Component
 
-**Purpose**: Visualize portfolio performance over time
+**Purpose**: Display cumulative **total return** from closed-position aggregates (Analysis tab accordion).
 
 **Visual Design**:
-- Line chart
-- Time period selector
-- Interactive tooltips
-- PnL overlay
-- Responsive sizing
+- **Snapshot mode** (single data point): large formatted value with **Total Return (USD)** or **Total Return (%)** label
+- **Series mode** (multiple points): line chart with interactive tooltips
+- Empty state when no closed trades yet
 
 **Chart Features**:
-- Portfolio value line
-- PnL bars (optional)
-- Time period selector (1d, 7d, 30d, all)
-- Zoom functionality
-- Hover tooltips
+- Metric kind from `get_performance`: `total_return` (USD) preferred, else `total_return_pct`
+- **Recharts** line chart when a time series is available (period tabs reserved for future equity-curve API)
+- `en-IN` number formatting
 
-**Layout**:
+**Layout** (snapshot):
 ```
 ┌─────────────────────────────────────────────────┐
-│  Performance Chart                    [1d|7d|30d|All] │
+│  Performance Chart                              │
+│  Total Return (USD)                             │
 │                                                 │
-│      ┌─────────────────────────────┐           │
-│      │                             │           │
-│      │        ╱╲                   │           │
-│      │      ╱    ╲                 │           │
-│      │    ╱        ╲               │           │
-│      │  ╱            ╲             │           │
-│      └─────────────────────────────┘           │
-│                                                 │
+│              $1,234.56                          │
+│  Snapshot from closed-position aggregates       │
 └─────────────────────────────────────────────────┘
 ```
+
+---
+
+### Analysis tab layout
+
+The **Analysis** tab groups three panels (see [`Dashboard.tsx`](../frontend/app/components/Dashboard.tsx)):
+
+1. **Performance Chart** (collapsible accordion)
+2. **Agent Diagnostics** (`SelfAwarenessPanel` — `agent_introspection`, reflection)
+3. **Signal Rationale** (`ReasoningChainView` — reasoning steps + v43 decision economics)
 
 ---
 
@@ -357,41 +358,39 @@ This combination provides:
 
 ### ReasoningChainView Component
 
-**Purpose**: Display agent's reasoning chain for transparency
+**Purpose**: **Signal Rationale** — display agent reasoning and v43 decision economics (Analysis tab)
 
 **Visual Design**:
-- Expandable step-by-step reasoning
-- Confidence indicators
-- Evidence badges
-- Conclusion highlight
-- Copy functionality
+- **Decision economics** summary (expected return, threshold, gate reject)
+- Expandable step-by-step reasoning accordion
+- Confidence indicators and evidence bullets
+- Conclusion block and final confidence in header
 
 **Layout**:
 ```
 ┌─────────────────────────────────────────────────┐
-│  Agent Reasoning Chain              Confidence: 75% │
+│  Signal Rationale              Final confidence │
+│  2026-06-03 10:30 IST                           │
 │                                                 │
-│  ▼ Step 1: Situational Assessment     85%      │
-│    Market Regime: bull_trending...             │
+│  Decision economics                             │
+│  • Expected return: 0.00125                     │
+│  • Threshold: 0.00080                           │
+│  • Gate reject: below_threshold (when HOLD)     │
 │                                                 │
-│  ▼ Step 2: Historical Context        80%      │
-│    Found 5 similar situations...               │
-│                                                 │
-│  ▼ Step 3: Model Consensus           75%      │
-│    Consensus Signal: BUY...                   │
-│                                                 │
-│  ┌───────────────────────────────────────────┐ │
-│  │ Conclusion: After analyzing...           │ │
-│  └───────────────────────────────────────────┘ │
+│  ▼ Reasoning steps (6)                          │
+│    1. Situational Assessment          85%       │
+│    ...                                          │
+│  Conclusion: ...                                │
 └─────────────────────────────────────────────────┘
 ```
 
 **Step Display**:
-- Step number and title
-- Expandable thought process
-- Confidence bar
-- Evidence tags
-- Collapsible sections
+- Step number and `step_name`
+- Description text and confidence badge
+- Evidence bullet list
+- Collapsible accordion section
+
+**Gate reject sourcing**: `signal.v43_gate_reject`, else `agent_introspection.v43_gate_reject` (see [Frontend](07-frontend.md#reasoningchainview-component)).
 
 ---
 

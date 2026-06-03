@@ -179,6 +179,8 @@ export interface Signal {
   model_version?: string
   /** Reasoning chain id from agent (WebSocket). */
   chain_id?: string
+  /** Final conclusion text when surfaced at top level (WebSocket). */
+  conclusion?: string
   /** Reasoning engine final confidence, 0-1 (may differ from calibrated UI confidence). */
   final_confidence?: number
   /** Which confidence field is authoritative for the AI card display. */
@@ -222,7 +224,6 @@ export interface Signal {
   market_context_excerpt?: Record<string, unknown>
   agent_introspection?: AgentIntrospectionSnapshot
   memory_context_id?: string
-  decision_event_id?: string
   reflection_snapshot?: ReflectionSnapshot
 }
 

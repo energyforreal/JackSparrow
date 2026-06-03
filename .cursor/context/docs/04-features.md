@@ -206,7 +206,7 @@ The example illustrates how raw market context, historical success rate, and mod
 **Risk Components**:
 
 **Position Sizing**:
-- Kelly Criterion wired in TradingHandler via RiskManager.calculate_position_size(); volatility from market context features is required (trade skipped if missing)
+- Portfolio-fraction lot sizing in TradingHandler (default 60% margin budget × fixed ISOLATED_MARGIN_LEVERAGE); volatility gate still applies in default entry path
 - Maximum position: configurable `max_position_size` (e.g. 10% of portfolio per trade)
 - Risk-adjusted sizing based on signal strength and volatility regime
 - ADX ranging market filter: when `adx_14` is available and &lt; 20, BUY/SELL (mild) entries are blocked

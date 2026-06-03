@@ -104,6 +104,18 @@ def _v43_gate_reject_from_context(reasoning_chain: Any, market_context: Any) -> 
     return None
 
 
+async def _cache_last_signal_redis(symbol: str, signal_data: Dict[str, Any]) -> None:
+    """Persist latest broadcast signal for REST hydration on dashboard connect."""
+    try:
+        r = await get_redis(required=False)
+        if not r:
+            return
+        key = f"jacksparrow:last_signal:{symbol}"
+        await r.set(key, json.dumps(signal_data, default=str), ex=3600)
+    except Exception as e:
+        logger.warning("last_signal_redis_cache_failed", error=str(e), symbol=symbol)
+
+
 async def _append_signal_edge_history_redis(symbol: str, signal_data: Dict[str, Any]) -> None:
     if signal_data.get("edge") is None:
         return
@@ -835,29 +847,13 @@ class AgentEventSubscriber:
                     message="Failed to persist trade and position to database"
                 )
 
-            # Format trade data for frontend - include position_id if available
-            ts_str = timestamp.isoformat() if isinstance(timestamp, datetime) else (timestamp or datetime.now(timezone.utc).isoformat())
-            trade_data = {
-                "order_id": order_id,
-                "trade_id": trade_id,
-                "symbol": symbol,
-                "side": side,
-                "quantity": quantity,
-                "price": fill_price,
-                "status": "EXECUTED",
-                "executed_at": ts_str,
-                "timestamp": ts_str,
-            }
-            
-            # Add position_id if position was created successfully
             if position_id:
-                trade_data["position_id"] = position_id
                 logger.debug(
                     "trade_executed_with_position_id",
                     service="backend",
                     trade_id=trade_id,
                     position_id=position_id,
-                    message="Including position_id in trade_executed message"
+                    message="Order fill persisted; recent-trades row deferred until position_closed",
                 )
             else:
                 logger.warning(
@@ -865,21 +861,10 @@ class AgentEventSubscriber:
                     service="backend",
                     trade_id=trade_id,
                     symbol=symbol,
-                    message="Position ID not available - position may not have been created"
+                    message="Position ID not available - position may not have been created",
                 )
 
-            # Broadcast via WebSocket using simplified message format
-            trade_message = create_trade_update(trade_data)
-            await unified_websocket_manager.broadcast(trade_message, channel="data_update")
-
-            logger.debug(
-                "agent_event_subscriber_order_fill_broadcast",
-                service="backend",
-                order_id=order_id,
-                symbol=symbol,
-                side=side
-            )
-            
+            # Entry fills are not pushed to Agent trades table (round-trip on position_closed).
             # Broadcast portfolio update after trade execution
             await self._broadcast_portfolio_update()
 
@@ -1665,7 +1650,12 @@ class AgentEventSubscriber:
             if excerpt:
                 signal_data["market_context_excerpt"] = excerpt
 
+        rj = _v43_gate_reject_from_context(reasoning_chain, market_context)
+        if rj:
+            signal_data["v43_gate_reject"] = rj
+
         await _append_signal_edge_history_redis(symbol, signal_data)
+        await _cache_last_signal_redis(symbol, signal_data)
 
         # Broadcast signal update
         signal_message = create_signal_update(signal_data)
@@ -1673,30 +1663,7 @@ class AgentEventSubscriber:
 
     async def _handle_order_fill_consolidated(self, payload: Dict[str, Any]):
         """Handle order_fill events with simplified logic (fallback; prefer _handle_order_fill for persistence)."""
-        trade_id = payload.get("trade_id", "")
-        symbol = payload.get("symbol", "")
-        quantity = payload.get("quantity", 0)
-        price = payload.get("fill_price") or payload.get("price", 0)
-        side = payload.get("side", "")
-
-        # Create trade data (include executed_at and status for frontend)
-        ts = payload.get("timestamp", datetime.now(timezone.utc).isoformat())
-        trade_data = {
-            "trade_id": trade_id,
-            "symbol": symbol,
-            "quantity": quantity,
-            "price": price,
-            "side": side,
-            "status": "EXECUTED",
-            "executed_at": ts,
-            "timestamp": ts,
-        }
-
-        # Broadcast trade update
-        trade_message = create_trade_update(trade_data)
-        await unified_websocket_manager.broadcast(trade_message, channel="data_update")
-
-        # Update portfolio after trade
+        # Entry fills: portfolio only; closed round-trips use position_closed trade broadcast.
         await self._broadcast_portfolio_update()
 
     async def _broadcast_position_reflection(self, payload: Dict[str, Any]) -> None:

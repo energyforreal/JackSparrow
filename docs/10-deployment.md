@@ -321,7 +321,7 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 > **Agent Risk Controls**  
 > Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Current defaults are `INITIAL_BALANCE=20000`, `MIN_CONFIDENCE_THRESHOLD=0.70`, `MIN_LOT_SIZE=1`, and `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC on Delta BTCUSD perpetual). **SL/TP defaults** in `.env.example` are `STOP_LOSS_PERCENTAGE=0.008` (0.8%) and `TAKE_PROFIT_PERCENTAGE=0.016` (1.6%) for BTCUSD 15m volatility. **Market data recovery:** `MARKET_DATA_STALE_REST_POLL_SECONDS=30`, `AGENT_NO_CANDLE_RESTART_MINUTES=8` (runtime floor is `2 × primary_interval + 2` minutes, e.g. 12 min when primary is 5m). On cold start, the agent may log a few transient `ConnectionRefusedError` retries when connecting outbound WebSocket to the backend — backend starts after agent; retries plus Redis event delivery handle this. **API:** `ENABLE_DEPRECATED_REST_TRADING=false` disables legacy REST predict/execute (410 Gone).
 >
-> **Optional execution overrides** (defaults live in `agent/core/config.py` if unset): `ENFORCE_FIXED_LOT_SIZE`, `FIXED_LOT_SIZE`, `ISOLATED_MARGIN_LEVERAGE`, and `USDINR_FALLBACK_RATE` (used when live/cached FX is unavailable). Uncomment or set these in `.env` only when you need to deviate from code defaults.
+> **Entry lot sizing** (defaults in `agent/core/config.py`): `PORTFOLIO_FRACTION_LOT_SIZING=true`, `ENTRY_PORTFOLIO_MARGIN_FRACTION=0.60`, `ISOLATED_MARGIN_LEVERAGE=5`. The handler uses up to 60% of `portfolio_value` (INR) as margin budget, then `price_to_lots` at fixed leverage — **more lots when balance grows**, not higher leverage. `SYNC_EXCHANGE_ORDER_LEVERAGE=false` by default. Legacy overrides: `ENFORCE_FIXED_LOT_SIZE`, `FIXED_LOT_SIZE`, `USE_NOTIONAL_LOT_SIZING`, `USDINR_FALLBACK_RATE`. Details: [Logic & reasoning – Entry lot sizing](05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction).
 
 > **Delta testnet trading (required)**  
 > Runtime places **real orders on Delta Exchange India testnet**; local paper simulation is removed.
@@ -983,6 +983,13 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `AGENT_INTROSPECTION_ENABLED` | Emit `agent_introspection` on `DECISION_READY` (read-only telemetry) | No | true |
 | `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED` | Backfill vector memory outcomes on position close | No | true |
 | `AGENT_REFLECTION_ADVISORY_ENABLED` | Emit advisory `reflection_snapshot` on `POSITION_CLOSED` | No | true |
+| `PORTFOLIO_FRACTION_LOT_SIZING` | Size entry lots from `ENTRY_PORTFOLIO_MARGIN_FRACTION` × portfolio INR (overrides fixed/v43/notional branches) | No | `true` |
+| `ENTRY_PORTFOLIO_MARGIN_FRACTION` | Fraction of available portfolio INR used as isolated margin budget for `price_to_lots` | No | `0.60` |
+| `ISOLATED_MARGIN_LEVERAGE` | Fixed leverage for margin/lot math and backend ROE display; set the same on Delta UI | No | `5` |
+| `SYNC_EXCHANGE_ORDER_LEVERAGE` | `POST /v2/products/{id}/orders/leverage` before entries (fail closed). Off when sizing lots from portfolio | No | `false` |
+| `ENFORCE_FIXED_LOT_SIZE` | When `PORTFOLIO_FRACTION_LOT_SIZING=false`, use `FIXED_LOT_SIZE` per entry | No | `false` |
+| `FIXED_LOT_SIZE` | Integer lots when fixed sizing path is active | No | `1` |
+| `MAX_LOTS_PER_ORDER` | Upper cap on `price_to_lots` output | No | `100` |
 
 ### Frontend Environment Variables
 
@@ -2455,9 +2462,9 @@ Containers on Docker bridge **`jacksparrow-network`** (service DNS names):
 **Operational Redis keys (agent → backend health):**
 - `market_data:last_tick:{SYMBOL}` — last tick timestamp (TTL 60s)
 - `exchange:connectivity` — Delta REST probe from agent healthcheck
-- `metrics:latency:execution` — risk-approved → fill latency snapshot
+- `metrics:latency:execution` — risk-approved → fill latency snapshot (TTL 600s; agent publishes at startup and each monitoring cycle)
 
-**Health API:** `GET /api/v1/health` includes `services.market_data` and `services.execution_latency` when Redis is available.
+**Health API:** `GET /api/v1/health` includes `services.market_data` and `services.execution_latency` when Redis is available. `execution_latency` reports **up** with an idle note when no fills have been recorded (`count === 0`).
 
 **Backend ↔ agent**
 

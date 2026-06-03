@@ -370,10 +370,10 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - **Responsibility**: Assess and manage trading risks
 - **Protocol**: Internal risk assessment API
 - **Dependencies**: Portfolio state, Market data
-- **Output**: Risk-adjusted position sizes, stop losses
+- **Output**: Trade approval/rejection (`validate_trade`), portfolio heat, and risk assessments — not entry lot counts
 - **Portfolio sync**: ExecutionEngine syncs portfolio with RiskManager on order fill and position close (add_position/remove_position) so risk limits reflect actual exposure.
-- **Sizing path**: Active sizing is via `RiskManager.calculate_position_size()`; `agent/risk/position_sizer.py` is legacy and not in the runtime decision path.
-- **ATR vs lot sizing**: When `USE_ATR_SCALED_SL_TP` is enabled, stop distance uses `max(fixed % of entry, ATR × multiplier)`, which can widen stops in volatile regimes. Entry lot sizing (fixed lots or notional allocation in `TradingEventHandler`) is **not** recalculated from that wider stop distance, so dollar risk per trade is not a fixed “% of equity at the configured SL%” unless you add separate risk-from-stop sizing.
+- **Entry lot sizing** (see `TradingEventHandler` in [Logic & reasoning – Entry lot sizing](05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction)): When `PORTFOLIO_FRACTION_LOT_SIZING=true` (default), lots = `price_to_lots(margin_inr = portfolio_value × ENTRY_PORTFOLIO_MARGIN_FRACTION, leverage = ISOLATED_MARGIN_LEVERAGE)`. Leverage is **not** raised at runtime; `SYNC_EXCHANGE_ORDER_LEVERAGE` defaults to **false**. Legacy: `RiskManager.calculate_position_size()` and `position_sizer.py` are not on the entry path.
+- **ATR vs lot sizing**: When `USE_ATR_SCALED_SL_TP` is enabled, stop distance uses `max(fixed % of entry, ATR × multiplier)`, which can widen stops in volatile regimes. Entry lots are **not** recalculated from that wider stop distance, so dollar risk per trade is not a fixed “% of equity at the configured SL%” unless you add separate risk-from-stop sizing.
 
 #### Learning System
 - **Responsibility**: Learn from trade outcomes and adapt

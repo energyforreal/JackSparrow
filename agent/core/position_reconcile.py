@@ -630,7 +630,20 @@ async def reconcile_positions_with_exchange(execution_module: Any) -> Dict[str, 
     try:
         view = await execution_module.get_margined_positions_view()
     except Exception as exc:
-        logger.warning("position_reconcile_fetch_failed", error=str(exc))
+        from agent.data.delta_client import CircuitBreakerOpenError
+
+        is_cb = isinstance(exc, CircuitBreakerOpenError)
+        logger.warning(
+            "position_reconcile_fetch_failed",
+            error=str(exc),
+            circuit_breaker_open=is_cb,
+            recovery_hint=(
+                "Delta circuit breaker will retry after timeout; "
+                "check API keys, testnet reachability, and rate limits"
+                if is_cb
+                else None
+            ),
+        )
         summary["skipped"].append("fetch_failed")
         if bool(getattr(settings, "block_entries_on_reconcile_divergence", True)):
             _set_reconcile_health(

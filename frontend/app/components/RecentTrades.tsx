@@ -13,7 +13,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Trade } from '@/types'
-import { formatClockTime, formatCurrency, formatUsdCurrency } from '@/utils/formatters'
+import { formatCurrency, formatDateTime, formatUsdCurrency } from '@/utils/formatters'
 import {
   computeTradeDurationSeconds,
   formatTradeDuration,
@@ -43,6 +43,8 @@ const TABLE_HEADS = [
   'Role',
   'Commission',
   'Type',
+  'Record',
+  'Exit reason',
   'Status',
 ] as const
 
@@ -128,9 +130,9 @@ export function RecentTrades({
     return parsed.toLocaleString('en-IN', { maximumFractionDigits: 6 })
   }
 
-  const formatDate = (date: Date | string | undefined) => {
+  const formatTradeTimestamp = (date: Date | string | undefined) => {
     if (!date) return '—'
-    return formatClockTime(date)
+    return formatDateTime(date)
   }
 
   const formatPriceUsd = (price: number | string | undefined) => {
@@ -142,9 +144,9 @@ export function RecentTrades({
   const formatPnl = (trade: Trade): number | null => {
     if (isExchangeFillTrade(trade as Record<string, unknown>)) return null
     const directPnl = parseFiniteNumber(trade.pnl)
-    if (directPnl !== null && directPnl !== 0) return directPnl
+    if (directPnl !== null) return directPnl
     const pnlUsd = parseFiniteNumber(trade.pnl_usd)
-    if (pnlUsd !== null && pnlUsd !== 0) {
+    if (pnlUsd !== null) {
       if (usdInr === null) return null
       return pnlUsd * usdInr
     }
@@ -169,6 +171,18 @@ export function RecentTrades({
     const orderType = trade.order_type
     if (fillType && orderType) return `${fillType} / ${orderType}`
     return fillType || orderType || '—'
+  }
+
+  const formatRecordKind = (trade: Trade): string => {
+    if (isExchangeFillTrade(trade as Record<string, unknown>)) return 'Fill'
+    if (trade.record_kind === 'round_trip') return 'Round-trip'
+    return 'Round-trip'
+  }
+
+  const formatExitReason = (trade: Trade): string => {
+    const reason = trade.exit_reason
+    if (!reason) return '—'
+    return String(reason).replace(/_/g, ' ')
   }
 
   const getStatusVariant = (status: string) => {
@@ -217,10 +231,12 @@ export function RecentTrades({
 
                 return (
                   <TableRow key={trade.trade_id}>
-                    <TableCell className="text-muted-foreground">
-                      {isFill ? '—' : formatDate(entryTime)}
+                    <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                      {isFill ? '—' : formatTradeTimestamp(entryTime)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(exitTime)}</TableCell>
+                    <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                      {formatTradeTimestamp(exitTime)}
+                    </TableCell>
                     <TableCell>{isFill ? '—' : formatTradeDuration(durationSec)}</TableCell>
                     <TableCell>
                       <Badge variant={sideBadgeVariant(trade.side)}>{trade.side}</Badge>
@@ -253,6 +269,14 @@ export function RecentTrades({
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatFillType(trade)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs">
+                        {formatRecordKind(trade)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground capitalize">
+                      {isFill ? '—' : formatExitReason(trade)}
                     </TableCell>
                     <TableCell>
                       <Badge variant={getStatusVariant(trade.status ?? 'CLOSED')}>

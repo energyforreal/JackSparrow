@@ -903,7 +903,7 @@ This information is used throughout the monitoring process to evaluate exit cond
 
 ### Kelly Criterion and Risk
 
-Position sizing is computed in **TradingHandler** using **RiskManager.calculate_position_size()**. The reasoning engine emits the signal; the trading handler maps signal to strength, reads **volatility** from `market_context.features` (required—if missing, the trade is skipped), derives a volatility regime, and calls the risk manager. Resulting size is clamped to `max_position_size`.
+Entry lots are sized in **TradingHandler** from **portfolio fraction** (`ENTRY_PORTFOLIO_MARGIN_FRACTION`, default 60% of `portfolio_value` INR) and fixed **`ISOLATED_MARGIN_LEVERAGE`** via `price_to_lots`. `RiskManager.validate_trade` approves the proposed portfolio fraction. Volatility in features is still required in the default entry path (trade skipped if missing). See canonical `docs/05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction`.
 
 ### Adaptive Consensus and Confidence
 

@@ -1257,14 +1257,26 @@ class Settings(BaseSettings):
     funding_interval_hours: int = Field(8, env="FUNDING_INTERVAL_HOURS")
     funding_interest_rate: float = Field(0.0001, env="FUNDING_INTEREST_RATE")
 
-    # Leverage (RiskManager sizing + optional Delta order-leverage sync before entries)
+    # Leverage (fixed for margin math; lots scale via portfolio fraction, not dynamic leverage)
     default_leverage: int = Field(5, env="DEFAULT_LEVERAGE")
     max_leverage: int = Field(20, env="MAX_LEVERAGE")
     min_leverage: int = Field(1, env="MIN_LEVERAGE")
     sync_exchange_order_leverage: bool = Field(
-        default=True,
+        default=False,
         env="SYNC_EXCHANGE_ORDER_LEVERAGE",
-        description="POST /v2/products/{id}/orders/leverage before entry orders (fail closed on error)",
+        description="POST /v2/products/{id}/orders/leverage before entry orders (off by default)",
+    )
+    entry_portfolio_margin_fraction: float = Field(
+        default=0.60,
+        env="ENTRY_PORTFOLIO_MARGIN_FRACTION",
+        ge=0.01,
+        le=1.0,
+        description="Fraction of available portfolio INR used as isolated margin budget for entry lot sizing",
+    )
+    portfolio_fraction_lot_sizing: bool = Field(
+        default=True,
+        env="PORTFOLIO_FRACTION_LOT_SIZING",
+        description="When true, size entry lots from entry_portfolio_margin_fraction (overrides fixed/v43/notional)",
     )
 
     # Order execution limits
@@ -1277,9 +1289,9 @@ class Settings(BaseSettings):
         description="Fixed lot size used for each entry when fixed sizing is enabled",
     )
     enforce_fixed_lot_size: bool = Field(
-        default=True,
+        default=False,
         env="ENFORCE_FIXED_LOT_SIZE",
-        description="When true, always trade the fixed lot size for new entries",
+        description="When true and portfolio_fraction_lot_sizing is false, trade fixed_lot_size per entry",
     )
     use_notional_lot_sizing: bool = Field(
         default=False,
@@ -1289,7 +1301,7 @@ class Settings(BaseSettings):
     isolated_margin_leverage: int = Field(
         default=5,
         env="ISOLATED_MARGIN_LEVERAGE",
-        description="Fallback leverage for portfolio display when exchange leverage is unknown",
+        description="Fixed leverage for lot sizing and margin checks (set matching leverage on Delta UI)",
     )
     usdinr_fallback_rate: float = Field(
         default=83.0,

@@ -632,7 +632,7 @@ For `DecisionReadyEvent` → `RiskApprovedEvent`, `agent/events/handlers/trading
 | Aspect | Default (`AI_SIGNAL_MINIMAL_ENTRY_GATES=false`) | Minimal (`AI_SIGNAL_MINIMAL_ENTRY_GATES=true`) |
 |--------|--------------------------------------------------|------------------------------------------------|
 | Confidence vs UI | Uses **calibrated** `confidence` vs Redis/metadata effective floor (`low_confidence_reject`). | Uses **raw** payload `confidence` vs `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` only (`low_ai_signal_confidence` if below floor). |
-| v15 / stale / filters | v15 entry gate, max signal age, vol/ATR floors, profit/R:R gate, MTF/ADX/EMA200/BB/SR, entry signal filter (rate limits), v15 gap and daily caps apply when configured. | Those checks are **skipped** (higher trade rate, weaker protection). |
+| v15 / stale / filters | v15 entry gate, max signal age (`decision_payload_timestamp_epoch_seconds` in `agent/core/decision_timestamp.py` — naive UTC-safe on Windows), vol/ATR floors, profit/R:R gate, MTF/ADX/EMA200/BB/SR, entry signal filter (rate limits), v15 gap and daily caps apply when configured. | Those checks are **skipped** (higher trade rate, weaker protection). |
 | Risk / debounce | `risk_manager.validate_trade` and debounce apply. | `risk_manager.validate_trade` and debounce **always** apply (agent-first); other handler filters are relaxed/skipped as in the left column. |
 | Unchanged | `HOLD` / empty signal, signal-reversal exit, same-side **`open_position_blocks_entry`**, live **price**, **margin** and **min lots**, SL/TP levels (profit gate only enforced in default mode). |
 
@@ -962,9 +962,24 @@ When a position is opened, the following information is stored in context:
 
 This information is used throughout the monitoring process to evaluate exit conditions and for the trade-outcome feedback loop.
 
-### Kelly Criterion and Risk
+### Entry lot sizing (portfolio fraction)
 
-Position sizing is computed in **TradingHandler** using **RiskManager.calculate_position_size()**. The reasoning engine emits the signal; the trading handler maps signal to strength, reads **volatility** from `market_context.features` (required—if missing, the trade is skipped), derives a volatility regime, and calls the risk manager. Resulting size is clamped to `max_position_size`.
+When `PORTFOLIO_FRACTION_LOT_SIZING=true` (default in `agent/core/config.py`), **`TradingEventHandler`** sizes **contract lots** before `RiskApprovedEvent`:
+
+1. Read **`available_cash_inr`** from agent context (`portfolio_value`, else `INITIAL_BALANCE`).
+2. **`margin_inr`** = `available_cash_inr × ENTRY_PORTFOLIO_MARGIN_FRACTION` (default **0.60** = 60% of portfolio as isolated margin budget).
+3. **`usd_margin`** = `margin_inr / usdinr_rate` (cached FX or `USDINR_FALLBACK_RATE`).
+4. **`entry_lots`** = `price_to_lots(usd_margin, entry_price, leverage=ISOLATED_MARGIN_LEVERAGE, contract_value_btc, max_lots=MAX_LOTS_PER_ORDER)` in [`agent/core/futures_utils.py`](../agent/core/futures_utils.py).
+5. Reject with `insufficient_margin_inr` if `margin_required_inr(lots) + entry_fees` exceeds available cash.
+6. **`validate_trade`** still runs with `proposed_size` derived from required margin ÷ portfolio (capped by `max_position_size`).
+
+**Leverage**: Fixed at `ISOLATED_MARGIN_LEVERAGE` for margin math only. The agent does **not** call Delta `POST /v2/products/{id}/orders/leverage` unless `SYNC_EXCHANGE_ORDER_LEVERAGE=true` (default **false**). Match leverage manually on the Delta testnet UI.
+
+**Legacy paths** (when `PORTFOLIO_FRACTION_LOT_SIZING=false`): v43 `margin_cap_fraction`, `USE_NOTIONAL_LOT_SIZING`, or `FIXED_LOT_SIZE` / `ENFORCE_FIXED_LOT_SIZE`.
+
+**Volatility gate**: In the default (non-minimal) path, missing `features.volatility` still rejects the entry; that gate is independent of lot sizing.
+
+See [Deployment – Agent environment variables](10-deployment.md#agent-environment-variables) and [Features – Position sizing](04-features.md#5-risk-management-features).
 
 ### Adaptive Consensus and Confidence
 

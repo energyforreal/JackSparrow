@@ -29,6 +29,9 @@ class _FakeExecutionModule:
 def _minimal_settings(monkeypatch):
     monkeypatch.setattr(settings, "ai_signal_minimal_entry_gates", True)
     monkeypatch.setattr(settings, "ai_signal_min_entry_confidence", 0.70)
+    monkeypatch.setattr(settings, "portfolio_fraction_lot_sizing", True)
+    monkeypatch.setattr(settings, "entry_portfolio_margin_fraction", 0.60)
+    monkeypatch.setattr(settings, "isolated_margin_leverage", 5)
     monkeypatch.setattr(settings, "use_notional_lot_sizing", False)
     monkeypatch.setattr(settings, "fixed_lot_size", 1)
     monkeypatch.setattr(settings, "min_lot_size", 1)

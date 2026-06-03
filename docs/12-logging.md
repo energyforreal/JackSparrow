@@ -495,12 +495,19 @@ Structured **`trading_entry_rejected`** lines (typically **INFO**) record why a 
 | `v15_entry_gate` / `v15_gate_hold` | v15 logic mapped signal to `HOLD` or non-trade |
 | `open_position_blocks_entry` | Same-direction position already open |
 | `no_price` / `insufficient_margin_inr` | Infrastructure / sizing |
-| `risk_rejected` | `validate_trade` did not approve |
+| `risk_rejected` | `validate_trade` did not approve (often `Exchange position fetch failed: Circuit breaker is OPEN` when Delta reconcile cannot run; see `position_reconcile_fetch_failed` with `circuit_breaker_open=true`) |
 | `debounce` | Duplicate (symbol, side) inside debounce window |
 | `profit_gate` | Risk/reward below `min_risk_reward_ratio` |
 | `min_trade_gap` / `daily_trade_cap` | v15 pacing caps |
 
-Successful publishes log **`trading_handler_risk_approved_published`** with `ai_signal_minimal_entry_gates` set so you can tell whether the approval used minimal gates. Reject rows are also appended to `signal_audit/live_audit.md` when that module is available.
+Successful publishes log **`trading_handler_risk_approved_published`** with `entry_lots`, `leverage` (fixed config), `margin_inr`, `entry_portfolio_margin_fraction`, and `available_cash_inr`, plus `ai_signal_minimal_entry_gates` when applicable. Reject rows are also appended to `signal_audit/live_audit.md` when that module is available.
+
+**Related agent startup / reconcile events:**
+
+| Event | Meaning |
+|-------|---------|
+| `mcp_orchestrator_single_model_loaded` | Only one ML model registered; fusion/adjudication may emit HOLD more often (`AGENT_POLICY_MODE` logged). |
+| `position_reconcile_fetch_failed` | Exchange position fetch failed; includes `circuit_breaker_open` and `recovery_hint` when Delta circuit breaker is OPEN. |
 
 ## Testing the Logging System
 

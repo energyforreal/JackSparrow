@@ -300,33 +300,13 @@ export function formatClockTime(date: Date | string | null | undefined): string 
     return '--:--:--'
   }
   const d = normalizeDate(date)
-  const formatted = d.toLocaleTimeString(IST_LOCALE, {
+  return d.toLocaleTimeString(IST_LOCALE, {
     timeZone: IST_TIMEZONE,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
   })
-  
-  // Debug logging in development mode
-  if (process.env.NODE_ENV === 'development') {
-    console.log('[formatClockTime] Time formatting:', {
-      input: date,
-      normalized_date: d,
-      normalized_utc_iso: d.toISOString(),
-      formatted_ist_time: formatted,
-      current_time_utc: new Date().toISOString(),
-      current_time_ist: new Date().toLocaleTimeString(IST_LOCALE, {
-        timeZone: IST_TIMEZONE,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-      })
-    })
-  }
-  
-  return formatted
 }
 
 export function formatTimezone(date: Date | string | null | undefined): string {

@@ -310,6 +310,19 @@ class MCPOrchestrator:
             logger.info("mcp_orchestrator_models_discovered",
                        model_count=len(discovered_models),
                        registry_models=len(self.model_registry.models))
+            loaded_n = len(self.model_registry.models)
+            if loaded_n == 1:
+                logger.warning(
+                    "mcp_orchestrator_single_model_loaded",
+                    model_count=loaded_n,
+                    policy_mode=str(
+                        getattr(settings, "agent_policy_mode", "ml_only") or "ml_only"
+                    ),
+                    message=(
+                        "Only one ML model is active; fusion/adjudication may emit "
+                        "HOLD more often until additional models load."
+                    ),
+                )
             self._required_feature_names_cache = (
                 self.model_registry.get_required_feature_names()
                 if self.model_registry

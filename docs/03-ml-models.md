@@ -1245,6 +1245,14 @@ Document the expected feature order inside each model’s metadata so downstream
 
 ## Troubleshooting
 
+### Frequent HOLD / no entries with one model loaded
+
+**Symptom**: Agent logs `mcp_orchestrator_single_model_loaded` and audit shows `hold_at_synthesis` or low trade scores.
+
+**Context**: With **`AGENT_POLICY_MODE=ml_or_thesis`** (or `ml_and_thesis`), a single active model limits fusion and adjudication alignment. Confirm `GET /api/v1/models` (agent) or `GET /api/v1/models/status` (backend) reports expected `count`.
+
+**Actions**: Load additional bundles under `MODEL_DIR`, lower `AGENT_TRADE_SCORE_MIN_*` only if policy allows, or review [Logic & reasoning – Trading handler gates](05-logic-reasoning.md#trading-handler-default-vs-minimal-ai-entry-gates). See [Debugging – No trades](13-debugging.md#no-trades-executed).
+
 ### Model Not Discovered
 
 **Problem**: Model not appearing in registry
@@ -1311,7 +1319,7 @@ Override **`AGENT_MODEL_DIR`** when you duplicate the IC bundle folder under a d
 1. `MCPOrchestrator.initialize()` creates `MCPFeatureServer`, `MCPModelRegistry`, and `MCPReasoningEngine`.
 2. `ModelDiscovery.discover_models()` loads **`MODEL_DIR/metadata_ic.json`**, instantiates **`RuleBasedIntelligenceNode`**, and registers it when `IC_MODE=true` and `MODEL_AUTO_REGISTER=true`.
 3. On each closed bar, the orchestrator requests features (v43 MCP row path), runs **`RuleBasedIntelligenceNode.predict`**, applies **`v43_signal_gates`**, and merges **`expected_return`**, **`regime`**, gate fields, and **`desired_side`** into market context for policy and reasoning.
-4. WebSocket payloads to the frontend are enriched in **`backend/services/agent_event_subscriber.py`** (**`expected_return`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`**) and persisted under Redis key **`jacksparrow:v43:signal_history:<symbol>`** for recent-tail diagnostics.
+4. WebSocket payloads to the frontend are enriched in **`backend/services/agent_event_subscriber.py`** (**`expected_return`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`** on both **`reasoning_complete`** and **`decision_ready`**) and persisted under Redis key **`jacksparrow:v43:signal_history:<symbol>`** for recent-tail diagnostics.
 
 ### Historical multi-node flow (forks only)
 

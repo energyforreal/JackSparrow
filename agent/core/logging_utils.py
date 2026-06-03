@@ -124,6 +124,14 @@ def configure_logging(force: bool = False) -> str:
     return session_id
 
 
+def get_session_id() -> str:
+    """Return the current logging session id, creating one if needed."""
+    global _SESSION_ID
+    if _SESSION_ID:
+        return _SESSION_ID
+    return configure_logging()
+
+
 def _build_log_context(
     message: str,
     component: Optional[str],

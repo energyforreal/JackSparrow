@@ -214,13 +214,16 @@ export function TradingDecision({
                   <span className="text-muted-foreground">Status:</span>
                   <Badge
                     variant={
-                      recentTrade.status === 'filled' || recentTrade.status === 'closed'
-                        ? 'default'
-                        : 'secondary'
+                      (() => {
+                        const s = String(recentTrade.status ?? '').toLowerCase()
+                        return s === 'filled' || s === 'closed' || s === 'executed'
+                          ? 'default'
+                          : 'secondary'
+                      })()
                     }
                     className="ml-2"
                   >
-                    {recentTrade.status.toUpperCase()}
+                    {String(recentTrade.status ?? 'UNKNOWN').toUpperCase()}
                   </Badge>
                 </div>
                 {recentTrade.exchange_order_id ? (

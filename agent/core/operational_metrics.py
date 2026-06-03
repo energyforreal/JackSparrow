@@ -13,6 +13,8 @@ logger = structlog.get_logger()
 MARKET_DATA_TICK_KEY_PREFIX = "market_data:last_tick:"
 EXCHANGE_CONNECTIVITY_KEY = "exchange:connectivity"
 LATENCY_METRICS_KEY = "metrics:latency:execution"
+# Must exceed agent periodic monitoring interval (default 300s) so health checks stay fresh.
+LATENCY_METRICS_TTL_SECONDS = 600
 
 
 async def publish_market_data_tick(symbol: str) -> None:
@@ -62,6 +64,6 @@ async def publish_latency_metrics(snapshot: Dict[str, Any]) -> None:
             **snapshot,
             "published_at": datetime.now(timezone.utc).isoformat(),
         }
-        await client.setex(LATENCY_METRICS_KEY, 120, json.dumps(payload, default=str))
+        await client.setex(LATENCY_METRICS_KEY, LATENCY_METRICS_TTL_SECONDS, json.dumps(payload, default=str))
     except Exception as exc:
         logger.debug("latency_metrics_redis_publish_failed", error=str(exc))

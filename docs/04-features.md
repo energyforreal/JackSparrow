@@ -239,12 +239,14 @@ The example illustrates how raw market context, historical success rate, and mod
 **Risk Components**:
 
 **Position Sizing**:
-- Kelly Criterion wired in TradingHandler via RiskManager.calculate_position_size(); volatility from market context features is required (trade skipped if missing)
-- Maximum position: configurable `max_position_size` (e.g. 10% of portfolio per trade)
-- Risk-adjusted sizing based on signal strength and volatility regime
+- **Portfolio-fraction lots** (default): `TradingEventHandler` allocates up to **`ENTRY_PORTFOLIO_MARGIN_FRACTION`** (default **60%**) of available portfolio INR as margin budget, converts to USD, and floors to integer lots via `price_to_lots` with fixed **`ISOLATED_MARGIN_LEVERAGE`** — scale exposure by **lot count**, not by raising leverage
+- **`SYNC_EXCHANGE_ORDER_LEVERAGE`**: off by default; set Delta UI leverage to match `ISOLATED_MARGIN_LEVERAGE`
+- **`validate_trade`**: Risk manager approves/rejects the proposed fraction after lot/margin checks
+- Maximum position: configurable `max_position_size` caps the proposed portfolio fraction passed to risk validation
+- Volatility from `market_context.features` is still required in the default entry path (trade skipped if missing); independent of the 60% lot formula
 - ADX ranging market filter: when `adx_14` is available and &lt; 20, BUY/SELL (mild) entries are blocked
 - **SL/TP at entry** (see `agent/core/sl_tp.py`): When `USE_ATR_SCALED_SL_TP` is true and `atr_14` is present, distance uses `max(entry × STOP_LOSS_PERCENTAGE, atr_14 × ATR_SL_DISTANCE_MULT)` for the stop leg and `max(entry × TAKE_PROFIT_PERCENTAGE, atr_14 × ATR_TP_DISTANCE_MULT)` for the take-profit leg; otherwise levels come from `STOP_LOSS_PERCENTAGE` / `TAKE_PROFIT_PERCENTAGE` alone. Prices are rounded to the contract `tick_size` when known.
-- Signal expiry: signals older than `max_signal_age_seconds` are rejected
+- Signal expiry: signals older than `max_signal_age_seconds` are rejected (age uses `agent/core/decision_timestamp.py` so naive UTC payloads are not misread as local time on Windows/IST hosts)
 
 **Portfolio Heat Monitoring**:
 - Tracks % of capital at risk
@@ -301,7 +303,7 @@ The example illustrates how raw market context, historical success rate, and mod
 **Perpetual Backtesting Notes**:
 - Data loader now includes `feature_store/perpetual_features.py` with market-depth and funding features.
 - Model feature set includes perp-specific features in `feature_store/feature_registry.py`.
-- In production, `agent/core/execution.py` and `agent/risk/risk_manager.py` use lot-based sizes.
+- In production, `TradingEventHandler` computes integer **lots** from portfolio fraction; `agent/core/execution.py` places that quantity on Delta testnet.
 
 **Agent State Metrics**:
 
@@ -550,23 +552,21 @@ The example illustrates how raw market context, historical success rate, and mod
 - Model consensus breakdown
 - Reasoning chain viewer
 
-**Performance Charts**:
-- Portfolio value over time
-- PnL distribution
-- Win rate trends
-- Model performance comparison
+**Performance Charts** (Analysis tab):
+- Cumulative **total return** snapshot from closed positions (`get_performance`)
+- USD or percent labeling via `metricKind`
+- Future: equity-curve time series when historical points API is added
 
-**Health Monitor**:
-- Overall health score
-- Component status grid
-- Service latencies
-- Degradation reasons
+**Reasoning Chain Viewer** (labeled **Signal Rationale** on Analysis tab):
+- v43 decision economics (expected return, threshold, gate reject)
+- Expandable step-by-step reasoning with evidence
+- Conclusion and final confidence
+- Gate reject from signal or `agent_introspection` fallback
 
-**Reasoning Chain Viewer**:
-- Expandable step-by-step reasoning
-- Evidence display
-- Confidence indicators
-- Conclusion display
+**Health Monitor** (System tab):
+- Overall health score and per-service status
+- `execution_latency` with p50/p95 or idle state when no fills yet
+- Service latency bars and degradation reasons
 
 **Learning Reports**:
 - (Paused) No new reports are generated while the learning loop is disabled.

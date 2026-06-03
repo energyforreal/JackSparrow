@@ -123,7 +123,7 @@ JackSparrow/
 │   ├── risk/
 │   │   ├── __init__.py
 │   │   ├── risk_manager.py            # Risk management
-│   │   └── position_sizer.py          # Legacy standalone helper (runtime uses RiskManager.calculate_position_size)
+│   │   └── position_sizer.py          # Legacy helper; entry lots sized in trading_handler via portfolio fraction
 │   ├── scripts/
 │   │   ├── __init__.py
 │   │   └── dev_watcher.py             # Docker-dev hot-reload watcher for `agent.core.intelligent_agent`

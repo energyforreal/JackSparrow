@@ -80,7 +80,13 @@ The dashboard reads all trading-related state from a single hook backed by a `us
 
 ### v15 & v43 signal fields (optional)
 
-`frontend/types/index.ts` extends **`Signal`** and **`ModelConsensus`** with optional **`edge`**, **`p_buy`**, **`p_sell`**, **`p_hold`**, **`v15_timeframe`** (v15 pipeline), and—with **JackSparrow v43**—**`expected_return`**, **`threshold`**, **`regime`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`**. WebSocket `data_update` / `resource: "signal"` merges these when the backend forwards agent metadata (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
+`frontend/types/index.ts` extends **`Signal`** and **`ModelConsensus`** with optional **`edge`**, **`p_buy`**, **`p_sell`**, **`p_hold`**, **`v15_timeframe`** (v15 pipeline), and—with **JackSparrow v43**—**`expected_return`**, **`threshold`**, **`regime`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`**, plus top-level **`conclusion`** when the backend surfaces it outside **`reasoning_chain_full`**. WebSocket `data_update` / `resource: "signal"` merges these when the backend forwards agent metadata (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
+
+Signal merges use **`frontend/utils/mergeSignalPayload.ts`** (imported by `useTradingData`). Partial HOLD patches preserve prior confidence fields; **`v43_gate_reject`** is preserved when a later patch omits it (e.g. `decision_ready` after `reasoning_complete`). When an incoming patch **omits** `timestamp`, the merge stamps **`new Date().toISOString()`** so **`DataFreshnessIndicator`** reflects the last WebSocket update instead of inheriting an old decision time.
+
+**Initial signal hydrate**: On first connect (not a light portfolio reconnect), `fetchInitialData` calls **`GET /api/backend/.../api/v1/signal/latest?symbol=BTCUSD`** and dispatches **`UPDATE_SIGNAL`** so the Overview / Trading cards are not blank until the next live `data_update` / `signal` message. The backend caches that payload in Redis when it broadcasts each `decision_ready` signal.
+
+**Decision time display**: `TradingDecision` and `SignalIndicator` pass **`signal.timestamp`** (UTC decision time from the agent payload) to **`DataFreshnessIndicator`** (“Decision time” / “Last update”). Dot and text colours use age thresholds (&lt;30s green through ≥15m red) in `formatters.ts` / `DataFreshnessIndicator.tsx`. This is separate from **`lastUpdate`** on `AgentStatus`, which tracks last reducer activity (any WS message).
 
 **Self-awareness** (optional on the same `Signal` payload): **`agent_introspection`** (`AgentIntrospectionSnapshot`), **`policy_verdict`**, **`policy_reason_codes`**, **`trade_score`**, **`thesis_signal`**, **`ml_evidence_snapshot`**, **`memory_context_id`**, **`decision_event_id`**. Zod schemas: `AgentIntrospectionSnapshotSchema`, `ReflectionSnapshotSchema` in `frontend/schemas/api.validation.ts`. Post-trade **`reflection_snapshot`** arrives on **`agent_update`** with `state: "POSITION_REFLECTION"` (not merged into `Signal` today). UI panels can consume these incrementally; existing components remain compatible when fields are absent.
 
@@ -95,6 +101,8 @@ The dashboard reads all trading-related state from a single hook backed by a `us
 **Returned data (selected)**:
 - `signal`, `portfolio`, `recentTrades`, `modelData`, `health`, `performanceData`
 - `agentState`, `isConnected`, `lastUpdate`, `isLoading`, `isPortfolioLoading`, `error`
+
+**Reducer actions**: `UPDATE_SIGNAL` applies REST-hydrated or manually set signal snapshots (`dataSource: 'api'`).
 
 **Trade notifications**: When a trade arrives as `data_update` with `resource: "trade"` or as legacy `trade_executed`, the reducer updates `recentTrades`. A separate `useEffect` in the same hook shows a **deduplicated** toast (via `react-hot-toast`) for user feedback without changing WebSocket contracts.
 
@@ -116,7 +124,8 @@ Additive UI-only behaviors (no backend or message-shape changes):
 | **Reasoning chain** | Step confidence bars use **`ConfidenceProgress`** variant **`reasoningStep`** (80% / 60% green / yellow / red tiers on normalized 0–100%). |
 | **Positions** | **Duration** cell color by minutes open (&lt;30m green, &lt;2h amber, longer red). |
 | **Health** | Per-service **latency bar** (scaled to 500ms) next to the ms label. |
-| **Performance chart** | **Recharts** `Tooltip` with shared hover, `en-IN` formatting, stronger cursor line (not Chart.js). |
+| **Performance chart** | **Recharts** snapshot or line chart; labels **Total Return (USD)** or **Total Return (%)** from `metricKind`; single-point data shows a snapshot card (no misleading period tabs until a time series exists). |
+| **Signal Rationale** | **Analysis** tab panel: v43 **Decision economics** block; gate reject falls back to **`agent_introspection.v43_gate_reject`** when top-level field is absent. |
 | **Keyboard** | **P** requests a prediction for `BTCUSD` when connected; hint shown near the signal card. |
 
 **Dependencies**: `react-hot-toast` (toast UI); root **`app/providers.tsx`** mounts `<Toaster position="bottom-right" />`.
@@ -133,7 +142,8 @@ Additive UI-only behaviors (no backend or message-shape changes):
 
 **Features**:
 - Uses **`useTradingData()`** for state (not a local WebSocket message switch)
-- Tabbed layout (Overview / Trading / Analysis / System)
+- Tabbed layout (Overview / Trading / **Analysis** / System)
+- **Analysis tab**: collapsible **Performance Chart** accordion, **Agent Diagnostics** (`SelfAwarenessPanel`), **Signal Rationale** (`ReasoningChainView`)
 - Global **keydown** handler for **P** → `apiClient.getPrediction('BTCUSD')` (with input-field guard)
 - Error boundary wrapping for major panels
 - Passes `isLoading` / `portfolioBlockLoading` into summary, positions, and recent trades
@@ -272,63 +282,86 @@ interface SignalIndicatorProps {
 
 **File**: `app/components/PerformanceChart.tsx`
 
-**Purpose**: Visualize portfolio performance over time.
+**Purpose**: Display cumulative return from closed-position aggregates (not live NAV).
 
 **Props**:
 ```typescript
+interface PerformanceDataPoint {
+  date: string;
+  value: number;
+  metricKind?: 'usd' | 'pct';  // total_return vs total_return_pct
+}
+
 interface PerformanceChartProps {
-  data?: Array<{ date: string; value: number }>;
+  data?: PerformanceDataPoint[];
+}
+```
+
+**Data source**: `useTradingData().performanceData`, populated once on connect via WebSocket command **`get_performance`** (same payload as REST portfolio performance metrics).
+
+**Features**:
+- **Single point**: large snapshot readout with metric label (**Total Return (USD)** or **Total Return (%)**)
+- **Multiple points**: **Recharts** line chart with `en-IN` tooltips (period tabs reserved for future time-series API)
+- Empty state when no closed trades / zero aggregate return
+
+---
+
+### SelfAwarenessPanel Component
+
+**File**: `app/components/SelfAwarenessPanel.tsx`
+
+**Purpose**: **Agent Diagnostics** on the Analysis tab — policy mode, trade score, regime, gate reject from **`agent_introspection`**, plus optional post-trade **`reflection_snapshot`**.
+
+---
+
+### ReasoningChainView Component
+
+**File**: `app/components/ReasoningChainView.tsx`
+
+**Purpose**: **Signal Rationale** — step-by-step reasoning and v43 decision economics on the Analysis tab.
+
+**Props** (selected):
+```typescript
+interface ReasoningChainViewProps {
+  reasoningChain?: ReasoningStep[];
+  chainMeta?: ReasoningChain;           // reasoning_chain_full or synthesized in Dashboard
+  overallConfidence?: number;
+  v43ExpectedReturn?: number;
+  v43Threshold?: number;
+  v43GateReject?: string;               // signal.v43_gate_reject ?? agent_introspection.v43_gate_reject
+  isLoading?: boolean;
 }
 ```
 
 **Features**:
-- **Recharts** line chart (`LineChart`, `Tooltip`, `ResponsiveContainer`)
-- In-chart tabs for **1d / 7d / 30d / all** (slice of `data`)
-- Tooltip and axes use **`en-IN`** where applicable; vertical cursor line on hover
+- **Decision economics** block when **`expected_return`**, **`threshold`**, or **`v43_gate_reject`** is present (threshold-only payloads no longer show empty state)
+- Expandable **Reasoning steps** accordion sorted by `step_number`
+- Per-step confidence badge and **`ConfidenceProgress`** bar
+- Evidence bullets, **Conclusion** from `chainMeta` or synthesized `signal.conclusion`
+- Header **Final confidence** from `chainMeta.final_confidence` or `overallConfidence`
+
+**Dashboard wiring** (`Dashboard.tsx`): `reasoningChainMetaFromSignal()` builds `ReasoningChain` metadata when `reasoning_chain_full` is missing.
 
 ---
 
 ### HealthMonitor Component
 
-**File**: `app/components/EmergencyStopButton.tsx`
-
-- Header control that calls `POST /api/v1/admin/agent/emergency-stop` via the Next.js backend proxy (`NEXT_PUBLIC_BACKEND_PROXY_BASE`).
-- Prompts for a **required reason**, then a confirmation dialog; sends `{ "reason": "..." }` as JSON.
-- Requires backend auth (proxy injects `BACKEND_API_KEY`); subject to admin rate limit (5 req/min per IP).
-
 **File**: `app/components/HealthMonitor.tsx`
 
-**Purpose**: Display system health status.
-
-**Props**:
-```typescript
-interface HealthMonitorProps {
-  health: {
-    status: 'healthy' | 'degraded' | 'unhealthy';
-    health_score: number;
-    services: {
-      [key: string]: {
-        status: 'up' | 'down' | 'degraded';
-        latency_ms?: number;
-      };
-    };
-    degradation_reasons: string[];
-  };
-}
-```
+**Purpose**: Display system health status on the **System** tab.
 
 **Features**:
 - Overall health score display
-- Service status list (array or object-shaped `services` normalized in-component)
+- Service status list (object-shaped `services` normalized to array in-component)
+- **`execution_latency`**: shows p50/p95 from `details.risk_approved_to_fill_ms` when samples exist; **UP (idle)** when `count === 0`
 - Latency **number + mini bar** (fill vs 500ms, green / amber / red)
-- Degradation reasons
-- Color-coded status indicators
+- Degradation reasons and color-coded status indicators
+
+**File**: `app/components/EmergencyStopButton.tsx` — header control for admin emergency stop (proxy to backend).
 
 ---
 
 ### RealTimePrice Component
-
-**File**: `app/components/RealTimePrice.tsx`
 
 **Purpose**: Display real-time price data with change indicators and position impact analysis.
 
@@ -388,39 +421,6 @@ interface RealTimePriceProps {
   showPositionImpact={true}
 />
 ```
-
----
-
-### ReasoningChainView Component
-
-**File**: `app/components/ReasoningChainView.tsx`
-
-**Purpose**: Display agent's reasoning chain for transparency.
-
-**Props**:
-```typescript
-interface ReasoningChainViewProps {
-  reasoningChain: {
-    steps: Array<{
-      step: number;
-      thought: string;
-      confidence: number;
-      evidence: string[];
-    }>;
-    conclusion: string;
-    final_confidence: number;
-  };
-}
-```
-
-**Features**:
-- Expandable step-by-step reasoning (6-step chain from live `Signal` / API)
-- Per-step **`ConfidenceProgress`** with **`variant="reasoningStep"`** for tiered colors
-- Evidence badges, conclusion card, optional model reasoning accordion
-
-**UI Structure**:
-- Accordion per step with summary + confidence readout
-- Model reasoning integrated below the chain
 
 ---
 

@@ -139,14 +139,29 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
             const totalModels =
               typeof details.total_models === 'number' ? details.total_models : undefined
             const note = typeof details.note === 'string' ? details.note : undefined
+            const fillMetrics =
+              service.name === 'execution_latency' &&
+              details.risk_approved_to_fill_ms &&
+              typeof details.risk_approved_to_fill_ms === 'object'
+                ? (details.risk_approved_to_fill_ms as {
+                    count?: number
+                    p50?: number | null
+                    p95?: number | null
+                  })
+                : null
+            const executionLatencyMs =
+              service.latency ??
+              (fillMetrics?.p50 != null ? fillMetrics.p50 : undefined)
             const hasUnitCounts =
               healthyModels !== undefined &&
               totalModels !== undefined &&
               service.name !== 'model_serving' &&
               service.name !== 'model_nodes'
             const shouldShowDetails =
-              Boolean(note || hasUnitCounts) &&
-              (service.status === 'unknown' || service.status === 'degraded')
+              Boolean(note || hasUnitCounts || fillMetrics) &&
+              (service.status === 'unknown' ||
+                service.status === 'degraded' ||
+                (service.name === 'execution_latency' && fillMetrics != null))
 
             return (
               <div
@@ -159,22 +174,22 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
                     <span className="text-sm font-medium">{service.name}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    {service.latency !== undefined && service.latency !== null && (
+                    {executionLatencyMs !== undefined && executionLatencyMs !== null && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground tabular-nums">
-                          {service.latency}ms
+                          {Math.round(executionLatencyMs)}ms
                         </span>
                         <div
                           className="w-16 h-1 rounded-full bg-muted overflow-hidden"
-                          title={`Latency vs 500ms reference: ${service.latency}ms`}
+                          title={`Latency vs 500ms reference: ${Math.round(executionLatencyMs)}ms`}
                         >
                           <div
                             className={cn(
                               'h-1 rounded-full transition-all',
-                              latencyBarColor(service.latency)
+                              latencyBarColor(executionLatencyMs)
                             )}
                             style={{
-                              width: `${Math.min((service.latency / 500) * 100, 100)}%`,
+                              width: `${Math.min((executionLatencyMs / 500) * 100, 100)}%`,
                             }}
                           />
                         </div>
@@ -190,6 +205,13 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
                     {hasUnitCounts && (
                       <p>
                         Healthy units: {healthyModels}/{totalModels}
+                      </p>
+                    )}
+                    {fillMetrics && (
+                      <p>
+                        Risk→fill samples: {fillMetrics.count ?? 0}
+                        {fillMetrics.p50 != null && ` · p50 ${Math.round(fillMetrics.p50)}ms`}
+                        {fillMetrics.p95 != null && ` · p95 ${Math.round(fillMetrics.p95)}ms`}
                       </p>
                     )}
                     {note && <p>{note}</p>}

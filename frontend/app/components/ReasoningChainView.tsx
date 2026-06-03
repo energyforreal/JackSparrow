@@ -71,7 +71,7 @@ export function ReasoningChainView({
 
   const hasSteps = reasoningChain && reasoningChain.length > 0
 
-  if (!hasSteps && !v43ExpectedReturn && !v43GateReject) {
+  if (!hasSteps && !v43ExpectedReturn && !v43GateReject && v43Threshold == null) {
     return (
       <Card>
         <CardHeader>

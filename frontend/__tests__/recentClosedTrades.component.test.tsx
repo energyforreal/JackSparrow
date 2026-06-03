@@ -22,6 +22,7 @@ describe('RecentTrades closed-only table', () => {
         exit_time: '2026-04-14T10:10:30Z',
         duration_seconds: 630,
         executed_at: '2026-04-14T10:10:30Z',
+        record_kind: 'round_trip',
       },
     ]
 
@@ -54,6 +55,7 @@ describe('RecentTrades closed-only table', () => {
         exit_time: '2026-05-16T10:00:01Z',
         duration_seconds: 1,
         executed_at: '2026-05-16T10:00:01Z',
+        record_kind: 'round_trip',
       },
     ]
 
@@ -96,5 +98,53 @@ describe('RecentTrades closed-only table', () => {
     expect(screen.getByText('FILLED')).toBeInTheDocument()
     expect(screen.getByText('$67,200.00')).toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+
+  it('shows zero PnL as currency not em dash', () => {
+    const trades: Trade[] = [
+      {
+        trade_id: 'breakeven_1',
+        symbol: 'BTCUSD',
+        side: 'BUY',
+        quantity: 1,
+        entry_price: 70000,
+        exit_price: 70000,
+        pnl: 0,
+        status: 'CLOSED',
+        entry_time: '2026-04-14T10:00:00Z',
+        exit_time: '2026-04-14T11:00:00Z',
+        duration_seconds: 3600,
+        executed_at: '2026-04-14T11:00:00Z',
+        record_kind: 'round_trip',
+      },
+    ]
+
+    render(<RecentTrades trades={trades} usdInrRate={83} contractValueBtc={0.001} />)
+    expect(screen.getByText('₹0.00')).toBeInTheDocument()
+  })
+
+  it('renders exit reason and record kind for closed round-trip', () => {
+    const trades: Trade[] = [
+      {
+        trade_id: 'agent_pos_1',
+        symbol: 'BTCUSD',
+        side: 'SHORT',
+        quantity: 1,
+        entry_price: 71305,
+        exit_price: 72650,
+        pnl: -123.56,
+        status: 'CLOSED',
+        record_kind: 'round_trip',
+        exit_reason: 'signal_reversal',
+        entry_time: '2026-04-12T11:54:03Z',
+        exit_time: '2026-04-13T18:45:41Z',
+        duration_seconds: 10783,
+        executed_at: '2026-04-13T18:45:41Z',
+      },
+    ]
+
+    render(<RecentTrades trades={trades} usdInrRate={83} contractValueBtc={0.001} />)
+    expect(screen.getByText('Round-trip')).toBeInTheDocument()
+    expect(screen.getByText('signal reversal')).toBeInTheDocument()
   })
 })

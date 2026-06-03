@@ -149,7 +149,7 @@ JackSparrow/
 │   ├── risk/
 │   │   ├── __init__.py
 │   │   ├── risk_manager.py            # Risk management
-│   │   └── position_sizer.py          # Legacy standalone helper (runtime uses RiskManager.calculate_position_size)
+│   │   └── position_sizer.py          # Legacy helper; entry lots sized in trading_handler via portfolio fraction + price_to_lots
 │   ├── scripts/
 │   │   ├── __init__.py
 │   │   └── dev_watcher.py             # Docker-dev hot-reload watcher for `agent.core.intelligent_agent`
@@ -188,16 +188,20 @@ JackSparrow/
 │   │   │   ├── ActivePositions.tsx     # Active positions list
 │   │   │   ├── RecentTrades.tsx       # Recent trades list
 │   │   │   ├── SignalIndicator.tsx    # Current signal display
-│   │   │   ├── PerformanceChart.tsx   # Performance visualization
+│   │   │   ├── SelfAwarenessPanel.tsx # Agent diagnostics (Analysis tab)
+│   │   │   ├── PerformanceChart.tsx   # Total return snapshot / chart
 │   │   │   ├── HealthMonitor.tsx       # Health status display
-│   │   │   ├── ReasoningChainView.tsx # Reasoning chain viewer
+│   │   │   ├── ReasoningChainView.tsx # Signal Rationale (Analysis tab)
 │   │   │   └── LearningReport.tsx     # Learning updates display
 │   │   └── api/                       # API routes (if needed)
 │   ├── hooks/
 │   │   ├── useWebSocket.ts            # WebSocket hook
-│   │   ├── useAgent.ts                # Agent state hook
-│   │   ├── usePortfolio.ts            # Portfolio data hook
-│   │   └── usePredictions.ts          # Prediction data hook
+│   │   ├── useTradingData.ts          # Unified dashboard state (signal, portfolio, performance)
+│   │   └── …
+│   ├── __tests__/
+│   │   ├── reasoningChainView.test.tsx
+│   │   ├── mergeSignalPayload.test.ts
+│   │   └── …
 │   ├── services/
 │   │   ├── api.ts                     # API client
 │   │   └── websocket.ts               # WebSocket client
@@ -206,6 +210,7 @@ JackSparrow/
 │   ├── utils/
 │   │   ├── formatters.ts              # Data formatting utilities (currency, percentages, timestamps)
 │   │   │                              # Includes UTC→IST time conversion and normalization
+│   │   ├── mergeSignalPayload.ts      # WS signal merge (timestamp, v43_gate_reject, partial HOLD confidence)
 │   │   ├── portfolioMetrics.ts        # ROE: unrealized PnL ÷ margin (PortfolioSummary badge)
 │   │   └── calculations.ts            # Calculation utilities
 │   ├── styles/
@@ -219,7 +224,9 @@ JackSparrow/
 │   ├── unit/
 │   │   ├── backend/
 │   │   │   ├── test_services.py
-│   │   │   └── test_routes.py
+│   │   │   ├── test_routes.py
+│   │   │   ├── test_execution_latency_health.py
+│   │   │   └── test_decision_ready_gate_reject.py
 │   │   ├── agent/
 │   │   │   ├── test_reasoning_engine.py
 │   │   │   ├── test_models.py

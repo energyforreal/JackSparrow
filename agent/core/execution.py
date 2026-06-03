@@ -376,6 +376,16 @@ class ExecutionEngine:
         # Initialize mock exchange connection
         await self._connect_exchange()
         self._initialized = True
+        if bool(getattr(settings, "sync_exchange_order_leverage", False)) and bool(
+            getattr(settings, "portfolio_fraction_lot_sizing", True)
+        ):
+            logger.warning(
+                "execution_leverage_sync_misconfiguration",
+                message=(
+                    "SYNC_EXCHANGE_ORDER_LEVERAGE is enabled with portfolio_fraction_lot_sizing; "
+                    "entries size lots from portfolio fraction and do not change exchange leverage"
+                ),
+            )
 
         # Subscribe to RiskApprovedEvent for automatic trade execution
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
@@ -689,18 +699,6 @@ class ExecutionEngine:
                     pass
             if pex:
                 trade["position_extras"] = pex
-
-            lev_raw = payload.get("leverage")
-            if lev_raw is not None:
-                try:
-                    trade["leverage"] = max(1, int(lev_raw))
-                except (TypeError, ValueError):
-                    logger.warning(
-                        "execution_risk_approved_invalid_leverage",
-                        symbol=symbol,
-                        leverage=lev_raw,
-                        event_id=event.event_id,
-                    )
 
             try:
                 pf = float(price)
@@ -1145,7 +1143,6 @@ class ExecutionEngine:
                 price=price,
                 bracket_stop_loss_price=float(stop_loss) if stop_loss is not None else None,
                 bracket_take_profit_price=float(take_profit) if take_profit is not None else None,
-                leverage=trade.get("leverage"),
                 reference_price=float(ref_px) if ref_px is not None else None,
                 idempotency_key=trade.get("idempotency_key") or trade.get("correlation_id"),
             )

@@ -895,6 +895,18 @@ class IntelligentAgent:
         monitoring_task = asyncio.create_task(self._periodic_monitoring())
 
         try:
+            from agent.core.latency_metrics import latency_snapshot
+            from agent.core.operational_metrics import publish_latency_metrics
+
+            await publish_latency_metrics(latency_snapshot())
+        except Exception as exc:
+            logger.warning(
+                "agent_initial_latency_metrics_publish_failed",
+                service="agent",
+                error=str(exc),
+            )
+
+        try:
             logger.info("agent_about_to_gather_tasks")
             await asyncio.gather(command_task, event_task, monitoring_task)
             logger.info("agent_gather_completed")
@@ -1588,7 +1600,15 @@ class IntelligentAgent:
         from agent.events.schemas import DecisionReadyEvent, CandleClosedEvent
         event_bus.subscribe(EventType.DECISION_READY, track_decision)
         event_bus.subscribe(EventType.CANDLE_CLOSED, track_candle)
-        
+
+        try:
+            from agent.core.latency_metrics import latency_snapshot
+            from agent.core.operational_metrics import publish_latency_metrics
+
+            await publish_latency_metrics(latency_snapshot())
+        except Exception:
+            pass
+
         try:
             while self.running:
                 try:

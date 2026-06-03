@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useReducer, useRef } from 'react'
+import type { PerformanceDataPoint } from '@/app/components/PerformanceChart'
 import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
 import { apiClient, setWebSocketConnection } from '@/services/api'
@@ -25,7 +26,6 @@ import {
 } from '@/utils/tradingDisplay'
 import {
   ReflectionSnapshotSchema,
-  AgentIntrospectionSnapshotSchema,
 } from '@/schemas/api.validation'
 import type {
   Signal as SharedSignal,
@@ -107,7 +107,7 @@ export interface TradingDataState {
   marketData: Record<string, MarketData>
   modelData: ModelData | null
   health: HealthData | null
-  performanceData: Array<{ date: string; value: number }>
+  performanceData: PerformanceDataPoint[]
   lastReflection: ReflectionSnapshot | null
   modelEdge: ModelEdgeSnapshot | null
 
@@ -121,6 +121,8 @@ export interface TradingDataState {
   isLoading: boolean
   /** True until the portfolio REST request settles (success or failure). */
   isPortfolioLoading: boolean
+  /** True until recent-closed-trades REST request settles (success or failure). */
+  isTradesLoading: boolean
   error: Error | null
 }
 
@@ -129,6 +131,7 @@ type TradingDataAction =
   | { type: 'WEBSOCKET_MESSAGE'; payload: any }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_PORTFOLIO_LOADING'; payload: boolean }
+  | { type: 'SET_TRADES_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: Error | null }
   | { type: 'UPDATE_SIGNAL'; payload: Signal }
   | { type: 'UPDATE_PORTFOLIO'; payload: Portfolio }
@@ -137,7 +140,7 @@ type TradingDataAction =
   | { type: 'UPDATE_MODEL_DATA'; payload: ModelData }
   | { type: 'UPDATE_HEALTH'; payload: HealthData }
   | { type: 'UPDATE_AGENT_STATE'; payload: string }
-  | { type: 'SET_PERFORMANCE_DATA'; payload: Array<{ date: string; value: number }> }
+  | { type: 'SET_PERFORMANCE_DATA'; payload: PerformanceDataPoint[] }
   | { type: 'SET_CONNECTED'; payload: boolean }
   | { type: 'SET_LAST_UPDATE'; payload: Date }
   | { type: 'SET_DATA_SOURCE'; payload: 'websocket' | 'api' | 'none' }
@@ -161,19 +164,43 @@ const initialState: TradingDataState = {
   dataSource: 'none',
   isLoading: true,
   isPortfolioLoading: true,
+  isTradesLoading: true,
   error: null,
 }
 
-function normalizeTradeRecord(raw: unknown): Trade | null {
+function upsertRecentTrade(trades: Trade[], incoming: Trade): Trade[] {
+  const byId = new Map<string, Trade>()
+  for (const t of trades) {
+    byId.set(String(t.trade_id), t)
+  }
+  byId.set(String(incoming.trade_id), incoming)
+  const combined = Array.from(byId.values()).sort((a, b) => {
+    const ta = new Date(a.executed_at ?? (a as { timestamp?: string }).timestamp ?? 0).getTime()
+    const tb = new Date(b.executed_at ?? (b as { timestamp?: string }).timestamp ?? 0).getTime()
+    return tb - ta
+  })
+  return combined.slice(0, RECENT_TRADES_MAX)
+}
+
+/** Normalize API/WS trade payloads for the Agent trades table. Exported for tests. */
+export function normalizeTradeRecord(raw: unknown): Trade | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   const id = r.trade_id
   if (id == null || id === '') return null
   const status = String(r.status ?? 'CLOSED').toUpperCase()
   if (!TERMINAL_TRADE_STATUSES.has(status)) return null
+  const isFill =
+    r.record_kind === 'fill' ||
+    r.data_source === 'exchange_fill' ||
+    String(id).startsWith('fill_')
+  const recordKind = String(r.record_kind ?? (isFill ? 'fill' : ''))
+  // Entry-only order fills (WS order_fill) are not closed round-trips.
+  if (status === 'EXECUTED' && !isFill && recordKind !== 'round_trip') {
+    return null
+  }
   const exitTime = (r.exit_time ?? r.closed_at ?? r.executed_at ?? r.timestamp) as Trade['executed_at']
   if (!exitTime) return null
-  const isFill = r.record_kind === 'fill' || r.data_source === 'exchange_fill'
   const entryTimeRaw = r.entry_time ?? r.opened_at
   return {
     ...(raw as Trade),
@@ -203,73 +230,31 @@ function parseReflectionSnapshot(raw: unknown): ReflectionSnapshot | null {
   return parsed.success ? parsed.data : (raw as ReflectionSnapshot)
 }
 
-/** Merge WS signal payloads without retaining omitted confidence keys (BUG 2). */
-function mergeSignalPayload(
-  signal: Signal | null,
-  data: Record<string, unknown>
-): Signal {
-  const prev = signal
-  const out: Record<string, unknown> = prev
-    ? { ...prev }
-    : { signal: 'HOLD' as SignalType, confidence: 0 }
+import { mergeSignalPayload } from '@/utils/mergeSignalPayload'
 
-  const incomingSignal =
-    data.signal != null ? String(data.signal) : undefined
-  const isHoldPatch = incomingSignal === 'HOLD'
-  const partialHold =
-    isHoldPatch &&
-    !('confidence' in data) &&
-    !('final_confidence' in data) &&
-    !('signal_strength' in data)
+function backendProxyBase(): string {
+  return process.env.NEXT_PUBLIC_BACKEND_PROXY_BASE || '/api/backend'
+}
 
-  for (const [key, value] of Object.entries(data)) {
-    if (
-      key === 'confidence' ||
-      key === 'final_confidence' ||
-      key === 'signal_strength'
-    ) {
-      continue
+async function fetchLatestSignalSnapshot(
+  symbol: string = 'BTCUSD'
+): Promise<Signal | null> {
+  try {
+    const res = await fetch(
+      `${backendProxyBase()}/api/v1/signal/latest?symbol=${encodeURIComponent(symbol)}`
+    )
+    if (!res.ok) return null
+    const body = (await res.json()) as {
+      available?: boolean
+      signal?: Record<string, unknown> | null
     }
-    if (value !== undefined) out[key] = value
+    if (!body?.available || !body.signal || typeof body.signal !== 'object') {
+      return null
+    }
+    return mergeSignalPayload(null, body.signal)
+  } catch {
+    return null
   }
-
-  if ('confidence' in data && data.confidence !== undefined) {
-    out.confidence = data.confidence
-  } else if (partialHold && prev?.confidence !== undefined) {
-    out.confidence = prev.confidence
-  } else if (!partialHold && prev) {
-    out.confidence = prev.confidence
-  } else if (partialHold) {
-    out.confidence = 0
-  }
-
-  if ('final_confidence' in data && data.final_confidence !== undefined) {
-    out.final_confidence = data.final_confidence
-  } else if (partialHold && prev?.final_confidence !== undefined) {
-    out.final_confidence = prev.final_confidence
-  } else if (!partialHold && prev?.final_confidence !== undefined) {
-    out.final_confidence = prev.final_confidence
-  }
-
-  if ('signal_strength' in data && data.signal_strength !== undefined) {
-    out.signal_strength = data.signal_strength
-  } else if (partialHold && prev?.signal_strength !== undefined) {
-    out.signal_strength = prev.signal_strength
-  } else if (!partialHold && prev?.signal_strength !== undefined) {
-    out.signal_strength = prev.signal_strength
-  }
-
-  if (data.timestamp !== undefined) {
-    out.timestamp = data.timestamp as string
-  }
-
-  const merged = out as Signal
-  const intro = data.agent_introspection
-  if (intro && typeof intro === 'object') {
-    const parsed = AgentIntrospectionSnapshotSchema.safeParse(intro)
-    if (parsed.success) merged.agent_introspection = parsed.data
-  }
-  return merged
 }
 
 // Reducer for state management
@@ -326,17 +311,12 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
             {
               const normalizedTrade = normalizeTradeRecord(data)
               if (!normalizedTrade) return state
-              const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
-              if (!existingTradeIds.has(normalizedTrade.trade_id)) {
-                const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
-                return {
-                  ...state,
-                  recentTrades: newTrades,
-                  lastUpdate: now,
-                  dataSource: 'websocket'
-                }
+              return {
+                ...state,
+                recentTrades: upsertRecentTrade(state.recentTrades, normalizedTrade),
+                lastUpdate: now,
+                dataSource: 'websocket',
               }
-              return state
             }
           case 'market':
             {
@@ -525,14 +505,11 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
     case 'ADD_TRADE': {
       const normalizedTrade = normalizeTradeRecord(action.payload)
       if (!normalizedTrade) return state
-      const existingTradeIds = new Set(state.recentTrades.map(t => t.trade_id))
-      if (existingTradeIds.has(normalizedTrade.trade_id)) return state
-      const newTrades = [normalizedTrade, ...state.recentTrades].slice(0, RECENT_TRADES_MAX)
       return {
         ...state,
-        recentTrades: newTrades,
+        recentTrades: upsertRecentTrade(state.recentTrades, normalizedTrade),
         lastUpdate: new Date(),
-        dataSource: 'api'
+        dataSource: 'api',
       }
     }
 
@@ -581,6 +558,7 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         portfolio: null,
         recentTrades: [],
         performanceData: [],
+        isTradesLoading: true,
         lastUpdate: new Date(),
         dataSource: 'api',
       }
@@ -591,6 +569,14 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         agentState: action.payload,
         lastUpdate: new Date(),
         dataSource: 'api'
+      }
+
+    case 'UPDATE_SIGNAL':
+      return {
+        ...state,
+        signal: action.payload,
+        lastUpdate: new Date(),
+        dataSource: 'api',
       }
 
     case 'UPDATE_HEALTH': {
@@ -619,6 +605,9 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
 
     case 'SET_PORTFOLIO_LOADING':
       return { ...state, isPortfolioLoading: action.payload }
+
+    case 'SET_TRADES_LOADING':
+      return { ...state, isTradesLoading: action.payload }
 
     case 'SET_ERROR':
       return { ...state, error: action.payload }
@@ -762,6 +751,7 @@ export function useTradingData() {
       if (showPortfolioSpinner) {
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: true })
       }
+      dispatch({ type: 'SET_TRADES_LOADING', payload: true })
 
       try {
         const [
@@ -782,6 +772,13 @@ export function useTradingData() {
           const healthData = healthResult.value
           if (healthData && typeof healthData === 'object') {
             dispatch({ type: 'UPDATE_HEALTH', payload: healthData as HealthData })
+          }
+        }
+
+        if (!isLightReconnect) {
+          const latest = await fetchLatestSignalSnapshot('BTCUSD')
+          if (latest) {
+            dispatch({ type: 'UPDATE_SIGNAL', payload: latest })
           }
         }
 
@@ -841,22 +838,34 @@ export function useTradingData() {
               },
             })
           }
+        } else {
+          console.warn('Recent closed trades fetch failed:', tradesResult.reason)
         }
+        dispatch({ type: 'SET_TRADES_LOADING', payload: false })
 
         if (!isLightReconnect && performanceResult.status === 'fulfilled') {
           const performanceMetrics = performanceResult.value
           if (performanceMetrics && typeof performanceMetrics === 'object') {
-            const totalReturn =
-              typeof (performanceMetrics as { total_return?: number }).total_return === 'number'
-                ? (performanceMetrics as { total_return: number }).total_return
-                : typeof (performanceMetrics as { total_return_pct?: number }).total_return_pct ===
-                    'number'
-                  ? (performanceMetrics as { total_return_pct: number }).total_return_pct
-                  : 0
+            const metrics = performanceMetrics as {
+              total_return?: number
+              total_return_pct?: number
+            }
+            const hasUsdReturn = typeof metrics.total_return === 'number'
+            const hasPctReturn = typeof metrics.total_return_pct === 'number'
+            const value = hasUsdReturn
+              ? metrics.total_return!
+              : hasPctReturn
+                ? metrics.total_return_pct!
+                : 0
+            const metricKind: PerformanceDataPoint['metricKind'] = hasUsdReturn
+              ? 'usd'
+              : hasPctReturn
+                ? 'pct'
+                : 'usd'
 
             dispatch({
               type: 'SET_PERFORMANCE_DATA',
-              payload: [{ date: new Date().toISOString(), value: totalReturn }],
+              payload: [{ date: new Date().toISOString(), value, metricKind }],
             })
           }
         }
@@ -888,6 +897,7 @@ export function useTradingData() {
           payload: err,
         })
         dispatch({ type: 'SET_PORTFOLIO_LOADING', payload: false })
+        dispatch({ type: 'SET_TRADES_LOADING', payload: false })
         portfolioLoadSettledRef.current = true
         if (!isLightReconnect) {
           dispatch({ type: 'SET_LOADING', payload: false })
@@ -925,6 +935,7 @@ export function useTradingData() {
     // State
     isLoading: state.isLoading,
     isPortfolioLoading: state.isPortfolioLoading,
+    isTradesLoading: state.isTradesLoading,
     error: state.error,
     resetLocalTradingState,
   }

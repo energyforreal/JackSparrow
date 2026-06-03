@@ -339,7 +339,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - **Dependencies**: Portfolio state, Market data
 - **Output**: Risk-adjusted position sizes, stop losses
 - **Portfolio sync**: ExecutionEngine syncs portfolio with RiskManager on order fill and position close (add_position/remove_position) so risk limits reflect actual exposure.
-- **Sizing path**: Active sizing is via `RiskManager.calculate_position_size()`; `agent/risk/position_sizer.py` is legacy and not in the runtime decision path.
+- **Entry lot sizing**: `TradingEventHandler` uses portfolio fraction + fixed `ISOLATED_MARGIN_LEVERAGE` (see docs/05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction); `calculate_position_size()` is not on the entry path.
 
 #### Learning System
 - **Responsibility**: Learn from trade outcomes and adapt

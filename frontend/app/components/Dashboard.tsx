@@ -73,6 +73,7 @@ export function Dashboard() {
     lastUpdate,
     isLoading,
     isPortfolioLoading,
+    isTradesLoading,
     error,
     performanceData,
     marketData,
@@ -86,6 +87,7 @@ export function Dashboard() {
   // Extract positions from portfolio - much simpler now!
   const positions = portfolio?.positions || []
   const portfolioBlockLoading = isPortfolioLoading && !portfolio
+  const tradesBlockLoading = isTradesLoading && recentTrades.length === 0
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -243,7 +245,7 @@ export function Dashboard() {
               <ErrorBoundary>
                 <RecentTrades
                   trades={recentTrades}
-                  isLoading={portfolioBlockLoading}
+                  isLoading={tradesBlockLoading}
                   usdInrRate={portfolio?.usd_inr_rate}
                   contractValueBtc={portfolio?.contract_value_btc}
                 />
@@ -304,7 +306,9 @@ export function Dashboard() {
                 v43Threshold={
                   signal?.threshold != null ? Number(signal.threshold) : undefined
                 }
-                v43GateReject={signal?.v43_gate_reject}
+                v43GateReject={
+                  signal?.v43_gate_reject ?? signal?.agent_introspection?.v43_gate_reject
+                }
               />
             </ErrorBoundary>
           </TabsContent>

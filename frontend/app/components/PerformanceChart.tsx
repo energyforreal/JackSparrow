@@ -1,8 +1,6 @@
 'use client'
 
-import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   LineChart,
   Line,
@@ -14,15 +12,37 @@ import {
   ReferenceLine,
 } from 'recharts'
 
-interface PerformanceChartProps {
-  data?: Array<{ date: string; value: number }>
+export type PerformanceMetricKind = 'usd' | 'pct'
+
+export interface PerformanceDataPoint {
+  date: string
+  value: number
+  metricKind?: PerformanceMetricKind
 }
 
-type TimePeriod = '1d' | '7d' | '30d' | 'all'
+interface PerformanceChartProps {
+  data?: PerformanceDataPoint[]
+}
+
+function formatPerformanceValue(value: number, metricKind: PerformanceMetricKind): string {
+  if (metricKind === 'pct') {
+    return `${value.toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}%`
+  }
+  return `$${value.toLocaleString('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
+function resolveMetricKind(data: PerformanceDataPoint[]): PerformanceMetricKind {
+  const explicit = data.find((p) => p.metricKind)?.metricKind
+  return explicit ?? 'usd'
+}
 
 export function PerformanceChart({ data }: PerformanceChartProps) {
-  const [period, setPeriod] = useState<TimePeriod>('7d')
-
   if (!data || data.length === 0) {
     return (
       <Card>
@@ -51,8 +71,8 @@ export function PerformanceChart({ data }: PerformanceChartProps) {
               No Performance Data Available
             </p>
             <p className="text-xs text-muted-foreground max-w-sm">
-              Performance data will appear here once trades are executed. 
-              The chart tracks portfolio value over time.
+              Performance data will appear here once trades are executed. The chart tracks
+              cumulative return from closed positions.
             </p>
           </div>
         </CardContent>
@@ -60,131 +80,115 @@ export function PerformanceChart({ data }: PerformanceChartProps) {
     )
   }
 
-  const filteredData = data.slice(-getDataPoints(period))
+  const metricKind = resolveMetricKind(data)
+  const metricLabel = metricKind === 'pct' ? 'Total Return (%)' : 'Total Return (USD)'
+  const isSnapshot = data.length === 1
+  const baselineValue = data[0]?.value
 
   return (
     <Card role="region" aria-label="Portfolio Performance Chart">
       <CardHeader>
         <CardTitle>Performance Chart</CardTitle>
+        <p className="text-xs text-muted-foreground">{metricLabel}</p>
       </CardHeader>
       <CardContent>
-        <Tabs value={period} onValueChange={(v) => setPeriod(v as TimePeriod)}>
-          <TabsList className="grid w-full grid-cols-4" role="tablist" aria-label="Time period selection">
-            <TabsTrigger value="1d" role="tab" aria-label="1 day view">1d</TabsTrigger>
-            <TabsTrigger value="7d" role="tab" aria-label="7 day view">7d</TabsTrigger>
-            <TabsTrigger value="30d" role="tab" aria-label="30 day view">30d</TabsTrigger>
-            <TabsTrigger value="all" role="tab" aria-label="All time view">All</TabsTrigger>
-          </TabsList>
-          <TabsContent value={period} className="mt-4" role="tabpanel" aria-label={`Performance chart for ${period}`}>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart 
-                data={filteredData}
-                aria-label="Portfolio value over time"
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => {
-                    const date = new Date(value)
-                    return period === '1d'
-                      ? date.toLocaleTimeString('en-IN', {
-                          timeZone: 'Asia/Kolkata',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })
-                      : date.toLocaleDateString('en-IN', {
-                          timeZone: 'Asia/Kolkata',
-                          month: 'short',
-                          day: 'numeric',
-                        })
+        {isSnapshot ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center space-y-2">
+            <p className="text-3xl font-semibold tabular-nums">
+              {formatPerformanceValue(data[0].value, metricKind)}
+            </p>
+            <p className="text-xs text-muted-foreground max-w-sm">
+              Snapshot from closed-position aggregates. A time series will appear when historical
+              performance points are available.
+            </p>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={data} aria-label="Total return over time">
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) => {
+                  const date = new Date(value)
+                  return date.toLocaleDateString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    month: 'short',
+                    day: 'numeric',
+                  })
+                }}
+              />
+              <YAxis
+                tick={{ fontSize: 12 }}
+                tickFormatter={(value) =>
+                  metricKind === 'pct'
+                    ? `${Number(value).toFixed(1)}%`
+                    : `$${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+                }
+              />
+              <Tooltip
+                shared
+                trigger="hover"
+                wrapperStyle={{ zIndex: 50 }}
+                contentStyle={{
+                  backgroundColor: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: '0.5rem',
+                  padding: '0.75rem',
+                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                }}
+                formatter={(value: number) => [
+                  formatPerformanceValue(value, metricKind),
+                  metricLabel,
+                ]}
+                labelFormatter={(label) => {
+                  const date = new Date(label)
+                  return date.toLocaleString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                }}
+                cursor={{
+                  stroke: 'hsl(var(--primary))',
+                  strokeWidth: 2,
+                  strokeDasharray: '4 4',
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="hsl(var(--primary))"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{
+                  r: 6,
+                  fill: 'hsl(var(--primary))',
+                  stroke: 'hsl(var(--background))',
+                  strokeWidth: 2,
+                }}
+                animationDuration={300}
+              />
+              {baselineValue != null && Number.isFinite(baselineValue) && (
+                <ReferenceLine
+                  y={baselineValue}
+                  stroke="hsl(var(--muted-foreground))"
+                  strokeDasharray="2 2"
+                  label={{
+                    value: 'Starting Value',
+                    position: 'right',
+                    fill: 'hsl(var(--muted-foreground))',
                   }}
                 />
-                <YAxis
-                  tick={{ fontSize: 12 }}
-                  tickFormatter={(value) =>
-                    `$${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-                  }
-                />
-                <Tooltip
-                  shared
-                  trigger="hover"
-                  wrapperStyle={{ zIndex: 50 }}
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '0.5rem',
-                    padding: '0.75rem',
-                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                  }}
-                  formatter={(value: number) => [
-                    `$${value.toLocaleString('en-IN', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`,
-                    'Portfolio Value',
-                  ]}
-                  labelFormatter={(label) => {
-                    const date = new Date(label)
-                    return date.toLocaleString('en-IN', {
-                      timeZone: 'Asia/Kolkata',
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  }}
-                  cursor={{
-                    stroke: 'hsl(var(--primary))',
-                    strokeWidth: 2,
-                    strokeDasharray: '4 4',
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ 
-                    r: 6, 
-                    fill: 'hsl(var(--primary))',
-                    stroke: 'hsl(var(--background))',
-                    strokeWidth: 2,
-                  }}
-                  animationDuration={300}
-                />
-                {filteredData.length > 0 && filteredData[0]?.value && (
-                  <ReferenceLine 
-                    y={filteredData[0].value} 
-                    stroke="hsl(var(--muted-foreground))" 
-                    strokeDasharray="2 2"
-                    label={{ value: 'Starting Value', position: 'right', fill: 'hsl(var(--muted-foreground))' }}
-                  />
-                )}
-              </LineChart>
-            </ResponsiveContainer>
-          </TabsContent>
-        </Tabs>
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </CardContent>
     </Card>
   )
 }
-
-function getDataPoints(period: TimePeriod): number {
-  switch (period) {
-    case '1d':
-      return 24 // hourly data points
-    case '7d':
-      return 168 // hourly data points for 7 days
-    case '30d':
-      return 30 // daily data points
-    case 'all':
-      return Infinity
-    default:
-      return 168
-  }
-}
-

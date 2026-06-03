@@ -318,7 +318,7 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 > **Agent Risk Controls**  
 > Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Current defaults are `INITIAL_BALANCE=20000`, `MIN_CONFIDENCE_THRESHOLD=0.70`, `MIN_LOT_SIZE=1`, and `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC on Delta BTCUSD perpetual).
 >
-> **Optional execution overrides** (defaults live in `agent/core/config.py` if unset): `ENFORCE_FIXED_LOT_SIZE`, `FIXED_LOT_SIZE`, `ISOLATED_MARGIN_LEVERAGE`, and `USDINR_FALLBACK_RATE` (used when live/cached FX is unavailable). Uncomment or set these in `.env` only when you need to deviate from code defaults.
+> **Entry lot sizing**: `PORTFOLIO_FRACTION_LOT_SIZING=true`, `ENTRY_PORTFOLIO_MARGIN_FRACTION=0.60`, `ISOLATED_MARGIN_LEVERAGE=5`, `SYNC_EXCHANGE_ORDER_LEVERAGE=false`. See `docs/05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction`.
 
 ---
 

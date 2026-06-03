@@ -34,6 +34,28 @@ async def models_status() -> Dict[str, Any]:
     }
 
 
+@router.get("/signal/latest")
+async def latest_signal(
+    symbol: str = Query(default="BTCUSD"),
+) -> Dict[str, Any]:
+    """Latest decision_ready signal snapshot (Redis cache from WS broadcast)."""
+    try:
+        r = await get_redis(required=False)
+        if r:
+            key = f"jacksparrow:last_signal:{symbol}"
+            raw = await r.get(key)
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    if isinstance(data, dict):
+                        return {"symbol": symbol, "available": True, "signal": data}
+                except (TypeError, json.JSONDecodeError):
+                    pass
+    except Exception as e:
+        logger.warning("latest_signal_redis_error", error=str(e), symbol=symbol)
+    return {"symbol": symbol, "available": False, "signal": None}
+
+
 @router.get("/signal/edge-history")
 async def edge_history(
     symbol: str = Query(default="BTCUSD"),

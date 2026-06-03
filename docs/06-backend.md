@@ -116,7 +116,11 @@ Comprehensive health check endpoint that tests all services.
     },
     "execution_latency": {
       "status": "up",
-      "details": { "risk_approved_to_fill_ms": { "count": 12, "p50": 320, "p95": 680 } }
+      "latency_ms": null,
+      "details": {
+        "risk_approved_to_fill_ms": { "count": 0, "p50": null, "p95": null },
+        "note": "No executions recorded yet (idle)"
+      }
     }
   },
   "agent_state": "MONITORING",
@@ -126,7 +130,7 @@ Comprehensive health check endpoint that tests all services.
 }
 ```
 
-`market_data` and `execution_latency` are populated from Redis keys written by the agent (`market_data:last_tick:*`, `metrics:latency:execution`). Stale ticks (>30s) report `market_data.status: degraded`.
+`market_data` and `execution_latency` are populated from Redis keys written by the agent (`market_data:last_tick:*`, `metrics:latency:execution`). Stale ticks (>30s) report `market_data.status: degraded`. The agent publishes latency metrics at startup and every monitoring cycle (Redis TTL 600s). When metrics exist with **`count === 0`**, `execution_latency.status` is **`up`** with an idle note rather than **`unknown`**.
 
 #### Model Nodes Troubleshooting
 
@@ -176,6 +180,27 @@ Proxies agent registry summary via `agent_service.get_agent_status()`.
   "status_stale": false
 }
 ```
+
+#### GET `/api/v1/signal/latest`
+
+Query params: `symbol` (default `BTCUSD`).
+
+Returns the most recent **`decision_ready`** signal snapshot written when the backend broadcasts `data_update` / `resource: "signal"`. Cached in Redis as `jacksparrow:last_signal:{symbol}` (TTL 3600s). Used by the dashboard on first WebSocket connect when live messages have not arrived yet.
+
+```json
+{
+  "symbol": "BTCUSD",
+  "available": true,
+  "signal": {
+    "signal": "HOLD",
+    "confidence": 0.3,
+    "timestamp": "2026-06-03T06:45:29.198469+00:00",
+    "reasoning_chain": []
+  }
+}
+```
+
+When no cache exists, `available` is `false` and `signal` is `null`.
 
 #### GET `/api/v1/signal/edge-history`
 
@@ -609,6 +634,14 @@ Optional controls (see `backend/core/config.py`):
 
 If Redis is unavailable at startup **and** `UVICORN_WORKERS` or `WEB_CONCURRENCY` suggests more than one worker, the unified WebSocket manager logs `unified_websocket_redis_required_for_multi_worker` because cross-replica fan-out depends on Redis pub/sub (`websocket:broadcast`).
 
+### Connect snapshot (cached signal)
+
+On a new dashboard WebSocket connection, `unified_manager` may replay the last cached signal (`_last_signal`) when it is still fresh:
+
+- **HOLD** and actionable signals are eligible if `timestamp` age ≤ **300 seconds** (override via optional `ws_signal_replay_max_age_seconds` on backend settings when defined).
+- Signals older than that window are **not** replayed (avoids misleading stale BUY/SELL badges).
+- The frontend also hydrates from **`GET /api/v1/signal/latest`** on first connect (see [Frontend – `useTradingData`](07-frontend.md#unified-dashboard-state-usetradingdata)).
+
 ### Simplified Message Format
 
 All WebSocket messages use a unified envelope format:
@@ -732,7 +765,7 @@ Per-model `model_consensus[]` entries may also include `p_buy`, `p_sell`, `p_hol
 | `threshold` | Dynamic score threshold used when the orchestrator compared the raw score to long/short rails. |
 | `regime` | Regime tag from model / context (string), when surfaced onto the top-level signal. |
 | `mcp_tanh_prediction` | Ancillary normalised score roughly in **[-1, 1]** derived from the same prediction (use when `expected_return` is missing). |
-| `v43_gate_reject` | Present on **HOLD**/blocked legs: short reason from post-threshold **`v43_signal_gates`** (`agent/core/v43_signal_gates.py`). |
+| `v43_gate_reject` | Present on **HOLD**/blocked legs: short reason from post-threshold **`v43_signal_gates`** (`agent/core/v43_signal_gates.py`). Set on both **`reasoning_complete`** and **`decision_ready`** broadcasts via **`_v43_gate_reject_from_context()`** in `agent_event_subscriber.py` (from `market_context` or `reasoning_chain.market_context`). Frontend **Signal Rationale** also falls back to **`agent_introspection.v43_gate_reject`**. |
 
 **Redis** (optional diagnostics): the backend appends recent v43 signal snapshots to **`jacksparrow:v43:signal_history:<symbol>`** (`backend/services/agent_event_subscriber.py`), including `expected_return` and `mcp_tanh_prediction` for drift of the last N bars.
 
@@ -1152,6 +1185,7 @@ class ModelPerformance(Base):
 - BTCUSD market prices remain USD in market payloads (`price`, `entry_price`, `current_price`)
 - Portfolio balances/PnL are emitted in INR (`total_value`, `available_balance`, `margin_used`, `total_unrealized_pnl`, `total_realized_pnl`)
 - **Margin and ROE (frontend)**: `margin_used` is the sum of **isolated margin in USD** per open position (`notional_usd / leverage` using `contract_value_btc` and `isolated_margin_leverage` from settings), converted to INR with the **same** `get_usdinr_rate()` snapshot as unrealized PnL so **ROE ratios** (unrealized ÷ margin) are not distorted by mixing FX sources. Leverage is **config-based**, not necessarily the exchange UI — optional future reconciliation with Delta `GET /v2/positions`. Multi-asset: one global `contract_value_btc` in `get_portfolio_summary` assumes a single contract spec unless extended per symbol.
+- **Entry quantity vs display**: Order **lots** on the agent path come from `TradingEventHandler` portfolio-fraction sizing (`ENTRY_PORTFOLIO_MARGIN_FRACTION`, `ISOLATED_MARGIN_LEVERAGE`); the API portfolio summary does not recompute entry size — it reports balances and open-position margin using the same leverage assumption. See [Entry lot sizing](05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction).
 
 ### Feature Service
 

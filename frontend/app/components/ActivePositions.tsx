@@ -64,8 +64,6 @@ export function ActivePositions({
                   <TableHead>Lots</TableHead>
                   <TableHead>Entry</TableHead>
                   <TableHead>Mark</TableHead>
-                  <TableHead>SL</TableHead>
-                  <TableHead>TP</TableHead>
                   <TableHead>Liq.</TableHead>
                   <TableHead>PnL</TableHead>
                   <TableHead>Duration</TableHead>
@@ -91,15 +89,6 @@ export function ActivePositions({
                     </TableCell>
                     <TableCell>
                       <div className="h-4 bg-muted rounded-md w-20" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-20" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-16" />
-                    </TableCell>
-                    <TableCell>
-                      <div className="h-4 bg-muted rounded-md w-16" />
                     </TableCell>
                     <TableCell>
                       <div className="h-4 bg-muted rounded-md w-20" />
@@ -139,7 +128,7 @@ export function ActivePositions({
             </>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground">No active positions on testnet</p>
+              <p className="text-sm text-muted-foreground">No active positions</p>
               <p className="text-xs mt-2 text-muted-foreground/80">
                 The agent is monitoring — no open trades right now.
               </p>
@@ -229,12 +218,6 @@ export function ActivePositions({
                       const markUsd = resolveMarkPriceUsd(position)
                       return markUsd === null ? '—' : formatPrice(markUsd)
                     })()}
-                  </TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {formatPrice(position.stop_loss)}
-                  </TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {formatPrice(position.take_profit)}
                   </TableCell>
                   <TableCell>
                     {position.liquidation_price != null ||

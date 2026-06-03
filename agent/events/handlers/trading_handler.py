@@ -579,47 +579,6 @@ class TradingEventHandler:
                 conf_f = 0.5
             conf_f = max(0.0, min(1.0, conf_f))
 
-            vol_f = 0.0
-            if features.get("volatility") is not None:
-                try:
-                    vol_f = float(features.get("volatility"))
-                except (TypeError, ValueError):
-                    vol_f = 0.0
-            funding_f = 0.0
-            if features.get("funding_rate") is not None:
-                try:
-                    funding_f = float(features.get("funding_rate"))
-                except (TypeError, ValueError):
-                    funding_f = 0.0
-
-            if not self.risk_manager or not getattr(self.risk_manager, "_initialized", False):
-                self._log_entry_rejected(
-                    "risk_sizing_unavailable",
-                    symbol=symbol,
-                    signal=signal,
-                    event_id=event.event_id,
-                    **diagnostics_base,
-                )
-                return
-
-            sizing = self.risk_manager.calculate_position_size(
-                mark_price=entry_price,
-                confidence=conf_f,
-                funding_rate=funding_f,
-                volatility=vol_f,
-                return_dict=True,
-            )
-            if not sizing or int(sizing.get("leverage") or 0) < 1:
-                self._log_entry_rejected(
-                    "risk_sizing_unavailable",
-                    symbol=symbol,
-                    signal=signal,
-                    event_id=event.event_id,
-                    **diagnostics_base,
-                )
-                return
-            leverage = max(1, int(sizing["leverage"]))
-
             usdinr_rate = await self._get_usdinr_rate(state)
             available_cash_inr = self._get_available_cash_inr(state)
 
@@ -633,7 +592,26 @@ class TradingEventHandler:
             )
             slip_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
 
-            if v43_exec_enabled and isinstance(v43_ex, dict):
+            leverage = max(1, int(getattr(settings, "isolated_margin_leverage", 5) or 5))
+            max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
+            margin_inr = 0.0
+            entry_portfolio_frac = float(
+                getattr(settings, "entry_portfolio_margin_fraction", 0.60) or 0.60
+            )
+
+            if getattr(settings, "portfolio_fraction_lot_sizing", True):
+                entry_portfolio_frac = max(0.01, min(1.0, entry_portfolio_frac))
+                margin_inr = available_cash_inr * entry_portfolio_frac
+                usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
+                entry_lots = price_to_lots(
+                    usd_margin=usd_margin,
+                    btc_price=entry_price,
+                    leverage=leverage,
+                    contract_value_btc=cv,
+                    max_lots=max_lots,
+                    min_lots=min_lot_size,
+                )
+            elif v43_exec_enabled and isinstance(v43_ex, dict):
                 alloc_frac = max(
                     0.01,
                     min(
@@ -643,7 +621,6 @@ class TradingEventHandler:
                 )
                 margin_inr = available_cash_inr * alloc_frac
                 usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
-                max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
                 entry_lots = price_to_lots(
                     usd_margin=usd_margin,
                     btc_price=entry_price,
@@ -662,7 +639,6 @@ class TradingEventHandler:
                 )
                 margin_inr = available_cash_inr * alloc_frac
                 usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
-                max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
                 entry_lots = price_to_lots(
                     usd_margin=usd_margin,
                     btc_price=entry_price,
@@ -1108,7 +1084,8 @@ class TradingEventHandler:
                 "tick_size": tick_sz,
                 "product_id": specs.product_id,
                 "leverage": leverage,
-                "margin_usd": sizing.get("margin_usd"),
+                "entry_portfolio_margin_fraction": entry_portfolio_frac,
+                "margin_inr_budget": margin_inr,
             }
             if signal_path_diag:
                 risk_payload["signal_path_diagnostics"] = signal_path_diag
@@ -1144,6 +1121,11 @@ class TradingEventHandler:
                 side=side,
                 quantity=quantity,
                 entry_price=entry_price,
+                entry_lots=entry_lots,
+                leverage=leverage,
+                margin_inr=margin_inr,
+                entry_portfolio_margin_fraction=entry_portfolio_frac,
+                available_cash_inr=available_cash_inr,
                 event_id=event.event_id,
                 **diagnostics_base,
             )

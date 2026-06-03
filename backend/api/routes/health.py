@@ -89,7 +89,20 @@ async def check_execution_latency_metrics() -> HealthServiceStatus:
             )
         text = raw.decode() if isinstance(raw, bytes) else str(raw)
         payload = json.loads(text)
-        return HealthServiceStatus(status="up", details=payload)
+        fill_block = payload.get("risk_approved_to_fill_ms") or {}
+        count = int(fill_block.get("count") or 0)
+        p50 = fill_block.get("p50")
+        latency_ms = float(p50) if p50 is not None and count > 0 else None
+        if count == 0:
+            return HealthServiceStatus(
+                status="up",
+                latency_ms=None,
+                details={
+                    **payload,
+                    "note": "No executions recorded yet (idle)",
+                },
+            )
+        return HealthServiceStatus(status="up", latency_ms=latency_ms, details=payload)
     except Exception as exc:
         return HealthServiceStatus(status="unknown", error=str(exc))
 

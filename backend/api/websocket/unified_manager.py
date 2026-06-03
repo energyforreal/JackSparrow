@@ -38,11 +38,34 @@ from backend.core.communication_logger import (
 logger = structlog.get_logger()
 
 
+def _cached_signal_age_seconds(cached: Dict[str, Any]) -> Optional[float]:
+    """Age of cached signal timestamp in seconds, or None if unparseable."""
+    ts_raw = cached.get("timestamp")
+    try:
+        if isinstance(ts_raw, str):
+            ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+        elif hasattr(ts_raw, "isoformat"):
+            ts = ts_raw  # type: ignore[assignment]
+        else:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts).total_seconds()
+    except Exception:
+        return None
+
+
 def _should_replay_cached_signal(cached: Dict[str, Any]) -> bool:
-    """Skip misleading HOLD or empty-confidence snapshots on client connect."""
+    """Replay last signal on connect when still fresh (including HOLD)."""
     sig = str(cached.get("signal") or "").upper()
-    if sig == "HOLD":
+    age = _cached_signal_age_seconds(cached)
+    max_replay_seconds = float(
+        getattr(settings, "ws_signal_replay_max_age_seconds", 300) or 300
+    )
+    if age is not None and age > max_replay_seconds:
         return False
+    if sig == "HOLD":
+        return age is not None
     conf = cached.get("confidence")
     fc = cached.get("final_confidence")
     try:
@@ -295,42 +318,20 @@ class UnifiedWebSocketManager:
                 _envelope_to_legacy_dict(create_agent_state_update(state_data)),
             )
             if self._last_signal and _should_replay_cached_signal(self._last_signal):
-                # Only send cached signal if it is still fresh to avoid
-                # showing very old signals when a new client connects.
                 try:
-                    ts_raw = self._last_signal.get("timestamp")
-                    is_fresh = False
-                    if isinstance(ts_raw, str):
-                        try:
-                            ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-                        except Exception:
-                            ts = None
-                    elif hasattr(ts_raw, "isoformat"):
-                        ts = ts_raw  # type: ignore[assignment]
-                    else:
-                        ts = None
-
-                    if ts is not None:
-                        if ts.tzinfo is None:
-                            ts = ts.replace(tzinfo=timezone.utc)
-                        age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
-                        # Treat signals older than 60 seconds as stale for
-                        # initial snapshot purposes.
-                        is_fresh = age_seconds <= 60
-
-                    if is_fresh:
-                        await self.send_personal_message(
-                            websocket,
-                            {
-                                "type": "data_update",
-                                "resource": "signal",
-                                "data": self._last_signal,
-                            },
-                        )
+                    await self.send_personal_message(
+                        websocket,
+                        {
+                            "type": "data_update",
+                            "resource": "signal",
+                            "data": self._last_signal,
+                        },
+                    )
                 except Exception:
-                    # If freshness calculation fails, skip sending cached signal
-                    # rather than risking a misleading stale value.
-                    pass
+                    logger.debug(
+                        "unified_websocket_signal_replay_failed",
+                        exc_info=True,
+                    )
             market_snapshot = (
                 self._last_market_by_symbol.get("BTCUSD")
                 or (next(iter(self._last_market_by_symbol.values()), None) if self._last_market_by_symbol else None)

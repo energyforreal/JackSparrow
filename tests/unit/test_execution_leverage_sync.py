@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from agent.core.config import settings
 from agent.core.execution import ExecutionEngine
 
 
@@ -38,7 +39,8 @@ def engine_with_delta():
 
 
 @pytest.mark.asyncio
-async def test_place_order_syncs_leverage_before_entry(engine_with_delta):
+async def test_place_order_syncs_leverage_before_entry(engine_with_delta, monkeypatch):
+    monkeypatch.setattr(settings, "sync_exchange_order_leverage", True)
     result = await engine_with_delta._place_order(
         symbol="BTCUSD",
         side="buy",
@@ -55,7 +57,8 @@ async def test_place_order_syncs_leverage_before_entry(engine_with_delta):
 
 
 @pytest.mark.asyncio
-async def test_place_order_aborts_when_leverage_sync_fails(engine_with_delta):
+async def test_place_order_aborts_when_leverage_sync_fails(engine_with_delta, monkeypatch):
+    monkeypatch.setattr(settings, "sync_exchange_order_leverage", True)
     engine_with_delta.delta_client.ensure_order_leverage = AsyncMock(
         side_effect=RuntimeError("open position blocks leverage change")
     )
@@ -98,6 +101,23 @@ async def test_place_order_skips_leverage_sync_when_leverage_omitted(
         side="buy",
         quantity=1.0,
         order_type="market",
+    )
+
+    engine_with_delta.delta_client.ensure_order_leverage.assert_not_awaited()
+    engine_with_delta.delta_client.place_order.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_place_order_skips_leverage_sync_when_sync_disabled(
+    engine_with_delta, monkeypatch
+):
+    monkeypatch.setattr(settings, "sync_exchange_order_leverage", False)
+    await engine_with_delta._place_order(
+        symbol="BTCUSD",
+        side="buy",
+        quantity=1.0,
+        order_type="market",
+        leverage=10,
     )
 
     engine_with_delta.delta_client.ensure_order_leverage.assert_not_awaited()
