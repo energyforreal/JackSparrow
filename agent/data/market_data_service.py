@@ -147,6 +147,12 @@ class MarketDataService:
         """Public alias for stale ticker detection (SL/TP and health dashboards)."""
         return self._ticker_stale(symbol)
 
+    def get_cached_features(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Latest computed feature vector for symbol (from context manager cache)."""
+        from agent.core.context_manager import context_manager
+
+        return context_manager.get_latest_features(symbol)
+
     def get_cached_headline_price(self, symbol: str) -> Optional[float]:
         """Best-effort mark/LTP from the in-memory ticker cache (no REST call)."""
         ticker = self._last_ticker_cache.get(symbol)

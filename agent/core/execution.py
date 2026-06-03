@@ -426,6 +426,11 @@ class ExecutionEngine:
 
     async def _disconnect_exchange(self):
         """Disconnect from trading exchange."""
+        if self.delta_client and hasattr(self.delta_client, "close"):
+            try:
+                await self.delta_client.close()
+            except Exception as exc:
+                logger.debug("delta_client_close_failed", error=str(exc))
         self.exchange_connected = False
         logger.info("exchange_disconnected")
 
@@ -1199,6 +1204,8 @@ class ExecutionEngine:
                     take_profit=take_profit,
                     position_extras=pex or None,
                 )
+                if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
+                    self.risk_manager.portfolio.record_entry_portfolio_value(symbol)
                 if order_result.get("bracket_sl_tp_active"):
                     position["exchange_bracket_sl_tp"] = True
                 elif bool(getattr(settings, "use_delta_position_bracket_api", True)):
@@ -2061,7 +2068,99 @@ class ExecutionEngine:
             if getattr(settings, "bracket_fallback_local_sl_tp", True):
                 position["bracket_api_degraded"] = True
 
+    async def _update_bracket_stop_only(self, symbol: str, stop_loss: float) -> None:
+        """PUT bracket stop-loss only (trailing stop sync to exchange)."""
+        if not getattr(settings, "dynamic_sl_tp_enabled", False):
+            return
+        if not getattr(settings, "use_delta_position_bracket_api", True) or not self.delta_client:
+            return
+        position = self.position_manager.get_position(symbol)
+        if not position or position.get("status") != "open":
+            return
+        bid = position.get("bracket_order_id")
+        if bid is None:
+            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            if bid is not None:
+                position["bracket_order_id"] = bid
+        if bid is None:
+            return
+        trigger = str(
+            position.get("bracket_trigger_method")
+            or getattr(settings, "bracket_stop_trigger_method", "mark_price")
+            or "mark_price"
+        )
+        try:
+            await self.delta_client.update_bracket_order(
+                int(bid),
+                symbol,
+                stop_loss_price=stop_loss,
+                take_profit_price=position.get("take_profit"),
+                trail_amount=position.get("bracket_trail_amount"),
+                bracket_stop_trigger_method=trigger,
+                use_product_symbol_only=True,
+            )
+            position["bracket_sl_tp_updated_at"] = datetime.now(timezone.utc).isoformat()
+            logger.info(
+                "trailing_bracket_stop_synced",
+                symbol=symbol,
+                bracket_order_id=bid,
+                stop_loss=stop_loss,
+            )
+        except Exception as exc:
+            logger.warning(
+                "trailing_bracket_stop_sync_failed",
+                symbol=symbol,
+                error=str(exc),
+            )
+            if getattr(settings, "bracket_fallback_local_sl_tp", True):
+                position["bracket_api_degraded"] = True
+
+    async def _update_position_stop_loss(
+        self,
+        symbol: str,
+        new_stop: float,
+        position: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Update in-memory stop and persist when order persistence is enabled."""
+        pos = position or self.position_manager.get_position(symbol)
+        if not pos:
+            return
+        pos["stop_loss"] = new_stop
+        logger.info(
+            "trailing_stop_updated",
+            symbol=symbol,
+            new_stop=new_stop,
+        )
+        if bool(getattr(settings, "order_persistence_enabled", True)):
+            try:
+                from agent.core.order_persistence import persist_position_stop_loss
+
+                await persist_position_stop_loss(symbol, new_stop)
+            except Exception as exc:
+                logger.debug(
+                    "position_stop_loss_persist_failed",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+
+    def _prune_closed_orders(self, max_closed: int = 500) -> None:
+        """Remove terminal orders from OrderManager to prevent unbounded growth."""
+        terminal = [
+            oid
+            for oid, o in self.order_manager.orders.items()
+            if o.status in ("filled", "cancelled", "rejected")
+        ]
+        if len(terminal) <= max_closed:
+            return
+        for oid in terminal[:-max_closed]:
+            self.order_manager.remove_order(oid)
+
     async def manage_position(self, position_symbol: str) -> Dict[str, Any]:
+        """Manage an existing position (check stops, etc.) under position lock."""
+        async with self._position_lock:
+            return await self._manage_position_impl(position_symbol)
+
+    async def _manage_position_impl(self, position_symbol: str) -> Dict[str, Any]:
         """
         Manage an existing position (check stops, etc.).
 
@@ -2116,24 +2215,28 @@ class ExecutionEngine:
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 - trail_pct)
                 if new_trail_stop > (position.get("stop_loss") or 0):
-                    position["stop_loss"] = new_trail_stop
-                    logger.info(
-                        "trailing_stop_updated",
-                        symbol=position_symbol,
-                        new_stop=new_trail_stop,
-                    )
+                    await self._update_position_stop_loss(position_symbol, new_trail_stop, position)
+                    if position.get("exchange_bracket_sl_tp") and not position.get(
+                        "bracket_api_degraded"
+                    ):
+                        asyncio.create_task(
+                            self._update_bracket_stop_only(position_symbol, new_trail_stop)
+                        )
         elif past_min_hold and position["side"] == "short" and current_price < entry_price:
             profit_pct = (entry_price - current_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 + trail_pct)
                 current_sl = position.get("stop_loss")
                 if current_sl is None or new_trail_stop < current_sl:
-                    position["stop_loss"] = new_trail_stop
-                    logger.info(
-                        "trailing_stop_updated",
-                        symbol=position_symbol,
-                        new_stop=new_trail_stop,
+                    await self._update_position_stop_loss(
+                        position_symbol, new_trail_stop, position
                     )
+                    if position.get("exchange_bracket_sl_tp") and not position.get(
+                        "bracket_api_degraded"
+                    ):
+                        asyncio.create_task(
+                            self._update_bracket_stop_only(position_symbol, new_trail_stop)
+                        )
 
         stop_loss = position.get("stop_loss")
         take_profit = position.get("take_profit")
@@ -2144,7 +2247,9 @@ class ExecutionEngine:
             )
             if should_stop:
                 sl_reason = "stop_loss_hit"
-                close_result = await self.close_position(position_symbol, exit_reason=sl_reason)
+                close_result = await self._close_position_impl(
+                    position_symbol, exit_reason=sl_reason
+                )
                 if close_result.success:
                     actions_taken.append(
                         {
@@ -2164,7 +2269,7 @@ class ExecutionEngine:
                 position["side"] == "short" and current_price <= take_profit
             )
             if should_tp:
-                close_result = await self.close_position(
+                close_result = await self._close_position_impl(
                     position_symbol, exit_reason="take_profit_hit"
                 )
                 if close_result.success:

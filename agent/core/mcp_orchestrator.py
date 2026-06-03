@@ -810,7 +810,7 @@ class MCPOrchestrator:
         final_long = False
         final_short = False
         reject_tail = "below_threshold"
-        eps_eff = float(eps) + float(self._v43_gate_state.near_threshold_epsilon_bump or 0.0)
+        eps_eff = float(eps) + float(self._v43_gate_state.effective_epsilon_bump())
 
         async with self._v43_gate_state_lock:
             self._v43_gate_state.note_regime(regime)
@@ -1490,18 +1490,19 @@ class MCPOrchestrator:
         """Extract trading decision from reasoning chain conclusion."""
         conclusion = reasoning_chain.conclusion.lower()
 
+        default_size = float(getattr(settings, "max_position_size", 0.1) or 0.1)
         if "strong_buy" in conclusion:
             signal = "STRONG_BUY"
-            position_size = 0.1  # 10% of portfolio
+            position_size = default_size
         elif "buy" in conclusion:
             signal = "BUY"
-            position_size = 0.05  # 5% of portfolio
+            position_size = max(0.01, default_size * 0.5)
         elif "strong_sell" in conclusion:
             signal = "STRONG_SELL"
-            position_size = 0.1  # 10% of portfolio
+            position_size = default_size
         elif "sell" in conclusion:
             signal = "SELL"
-            position_size = 0.05  # 5% of portfolio
+            position_size = max(0.01, default_size * 0.5)
         else:
             signal = "HOLD"
             position_size = 0.0

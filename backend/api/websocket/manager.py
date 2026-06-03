@@ -516,73 +516,87 @@ class WebSocketManager:
             await self.disconnect(websocket)
     
     async def _redis_listener(self):
-        """Background task to listen for Redis pub/sub messages."""
-        if not self._redis_subscriber:
-            return
-        
-        try:
-            # Create pubsub object
-            pubsub = self._redis_subscriber.pubsub()
-            await pubsub.subscribe(self._redis_channel)
-            
-            logger.info(
-                "websocket_redis_listener_started",
-                channel=self._redis_channel
-            )
-            
-            while True:
+        """Background task to listen for Redis pub/sub messages with reconnect."""
+        backoff_seconds = 1.0
+        pubsub = None
+
+        while True:
+            try:
+                if self._redis_subscriber is None:
+                    self._redis_subscriber = await aioredis.from_url(
+                        settings.redis_url,
+                        encoding="utf-8",
+                        decode_responses=True,
+                        socket_connect_timeout=3,
+                    )
+                    await self._redis_subscriber.ping()
+
+                if pubsub is None:
+                    pubsub = self._redis_subscriber.pubsub()
+                    await pubsub.subscribe(self._redis_channel)
+                    logger.info(
+                        "websocket_redis_listener_started",
+                        channel=self._redis_channel,
+                    )
+                    backoff_seconds = 1.0
+
                 try:
-                    # Wait for message with timeout
                     message = await asyncio.wait_for(
                         pubsub.get_message(ignore_subscribe_messages=True),
-                        timeout=1.0
+                        timeout=1.0,
                     )
-                    
-                    if message and message.get("type") == "message":
-                        try:
-                            data = json.loads(message.get("data", "{}"))
-                            instance_id = data.get("instance_id")
-                            channel = data.get("channel")
-                            message_data = data.get("message", {})
-                            
-                            # Skip messages from this instance (already broadcast locally)
-                            if instance_id != self._instance_id:
-                                # Broadcast to local connections
-                                await self._broadcast_local(message_data, channel)
-                        except (json.JSONDecodeError, KeyError) as e:
-                            logger.warning(
-                                "websocket_redis_message_decode_error",
-                                error=str(e)
-                            )
-                    
                 except asyncio.TimeoutError:
-                    # Timeout is expected, continue listening
                     continue
-                except Exception as e:
-                    logger.error(
-                        "websocket_redis_listener_error",
-                        error=str(e),
-                        exc_info=True
-                    )
-                    # Wait before retrying
-                    await asyncio.sleep(1)
-                    
-        except asyncio.CancelledError:
-            logger.info("websocket_redis_listener_cancelled")
-            if self._redis_subscriber:
-                try:
-                    pubsub = self._redis_subscriber.pubsub()
-                    await pubsub.unsubscribe(self._redis_channel)
-                    await pubsub.close()
-                except Exception:
-                    pass
-            raise
-        except Exception as e:
-            logger.error(
-                "websocket_redis_listener_fatal_error",
-                error=str(e),
-                exc_info=True
-            )
+
+                if message and message.get("type") == "message":
+                    try:
+                        data = json.loads(message.get("data", "{}"))
+                        instance_id = data.get("instance_id")
+                        channel = data.get("channel")
+                        message_data = data.get("message", {})
+                        if instance_id != self._instance_id:
+                            await self._broadcast_local(message_data, channel)
+                    except (json.JSONDecodeError, KeyError) as e:
+                        logger.warning(
+                            "websocket_redis_message_decode_error",
+                            error=str(e),
+                        )
+
+            except asyncio.CancelledError:
+                logger.info("websocket_redis_listener_cancelled")
+                if pubsub is not None:
+                    try:
+                        await pubsub.unsubscribe(self._redis_channel)
+                        await pubsub.close()
+                    except Exception:
+                        pass
+                if self._redis_subscriber is not None:
+                    try:
+                        await self._redis_subscriber.close()
+                    except Exception:
+                        pass
+                raise
+            except Exception as e:
+                logger.error(
+                    "websocket_redis_listener_error",
+                    error=str(e),
+                    exc_info=True,
+                )
+                if pubsub is not None:
+                    try:
+                        await pubsub.unsubscribe(self._redis_channel)
+                        await pubsub.close()
+                    except Exception:
+                        pass
+                    pubsub = None
+                if self._redis_subscriber is not None:
+                    try:
+                        await self._redis_subscriber.close()
+                    except Exception:
+                        pass
+                    self._redis_subscriber = None
+                await asyncio.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, 30.0)
     
     async def handle_command(self, websocket: WebSocket, command_data: Dict[str, Any]) -> None:
         """Handle WebSocket command requests from frontend clients.

@@ -130,12 +130,45 @@ def fetch_historical_candles(
         return df
     df["datetime"] = pd.to_datetime(df["time"], unit="s", utc=True)
     df = df.sort_values("datetime").reset_index(drop=True)
+    _validate_ohlcv_dataframe(df, resolution, symbol)
 
     if dst_path is not None:
         dst_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_parquet(dst_path)
 
     return df
+
+
+def _validate_ohlcv_dataframe(df: pd.DataFrame, resolution: str, symbol: str) -> None:
+    """Log warnings for gaps, OHLCV sanity issues, and incomplete history."""
+    if df.empty or "time" not in df.columns:
+        return
+    period = RESOLUTION_SECONDS.get(resolution)
+    if not period:
+        return
+    times = df["time"].astype(int).tolist()
+    if len(times) >= 2:
+        gaps = 0
+        for i in range(1, len(times)):
+            delta = times[i] - times[i - 1]
+            if delta > period * 1.5:
+                gaps += 1
+        completeness = 1.0 - (gaps / max(1, len(times) - 1))
+        if completeness < 0.95:
+            print(
+                f"[WARN] {symbol} {resolution} candle completeness {completeness:.1%} "
+                f"({gaps} gaps detected)"
+            )
+    bad_rows = 0
+    for _, row in df.iterrows():
+        try:
+            o, h, l, c = float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])
+            if h < l or min(o, h, l, c) <= 0:
+                bad_rows += 1
+        except (TypeError, ValueError, KeyError):
+            bad_rows += 1
+    if bad_rows:
+        print(f"[WARN] {symbol} {resolution}: {bad_rows} OHLCV sanity violations")
 
 
 async def fetch_historical_candles_async(
@@ -195,6 +228,7 @@ async def fetch_historical_candles_async(
         return df
     df["datetime"] = pd.to_datetime(df["time"], unit="s", utc=True)
     df = df.sort_values("datetime").reset_index(drop=True)
+    _validate_ohlcv_dataframe(df, resolution, symbol)
 
     if dst_path is not None:
         dst_path.parent.mkdir(parents=True, exist_ok=True)

@@ -190,3 +190,34 @@ async def sync_open_orders_with_exchange(
         except Exception:
             pass
     return updated
+
+
+def _position_stops_path() -> Path:
+    root = Path(getattr(settings, "data_dir", "data") or "data")
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "agent_position_stops.json"
+
+
+async def persist_position_stop_loss(symbol: str, stop_loss: float) -> None:
+    """Persist trailing stop level for crash recovery."""
+    if not bool(getattr(settings, "order_persistence_enabled", True)):
+        return
+    path = _position_stops_path()
+    data: Dict[str, Any] = {}
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    stops = data.get("stops") if isinstance(data.get("stops"), dict) else {}
+    stops[str(symbol).upper()] = {
+        "stop_loss": float(stop_loss),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    data["stops"] = stops
+    try:
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("position_stop_persistence_write_failed", symbol=symbol, error=str(exc))

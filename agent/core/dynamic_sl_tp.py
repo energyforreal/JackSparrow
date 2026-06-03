@@ -45,10 +45,17 @@ def compute_sl_tp_levels(
     sl_pct = float(getattr(settings, "stop_loss_percentage", 0.01) or 0.01)
     tp_pct = float(getattr(settings, "take_profit_percentage", 0.02) or 0.02)
 
-    # Mild regime tweak: widen stops in high-vol labels when configured distances are tight.
-    if regime and str(regime).lower() in ("high_vol", "volatile", "breakout"):
-        sl_pct = max(sl_pct, sl_pct * 1.1)
-        tp_pct = max(tp_pct, tp_pct * 1.05)
+    regime_sl_tp_multipliers = {
+        "crisis": (1.5, 1.2),
+        "trending": (0.9, 1.3),
+        "ranging": (0.85, 0.85),
+        "neutral": (1.0, 1.0),
+    }
+    sl_mult, tp_mult = regime_sl_tp_multipliers.get(
+        str(regime or "neutral").lower(), (1.0, 1.0)
+    )
+    sl_pct = sl_pct * sl_mult
+    tp_pct = tp_pct * tp_mult
 
     stop_loss, take_profit = compute_stop_take_prices(
         entry,
@@ -70,6 +77,28 @@ def compute_sl_tp_levels(
                 trail_amount = atr_f * float(getattr(settings, "atr_trailing_mult", 1.0) or 1.0)
         except (TypeError, ValueError):
             trail_amount = None
+
+    if str(regime or "").lower() == "trending" and atr_14 is not None and entry > 0:
+        try:
+            atr_f = float(atr_14)
+            atr_tp_mult = float(getattr(settings, "atr_tp_distance_mult", 1.5) or 1.5)
+            side_u = str(side or "BUY").strip().upper()
+            if side_u in ("LONG",):
+                side_u = "BUY"
+            if side_u in ("SHORT",):
+                side_u = "SELL"
+            extended_tp = (
+                entry + (atr_f * atr_tp_mult * 2.0)
+                if side_u == "BUY"
+                else entry - (atr_f * atr_tp_mult * 2.0)
+            )
+            if take_profit is not None:
+                if side_u == "BUY" and extended_tp > take_profit:
+                    take_profit = extended_tp
+                elif side_u == "SELL" and extended_tp < take_profit:
+                    take_profit = extended_tp
+        except (TypeError, ValueError):
+            pass
 
     return SlTpLevels(stop_loss, take_profit, trail_amount)
 

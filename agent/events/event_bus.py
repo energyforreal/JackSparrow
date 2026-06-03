@@ -38,7 +38,7 @@ class EventBus:
         self._consuming_task: Optional[asyncio.Task] = None
         self._dead_letter_stream = f"{stream_name}:dlq"
         self._max_retries = 3
-        self._processing_lock: Dict[str, asyncio.Lock] = {}
+        self._processing_lock: asyncio.Lock = asyncio.Lock()
     
     async def initialize(self):
         """Initialize event bus and create consumer group."""
@@ -236,7 +236,9 @@ class EventBus:
                 self.stream_name,
                 {
                     "event": event_json_str
-                }
+                },
+                maxlen=10_000,
+                approximate=True,
             )
             
             logger.debug(
@@ -409,7 +411,9 @@ class EventBus:
                     "failed_at": datetime.now(timezone.utc).isoformat() + "Z",
                     "reason": reason,
                     "event_data": event_data_str[:1000]  # Limit size
-                }
+                },
+                maxlen=1_000,
+                approximate=True,
             )
             logger.warning(
                 "event_moved_to_dlq_validation",
@@ -721,7 +725,9 @@ class EventBus:
                             "retry_count": str(new_retry_count),
                             "original_message_id": message_id,
                             "retry_at": datetime.now(timezone.utc).isoformat()
-                        }
+                        },
+                        maxlen=10_000,
+                        approximate=True,
                     )
                     
                     # Acknowledge original message (it's been re-queued)
@@ -753,7 +759,9 @@ class EventBus:
                         "retry_count": str(current_retry_count),
                         "failed_at": datetime.now(timezone.utc).isoformat(),
                         "event": json.dumps(event.dict(), default=str) if event else "{}"
-                    }
+                    },
+                    maxlen=1_000,
+                    approximate=True,
                 )
                 
                 # Acknowledge original message

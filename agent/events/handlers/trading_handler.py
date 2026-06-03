@@ -7,6 +7,7 @@ and publishing RiskApprovedEvent when trades are approved.
 
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
+import asyncio
 import structlog
 import time
 
@@ -438,8 +439,12 @@ class TradingEventHandler:
                             signal=signal,
                             event_id=event.event_id,
                         )
-                        await self.execution_module.close_position(symbol, exit_reason="signal_reversal")
-                        return
+                        close_result = await self.execution_module.close_position(
+                            symbol, exit_reason="signal_reversal"
+                        )
+                        if not close_result.success:
+                            return
+                        # Fall through to size and enter on the new side without waiting for next bar.
                     elif (pos_side == "long" and signal in ("BUY", "STRONG_BUY")) or (
                         pos_side == "short" and signal in ("SELL", "STRONG_SELL")
                     ):
@@ -477,13 +482,14 @@ class TradingEventHandler:
                 elif rec_threshold is not None:
                     # Choose a conservative midpoint between global threshold and metadata recommendation.
                     eff_min_conf = max(0.0, min(1.0, (eff_min_conf + rec_threshold) / 2.0))
-                if confidence < eff_min_conf:
+                if raw_confidence < eff_min_conf:
                     self._log_entry_rejected(
                         "low_confidence_reject",
                         symbol=symbol,
                         signal=signal,
                         event_id=event.event_id,
-                        confidence=confidence,
+                        confidence=raw_confidence,
+                        calibrated_confidence=confidence,
                         threshold=eff_min_conf,
                         metadata_recommended_threshold=rec_threshold,
                         config_min_confidence_threshold=settings.min_confidence_threshold,
@@ -580,7 +586,7 @@ class TradingEventHandler:
             conf_f = max(0.0, min(1.0, conf_f))
 
             usdinr_rate = await self._get_usdinr_rate(state)
-            available_cash_inr = self._get_available_cash_inr(state)
+            available_cash_inr = await self._get_available_cash_inr(state, symbol)
 
             specs = await get_contract_specs(symbol)
             cv = float(specs.contract_value_btc)
@@ -600,7 +606,19 @@ class TradingEventHandler:
             )
 
             if getattr(settings, "portfolio_fraction_lot_sizing", True):
-                entry_portfolio_frac = max(0.01, min(1.0, entry_portfolio_frac))
+                base_frac = max(0.01, min(1.0, entry_portfolio_frac))
+                trade_score_raw = payload.get("trade_score")
+                try:
+                    trade_score_normalized = min(
+                        1.0, float(trade_score_raw if trade_score_raw is not None else 70.0) / 100.0
+                    )
+                except (TypeError, ValueError):
+                    trade_score_normalized = 0.7
+                conf_weight = max(0.5, min(1.0, conf_f))
+                entry_portfolio_frac = max(
+                    0.05,
+                    min(1.0, base_frac * conf_weight * (0.7 + 0.3 * trade_score_normalized)),
+                )
                 margin_inr = available_cash_inr * entry_portfolio_frac
                 usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
                 entry_lots = price_to_lots(
@@ -1222,8 +1240,30 @@ class TradingEventHandler:
             logger.debug("usdinr_cache_lookup_failed", error=str(e))
         return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
 
-    def _get_available_cash_inr(self, state: Optional[Any]) -> float:
-        """Best-effort INR cash extraction from runtime state."""
+    async def _get_available_cash_inr(self, state: Optional[Any], symbol: str) -> float:
+        """INR cash from live exchange wallet when available, else agent state."""
+        if self.execution_module:
+            try:
+                snapshot = await asyncio.wait_for(
+                    self.execution_module.get_exchange_portfolio_snapshot(symbol=symbol),
+                    timeout=5.0,
+                )
+                live_inr = self._extract_available_inr_from_snapshot(snapshot)
+                if live_inr > 0:
+                    return live_inr
+            except Exception as exc:
+                logger.debug(
+                    "live_wallet_balance_unavailable",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+        if state is not None and hasattr(state, "cash_balance"):
+            try:
+                val = float(state.cash_balance)
+                if val > 0:
+                    return val
+            except Exception as e:
+                logger.debug("cash_balance_parse_failed", error=str(e))
         if state is not None and hasattr(state, "portfolio_value"):
             try:
                 val = float(state.portfolio_value)
@@ -1232,6 +1272,40 @@ class TradingEventHandler:
             except Exception as e:
                 logger.debug("portfolio_value_parse_failed", error=str(e))
         return float(getattr(settings, "initial_balance", 20000.0) or 20000.0)
+
+    @staticmethod
+    def _extract_available_inr_from_snapshot(snapshot: Dict[str, Any]) -> float:
+        """Parse wallet balances from exchange portfolio snapshot into INR."""
+        wallet = snapshot.get("wallet_balances") if isinstance(snapshot, dict) else None
+        if not isinstance(wallet, dict):
+            return 0.0
+        rows = wallet.get("result")
+        if isinstance(rows, dict):
+            rows = rows.get("balances") or [rows]
+        if not isinstance(rows, list):
+            return 0.0
+        total_usd = 0.0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            asset = str(row.get("asset_symbol") or row.get("currency") or "").upper()
+            raw_bal = row.get("available_balance")
+            if raw_bal is None:
+                raw_bal = row.get("balance")
+            try:
+                val = float(raw_bal)
+            except (TypeError, ValueError):
+                continue
+            if val <= 0:
+                continue
+            if asset == "INR":
+                return val
+            if asset in ("USD", "USDT", "USDC"):
+                total_usd += val
+        if total_usd > 0:
+            rate = float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+            return total_usd * rate
+        return 0.0
 
     async def register_handlers(self):
         """Register event handlers with event bus."""

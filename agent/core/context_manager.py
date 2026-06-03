@@ -247,6 +247,7 @@ class ContextManager:
         self._auto_save_task: Optional[asyncio.Task] = None
         self._event_hooks_registered = False
         self._initialized = False
+        self._latest_features_by_symbol: Dict[str, Dict[str, Any]] = {}
 
         # Ensure directories exist
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -429,6 +430,15 @@ class ContextManager:
     def get_state(self) -> Optional[AgentState]:
         """Get current agent state."""
         return self.current_state
+
+    def set_latest_features(self, symbol: str, features: Dict[str, Any]) -> None:
+        """Cache latest feature vector for open-position ATR/regime refresh."""
+        if symbol and isinstance(features, dict):
+            self._latest_features_by_symbol[str(symbol)] = dict(features)
+
+    def get_latest_features(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Return cached features for symbol, if any."""
+        return self._latest_features_by_symbol.get(str(symbol))
 
     async def update_state(self, updates: Dict[str, Any]) -> bool:
         """

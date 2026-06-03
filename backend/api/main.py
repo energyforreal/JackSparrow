@@ -50,6 +50,58 @@ async def _initialize_database_schema() -> None:
         await connection.run_sync(Base.metadata.create_all)
 
 
+async def _verify_alembic_at_head() -> None:
+    """Ensure database revision matches Alembic head (fatal on mismatch)."""
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    repo_root = Path(__file__).resolve().parents[2]
+    alembic_cfg = Config(str(repo_root / "alembic.ini"))
+    script = ScriptDirectory.from_config(alembic_cfg)
+    head_rev = script.get_current_head()
+    if not head_rev:
+        raise RuntimeError("Alembic has no head revision configured")
+
+    async with engine.begin() as connection:
+        def _current_rev(sync_conn):
+            ctx = MigrationContext.configure(sync_conn)
+            return ctx.get_current_revision()
+
+        current_rev = await connection.run_sync(_current_rev)
+
+        if current_rev is None:
+            await connection.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS alembic_version "
+                    "(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"
+                )
+            )
+            await connection.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
+                {"rev": head_rev},
+            )
+            current_rev = head_rev
+            logger.info(
+                "backend_alembic_version_bootstrapped",
+                service="backend",
+                revision=head_rev,
+            )
+
+    if current_rev != head_rev:
+        raise RuntimeError(
+            f"Database schema drift: current={current_rev!r} expected head={head_rev!r}. "
+            "Run: alembic -c alembic.ini upgrade head"
+        )
+    logger.info(
+        "backend_alembic_head_verified",
+        service="backend",
+        revision=head_rev,
+    )
+
+
 async def _migrate_database_schema() -> None:
     """Apply lightweight schema migrations for long-lived database state."""
     async with engine.begin() as connection:
@@ -101,14 +153,14 @@ async def _migrate_database_schema() -> None:
             )
             logger.info("backend_database_schema_migrated", service="backend")
         except Exception as e:
-            logger.warning(
+            logger.error(
                 "backend_database_schema_migration_failed",
                 service="backend",
                 error=str(e),
                 error_type=type(e).__name__,
                 exc_info=True,
-                message="Database migration check failed; startup may still continue"
             )
+            raise RuntimeError("Database schema migration failed") from e
 
 
 async def _reset_paper_trade_state() -> None:
@@ -169,6 +221,7 @@ async def lifespan(app: FastAPI):
         try:
             await _initialize_database_schema()
             await _migrate_database_schema()
+            await _verify_alembic_at_head()
             logger.info(
                 "backend_database_schema_created",
                 service="backend",

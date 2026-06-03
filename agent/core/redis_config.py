@@ -123,6 +123,7 @@ async def get_redis() -> Optional[Redis]:
             except Exception:
                 pass
             _redis_client = None
+            _redis_pool = None
             _reconnection_attempts = 0
     
     # Create new connection or reconnect

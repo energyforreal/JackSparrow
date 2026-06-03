@@ -580,6 +580,11 @@ class IntelligentAgent:
                 if not monitor_symbols:
                     continue
 
+                try:
+                    execution_module._prune_closed_orders()
+                except Exception:
+                    pass
+
                 for symbol in monitor_symbols:
                     if not self.running:
                         break
@@ -616,6 +621,21 @@ class IntelligentAgent:
                             execution_module.position_manager.update_position(
                                 symbol, current_price
                             )
+                            position = execution_module.position_manager.get_position(symbol)
+                            if position and self.market_data_service:
+                                cached_features = self.market_data_service.get_cached_features(
+                                    symbol
+                                )
+                                if cached_features:
+                                    fresh_atr = cached_features.get("atr_14")
+                                    fresh_regime = cached_features.get("regime")
+                                    if fresh_atr is not None:
+                                        try:
+                                            position["atr_14"] = float(fresh_atr)
+                                        except (TypeError, ValueError):
+                                            pass
+                                    if fresh_regime is not None:
+                                        position["regime"] = str(fresh_regime)
                             last_ws = float(
                                 execution_module._last_ws_sltp_check_ts.get(symbol, 0.0)
                             )
@@ -931,7 +951,7 @@ class IntelligentAgent:
                     if result:
                         _, raw = result
                         command = json.loads(raw)
-                        await self._process_command(command)
+                        await self._process_command(command, redis_client=redis_client)
                 else:
                     await asyncio.sleep(redis_backoff_seconds)
                     redis_backoff_seconds = min(redis_backoff_seconds * 2, 30.0)
@@ -950,7 +970,7 @@ class IntelligentAgent:
                 await asyncio.sleep(min(redis_backoff_seconds, 30.0))
                 redis_backoff_seconds = min(redis_backoff_seconds * 2, 30.0)
     
-    async def _process_command(self, command):
+    async def _process_command(self, command, redis_client=None):
         """Process command from backend."""
         request_id = command.get("request_id") or str(uuid.uuid4())
         cmd = command.get("command")
@@ -960,37 +980,44 @@ class IntelligentAgent:
             if cmd == "get_status":
                 result = await self._handle_get_status()
                 payload = result.get("data", result)
-                await self._send_response(request_id, payload)
+                await self._send_response(request_id, payload, redis_client=redis_client)
             elif cmd == "predict":
                 result = await self._handle_predict(params)
-                await self._send_response(request_id, result)
+                await self._send_response(request_id, result, redis_client=redis_client)
             elif cmd == "execute_trade":
                 result = await self._handle_execute_trade(params)
-                await self._send_response(request_id, result)
+                await self._send_response(request_id, result, redis_client=redis_client)
             elif cmd == "control":
                 result = await self._handle_control(params)
-                await self._send_response(request_id, result)
+                await self._send_response(request_id, result, redis_client=redis_client)
             elif cmd == "change_margin":
                 symbol = str(params.get("symbol") or self.default_symbol)
                 margin_delta = float(params.get("margin_delta", 0.0) or 0.0)
                 result = await execution_module.change_position_margin(symbol, margin_delta)
-                await self._send_response(request_id, result)
+                await self._send_response(request_id, result, redis_client=redis_client)
             elif cmd == "close_all_positions":
                 result = await execution_module.close_all_positions(exit_reason="emergency_exit")
-                await self._send_response(request_id, result)
+                await self._send_response(request_id, result, redis_client=redis_client)
             elif cmd == "get_exchange_portfolio":
                 result = await self._handle_get_exchange_portfolio(params)
-                await self._send_response(request_id, result.get("data", result))
+                await self._send_response(
+                    request_id, result.get("data", result), redis_client=redis_client
+                )
             elif cmd == "get_exchange_fills":
                 result = await self._handle_get_exchange_fills(params)
-                await self._send_response(request_id, result.get("data", result))
+                await self._send_response(
+                    request_id, result.get("data", result), redis_client=redis_client
+                )
             elif cmd == "register_models":
                 result = await self._handle_register_models(params)
-                await self._send_response(request_id, result.get("data", result))
+                await self._send_response(
+                    request_id, result.get("data", result), redis_client=redis_client
+                )
             else:
                 await self._send_response(
                     request_id,
                     {"success": True, "message": f"Command '{cmd}' processed"},
+                    redis_client=redis_client,
                 )
         except Exception as e:
             logger.error(
@@ -1001,7 +1028,9 @@ class IntelligentAgent:
                 exc_info=True,
                 service="agent",
             )
-            await self._send_response(request_id, {"success": False, "error": str(e)})
+            await self._send_response(
+                request_id, {"success": False, "error": str(e)}, redis_client=redis_client
+            )
     
     async def _handle_predict(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle prediction request."""
@@ -1574,6 +1603,8 @@ class IntelligentAgent:
         last_candle_time = None
         last_stream_restart_attempt = 0.0
         last_staleness_trigger_at: datetime | None = None
+        consecutive_stale_with_positions = 0
+        start_mode_warned = False
         decisions_last_hour_times = deque()
         candles_last_hour_times = deque()
         metrics_window_seconds = 3600  # 1 hour rolling window
@@ -1687,16 +1718,47 @@ class IntelligentAgent:
                         and hasattr(self.market_data_service, "is_ticker_stale_for_symbol")
                         and self.market_data_service.is_ticker_stale_for_symbol(agent_symbol)
                     ):
+                        consecutive_stale_with_positions += 1
                         stale_s = self.market_data_service.seconds_since_last_good_tick(agent_symbol)
                         logger.error(
                             "market_data_stale_with_open_positions",
                             symbol=agent_symbol,
                             open_positions=open_count,
                             stale_seconds=stale_s,
+                            consecutive_stale_checks=consecutive_stale_with_positions,
                             threshold_seconds=getattr(
                                 settings, "market_data_stale_rest_poll_seconds", 15
                             ),
                         )
+                        if consecutive_stale_with_positions >= 3:
+                            from agent.core.trading_controls import activate_kill_switch
+
+                            activate_kill_switch(
+                                "market_data_stale_with_open_positions",
+                                persist_context=True,
+                            )
+                            await execution_module.close_all_positions(
+                                exit_reason="emergency_stale_data"
+                            )
+                            consecutive_stale_with_positions = 0
+                    else:
+                        consecutive_stale_with_positions = 0
+
+                    if (
+                        self.start_mode != "MONITORING"
+                        and not start_mode_warned
+                        and not streaming_running
+                    ):
+                        logger.critical(
+                            "agent_start_mode_no_market_stream",
+                            start_mode=self.start_mode,
+                            streaming_running=streaming_running,
+                            message=(
+                                "Non-MONITORING start mode with no active market data stream; "
+                                "agent will not receive candle events"
+                            ),
+                        )
+                        start_mode_warned = True
 
                     # Log warning if no decisions generated in last 30 minutes
                     if time_since_last_decision and time_since_last_decision > 1800:
@@ -1802,7 +1864,9 @@ class IntelligentAgent:
                             elapsed_since_trigger = (
                                 datetime.now(timezone.utc) - last_staleness_trigger_at
                             ).total_seconds()
-                            staleness_cooldown_ok = elapsed_since_trigger >= stale_seconds
+                            staleness_cooldown_ok = elapsed_since_trigger >= max(
+                                stale_seconds * 2, 600
+                            )
                         if (
                             time_since_last_decision
                             and time_since_last_decision > stale_seconds
@@ -1876,7 +1940,13 @@ class IntelligentAgent:
         finally:
             event_bus.unsubscribe(EventType.DECISION_READY, track_decision)
             event_bus.unsubscribe(EventType.CANDLE_CLOSED, track_candle)
-    async def _send_response(self, request_id: str, payload: Dict[str, Any], ttl: int = 120):
+    async def _send_response(
+        self,
+        request_id: str,
+        payload: Dict[str, Any],
+        redis_client=None,
+        ttl: int = 300,
+    ):
         """Send response back to backend via Redis key-value store.
         
         Backend polls for responses using get_response() which reads from response:{request_id} key.
@@ -1884,8 +1954,10 @@ class IntelligentAgent:
         """
         response = dict(payload)
         response["request_id"] = request_id
-        logger.info("agent_getting_redis_connection", request_id=request_id)
-        redis = await get_redis()
+        redis = redis_client
+        if redis is None:
+            logger.info("agent_getting_redis_connection", request_id=request_id)
+            redis = await get_redis()
         logger.info("agent_redis_connection_result", request_id=request_id, redis_available=redis is not None)
 
         if redis is None:

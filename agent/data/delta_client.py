@@ -170,6 +170,15 @@ class DeltaExchangeClient:
         self._validate_time_sync()
         # Delta signature timestamps are Unix seconds; offset = server - local (refreshed on auth errors).
         self._auth_timestamp_offset_seconds: int = 0
+        self._http_client = httpx.AsyncClient(
+            timeout=self.timeout,
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+
+    async def close(self) -> None:
+        """Close the shared HTTP client."""
+        await self._http_client.aclose()
 
     @staticmethod
     def _is_public_market_endpoint(endpoint: str) -> bool:
@@ -266,29 +275,28 @@ class DeltaExchangeClient:
     async def _refresh_auth_time_offset_unauthenticated(self) -> None:
         """Align local signature timestamp offset using a public time endpoint."""
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                for path in ("/v2/public/time", "/v2/time"):
-                    try:
-                        r = await client.get(f"{self.base_url}{path}")
-                        if r.status_code != 200:
-                            continue
-                        data = r.json()
-                        ts = self._parse_server_unix_seconds(data)
-                        if ts is None:
-                            continue
-                        local = int(time.time())
-                        self._auth_timestamp_offset_seconds = int(ts) - local
-                        logger.info(
-                            "delta_exchange_auth_time_offset_refreshed",
-                            server_ts=ts,
-                            local_ts=local,
-                            offset_seconds=self._auth_timestamp_offset_seconds,
-                            path=path,
-                            component="delta_client",
-                        )
-                        return
-                    except Exception:
+            for path in ("/v2/public/time", "/v2/time"):
+                try:
+                    r = await self._http_client.get(f"{self.base_url}{path}", timeout=10.0)
+                    if r.status_code != 200:
                         continue
+                    data = r.json()
+                    ts = self._parse_server_unix_seconds(data)
+                    if ts is None:
+                        continue
+                    local = int(time.time())
+                    self._auth_timestamp_offset_seconds = int(ts) - local
+                    logger.info(
+                        "delta_exchange_auth_time_offset_refreshed",
+                        server_ts=ts,
+                        local_ts=local,
+                        offset_seconds=self._auth_timestamp_offset_seconds,
+                        path=path,
+                        component="delta_client",
+                    )
+                    return
+                except Exception:
+                    continue
         except Exception as e:
             logger.debug(
                 "delta_exchange_time_offset_refresh_failed",
@@ -342,10 +350,7 @@ class DeltaExchangeClient:
         query_string = self._build_query_string(params) if params else ""
         await _PUBLIC_RATE_LIMITER.acquire()
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout, follow_redirects=True
-            ) as client:
-                response = await client.get(f"{url}{query_string}")
+            response = await self._http_client.get(f"{url}{query_string}")
         except httpx.HTTPError as exc:
             raise DeltaExchangeError(f"HTTP client error: {exc}") from exc
 
@@ -382,185 +387,178 @@ class DeltaExchangeClient:
         
         async def _request(attempt: int = 0):
             await _PRIVATE_RATE_LIMITER.acquire()
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                # Ensure endpoint doesn't contain query parameters
-                # Query params should be passed separately via params argument
-                clean_endpoint = endpoint.split('?')[0]
-                
-                # Generate fresh headers with new timestamp for each attempt
-                # This ensures timestamp is as current as possible
-                headers = self._build_headers(method, clean_endpoint, params, data)
-                
-                url = f"{self.base_url}{clean_endpoint}"
-                
-                try:
-                    if method == "GET":
-                        # Build URL with an explicit query-string so the request encoding
-                        # matches exactly what we used for signature generation.
-                        query_string = self._build_query_string(params) if params else ""
-                        response = await client.get(f"{url}{query_string}", headers=headers)
-                    elif method in ("POST", "DELETE"):
-                        # Body bytes must match the compact JSON used for signing.
-                        body_str = (
-                            self._serialize_payload(data, method=method.upper())
-                            if data
-                            else ""
+            client = self._http_client
+            # Ensure endpoint doesn't contain query parameters
+            # Query params should be passed separately via params argument
+            clean_endpoint = endpoint.split('?')[0]
+
+            # Generate fresh headers with new timestamp for each attempt
+            # This ensures timestamp is as current as possible
+            headers = self._build_headers(method, clean_endpoint, params, data)
+
+            url = f"{self.base_url}{clean_endpoint}"
+
+            try:
+                if method == "GET":
+                    query_string = self._build_query_string(params) if params else ""
+                    response = await client.get(f"{url}{query_string}", headers=headers)
+                elif method in ("POST", "DELETE"):
+                    body_str = (
+                        self._serialize_payload(data, method=method.upper())
+                        if data
+                        else ""
+                    )
+                    body_bytes = body_str.encode("utf-8") if body_str else b""
+                    if method == "POST":
+                        response = await client.post(
+                            url, headers=headers, content=body_bytes
                         )
-                        body_bytes = body_str.encode("utf-8") if body_str else b""
-                        if method == "POST":
-                            response = await client.post(
-                                url, headers=headers, content=body_bytes
-                            )
-                        else:
-                            response = await client.request(
-                                "DELETE", url, headers=headers, content=body_bytes
-                            )
                     else:
-                        raise ValueError(f"Unsupported method: {method}")
-                except httpx.HTTPError as exc:
-                    exc_name = type(exc).__name__
-                    is_timeout = "Timeout" in exc_name or "timed out" in str(exc).lower()
-                    sample_key = f"delta_exchange_http_error:{exc_name}:{clean_endpoint}"
-                    if is_timeout and not self._should_sample_log(sample_key, interval_seconds=60):
-                        # De-duplicate noisy timeout logs.
-                        raise DeltaExchangeError(f"HTTP timeout error: {exc}") from exc
+                        response = await client.request(
+                            "DELETE", url, headers=headers, content=body_bytes
+                        )
+                else:
+                    raise ValueError(f"Unsupported method: {method}")
+            except httpx.HTTPError as exc:
+                exc_name = type(exc).__name__
+                is_timeout = "Timeout" in exc_name or "timed out" in str(exc).lower()
+                sample_key = f"delta_exchange_http_error:{exc_name}:{clean_endpoint}"
+                if is_timeout and not self._should_sample_log(sample_key, interval_seconds=60):
+                    raise DeltaExchangeError(f"HTTP timeout error: {exc}") from exc
 
-                    log_fn = log_warning_with_context if is_timeout else log_error_with_context
-                    log_fn(
-                        "delta_exchange_http_error",
-                        error=exc,
+                log_fn = log_warning_with_context if is_timeout else log_error_with_context
+                log_fn(
+                    "delta_exchange_http_error",
+                    error=exc,
+                    component="delta_client",
+                    method=method,
+                    endpoint=clean_endpoint,
+                    base_url=self.base_url,
+                )
+                raise DeltaExchangeError(f"HTTP client error: {exc}") from exc
+            except Exception as exc:
+                log_error_with_context(
+                    "delta_exchange_request_error",
+                    error=exc,
+                    component="delta_client",
+                    method=method,
+                    endpoint=clean_endpoint
+                )
+                raise DeltaExchangeError(f"Request error: {exc}") from exc
+
+            # Handle authentication errors with retry logic
+            if response.status_code in (401, 403):
+                error_text = response.text
+                auth_class = DeltaExchangeClient._classify_delta_auth_error(error_text)
+                is_expired_signature = "expired_signature" in error_text.lower()
+
+                if (
+                    auth_class in ("expired_signature", "timestamp_skew")
+                    and attempt < max_auth_retries
+                    and not is_expired_signature
+                ):
+                    await self._refresh_auth_time_offset_unauthenticated()
+                    await asyncio.sleep(max(0.05, 1.0 - (time.time() % 1.0)))
+                    logger.info(
+                        "delta_exchange_auth_retry",
+                        attempt=attempt + 1,
+                        max_retries=max_auth_retries,
+                        endpoint=clean_endpoint,
+                        reason="timestamp_skew_offset_refresh",
+                        auth_error_class=auth_class,
+                        component="delta_client",
+                    )
+                    return await _request(attempt + 1)
+
+                if is_expired_signature and attempt < max_auth_retries:
+                    timestamp_used_str = headers.get("timestamp") or ""
+                    try:
+                        timestamp_used = int(timestamp_used_str)
+                    except Exception:
+                        timestamp_used = int(time.time())
+                    next_second = timestamp_used + 1
+                    sleep_for = max(0.01, next_second - time.time())
+                    await asyncio.sleep(sleep_for)
+                    await self._refresh_auth_time_offset_unauthenticated()
+                    logger.info(
+                        "delta_exchange_auth_retry",
+                        attempt=attempt + 1,
+                        max_retries=max_auth_retries,
+                        endpoint=clean_endpoint,
+                        reason="expired_signature",
+                        timestamp_used=timestamp_used,
+                        sleep_seconds=round(sleep_for, 3),
+                        local_time=int(time.time()),
+                        auth_error_class=auth_class,
+                    )
+                    return await _request(attempt + 1)
+
+                sample_key = f"delta_exchange_auth_error:{response.status_code}:{clean_endpoint}"
+                should_log = self._should_sample_log(sample_key, interval_seconds=120)
+                if should_log:
+                    log_warning_with_context(
+                        "delta_exchange_auth_error",
                         component="delta_client",
                         method=method,
                         endpoint=clean_endpoint,
-                        base_url=self.base_url,
-                    )
-                    raise DeltaExchangeError(f"HTTP client error: {exc}") from exc
-                except Exception as exc:
-                    log_error_with_context(
-                        "delta_exchange_request_error",
-                        error=exc,
-                        component="delta_client",
-                        method=method,
-                        endpoint=clean_endpoint
-                    )
-                    raise DeltaExchangeError(f"Request error: {exc}") from exc
-                
-                # Handle authentication errors with retry logic
-                if response.status_code in (401, 403):
-                    error_text = response.text
-                    auth_class = DeltaExchangeClient._classify_delta_auth_error(error_text)
-
-                    # Check if it's an expired_signature error that we can retry
-                    is_expired_signature = "expired_signature" in error_text.lower()
-
-                    if (
-                        auth_class in ("expired_signature", "timestamp_skew")
-                        and attempt < max_auth_retries
-                        and not is_expired_signature
-                    ):
-                        await self._refresh_auth_time_offset_unauthenticated()
-                        await asyncio.sleep(max(0.05, 1.0 - (time.time() % 1.0)))
-                        logger.info(
-                            "delta_exchange_auth_retry",
-                            attempt=attempt + 1,
-                            max_retries=max_auth_retries,
-                            endpoint=clean_endpoint,
-                            reason="timestamp_skew_offset_refresh",
-                            auth_error_class=auth_class,
-                            component="delta_client",
-                        )
-                        return await _request(attempt + 1)
-
-                    if is_expired_signature and attempt < max_auth_retries:
-                        # Important: signatures use whole-second timestamps.
-                        # If we retry within the same second, the signature stays identical
-                        # and won't recover. Wait until at least the next second boundary.
-                        timestamp_used_str = headers.get("timestamp") or ""
-                        try:
-                            timestamp_used = int(timestamp_used_str)
-                        except Exception:
-                            timestamp_used = int(time.time())
-                        next_second = timestamp_used + 1
-                        sleep_for = max(0.01, next_second - time.time())
-                        await asyncio.sleep(sleep_for)
-                        await self._refresh_auth_time_offset_unauthenticated()
-                        logger.info(
-                            "delta_exchange_auth_retry",
-                            attempt=attempt + 1,
-                            max_retries=max_auth_retries,
-                            endpoint=clean_endpoint,
-                            reason="expired_signature",
-                            timestamp_used=timestamp_used,
-                            sleep_seconds=round(sleep_for, 3),
-                            local_time=int(time.time()),
-                            auth_error_class=auth_class,
-                        )
-                        # Retry with fresh timestamp
-                        return await _request(attempt + 1)
-                    
-                    sample_key = f"delta_exchange_auth_error:{response.status_code}:{clean_endpoint}"
-                    should_log = self._should_sample_log(sample_key, interval_seconds=120)
-                    if should_log:
-                        log_warning_with_context(
-                            "delta_exchange_auth_error",
-                            component="delta_client",
-                            method=method,
-                            endpoint=clean_endpoint,
-                            status_code=response.status_code,
-                            error_message=error_text,
-                            attempt=attempt + 1,
-                            timestamp=headers.get("timestamp"),
-                            local_time=int(time.time()),
-                            auth_error_class=auth_class,
-                            auth_timestamp_offset_seconds=self._auth_timestamp_offset_seconds,
-                            message="Authentication failed - check API credentials, scopes, and clock sync",
-                        )
-
-                    if auth_class == "ip_restriction":
-                        client_ip = self._extract_client_ip_from_error(error_text)
-                        self._latch_auth_blocked("ip_restriction", client_ip=client_ip)
-                        ip_hint = client_ip or self._auth_blocked_client_ip or "your host IP"
-                        raise DeltaExchangeError(
-                            f"Delta Exchange API key IP whitelist: add {ip_hint} to the key's "
-                            f"allowed IPs in Delta Exchange settings. Raw: {error_text}"
-                        )
-                    
-                    # Log signature details for debugging (without exposing secret)
-                    logger.debug(
-                        "delta_exchange_auth_debug",
-                        method=method,
-                        endpoint=clean_endpoint,
-                        has_params=params is not None,
-                        has_data=data is not None,
+                        status_code=response.status_code,
+                        error_message=error_text,
+                        attempt=attempt + 1,
                         timestamp=headers.get("timestamp"),
-                        api_key_prefix=self.api_key[:8] + "..." if len(self.api_key) > 8 else "***"
+                        local_time=int(time.time()),
+                        auth_error_class=auth_class,
+                        auth_timestamp_offset_seconds=self._auth_timestamp_offset_seconds,
+                        message="Authentication failed - check API credentials, scopes, and clock sync",
                     )
-                    
+
+                if auth_class == "ip_restriction":
+                    client_ip = self._extract_client_ip_from_error(error_text)
+                    self._latch_auth_blocked("ip_restriction", client_ip=client_ip)
+                    ip_hint = client_ip or self._auth_blocked_client_ip or "your host IP"
                     raise DeltaExchangeError(
-                        f"Delta Exchange authentication error {response.status_code}: {error_text}. "
-                        f"Please verify API credentials and signature format."
+                        f"Delta Exchange API key IP whitelist: add {ip_hint} to the key's "
+                        f"allowed IPs in Delta Exchange settings. Raw: {error_text}"
                     )
-                
-                if response.status_code >= 400:
-                    error_text = response.text
-                    transient_status = response.status_code in {429, 500, 502, 503, 504}
-                    sample_key = f"delta_exchange_api_error:{response.status_code}:{clean_endpoint}"
-                    should_log = self._should_sample_log(sample_key, interval_seconds=120) if transient_status else True
-                    if should_log:
-                        log_fn = log_warning_with_context if transient_status else log_error_with_context
-                        log_fn(
-                            "delta_exchange_api_error",
-                            component="delta_client",
-                            method=method,
-                            endpoint=clean_endpoint,
-                            status_code=response.status_code,
-                            error_message=error_text,
-                        )
-                    raise DeltaExchangeError(
-                        f"Delta Exchange error {response.status_code}: {error_text}"
+
+                logger.debug(
+                    "delta_exchange_auth_debug",
+                    method=method,
+                    endpoint=clean_endpoint,
+                    has_params=params is not None,
+                    has_data=data is not None,
+                    timestamp=headers.get("timestamp"),
+                    api_key_prefix=self.api_key[:8] + "..." if len(self.api_key) > 8 else "***",
+                )
+
+                raise DeltaExchangeError(
+                    f"Delta Exchange authentication error {response.status_code}: {error_text}. "
+                    f"Please verify API credentials and signature format."
+                )
+
+            if response.status_code >= 400:
+                error_text = response.text
+                transient_status = response.status_code in {429, 500, 502, 503, 504}
+                sample_key = f"delta_exchange_api_error:{response.status_code}:{clean_endpoint}"
+                should_log = (
+                    self._should_sample_log(sample_key, interval_seconds=120)
+                    if transient_status
+                    else True
+                )
+                if should_log:
+                    log_fn = log_warning_with_context if transient_status else log_error_with_context
+                    log_fn(
+                        "delta_exchange_api_error",
+                        component="delta_client",
+                        method=method,
+                        endpoint=clean_endpoint,
+                        status_code=response.status_code,
+                        error_message=error_text,
                     )
-                
-                return response.json()
+                raise DeltaExchangeError(
+                    f"Delta Exchange error {response.status_code}: {error_text}"
+                )
+
+            return response.json()
         
         # Use a wrapper function for the circuit breaker
         async def _request_wrapper():

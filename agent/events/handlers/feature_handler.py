@@ -43,6 +43,8 @@ class FeatureEventHandler:
             await self.context_manager.update_state({
                 "features": features
             })
+            if symbol:
+                self.context_manager.set_latest_features(symbol, features)
             
             # Trigger model prediction request
             model_request = ModelPredictionRequestEvent(

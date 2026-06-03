@@ -85,9 +85,28 @@ def record_decision_cycle(
     if extra:
         row.update(extra)
     path = telemetry_path()
+    from agent.core.config import settings as app_settings
+
+    max_bytes = int(
+        getattr(app_settings, "signal_recovery_telemetry_max_bytes", 100 * 1024 * 1024)
+        or 100 * 1024 * 1024
+    )
+    backup_count = 3
     try:
         with _lock:
             path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_file() and path.stat().st_size > max_bytes:
+                for i in range(backup_count - 1, 0, -1):
+                    src = path.with_suffix(path.suffix + f".{i}")
+                    dst = path.with_suffix(path.suffix + f".{i + 1}")
+                    if src.is_file():
+                        if dst.is_file():
+                            dst.unlink()
+                        src.rename(dst)
+                rotated = path.with_suffix(path.suffix + ".1")
+                if rotated.is_file():
+                    rotated.unlink()
+                path.rename(rotated)
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, separators=(",", ":")) + "\n")
     except OSError as exc:

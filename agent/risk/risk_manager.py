@@ -5,7 +5,8 @@ Implements advanced risk management including portfolio optimization,
 position sizing, drawdown control, and Kelly Criterion calculations.
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Deque
+from collections import deque
 from datetime import datetime, timezone
 import statistics
 import structlog
@@ -90,7 +91,8 @@ class Portfolio:
         self.initial_balance = initial_balance
         self.cash_balance = initial_balance
         self.positions: Dict[str, Position] = {}
-        self.trade_history: List[Dict[str, Any]] = []
+        self.trade_history: Deque[Dict[str, Any]] = deque(maxlen=2000)
+        self._entry_portfolio_values: Dict[str, float] = {}
         self.peak_portfolio_value = initial_balance
         self.current_portfolio_value = initial_balance
 
@@ -168,12 +170,20 @@ class Portfolio:
 
         return (avg_return - risk_free_rate) / std_return
 
+    def record_entry_portfolio_value(self, symbol: str) -> None:
+        """Capture portfolio value at trade entry for Sharpe ratio calculations."""
+        self._entry_portfolio_values[str(symbol)] = float(self.current_portfolio_value)
+
     def record_trade(self, trade_details: Dict[str, Any]):
         """Record a completed trade."""
+        symbol = str(trade_details.get("symbol") or "")
+        portfolio_at_entry = self._entry_portfolio_values.pop(
+            symbol, self.current_portfolio_value
+        )
         self.trade_history.append({
             **trade_details,
             "timestamp": datetime.now(timezone.utc),
-            "portfolio_value_before": self.current_portfolio_value
+            "portfolio_value_before": portfolio_at_entry,
         })
 
         # Update cash balance with realized P&L

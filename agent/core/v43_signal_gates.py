@@ -78,6 +78,20 @@ class V43GateState:
     regime_bar_age: int = 0
     recent_collapse_samples: List[float] = field(default_factory=list)
     near_threshold_epsilon_bump: float = 0.0
+    epsilon_bumped_at: Optional[datetime] = None
+    EPSILON_DECAY_HOURS: float = 12.0
+
+    def effective_epsilon_bump(self) -> float:
+        """Return epsilon bump, decaying to zero after EPSILON_DECAY_HOURS."""
+        bump = float(self.near_threshold_epsilon_bump or 0.0)
+        if bump <= 0 or self.epsilon_bumped_at is None:
+            return 0.0
+        age_hours = (
+            datetime.now(timezone.utc) - self.epsilon_bumped_at
+        ).total_seconds() / 3600.0
+        if age_hours > self.EPSILON_DECAY_HOURS:
+            return 0.0
+        return bump
 
     def note_regime(self, regime: str) -> None:
         """Track consecutive bars in the same regime label."""
@@ -116,6 +130,11 @@ class V43GateState:
             "regime_bar_age": int(self.regime_bar_age or 0),
             "recent_collapse_samples": list(self.recent_collapse_samples),
             "near_threshold_epsilon_bump": float(self.near_threshold_epsilon_bump or 0.0),
+            "epsilon_bumped_at": (
+                self.epsilon_bumped_at.astimezone(timezone.utc).isoformat()
+                if self.epsilon_bumped_at is not None
+                else None
+            ),
         }
 
     @classmethod
@@ -148,6 +167,7 @@ class V43GateState:
             regime_bar_age=int(data.get("regime_bar_age") or 0),
             recent_collapse_samples=[float(x) for x in samples if x is not None],
             near_threshold_epsilon_bump=float(data.get("near_threshold_epsilon_bump") or 0.0),
+            epsilon_bumped_at=_parse_optional_datetime(data.get("epsilon_bumped_at")),
         )
 
     def note_signal_decision(self, bar_index: int) -> None:
@@ -206,6 +226,22 @@ async def persist_gate_state(
         logger.warning("v43_gate_state_persist_failed", symbol=symbol, error=str(e))
 
 
+def _parse_optional_datetime(raw: Any) -> Optional[datetime]:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw.astimezone(timezone.utc)
+    if isinstance(raw, str):
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            return None
+    return None
+
+
 def compute_regime_transition_risk(thesis_allowed_count: int) -> str:
     """Map count of regime-valid thesis strategies to transition risk label."""
     if thesis_allowed_count >= 2:
@@ -228,6 +264,7 @@ def maybe_widen_epsilon_on_high_collapse(
     if bump <= 0:
         bump = 0.001
     state.near_threshold_epsilon_bump = min(0.02, state.near_threshold_epsilon_bump + bump)
+    state.epsilon_bumped_at = datetime.now(timezone.utc)
     return bump
 
 
