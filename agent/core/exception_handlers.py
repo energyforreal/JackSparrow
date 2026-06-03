@@ -145,28 +145,21 @@ def _thread_exception_handler(args):
     )
 
 
+def install_async_exception_handler_on_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Attach the async exception handler to a running event loop."""
+    if loop and not loop.is_closed():
+        loop.set_exception_handler(_async_exception_handler)
+
+
 def setup_global_exception_handlers():
     """Set up global exception handlers for all unhandled exceptions.
     
     This function should be called once during application startup to ensure
-    all unhandled exceptions are properly logged.
+    all unhandled exceptions are properly logged. Async handler installation
+    requires a running loop via install_async_exception_handler_on_loop().
     """
     # Set up synchronous exception handler
     sys.excepthook = _sync_exception_handler
-    
-    # Set up async exception handler
-    loop = None
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # No event loop exists yet, will be set up when loop is created
-            pass
-    
-    if loop and not loop.is_closed():
-        loop.set_exception_handler(_async_exception_handler)
     
     # Set up thread exception handler (Python 3.8+)
     if hasattr(threading, "excepthook"):
@@ -178,23 +171,8 @@ def setup_global_exception_handlers():
         session_id=get_session_id(),
         handlers={
             "sync": "installed",
-            "async": "installed" if loop and not loop.is_closed() else "pending",
+            "async": "pending_until_loop_start",
             "thread": "installed" if hasattr(threading, "excepthook") else "not_available",
         }
-    )
-
-
-def install_async_exception_handler(loop: asyncio.AbstractEventLoop):
-    """Install async exception handler on an existing event loop.
-    
-    Args:
-        loop: Event loop to install handler on
-    """
-    loop.set_exception_handler(_async_exception_handler)
-    logger.debug(
-        "async_exception_handler_installed",
-        service="agent",
-        session_id=get_session_id(),
-        loop_id=id(loop)
     )
 

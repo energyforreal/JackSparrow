@@ -29,6 +29,7 @@ class AgentState:
         self.is_active: bool = False
         self.trading_enabled: bool = False
         self.emergency_stop: bool = False
+        self.manual_reset: bool = False
 
         # Portfolio state
         self.portfolio_value: float = 10000.0  # Starting capital
@@ -85,6 +86,7 @@ class AgentState:
             "is_active": self.is_active,
             "trading_enabled": self.trading_enabled,
             "emergency_stop": self.emergency_stop,
+            "manual_reset": self.manual_reset,
             "portfolio_value": self.portfolio_value,
             "cash_balance": self.cash_balance,
             "positions": self.positions,
@@ -122,6 +124,7 @@ class AgentState:
         state.is_active = data.get("is_active", state.is_active)
         state.trading_enabled = data.get("trading_enabled", state.trading_enabled)
         state.emergency_stop = data.get("emergency_stop", state.emergency_stop)
+        state.manual_reset = data.get("manual_reset", state.manual_reset)
 
         # Portfolio
         state.portfolio_value = data.get("portfolio_value", state.portfolio_value)

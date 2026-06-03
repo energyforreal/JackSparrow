@@ -31,6 +31,14 @@ def get_kill_switch_reason() -> str:
     return "Trading kill switch active"
 
 
+def _ensure_context_state():
+    from agent.core.context_manager import AgentState, context_manager
+
+    if context_manager.current_state is None:
+        context_manager.current_state = AgentState()
+    return context_manager.current_state
+
+
 def activate_kill_switch(reason: str, *, persist_context: bool = True) -> None:
     """Activate runtime kill switch (e.g. emergency stop)."""
     global _kill_switch_active, _kill_switch_reason, _kill_switch_set_at
@@ -40,10 +48,9 @@ def activate_kill_switch(reason: str, *, persist_context: bool = True) -> None:
     logger.critical("trading_kill_switch_activated", reason=reason)
     if persist_context:
         try:
-            from agent.core.context_manager import context_manager
-
-            context_manager.current_state.emergency_stop = True
-            context_manager.current_state.trading_enabled = False
+            state = _ensure_context_state()
+            state.emergency_stop = True
+            state.trading_enabled = False
         except Exception as exc:
             logger.warning("kill_switch_context_update_failed", error=str(exc))
 
@@ -54,6 +61,18 @@ def clear_kill_switch() -> None:
     _kill_switch_active = False
     _kill_switch_reason = None
     _kill_switch_set_at = None
+
+
+def recover_from_emergency_stop(*, trading_enabled: bool = True) -> None:
+    """Clear kill switch and reset persisted emergency-stop context for manual recovery."""
+    clear_kill_switch()
+    try:
+        state = _ensure_context_state()
+        state.emergency_stop = False
+        state.trading_enabled = trading_enabled
+        state.manual_reset = True
+    except Exception as exc:
+        logger.warning("emergency_stop_context_recovery_failed", error=str(exc))
 
 
 def trading_halt_status(delta_client: Any = None) -> Dict[str, Any]:

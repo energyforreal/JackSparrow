@@ -20,6 +20,7 @@ services:
     command: ["sh", "-c", "uvicorn backend.api.main:app --host 0.0.0.0 --port ${BACKEND_PORT:-8000} --reload"]
     volumes:
       - ./backend:/app/backend:rw
+      - ./shared:/app/shared:ro
       - ./logs/backend:/logs:rw
     environment:
       LOG_LEVEL: ${BACKEND_LOG_LEVEL:-DEBUG}
@@ -33,6 +34,7 @@ services:
       - "${AGENT_WS_PORT:-8003}:8003"
     volumes:
       - ./agent:/app/agent:rw
+      - ./shared:/app/shared:ro
       - ./feature_store:/app/feature_store:rw
       - ./agent/model_storage:/app/agent/model_storage:rw
       - ./logs/agent:/logs:rw

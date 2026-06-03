@@ -308,6 +308,19 @@ class EventBus:
             event_type=event_type,
             handler=handler.__name__ if hasattr(handler, "__name__") else str(handler)
         )
+
+    def unsubscribe(self, event_type: EventType, handler: Callable[[BaseEvent], None]) -> bool:
+        """Remove a handler subscription. Returns True if a handler was removed."""
+        handlers = self.handlers.get(event_type)
+        if not handlers:
+            return False
+        try:
+            handlers.remove(handler)
+            if not handlers:
+                del self.handlers[event_type]
+            return True
+        except ValueError:
+            return False
     
     async def start_consuming(self):
         """Start consuming events from stream."""

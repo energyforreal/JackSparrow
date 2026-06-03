@@ -63,6 +63,8 @@ COPY --from=builder --chown=agent:agent /root/.local /home/agent/.local
 # but it also allows the dev image to start correctly when the source mount is not present.
 COPY --chown=agent:agent agent /app/agent
 
+COPY --chown=agent:agent shared /app/shared
+
 # Copy shared feature_store package used by agent (for unified feature engine)
 COPY --chown=agent:agent feature_store /app/feature_store
 

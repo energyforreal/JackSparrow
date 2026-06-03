@@ -461,7 +461,7 @@ class ExecutionEngine:
 
             persist_open_order_records(self.order_manager.orders)
         except Exception as exc:
-            logger.debug("order_persistence_skipped", error=str(exc))
+            logger.warning("order_persistence_skipped", error=str(exc))
 
     async def _handle_partial_fill(self, event: PartialFillEvent) -> None:
         """Complete or close a partial fill after a short timeout."""
@@ -884,8 +884,8 @@ class ExecutionEngine:
                         else event.timestamp.replace(tzinfo=timezone.utc)
                     )
                     record_risk_to_fill_ms(delta.total_seconds() * 1000.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("risk_to_fill_metric_record_failed", error=str(exc))
 
             if getattr(settings, "signal_audit_md_enabled", True):
                 try:
@@ -1221,7 +1221,7 @@ class ExecutionEngine:
                     try:
                         getattr(self.exchange_gateway, "register_position_opened")(position)
                     except Exception as e:
-                        logger.debug("exchange_gateway_register_open_failed", error=str(e), symbol=symbol)
+                        logger.warning("exchange_gateway_register_open_failed", error=str(e), symbol=symbol)
 
                 if is_agent_controlled_authority(execution_authority):
                     record_agent_order_fill(
@@ -1447,7 +1447,7 @@ class ExecutionEngine:
                     try:
                         getattr(self.exchange_gateway, "register_position_closed")(symbol, net_usd)
                     except Exception as e:
-                        logger.debug("exchange_gateway_register_close_failed", error=str(e), symbol=symbol)
+                        logger.warning("exchange_gateway_register_close_failed", error=str(e), symbol=symbol)
 
                 if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                     self.risk_manager.portfolio.remove_position(symbol)
@@ -1800,7 +1800,7 @@ class ExecutionEngine:
                 try:
                     getattr(self.exchange_gateway, "register_position_opened")(pos)
                 except Exception as exc:
-                    logger.debug(
+                    logger.warning(
                         "adopt_exchange_register_gateway_failed",
                         symbol=sym,
                         error=str(exc),
@@ -2297,7 +2297,7 @@ class ExecutionEngine:
                 if state in ("closed", "filled") or filled_qty >= requested_qty * 0.999:
                     break
             except Exception as exc:
-                logger.debug(
+                logger.warning(
                     "order_fill_poll_failed",
                     symbol=symbol,
                     exchange_order_id=exchange_order_id,

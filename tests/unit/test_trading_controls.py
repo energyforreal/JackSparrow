@@ -11,6 +11,7 @@ from agent.core.trading_controls import (
     clear_kill_switch,
     exchange_circuit_breaker_open,
     is_kill_switch_active,
+    recover_from_emergency_stop,
     should_block_new_orders,
 )
 
@@ -29,6 +30,17 @@ def test_kill_switch_runtime_activation():
     blocked, reason = should_block_new_orders()
     assert blocked
     assert "test_halt" in reason
+
+
+def test_recover_from_emergency_stop_clears_context():
+    activate_kill_switch("halt", persist_context=True)
+    recover_from_emergency_stop()
+    assert not is_kill_switch_active()
+    from agent.core.context_manager import context_manager
+
+    assert context_manager.current_state.emergency_stop is False
+    assert context_manager.current_state.trading_enabled is True
+    assert context_manager.current_state.manual_reset is True
 
 
 def test_circuit_breaker_open_blocks():

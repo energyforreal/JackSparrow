@@ -580,7 +580,9 @@ If you place the stack behind a reverse proxy or different hostname, update thes
 
 **Not bind-mounted in production:** `./agent` source tree and `./feature_store` — rebuild images after code changes.
 
-**Development overlay:** `docker-compose.dev.yml` restores source bind mounts, exposes agent ports `8002`/`8003` on the host, and enables hot reload — see [Docker development hot reload](#docker-development-hot-reload).
+**Development overlay:** `docker-compose.dev.yml` restores source bind mounts (including `./shared` for UTF-8 helpers), exposes agent ports `8002`/`8003` on the host, and enables hot reload — see [Docker development hot reload](#docker-development-hot-reload).
+
+**Local Redis (Windows):** Do not commit `redis-tmp/` binaries. Install Redis via your OS package manager or Docker; legacy vendored Windows binaries were removed from git tracking.
 
 **Network Isolation:**
 - All services communicate on isolated Docker network (`jacksparrow-network`)

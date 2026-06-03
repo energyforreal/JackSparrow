@@ -64,6 +64,8 @@ COPY --from=builder --chown=agent:agent /root/.local /home/agent/.local
 # Copy application code - maintain agent directory structure  
 COPY --chown=agent:agent agent /app/agent
 
+COPY --chown=agent:agent shared /app/shared
+
 # Copy shared feature_store package used by agent (for unified feature engine)
 COPY --chown=agent:agent feature_store /app/feature_store
 

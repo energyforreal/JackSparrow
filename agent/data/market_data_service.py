@@ -74,6 +74,28 @@ class MarketDataService:
             on_connection_lost=self._on_delta_ws_connection_lost,
         )
 
+    def get_health(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """Public health snapshot for monitoring and agent health checks."""
+        sym = symbol or (self.streaming_symbols[0] if self.streaming_symbols else None)
+        last_tick_at: Optional[datetime] = None
+        if sym and sym in self._last_tick_time:
+            last_tick_at = self._last_tick_time[sym]
+        ticker_recent = False
+        if last_tick_at is not None:
+            ticker_recent = (time.time() - last_tick_at.timestamp()) < 300
+        healthy = (
+            self._websocket_connected
+            or self.streaming_running
+            or ticker_recent
+        )
+        return {
+            "websocket_connected": self._websocket_connected,
+            "streaming_running": self.streaming_running,
+            "last_tick_at": last_tick_at.isoformat() if last_tick_at else None,
+            "ticker_recent": ticker_recent,
+            "healthy": healthy,
+        }
+
     def _on_delta_ws_connection_lost(self, reason: str) -> None:
         """Delta WSS dropped; invalidate subscription until re-subscribe succeeds."""
         self._ws_ticker_subscription_ok = False

@@ -3,18 +3,33 @@ perpetual_data_fetcher.py
 Fetches OHLCV, Funding Rate, Open Interest, and Mark Price from Delta Exchange India
 with automatic pagination (handles the 2,000-candle-per-request limit).
 Supported timeframes: 5m, 15m, 30m, 1h, 2h ONLY.
+
+Sync helpers are intended for offline scripts. Use async_* functions from async code paths.
 """
+from __future__ import annotations
+
+import asyncio
 import time
-import requests
-import pandas as pd
-from typing import Optional
 from pathlib import Path
+from typing import Optional
+
+import httpx
+import pandas as pd
+import requests
 
 BASE_URL = "https://api.india.delta.exchange/v2"
 MAX_CANDLES_PER_REQUEST = 2000
 REQUEST_DELAY_SECONDS = 0.25   # Respect rate limits
 
 VALID_RESOLUTIONS = {"5m", "15m", "30m", "1h", "2h"}
+
+
+def _validate_resolution(resolution: str) -> None:
+    if resolution not in VALID_RESOLUTIONS:
+        raise ValueError(
+            f"Invalid resolution '{resolution}'. "
+            f"Allowed: {sorted(VALID_RESOLUTIONS)}"
+        )
 
 
 def fetch_candles_paginated(
@@ -25,10 +40,8 @@ def fetch_candles_paginated(
     verbose: bool = True,
     page_size: int = MAX_CANDLES_PER_REQUEST,
 ) -> list:
-    assert resolution in VALID_RESOLUTIONS, (
-        f"Invalid resolution '{resolution}'. "
-        f"Allowed: {sorted(VALID_RESOLUTIONS)}"
-    )
+    """Sync paginated fetch (scripts/offline only — blocks the event loop if awaited directly)."""
+    _validate_resolution(resolution)
 
     all_candles = []
     current_start = start_ts
@@ -78,6 +91,74 @@ def fetch_candles_paginated(
     return all_candles
 
 
+async def fetch_candles_paginated_async(
+    symbol_query: str,
+    resolution: str,
+    start_ts: float,
+    end_ts: float,
+    verbose: bool = True,
+    page_size: int = MAX_CANDLES_PER_REQUEST,
+    client: Optional[httpx.AsyncClient] = None,
+) -> list:
+    """Async paginated fetch safe for the agent event loop."""
+    _validate_resolution(resolution)
+
+    all_candles: list = []
+    current_start = start_ts
+    batch_num = 0
+    own_client = client is None
+    if own_client:
+        client = httpx.AsyncClient(timeout=15.0)
+
+    try:
+        if client is None:
+            raise RuntimeError("httpx client not initialized")
+        while current_start < end_ts:
+            batch_num += 1
+            params = {
+                "symbol": symbol_query,
+                "resolution": resolution,
+                "start": int(current_start),
+                "end": int(end_ts),
+                "page_size": page_size,
+            }
+            try:
+                resp = await client.get(f"{BASE_URL}/history/candles", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                if verbose:
+                    print(f"  [ERROR] {symbol_query} batch {batch_num}: {e}")
+                break
+
+            if not data.get("success") or not data.get("result"):
+                break
+
+            batch = data["result"]
+            all_candles.extend(batch)
+
+            if verbose:
+                print(
+                    f"  [{symbol_query}] Batch {batch_num}: {len(batch)} candles "
+                    f"(total: {len(all_candles)})"
+                )
+
+            if len(batch) < page_size:
+                break
+
+            last_time = batch[-1]["time"]
+            if last_time <= current_start:
+                break
+            current_start = last_time + 1
+
+            await asyncio.sleep(REQUEST_DELAY_SECONDS)
+    finally:
+        if own_client and client is not None:
+            await client.aclose()
+
+    return all_candles
+
+
 def fetch_candles_until_count(
     symbol_query: str,
     resolution: str,
@@ -87,11 +168,9 @@ def fetch_candles_until_count(
     verbose: bool = True,
 ) -> list:
     """Fetch at least `target_count` candles, going backward from end_ts."""
-    assert resolution in VALID_RESOLUTIONS, (
-        f"Invalid resolution '{resolution}'. "
-        f"Allowed: {sorted(VALID_RESOLUTIONS)}"
-    )
-    assert target_count > 0, "target_count must be > 0"
+    _validate_resolution(resolution)
+    if target_count <= 0:
+        raise ValueError("target_count must be > 0")
 
     if end_ts is None:
         end_ts = time.time()

@@ -33,22 +33,9 @@ from backend.services.health_poller import health_poller
 from backend.services.portfolio_service import portfolio_service
 
 
-def _configure_utf8_stdio() -> None:
-    """Ensure console output uses UTF-8 (fixes Windows encoding errors)."""
-    if os.name != "nt":
-        return
-    
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-    for stream_name in ("stdout", "stderr"):
-        stream = getattr(sys, stream_name, None)
-        if stream and hasattr(stream, "reconfigure"):
-            try:
-                stream.reconfigure(encoding="utf-8")
-            except Exception:
-                pass
+from shared.stdio_utf8 import configure_utf8_stdio
 
-
-_configure_utf8_stdio()
+configure_utf8_stdio()
 
 
 async def _verify_database_connection() -> None:

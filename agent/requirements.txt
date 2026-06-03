@@ -1,6 +1,4 @@
-# Core ML Libraries
-xgboost==2.0.2
-lightgbm==4.1.0
+# IC / vector memory (NO-ML branch — xgboost/lightgbm not used at runtime)
 scikit-learn==1.6.1
 
 # Data Processing

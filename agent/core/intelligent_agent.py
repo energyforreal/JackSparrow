@@ -18,22 +18,9 @@ from typing import Dict, Any, Optional
 import json
 import structlog
 
-def _configure_utf8_stdio() -> None:
-    """Ensure Windows consoles use UTF-8 to avoid encoding crashes."""
-    if os.name != "nt":
-        return
-    
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-    for stream_name in ("stdout", "stderr"):
-        stream = getattr(sys, stream_name, None)
-        if stream and hasattr(stream, "reconfigure"):
-            try:
-                stream.reconfigure(encoding="utf-8")
-            except Exception:
-                pass
+from shared.stdio_utf8 import configure_utf8_stdio
 
-
-_configure_utf8_stdio()
+configure_utf8_stdio()
 
 
 def _interval_to_minutes(interval: str) -> int:
@@ -537,74 +524,6 @@ class IntelligentAgent:
                     exc_info=True,
                 )
 
-    async def _retraining_scheduler_loop(self) -> None:
-        """Periodically evaluate outcomes and (optionally) trigger local retraining."""
-        from agent.learning.retraining_scheduler import RetrainingScheduler
-
-        interval = int(getattr(settings, "retraining_scheduler_interval_seconds", 3600) or 3600)
-        interval = max(60, interval)
-        scheduler = RetrainingScheduler()
-
-        while self.running:
-            try:
-                await asyncio.sleep(interval)
-                if not self.running:
-                    break
-                if not getattr(settings, "retraining_scheduler_enabled", False):
-                    continue
-                db_url = getattr(settings, "database_url", None)
-                if not db_url:
-                    continue
-                should = await scheduler.should_retrain(None, db_url)
-                if should:
-                    run_result = await scheduler.run(None)
-                    if run_result.get("success"):
-                        try:
-                            await self.mcp_orchestrator.refresh_models()
-                            logger.info(
-                                "agent_retraining_model_refresh_complete",
-                                service="agent",
-                                message="Model discovery refreshed after retraining.",
-                            )
-                        except Exception as refresh_error:
-                            logger.warning(
-                                "agent_retraining_model_refresh_failed",
-                                service="agent",
-                                error=str(refresh_error),
-                                exc_info=True,
-                            )
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(
-                    "retraining_scheduler_loop_tick_failed",
-                    service="agent",
-                    error=str(e),
-                    exc_info=True,
-                )
-
-    async def _adaptive_retrain_loop(self) -> None:
-        """Disabled: ML adaptive retrain removed on NO-ML branch."""
-        interval = int(
-            getattr(settings, "adaptive_retrain_check_interval_seconds", 3600) or 3600
-        )
-        interval = max(60, interval)
-        while self.running:
-            try:
-                await asyncio.sleep(interval)
-                if not self.running:
-                    break
-                continue
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(
-                    "adaptive_retrain_loop_tick_failed",
-                    service="agent",
-                    error=str(e),
-                    exc_info=True,
-                )
-
     async def _position_monitor_loop(self) -> None:
         """Background loop: update position prices and run manage_position for stop/take profit."""
         last_reconcile_at = 0.0
@@ -743,22 +662,6 @@ class IntelligentAgent:
                 pass
             self._threshold_adapter_task = None
 
-        if getattr(self, "_retraining_scheduler_task", None):
-            self._retraining_scheduler_task.cancel()
-            try:
-                await self._retraining_scheduler_task
-            except asyncio.CancelledError:
-                pass
-            self._retraining_scheduler_task = None
-
-        if getattr(self, "_adaptive_retrain_task", None):
-            self._adaptive_retrain_task.cancel()
-            try:
-                await self._adaptive_retrain_task
-            except asyncio.CancelledError:
-                pass
-            self._adaptive_retrain_task = None
-
         # Cancel position monitoring loop
         if getattr(self, "_position_monitor_task", None):
             self._position_monitor_task.cancel()
@@ -829,23 +732,7 @@ class IntelligentAgent:
             True if market data service appears healthy, False otherwise
         """
         try:
-            # Check if WebSocket is connected
-            websocket_connected = getattr(self.market_data_service, '_websocket_connected', False)
-
-            # Check if streaming is running
-            streaming_running = getattr(self.market_data_service, 'streaming_running', False)
-
-            # Check if we have recent ticker data (within last 5 minutes)
-            last_ticker_time = None
-            if hasattr(self.market_data_service, '_last_tick_time'):
-                last_times = self.market_data_service._last_tick_time
-                if last_times and self.default_symbol in last_times:
-                    last_ticker_time = last_times[self.default_symbol]
-
-            ticker_recent = last_ticker_time and (time.time() - last_ticker_time.timestamp()) < 300
-
-            # Consider healthy if WebSocket connected OR streaming running OR recent ticker data
-            return websocket_connected or streaming_running or ticker_recent
+            return bool(self.market_data_service.get_health(self.default_symbol).get("healthy"))
 
         except Exception as e:
             logger.warning(
@@ -973,6 +860,9 @@ class IntelligentAgent:
     
     async def start(self):
         """Start agent main loop."""
+        from agent.core.exception_handlers import install_async_exception_handler_on_loop
+
+        install_async_exception_handler_on_loop(asyncio.get_running_loop())
         logger.info("agent_start_method_called")
         self.running = True
         logger.info("agent_running_set_to_true")
@@ -991,24 +881,6 @@ class IntelligentAgent:
                 "agent_threshold_adapter_started",
                 service="agent",
                 interval_seconds=getattr(settings, "threshold_adapter_interval_seconds", 3600),
-            )
-
-        if getattr(settings, "retraining_scheduler_enabled", False):
-            self._retraining_scheduler_task = asyncio.create_task(
-                self._retraining_scheduler_loop()
-            )
-            logger.info(
-                "agent_retraining_scheduler_started",
-                service="agent",
-                interval_seconds=getattr(settings, "retraining_scheduler_interval_seconds", 3600),
-            )
-
-        if getattr(settings, "adaptive_retrain_enabled", False):
-            self._adaptive_retrain_task = asyncio.create_task(self._adaptive_retrain_loop())
-            logger.info(
-                "agent_adaptive_retrain_started",
-                service="agent",
-                interval_seconds=getattr(settings, "adaptive_retrain_check_interval_seconds", 3600),
             )
 
         # Start command handler (for backward compatibility)
@@ -1034,10 +906,14 @@ class IntelligentAgent:
         from agent.core.redis_config import get_redis
         logger.info("agent_command_handler_started", queue=self.command_queue)
         count = 0
+        redis_client = None
+        redis_backoff_seconds = 1.0
         while self.running:
             try:
-                redis_client = await get_redis()
+                if redis_client is None:
+                    redis_client = await get_redis()
                 if redis_client:
+                    redis_backoff_seconds = 1.0
                     # BRPOP blocks for 1s - FIFO (backend LPUSH, we BRPOP)
                     result = await redis_client.brpop(self.command_queue, timeout=1)
                     if result:
@@ -1045,10 +921,12 @@ class IntelligentAgent:
                         command = json.loads(raw)
                         await self._process_command(command)
                 else:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(redis_backoff_seconds)
+                    redis_backoff_seconds = min(redis_backoff_seconds * 2, 30.0)
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                redis_client = None
                 count += 1
                 if count % 30 == 0:
                     logger.warning(
@@ -1057,7 +935,8 @@ class IntelligentAgent:
                         count=count,
                         service="agent"
                     )
-                await asyncio.sleep(1)
+                await asyncio.sleep(min(redis_backoff_seconds, 30.0))
+                redis_backoff_seconds = min(redis_backoff_seconds * 2, 30.0)
     
     async def _process_command(self, command):
         """Process command from backend."""
@@ -1092,6 +971,9 @@ class IntelligentAgent:
                 await self._send_response(request_id, result.get("data", result))
             elif cmd == "get_exchange_fills":
                 result = await self._handle_get_exchange_fills(params)
+                await self._send_response(request_id, result.get("data", result))
+            elif cmd == "register_models":
+                result = await self._handle_register_models(params)
                 await self._send_response(request_id, result.get("data", result))
             else:
                 await self._send_response(
@@ -1286,6 +1168,7 @@ class IntelligentAgent:
     
     async def _handle_get_status(self) -> Dict[str, Any]:
         """Handle status request with detailed health information."""
+        status_started = time.perf_counter()
         logger.info("agent_handling_get_status", message="Processing get_status command")
 
         # Check if MCP orchestrator is initialized
@@ -1516,7 +1399,8 @@ class IntelligentAgent:
         from agent.core.agent_thesis_engine import get_last_thesis_snapshot
 
         thesis_snap = get_last_thesis_snapshot()
-        policy_mode = str(getattr(settings, "agent_policy_mode", "ml_only") or "ml_only")
+        policy_mode = str(getattr(settings, "agent_policy_mode", "ic") or "ic")
+        latency_ms = round((time.perf_counter() - status_started) * 1000.0, 2)
 
         return {
             "success": True,
@@ -1525,7 +1409,7 @@ class IntelligentAgent:
                 "state": self.state_machine.current_state.value,
                 "health": health,  # Keep original health structure for backward compatibility
                 "detailed_health": detailed_health,  # New detailed structure
-                "latency_ms": 5.0,
+                "latency_ms": latency_ms,
                 "policy_mode": policy_mode,
                 "current_regime": thesis_snap.get("regime"),
                 "active_thesis_strategy": thesis_snap.get("thesis_type"),
@@ -1614,6 +1498,10 @@ class IntelligentAgent:
         
         # Handle actions
         if action == "start":
+            from agent.core.trading_controls import recover_from_emergency_stop
+
+            recover_from_emergency_stop()
+            self.running = True
             await self.state_machine._transition_to(
                 AgentState.OBSERVING,
                 "Manual start command"
@@ -1701,133 +1589,168 @@ class IntelligentAgent:
         event_bus.subscribe(EventType.DECISION_READY, track_decision)
         event_bus.subscribe(EventType.CANDLE_CLOSED, track_candle)
         
-        while self.running:
-            try:
-                await asyncio.sleep(300)  # Log every 5 minutes
-
-                current_state = self.state_machine.current_state.value
-                time_since_last_decision = None
-                time_since_last_candle = None
-
-                if last_decision_time:
-                    time_since_last_decision = time.time() - last_decision_time
-
-                if last_candle_time:
-                    time_since_last_candle = time.time() - last_candle_time
-
-                # How long we wait for candle closes before attempting a stream recovery.
-                configured_minutes = getattr(settings, "agent_no_candle_restart_minutes", 8) or 8
-                no_candle_restart_minutes = effective_no_candle_restart_minutes(
-                    self.primary_interval,
-                    int(configured_minutes),
-                )
-                no_candle_restart_seconds = max(60, no_candle_restart_minutes * 60)
-
-                # Rolling metrics for the last hour
-                now = time.time()
-                while decisions_last_hour_times and decisions_last_hour_times[0] < now - metrics_window_seconds:
-                    decisions_last_hour_times.popleft()
-                while candles_last_hour_times and candles_last_hour_times[0] < now - metrics_window_seconds:
-                    candles_last_hour_times.popleft()
-                decisions_last_hour = len(decisions_last_hour_times)
-                candles_last_hour = len(candles_last_hour_times)
-
-                # Check market data service health
-                market_data_healthy = self._check_market_data_health()
-                websocket_connected = getattr(self.market_data_service, '_websocket_connected', False)
-                streaming_running = getattr(self.market_data_service, 'streaming_running', False)
-
+        try:
+            while self.running:
                 try:
-                    from agent.core.latency_metrics import latency_snapshot
-                    from agent.core.operational_metrics import publish_latency_metrics
+                    await asyncio.sleep(300)  # Log every 5 minutes
 
-                    latency_stats = latency_snapshot()
-                    await publish_latency_metrics(latency_stats)
-                except Exception:
-                    latency_stats = {}
+                    current_state = self.state_machine.current_state.value
+                    time_since_last_decision = None
+                    time_since_last_candle = None
 
-                logger.info(
-                    "agent_periodic_status",
-                    service="agent",
-                    state=current_state,
-                    time_since_last_decision_seconds=time_since_last_decision,
-                    time_since_last_candle_seconds=time_since_last_candle,
-                    market_data_healthy=market_data_healthy,
-                    websocket_connected=websocket_connected,
-                    streaming_running=streaming_running,
-                    decisions_last_hour=decisions_last_hour,
-                    candle_closes_last_hour=candles_last_hour,
-                    latency_metrics=latency_stats,
-                    last_staleness_trigger_at=(
-                        last_staleness_trigger_at.isoformat()
-                        if last_staleness_trigger_at is not None
-                        else None
-                    ),
-                    message="Agent periodic status check - decision generation monitoring"
-                )
+                    if last_decision_time:
+                        time_since_last_decision = time.time() - last_decision_time
 
-                agent_symbol = str(getattr(settings, "agent_symbol", "BTCUSD") or "BTCUSD")
-                open_count = 0
-                try:
-                    open_count = len(execution_module.position_manager.get_all_positions())
-                except Exception:
-                    pass
-                if (
-                    open_count > 0
-                    and self.market_data_service
-                    and hasattr(self.market_data_service, "is_ticker_stale_for_symbol")
-                    and self.market_data_service.is_ticker_stale_for_symbol(agent_symbol)
-                ):
-                    stale_s = self.market_data_service.seconds_since_last_good_tick(agent_symbol)
-                    logger.error(
-                        "market_data_stale_with_open_positions",
-                        symbol=agent_symbol,
-                        open_positions=open_count,
-                        stale_seconds=stale_s,
-                        threshold_seconds=getattr(
-                            settings, "market_data_stale_rest_poll_seconds", 15
-                        ),
+                    if last_candle_time:
+                        time_since_last_candle = time.time() - last_candle_time
+
+                    # How long we wait for candle closes before attempting a stream recovery.
+                    configured_minutes = getattr(settings, "agent_no_candle_restart_minutes", 8) or 8
+                    no_candle_restart_minutes = effective_no_candle_restart_minutes(
+                        self.primary_interval,
+                        int(configured_minutes),
                     )
+                    no_candle_restart_seconds = max(60, no_candle_restart_minutes * 60)
 
-                # Log warning if no decisions generated in last 30 minutes
-                if time_since_last_decision and time_since_last_decision > 1800:
-                    logger.warning(
-                        "agent_no_decisions_generated",
+                    # Rolling metrics for the last hour
+                    now = time.time()
+                    while decisions_last_hour_times and decisions_last_hour_times[0] < now - metrics_window_seconds:
+                        decisions_last_hour_times.popleft()
+                    while candles_last_hour_times and candles_last_hour_times[0] < now - metrics_window_seconds:
+                        candles_last_hour_times.popleft()
+                    decisions_last_hour = len(decisions_last_hour_times)
+                    candles_last_hour = len(candles_last_hour_times)
+
+                    # Check market data service health
+                    market_data_healthy = self._check_market_data_health()
+                    md_health = self.market_data_service.get_health(self.default_symbol)
+                    websocket_connected = md_health.get("websocket_connected", False)
+                    streaming_running = md_health.get("streaming_running", False)
+                    try:
+                        from agent.core.latency_metrics import latency_snapshot
+                        from agent.core.operational_metrics import publish_latency_metrics
+
+                        latency_stats = latency_snapshot()
+                        await publish_latency_metrics(latency_stats)
+                    except Exception:
+                        latency_stats = {}
+
+                    logger.info(
+                        "agent_periodic_status",
                         service="agent",
                         state=current_state,
-                        time_since_last_decision_minutes=int(time_since_last_decision / 60),
-                        message="No decisions generated in last 30 minutes - check candle close events and decision pipeline"
-                    )
-
-                # Log warning and attempt recovery if no candle close events in configured window.
-                if time_since_last_candle and time_since_last_candle > no_candle_restart_seconds:
-                    logger.warning(
-                        "agent_no_candle_closes",
-                        service="agent",
-                        state=current_state,
-                        time_since_last_candle_minutes=int(time_since_last_candle / 60),
-                        no_candle_restart_minutes=no_candle_restart_minutes,
+                        time_since_last_decision_seconds=time_since_last_decision,
+                        time_since_last_candle_seconds=time_since_last_candle,
+                        market_data_healthy=market_data_healthy,
                         websocket_connected=websocket_connected,
                         streaming_running=streaming_running,
-                        message=(
-                            f"No candle close events detected in last {no_candle_restart_minutes} minutes "
-                            f"- attempting market data recovery"
-                        )
+                        decisions_last_hour=decisions_last_hour,
+                        candle_closes_last_hour=candles_last_hour,
+                        latency_metrics=latency_stats,
+                        last_staleness_trigger_at=(
+                            last_staleness_trigger_at.isoformat()
+                            if last_staleness_trigger_at is not None
+                            else None
+                        ),
+                        message="Agent periodic status check - decision generation monitoring"
                     )
 
-                    # If we're in monitoring mode, restart the stream as a recovery action.
-                    if self.start_mode == "MONITORING":
+                    agent_symbol = str(getattr(settings, "agent_symbol", "BTCUSD") or "BTCUSD")
+                    open_count = 0
+                    try:
+                        open_count = len(execution_module.position_manager.get_all_positions())
+                    except Exception:
+                        pass
+                    if (
+                        open_count > 0
+                        and self.market_data_service
+                        and hasattr(self.market_data_service, "is_ticker_stale_for_symbol")
+                        and self.market_data_service.is_ticker_stale_for_symbol(agent_symbol)
+                    ):
+                        stale_s = self.market_data_service.seconds_since_last_good_tick(agent_symbol)
+                        logger.error(
+                            "market_data_stale_with_open_positions",
+                            symbol=agent_symbol,
+                            open_positions=open_count,
+                            stale_seconds=stale_s,
+                            threshold_seconds=getattr(
+                                settings, "market_data_stale_rest_poll_seconds", 15
+                            ),
+                        )
+
+                    # Log warning if no decisions generated in last 30 minutes
+                    if time_since_last_decision and time_since_last_decision > 1800:
+                        logger.warning(
+                            "agent_no_decisions_generated",
+                            service="agent",
+                            state=current_state,
+                            time_since_last_decision_minutes=int(time_since_last_decision / 60),
+                            message="No decisions generated in last 30 minutes - check candle close events and decision pipeline"
+                        )
+
+                    # Log warning and attempt recovery if no candle close events in configured window.
+                    if time_since_last_candle and time_since_last_candle > no_candle_restart_seconds:
+                        logger.warning(
+                            "agent_no_candle_closes",
+                            service="agent",
+                            state=current_state,
+                            time_since_last_candle_minutes=int(time_since_last_candle / 60),
+                            no_candle_restart_minutes=no_candle_restart_minutes,
+                            websocket_connected=websocket_connected,
+                            streaming_running=streaming_running,
+                            message=(
+                                f"No candle close events detected in last {no_candle_restart_minutes} minutes "
+                                f"- attempting market data recovery"
+                            )
+                        )
+
+                        # If we're in monitoring mode, restart the stream as a recovery action.
+                        if self.start_mode == "MONITORING":
+                            now = time.time()
+                            # Avoid restart spam if this loop runs frequently while the stream is failing.
+                            if now - last_stream_restart_attempt >= 60:
+                                last_stream_restart_attempt = now
+                                logger.info(
+                                    "agent_attempting_market_data_restart",
+                                    service="agent",
+                                    message="Attempting to restart market data streaming due to missing candle closes",
+                                )
+                                try:
+                                    await self.market_data_service.restart_market_data_stream(
+                                        symbols=[self.default_symbol],
+                                        interval=self.primary_interval
+                                    )
+                                    logger.info(
+                                        "agent_market_data_stream_restarted",
+                                        service="agent",
+                                        symbols=[self.default_symbol],
+                                        interval=self.primary_interval,
+                                    )
+                                except Exception as e:
+                                    logger.error(
+                                        "agent_market_data_stream_restart_failed",
+                                        service="agent",
+                                        error=str(e),
+                                        error_type=type(e).__name__,
+                                        message="Failed to restart market data streaming",
+                                        exc_info=True
+                                    )
+
+                    # Proactively restart if the stream is down, regardless of the candle timer.
+                    # This addresses cases where the stream crashes but the last candle timestamp
+                    # is still recent.
+                    if self.start_mode == "MONITORING" and not streaming_running:
                         now = time.time()
-                        # Avoid restart spam if this loop runs frequently while the stream is failing.
+                        # Avoid restart spam if the stream keeps failing immediately.
                         if now - last_stream_restart_attempt >= 60:
                             last_stream_restart_attempt = now
                             logger.info(
                                 "agent_attempting_market_data_restart",
                                 service="agent",
-                                message="Attempting to restart market data streaming due to missing candle closes",
+                                message="Attempting to restart market data streaming because stream is not running"
                             )
                             try:
-                                await self.market_data_service.restart_market_data_stream(
+                                await self.market_data_service.start_market_data_stream(
                                     symbols=[self.default_symbol],
                                     interval=self.primary_interval
                                 )
@@ -1847,123 +1770,92 @@ class IntelligentAgent:
                                     exc_info=True
                                 )
 
-                # Proactively restart if the stream is down, regardless of the candle timer.
-                # This addresses cases where the stream crashes but the last candle timestamp
-                # is still recent.
-                if self.start_mode == "MONITORING" and not streaming_running:
-                    now = time.time()
-                    # Avoid restart spam if the stream keeps failing immediately.
-                    if now - last_stream_restart_attempt >= 60:
-                        last_stream_restart_attempt = now
-                        logger.info(
-                            "agent_attempting_market_data_restart",
-                            service="agent",
-                            message="Attempting to restart market data streaming because stream is not running"
-                        )
-                        try:
-                            await self.market_data_service.start_market_data_stream(
-                                symbols=[self.default_symbol],
-                                interval=self.primary_interval
-                            )
+                    # Proactively trigger a fresh prediction when signals have been
+                    # stale for longer than the configured staleness window. This
+                    # prevents the UI from appearing permanently \"stuck\" during
+                    # extended low-volatility periods.
+                    try:
+                        stale_minutes_cfg = getattr(settings, "signal_staleness_minutes", 10) or 10
+                        stale_seconds = max(60, stale_minutes_cfg * 60)
+                        staleness_cooldown_ok = True
+                        if last_staleness_trigger_at is not None:
+                            elapsed_since_trigger = (
+                                datetime.now(timezone.utc) - last_staleness_trigger_at
+                            ).total_seconds()
+                            staleness_cooldown_ok = elapsed_since_trigger >= stale_seconds
+                        if (
+                            time_since_last_decision
+                            and time_since_last_decision > stale_seconds
+                            and staleness_cooldown_ok
+                        ):
                             logger.info(
-                                "agent_market_data_stream_restarted",
+                                "agent_triggering_stale_signal_refresh",
                                 service="agent",
-                                symbols=[self.default_symbol],
-                                interval=self.primary_interval,
+                                state=current_state,
+                                symbol=self.default_symbol,
+                                time_since_last_decision_seconds=time_since_last_decision,
+                                staleness_threshold_seconds=stale_seconds,
+                                message=(
+                                    "No decisions generated recently; emitting "
+                                    "FeatureRequestEvent for fresh feature+model pipeline"
+                                ),
                             )
-                        except Exception as e:
-                            logger.error(
-                                "agent_market_data_stream_restart_failed",
-                                service="agent",
-                                error=str(e),
-                                error_type=type(e).__name__,
-                                message="Failed to restart market data streaming",
-                                exc_info=True
+                            last_staleness_trigger_at = datetime.now(timezone.utc)
+                            from agent.events.handlers.market_data_handler import (
+                                MarketDataEventHandler,
                             )
+                            from agent.events.schemas import FeatureRequestEvent
 
-                # Proactively trigger a fresh prediction when signals have been
-                # stale for longer than the configured staleness window. This
-                # prevents the UI from appearing permanently \"stuck\" during
-                # extended low-volatility periods.
-                try:
-                    stale_minutes_cfg = getattr(settings, "signal_staleness_minutes", 10) or 10
-                    stale_seconds = max(60, stale_minutes_cfg * 60)
-                    staleness_cooldown_ok = True
-                    if last_staleness_trigger_at is not None:
-                        elapsed_since_trigger = (
-                            datetime.now(timezone.utc) - last_staleness_trigger_at
-                        ).total_seconds()
-                        staleness_cooldown_ok = elapsed_since_trigger >= stale_seconds
-                    if (
-                        time_since_last_decision
-                        and time_since_last_decision > stale_seconds
-                        and staleness_cooldown_ok
-                    ):
-                        logger.info(
-                            "agent_triggering_stale_signal_refresh",
-                            service="agent",
-                            state=current_state,
-                            symbol=self.default_symbol,
-                            time_since_last_decision_seconds=time_since_last_decision,
-                            staleness_threshold_seconds=stale_seconds,
-                            message=(
-                                "No decisions generated recently; emitting "
-                                "FeatureRequestEvent for fresh feature+model pipeline"
-                            ),
-                        )
-                        last_staleness_trigger_at = datetime.now(timezone.utc)
-                        from agent.events.handlers.market_data_handler import (
-                            MarketDataEventHandler,
-                        )
-                        from agent.events.schemas import FeatureRequestEvent
-
-                        runtime_feature_names = (
-                            MarketDataEventHandler._get_runtime_feature_names()
-                        )
-                        cached_price = None
-                        if self.market_data_service:
-                            cached_price = (
-                                self.market_data_service.get_cached_headline_price(
-                                    self.default_symbol
+                            runtime_feature_names = (
+                                MarketDataEventHandler._get_runtime_feature_names()
+                            )
+                            cached_price = None
+                            if self.market_data_service:
+                                cached_price = (
+                                    self.market_data_service.get_cached_headline_price(
+                                        self.default_symbol
+                                    )
                                 )
-                            )
-                        feature_request = FeatureRequestEvent(
-                            source="intelligent_agent",
-                            payload={
-                                "symbol": self.default_symbol,
-                                "current_price": cached_price,
-                                "feature_names": runtime_feature_names,
-                                "timestamp": datetime.now(timezone.utc),
-                                "version": "latest",
-                                "context": {
+                            feature_request = FeatureRequestEvent(
+                                source="intelligent_agent",
+                                payload={
                                     "symbol": self.default_symbol,
-                                    "trigger": "staleness_watchdog",
-                                    "requested_at": datetime.now(timezone.utc),
-                                    "interval": self.primary_interval,
+                                    "current_price": cached_price,
+                                    "feature_names": runtime_feature_names,
+                                    "timestamp": datetime.now(timezone.utc),
+                                    "version": "latest",
+                                    "context": {
+                                        "symbol": self.default_symbol,
+                                        "trigger": "staleness_watchdog",
+                                        "requested_at": datetime.now(timezone.utc),
+                                        "interval": self.primary_interval,
+                                    },
                                 },
-                            },
+                            )
+                            await event_bus.publish(feature_request)
+                    except Exception as trigger_error:
+                        logger.warning(
+                            "agent_stale_signal_refresh_failed",
+                            service="agent",
+                            error=str(trigger_error),
+                            error_type=type(trigger_error).__name__,
+                            message="Failed to trigger stale-signal refresh; will retry on next monitoring cycle",
                         )
-                        await event_bus.publish(feature_request)
-                except Exception as trigger_error:
-                    logger.warning(
-                        "agent_stale_signal_refresh_failed",
-                        service="agent",
-                        error=str(trigger_error),
-                        error_type=type(trigger_error).__name__,
-                        message="Failed to trigger stale-signal refresh; will retry on next monitoring cycle",
-                    )
                     
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(
                     "agent_periodic_monitoring_error",
                     service="agent",
                     error=str(e),
                     exc_info=True
                 )
-                await asyncio.sleep(60)  # Wait before retrying on error
+                    await asyncio.sleep(60)  # Wait before retrying on error
 
+        finally:
+            event_bus.unsubscribe(EventType.DECISION_READY, track_decision)
+            event_bus.unsubscribe(EventType.CANDLE_CLOSED, track_candle)
     async def _send_response(self, request_id: str, payload: Dict[str, Any], ttl: int = 120):
         """Send response back to backend via Redis key-value store.
         

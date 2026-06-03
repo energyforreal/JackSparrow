@@ -54,6 +54,8 @@ COPY --from=builder --chown=backend:backend /root/.local /home/backend/.local
 # Copy application code - maintain backend directory structure
 COPY --chown=backend:backend backend /app/backend
 
+COPY --chown=backend:backend shared /app/shared
+
 # Add build metadata labels
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \
