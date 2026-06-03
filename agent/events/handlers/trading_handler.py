@@ -15,7 +15,13 @@ from agent.events.schemas import DecisionReadyEvent, RiskApprovedEvent, EventTyp
 from agent.events.event_bus import event_bus
 from agent.core.context_manager import context_manager
 from agent.core.config import settings
-from agent.core.futures_utils import margin_required_inr, price_to_lots, entry_leg_fees_usd
+from agent.core.futures_utils import (
+    entry_lots_from_portfolio_margin,
+    entry_leg_fees_usd,
+    margin_required_inr,
+    max_affordable_lots_from_cash,
+    price_to_lots,
+)
 from agent.core.sl_tp import compute_stop_take_prices
 from agent.core.product_specs import get_contract_specs
 from agent.core.decision_timestamp import decision_payload_age_seconds
@@ -346,6 +352,10 @@ class TradingEventHandler:
 
             # Signal expiry: reject stale signals (prefer server_timestamp_ms from emit)
             if not minimal_entry:
+                if payload.get("server_timestamp_ms") is None:
+                    payload["server_timestamp_ms"] = int(
+                        getattr(event, "timestamp", now_utc).timestamp() * 1000
+                    )
                 try:
                     age = decision_payload_age_seconds(payload)
                     if age is None:
@@ -373,25 +383,18 @@ class TradingEventHandler:
                         error=str(e),
                         exc_info=True,
                     )
+                    self._log_entry_rejected(
+                        "stale_signal_timestamp_unverifiable",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        **diagnostics_base,
+                    )
+                    return
 
             signal_path_diag: Dict[str, Any] = {}
-            if minimal_entry:
-                new_signal = signal
-            else:
-                new_signal = signal
-                if v43_exec_enabled:
-                    signal_path_diag = {"v43_execution_profile": True}
-            if not minimal_entry and new_signal == "HOLD" and signal not in ("HOLD", None, ""):
-                self._log_entry_rejected(
-                    "entry_signal_hold_after_synthesis",
-                    symbol=symbol,
-                    signal=signal,
-                    event_id=event.event_id,
-                    **diagnostics_base,
-                    **signal_path_diag,
-                )
-                return
-            signal = new_signal
+            if not minimal_entry and v43_exec_enabled:
+                signal_path_diag = {"v43_execution_profile": True}
             if signal in ("BUY", "STRONG_BUY"):
                 side = "BUY"
                 risk_side = "long"
@@ -589,6 +592,9 @@ class TradingEventHandler:
 
             usdinr_rate = await self._get_usdinr_rate(state)
             available_cash_inr = await self._get_available_cash_inr(state, symbol)
+            portfolio_value_inr = await self._get_portfolio_value_inr(
+                state, symbol, available_cash_inr=available_cash_inr
+            )
 
             specs = await get_contract_specs(symbol)
             cv = float(specs.contract_value_btc)
@@ -603,33 +609,33 @@ class TradingEventHandler:
             leverage = max(1, int(getattr(settings, "isolated_margin_leverage", 5) or 5))
             max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
             margin_inr = 0.0
-            entry_portfolio_frac = float(
-                getattr(settings, "entry_portfolio_margin_fraction", 0.60) or 0.60
+            entry_portfolio_frac = max(
+                0.01,
+                min(
+                    1.0,
+                    float(
+                        getattr(settings, "entry_portfolio_margin_fraction", 0.60) or 0.60
+                    ),
+                ),
             )
 
+            fee_reserve = float(
+                getattr(settings, "entry_fee_reserve_fraction", 0.02) or 0.02
+            )
             if getattr(settings, "portfolio_fraction_lot_sizing", True):
-                base_frac = max(0.01, min(1.0, entry_portfolio_frac))
-                trade_score_raw = payload.get("trade_score")
-                try:
-                    trade_score_normalized = min(
-                        1.0, float(trade_score_raw if trade_score_raw is not None else 70.0) / 100.0
-                    )
-                except (TypeError, ValueError):
-                    trade_score_normalized = 0.7
-                conf_weight = max(0.5, min(1.0, conf_f))
-                entry_portfolio_frac = max(
-                    0.05,
-                    min(1.0, base_frac * conf_weight * (0.7 + 0.3 * trade_score_normalized)),
-                )
-                margin_inr = available_cash_inr * entry_portfolio_frac
-                usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
-                entry_lots = price_to_lots(
-                    usd_margin=usd_margin,
+                entry_lots, margin_inr = entry_lots_from_portfolio_margin(
+                    portfolio_value_inr=portfolio_value_inr,
+                    margin_fraction=entry_portfolio_frac,
+                    usdinr_rate=usdinr_rate,
                     btc_price=entry_price,
                     leverage=leverage,
                     contract_value_btc=cv,
                     max_lots=max_lots,
                     min_lots=min_lot_size,
+                    available_cash_inr=available_cash_inr,
+                    fee_reserve_fraction=fee_reserve,
+                    taker_fee_rate=taker_rate,
+                    slippage_bps=slip_bps,
                 )
             elif v43_exec_enabled and isinstance(v43_ex, dict):
                 alloc_frac = max(
@@ -670,13 +676,31 @@ class TradingEventHandler:
             else:
                 entry_lots = fixed_lots
 
-            required_margin_inr = margin_required_inr(
+            affordable_lots = max_affordable_lots_from_cash(
+                available_cash_inr=available_cash_inr,
+                usdinr_rate=usdinr_rate,
+                btc_price=entry_price,
+                leverage=leverage,
+                contract_value_btc=cv,
+                fee_reserve_fraction=fee_reserve,
+                taker_fee_rate=taker_rate,
+                slippage_bps=slip_bps,
+                min_lots=min_lot_size,
+                max_lots=max_lots,
+            )
+            if affordable_lots <= 0:
+                entry_lots = 0
+            else:
+                entry_lots = min(entry_lots, affordable_lots)
+            margin_inr = margin_required_inr(
                 lots=entry_lots,
                 btc_price_usd=entry_price,
                 usdinr_rate=usdinr_rate,
                 leverage=leverage,
                 contract_value_btc=cv,
             )
+
+            required_margin_inr = margin_inr
             fee_mode = (getattr(settings, "fee_accounting_mode", "split") or "split").lower()
             entry_fee_inr = 0.0
             if fee_mode == "split":
@@ -709,7 +733,7 @@ class TradingEventHandler:
 
             proposed_size = max(
                 0.01,
-                min(required_margin_inr / max(available_cash_inr, 1.0), settings.max_position_size),
+                min(entry_portfolio_frac, settings.max_position_size),
             )
 
             if bool(getattr(settings, "exchange_position_reconcile_enabled", True)):
@@ -731,6 +755,8 @@ class TradingEventHandler:
                 proposed_size=proposed_size,
                 entry_price=entry_price,
                 stop_loss=None,  # Execution will compute from config
+                required_balance_override=required_margin_inr,
+                available_balance_override=available_cash_inr,
             )
 
             if not validation.get("approved", False):
@@ -1100,6 +1126,8 @@ class TradingEventHandler:
                 "usd_inr_rate": usdinr_rate,
                 "required_margin_inr": required_margin_inr,
                 "available_cash_inr": available_cash_inr,
+                "portfolio_value_inr": portfolio_value_inr,
+                "entry_lots": entry_lots,
                 "contract_value_btc": cv,
                 "tick_size": tick_sz,
                 "product_id": specs.product_id,
@@ -1145,6 +1173,7 @@ class TradingEventHandler:
                 leverage=leverage,
                 margin_inr=margin_inr,
                 entry_portfolio_margin_fraction=entry_portfolio_frac,
+                portfolio_value_inr=portfolio_value_inr,
                 available_cash_inr=available_cash_inr,
                 event_id=event.event_id,
                 **diagnostics_base,
@@ -1227,6 +1256,36 @@ class TradingEventHandler:
         except Exception as e:
             logger.debug("usdinr_cache_lookup_failed", error=str(e))
         return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+
+    async def _get_portfolio_value_inr(
+        self,
+        state: Optional[Any],
+        symbol: str,
+        *,
+        available_cash_inr: Optional[float] = None,
+    ) -> float:
+        """Portfolio value in INR for lot sizing, capped by live wallet when known."""
+        book_inr: Optional[float] = None
+        if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
+            try:
+                usdinr = float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+                total_usd = float(self.risk_manager.portfolio.total_value)
+                if total_usd > 0 and usdinr > 0:
+                    book_inr = total_usd * usdinr
+            except (TypeError, ValueError):
+                pass
+        if book_inr is None and state is not None and hasattr(state, "portfolio_value"):
+            try:
+                val = float(state.portfolio_value)
+                if val > 0:
+                    book_inr = val
+            except (TypeError, ValueError):
+                pass
+        if book_inr is None:
+            book_inr = float(getattr(settings, "initial_balance", 20000.0) or 20000.0)
+        if available_cash_inr is not None and available_cash_inr > 0:
+            return min(book_inr, float(available_cash_inr))
+        return book_inr
 
     async def _get_available_cash_inr(self, state: Optional[Any], symbol: str) -> float:
         """INR cash from live exchange wallet when available, else agent state."""

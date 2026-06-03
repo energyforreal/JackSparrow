@@ -8,6 +8,7 @@ import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
 import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
+import { ConfidenceProgress } from './ConfidenceProgress'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 

@@ -1279,7 +1279,10 @@ class Settings(BaseSettings):
         env="ENTRY_PORTFOLIO_MARGIN_FRACTION",
         ge=0.01,
         le=1.0,
-        description="Fraction of available portfolio INR used as isolated margin budget for entry lot sizing",
+        description=(
+            "Fraction of total portfolio value (INR) used as isolated margin budget for entry lot sizing; "
+            "exit closes the same lots recorded at entry"
+        ),
     )
     portfolio_fraction_lot_sizing: bool = Field(
         default=True,

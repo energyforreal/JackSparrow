@@ -251,7 +251,9 @@ class IntelligentAgent:
         
         # Initialize all components with event handlers
         await self.state_machine.initialize()
-        await self.risk_manager.initialize()
+        await self.risk_manager.initialize(
+            float(getattr(settings, "initial_balance", 10000.0) or 10000.0)
+        )
 
         async def _close_symbol_from_gateway(symbol: str):
             return await execution_module.close_position(symbol, exit_reason="close_all")

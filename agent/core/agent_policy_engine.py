@@ -110,14 +110,15 @@ def synthesize_market_state_intelligence(
 
 def conclusion_to_ml_signal_and_size(conclusion: str) -> Tuple[str, float]:
     """Map a reasoning conclusion string to a discrete ML-style signal and default size."""
-    c = (conclusion or "").lower()
-    if "strong_buy" in c or "strong buy" in c:
+    text = (conclusion or "").strip()
+    token = text.upper().split()[0].rstrip(":-,") if text else "HOLD"
+    if token == "STRONG_BUY":
         return "STRONG_BUY", 0.1
-    if "strong_sell" in c or "strong sell" in c:
+    if token == "STRONG_SELL":
         return "STRONG_SELL", 0.1
-    if "buy" in c:
+    if token == "BUY":
         return "BUY", 0.05
-    if "sell" in c:
+    if token == "SELL":
         return "SELL", 0.05
     return "HOLD", 0.0
 

@@ -603,8 +603,16 @@ class RiskManager:
             "max_drawdown": portfolio_risk.max_drawdown
         }
 
-    async def validate_trade(self, symbol: str, side: str, proposed_size: float,
-                           entry_price: float, stop_loss: Optional[float] = None) -> Dict[str, Any]:
+    async def validate_trade(
+        self,
+        symbol: str,
+        side: str,
+        proposed_size: float,
+        entry_price: float,
+        stop_loss: Optional[float] = None,
+        required_balance_override: Optional[float] = None,
+        available_balance_override: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """
         Validate a proposed trade against risk limits.
 
@@ -670,6 +678,8 @@ class RiskManager:
             entry_price,
             side,
             proposed_size_is_fraction=True,
+            required_balance_override=required_balance_override,
+            available_balance_override=available_balance_override,
         )
         if not budget_check["approved"]:
             result["approved"] = False
@@ -763,6 +773,8 @@ class RiskManager:
         entry_price: float,
         side: str = "long",
         proposed_size_is_fraction: bool = True,
+        required_balance_override: Optional[float] = None,
+        available_balance_override: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Validate that proposed trade doesn't exceed available budget.
@@ -786,13 +798,19 @@ class RiskManager:
             }
         
         # Use consistent units with caller intent.
-        if proposed_size_is_fraction:
+        if required_balance_override is not None:
+            required_balance = float(required_balance_override)
+            requirement_units = "caller_override"
+        elif proposed_size_is_fraction:
             required_balance = self.portfolio.total_value * proposed_size
             requirement_units = "portfolio_fraction"
         else:
             required_balance = entry_price * proposed_size
             requirement_units = "base_quantity"
-        available_balance = self.portfolio.cash_balance
+        if available_balance_override is not None:
+            available_balance = float(available_balance_override)
+        else:
+            available_balance = self.portfolio.cash_balance
         
         result = {
             "approved": True,

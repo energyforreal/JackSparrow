@@ -15,6 +15,113 @@ from typing import Literal
 Side = Literal["long", "short"]
 
 
+def entry_lots_from_portfolio_margin(
+    portfolio_value_inr: float,
+    margin_fraction: float,
+    usdinr_rate: float,
+    btc_price: float,
+    leverage: int = 5,
+    contract_value_btc: float = 0.001,
+    max_lots: int = 100,
+    min_lots: int = 1,
+    *,
+    available_cash_inr: float | None = None,
+    fee_reserve_fraction: float = 0.02,
+    taker_fee_rate: float = 0.0005,
+    slippage_bps: float = 5.0,
+) -> tuple[int, float]:
+    """Size entry lots from a fixed fraction of portfolio value (INR), capped by cash.
+
+    When ``available_cash_inr`` is set, the margin budget is limited to what the wallet
+    can cover (including a fee headroom). This prevents sizing from in-memory portfolio
+    books that exceed live exchange balances.
+
+    Returns:
+        (lots, margin_inr_budget) where margin_inr_budget is the margin used for sizing.
+    """
+    frac = max(0.01, min(1.0, float(margin_fraction)))
+    margin_inr = max(0.0, float(portfolio_value_inr)) * frac
+    if available_cash_inr is not None and available_cash_inr > 0:
+        reserve = max(0.0, min(0.25, float(fee_reserve_fraction)))
+        margin_inr = min(margin_inr, float(available_cash_inr) * (1.0 - reserve))
+    usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
+    lots = price_to_lots(
+        usd_margin=usd_margin,
+        btc_price=btc_price,
+        leverage=leverage,
+        contract_value_btc=contract_value_btc,
+        max_lots=max_lots,
+        min_lots=min_lots,
+    )
+    if available_cash_inr is not None and available_cash_inr > 0 and lots > 0:
+        affordable = max_affordable_lots_from_cash(
+            available_cash_inr=available_cash_inr,
+            usdinr_rate=usdinr_rate,
+            btc_price=btc_price,
+            leverage=leverage,
+            contract_value_btc=contract_value_btc,
+            fee_reserve_fraction=fee_reserve_fraction,
+            taker_fee_rate=taker_fee_rate,
+            slippage_bps=slippage_bps,
+            min_lots=min_lots,
+            max_lots=max_lots,
+        )
+        if affordable <= 0:
+            return 0, 0.0
+        lots = min(lots, affordable)
+    margin_inr = margin_required_inr(
+        lots,
+        btc_price,
+        usdinr_rate,
+        leverage,
+        contract_value_btc,
+    )
+    return int(lots), margin_inr
+
+
+def max_affordable_lots_from_cash(
+    available_cash_inr: float,
+    usdinr_rate: float,
+    btc_price: float,
+    leverage: int = 5,
+    contract_value_btc: float = 0.001,
+    fee_reserve_fraction: float = 0.02,
+    taker_fee_rate: float = 0.0005,
+    slippage_bps: float = 5.0,
+    min_lots: int = 1,
+    max_lots: int = 100,
+) -> int:
+    """Maximum integer lots fundable from ``available_cash_inr`` (margin + entry fee)."""
+    if available_cash_inr <= 0 or usdinr_rate <= 0 or btc_price <= 0 or leverage <= 0:
+        return 0
+    reserve = max(0.0, min(0.25, float(fee_reserve_fraction)))
+    budget_inr = float(available_cash_inr) * (1.0 - reserve)
+    lots = price_to_lots(
+        usd_margin=budget_inr / usdinr_rate,
+        btc_price=btc_price,
+        leverage=leverage,
+        contract_value_btc=contract_value_btc,
+        max_lots=max_lots,
+        min_lots=0,
+    )
+    while lots > 0:
+        margin_inr = margin_required_inr(
+            lots, btc_price, usdinr_rate, leverage, contract_value_btc
+        )
+        fee_usd = entry_leg_fees_usd(
+            btc_price,
+            float(lots),
+            contract_value_btc,
+            taker_fee_rate,
+            slippage_bps,
+        )
+        total_inr = margin_inr + fee_usd * usdinr_rate
+        if total_inr <= budget_inr:
+            return max(min_lots, lots) if lots >= min_lots else 0
+        lots -= 1
+    return 0
+
+
 def price_to_lots(
     usd_margin: float,
     btc_price: float,

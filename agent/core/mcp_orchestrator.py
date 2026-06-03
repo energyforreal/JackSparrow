@@ -1505,19 +1505,20 @@ class MCPOrchestrator:
         
     def _extract_decision_from_reasoning(self, reasoning_chain: MCPReasoningChain) -> Dict[str, Any]:
         """Extract trading decision from reasoning chain conclusion."""
-        conclusion = reasoning_chain.conclusion.lower()
+        conclusion = (reasoning_chain.conclusion or "").strip()
+        token = conclusion.upper().split()[0].rstrip(":-,") if conclusion else "HOLD"
 
         default_size = float(getattr(settings, "max_position_size", 0.1) or 0.1)
-        if "strong_buy" in conclusion:
+        if token == "STRONG_BUY":
             signal = "STRONG_BUY"
             position_size = default_size
-        elif "buy" in conclusion:
+        elif token == "BUY":
             signal = "BUY"
             position_size = max(0.01, default_size * 0.5)
-        elif "strong_sell" in conclusion:
+        elif token == "STRONG_SELL":
             signal = "STRONG_SELL"
             position_size = default_size
-        elif "sell" in conclusion:
+        elif token == "SELL":
             signal = "SELL"
             position_size = max(0.01, default_size * 0.5)
         else:
