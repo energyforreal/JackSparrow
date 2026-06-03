@@ -9,6 +9,7 @@ import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
+from agent.core.decision_timestamp import parse_utc_datetime
 from agent.events.schemas import BaseEvent
 
 
@@ -61,19 +62,16 @@ def deserialize_event(data: bytes, event_class: type = BaseEvent) -> BaseEvent:
     """
     event_dict = json.loads(data.decode("utf-8"))
     
-    # Handle datetime strings
+    # Handle datetime strings (naive ISO → UTC for Windows/IST hosts)
     if "timestamp" in event_dict:
-        if isinstance(event_dict["timestamp"], str):
-            event_dict["timestamp"] = datetime.fromisoformat(event_dict["timestamp"])
-    
-    # Handle nested payload timestamps
+        parsed = parse_utc_datetime(event_dict["timestamp"])
+        if parsed is not None:
+            event_dict["timestamp"] = parsed
+
     if "payload" in event_dict and isinstance(event_dict["payload"], dict):
-        for key, value in event_dict["payload"].items():
-            if isinstance(value, str) and "timestamp" in key.lower():
-                try:
-                    event_dict["payload"][key] = datetime.fromisoformat(value)
-                except (ValueError, TypeError):
-                    pass
+        parsed_ts = parse_utc_datetime(event_dict["payload"].get("timestamp"))
+        if parsed_ts is not None:
+            event_dict["payload"]["timestamp"] = parsed_ts
     
     return event_class(**event_dict)
 

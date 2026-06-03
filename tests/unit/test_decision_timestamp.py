@@ -2,7 +2,10 @@
 
 from datetime import datetime, timezone
 
-from agent.core.decision_timestamp import decision_payload_timestamp_epoch_seconds
+from agent.core.decision_timestamp import (
+    decision_payload_age_seconds,
+    decision_payload_timestamp_epoch_seconds,
+)
 
 
 def test_naive_utc_datetime_matches_utc_epoch():
@@ -33,3 +36,16 @@ def test_numeric_epoch_seconds():
 def test_numeric_millis_normalized():
     base = 1_700_000_000.0
     assert abs(decision_payload_timestamp_epoch_seconds(base * 1000.0) - base) < 1e-6
+
+
+def test_decision_payload_age_prefers_server_timestamp_ms():
+    import time as time_mod
+
+    now_ms = int(time_mod.time() * 1000)
+    payload = {
+        "timestamp": "2020-01-01T00:00:00+00:00",
+        "server_timestamp_ms": now_ms - 5000,
+    }
+    age = decision_payload_age_seconds(payload)
+    assert age is not None
+    assert 4.0 <= age <= 8.0

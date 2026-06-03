@@ -56,6 +56,9 @@ COPY --chown=backend:backend backend /app/backend
 
 COPY --chown=backend:backend shared /app/shared
 
+# Alembic head-check at startup (paths relative to /app/alembic.ini)
+COPY --chown=backend:backend alembic.ini /app/alembic.ini
+
 # Add build metadata labels
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${VERSION}" \

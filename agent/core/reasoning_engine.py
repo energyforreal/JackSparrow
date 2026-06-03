@@ -274,7 +274,7 @@ class MCPReasoningEngine:
                         "market_context": reasoning_chain.market_context
                     },
                     "final_confidence": reasoning_chain.final_confidence,
-                    "timestamp": reasoning_chain.timestamp
+                    "timestamp": datetime.now(timezone.utc),
                 }
             )
             
@@ -367,7 +367,8 @@ class MCPReasoningEngine:
                         "market_context": reasoning_chain.market_context,
                         "model_predictions": reasoning_chain.model_predictions
                     },
-                    "timestamp": reasoning_chain.timestamp
+                    "timestamp": datetime.now(timezone.utc),
+                    "server_timestamp_ms": int(time.time() * 1000),
                 }
             )
             

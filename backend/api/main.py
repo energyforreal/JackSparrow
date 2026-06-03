@@ -59,7 +59,19 @@ async def _verify_alembic_at_head() -> None:
     from alembic.script import ScriptDirectory
 
     repo_root = Path(__file__).resolve().parents[2]
-    alembic_cfg = Config(str(repo_root / "alembic.ini"))
+    alembic_ini = repo_root / "alembic.ini"
+    if not alembic_ini.is_file():
+        # Local dev: backend/api/main.py -> parents[3] is repo root
+        alt_root = Path(__file__).resolve().parents[3]
+        if (alt_root / "alembic.ini").is_file():
+            repo_root = alt_root
+            alembic_ini = repo_root / "alembic.ini"
+        else:
+            raise RuntimeError(
+                f"Alembic config not found at {repo_root / 'alembic.ini'} "
+                "or repo root; ensure alembic.ini is copied into the image."
+            )
+    alembic_cfg = Config(str(alembic_ini))
     script = ScriptDirectory.from_config(alembic_cfg)
     head_rev = script.get_current_head()
     if not head_rev:

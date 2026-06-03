@@ -1967,10 +1967,11 @@ class Settings(BaseSettings):
         ),
     )
     agent_policy_mode: str = Field(
-        default="ml_and_thesis",
+        default="ml_or_thesis",
         env="AGENT_POLICY_MODE",
         description=(
-            "Signal fusion: ml_only | thesis_only | ml_or_thesis | ml_and_thesis | thesis_veto_ml"
+            "Signal fusion: ml_only | thesis_only | ml_or_thesis | ml_and_thesis | thesis_veto_ml. "
+            "Default ml_or_thesis allows gated ML when thesis is neutral (see .env.example recovery notes)."
         ),
     )
     agent_trade_score_min: float = Field(

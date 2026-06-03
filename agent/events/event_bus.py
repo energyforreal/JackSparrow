@@ -15,6 +15,7 @@ from redis.exceptions import ResponseError, ConnectionError
 from agent.core.logging_utils import log_error_with_context
 from agent.core.redis_config import get_redis
 from agent.events.schemas import BaseEvent, EventType
+from agent.core.decision_timestamp import parse_utc_datetime
 from agent.events.utils import serialize_event, deserialize_event
 
 logger = structlog.get_logger()
@@ -604,10 +605,17 @@ class EventBus:
             
             event_class = event_class_map.get(event_class_name, BaseEvent)
             
-            # Handle datetime strings
-            if "timestamp" in event_dict and isinstance(event_dict["timestamp"], str):
-                event_dict["timestamp"] = datetime.fromisoformat(event_dict["timestamp"])
-            
+            # Handle datetime strings (naive ISO → UTC)
+            if "timestamp" in event_dict:
+                parsed_evt_ts = parse_utc_datetime(event_dict["timestamp"])
+                if parsed_evt_ts is not None:
+                    event_dict["timestamp"] = parsed_evt_ts
+            payload_raw = event_dict.get("payload")
+            if isinstance(payload_raw, dict):
+                parsed_payload_ts = parse_utc_datetime(payload_raw.get("timestamp"))
+                if parsed_payload_ts is not None:
+                    payload_raw["timestamp"] = parsed_payload_ts
+
             # Create event instance with error handling
             try:
                 event = event_class(**event_dict)

@@ -18,7 +18,7 @@ from agent.core.config import settings
 from agent.core.futures_utils import margin_required_inr, price_to_lots, entry_leg_fees_usd
 from agent.core.sl_tp import compute_stop_take_prices
 from agent.core.product_specs import get_contract_specs
-from agent.core.decision_timestamp import decision_payload_timestamp_epoch_seconds
+from agent.core.decision_timestamp import decision_payload_age_seconds
 from agent.core.learning_system import LearningSystem
 from agent.core.signal_filter import EntrySignalFilter
 from agent.core.redis_config import get_cache
@@ -344,22 +344,24 @@ class TradingEventHandler:
                 )
                 return
 
-            # Signal expiry: reject stale signals
-            ts = payload.get("timestamp")
-            if not minimal_entry and ts is not None:
+            # Signal expiry: reject stale signals (prefer server_timestamp_ms from emit)
+            if not minimal_entry:
                 try:
-                    ts_sec = decision_payload_timestamp_epoch_seconds(ts)
-                    if ts_sec is None:
-                        raise ValueError("unparseable timestamp")
-                    age = time.time() - ts_sec
-                    if age > getattr(settings, "max_signal_age_seconds", 45):
+                    age = decision_payload_age_seconds(payload)
+                    if age is None:
+                        raise ValueError("unparseable decision timestamp")
+                    max_age = int(
+                        getattr(settings, "max_signal_age_seconds", 45) or 45
+                    )
+                    if age > max_age:
                         self._log_entry_rejected(
                             "stale_signal_reject",
                             symbol=symbol,
                             signal=signal,
                             event_id=event.event_id,
                             age_seconds=round(age, 3),
-                            max_signal_age_seconds=getattr(settings, "max_signal_age_seconds", 45),
+                            max_signal_age_seconds=max_age,
+                            server_timestamp_ms=payload.get("server_timestamp_ms"),
                             **diagnostics_base,
                         )
                         return
