@@ -14,6 +14,14 @@ from agent.core.config import settings
 
 INTROSPECTION_VERSION = "1.0"
 
+_GATED_ML_ADOPT_CODES = frozenset(
+    {
+        "fusion_ml_gated_thesis_neutral",
+        "fusion_ml_or_thesis_gated_neutral",
+        "fusion_ml_or_thesis_ml",
+    }
+)
+
 
 @dataclass
 class AgentIntrospectionSnapshot:
@@ -125,10 +133,36 @@ def build_introspection_snapshot(
         except (TypeError, ValueError):
             pass
 
+    reason_codes = list(policy_reason_codes or pv.get("reason_codes") or [])
     min_score = float(getattr(settings, "agent_trade_score_min", 55.0) or 55.0)
+    if any(c in _GATED_ML_ADOPT_CODES for c in reason_codes):
+        min_score = min(
+            min_score,
+            float(
+                getattr(settings, "agent_trade_score_min_gated_ml_adoption", 30.0) or 30.0
+            ),
+        )
+
+    ts_dict = mctx.get("trade_score")
+    ts_passed_from_ctx: Optional[bool] = None
+    if isinstance(ts_dict, dict) and ts_dict.get("passed") is not None:
+        ts_passed_from_ctx = bool(ts_dict["passed"])
+
+    ml_validation = mctx.get("ml_validation")
+    final_long = False
+    final_short = False
+    if isinstance(ml_validation, dict):
+        final_long = bool(ml_validation.get("final_long"))
+        final_short = bool(ml_validation.get("final_short"))
+
     trade_pass: Optional[bool] = None
-    if ts_val is not None:
-        trade_pass = ts_val >= min_score
+    if ts_passed_from_ctx is not None or ts_val is not None:
+        score_ok = bool(ts_passed_from_ctx) or (
+            ts_val is not None
+            and float(ts_val) >= min_score
+            and (final_long or final_short)
+        )
+        trade_pass = score_ok
 
     pg = mctx.get("portfolio_guard")
     pg_action: Optional[str] = None
@@ -145,7 +179,6 @@ def build_introspection_snapshot(
     v43_regime = ml.get("v43_regime") or excerpt.get("v43_regime")
     v43_gate = ml.get("v43_gate_reject") or excerpt.get("v43_gate_reject")
 
-    ml_validation = mctx.get("ml_validation")
     if v43_regime is None and isinstance(ml_validation, dict):
         v43_regime = ml_validation.get("regime")
     if v43_gate is None and isinstance(ml_validation, dict):

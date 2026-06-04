@@ -8,6 +8,7 @@ import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
 import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
+import { resolveDecisionReasoning } from '@/utils/signalConfidence'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
@@ -183,12 +184,16 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
-        {signal.agent_decision_reasoning && (
-          <div className="pt-2 border-t">
-            <p className="text-sm font-medium mb-1">Decision Reasoning</p>
-            <p className="text-xs text-muted-foreground">{signal.agent_decision_reasoning}</p>
-          </div>
-        )}
+        {(() => {
+          const reasoning = resolveDecisionReasoning(signal)
+          if (!reasoning) return null
+          return (
+            <div className="pt-2 border-t">
+              <p className="text-sm font-medium mb-1">Decision Reasoning</p>
+              <p className="text-xs text-muted-foreground">{reasoning}</p>
+            </div>
+          )
+        })()}
 
         {(signal.timestamp || signal.server_timestamp_ms) && (
           <DataFreshnessIndicator

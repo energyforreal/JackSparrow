@@ -19,6 +19,11 @@ export function mergeSignalPayload(
     !('confidence' in data) &&
     !('final_confidence' in data) &&
     !('signal_strength' in data)
+  const explicitNonActionableHold =
+    isHoldPatch &&
+    'is_actionable_entry' in data &&
+    data.is_actionable_entry !== true &&
+    data.is_actionable_entry !== 'true'
 
   for (const [key, value] of Object.entries(data)) {
     if (
@@ -33,28 +38,32 @@ export function mergeSignalPayload(
 
   if ('confidence' in data && data.confidence !== undefined) {
     out.confidence = data.confidence
-  } else if (partialHold && prev?.confidence !== undefined) {
-    out.confidence = prev.confidence
+  } else if (explicitNonActionableHold || partialHold) {
+    out.confidence = 0
   } else if (!partialHold && prev) {
     out.confidence = prev.confidence
-  } else if (partialHold) {
-    out.confidence = 0
   }
 
   if ('final_confidence' in data && data.final_confidence !== undefined) {
     out.final_confidence = data.final_confidence
-  } else if (partialHold && prev?.final_confidence !== undefined) {
-    out.final_confidence = prev.final_confidence
+  } else if (explicitNonActionableHold || partialHold) {
+    delete out.final_confidence
   } else if (!partialHold && prev?.final_confidence !== undefined) {
     out.final_confidence = prev.final_confidence
   }
 
   if ('signal_strength' in data && data.signal_strength !== undefined) {
     out.signal_strength = data.signal_strength
-  } else if (partialHold && prev?.signal_strength !== undefined) {
-    out.signal_strength = prev.signal_strength
+  } else if (explicitNonActionableHold || partialHold) {
+    delete out.signal_strength
   } else if (!partialHold && prev?.signal_strength !== undefined) {
     out.signal_strength = prev.signal_strength
+  }
+
+  if ('server_timestamp_ms' in data && data.server_timestamp_ms !== undefined) {
+    out.server_timestamp_ms = data.server_timestamp_ms
+  } else if (prev?.server_timestamp_ms !== undefined) {
+    out.server_timestamp_ms = prev.server_timestamp_ms
   }
 
   if ('v43_gate_reject' in data && data.v43_gate_reject !== undefined) {

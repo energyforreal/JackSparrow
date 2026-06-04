@@ -40,7 +40,9 @@ def test_build_introspection_includes_policy_and_ml_fields(
             "portfolio_guard": {
                 "action": "allow",
                 "reason_codes": [],
-            }
+            },
+            "trade_score": {"score": 78.0, "passed": True},
+            "ml_validation": {"final_long": True, "final_short": False},
         },
         memory_enabled=True,
         memory_context_count=12,
@@ -61,5 +63,42 @@ def test_build_introspection_trade_score_fail(introspection_settings) -> None:
         signal="HOLD",
         confidence=0.4,
         trade_score=55.0,
+        market_context={
+            "ml_validation": {"final_long": False, "final_short": False},
+        },
     )
     assert snap.trade_score_pass is False
+
+
+def test_build_introspection_trade_score_ok_with_gated_ml(
+    introspection_settings,
+) -> None:
+    """Matches orchestrator: score >= min with final_short even if scorer.passed is false."""
+    snap = build_introspection_snapshot(
+        symbol="BTCUSD",
+        signal="SELL",
+        confidence=0.3,
+        trade_score=93.0,
+        policy_reason_codes=["fusion_ml_gated_thesis_neutral"],
+        market_context={
+            "trade_score": {"score": 93.0, "passed": False},
+            "ml_validation": {"final_short": True, "final_long": False},
+        },
+    )
+    assert snap.trade_score_pass is True
+
+
+def test_build_introspection_trade_score_uses_passed_from_context(
+    introspection_settings,
+) -> None:
+    snap = build_introspection_snapshot(
+        symbol="BTCUSD",
+        signal="HOLD",
+        confidence=0.4,
+        trade_score=40.0,
+        market_context={
+            "trade_score": {"score": 40.0, "passed": True},
+            "ml_validation": {"final_long": False, "final_short": False},
+        },
+    )
+    assert snap.trade_score_pass is True

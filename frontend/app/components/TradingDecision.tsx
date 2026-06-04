@@ -13,6 +13,7 @@ import {
   sideBadgeVariant,
 } from '@/utils/tradingDisplay'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
+import { resolveDecisionReasoning } from '@/utils/signalConfidence'
 
 interface TradingDecisionProps {
   signal?: Signal | null
@@ -129,14 +130,16 @@ export function TradingDecision({
                 </div>
               )}
 
-              {signal.agent_decision_reasoning && (
-                <div className="pt-2 border-t">
-                  <p className="text-xs font-medium mb-1">Decision Reasoning</p>
-                  <p className="text-xs text-muted-foreground">
-                    {signal.agent_decision_reasoning}
-                  </p>
-                </div>
-              )}
+              {(() => {
+                const reasoning = resolveDecisionReasoning(signal)
+                if (!reasoning) return null
+                return (
+                  <div className="pt-2 border-t">
+                    <p className="text-xs font-medium mb-1">Decision Reasoning</p>
+                    <p className="text-xs text-muted-foreground">{reasoning}</p>
+                  </div>
+                )
+              })()}
 
               {(signal.timestamp || signal.server_timestamp_ms) && (
                 <DataFreshnessIndicator

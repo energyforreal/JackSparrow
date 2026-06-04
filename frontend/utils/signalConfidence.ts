@@ -10,6 +10,25 @@ type SignalWithFreshness = {
  * Prefers server_timestamp_ms (wall-clock from agent emit) over timestamp ISO string,
  * mirroring the handler-side age check in decision_payload_age_seconds.
  */
+type DecisionReasoningCarrier = {
+  agent_decision_reasoning?: string | null
+  conclusion?: string | null
+  reasoning_chain_full?: { conclusion?: string | null } | null
+}
+
+/** Decision text for UI: backend field, then conclusion aliases. */
+export function resolveDecisionReasoning(
+  signal: DecisionReasoningCarrier | null | undefined
+): string | undefined {
+  if (!signal) return undefined
+  const direct = signal.agent_decision_reasoning?.trim()
+  if (direct) return direct
+  const top = signal.conclusion?.trim()
+  if (top) return top
+  const chain = signal.reasoning_chain_full?.conclusion?.trim()
+  return chain || undefined
+}
+
 export function resolveSignalFreshnessMs(
   signal: SignalWithFreshness | null | undefined
 ): number | null {
@@ -42,6 +61,15 @@ export interface DisplayConfidenceResult {
   signalStrengthPercent?: number
 }
 
+type TradeScoreRaw =
+  | number
+  | {
+      score?: number | null
+      passed?: boolean | null
+    }
+  | null
+  | undefined
+
 type ConfidenceCarrier = {
   confidence?: number | null
   final_confidence?: number | null
@@ -50,8 +78,9 @@ type ConfidenceCarrier = {
   calibrated_confidence?: number | null
   policy_confidence?: number | null
   display_confidence?: number | null
-  trade_score?: number | null
+  trade_score?: TradeScoreRaw
   is_actionable_entry?: boolean | null
+  signal?: string | null
   agent_introspection?: {
     trade_score?: number | null
     trade_score_pass?: boolean | null
@@ -129,16 +158,40 @@ export function resolvePolicyEntryPercent(
   return normalizeConfidenceToPercent(signal.confidence)
 }
 
+function parseTradeScoreRaw(raw: TradeScoreRaw): { score: number; passed?: boolean } | undefined {
+  if (raw == null) return undefined
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const score = raw.score
+    if (score == null || !Number.isFinite(Number(score))) return undefined
+    const passed =
+      raw.passed != null && raw.passed !== undefined ? Boolean(raw.passed) : undefined
+    return { score: Number(score), passed }
+  }
+  if (!Number.isFinite(Number(raw))) return undefined
+  return { score: Number(raw) }
+}
+
 export function resolveTradeScore(
   signal: ConfidenceCarrier | null | undefined
 ): TradeScoreInfo | undefined {
   if (!signal) return undefined
   const intro = signal.agent_introspection
-  const raw = signal.trade_score ?? intro?.trade_score
-  if (raw == null || !Number.isFinite(Number(raw))) return undefined
+  const parsed =
+    parseTradeScoreRaw(signal.trade_score) ?? parseTradeScoreRaw(intro?.trade_score)
+  if (!parsed) return undefined
   const passed =
-    intro?.trade_score_pass != null ? Boolean(intro.trade_score_pass) : undefined
-  return { score: Number(raw), passed }
+    parsed.passed ??
+    (intro?.trade_score_pass != null ? Boolean(intro.trade_score_pass) : undefined)
+  return { score: parsed.score, passed }
+}
+
+/** True when UI should de-emphasize confidence bars (non-entry HOLD). */
+export function isHoldNonActionableDisplay(
+  signal: ConfidenceCarrier | null | undefined
+): boolean {
+  if (!signal) return false
+  if (String(signal.signal || '').toUpperCase() !== 'HOLD') return false
+  return signal.is_actionable_entry !== true
 }
 
 /** Full entry vs display breakdown for the Trading Signal card. */
@@ -146,17 +199,24 @@ export function resolveSignalEntryMetrics(
   signal: ConfidenceCarrier | null | undefined
 ): SignalEntryMetrics | null {
   if (!signal) return null
+  const holdDim = isHoldNonActionableDisplay(signal)
   const display = resolveDisplayConfidence(signal)
-  const policyEntryPercent = resolvePolicyEntryPercent(signal, display)
+  let policyEntryPercent = resolvePolicyEntryPercent(signal, display)
+  let reasoningPercent = display.percent
+  if (holdDim) {
+    policyEntryPercent = 0
+    reasoningPercent = 0
+  }
   const tradeScore = resolveTradeScore(signal)
   const showSplitConfidence =
+    !holdDim &&
     display.source === 'reasoning' &&
     Math.abs(policyEntryPercent - display.percent) >= 1
   return {
-    reasoningPercent: display.percent,
+    reasoningPercent,
     policyEntryPercent,
     tradeScore,
-    signalStrengthPercent: display.signalStrengthPercent,
+    signalStrengthPercent: holdDim ? undefined : display.signalStrengthPercent,
     isActionableEntry:
       signal.is_actionable_entry != null
         ? Boolean(signal.is_actionable_entry)

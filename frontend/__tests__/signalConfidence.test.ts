@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals'
 
 import {
+  isHoldNonActionableDisplay,
   resolveDisplayConfidence,
   resolvePolicyEntryPercent,
   resolveSignalEntryMetrics,
@@ -64,6 +65,12 @@ describe('resolveTradeScore', () => {
     expect(resolveTradeScore({ trade_score: 93 })?.score).toBe(93)
   })
 
+  it('reads trade_score object with passed flag', () => {
+    expect(
+      resolveTradeScore({ trade_score: { score: 88, passed: true } })
+    ).toEqual({ score: 88, passed: true })
+  })
+
   it('falls back to introspection', () => {
     expect(
       resolveTradeScore({
@@ -94,5 +101,29 @@ describe('resolveSignalEntryMetrics', () => {
     })
     expect(m?.tradeScore?.score).toBe(93)
     expect(m?.tradeScore?.passed).toBe(true)
+  })
+
+  it('zeros confidence bars for non-actionable HOLD', () => {
+    const m = resolveSignalEntryMetrics({
+      signal: 'HOLD',
+      confidence: 0.85,
+      final_confidence: 0.72,
+      is_actionable_entry: false,
+    })
+    expect(m?.reasoningPercent).toBe(0)
+    expect(m?.policyEntryPercent).toBe(0)
+    expect(m?.showSplitConfidence).toBe(false)
+  })
+})
+
+describe('isHoldNonActionableDisplay', () => {
+  it('returns true for HOLD without actionable flag', () => {
+    expect(isHoldNonActionableDisplay({ signal: 'HOLD' })).toBe(true)
+  })
+
+  it('returns false for actionable BUY', () => {
+    expect(
+      isHoldNonActionableDisplay({ signal: 'BUY', is_actionable_entry: true })
+    ).toBe(false)
   })
 })

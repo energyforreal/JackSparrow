@@ -43,6 +43,45 @@ describe('mergeSignalPayload', () => {
     expect(merged.timestamp).toBe('2026-06-03T06:00:00.000Z')
   })
 
+  it('preserves server_timestamp_ms across partial patches', () => {
+    const prev: Signal = {
+      signal: 'SELL',
+      confidence: 0.8,
+      server_timestamp_ms: 1_700_000_000_000,
+      timestamp: '2026-06-03T06:00:00.000Z',
+    }
+    const merged = mergeSignalPayload(prev, { signal: 'HOLD' })
+    expect(merged.server_timestamp_ms).toBe(1_700_000_000_000)
+  })
+
+  it('clears confidence on partial HOLD patch', () => {
+    const prev: Signal = {
+      signal: 'SELL',
+      confidence: 0.85,
+      final_confidence: 0.72,
+      signal_strength: 0.6,
+    }
+    const merged = mergeSignalPayload(prev, { signal: 'HOLD' })
+    expect(merged.confidence).toBe(0)
+    expect(merged.final_confidence).toBeUndefined()
+    expect(merged.signal_strength).toBeUndefined()
+  })
+
+  it('clears confidence when HOLD is explicitly non-actionable', () => {
+    const prev: Signal = {
+      signal: 'SELL',
+      confidence: 0.9,
+      final_confidence: 0.8,
+    }
+    const merged = mergeSignalPayload(prev, {
+      signal: 'HOLD',
+      is_actionable_entry: false,
+      confidence: 0.3,
+    })
+    expect(merged.confidence).toBe(0.3)
+    expect(merged.final_confidence).toBeUndefined()
+  })
+
   it('updates v43_gate_reject when incoming patch includes it', () => {
     const prev: Signal = {
       signal: 'HOLD',

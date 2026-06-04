@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import type { Signal } from '@/types'
 import { formatConfidence } from '@/utils/formatters'
 import {
+  isHoldNonActionableDisplay,
   resolveDisplayConfidence,
   resolveSignalEntryMetrics,
 } from '@/utils/signalConfidence'
@@ -23,6 +24,8 @@ export function SignalEntryMetricsBlock({
   const display = resolveDisplayConfidence(signal)
   const metrics = resolveSignalEntryMetrics(signal)
   if (!metrics) return null
+
+  const holdDim = isHoldNonActionableDisplay(signal)
 
   const reasoningLabel =
     display.source === 'reasoning' ? 'Reasoning confidence' : 'Signal confidence'
@@ -66,7 +69,10 @@ export function SignalEntryMetricsBlock({
   }
 
   return (
-    <div className="space-y-3">
+    <div className={cn('space-y-3', holdDim && 'opacity-50')}>
+      {holdDim && (
+        <p className="text-[10px] text-muted-foreground">HOLD — confidence bars cleared (no entry).</p>
+      )}
       <div>
         <div className="flex justify-between text-sm mb-1">
           <span className="text-muted-foreground">{reasoningLabel}</span>
