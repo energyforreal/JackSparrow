@@ -1391,7 +1391,9 @@ class TradingEventHandler:
                 pass
         if book_inr is None:
             book_inr = float(getattr(settings, "initial_balance", 20000.0) or 20000.0)
-        # Total equity for sizing; free cash is capped in entry_lots_from_portfolio_margin only.
+        # Live wallet is the sizing base for 60/40 margin+reserve (must match risk reserve check).
+        if available_cash_inr is not None and float(available_cash_inr) > 0:
+            return float(available_cash_inr)
         return book_inr
 
     async def _get_available_cash_inr(self, state: Optional[Any], symbol: str) -> float:
