@@ -19,6 +19,7 @@ __all__ = [
     "clear_recent_trades_display",
     "fetch_portfolio_summary",
     "fetch_recent_closed_trades",
+    "fetch_recent_closed_trades_payload",
     "merge_recent_trades",
     "is_testnet_trading_mode",
     "require_testnet_exchange",
@@ -131,23 +132,45 @@ def merge_recent_trades(
     return combined[:limit]
 
 
-async def fetch_recent_closed_trades(
+def _recent_trades_meta(
+    *,
+    suppressed: bool,
+    fills_attribution: str = "agent_only",
+) -> Dict[str, Any]:
+    return {
+        "suppressed": suppressed,
+        "fills_attribution": fills_attribution,
+    }
+
+
+async def _is_recent_trades_suppressed_active() -> bool:
+    if is_recent_trades_suppressed():
+        return True
+    from backend.core.redis import get_cache
+
+    try:
+        if await get_cache(RECENT_TRADES_SUPPRESS_KEY):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def fetch_recent_closed_trades_payload(
     db: AsyncSession,
     *,
     symbol: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-) -> List[Dict[str, Any]]:
-    if is_recent_trades_suppressed():
-        return []
+) -> Dict[str, Any]:
+    """Return trades list plus meta for UI (suppress flag, fill attribution)."""
+    if await _is_recent_trades_suppressed_active():
+        return {
+            "trades": [],
+            "meta": _recent_trades_meta(suppressed=True),
+        }
 
-    from backend.core.redis import get_cache
-
-    try:
-        if await get_cache(RECENT_TRADES_SUPPRESS_KEY):
-            return []
-    except Exception:
-        pass
+    fills_attribution = "agent_only"
 
     if is_testnet_trading_mode():
         from backend.services.agent_trade_ledger_service import get_agent_closed_trades
@@ -162,18 +185,42 @@ async def fetch_recent_closed_trades(
 
         fill_rows: List[Dict[str, Any]] = []
         try:
-            fill_rows = await testnet_portfolio_service.get_recent_fills_from_exchange(
-                symbol=symbol,
-                limit=limit + offset,
+            fill_rows, fills_attribution = (
+                await testnet_portfolio_service.get_recent_fills_from_exchange_with_meta(
+                    symbol=symbol,
+                    limit=limit + offset,
+                )
             )
         except TestnetExchangeUnavailableError:
             pass
 
         merged = merge_recent_trades(ledger_rows, fill_rows, limit=limit + offset)
-        return merged[offset : offset + limit]
-    return await portfolio_service.get_recent_closed_trades(
+        trades = merged[offset : offset + limit]
+        return {
+            "trades": trades,
+            "meta": _recent_trades_meta(suppressed=False, fills_attribution=fills_attribution),
+        }
+
+    rows = await portfolio_service.get_recent_closed_trades(
         db=db,
         symbol=symbol,
         limit=limit,
         offset=offset,
     )
+    return {
+        "trades": rows,
+        "meta": _recent_trades_meta(suppressed=False, fills_attribution="agent_only"),
+    }
+
+
+async def fetch_recent_closed_trades(
+    db: AsyncSession,
+    *,
+    symbol: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    payload = await fetch_recent_closed_trades_payload(
+        db, symbol=symbol, limit=limit, offset=offset
+    )
+    return payload.get("trades") or []

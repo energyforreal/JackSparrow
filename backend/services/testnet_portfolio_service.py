@@ -520,6 +520,19 @@ class TestnetPortfolioService:
         db: Optional[AsyncSession] = None,
     ) -> List[Dict[str, Any]]:
         """Agent-attributed fills from Delta GET /v2/fills (testnet)."""
+        rows, _ = await self.get_recent_fills_from_exchange_with_meta(
+            symbol=symbol, limit=limit, db=db
+        )
+        return rows
+
+    async def get_recent_fills_from_exchange_with_meta(
+        self,
+        *,
+        symbol: Optional[str] = None,
+        limit: int = 50,
+        db: Optional[AsyncSession] = None,
+    ) -> tuple[List[Dict[str, Any]], str]:
+        """Returns (fill rows, fills_attribution) where attribution is agent_only or all_fills."""
         _ = db
         symbol = symbol or str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD")
         fills_snapshot = await agent_service.get_exchange_fills(symbol=symbol, limit=limit)
@@ -534,6 +547,7 @@ class TestnetPortfolioService:
         fills_body = fills_snapshot.get("fills") or {}
         order_history = fills_snapshot.get("order_history") or {}
         agent_order_ids = _collect_agent_order_ids(order_history)
+        fills_attribution = "agent_only" if agent_order_ids else "all_fills"
 
         rows = _extract_result_list(fills_body)
         mapped: List[Dict[str, Any]] = []
@@ -549,7 +563,7 @@ class TestnetPortfolioService:
             key=lambda r: r.get("executed_at") or datetime.min.replace(tzinfo=timezone.utc),
             reverse=True,
         )
-        return mapped[:limit]
+        return mapped[:limit], fills_attribution
 
     async def get_recent_closed_trades_from_exchange(
         self,

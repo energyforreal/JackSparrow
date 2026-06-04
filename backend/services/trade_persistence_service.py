@@ -20,6 +20,8 @@ from backend.core.database import (
 )
 from backend.utils.futures_contract import unrealized_pnl_usd
 from backend.core.config import settings as backend_settings
+from backend.services.portfolio_fetch import is_testnet_trading_mode
+
 logger = structlog.get_logger()
 
 
@@ -68,6 +70,15 @@ class TradePersistenceService:
             order_type=order_type,
             message="TradePersistenceService.create_trade_and_position called"
         )
+
+        if is_testnet_trading_mode():
+            logger.debug(
+                "trade_persistence_skipped_testnet",
+                trade_id=trade_id,
+                symbol=symbol,
+                reason="testnet_exchange_ledger",
+            )
+            return {"skipped": True, "reason": "testnet_exchange_ledger"}
 
         # Validate inputs
         if not trade_id:
@@ -281,6 +292,15 @@ class TradePersistenceService:
         Returns:
             Dictionary with updated position details
         """
+        if is_testnet_trading_mode():
+            logger.debug(
+                "trade_persistence_skipped_testnet",
+                position_id=position_id,
+                symbol=symbol,
+                reason="testnet_exchange_ledger",
+            )
+            return {"skipped": True, "reason": "testnet_exchange_ledger"}
+
         async with AsyncSessionLocal() as session:
             try:
                 closed_at = closed_at or datetime.now(timezone.utc)

@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { getDataFreshnessColor, formatClockTime, normalizeDate } from '@/utils/formatters'
 
@@ -26,15 +27,26 @@ function resolveEffectiveDate(
   return timestamp
 }
 
+function effectiveTimestampKey(
+  timestamp: Date | string | null | undefined,
+  serverTimestampMs: number | null | undefined
+): string {
+  if (serverTimestampMs != null && Number.isFinite(serverTimestampMs) && serverTimestampMs > 0) {
+    return `ms:${serverTimestampMs}`
+  }
+  if (timestamp == null || timestamp === '') return 'none'
+  return `ts:${String(timestamp)}`
+}
+
 function getFreshnessDotColor(timestamp: Date | string | null | undefined): string {
   if (!timestamp) return 'bg-muted-foreground'
-  
+
   const now = new Date()
   const dataTime = normalizeDate(timestamp)
   const ageMs = now.getTime() - dataTime.getTime()
   const ageSeconds = ageMs / 1000
   const ageMinutes = ageSeconds / 60
-  
+
   if (ageSeconds < 30) return 'bg-green-600 dark:bg-green-400'
   if (ageMinutes < 1) return 'bg-green-500 dark:bg-green-500'
   if (ageMinutes < 2) return 'bg-yellow-500 dark:bg-yellow-500'
@@ -43,35 +55,41 @@ function getFreshnessDotColor(timestamp: Date | string | null | undefined): stri
   return 'bg-red-600 dark:bg-red-400'
 }
 
-export function DataFreshnessIndicator({ 
+export function DataFreshnessIndicator({
   timestamp,
   serverTimestampMs,
   label = 'Last update',
-  className 
+  className,
 }: DataFreshnessIndicatorProps) {
   const effective = resolveEffectiveDate(timestamp, serverTimestampMs)
+  const lastLoggedKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return
+    const key = effectiveTimestampKey(timestamp, serverTimestampMs ?? null)
+    if (lastLoggedKeyRef.current === key) return
+    lastLoggedKeyRef.current = key
+
+    if (!effective) {
+      console.log('[DataFreshnessIndicator] No timestamp provided:', { label })
+      return
+    }
+    const normalized = normalizeDate(effective)
+    console.log('[DataFreshnessIndicator] Timestamp changed:', {
+      label,
+      raw_timestamp: timestamp,
+      server_timestamp_ms: serverTimestampMs,
+      normalized_utc_iso: normalized.toISOString(),
+      age_ms: new Date().getTime() - normalized.getTime(),
+    })
+  }, [effective, timestamp, serverTimestampMs, label])
 
   if (!effective) {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[DataFreshnessIndicator] No timestamp provided:', { label })
-    }
     return (
       <span className={cn('text-xs text-muted-foreground', className)}>
         {label}: N/A
       </span>
     )
-  }
-
-  if (process.env.NODE_ENV === 'development') {
-    const normalized = normalizeDate(effective)
-    console.log('[DataFreshnessIndicator] Rendering timestamp:', {
-      label,
-      raw_timestamp: timestamp,
-      server_timestamp_ms: serverTimestampMs,
-      effective_timestamp: effective,
-      normalized_utc_iso: normalized.toISOString(),
-      age_ms: new Date().getTime() - normalized.getTime()
-    })
   }
 
   const colorClass = getDataFreshnessColor(effective)
@@ -81,9 +99,7 @@ export function DataFreshnessIndicator({
   return (
     <span className={cn('text-xs flex items-center gap-1.5', className)}>
       <span className="text-muted-foreground">{label}:</span>
-      <span className={cn('font-medium', colorClass)}>
-        {formattedTime}
-      </span>
+      <span className={cn('font-medium', colorClass)}>{formattedTime}</span>
       <span
         className={cn('h-1.5 w-1.5 rounded-full', dotColorClass)}
         aria-label="Data freshness indicator"

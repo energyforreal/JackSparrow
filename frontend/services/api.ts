@@ -46,6 +46,42 @@ interface PendingCommandRequest {
   resolve: (data: unknown) => void
   reject: (error: Error) => void
   timeoutId: ReturnType<typeof setTimeout>
+  startedAt: number
+}
+
+export interface RecentTradesMeta {
+  suppressed?: boolean
+  fills_attribution?: 'agent_only' | 'all_fills'
+}
+
+export interface RecentClosedTradesResult {
+  trades: unknown[]
+  meta: RecentTradesMeta
+}
+
+export function parseRecentClosedTradesResponse(result: unknown): RecentClosedTradesResult {
+  if (Array.isArray(result)) {
+    return {
+      trades: result,
+      meta: { suppressed: false, fills_attribution: 'agent_only' },
+    }
+  }
+  if (result && typeof result === 'object') {
+    const r = result as {
+      trades?: unknown[]
+      closed_trades?: unknown[]
+      meta?: RecentTradesMeta
+    }
+    const trades =
+      r.trades ??
+      r.closed_trades ??
+      []
+    return {
+      trades: Array.isArray(trades) ? trades : [],
+      meta: r.meta ?? { suppressed: false, fills_attribution: 'agent_only' },
+    }
+  }
+  return { trades: [], meta: { suppressed: false, fills_attribution: 'agent_only' } }
 }
 
 const pendingCommandRequests: Map<string, PendingCommandRequest> = new Map()
@@ -78,11 +114,12 @@ export function handleWebSocketResponse(message: any): void {
   clearTimeout(pending.timeoutId)
   pendingCommandRequests.delete(requestId)
 
+  const latencyMs = performance.now() - pending.startedAt
   logCommandResponse(
     pending.command,
     message.data,
     requestId,
-    undefined,
+    latencyMs,
     message.success ? undefined : message.error
   )
 
@@ -133,251 +170,9 @@ async function sendCommand(
       resolve,
       reject,
       timeoutId,
+      startedAt: performance.now(),
     })
   })
-}
-
-interface ApiError {
-  error?: {
-    code?: string
-    message?: string
-    details?: unknown
-  }
-  message?: string
-}
-
-class ApiClient {
-  async getHealth(): Promise<{
-    status: string
-    health_score: number
-    score?: number
-    services: Record<string, {
-      status: string
-      latency_ms?: number
-      error?: string
-      details?: Record<string, unknown>
-    }>
-    degradation_reasons?: string[]
-    agent_state?: string
-    trading_ready?: boolean
-    trading_mode?: string
-    ml_models?: Record<string, unknown>
-    timestamp?: string
-  }> {
-    return sendCommand('get_health') as Promise<{
-      status: string
-      health_score: number
-      score?: number
-      services: Record<string, {
-        status: string
-        latency_ms?: number
-        error?: string
-        details?: Record<string, unknown>
-      }>
-      degradation_reasons?: string[]
-      agent_state?: string
-      trading_ready?: boolean
-      trading_mode?: string
-      ml_models?: Record<string, unknown>
-      timestamp?: string
-    }>
-  }
-
-  async getPrediction(symbol: string = 'BTCUSD'): Promise<{
-    signal: string
-    confidence: number
-    position_size?: number
-    reasoning_chain: {
-      chain_id: string
-      timestamp: string
-      steps: Array<{
-        step_number: number
-        step_name: string
-        description: string
-        confidence: number
-        evidence?: string[]
-      }>
-      conclusion: string
-      final_confidence: number
-    }
-    model_predictions: Array<{
-      model_name: string
-      prediction: number
-      confidence: number
-      reasoning: string
-    }>
-    model_consensus: Array<{
-      model_name: string
-      signal: string
-      confidence: number
-    }>
-    individual_model_reasoning: Array<{
-      model_name: string
-      reasoning: string
-      confidence: number
-    }>
-    market_context?: Record<string, unknown>
-    timestamp: string
-  }> {
-    return sendCommand('predict', { symbol }) as Promise<{
-      signal: string
-      confidence: number
-      position_size?: number
-      reasoning_chain: {
-        chain_id: string
-        timestamp: string
-        steps: Array<{
-          step_number: number
-          step_name: string
-          description: string
-          confidence: number
-          evidence?: string[]
-        }>
-        conclusion: string
-        final_confidence: number
-      }
-      model_predictions: Array<{
-        model_name: string
-        prediction: number
-        confidence: number
-        reasoning: string
-      }>
-      model_consensus: Array<{
-        model_name: string
-        signal: string
-        confidence: number
-      }>
-      individual_model_reasoning: Array<{
-        model_name: string
-        reasoning: string
-        confidence: number
-      }>
-      market_context?: Record<string, unknown>
-      timestamp: string
-    }>
-  }
-
-  async predictWithContext(symbol: string, marketContext: Record<string, unknown>): Promise<{
-    success: boolean
-    data: {
-      decision: 'BUY' | 'SELL' | 'HOLD'
-      confidence: number
-      reasoning: string
-      model_predictions: Array<{
-        model_name: string
-        prediction: number
-        confidence: number
-        reasoning: string
-      }>
-      model_consensus: Array<{
-        model_name: string
-        signal: string
-        confidence: number
-      }>
-      individual_model_reasoning: Array<{
-        model_name: string
-        reasoning: string
-        confidence: number
-      }>
-      market_context?: Record<string, unknown>
-      timestamp: string
-    }
-  }> {
-    return sendCommand('predict', {
-      symbol,
-      context: marketContext
-    }) as Promise<{
-      success: boolean
-      data: {
-        decision: 'BUY' | 'SELL' | 'HOLD'
-        confidence: number
-        reasoning: string
-        model_predictions: Array<{
-          model_name: string
-          prediction: number
-          confidence: number
-          reasoning: string
-        }>
-        model_consensus: Array<{
-          model_name: string
-          signal: string
-          confidence: number
-        }>
-        individual_model_reasoning: Array<{
-          model_name: string
-          reasoning: string
-          confidence: number
-        }>
-        market_context?: Record<string, unknown>
-        timestamp: string
-      }
-    }>
-  }
-
-  async getPortfolioSummary(): Promise<{
-    total_value: number
-    available_balance: number
-    open_positions: number
-    total_unrealized_pnl: number
-    total_realized_pnl: number
-    positions: unknown[]
-  }> {
-    return sendCommand('get_portfolio') as Promise<{
-      total_value: number
-      available_balance: number
-      open_positions: number
-      total_unrealized_pnl: number
-      total_realized_pnl: number
-      positions: unknown[]
-    }>
-  }
-
-  async getPositions(): Promise<unknown[]> {
-    const result = await sendCommand('get_positions')
-    return Array.isArray(result) ? result : (result as { positions?: unknown[] })?.positions ?? []
-  }
-
-  async getTrades(): Promise<unknown[]> {
-    const result = await sendCommand('get_trades')
-    return Array.isArray(result) ? result : (result as { trades?: unknown[] })?.trades ?? []
-  }
-
-  async getRecentClosedTrades(limit: number = 50): Promise<unknown[]> {
-    const result = await sendCommand('get_recent_closed_trades', { limit })
-    return Array.isArray(result)
-      ? result
-      : (result as { trades?: unknown[]; closed_trades?: unknown[] })?.closed_trades
-        ?? (result as { trades?: unknown[] })?.trades
-        ?? []
-  }
-
-  async getAgentStatus(): Promise<{
-    available: boolean
-    state: string
-    health?: unknown
-    latency_ms?: number
-  }> {
-    return sendCommand('get_agent_status') as Promise<{
-      available: boolean
-      state: string
-      health?: unknown
-      latency_ms?: number
-    }>
-  }
-
-  async getSystemTime(): Promise<{
-    server_time: string
-    timestamp_ms: number
-    timezone: string
-  }> {
-    // System time is sent via WebSocket broadcasts, not commands
-    // Return current time as fallback
-    return {
-      server_time: new Date().toISOString(),
-      timestamp_ms: Date.now(),
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-    }
-  }
 }
 
 // WebSocket-based API client
@@ -655,13 +450,9 @@ class WebSocketApiClient {
     return Array.isArray(result) ? result : (result as { trades?: unknown[] })?.trades ?? []
   }
 
-  async getRecentClosedTrades(limit: number = 50): Promise<unknown[]> {
+  async getRecentClosedTrades(limit: number = 50): Promise<RecentClosedTradesResult> {
     const result = await sendCommand('get_recent_closed_trades', { limit })
-    return Array.isArray(result)
-      ? result
-      : (result as { trades?: unknown[]; closed_trades?: unknown[] })?.closed_trades
-        ?? (result as { trades?: unknown[] })?.trades
-        ?? []
+    return parseRecentClosedTradesResponse(result)
   }
 
   async getAgentStatus(): Promise<{

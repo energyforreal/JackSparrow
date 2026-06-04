@@ -15,15 +15,16 @@ import { useCallback, useEffect, useReducer, useRef } from 'react'
 import type { PerformanceDataPoint } from '@/app/components/PerformanceChart'
 import toast from 'react-hot-toast'
 import { useWebSocket } from './useWebSocket'
-import { apiClient, setWebSocketConnection } from '@/services/api'
+import {
+  apiClient,
+  setWebSocketConnection,
+  type RecentTradesMeta,
+} from '@/services/api'
+import { performanceMetricsToChartData } from '@/utils/performanceMetrics'
 import { resolveWebSocketUrl } from '@/lib/websocketUrl'
 import { formatCurrency, formatUsdCurrency, parseUtcTimestamp } from '@/utils/formatters'
 import { mergeHealthPreserveFields, normalizeHealthPayload } from '@/lib/healthNormalize'
-import {
-  isTestnetTradingMode,
-  resolveContractValueBtc,
-  resolveUsdInrRate,
-} from '@/utils/tradingDisplay'
+import { resolveContractValueBtc, resolveUsdInrRate } from '@/utils/tradingDisplay'
 import {
   ReflectionSnapshotSchema,
 } from '@/schemas/api.validation'
@@ -123,8 +124,13 @@ export interface TradingDataState {
   isPortfolioLoading: boolean
   /** True until recent-closed-trades REST request settles (success or failure). */
   isTradesLoading: boolean
+  isPortfolioRecovering: boolean
+  tradesMeta: RecentTradesMeta | null
+  tradesError: string | null
   error: Error | null
 }
+
+export type { RecentTradesMeta }
 
 // Actions for state management
 type TradingDataAction =
@@ -144,7 +150,13 @@ type TradingDataAction =
   | { type: 'SET_CONNECTED'; payload: boolean }
   | { type: 'SET_LAST_UPDATE'; payload: Date }
   | { type: 'SET_DATA_SOURCE'; payload: 'websocket' | 'api' | 'none' }
-  | { type: 'HYDRATE_TRADES'; payload: { trades: Trade[]; merge?: boolean } }
+  | {
+      type: 'HYDRATE_TRADES'
+      payload: { trades: Trade[]; merge?: boolean; meta?: RecentTradesMeta | null }
+    }
+  | { type: 'SET_TRADES_META'; payload: RecentTradesMeta | null }
+  | { type: 'SET_TRADES_ERROR'; payload: string | null }
+  | { type: 'SET_PORTFOLIO_RECOVERING'; payload: boolean }
   | { type: 'RESET_LOCAL_TRADING_STATE' }
 
 // Initial state
@@ -165,6 +177,9 @@ const initialState: TradingDataState = {
   isLoading: true,
   isPortfolioLoading: true,
   isTradesLoading: true,
+  isPortfolioRecovering: false,
+  tradesMeta: null,
+  tradesError: null,
   error: null,
 }
 
@@ -222,6 +237,11 @@ export function normalizeTradeRecord(raw: unknown): Trade | null {
         ? r.duration_seconds
         : Number.parseInt(String(r.duration_seconds ?? 0), 10) || 0,
   }
+}
+
+/** True when a WS trade payload should toast (matches Agent trades table rules). */
+export function shouldShowTradeExecutedToast(data: unknown): boolean {
+  return normalizeTradeRecord(data) !== null
 }
 
 function parseReflectionSnapshot(raw: unknown): ReflectionSnapshot | null {
@@ -485,6 +505,19 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
               ...state,
               lastUpdate: now
             }
+          case 'performance': {
+            const metrics =
+              data && typeof data === 'object'
+                ? (data as Record<string, unknown>)
+                : {}
+            const chartData = performanceMetricsToChartData(metrics)
+            return {
+              ...state,
+              performanceData: chartData,
+              lastUpdate: now,
+              dataSource: 'websocket',
+            }
+          }
           default:
             return state
         }
@@ -547,10 +580,21 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
       return {
         ...state,
         recentTrades: combined.slice(0, RECENT_TRADES_MAX),
+        tradesMeta: action.payload.meta ?? state.tradesMeta,
+        tradesError: null,
         lastUpdate: new Date(),
         dataSource: 'api',
       }
     }
+
+    case 'SET_TRADES_META':
+      return { ...state, tradesMeta: action.payload }
+
+    case 'SET_TRADES_ERROR':
+      return { ...state, tradesError: action.payload }
+
+    case 'SET_PORTFOLIO_RECOVERING':
+      return { ...state, isPortfolioRecovering: action.payload }
 
     case 'RESET_LOCAL_TRADING_STATE':
       return {
@@ -559,6 +603,8 @@ function tradingDataReducer(state: TradingDataState, action: TradingDataAction):
         recentTrades: [],
         performanceData: [],
         isTradesLoading: true,
+        tradesMeta: null,
+        tradesError: null,
         lastUpdate: new Date(),
         dataSource: 'api',
       }
@@ -715,12 +761,13 @@ export function useTradingData() {
     }
   }, [lastMessage])
 
-  // Trade executed: toast (deduped; does not change reducer / WS contract)
+  // Trade executed: toast only when row would appear in Agent trades table
   useEffect(() => {
     if (!lastMessage || !isTradeExecutedMessage(lastMessage)) return
     const msg = lastMessage as { data?: unknown; payload?: unknown }
     const data = (msg.data ?? msg.payload ?? {}) as Record<string, unknown>
     if (!data || typeof data !== 'object') return
+    if (!shouldShowTradeExecutedToast(data)) return
     const id = data.trade_id
     if (id == null || id === '') return
     const idStr = String(id)
@@ -798,6 +845,7 @@ export function useTradingData() {
           }
         } else {
           console.warn('Portfolio summary fetch failed:', portfolioResult.reason)
+          dispatch({ type: 'SET_PORTFOLIO_RECOVERING', payload: true })
           let portfolioRecovered: Portfolio | null = null
           for (let attempt = 1; attempt <= 2; attempt++) {
             try {
@@ -811,6 +859,7 @@ export function useTradingData() {
               // Continue to next retry
             }
           }
+          dispatch({ type: 'SET_PORTFOLIO_RECOVERING', payload: false })
           if (portfolioRecovered) {
             dispatch({
               type: 'UPDATE_PORTFOLIO',
@@ -822,50 +871,34 @@ export function useTradingData() {
         portfolioLoadSettledRef.current = true
 
         if (tradesResult.status === 'fulfilled') {
-          const trades = tradesResult.value
-          if (Array.isArray(trades)) {
-            const healthPayload =
-              healthResult.status === 'fulfilled' ? (healthResult.value as HealthData) : state.health
-            const mergeTrades = !isTestnetTradingMode(
-              healthPayload?.trading_mode,
-              healthPayload?.delta_environment
-            )
-            dispatch({
-              type: 'HYDRATE_TRADES',
-              payload: {
-                trades: trades as Trade[],
-                merge: mergeTrades,
-              },
-            })
-          }
+          const { trades, meta } = tradesResult.value
+          dispatch({
+            type: 'HYDRATE_TRADES',
+            payload: {
+              trades: trades as Trade[],
+              merge: true,
+              meta,
+            },
+          })
         } else {
           console.warn('Recent closed trades fetch failed:', tradesResult.reason)
+          const reason = tradesResult.reason
+          const message =
+            reason instanceof Error
+              ? reason.message
+              : 'Failed to load recent trades'
+          dispatch({ type: 'SET_TRADES_ERROR', payload: message })
         }
         dispatch({ type: 'SET_TRADES_LOADING', payload: false })
 
         if (!isLightReconnect && performanceResult.status === 'fulfilled') {
           const performanceMetrics = performanceResult.value
           if (performanceMetrics && typeof performanceMetrics === 'object') {
-            const metrics = performanceMetrics as {
-              total_return?: number
-              total_return_pct?: number
-            }
-            const hasUsdReturn = typeof metrics.total_return === 'number'
-            const hasPctReturn = typeof metrics.total_return_pct === 'number'
-            const value = hasUsdReturn
-              ? metrics.total_return!
-              : hasPctReturn
-                ? metrics.total_return_pct!
-                : 0
-            const metricKind: PerformanceDataPoint['metricKind'] = hasUsdReturn
-              ? 'usd'
-              : hasPctReturn
-                ? 'pct'
-                : 'usd'
-
             dispatch({
               type: 'SET_PERFORMANCE_DATA',
-              payload: [{ date: new Date().toISOString(), value, metricKind }],
+              payload: performanceMetricsToChartData(
+                performanceMetrics as Record<string, unknown>
+              ),
             })
           }
         }
@@ -935,7 +968,10 @@ export function useTradingData() {
     // State
     isLoading: state.isLoading,
     isPortfolioLoading: state.isPortfolioLoading,
+    isPortfolioRecovering: state.isPortfolioRecovering,
     isTradesLoading: state.isTradesLoading,
+    tradesMeta: state.tradesMeta,
+    tradesError: state.tradesError,
     error: state.error,
     resetLocalTradingState,
   }

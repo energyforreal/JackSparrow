@@ -902,7 +902,7 @@ class UnifiedWebSocketManager:
             from backend.api.models.responses import ClosedTradeResponse
             from backend.services.portfolio_fetch import (
                 TestnetExchangeUnavailableError,
-                fetch_recent_closed_trades,
+                fetch_recent_closed_trades_payload,
             )
 
             symbol = parameters.get("symbol")
@@ -918,12 +918,13 @@ class UnifiedWebSocketManager:
 
             async with AsyncSessionLocal() as db:
                 try:
-                    rows = await fetch_recent_closed_trades(
+                    payload = await fetch_recent_closed_trades_payload(
                         db=db,
                         symbol=validated_symbol,
                         limit=limit,
                         offset=offset,
                     )
+                    rows = payload.get("trades") or []
                     closed_trades_data = [
                         ClosedTradeResponse(**row).model_dump(mode="json") for row in rows
                     ]
@@ -942,7 +943,13 @@ class UnifiedWebSocketManager:
             return {
                 "type": "response",
                 "success": True,
-                "data": closed_trades_data,
+                "data": {
+                    "trades": closed_trades_data,
+                    "meta": payload.get("meta") or {
+                        "suppressed": False,
+                        "fills_attribution": "agent_only",
+                    },
+                },
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         if command == "get_ticker":

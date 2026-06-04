@@ -177,6 +177,13 @@ def create_time_sync(time_data: Dict[str, Any]) -> WebSocketEnvelope:
     return WebSocketMessageBuilder.system_update(WebSocketResource.TIME, time_data, "system")
 
 
+def create_performance_update(performance_data: Dict[str, Any]) -> WebSocketEnvelope:
+    """Create a performance metrics update message."""
+    return WebSocketMessageBuilder.system_update(
+        WebSocketResource.PERFORMANCE, performance_data, "system"
+    )
+
+
 def create_agent_state_update(state_data: Dict[str, Any]) -> WebSocketEnvelope:
     """Create an agent state update message."""
     return WebSocketMessageBuilder.agent_update(state_data, "agent")

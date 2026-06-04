@@ -15,9 +15,14 @@ const ROE_MARGIN_TOOLTIP =
 interface PortfolioSummaryProps {
   portfolio?: Portfolio
   isLoading?: boolean
+  isRecovering?: boolean
 }
 
-export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSummaryProps) {
+export function PortfolioSummary({
+  portfolio,
+  isLoading = false,
+  isRecovering = false,
+}: PortfolioSummaryProps) {
   if (isLoading) {
     return (
       <Card role="status" aria-label="Loading portfolio summary">
@@ -79,6 +84,10 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
   const usdInrRate = parseNumber(portfolio.usd_inr_rate)
 
   const isTestnetSource = portfolio.data_source === 'delta_testnet'
+
+  const recoveringBanner = isRecovering ? (
+    <p className="text-xs text-muted-foreground mb-2">Syncing portfolio…</p>
+  ) : null
   const totalValueUsd: number | null =
     portfolio.total_value_usd != null
       ? parseNumber(portfolio.total_value_usd)
@@ -107,6 +116,7 @@ export function PortfolioSummary({ portfolio, isLoading = false }: PortfolioSumm
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {recoveringBanner}
         <div className="flex items-baseline justify-between">
           <div>
             {isTestnetSource && totalValueUsd !== null ? (

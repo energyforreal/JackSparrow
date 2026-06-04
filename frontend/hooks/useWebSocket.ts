@@ -5,7 +5,6 @@ import {
   logCommandRequest,
   logCommandResponse,
   extractCorrelationId,
-  LatencyTimer
 } from '../utils/communicationLogger'
 import { handleWebSocketResponse } from '@/services/api'
 import { parseWebSocketInbound } from '@/schemas/websocketMessages.zod'
@@ -175,9 +174,6 @@ export function useWebSocket(url: string): UseWebSocketReturn {
         }
 
         ws.onmessage = (event) => {
-          // WS MESSAGE: Debug log for message tracking
-          console.log('WS MESSAGE:', event.data)
-
           let rawParsed: unknown
           try {
             rawParsed = JSON.parse(event.data) as unknown
@@ -355,6 +351,13 @@ export function useWebSocket(url: string): UseWebSocketReturn {
   // Ensure subscription when connected (backup in case onopen subscription didn't work)
   useEffect(() => {
     if (isConnected && !isSubscribed && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const alreadySubscribed = SUBSCRIBE_CHANNELS.every((ch) =>
+        subscribedChannelsRef.current.has(ch)
+      )
+      if (alreadySubscribed) {
+        setIsSubscribed(true)
+        return
+      }
       try {
         const subscribeMessage = {
           action: 'subscribe',

@@ -73,7 +73,10 @@ export function Dashboard() {
     lastUpdate,
     isLoading,
     isPortfolioLoading,
+    isPortfolioRecovering,
     isTradesLoading,
+    tradesMeta,
+    tradesError,
     error,
     performanceData,
     marketData,
@@ -227,7 +230,11 @@ export function Dashboard() {
 
             {/* Portfolio Summary */}
             <ErrorBoundary>
-              <PortfolioSummary portfolio={portfolio || undefined} isLoading={portfolioBlockLoading} />
+              <PortfolioSummary
+                portfolio={portfolio || undefined}
+                isLoading={portfolioBlockLoading}
+                isRecovering={isPortfolioRecovering}
+              />
             </ErrorBoundary>
           </TabsContent>
 
@@ -246,6 +253,8 @@ export function Dashboard() {
                 <RecentTrades
                   trades={recentTrades}
                   isLoading={tradesBlockLoading}
+                  tradesMeta={tradesMeta}
+                  tradesError={tradesError}
                   usdInrRate={portfolio?.usd_inr_rate}
                   contractValueBtc={portfolio?.contract_value_btc}
                 />

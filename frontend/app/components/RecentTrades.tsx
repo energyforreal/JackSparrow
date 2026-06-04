@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import type { RecentTradesMeta } from '@/services/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
@@ -51,6 +52,8 @@ const TABLE_HEADS = [
 interface RecentTradesProps {
   trades?: Trade[]
   isLoading?: boolean
+  tradesMeta?: RecentTradesMeta | null
+  tradesError?: string | null
   usdInrRate?: number | string
   contractValueBtc?: number | string
 }
@@ -63,10 +66,19 @@ function truncateId(id: string | undefined, max = 10): string {
 export function RecentTrades({
   trades,
   isLoading = false,
+  tradesMeta,
+  tradesError,
   usdInrRate,
   contractValueBtc,
 }: RecentTradesProps) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_TRADES)
+  const prevTradeCountRef = useRef(0)
+  const tradeCount = trades?.length ?? 0
+  const ariaLiveActive = tradeCount > prevTradeCountRef.current
+
+  useEffect(() => {
+    prevTradeCountRef.current = tradeCount
+  }, [tradeCount])
 
   if (isLoading) {
     return (
@@ -80,7 +92,9 @@ export function RecentTrades({
               <TableHeader>
                 <TableRow>
                   {TABLE_HEADS.map((head) => (
-                    <TableHead key={head}>{head}</TableHead>
+                    <TableHead key={head} scope="col">
+                      {head}
+                    </TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -102,16 +116,37 @@ export function RecentTrades({
     )
   }
 
+  if (tradesError) {
+    return (
+      <Card role="alert">
+        <CardHeader>
+          <CardTitle>Agent trades</CardTitle>
+        </CardHeader>
+        <CardContent className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+          <p className="text-sm text-destructive font-medium">Could not load recent trades</p>
+          <p className="text-xs mt-2 text-muted-foreground break-all">{tradesError}</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (!trades || trades.length === 0) {
+    const suppressed = tradesMeta?.suppressed === true
     return (
       <Card>
         <CardHeader>
           <CardTitle>Agent trades</CardTitle>
         </CardHeader>
         <CardContent className="rounded-xl border border-dashed p-8 text-center">
-          <p className="text-sm text-muted-foreground">No agent-executed trades yet</p>
+          <p className="text-sm text-muted-foreground">
+            {suppressed
+              ? 'Recent trades display is suppressed'
+              : 'No agent-executed trades yet'}
+          </p>
           <p className="text-xs mt-2 text-muted-foreground/80">
-            Closed round-trips and Delta testnet fills (agent orders) sync here when trades execute.
+            {suppressed
+              ? 'Clear the suppress flag or unset SUPPRESS_RECENT_TRADES to show history again.'
+              : 'Closed round-trips and Delta testnet fills (agent orders) sync here when trades execute.'}
           </p>
         </CardContent>
       </Card>
@@ -208,12 +243,23 @@ export function RecentTrades({
         </p>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto -mx-6 px-6">
+        {tradesMeta?.fills_attribution === 'all_fills' && (
+          <p className="text-xs text-muted-foreground mb-3 px-1">
+            Showing all testnet fills (agent order IDs not found in recent history).
+          </p>
+        )}
+        <div
+          className="overflow-x-auto -mx-6 px-6"
+          aria-live={ariaLiveActive ? 'polite' : 'off'}
+          aria-atomic="false"
+        >
           <Table>
             <TableHeader>
               <TableRow>
                 {TABLE_HEADS.map((head) => (
-                  <TableHead key={head}>{head}</TableHead>
+                  <TableHead key={head} scope="col">
+                    {head}
+                  </TableHead>
                 ))}
               </TableRow>
             </TableHeader>

@@ -974,6 +974,17 @@ class AgentEventSubscriber:
                     error=str(broadcast_error),
                     position_id=position_id,
                 )
+
+            try:
+                from backend.services.performance_broadcast import broadcast_performance_update
+
+                await broadcast_performance_update()
+            except Exception as perf_exc:
+                logger.warning(
+                    "agent_event_subscriber_performance_broadcast_failed",
+                    error=str(perf_exc),
+                    position_id=position_id,
+                )
             
         except Exception as e:
             log_error_with_context(
