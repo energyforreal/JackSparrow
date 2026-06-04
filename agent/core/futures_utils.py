@@ -122,6 +122,31 @@ def max_affordable_lots_from_cash(
     return 0
 
 
+def max_lots_from_portfolio_budget(
+    portfolio_value_inr: float,
+    margin_fraction: float,
+    usdinr_rate: float,
+    btc_price: float,
+    leverage: int,
+    contract_value_btc: float,
+    settings_cap: int,
+    min_lots: int = 1,
+) -> int:
+    """Upper bound on lots implied by portfolio margin fraction (before cash cap)."""
+    frac = max(0.01, min(1.0, float(margin_fraction)))
+    margin_inr = max(0.0, float(portfolio_value_inr)) * frac
+    usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
+    implied = price_to_lots(
+        usd_margin=usd_margin,
+        btc_price=btc_price,
+        leverage=leverage,
+        contract_value_btc=contract_value_btc,
+        max_lots=settings_cap,
+        min_lots=0,
+    )
+    return max(min_lots, min(int(settings_cap), int(implied)))
+
+
 def price_to_lots(
     usd_margin: float,
     btc_price: float,

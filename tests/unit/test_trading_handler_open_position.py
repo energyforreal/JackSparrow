@@ -120,3 +120,61 @@ async def test_signal_reversal_still_closes_when_opposite_signal(monkeypatch) ->
     await handler.handle_decision_ready_for_trading(event)
 
     close_mock.assert_awaited_once_with("BTCUSD", exit_reason="signal_reversal")
+
+
+@pytest.mark.asyncio
+async def test_hold_with_gated_ml_short_closes_long(monkeypatch) -> None:
+    """HOLD policy + final_short + open long triggers ml_reversal_while_policy_hold."""
+
+    published: list = []
+
+    async def capture_publish(event):
+        published.append(event)
+
+    monkeypatch.setattr(trading_handler_mod.event_bus, "publish", capture_publish)
+
+    close_mock = AsyncMock(return_value=MagicMock(success=True))
+    open_leg = {"status": "open", "side": "long"}
+    execution = _FakeExecutionModule(open_leg)
+    execution.close_position = close_mock  # type: ignore[attr-defined]
+
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "position_exit_on_ml_reversal_enabled", True)
+    monkeypatch.setattr(settings, "position_exit_ml_confidence_min", 0.50)
+    monkeypatch.setattr(settings, "exchange_position_reconcile_enabled", False)
+
+    risk = MagicMock()
+    handler = TradingEventHandler(
+        risk_manager=risk,
+        delta_client=None,
+        execution_module=execution,
+    )
+
+    now = datetime.now(timezone.utc)
+    event = DecisionReadyEvent(
+        source="test",
+        payload={
+            "symbol": "BTCUSD",
+            "signal": "HOLD",
+            "confidence": 0.0,
+            "position_size": 0.0,
+            "timestamp": now,
+            "reasoning_chain": {
+                "market_context": {
+                    "ml_validation": {
+                        "final_short": True,
+                        "final_long": False,
+                        "model_confidence": 0.80,
+                    },
+                    "consensus_confidence": 0.80,
+                },
+            },
+        },
+    )
+
+    await handler.handle_decision_ready_for_trading(event)
+
+    close_mock.assert_awaited_once_with(
+        "BTCUSD", exit_reason="ml_reversal_while_policy_hold"
+    )

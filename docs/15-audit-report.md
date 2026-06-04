@@ -357,3 +357,23 @@ WHERE closed_at >= NOW() - INTERVAL '24 hours';
 
 See [ML Models](03-ml-models.md) for learning and threshold adapters.
 
+---
+
+## Intelligence layer remediation (2026-06-04)
+
+Audit-driven fixes applied across agent execution, sizing, data loaders, and signal pipeline:
+
+| Area | Change |
+|------|--------|
+| Risk vs lots | `proposed_size` matches `ENTRY_PORTFOLIO_MARGIN_FRACTION`; `MAX_POSITION_SIZE` default 0.60 |
+| Portfolio INR | Total equity no longer capped by free cash in `_get_portfolio_value_inr` |
+| USDINR | Agent `fx_rate` module refreshes `fx:usdinr:last`; fallback 86.0 |
+| Policy | Single `AgentPolicyEngine.evaluate()` after reasoning (pre-eval removed) |
+| Delta history | `page_size` capped at 500; stepped pagination; timestamp dedup |
+| Funding | OI `predicted_funding_rate` preferred over zero-fill |
+| Exits | `ml_reversal_while_policy_hold` on HOLD when gated ML contradicts open position |
+| Leverage | Fixed `ISOLATED_MARGIN_LEVERAGE` for lot math; portfolio sizing does not auto-increase leverage |
+| Performance | Incremental v43 OHLCV cache; optional `REASONING_FAST_PATH_ON_BLOCKED_ENTRY` |
+
+See [Logic & Reasoning](05-logic-reasoning.md) and [Deployment](10-deployment.md) for env variables.
+

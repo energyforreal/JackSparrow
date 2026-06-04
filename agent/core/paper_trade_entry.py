@@ -12,7 +12,7 @@ from typing import Any, Optional, Tuple
 
 from agent.core.config import settings
 from agent.core.futures_utils import entry_leg_fees_usd
-from agent.core.redis_config import get_cache
+from agent.core.fx_rate import resolve_usdinr_rate
 
 
 async def resolve_paper_usdinr_rate(payload_usd_inr: Optional[Any] = None) -> float:
@@ -24,15 +24,7 @@ async def resolve_paper_usdinr_rate(payload_usd_inr: Optional[Any] = None) -> fl
                 return v
         except (TypeError, ValueError):
             pass
-    try:
-        cached = await get_cache("fx:usdinr:last")
-        if isinstance(cached, dict):
-            val = cached.get("rate")
-            if val is not None and float(val) > 0:
-                return float(val)
-    except Exception:
-        pass
-    return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+    return await resolve_usdinr_rate()
 
 
 def compute_paper_entry_ledger(

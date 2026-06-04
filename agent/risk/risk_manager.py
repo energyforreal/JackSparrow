@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 import statistics
 import structlog
 
+from agent.core.config import settings
+
 logger = structlog.get_logger()
 
 
@@ -693,6 +695,28 @@ class RiskManager:
             )
             return result
         result["budget_check"] = budget_check
+
+        if (
+            bool(getattr(settings, "portfolio_fraction_lot_sizing", True))
+            and required_balance_override is not None
+            and available_balance_override is not None
+            and float(available_balance_override) > 0
+        ):
+            margin_frac = float(
+                getattr(settings, "entry_portfolio_margin_fraction", 0.60) or 0.60
+            )
+            reserve_frac = max(0.0, 1.0 - margin_frac)
+            usdinr = float(getattr(settings, "usdinr_fallback_rate", 86.0) or 86.0)
+            equity_inr = float(self.portfolio.total_value) * usdinr
+            post_cash = float(available_balance_override) - float(required_balance_override)
+            min_reserve_inr = equity_inr * reserve_frac
+            if post_cash < min_reserve_inr:
+                result["approved"] = False
+                result["reason"] = (
+                    f"cash_reserve_breach: post-trade cash {post_cash:.0f} INR "
+                    f"< {reserve_frac:.0%} reserve floor {min_reserve_inr:.0f} INR"
+                )
+                return result
 
         # Check position size limits
         max_allowed_size = risk_assessment.max_position_size

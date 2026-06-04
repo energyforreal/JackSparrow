@@ -1312,12 +1312,28 @@ class Settings(BaseSettings):
     isolated_margin_leverage: int = Field(
         default=5,
         env="ISOLATED_MARGIN_LEVERAGE",
-        description="Fixed leverage for lot sizing and margin checks (set matching leverage on Delta UI)",
+        description=(
+            "Fixed leverage for margin/lot math only; does not auto-increase. "
+            "With PORTFOLIO_FRACTION_LOT_SIZING, lot count scales from portfolio "
+            "equity × ENTRY_PORTFOLIO_MARGIN_FRACTION at this leverage. "
+            "Set to match Delta UI; agent does not raise leverage unless "
+            "SYNC_EXCHANGE_ORDER_LEVERAGE=true."
+        ),
     )
     usdinr_fallback_rate: float = Field(
-        default=83.0,
+        default=86.0,
         env="USDINR_FALLBACK_RATE",
         description="Fallback USDINR conversion rate when live FX is unavailable",
+    )
+    usdinr_cache_ttl_seconds: int = Field(
+        default=300,
+        env="USDINR_CACHE_TTL_SECONDS",
+        description="TTL for Redis fx:usdinr:last written by agent FX refresh",
+    )
+    usdinr_refresh_interval_seconds: int = Field(
+        default=300,
+        env="USDINR_REFRESH_INTERVAL_SECONDS",
+        description="How often the agent refreshes and caches USDINR",
     )
     maintenance_fraction_of_initial: float = Field(
         0.5,
@@ -1352,9 +1368,12 @@ class Settings(BaseSettings):
 
     # Risk Management
     max_position_size: float = Field(
-        default=0.1,
+        default=0.60,
         env="MAX_POSITION_SIZE",
-        description="Maximum position size as fraction of portfolio"
+        description=(
+            "Maximum position size as fraction of portfolio; align with "
+            "ENTRY_PORTFOLIO_MARGIN_FRACTION when portfolio_fraction_lot_sizing is enabled"
+        ),
     )
     max_portfolio_heat: float = Field(
         default=0.3,
@@ -1382,9 +1401,26 @@ class Settings(BaseSettings):
         description="When True, require long trades above EMA200 and short trades below EMA200."
     )
     max_signal_age_seconds: int = Field(
-        default=45,
+        default=90,
         env="MAX_SIGNAL_AGE_SECONDS",
-        description="Reject signals older than this (seconds)"
+        description="Reject signals older than this (seconds); allow headroom for 5m candle + reasoning latency",
+    )
+    position_exit_on_ml_reversal_enabled: bool = Field(
+        default=True,
+        env="POSITION_EXIT_ON_ML_REVERSAL_ENABLED",
+        description="When policy is HOLD but gated ML contradicts open position, attempt close",
+    )
+    position_exit_ml_confidence_min: float = Field(
+        default=0.70,
+        env="POSITION_EXIT_ML_CONFIDENCE_MIN",
+        ge=0.0,
+        le=1.0,
+        description="Minimum ML candidate confidence to trigger ml_reversal_while_policy_hold exit",
+    )
+    reasoning_fast_path_on_blocked_entry: bool = Field(
+        default=False,
+        env="REASONING_FAST_PATH_ON_BLOCKED_ENTRY",
+        description="Skip full 7-step reasoning when open_position gate blocks with no gated entry",
     )
     trailing_stop_percentage: float = Field(
         default=0.015,

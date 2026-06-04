@@ -18,10 +18,11 @@ import pandas as pd
 import requests
 
 BASE_URL = "https://api.india.delta.exchange/v2"
-MAX_CANDLES_PER_REQUEST = 2000
+DELTA_MAX_PAGE_SIZE = 500
+MAX_CANDLES_PER_REQUEST = DELTA_MAX_PAGE_SIZE
 REQUEST_DELAY_SECONDS = 0.25   # Respect rate limits
 
-VALID_RESOLUTIONS = {"5m", "15m", "30m", "1h", "2h"}
+VALID_RESOLUTIONS = {"1m", "5m", "15m", "30m", "1h", "2h"}
 
 
 def _validate_resolution(resolution: str) -> None:
@@ -54,7 +55,7 @@ def fetch_candles_paginated(
             "resolution": resolution,
             "start": int(current_start),
             "end": int(end_ts),
-            "page_size": page_size,
+            "page_size": min(int(page_size), DELTA_MAX_PAGE_SIZE),
         }
         try:
             resp = requests.get(
@@ -120,7 +121,7 @@ async def fetch_candles_paginated_async(
                 "resolution": resolution,
                 "start": int(current_start),
                 "end": int(end_ts),
-                "page_size": page_size,
+                "page_size": min(int(page_size), DELTA_MAX_PAGE_SIZE),
             }
             try:
                 resp = await client.get(f"{BASE_URL}/history/candles", params=params)

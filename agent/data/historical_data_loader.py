@@ -22,8 +22,10 @@ except ImportError:
 
 DELTA_HISTORY_URL = "https://api.india.delta.exchange/v2/history/candles"
 DEFAULT_DELAY_SECONDS = 0.4
+DELTA_MAX_PAGE_SIZE = 500
 
 RESOLUTION_SECONDS = {
+    "1m": 60,
     "5m": 5 * 60,
     "15m": 15 * 60,
     "30m": 30 * 60,
@@ -40,13 +42,30 @@ def _validate_resolution(resolution: str) -> None:
         )
 
 
-def _fetch_delta_candles(symbol: str, resolution: str, start_ts: int, end_ts: int, page_size: int = 2000):
+def _cap_page_size(page_size: int) -> int:
+    return max(1, min(int(page_size), DELTA_MAX_PAGE_SIZE))
+
+
+def _dedup_candles_by_time(candles: list) -> list:
+    if not candles:
+        return candles
+    by_time = {int(c["time"]): c for c in candles if "time" in c}
+    return [by_time[k] for k in sorted(by_time)]
+
+
+def _fetch_delta_candles(
+    symbol: str,
+    resolution: str,
+    start_ts: int,
+    end_ts: int,
+    page_size: int = DELTA_MAX_PAGE_SIZE,
+):
     params = {
         "symbol": symbol,
         "resolution": resolution,
         "start": int(start_ts),
         "end": int(end_ts),
-        "page_size": page_size,
+        "page_size": _cap_page_size(page_size),
     }
     resp = requests.get(DELTA_HISTORY_URL, params=params, timeout=20)
     resp.raise_for_status()
@@ -62,14 +81,14 @@ async def _fetch_delta_candles_async(
     resolution: str,
     start_ts: int,
     end_ts: int,
-    page_size: int = 2000,
+    page_size: int = DELTA_MAX_PAGE_SIZE,
 ) -> list:
     params = {
         "symbol": symbol,
         "resolution": resolution,
         "start": int(start_ts),
         "end": int(end_ts),
-        "page_size": page_size,
+        "page_size": _cap_page_size(page_size),
     }
     resp = await client.get(DELTA_HISTORY_URL, params=params)
     resp.raise_for_status()
@@ -98,8 +117,9 @@ def fetch_historical_candles(
     candles = []
     current_end = end_ts
 
+    step_seconds = DELTA_MAX_PAGE_SIZE * period
     while len(candles) < target_count and current_end > lookback_limit:
-        current_start = max(lookback_limit, current_end - target_count * period * 2)
+        current_start = max(lookback_limit, current_end - step_seconds)
         page_candles = _fetch_delta_candles(symbol, resolution, current_start, current_end)
 
         if not page_candles:
@@ -122,6 +142,7 @@ def fetch_historical_candles(
         print("[WARN] Delta data less than target; using Binance fallback (ccxt)")
         candles = _fetch_binance_candles(symbol.replace("USD", "/USDT"), resolution, target_count)
 
+    candles = _dedup_candles_by_time(candles)
     if len(candles) > target_count:
         candles = candles[-target_count:]
 
@@ -159,14 +180,13 @@ def _validate_ohlcv_dataframe(df: pd.DataFrame, resolution: str, symbol: str) ->
                 f"[WARN] {symbol} {resolution} candle completeness {completeness:.1%} "
                 f"({gaps} gaps detected)"
             )
-    bad_rows = 0
-    for _, row in df.iterrows():
-        try:
-            o, h, l, c = float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"])
-            if h < l or min(o, h, l, c) <= 0:
-                bad_rows += 1
-        except (TypeError, ValueError, KeyError):
-            bad_rows += 1
+    try:
+        ohlcv = df[["open", "high", "low", "close"]].astype(float)
+        bad_rows = int(
+            ((ohlcv["high"] < ohlcv["low"]) | (ohlcv.min(axis=1) <= 0)).sum()
+        )
+    except (TypeError, ValueError, KeyError):
+        bad_rows = len(df)
     if bad_rows:
         print(f"[WARN] {symbol} {resolution}: {bad_rows} OHLCV sanity violations")
 
@@ -191,8 +211,9 @@ async def fetch_historical_candles_async(
     current_end = end_ts
 
     async with httpx.AsyncClient(timeout=20.0) as client:
+        step_seconds = DELTA_MAX_PAGE_SIZE * period
         while len(candles) < target_count and current_end > lookback_limit:
-            current_start = max(lookback_limit, current_end - target_count * period * 2)
+            current_start = max(lookback_limit, current_end - step_seconds)
             page_candles = await _fetch_delta_candles_async(
                 client, symbol, resolution, current_start, current_end
             )
@@ -220,6 +241,7 @@ async def fetch_historical_candles_async(
             target_count,
         )
 
+    candles = _dedup_candles_by_time(candles)
     if len(candles) > target_count:
         candles = candles[-target_count:]
 

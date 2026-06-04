@@ -327,8 +327,16 @@ class TradingEventHandler:
             diagnostics_base["ai_signal_min_entry_confidence_floor"] = ai_floor
             diagnostics_base["ai_signal_minimal_entry_gates"] = minimal_entry
 
-            # Skip HOLD - no trade to execute
+            # HOLD: optional gated-ML reversal exit while positioned (PIPE-01)
             if signal == "HOLD" or not signal:
+                rc = payload.get("reasoning_chain") or {}
+                if isinstance(rc, dict) and await self._try_ml_reversal_exit_while_policy_hold(
+                    symbol=symbol,
+                    event_id=event.event_id,
+                    reasoning_chain=rc,
+                    diagnostics_base=diagnostics_base,
+                ):
+                    return
                 self._log_entry_rejected(
                     "hold_at_synthesis",
                     symbol=symbol,
@@ -606,9 +614,6 @@ class TradingEventHandler:
             )
             slip_bps = float(getattr(settings, "slippage_bps", 5.0) or 5.0)
 
-            leverage = max(1, int(getattr(settings, "isolated_margin_leverage", 5) or 5))
-            max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
-            margin_inr = 0.0
             entry_portfolio_frac = max(
                 0.01,
                 min(
@@ -618,6 +623,24 @@ class TradingEventHandler:
                     ),
                 ),
             )
+            leverage = max(1, int(getattr(settings, "isolated_margin_leverage", 5) or 5))
+            settings_max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
+            if getattr(settings, "portfolio_fraction_lot_sizing", True):
+                from agent.core.futures_utils import max_lots_from_portfolio_budget
+
+                max_lots = max_lots_from_portfolio_budget(
+                    portfolio_value_inr=portfolio_value_inr,
+                    margin_fraction=entry_portfolio_frac,
+                    usdinr_rate=usdinr_rate,
+                    btc_price=entry_price,
+                    leverage=leverage,
+                    contract_value_btc=cv,
+                    settings_cap=settings_max_lots,
+                    min_lots=min_lot_size,
+                )
+            else:
+                max_lots = settings_max_lots
+            margin_inr = 0.0
 
             fee_reserve = float(
                 getattr(settings, "entry_fee_reserve_fraction", 0.02) or 0.02
@@ -731,10 +754,8 @@ class TradingEventHandler:
                 )
                 return
 
-            proposed_size = max(
-                0.01,
-                min(entry_portfolio_frac, settings.max_position_size),
-            )
+            # Must match entry_portfolio_frac used for lot sizing (BUG-01: avoid 10% cap mismatch).
+            proposed_size = entry_portfolio_frac
 
             if bool(getattr(settings, "exchange_position_reconcile_enabled", True)):
                 try:
@@ -1047,6 +1068,7 @@ class TradingEventHandler:
                         signal=signal,
                         event_id=event.event_id,
                         filter_reason=filt_reason,
+                        entry_signal_filter_reason=filt_reason,
                         **diagnostics_base,
                     )
                     return
@@ -1206,6 +1228,102 @@ class TradingEventHandler:
                 exc_info=True,
             )
 
+    async def _try_ml_reversal_exit_while_policy_hold(
+        self,
+        *,
+        symbol: str,
+        event_id: str,
+        reasoning_chain: Dict[str, Any],
+        diagnostics_base: Dict[str, Any],
+    ) -> bool:
+        """Close open position when gated ML contradicts side but policy emitted HOLD."""
+        if not bool(getattr(settings, "position_exit_on_ml_reversal_enabled", True)):
+            return False
+        if not self.execution_module:
+            return False
+
+        min_conf = float(
+            getattr(settings, "position_exit_ml_confidence_min", 0.70) or 0.70
+        )
+        mc = (
+            reasoning_chain.get("market_context", {})
+            if isinstance(reasoning_chain.get("market_context"), dict)
+            else {}
+        )
+        ml_val = mc.get("ml_validation") if isinstance(mc.get("ml_validation"), dict) else {}
+        v43_dec = (
+            mc.get("v43_dedicated_decision")
+            if isinstance(mc.get("v43_dedicated_decision"), dict)
+            else {}
+        )
+        ml_conf = float(
+            ml_val.get("model_confidence")
+            or v43_dec.get("confidence")
+            or mc.get("consensus_confidence")
+            or 0.0
+        )
+        if ml_conf > 1.0:
+            ml_conf = ml_conf / 100.0
+        if ml_conf < min_conf:
+            return False
+
+        final_short = bool(ml_val.get("final_short"))
+        final_long = bool(ml_val.get("final_long"))
+        short_enabled = bool(
+            getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
+        )
+
+        open_pos = self.execution_module.position_manager.get_position(symbol)
+        if (
+            bool(getattr(settings, "exchange_position_reconcile_enabled", True))
+            and (not open_pos or open_pos.get("status") != "open")
+        ):
+            try:
+                from agent.core.mcp_orchestrator import _exchange_has_open_position_async
+                from agent.core.position_reconcile import reconcile_positions_with_exchange
+
+                if await _exchange_has_open_position_async(symbol):
+                    await reconcile_positions_with_exchange(self.execution_module)
+                    open_pos = self.execution_module.position_manager.get_position(symbol)
+            except Exception as e:
+                logger.warning(
+                    "ml_reversal_reconcile_failed",
+                    symbol=symbol,
+                    error=str(e),
+                )
+
+        if not open_pos or open_pos.get("status") != "open":
+            return False
+
+        pos_side = open_pos.get("side", "")
+        should_close = (pos_side == "long" and final_short) or (
+            pos_side == "short" and final_long and short_enabled
+        )
+        if not should_close:
+            return False
+
+        logger.info(
+            "ml_reversal_while_policy_hold",
+            symbol=symbol,
+            pos_side=pos_side,
+            final_short=final_short,
+            final_long=final_long,
+            ml_confidence=ml_conf,
+            event_id=event_id,
+        )
+        close_result = await self.execution_module.close_position(
+            symbol, exit_reason="ml_reversal_while_policy_hold"
+        )
+        if not close_result.success:
+            logger.warning(
+                "ml_reversal_while_policy_hold_failed",
+                symbol=symbol,
+                event_id=event_id,
+                **diagnostics_base,
+            )
+            return False
+        return True
+
     async def _get_current_price(self, symbol: str, state: Optional[Any]) -> Optional[float]:
         """Get current price from context or live ticker. Returns None if unavailable."""
         try:
@@ -1237,25 +1355,15 @@ class TradingEventHandler:
 
     async def _get_usdinr_rate(self, state: Optional[Any]) -> float:
         """Best-effort USDINR lookup: context -> Redis cached last-good -> config fallback."""
+        from agent.core.fx_rate import resolve_usdinr_rate
+
+        md = None
         try:
             if state and hasattr(state, "config") and isinstance(state.config, dict):
-                md = state.config.get("market_data", {})
-                if isinstance(md, dict):
-                    for key in ("usd_inr", "usd_inr_rate", "usdinr", "inr_per_usd"):
-                        val = md.get(key)
-                        if val is not None and float(val) > 0:
-                            return float(val)
+                md = state.config.get("market_data")
         except Exception as e:
             logger.debug("usdinr_context_lookup_failed", error=str(e))
-        try:
-            cached = await get_cache("fx:usdinr:last")
-            if isinstance(cached, dict):
-                val = cached.get("rate")
-                if val is not None and float(val) > 0:
-                    return float(val)
-        except Exception as e:
-            logger.debug("usdinr_cache_lookup_failed", error=str(e))
-        return float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+        return await resolve_usdinr_rate(state_market_data=md if isinstance(md, dict) else None)
 
     async def _get_portfolio_value_inr(
         self,
@@ -1268,7 +1376,7 @@ class TradingEventHandler:
         book_inr: Optional[float] = None
         if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
             try:
-                usdinr = float(getattr(settings, "usdinr_fallback_rate", 83.0) or 83.0)
+                usdinr = await self._get_usdinr_rate(state)
                 total_usd = float(self.risk_manager.portfolio.total_value)
                 if total_usd > 0 and usdinr > 0:
                     book_inr = total_usd * usdinr
@@ -1283,8 +1391,7 @@ class TradingEventHandler:
                 pass
         if book_inr is None:
             book_inr = float(getattr(settings, "initial_balance", 20000.0) or 20000.0)
-        if available_cash_inr is not None and available_cash_inr > 0:
-            return min(book_inr, float(available_cash_inr))
+        # Total equity for sizing; free cash is capped in entry_lots_from_portfolio_margin only.
         return book_inr
 
     async def _get_available_cash_inr(self, state: Optional[Any], symbol: str) -> float:

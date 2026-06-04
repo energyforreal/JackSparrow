@@ -966,14 +966,16 @@ This information is used throughout the monitoring process to evaluate exit cond
 
 When `PORTFOLIO_FRACTION_LOT_SIZING=true` (default in `agent/core/config.py`), **`TradingEventHandler`** sizes **contract lots** before `RiskApprovedEvent`:
 
-1. Read **`available_cash_inr`** from agent context (`portfolio_value`, else `INITIAL_BALANCE`).
-2. **`margin_inr`** = `available_cash_inr × ENTRY_PORTFOLIO_MARGIN_FRACTION` (default **0.60** = 60% of portfolio as isolated margin budget).
-3. **`usd_margin`** = `margin_inr / usdinr_rate` (cached FX or `USDINR_FALLBACK_RATE`).
-4. **`entry_lots`** = `price_to_lots(usd_margin, entry_price, leverage=ISOLATED_MARGIN_LEVERAGE, contract_value_btc, max_lots=MAX_LOTS_PER_ORDER)` in [`agent/core/futures_utils.py`](../agent/core/futures_utils.py).
-5. Reject with `insufficient_margin_inr` if `margin_required_inr(lots) + entry_fees` exceeds available cash.
-6. **`validate_trade`** still runs with `proposed_size` derived from required margin ÷ portfolio (capped by `max_position_size`).
+1. Read **total equity** in INR via `_get_portfolio_value_inr` (risk `portfolio.total_value × USDINR`, else agent `portfolio_value`, else `INITIAL_BALANCE`). Free cash does **not** cap this figure; affordability is applied in step 5.
+2. **`margin_inr`** = `portfolio_value_inr × ENTRY_PORTFOLIO_MARGIN_FRACTION` (default **0.60**).
+3. **`usd_margin`** = `margin_inr / usdinr_rate` from Redis `fx:usdinr:last` (agent `agent/core/fx_rate.py` refresh) or `USDINR_FALLBACK_RATE` (default **86.0**).
+4. **`max_lots`** = `max_lots_from_portfolio_budget(...)` capped by `MAX_LOTS_PER_ORDER`; **`entry_lots`** = `entry_lots_from_portfolio_margin(..., available_cash_inr=...)` in [`agent/core/futures_utils.py`](../agent/core/futures_utils.py).
+5. Reject with `insufficient_margin_inr` if `margin_required_inr(lots) + entry_fees` exceeds **available** cash.
+6. **`validate_trade`** receives `proposed_size = ENTRY_PORTFOLIO_MARGIN_FRACTION` (same fraction as lot sizing; `MAX_POSITION_SIZE` default **0.60** aligns other risk paths). Post-trade free cash must stay above the **40% reserve** when portfolio sizing is on (`cash_reserve_breach` in `risk_manager`).
 
-**Leverage**: Fixed at `ISOLATED_MARGIN_LEVERAGE` for margin math only. The agent does **not** call Delta `POST /v2/products/{id}/orders/leverage` unless `SYNC_EXCHANGE_ORDER_LEVERAGE=true` (default **false**). Match leverage manually on the Delta testnet UI.
+**Leverage**: `ISOLATED_MARGIN_LEVERAGE` is a **fixed** input for margin math (default **5**). Portfolio growth changes **lot count**, not leverage. The agent does **not** call Delta `POST /v2/products/{id}/orders/leverage` unless `SYNC_EXCHANGE_ORDER_LEVERAGE=true` (default **false**). Set `ISOLATED_MARGIN_LEVERAGE` to match your Delta UI; `JACKSPARROW_V43_LEVERAGE_ASSUMPTION` (default 3) is for v43 gate/diagnostic math only.
+
+**HOLD + open position**: When policy emits `HOLD` but gated ML shows reversal (`final_short` vs long, etc.), optional exit via `POSITION_EXIT_ON_ML_REVERSAL_ENABLED` and `POSITION_EXIT_ML_CONFIDENCE_MIN` (see audit remediation in [15-audit-report.md](15-audit-report.md)).
 
 **Legacy paths** (when `PORTFOLIO_FRACTION_LOT_SIZING=false`): v43 `margin_cap_fraction`, `USE_NOTIONAL_LOT_SIZING`, or `FIXED_LOT_SIZE` / `ENFORCE_FIXED_LOT_SIZE`.
 
@@ -993,7 +995,8 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 1. **`_step5_decision_synthesis()`** (`agent/core/reasoning_engine.py`): Maps scalar `consensus` in `[-1,1]` to BUY/SELL/STRONG_* / **HOLD** using volatility-adaptive `(strong_thresh, mild_thresh)`. Example bands (verify in code): high `volatility` feature → mild band about `±0.40`; mid → about `±0.30`; low → about `±0.25`. Values inside the band are **HOLD**.
 2. **`_step3_model_consensus()`**: If per-model prediction stdev exceeds `model_disagreement_threshold` (default `0.4`), consensus magnitude is scaled down, pushing more outcomes into the HOLD band.
 3. **Ensemble mapping** (`V4EnsembleNode`): Entry signal is often `buy_prob - sell_prob`; confidence uses class probabilities. Near-neutral ensemble output maps to HOLD after step 5.
-4. **`TradingEventHandler`**: `signal == "HOLD"` skips execution (no trade), so outcomes look “inactive” even when the pipeline ran.
+4. **`TradingEventHandler`**: `signal == "HOLD"` skips new entries; with an open position, optional **ML reversal exit** may still close before `hold_at_synthesis` when configured.
+5. **`AGENT_POLICY_MODE`**: Default `ml_or_thesis` fuses thesis and ML. For **true NO-ML** (IC/thesis-only authority), set `AGENT_POLICY_MODE=thesis_only` and keep `REQUIRE_ML_SIGNAL_FOR_ORDERS=false`.
 
 **Scalping**: Align training horizon, `PRICE_FLUCTUATION_THRESHOLD_PCT`, TP/SL, and position monitor intervals with the intended timeframe; defaults may still reflect swing-style risk. See [Features – Signal triggers](04-features.md#market-signal-generation-triggers).
 

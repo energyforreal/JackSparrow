@@ -2471,7 +2471,7 @@ class ExecutionEngine:
 
             if (
                 not reduce_only
-                and bool(getattr(settings, "sync_exchange_order_leverage", True))
+                and bool(getattr(settings, "sync_exchange_order_leverage", False))
                 and leverage is not None
             ):
                 try:

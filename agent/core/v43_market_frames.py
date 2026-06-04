@@ -14,6 +14,10 @@ from agent.core.config import settings
 
 logger = structlog.get_logger()
 
+# Incremental OHLCV cache: symbol -> resolution -> DataFrame (PERF-01)
+_OHLCV_FRAME_CACHE: Dict[str, Dict[str, pd.DataFrame]] = {}
+_INCREMENTAL_TAIL_BARS = 3
+
 
 def _normalize_delta_candles(raw: List[dict[str, Any]]) -> List[dict[str, Any]]:
     """Normalize Delta ``history/candles`` rows to candle_validation format."""
@@ -56,12 +60,26 @@ async def _fetch_ohlcv_df(
     resolution: str,
     bar_seconds: int,
     n_candles: int,
+    *,
+    use_incremental_cache: bool = True,
 ) -> pd.DataFrame:
-    """Fetch last ``n_candles`` bars ending now."""
+    """Fetch last ``n_candles`` bars ending now (incremental append when cached)."""
     from datetime import datetime, timezone
 
     end_ts = int(datetime.now(timezone.utc).timestamp())
-    start_ts = end_ts - int(n_candles * bar_seconds * 1.05)
+    sym_cache = _OHLCV_FRAME_CACHE.setdefault(symbol, {})
+    cached = sym_cache.get(resolution) if use_incremental_cache else None
+
+    if (
+        use_incremental_cache
+        and cached is not None
+        and not cached.empty
+        and "timestamp" in cached.columns
+    ):
+        start_ts = end_ts - int(_INCREMENTAL_TAIL_BARS * bar_seconds * 2)
+    else:
+        start_ts = end_ts - int(n_candles * bar_seconds * 1.05)
+
     resp = await delta_client.get_candles(
         symbol=symbol,
         resolution=resolution,
@@ -69,7 +87,22 @@ async def _fetch_ohlcv_df(
         end=end_ts,
     )
     formatted = _parse_candles_response(resp)
-    return dataframe_from_delta_candles(formatted)
+    fresh = dataframe_from_delta_candles(formatted)
+    if fresh.empty:
+        return cached.copy() if cached is not None and not cached.empty else fresh
+
+    if cached is not None and not cached.empty and use_incremental_cache:
+        combined = (
+            pd.concat([cached, fresh], ignore_index=True)
+            .drop_duplicates(subset=["timestamp"], keep="last")
+            .sort_values("timestamp")
+        )
+        out = combined.tail(n_candles).reset_index(drop=True)
+    else:
+        out = fresh.tail(n_candles).reset_index(drop=True)
+
+    sym_cache[resolution] = out
+    return out
 
 
 async def _fetch_funding_series(
@@ -137,7 +170,23 @@ async def fetch_v43_market_frames(
         _fetch_ohlcv_df(delta_client, mark_symbol, "5m", 300, n5),
     )
 
-    if df_funding.empty and not df1h.empty:
+    if df_funding.empty and not df_oi.empty and "predicted_funding_rate" in df_oi.columns:
+        df_funding = (
+            df_oi[["timestamp", "predicted_funding_rate"]]
+            .rename(columns={"predicted_funding_rate": "funding_rate"})
+            .copy()
+        )
+        logger.info(
+            "v43_funding_from_oi_predicted_rate",
+            symbol=symbol,
+            rows=len(df_funding),
+        )
+    elif df_funding.empty and not df1h.empty:
+        logger.warning(
+            "v43_funding_zero_fill_fallback",
+            symbol=symbol,
+            message="Using 0.0 funding_rate — FUNDING fetch and OI predicted_funding_rate unavailable",
+        )
         df_funding = pd.DataFrame(
             {
                 "timestamp": df1h["timestamp"].values,

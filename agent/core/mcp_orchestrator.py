@@ -1117,21 +1117,29 @@ class MCPOrchestrator:
             thesis_allowed
         )
 
-        policy_verdict = agent_policy_engine.evaluate(
-            ml_evidence=ml_evidence,
-            conclusion="",
-            market_context=market_context_for_reasoning,
+        use_fast_reasoning = (
+            bool(getattr(settings, "reasoning_fast_path_on_blocked_entry", False))
+            and has_open
+            and gate_reject == "open_position"
+            and not final_long
+            and not final_short
         )
-        market_context_for_reasoning["policy_verdict"] = policy_verdict.model_dump(
-            mode="json"
-        )
-
-        reasoning_request = MCPReasoningRequest(
-            symbol=symbol,
-            market_context=market_context_for_reasoning,
-            use_memory=bool(self.vector_store),
-        )
-        reasoning_chain = await self.reasoning_engine.generate_reasoning(reasoning_request)
+        if use_fast_reasoning:
+            reasoning_chain = self._build_fast_hold_reasoning_chain(
+                symbol=symbol,
+                market_context=market_context_for_reasoning,
+                gate_reject=gate_reject,
+                model_predictions_payload=model_predictions_payload,
+            )
+        else:
+            reasoning_request = MCPReasoningRequest(
+                symbol=symbol,
+                market_context=market_context_for_reasoning,
+                use_memory=bool(self.vector_store),
+            )
+            reasoning_chain = await self.reasoning_engine.generate_reasoning(
+                reasoning_request
+            )
 
         policy_verdict = agent_policy_engine.evaluate(
             ml_evidence=ml_evidence,
@@ -1502,6 +1510,42 @@ class MCPOrchestrator:
             message="Model-specific feature requirements unavailable, falling back to canonical feature list.",
         )
         return get_feature_list()
+
+    def _build_fast_hold_reasoning_chain(
+        self,
+        *,
+        symbol: str,
+        market_context: Dict[str, Any],
+        gate_reject: Optional[str],
+        model_predictions_payload: List[Dict[str, Any]],
+    ) -> MCPReasoningChain:
+        """Lightweight reasoning when entry blocked by open_position (PERF-03)."""
+        from agent.core.reasoning_engine import ReasoningStep
+
+        ts = datetime.now(timezone.utc)
+        desc = (
+            f"HOLD - fast path: open position blocks new entry "
+            f"(gate_reject={gate_reject or 'open_position'})"
+        )
+        step = ReasoningStep(
+            step_number=1,
+            step_name="Fast Hold",
+            description=desc,
+            evidence=[f"symbol={symbol}", f"gate_reject={gate_reject}"],
+            confidence=0.0,
+            timestamp=ts,
+        )
+        return MCPReasoningChain(
+            chain_id=str(uuid.uuid4()),
+            timestamp=ts,
+            market_context=market_context,
+            steps=[step],
+            conclusion=desc,
+            final_confidence=0.0,
+            model_predictions=list(model_predictions_payload or []),
+            feature_context=[],
+            signal_strength=None,
+        )
         
     def _extract_decision_from_reasoning(self, reasoning_chain: MCPReasoningChain) -> Dict[str, Any]:
         """Extract trading decision from reasoning chain conclusion."""

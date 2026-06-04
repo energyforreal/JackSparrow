@@ -316,7 +316,44 @@ class IntelligentAgent:
                     error=str(exc),
                     exc_info=True,
                 )
+        try:
+            from agent.core.portfolio_seed import seed_risk_manager_portfolio_from_exchange
+
+            await seed_risk_manager_portfolio_from_exchange(
+                execution_module,
+                self.risk_manager,
+                str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD"),
+            )
+        except Exception as exc:
+            logger.warning(
+                "agent_portfolio_seed_startup_failed",
+                service="agent",
+                error=str(exc),
+            )
+        live_lev = int(getattr(settings, "isolated_margin_leverage", 5) or 5)
+        train_lev = int(getattr(settings, "jacksparrow_v43_leverage_assumption", 3) or 3)
+        if live_lev != train_lev:
+            logger.info(
+                "leverage_training_live_mismatch",
+                service="agent",
+                isolated_margin_leverage=live_lev,
+                jacksparrow_v43_leverage_assumption=train_lev,
+                note=(
+                    "Lot sizing uses isolated_margin_leverage only; "
+                    "v43 assumption affects gate diagnostics, not live leverage."
+                ),
+            )
         self.mcp_orchestrator.delta_client = self.delta_client  # For MTF trend_15m when enabled
+        try:
+            from agent.core.fx_rate import refresh_usdinr_rate
+
+            await refresh_usdinr_rate(self.delta_client)
+        except Exception as exc:
+            logger.warning(
+                "agent_fx_rate_startup_refresh_failed",
+                service="agent",
+                error=str(exc),
+            )
         await self.learning_system.initialize()
         await self.market_data_service.initialize()
 
@@ -529,6 +566,10 @@ class IntelligentAgent:
     async def _position_monitor_loop(self) -> None:
         """Background loop: update position prices and run manage_position for stop/take profit."""
         last_reconcile_at = 0.0
+        last_fx_refresh_at = 0.0
+        fx_refresh_interval = float(
+            getattr(settings, "usdinr_refresh_interval_seconds", 300) or 300
+        )
         reconcile_interval = float(
             getattr(settings, "exchange_position_reconcile_interval_seconds", 30.0) or 30.0
         )
@@ -1687,6 +1728,18 @@ class IntelligentAgent:
                         await publish_latency_metrics(latency_stats)
                     except Exception:
                         latency_stats = {}
+
+                    if (now - last_fx_refresh_at) >= fx_refresh_interval:
+                        try:
+                            from agent.core.fx_rate import refresh_usdinr_rate
+
+                            await refresh_usdinr_rate(self.delta_client)
+                            last_fx_refresh_at = now
+                        except Exception as fx_exc:
+                            logger.warning(
+                                "agent_fx_rate_periodic_refresh_failed",
+                                error=str(fx_exc),
+                            )
 
                     logger.info(
                         "agent_periodic_status",
