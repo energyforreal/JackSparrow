@@ -244,8 +244,8 @@ async def test_proposed_size_matches_entry_portfolio_fraction(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_portfolio_value_inr_uses_total_equity_not_free_cash(monkeypatch) -> None:
-    """BUG-04: book equity must not be capped by available_cash_inr."""
+async def test_portfolio_value_inr_uses_live_wallet_when_provided(monkeypatch) -> None:
+    """Sizing base must match live wallet so 60% margin leaves 40% reserve."""
     from unittest.mock import AsyncMock, MagicMock
 
     from agent.events.handlers.trading_handler import TradingEventHandler
@@ -260,8 +260,22 @@ async def test_portfolio_value_inr_uses_total_equity_not_free_cash(monkeypatch) 
         "BTCUSD",
         available_cash_inr=30_000.0,
     )
+    assert val == pytest.approx(30_000.0, rel=0.01)
+
+
+@pytest.mark.asyncio
+async def test_portfolio_value_inr_falls_back_to_book_without_wallet(monkeypatch) -> None:
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent.events.handlers.trading_handler import TradingEventHandler
+
+    risk = MagicMock()
+    risk.portfolio = MagicMock()
+    risk.portfolio.total_value = 100_000.0 / 83.0
+    handler = TradingEventHandler(risk_manager=risk, execution_module=None)
+    monkeypatch.setattr(handler, "_get_usdinr_rate", AsyncMock(return_value=83.0))
+    val = await handler._get_portfolio_value_inr(None, "BTCUSD")
     assert val == pytest.approx(100_000.0, rel=0.01)
-    assert val > 30_000.0
 
 
 def test_entry_lots_use_equity_budget_capped_by_cash() -> None:

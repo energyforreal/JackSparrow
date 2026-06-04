@@ -706,8 +706,9 @@ class RiskManager:
                 getattr(settings, "entry_portfolio_margin_fraction", 0.60) or 0.60
             )
             reserve_frac = max(0.0, 1.0 - margin_frac)
-            usdinr = float(getattr(settings, "usdinr_fallback_rate", 86.0) or 86.0)
-            equity_inr = float(self.portfolio.total_value) * usdinr
+            # Reserve floor is 40% of live wallet cash (same base as lot sizing), not the
+            # in-memory USD book (INITIAL_BALANCE) which may never match the exchange.
+            equity_inr = float(available_balance_override)
             post_cash = float(available_balance_override) - float(required_balance_override)
             min_reserve_inr = equity_inr * reserve_frac
             if post_cash < min_reserve_inr:
