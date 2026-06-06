@@ -7,6 +7,7 @@ from agent.data.candle_validation import (
     resolution_to_seconds,
     validate_candles,
     validate_delta_candle_rows,
+    filter_valid_delta_candle_rows,
 )
 
 
@@ -77,3 +78,14 @@ def test_validate_delta_candle_rows_seconds() -> None:
             }
         )
     validate_delta_candle_rows(candles, "5m", min_rows=50, allow_last_irregular=True)
+
+
+def test_filter_valid_delta_candle_rows_drops_invalid_ohlc() -> None:
+    candles = [
+        {"timestamp": 1700000000, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 10.0},
+        {"timestamp": 1700000300, "open": 101.5, "high": 102.0, "low": 101.0, "close": 101.0, "volume": 15.0},
+        {"timestamp": 1700000600, "open": 100.5, "high": 101.0, "low": 99.0, "close": 101.5, "volume": 12.0},
+    ]
+    filtered = filter_valid_delta_candle_rows(candles)
+    assert len(filtered) == 2
+    validate_delta_candle_rows(filtered, "5m", min_rows=2, allow_last_irregular=True)

@@ -429,62 +429,73 @@ class MarketDataService:
                     self._websocket_connected = self.websocket_client.connected
 
                 # Check WebSocket connection health and reconnect if needed
-                if self._websocket_enabled and not self._websocket_connected and websocket_reconnect_attempts < max_websocket_reconnect_attempts:
-                    wait_s = min(self._ws_reconnect_backoff_seconds, 60.0)
-                    if wait_s > 0:
-                        logger.info(
-                            "market_data_websocket_reconnect_backoff",
-                            sleep_seconds=round(wait_s, 2),
-                            attempt=websocket_reconnect_attempts + 1,
+                if self._websocket_enabled and not self._websocket_connected:
+                    if websocket_reconnect_attempts >= max_websocket_reconnect_attempts:
+                        logger.warning(
+                            "market_data_websocket_reconnect_max_attempts_reached",
+                            attempts=websocket_reconnect_attempts,
+                            max_attempts=max_websocket_reconnect_attempts,
+                            message="Reached max websocket reconnect attempts. Will retry after delay.",
                         )
-                        await asyncio.sleep(wait_s)
-                    logger.info(
-                        "market_data_attempting_websocket_reconnect",
-                        attempt=websocket_reconnect_attempts + 1,
-                        max_attempts=max_websocket_reconnect_attempts,
-                        backoff_seconds=round(self._ws_reconnect_backoff_seconds, 2),
-                    )
-                    try:
-                        await self._connect_websocket()
-                        if self._websocket_connected:
-                            # Re-subscribe to symbols
-                            try:
-                                await self.websocket_client.subscribe_ticker(self.streaming_symbols)
-                                self._ws_ticker_subscription_ok = True
-                                if getattr(settings, "use_delta_user_trades_ws", True):
-                                    await self.websocket_client.subscribe_user_trades(
-                                        self.streaming_symbols
+                        await asyncio.sleep(60)
+                        websocket_reconnect_attempts = 0
+                        self._ws_reconnect_backoff_seconds = 1.0
+                    else:
+                        wait_s = min(self._ws_reconnect_backoff_seconds, 60.0)
+                        if wait_s > 0:
+                            logger.info(
+                                "market_data_websocket_reconnect_backoff",
+                                sleep_seconds=round(wait_s, 2),
+                                attempt=websocket_reconnect_attempts + 1,
+                            )
+                            await asyncio.sleep(wait_s)
+                        logger.info(
+                            "market_data_attempting_websocket_reconnect",
+                            attempt=websocket_reconnect_attempts + 1,
+                            max_attempts=max_websocket_reconnect_attempts,
+                            backoff_seconds=round(self._ws_reconnect_backoff_seconds, 2),
+                        )
+                        try:
+                            await self._connect_websocket()
+                            if self._websocket_connected:
+                                # Re-subscribe to symbols
+                                try:
+                                    await self.websocket_client.subscribe_ticker(self.streaming_symbols)
+                                    self._ws_ticker_subscription_ok = True
+                                    if getattr(settings, "use_delta_user_trades_ws", True):
+                                        await self.websocket_client.subscribe_user_trades(
+                                            self.streaming_symbols
+                                        )
+                                    logger.info(
+                                        "market_data_websocket_reconnected_and_subscribed",
+                                        symbols=self.streaming_symbols,
                                     )
-                                logger.info(
-                                    "market_data_websocket_reconnected_and_subscribed",
-                                    symbols=self.streaming_symbols,
+                                except Exception as sub_e:
+                                    self._ws_ticker_subscription_ok = False
+                                    logger.warning(
+                                        "market_data_websocket_resubscribe_failed",
+                                        error=str(sub_e),
+                                        reason="subscription_failed",
+                                        symbols=self.streaming_symbols,
+                                    )
+                                websocket_reconnect_attempts = 0  # Reset on success
+                                self._ws_reconnect_backoff_seconds = 1.0
+                            else:
+                                websocket_reconnect_attempts += 1
+                                self._ws_reconnect_backoff_seconds = min(
+                                    self._ws_reconnect_backoff_seconds * 2.0, 60.0
                                 )
-                            except Exception as sub_e:
-                                self._ws_ticker_subscription_ok = False
-                                logger.warning(
-                                    "market_data_websocket_resubscribe_failed",
-                                    error=str(sub_e),
-                                    reason="subscription_failed",
-                                    symbols=self.streaming_symbols,
-                                )
-                            websocket_reconnect_attempts = 0  # Reset on success
-                            self._ws_reconnect_backoff_seconds = 1.0
-                        else:
+                        except Exception as e:
+                            logger.warning(
+                                "market_data_websocket_reconnect_failed",
+                                attempt=websocket_reconnect_attempts + 1,
+                                error=str(e),
+                                next_backoff_seconds=min(self._ws_reconnect_backoff_seconds * 2.0, 60.0),
+                            )
                             websocket_reconnect_attempts += 1
                             self._ws_reconnect_backoff_seconds = min(
                                 self._ws_reconnect_backoff_seconds * 2.0, 60.0
                             )
-                    except Exception as e:
-                        logger.warning(
-                            "market_data_websocket_reconnect_failed",
-                            attempt=websocket_reconnect_attempts + 1,
-                            error=str(e),
-                            next_backoff_seconds=min(self._ws_reconnect_backoff_seconds * 2.0, 60.0),
-                        )
-                        websocket_reconnect_attempts += 1
-                        self._ws_reconnect_backoff_seconds = min(
-                            self._ws_reconnect_backoff_seconds * 2.0, 60.0
-                        )
 
                 for symbol in self.streaming_symbols:
                     await self._poll_ticker_via_rest_if_needed(symbol)
@@ -1102,16 +1113,40 @@ class MarketDataService:
 
             if bool(getattr(settings, "strict_candle_validation_enabled", True)) and formatted_candles:
                 try:
-                    from agent.data.candle_validation import validate_delta_candle_rows
+                    from agent.data.candle_validation import (
+                        validate_delta_candle_rows,
+                        filter_valid_delta_candle_rows,
+                    )
 
                     want = int(getattr(settings, "strict_candle_validation_min_rows", 50) or 50)
                     mr = min(len(formatted_candles), max(2, want))
-                    validate_delta_candle_rows(
-                        formatted_candles,
-                        resolution,
-                        min_rows=mr,
-                        allow_last_irregular=True,
-                    )
+                    try:
+                        validate_delta_candle_rows(
+                            formatted_candles,
+                            resolution,
+                            min_rows=mr,
+                            allow_last_irregular=True,
+                        )
+                    except ValueError:
+                        valid_candles = filter_valid_delta_candle_rows(formatted_candles)
+                        invalid_count = len(formatted_candles) - len(valid_candles)
+                        if invalid_count > 0 and len(valid_candles) >= mr:
+                            logger.warning(
+                                "market_data_candle_validation_filtered_invalid_rows",
+                                symbol=symbol,
+                                interval=interval,
+                                invalid_rows=invalid_count,
+                                original_rows=len(formatted_candles),
+                            )
+                            formatted_candles = valid_candles
+                            validate_delta_candle_rows(
+                                formatted_candles,
+                                resolution,
+                                min_rows=mr,
+                                allow_last_irregular=True,
+                            )
+                        else:
+                            raise
                 except ValueError as e:
                     logger.warning(
                         "market_data_candle_validation_failed",

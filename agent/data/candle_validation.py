@@ -146,6 +146,52 @@ def dataframe_from_delta_candles(candles: list[dict[str, Any]]) -> pd.DataFrame:
     return df
 
 
+def _is_valid_delta_candle_row(candle: dict[str, Any]) -> bool:
+    """Return True when a candle row has internally consistent OHLC values."""
+    try:
+        high = float(candle.get("high", 0))
+        low = float(candle.get("low", 0))
+        open_ = float(candle.get("open", 0))
+        close = float(candle.get("close", 0))
+    except (TypeError, ValueError):
+        return False
+    if high < low:
+        return False
+    if open_ < low or open_ > high:
+        return False
+    if close < low or close > high:
+        return False
+    return True
+
+
+def filter_valid_delta_candle_rows(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter malformed Delta candle rows that fail basic OHLC consistency checks."""
+    return [c for c in candles if _is_valid_delta_candle_row(c)]
+
+
+def _is_valid_delta_candle_row(candle: dict[str, Any]) -> bool:
+    """Return True when a candle row has internally consistent OHLC values."""
+    try:
+        high = float(candle.get("high", 0))
+        low = float(candle.get("low", 0))
+        open_ = float(candle.get("open", 0))
+        close = float(candle.get("close", 0))
+    except (TypeError, ValueError):
+        return False
+    if high < low:
+        return False
+    if open_ < low or open_ > high:
+        return False
+    if close < low or close > high:
+        return False
+    return True
+
+
+def filter_valid_delta_candle_rows(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter malformed Delta candle rows that fail basic OHLC consistency checks."""
+    return [c for c in candles if _is_valid_delta_candle_row(c)]
+
+
 def validate_delta_candle_rows(
     candles: list[dict[str, Any]],
     interval: str,

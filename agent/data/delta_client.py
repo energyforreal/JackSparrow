@@ -9,12 +9,14 @@ import json
 import time
 import hmac
 import hashlib
+import socket
 from typing import Dict, Any, Optional, List, Callable, Set
 from datetime import datetime, timezone
 import httpx
 import asyncio
 import structlog
 import websockets
+from urllib.parse import urlparse
 from websockets.exceptions import ConnectionClosedError, WebSocketException
 
 from agent.core.logging_utils import log_error_with_context, log_warning_with_context, log_exception
@@ -1563,6 +1565,27 @@ class DeltaExchangeWebSocketClient:
 
     async def _connect_websocket(self, url: str) -> None:
         """Internal method to establish WebSocket connection."""
+        parsed_url = urlparse(url)
+        host = parsed_url.hostname or ""
+        port = parsed_url.port or (443 if parsed_url.scheme == "wss" else 80)
+
+        # Retry transient DNS failures before attempting the websocket connect.
+        for attempt in range(1, 4):
+            try:
+                socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+                break
+            except socket.gaierror as e:
+                if attempt >= 3:
+                    raise
+                logger.warning(
+                    "delta_websocket_dns_resolution_retry",
+                    host=host,
+                    port=port,
+                    attempt=attempt,
+                    error=str(e),
+                )
+                await asyncio.sleep(1)
+
         # Use a slightly more tolerant ping configuration to reduce spurious
         # keepalive timeouts while still detecting real disconnects.
         self.websocket = await websockets.connect(
