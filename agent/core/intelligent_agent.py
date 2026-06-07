@@ -277,6 +277,7 @@ class IntelligentAgent:
             delta_client=self.delta_client,
             risk_manager=self.risk_manager,
             exchange_gateway=self.exchange_gateway,
+            market_data_service=self.market_data_service,
         )
         if bool(getattr(settings, "position_restore_on_startup", True)):
             skip_restore = (

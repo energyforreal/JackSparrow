@@ -364,16 +364,24 @@ class ExecutionEngine:
         self._last_ws_sltp_check_ts: Dict[str, float] = {}
         self._partial_fill_tasks: Dict[str, asyncio.Task] = {}
 
-    async def initialize(self, delta_client=None, risk_manager=None, exchange_gateway: Optional[ExchangeGateway] = None):
+    async def initialize(
+        self,
+        delta_client=None,
+        risk_manager=None,
+        exchange_gateway: Optional[ExchangeGateway] = None,
+        market_data_service=None,
+    ):
         """Initialize execution engine.
 
         Args:
             delta_client: Optional DeltaExchangeClient for paper/live trading
             risk_manager: Optional RiskManager for portfolio sync on fill/close
+            market_data_service: Optional MarketDataService for cached feature access
         """
         self.delta_client = delta_client
         self.risk_manager = risk_manager
         self.exchange_gateway = exchange_gateway
+        self.market_data_service = market_data_service
         # Initialize mock exchange connection
         await self._connect_exchange()
         self._initialized = True
@@ -2008,9 +2016,20 @@ class ExecutionEngine:
         levels: Optional[Any] = None
         flip_triggered = False
         market_data_service = getattr(self, "market_data_service", None)
+        logger.info(
+            "dynamic_bracket_flip_path_start",
+            symbol=symbol,
+            has_market_data_service=bool(market_data_service),
+        )
         if market_data_service:
             cached_features = market_data_service.get_cached_features(symbol) or {}
-            if cached_features:
+            if not cached_features:
+                logger.info(
+                    "dynamic_bracket_no_cached_features",
+                    symbol=symbol,
+                    market_data_service_available=True,
+                )
+            else:
                 levels, flip_triggered = compute_flip_adjusted_levels(
                     position,
                     cached_features,
