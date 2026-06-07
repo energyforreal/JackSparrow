@@ -38,6 +38,7 @@ from agent.core.sl_tp import (
 )
 from agent.core.dynamic_sl_tp import (
     compute_sl_tp_levels,
+    compute_flip_adjusted_levels,
     should_update_bracket,
     to_delta_bracket_payload,
 )
@@ -1981,7 +1982,14 @@ class ExecutionEngine:
     async def _maybe_update_dynamic_bracket(
         self, symbol: str, position: Dict[str, Any]
     ) -> None:
-        """PUT /v2/orders/bracket when ATR/regime levels move beyond throttle thresholds."""
+        """PUT /v2/orders/bracket when ATR/regime levels move beyond throttle thresholds.
+
+        Two update paths:
+          1. FLIP-RISK PATH — if market_flip_detector scores a high flip risk,
+             bypass the normal throttle interval and immediately tighten SL/TP.
+          2. NORMAL ATR/REGIME PATH — periodic ATR/regime-aware recompute, throttled
+             by dynamic_sl_tp_min_adjust_interval_seconds.
+        """
         if not getattr(settings, "dynamic_sl_tp_enabled", False):
             return
         if not getattr(settings, "use_delta_position_bracket_api", True) or not self.delta_client:
@@ -1989,14 +1997,6 @@ class ExecutionEngine:
         entry = float(position.get("entry_price") or 0)
         if entry <= 0:
             return
-        atr_14: Optional[float] = None
-        atr_raw = position.get("atr_14")
-        if atr_raw is not None:
-            try:
-                atr_14 = float(atr_raw)
-            except (TypeError, ValueError):
-                atr_14 = None
-        side = "BUY" if position.get("side") == "long" else "SELL"
         tick_raw = position.get("tick_size")
         tick_sz: Optional[float] = None
         if tick_raw is not None:
@@ -2004,16 +2004,40 @@ class ExecutionEngine:
                 tick_sz = float(tick_raw)
             except (TypeError, ValueError):
                 tick_sz = None
-        levels = compute_sl_tp_levels(
-            entry,
-            side,
-            atr_14,
-            position.get("regime"),
-            settings,
-            tick_size=tick_sz,
-        )
-        if not should_update_bracket(position, levels, settings):
-            return
+
+        levels: Optional[Any] = None
+        flip_triggered = False
+        market_data_service = getattr(self, "market_data_service", None)
+        if market_data_service:
+            cached_features = market_data_service.get_cached_features(symbol) or {}
+            if cached_features:
+                levels, flip_triggered = compute_flip_adjusted_levels(
+                    position,
+                    cached_features,
+                    settings,
+                    tick_size=tick_sz,
+                )
+
+        if not flip_triggered:
+            atr_14: Optional[float] = None
+            atr_raw = position.get("atr_14")
+            if atr_raw is not None:
+                try:
+                    atr_14 = float(atr_raw)
+                except (TypeError, ValueError):
+                    atr_14 = None
+            side = "BUY" if position.get("side") == "long" else "SELL"
+            levels = compute_sl_tp_levels(
+                entry,
+                side,
+                atr_14,
+                position.get("regime"),
+                settings,
+                tick_size=tick_sz,
+            )
+            if not should_update_bracket(position, levels, settings):
+                return
+
         bid = position.get("bracket_order_id")
         if bid is None:
             bid = await self.delta_client.find_open_bracket_order_id(symbol)
@@ -2062,6 +2086,7 @@ class ExecutionEngine:
                 bracket_order_id=bid,
                 stop_loss=levels.stop_loss,
                 take_profit=levels.take_profit,
+                flip_triggered=flip_triggered,
             )
         except Exception as exc:
             logger.warning("dynamic_bracket_update_failed", symbol=symbol, error=str(exc))

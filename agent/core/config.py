@@ -859,6 +859,90 @@ class Settings(BaseSettings):
         ge=0.0,
         description="Minimum relative SL/TP price change before issuing bracket PUT.",
     )
+
+    # ── Market Flip Detection ──────────────────────────────────────────────────
+    flip_detection_enabled: bool = Field(
+        default=True,
+        env="FLIP_DETECTION_ENABLED",
+        description=(
+            "When True, detect imminent trend reversals and immediately tighten SL/TP "
+            "on the exchange bracket, bypassing the normal throttle interval."
+        ),
+    )
+    flip_score_threshold_low: float = Field(
+        default=0.55,
+        env="FLIP_SCORE_THRESHOLD_LOW",
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum flip risk score (0-1) to trigger immediate bracket tightening. "
+            "Lower = more sensitive. Computed from RSI, MACD, EMA cross, momentum, regime, ADX, ATR."
+        ),
+    )
+    flip_rsi_overbought: float = Field(
+        default=72.0,
+        env="FLIP_RSI_OVERBOUGHT",
+        ge=50.0,
+        le=100.0,
+        description="RSI level above which a long position is flagged as overbought.",
+    )
+    flip_rsi_oversold: float = Field(
+        default=28.0,
+        env="FLIP_RSI_OVERSOLD",
+        ge=0.0,
+        le=50.0,
+        description="RSI level below which a short position is flagged as oversold.",
+    )
+    flip_adx_trend_min: float = Field(
+        default=22.0,
+        env="FLIP_ADX_TREND_MIN",
+        ge=10.0,
+        description="ADX level above which a market is considered trending for flip detection.",
+    )
+    flip_adx_collapse_max: float = Field(
+        default=18.0,
+        env="FLIP_ADX_COLLAPSE_MAX",
+        ge=5.0,
+        description="ADX drops below this from above flip_adx_trend_min = trend death signal.",
+    )
+    flip_atr_spike_pct: float = Field(
+        default=0.30,
+        env="FLIP_ATR_SPIKE_PCT",
+        ge=0.05,
+        description="ATR % increase in one bar above this threshold triggers volatility shock signal.",
+    )
+    flip_sl_tighten_mult_min: float = Field(
+        default=0.50,
+        env="FLIP_SL_TIGHTEN_MULT_MIN",
+        ge=0.1,
+        le=1.0,
+        description=(
+            "At maximum flip score (1.0): SL distance from current price = "
+            "original_distance × this multiplier. Smaller = tighter SL."
+        ),
+    )
+    flip_sl_tighten_mult_max: float = Field(
+        default=0.85,
+        env="FLIP_SL_TIGHTEN_MULT_MAX",
+        ge=0.1,
+        le=1.0,
+        description="At flip_score_threshold_low: SL tighten multiplier (gentler).",
+    )
+    flip_tp_lock_mult_min: float = Field(
+        default=0.50,
+        env="FLIP_TP_LOCK_MULT_MIN",
+        ge=0.1,
+        le=1.0,
+        description="At max flip score: TP pulled to current + (old_TP - current) × this mult.",
+    )
+    flip_tp_lock_mult_max: float = Field(
+        default=0.80,
+        env="FLIP_TP_LOCK_MULT_MAX",
+        ge=0.1,
+        le=1.0,
+        description="At flip_score_threshold_low: TP lock multiplier (gentler).",
+    )
+
     use_atr_trailing_stop: bool = Field(
         default=False,
         env="USE_ATR_TRAILING_STOP",

@@ -193,3 +193,97 @@ def levels_to_put_bracket_fields(levels: SlTpLevels) -> Dict[str, str]:
     if levels.trail_amount is not None and levels.trail_amount > 0:
         out["bracket_trail_amount"] = str(levels.trail_amount)
     return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Flip-aware bracket update (bypasses throttle when flip risk is high)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def compute_flip_adjusted_levels(
+    position: Dict[str, Any],
+    cached_features: Dict[str, Any],
+    settings: Any,
+    *,
+    tick_size: Optional[float] = None,
+) -> Tuple[Optional["SlTpLevels"], bool]:
+    """
+    Check for market flip risk and, if high, compute tightened SL/TP levels.
+
+    This is called from _maybe_update_dynamic_bracket() BEFORE the normal
+    throttle check — when flip risk is high, we bypass the interval throttle
+    and update immediately.
+
+    Returns:
+        (levels, is_flip_triggered) — levels is None if no update needed.
+        is_flip_triggered is True when a flip-risk tightening was applied,
+        which tells the caller to skip the normal should_update_bracket() check.
+    """
+    from agent.core.market_flip_detector import (
+        detect_market_flip_risk,
+        compute_flip_tightened_levels,
+    )
+
+    flip_enabled = bool(getattr(settings, "flip_detection_enabled", True))
+    if not flip_enabled:
+        return None, False
+
+    score_threshold = float(
+        getattr(settings, "flip_score_threshold_low", 0.55) or 0.55
+    )
+
+    side_raw = position.get("side", "long")
+    position_side = "long" if str(side_raw).lower() in ("long", "buy") else "short"
+    symbol = str(position.get("symbol") or "UNKNOWN")
+
+    snapshot = detect_market_flip_risk(
+        cached_features,
+        position_side,
+        symbol,
+        settings=settings,
+    )
+
+    if snapshot.score < score_threshold:
+        return None, False
+
+    current_price = float(position.get("current_price") or position.get("entry_price") or 0)
+    entry = float(position.get("entry_price") or 0)
+    current_sl = position.get("stop_loss")
+    current_tp = position.get("take_profit")
+    try:
+        current_sl = float(current_sl) if current_sl is not None else None
+    except (TypeError, ValueError):
+        current_sl = None
+    try:
+        current_tp = float(current_tp) if current_tp is not None else None
+    except (TypeError, ValueError):
+        current_tp = None
+
+    new_sl, new_tp = compute_flip_tightened_levels(
+        entry,
+        current_price,
+        current_sl,
+        current_tp,
+        position_side,
+        snapshot.score,
+        settings=settings,
+    )
+
+    if tick_size is not None and tick_size > 0:
+        from agent.core.futures_utils import round_to_tick
+        if new_sl is not None:
+            new_sl = round_to_tick(new_sl, tick_size)
+        if new_tp is not None:
+            new_tp = round_to_tick(new_tp, tick_size)
+
+    sl_changed = new_sl is not None and new_sl != current_sl
+    tp_changed = new_tp is not None and new_tp != current_tp
+    if not sl_changed and not tp_changed:
+        return None, False
+
+    levels = SlTpLevels(
+        stop_loss=new_sl,
+        take_profit=new_tp,
+        trail_amount=position.get("bracket_trail_amount"),
+    )
+    return levels, True
