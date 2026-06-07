@@ -36,11 +36,9 @@ def micro_expected_return_from_features(
     body_dir = _feat(closed_feats, "body_dir")
 
     composite = (
-        0.40 * ret_1
-        + 0.35 * trend_mom
+        0.45 * ret_1
+        + 0.40 * trend_mom
         + 0.15 * (macd * 1e-4 if abs(macd) > 10.0 else macd)
-        + 0.07 * (di * 1e-4)
-        + 0.03 * body_dir * 1e-3
     )
     if abs(composite) < 1e-9:
         return 0.0

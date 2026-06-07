@@ -406,6 +406,14 @@ def _thesis_blocks_gated_ml_adoption(thesis: ThesisVerdict) -> bool:
         return True
     if any("veto" in c for c in codes):
         return True
+    _HARD_BLOCK_CODES = frozenset({
+        "thesis_open_position",
+        "thesis_atr_too_low",
+        "non_operational",
+        "thesis_no_rule_fired",
+    })
+    if codes & _HARD_BLOCK_CODES:
+        return True
     return False
 
 

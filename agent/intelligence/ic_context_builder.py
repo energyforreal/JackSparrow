@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Tuple
 
 import numpy as np
+import structlog
 
 from agent.core.agent_thesis_engine import AgentThesisEngine, ThesisVerdict
 from agent.core.config import settings
@@ -37,6 +38,24 @@ def head_confidence(edge: float, threshold: float, unc_scale: float) -> float:
     edge_ratio = min(1.0, abs(float(edge)) / thr)
     base = 0.25 + 0.75 * edge_ratio
     return float(min(1.0, max(0.0, base * float(unc_scale))))
+
+
+def _check_htf_features_available(features: Dict[str, Any], prefix: str) -> bool:
+    if prefix == "h1":
+        keys = ("h1_trend", "h1_rsi_14", "h1_adx")
+    else:
+        keys = ("h_trend", "h_rsi_14", "adx_14")
+    for k in keys:
+        v = features.get(k)
+        if v is None:
+            return False
+        try:
+            f = float(v)
+            if f != f:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def _thesis_from_htf_bias(features: Dict[str, Any], prefix: str) -> ThesisVerdict:
@@ -116,9 +135,24 @@ def build_ic_prediction_context(
     if alignment >= 0.6 and primary_er != 0.0:
         primary_er *= 1.0 + 0.15 * alignment
 
+    htf_15m_ok = _check_htf_features_available(closed_feats, "h")
+    htf_1h_ok = _check_htf_features_available(closed_feats, "h1")
+    if not htf_15m_ok or not htf_1h_ok:
+        logger = structlog.get_logger()
+        logger.warning(
+            "ic_htf_features_missing",
+            htf_15m_available=htf_15m_ok,
+            htf_1h_available=htf_1h_ok,
+            message=(
+                "Higher-timeframe trend features absent or NaN in closed_feats. "
+                "MTF alignment will default to 0.0."
+            ),
+        )
+
     primary_fb = int(primary_execution_horizon_bars(bundle_metadata))
     floor = float(bundle_metadata.get("default_threshold") or 0.005)
     gate_thr_hint = float(floor)
+    _er_before_micro = primary_er
     primary_er = apply_ic_micro_momentum_er(
         str(thesis_5m.signal),
         primary_er,
@@ -127,7 +161,9 @@ def build_ic_prediction_context(
         short_enabled=short_enabled,
     )
     ic_micro_applied = (
-        str(thesis_5m.signal).upper() == "HOLD" and primary_er != 0.0
+        str(thesis_5m.signal).upper() == "HOLD"
+        and _er_before_micro == 0.0
+        and primary_er != 0.0
     )
 
     p_vol = estimate_vol_expansion(closed_feats)
@@ -197,8 +233,11 @@ def build_ic_prediction_context(
         "p_vol_expansion": p_vol,
         "ic_alignment_score": alignment,
         "ic_thesis_signal": thesis_5m.signal,
+        "ic_thesis_signal_is_pre_reconcile": True,
+        "expected_return_is_synthetic": True,
         "ic_reason_codes": list(thesis_5m.reason_codes),
         "ic_micro_momentum_applied": ic_micro_applied,
+        "htf_features_available": {"15m": htf_15m_ok, "1h": htf_1h_ok},
     }
     if ic_micro_applied:
         out_ctx["ic_reason_codes"] = list(thesis_5m.reason_codes) + [

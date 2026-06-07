@@ -180,11 +180,14 @@ def _model_consensus_row(
     return row
 
 
-def _map_consensus_signal_to_string(value: Any) -> str:
-    """Map numeric consensus_signal (-1 to +1) to discrete SignalType string.
-    
-    Frontend expects signal as string (STRONG_BUY, BUY, HOLD, etc.), not numeric.
+def _map_consensus_signal_to_string(value: Any, ic_thesis_signal: str = "") -> str:
+    """Map consensus output to a discrete SignalType string.
+
+    Prefer explicit IC thesis strings when available, otherwise fall back to
+    numeric tanh-derived classification for legacy model outputs.
     """
+    if ic_thesis_signal and isinstance(ic_thesis_signal, str) and SignalType.is_valid(ic_thesis_signal):
+        return ic_thesis_signal
     if isinstance(value, str) and SignalType.is_valid(value):
         return value
     if not isinstance(value, (int, float)):
@@ -1072,7 +1075,10 @@ class AgentEventSubscriber:
             consensus_confidence = max(0.0, min(1.0, consensus_confidence))
             
             # Map numeric consensus_signal to discrete string for frontend Signal type
-            signal_str = _map_consensus_signal_to_string(consensus_signal)
+            signal_str = _map_consensus_signal_to_string(
+                consensus_signal,
+                ic_thesis_signal=str(norm.get("ic_thesis_signal") or ""),
+            )
             
             # Broadcast model prediction update using simplified message format
             model_data = {
@@ -1185,9 +1191,9 @@ class AgentEventSubscriber:
             rj = _v43_gate_reject_from_context(reasoning_chain, market_context)
             if rj:
                 reasoning_data["v43_gate_reject"] = rj
-            # Reasoning is part of signal data, so use signal update
-            signal_message = create_signal_update(reasoning_data)
-            await unified_websocket_manager.broadcast(signal_message, channel="data_update")
+            # Reasoning is part of model state data, so broadcast as model update
+            reasoning_message = create_model_update(reasoning_data)
+            await unified_websocket_manager.broadcast(reasoning_message, channel="data_update")
 
             logger.info(
                 "agent_event_subscriber_reasoning_complete_broadcast",
@@ -1871,9 +1877,10 @@ class AgentEventSubscriber:
         if rj:
             reasoning_data["v43_gate_reject"] = rj
 
-        # Broadcast reasoning update (part of signal data)
-        signal_message = create_signal_update(reasoning_data)
-        await unified_websocket_manager.broadcast(signal_message, channel="data_update")
+        # Broadcast reasoning update as model data to avoid overwriting
+        # frontend signal state with reasoning confidence.
+        reasoning_message = create_model_update(reasoning_data)
+        await unified_websocket_manager.broadcast(reasoning_message, channel="data_update")
 
     async def _handle_market_tick_consolidated(self, payload: Dict[str, Any]):
         """Handle market_tick events with simplified logic."""

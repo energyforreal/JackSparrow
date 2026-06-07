@@ -769,6 +769,20 @@ class MCPOrchestrator:
             thesis_mc["market_health_hold"] = True
             thesis_mc["market_health_reason"] = mctx.get("v43_market_health_reason")
         thesis_verdict = agent_thesis_engine.evaluate(regime, thesis_mc)
+        _ic_thesis_pre_reconcile = str(pctx.get("ic_thesis_signal") or "").upper()
+        _policy_thesis = str(thesis_verdict.signal).upper()
+        if _ic_thesis_pre_reconcile and _ic_thesis_pre_reconcile != _policy_thesis:
+            logger.warning(
+                "ic_thesis_policy_divergence",
+                ic_thesis_pre_reconcile=_ic_thesis_pre_reconcile,
+                policy_thesis=_policy_thesis,
+                has_open_position=has_open,
+                message=(
+                    "IC pre-reconcile thesis differs from policy-level thesis. "
+                    "Agent will act on policy_thesis. Frontend ic_thesis_signal "
+                    "is tagged ic_thesis_signal_is_pre_reconcile=True."
+                ),
+            )
         strategy_candidate = thesis_verdict_to_strategy_candidate(thesis_verdict)
 
         thesis_h_bars = int(
