@@ -15,6 +15,9 @@ from agent.core.config import settings
 
 logger = structlog.get_logger()
 
+# Minimum closed 5m bars required by build_v43_feature_matrix (orchestrator must match).
+V43_MIN_5M_ROWS = 40
+
 # Legacy module-level cache when no MarketDataManager registry is supplied.
 _OHLCV_FRAME_CACHE: Dict[str, Dict[str, pd.DataFrame]] = {}
 _LEGACY_BUFFER_REGISTRY = RollingOhlcvBufferRegistry()

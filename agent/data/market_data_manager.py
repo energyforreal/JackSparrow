@@ -12,7 +12,11 @@ import structlog
 
 from agent.core.config import settings
 from agent.core.v43_contract_state import ContractStateSnapshot, get_contract_state
-from agent.core.v43_market_frames import closed_5m_bar_index, fetch_v43_market_frames
+from agent.core.v43_market_frames import (
+    V43_MIN_5M_ROWS,
+    closed_5m_bar_index,
+    fetch_v43_market_frames,
+)
 from agent.core.v43_oi_frames import push_oi_from_ws_ticker
 from agent.data.market_data_service import MarketDataService
 from agent.data.rolling_ohlcv_buffer import RollingOhlcvBufferRegistry
@@ -22,7 +26,7 @@ logger = structlog.get_logger()
 
 _V43_WARM_LIMITS: Dict[str, int] = {
     "1m": 100,
-    "5m": 100,
+    "5m": max(100, V43_MIN_5M_ROWS),
     "15m": 100,
     "30m": 100,
     "1h": 100,
@@ -141,32 +145,39 @@ class MarketDataManager(MarketDataService):
         symbol: str,
         interval: str = "1h",
         limit: int = 100,
+        *,
+        force_refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Get market data; prefer in-process OHLCV buffers when manager is enabled."""
         if not bool(getattr(settings, "market_data_manager_enabled", True)):
-            return await super().get_market_data(symbol, interval, limit)
+            return await super().get_market_data(
+                symbol, interval, limit, force_refresh=force_refresh
+            )
 
         sym = normalize_symbol_for_delta_api(symbol)
         iv = str(interval or "1h").strip().lower()
         want = max(1, int(limit))
 
-        cached_df = self._ohlcv_buffers.get(sym, iv)
-        if cached_df is not None and len(cached_df) >= want:
-            formatted = self._ohlcv_buffers.to_formatted_candles(sym, iv, want)
-            ticker = await self.get_ticker(sym)
-            current_price = ticker.get("close") if ticker else None
-            return {
-                "symbol": sym,
-                "interval": iv,
-                "candles": formatted,
-                "current_price": current_price,
-                "data_age_seconds": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+        if not force_refresh:
+            cached_df = self._ohlcv_buffers.get(sym, iv)
+            if cached_df is not None and len(cached_df) >= want:
+                formatted = self._ohlcv_buffers.to_formatted_candles(sym, iv, want)
+                ticker = await self.get_ticker(sym)
+                current_price = ticker.get("close") if ticker else None
+                return {
+                    "symbol": sym,
+                    "interval": iv,
+                    "candles": formatted,
+                    "current_price": current_price,
+                    "data_age_seconds": 0,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
 
         df = await self.get_ohlcv_df(sym, iv, want)
         if df.empty:
-            return await super().get_market_data(symbol, interval, limit)
+            return await super().get_market_data(
+                symbol, interval, limit, force_refresh=force_refresh
+            )
 
         formatted = self._ohlcv_buffers.to_formatted_candles(sym, iv, want)
         ticker = await self.get_ticker(sym)

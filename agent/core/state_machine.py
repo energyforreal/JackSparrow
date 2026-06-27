@@ -24,6 +24,7 @@ from agent.events.schemas import (
     PositionClosedEvent,
     StateTransitionEvent,
     DecisionReadyEvent,
+    ModelPredictionCompleteEvent,
     EventType,
 )
 from agent.core.learning_system import TradeOutcome
@@ -83,6 +84,9 @@ class AgentStateMachine:
         event_bus.subscribe(EventType.CANDLE_CLOSED, self._handle_candle_closed)
         event_bus.subscribe(EventType.REASONING_COMPLETE, self._handle_reasoning_complete)
         event_bus.subscribe(EventType.DECISION_READY, self._handle_decision_ready)
+        event_bus.subscribe(
+            EventType.MODEL_PREDICTION_COMPLETE, self._handle_prediction_complete
+        )
         event_bus.subscribe(EventType.RISK_APPROVED, self._handle_risk_approved)
         event_bus.subscribe(EventType.ORDER_FILL, self._handle_order_fill)
         event_bus.subscribe(EventType.RISK_ALERT, self._handle_risk_alert)
@@ -100,14 +104,49 @@ class AgentStateMachine:
             await self._transition_to(AgentState.DELIBERATING, "Reasoning chain complete")
     
     async def _handle_decision_ready(self, event: DecisionReadyEvent):
-        """Handle decision ready event - transition DELIBERATING -> OBSERVING if HOLD, or stay in DELIBERATING for trade signals."""
-        if self.current_state == AgentState.DELIBERATING:
-            signal = event.payload.get("signal", "")
-            # If HOLD decision, transition back to OBSERVING to continue monitoring
+        """Handle decision ready: return to OBSERVING on HOLD, else await risk."""
+        signal = str(event.payload.get("signal", "") or "")
+        if self.current_state == AgentState.THINKING:
             if signal == "HOLD":
-                await self._transition_to(AgentState.OBSERVING, "HOLD decision - returning to observation mode")
+                await self._transition_to(
+                    AgentState.OBSERVING,
+                    "HOLD decision - returning to observation mode",
+                )
+            else:
+                await self._transition_to(
+                    AgentState.DELIBERATING,
+                    "Trade signal - awaiting risk approval",
+                )
+            return
+        if self.current_state == AgentState.DELIBERATING:
+            if signal == "HOLD":
+                await self._transition_to(
+                    AgentState.OBSERVING,
+                    "HOLD decision - returning to observation mode",
+                )
             # For BUY/SELL signals, stay in DELIBERATING to wait for risk approval
-            # The transition to EXECUTING will happen when RISK_APPROVED event is received
+
+    async def _handle_prediction_complete(self, event: ModelPredictionCompleteEvent):
+        """Recover from THINKING when the candle-close prediction fails without DECISION_READY."""
+        if self.current_state != AgentState.THINKING:
+            return
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if not payload.get("error"):
+            return
+        req_ctx = payload.get("request_context") or {}
+        trigger = str(req_ctx.get("trigger") or "")
+        if trigger not in ("candle_closed", "staleness_watchdog"):
+            logger.debug(
+                "state_machine_prediction_error_ignored",
+                trigger=trigger or None,
+                error_code=payload.get("error_code"),
+                message="Only candle/staleness prediction errors recover THINKING",
+            )
+            return
+        await self._transition_to(
+            AgentState.OBSERVING,
+            "Prediction failed - resuming observation",
+        )
     
     async def _handle_risk_approved(self, event: RiskApprovedEvent):
         """Handle risk approved event - transition DELIBERATING/ANALYZING -> EXECUTING."""

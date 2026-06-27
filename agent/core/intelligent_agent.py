@@ -1668,6 +1668,11 @@ class IntelligentAgent:
         decisions_last_hour_times = deque()
         candles_last_hour_times = deque()
         metrics_window_seconds = 3600  # 1 hour rolling window
+        last_fx_refresh_at = 0.0
+        fx_refresh_interval = float(
+            getattr(settings, "usdinr_refresh_interval_seconds", 300) or 300
+        )
+        monitoring_started_at = time.time()
         
         # Subscribe to decision ready events to track last decision time
         async def track_decision(event):
@@ -1970,8 +1975,24 @@ class IntelligentAgent:
                                 pass
 
                         if (
-                            time_since_last_decision
-                            and time_since_last_decision > stale_seconds
+                            (
+                                time_since_last_decision is not None
+                                and time_since_last_decision > stale_seconds
+                            )
+                            or (
+                                time_since_last_decision is None
+                                and (
+                                    (
+                                        time_since_last_candle is not None
+                                        and time_since_last_candle > stale_seconds
+                                    )
+                                    or (
+                                        last_candle_time is None
+                                        and (time.time() - monitoring_started_at)
+                                        > stale_seconds
+                                    )
+                                )
+                            )
                             and staleness_cooldown_ok
                             and not skip_stale_refresh
                         ):
@@ -1981,6 +2002,7 @@ class IntelligentAgent:
                                 state=current_state,
                                 symbol=self.default_symbol,
                                 time_since_last_decision_seconds=time_since_last_decision,
+                                time_since_last_candle_seconds=time_since_last_candle,
                                 staleness_threshold_seconds=stale_seconds,
                                 message=(
                                     "No decisions generated recently; emitting "

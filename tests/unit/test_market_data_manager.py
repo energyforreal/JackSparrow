@@ -86,3 +86,21 @@ async def test_get_market_data_prefers_buffer(monkeypatch: pytest.MonkeyPatch) -
 
     await mgr.get_market_data("BTCUSD", interval="5m", limit=40)
     assert client.get_candles.await_count == calls_after_seed
+
+
+@pytest.mark.asyncio
+async def test_get_market_data_force_refresh_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """force_refresh=True must bypass in-process buffer and hit the exchange."""
+    monkeypatch.setattr(settings, "market_data_manager_enabled", True)
+
+    candles = _fake_candles(100)
+    client = MagicMock()
+    client.get_candles = AsyncMock(return_value={"result": {"candles": candles}})
+    client.get_ticker = AsyncMock(return_value={"close": 101.0})
+
+    mgr = MarketDataManager(delta_client=client)
+    await mgr.get_ohlcv_df("BTCUSD", "5m", 50)
+    calls_after_seed = client.get_candles.await_count
+
+    await mgr.get_market_data("BTCUSD", interval="5m", limit=40, force_refresh=True)
+    assert client.get_candles.await_count > calls_after_seed

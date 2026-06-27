@@ -44,7 +44,7 @@ from agent.core.agent_policy_engine import (
 )
 from agent.core.config import settings
 from agent.core.agent_introspection import build_introspection_snapshot
-from agent.core.v43_market_frames import closed_5m_bar_index
+from agent.core.v43_market_frames import V43_MIN_5M_ROWS, closed_5m_bar_index
 from agent.core.v43_signal_gates import (
     V43GateResult,
     V43GateState,
@@ -283,6 +283,7 @@ class MCPOrchestrator:
         self._initialized = False
         self._v43_gate_state = V43GateState()
         self._v43_gate_state_lock = asyncio.Lock()
+        self._prediction_lock = asyncio.Lock()
         self._v43_gate_symbol: Optional[str] = None
         self._v43_last_entry_decision_bar: Optional[int] = None
     
@@ -598,7 +599,9 @@ class MCPOrchestrator:
                 symbol=symbol,
                 message="delta_client not set; cannot fetch v43 OHLCV frames",
             )
-            return self._create_empty_prediction_response(symbol, context)
+            return self._create_empty_prediction_response(
+                symbol, context, reason="delta_client_unavailable"
+            )
 
         context = _merge_prediction_context_with_agent_state(symbol, context)
 
@@ -636,8 +639,13 @@ class MCPOrchestrator:
                     error=str(warm_err),
                 )
 
-        if df5.empty or len(df5) < 2:
-            return self._create_empty_prediction_response(symbol, context)
+        if df5.empty or len(df5) < V43_MIN_5M_ROWS:
+            return self._create_empty_prediction_response(
+                symbol,
+                context,
+                reason=f"insufficient_5m_rows:{len(df5) if not df5.empty else 0}<{V43_MIN_5M_ROWS}",
+                df5_rows=len(df5) if not df5.empty else 0,
+            )
 
         import pandas as pd
 
@@ -692,7 +700,8 @@ class MCPOrchestrator:
             )
 
         try:
-            closed_feats_pre, df_feat_pre = incremental_feature_engine.update_from_frames(
+            closed_feats_pre, df_feat_pre = await asyncio.to_thread(
+                incremental_feature_engine.update_from_frames,
                 symbol,
                 df5,
                 df15,
@@ -703,11 +712,28 @@ class MCPOrchestrator:
             )
         except ValueError:
             try:
-                closed_feats_pre, df_feat_pre = build_closed_feats_from_v43_dataframes(
-                    df5, df15, df1h, df_fund, df_oi=df_oi, df_mark=df_mark
+                closed_feats_pre, df_feat_pre = await asyncio.to_thread(
+                    build_closed_feats_from_v43_dataframes,
+                    df5,
+                    df15,
+                    df1h,
+                    df_fund,
+                    df_oi=df_oi,
+                    df_mark=df_mark,
                 )
-            except ValueError:
-                return self._create_empty_prediction_response(symbol, context)
+            except ValueError as feat_err:
+                logger.warning(
+                    "v43_feature_matrix_batch_fallback_failed",
+                    symbol=symbol,
+                    df5_rows=len(df5) if not df5.empty else 0,
+                    error=str(feat_err),
+                )
+                return self._create_empty_prediction_response(
+                    symbol,
+                    context,
+                    reason="v43_feature_matrix_build_failed",
+                    df5_rows=len(df5) if not df5.empty else 0,
+                )
 
         has_open_pre = bool(context.get("has_open_position", False))
         if not has_open_pre:
@@ -798,7 +824,12 @@ class MCPOrchestrator:
                     bar_index=bar_idx,
                     reasons=material.reasons,
                 )
-                return self._create_empty_prediction_response(symbol, context)
+                return self._create_empty_prediction_response(
+                    symbol,
+                    context,
+                    reason="intel_unchanged_skip",
+                    bar_index=bar_idx,
+                )
 
         model_request = MCPModelRequest(
             request_id=req_id,
@@ -1539,25 +1570,41 @@ class MCPOrchestrator:
 
         try:
             _t0 = time.perf_counter()
-            logger.info("mcp_orchestrator_prediction_start",
-                       symbol=symbol,
-                       context_keys=list(context.keys()) if context else None)
-
-            context = context or {}
-
-            if not self.model_registry or not self.model_registry.models:
-                logger.warning(
-                    "mcp_orchestrator_prediction_no_models",
+            if self._prediction_lock.locked():
+                logger.info(
+                    "mcp_orchestrator_prediction_skipped_in_flight",
                     symbol=symbol,
+                    context_keys=list(context.keys()) if context else None,
+                    message="Another v43 prediction is running; skipping duplicate trigger",
                 )
-                return self._create_model_error_prediction_response(
-                    symbol=symbol,
-                    context=context,
-                    error_code="NO_MODELS_REGISTERED",
-                    error_message="No ML models registered.",
+                return self._create_empty_prediction_response(
+                    symbol,
+                    context or {},
+                    reason="prediction_skipped_in_flight",
                 )
 
-            return await self._process_jacksparrow_v43_prediction(symbol, context, _t0)
+            async with self._prediction_lock:
+                logger.info(
+                    "mcp_orchestrator_prediction_start",
+                    symbol=symbol,
+                    context_keys=list(context.keys()) if context else None,
+                )
+
+                context = context or {}
+
+                if not self.model_registry or not self.model_registry.models:
+                    logger.warning(
+                        "mcp_orchestrator_prediction_no_models",
+                        symbol=symbol,
+                    )
+                    return self._create_model_error_prediction_response(
+                        symbol=symbol,
+                        context=context,
+                        error_code="NO_MODELS_REGISTERED",
+                        error_message="No ML models registered.",
+                    )
+
+                return await self._process_jacksparrow_v43_prediction(symbol, context, _t0)
 
         except Exception as e:
             logger.error("mcp_orchestrator_prediction_failed",
@@ -1760,18 +1807,34 @@ class MCPOrchestrator:
             "reasoning": reasoning_chain.conclusion
         }
 
-    def _create_empty_prediction_response(self, symbol: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _create_empty_prediction_response(
+        self,
+        symbol: str,
+        context: Dict[str, Any],
+        *,
+        reason: str = "unknown",
+        **log_fields: Any,
+    ) -> Dict[str, Any]:
         """Create explicit error response when no features are available.
 
         This intentionally does NOT fabricate a neutral HOLD decision. Instead it
         returns an error payload that callers must treat as \"no decision\".
         """
+        logger.warning(
+            "mcp_orchestrator_prediction_no_features",
+            symbol=symbol,
+            reason=reason,
+            trigger=(context or {}).get("trigger"),
+            **log_fields,
+        )
         return {
             "symbol": symbol,
             "timestamp": datetime.now(timezone.utc),
             "success": False,
             "error_code": "NO_FEATURES",
             "error": "No features available for prediction",
+            "failure_reason": reason,
+            "request_context": dict(context or {}),
             "features": {"count": 0, "quality_score": 0.0},
             "models": {
                 "predictions": [],
@@ -1800,6 +1863,7 @@ class MCPOrchestrator:
             "error_code": error_code,
             "error": error_message,
             "context": context or {},
+            "request_context": dict(context or {}),
             "features": context.get("features") if isinstance(context, dict) else None,
             "models": {
                 "predictions": [],

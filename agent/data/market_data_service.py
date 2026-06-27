@@ -377,6 +377,19 @@ class MarketDataService:
         for symbol in self.streaming_symbols:
             await self.seed_last_completed_candle_cache([symbol], interval)
 
+        warm_fn = getattr(self, "warm_timeframes", None)
+        if callable(warm_fn):
+            for sym in self.streaming_symbols:
+                try:
+                    await warm_fn(sym, [interval], limit=max(50, 10))
+                except Exception as warm_err:
+                    logger.warning(
+                        "market_data_stream_primary_warm_failed",
+                        symbol=sym,
+                        interval=interval,
+                        error=str(warm_err),
+                    )
+
         self._streaming_task = asyncio.create_task(self._stream_loop(interval))
 
         logger.info(
@@ -417,7 +430,12 @@ class MarketDataService:
             sym = normalize_symbol_for_delta_api(symbol)
             key = f"{sym}:{interval}"
             try:
-                market_data = await self.get_market_data(sym, interval, limit=10)
+                market_data = await self.get_market_data(
+                    sym,
+                    interval,
+                    limit=max(50, 10),
+                    force_refresh=True,
+                )
                 candles = (market_data or {}).get("candles") or []
                 if len(candles) < 2:
                     logger.info(
@@ -756,8 +774,13 @@ class MarketDataService:
     async def _check_and_emit_candle(self, symbol: str, interval: str):
         """Check for new candle and emit candle closed event."""
         try:
-            # Request more historical data to ensure we get completed candles
-            market_data = await self.get_market_data(symbol, interval, limit=10)
+            # Always refresh tail from exchange so close detection is not stuck on stale cache.
+            market_data = await self.get_market_data(
+                symbol,
+                interval,
+                limit=10,
+                force_refresh=True,
+            )
             if not market_data or not market_data.get("candles"):
                 return
 
@@ -1079,16 +1102,20 @@ class MarketDataService:
         self,
         symbol: str,
         interval: str = "1h",
-        limit: int = 100
+        limit: int = 100,
+        *,
+        force_refresh: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Get market data (OHLCV candles)."""
+        _ = force_refresh  # Legacy path always hits REST below.
         symbol = normalize_symbol_for_delta_api(symbol)
 
         # Check cache first
         cache_key = f"market_data:{symbol}:{interval}:{limit}"
-        cached = await get_cache(cache_key)
-        if cached:
-            return cached
+        if not force_refresh:
+            cached = await get_cache(cache_key)
+            if cached:
+                return cached
         
         try:
             # Map interval to Delta Exchange resolution (must be lowercase)
