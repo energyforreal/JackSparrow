@@ -667,6 +667,19 @@ For `DecisionReadyEvent` → `RiskApprovedEvent`, `agent/events/handlers/trading
 
 Restart the agent after changing these env vars. `AI_SIGNAL_MINIMAL_ENTRY_GATES` defaults to **false** so the full gate stack remains enabled until you opt in.
 
+### Evidence-based decision path (default: permissive)
+
+When `GATE_PROFILE=permissive` and `EVIDENCE_BASED_SIZING=true` (defaults):
+
+1. **EvidenceEngine** aggregates continuous scores (0–1) per dimension — liquidity, structure, ML edge, regime, horizon alignment, etc. There is no `passed` boolean on the hot path.
+2. **Conviction** is a weighted aggregate; `size_fraction` scales `PolicyVerdict.position_size` between `CONVICTION_SIZE_FLOOR` and `CONVICTION_SIZE_CEIL`.
+3. **Single quality floor**: `CONVICTION_ENTRY_FLOOR` → `NO_EDGE` HOLD. Weak setups get smaller size, not stacked vetoes.
+4. **Hard tier only** blocks entries: open position, invalid data, exchange health, portfolio/risk limits, debounce/frequency caps, `agent_policy_force_hold`.
+5. **EvidenceGraph** and **MarketStateEngine** persist trajectory for reasoning and telemetry (`EVIDENCE_GRAPH_ENABLED`, `MARKET_STATE_REDIS_ENABLED` optional).
+6. **Policy mode** `risk_only` validates hard tier only; legacy strict stack remains behind `GATE_PROFILE=strict`.
+
+Key modules: `agent/core/evidence_engine.py`, `agent/core/conviction.py`, `agent/core/abstention.py`, `agent/intelligence/evidence_graph.py`, `agent/intelligence/market_state_engine.py`.
+
 ### Risk-Adjusted Execution
 
 - Position size scales with signal strength

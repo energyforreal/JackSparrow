@@ -43,6 +43,14 @@ from agent.core.agent_policy_engine import (
     build_ml_evidence_from_orchestrator_result,
 )
 from agent.core.config import settings
+from agent.core.evidence_engine import build_evidence_bundle, market_forecast_from_context
+from agent.core.conviction import compute_conviction
+from agent.core.gate_profile import (
+    evidence_based_sizing_enabled,
+    trade_score_hard_veto_enabled,
+    v43_soft_ml_gates_enabled,
+)
+from agent.core.abstention import abstention_from_reason_codes
 from agent.core.signal_vocabulary import (
     ENTRY_SIGNALS,
     is_entry_signal,
@@ -1041,6 +1049,8 @@ class MCPOrchestrator:
         reject_tail = "below_threshold"
         eps_eff = float(eps) + float(self._v43_gate_state.effective_epsilon_bump())
 
+        soft_ml_gates = v43_soft_ml_gates_enabled()
+
         async with self._v43_gate_state_lock:
             self._v43_gate_state.note_regime(regime)
             if raw_long:
@@ -1053,7 +1063,10 @@ class MCPOrchestrator:
                 )
                 reject_tail = gr2.reject_reason or "below_threshold"
                 if gr2.allow:
-                    if bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False)):
+                    if (
+                        bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False))
+                        and not soft_ml_gates
+                    ):
                         gu = apply_uncertainty_gate(
                             uncertainty_score, self._v43_gate_state
                         )
@@ -1061,16 +1074,16 @@ class MCPOrchestrator:
                             reject_tail = gu.reject_reason or "high_uncertainty"
                             gr2 = V43GateResult(allow=False, reject_reason=reject_tail)
                     if gr2.allow:
-                        g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
-                    else:
-                        g5 = V43GateResult(allow=False, reject_reason=reject_tail)
-                    final_long = bool(g5.allow)
-                    if not final_long:
-                        reject_tail = g5.reject_reason or "min_edge_cost"
+                        if soft_ml_gates:
+                            final_long = True
+                            reject_tail = "gates_passed_long"
+                        else:
+                            g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
+                            final_long = bool(g5.allow)
+                            if not final_long:
+                                reject_tail = g5.reject_reason or "min_edge_cost"
                 else:
                     reject_tail = gr2.reject_reason or "gate"
-                if final_long:
-                    reject_tail = "gates_passed_long"
             elif raw_short:
                 gr2s = apply_post_threshold_gates_short(
                     raw_short=raw_short,
@@ -1081,7 +1094,10 @@ class MCPOrchestrator:
                 )
                 reject_tail = gr2s.reject_reason or "below_threshold_short"
                 if gr2s.allow:
-                    if bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False)):
+                    if (
+                        bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False))
+                        and not soft_ml_gates
+                    ):
                         gu = apply_uncertainty_gate(
                             uncertainty_score, self._v43_gate_state
                         )
@@ -1089,16 +1105,18 @@ class MCPOrchestrator:
                             reject_tail = gu.reject_reason or "high_uncertainty"
                             gr2s = V43GateResult(allow=False, reject_reason=reject_tail)
                     if gr2s.allow:
-                        g5s = apply_gate5_min_edge_short(proba, short_thr, self._v43_gate_state)
-                    else:
-                        g5s = V43GateResult(allow=False, reject_reason=reject_tail)
-                    final_short = bool(g5s.allow)
-                    if not final_short:
-                        reject_tail = g5s.reject_reason or "min_edge_cost"
+                        if soft_ml_gates:
+                            final_short = True
+                            reject_tail = "gates_passed_short"
+                        else:
+                            g5s = apply_gate5_min_edge_short(
+                                proba, short_thr, self._v43_gate_state
+                            )
+                            final_short = bool(g5s.allow)
+                            if not final_short:
+                                reject_tail = g5s.reject_reason or "min_edge_cost"
                 else:
                     reject_tail = gr2s.reject_reason or "gate"
-                if final_short:
-                    reject_tail = "gates_passed_short"
             else:
                 if proba <= (thr - max(0.0, eps_eff)):
                     reject_tail = "below_threshold"
@@ -1267,6 +1285,43 @@ class MCPOrchestrator:
                 "regime", regime
             )
 
+        evidence_bundle = build_evidence_bundle(
+            market_context=market_context_for_reasoning,
+            ml_validation=ml_validation,
+            structure=structure,
+            strategy=strategy_candidate,
+            thesis_verdict=thesis_verdict,
+            ml_confirms=ml_confirms,
+        )
+        market_forecast = market_forecast_from_context(
+            market_context_for_reasoning, ml_validation
+        )
+        market_context_for_reasoning["evidence_bundle"] = evidence_bundle.to_dict()
+        market_context_for_reasoning["market_forecast"] = market_forecast.to_dict()
+
+        if bool(getattr(settings, "evidence_graph_enabled", True)):
+            from agent.intelligence.evidence_graph import build_evidence_graph
+
+            evidence_graph = build_evidence_graph(
+                evidence_bundle,
+                direction=strategy_candidate.signal,
+                market_forecast=market_forecast.to_dict(),
+            )
+            market_context_for_reasoning["evidence_graph"] = evidence_graph.to_dict()
+
+        if bool(getattr(settings, "market_intelligence_enabled", True)):
+            from agent.intelligence.market_state_engine import market_state_engine
+
+            ms_traj = market_state_engine.update_from_cycle(
+                symbol=symbol,
+                bar_index=bar_idx,
+                regime=regime,
+                evidence=evidence_bundle,
+                forecast=market_forecast,
+                breakout_failed=reject_tail in ("failed_breakout", "breakout_failed"),
+            )
+            market_context_for_reasoning["market_state_trajectory"] = ms_traj.to_dict()
+
         ml_evidence = MLEvidenceSnapshot(
             symbol=symbol,
             source="v43_orchestrator",
@@ -1374,6 +1429,82 @@ class MCPOrchestrator:
             mode="json"
         )
 
+        _entry_signals = ENTRY_SIGNALS
+        conviction_result = compute_conviction(evidence_bundle, policy_verdict.signal)
+        market_context_for_reasoning["conviction"] = conviction_result.to_dict()
+
+        if evidence_based_sizing_enabled() and policy_verdict.signal in _entry_signals:
+            if conviction_result.below_entry_floor:
+                policy_verdict = PolicyVerdict(
+                    signal="HOLD",
+                    confidence=policy_verdict.confidence,
+                    position_size=0.0,
+                    reason_codes=list(policy_verdict.reason_codes)
+                    + ["no_edge"]
+                    + list(conviction_result.reason_codes),
+                    ml_evidence_id=policy_verdict.ml_evidence_id,
+                    adopted_ml_candidate=policy_verdict.adopted_ml_candidate,
+                    memory_size_scale=policy_verdict.memory_size_scale,
+                    conviction=conviction_result.conviction,
+                    size_fraction=0.0,
+                    evidence=evidence_bundle.to_dict(),
+                    abstention="NO_EDGE",
+                )
+            else:
+                base_size = float(policy_verdict.position_size or 0.0)
+                if base_size <= 0:
+                    base_size = float(pos_hint)
+                sized = base_size * conviction_result.size_fraction
+                policy_verdict = PolicyVerdict(
+                    signal=policy_verdict.signal,
+                    confidence=policy_verdict.confidence,
+                    position_size=sized,
+                    reason_codes=list(policy_verdict.reason_codes)
+                    + list(conviction_result.reason_codes),
+                    ml_evidence_id=policy_verdict.ml_evidence_id,
+                    adopted_ml_candidate=policy_verdict.adopted_ml_candidate,
+                    memory_size_scale=policy_verdict.memory_size_scale,
+                    conviction=conviction_result.conviction,
+                    size_fraction=conviction_result.size_fraction,
+                    evidence=evidence_bundle.to_dict(),
+                )
+        elif policy_verdict.signal in _entry_signals:
+            policy_verdict = PolicyVerdict(
+                signal=policy_verdict.signal,
+                confidence=policy_verdict.confidence,
+                position_size=policy_verdict.position_size,
+                reason_codes=list(policy_verdict.reason_codes),
+                ml_evidence_id=policy_verdict.ml_evidence_id,
+                adopted_ml_candidate=policy_verdict.adopted_ml_candidate,
+                memory_size_scale=policy_verdict.memory_size_scale,
+                conviction=conviction_result.conviction,
+                size_fraction=conviction_result.size_fraction,
+                evidence=evidence_bundle.to_dict(),
+            )
+
+        logger.info(
+            "evidence_conviction_cycle",
+            symbol=symbol,
+            conviction=conviction_result.conviction,
+            size_fraction=conviction_result.size_fraction,
+            below_entry_floor=conviction_result.below_entry_floor,
+            policy_signal=policy_verdict.signal,
+            evidence_scores=evidence_bundle.scores,
+            hard_block_reason=gate_reject,
+        )
+        if bool(getattr(settings, "evidence_shadow_dual_pipeline", True)):
+            from agent.core.conviction import confluence_score_to_size_multiplier
+
+            legacy_mult = confluence_score_to_size_multiplier(float(trade_score.score))
+            logger.info(
+                "evidence_shadow_dual_pipeline",
+                symbol=symbol,
+                legacy_trade_score=float(trade_score.score),
+                legacy_size_multiplier=legacy_mult,
+                evidence_conviction=conviction_result.conviction,
+                evidence_size_fraction=conviction_result.size_fraction,
+            )
+
         portfolio_guard = evaluate_portfolio_guard(
             portfolio_snap,
             symbol=symbol,
@@ -1402,35 +1533,59 @@ class MCPOrchestrator:
             reason_codes=portfolio_guard.reason_codes,
         )
 
-        _entry_signals = ENTRY_SIGNALS
-        _gated_adopt_codes = frozenset(
-            {
-                "fusion_ml_gated_thesis_neutral",
-                "fusion_ml_or_thesis_gated_neutral",
-                "fusion_ml_or_thesis_ml",
-            }
+        abstention = abstention_from_reason_codes(
+            policy_verdict.reason_codes,
+            gate_reject=gate_reject,
+            signal=policy_verdict.signal,
         )
-        score_min = float(getattr(settings, "agent_trade_score_min", 55.0) or 55.0)
-        if any(c in _gated_adopt_codes for c in (policy_verdict.reason_codes or [])):
-            score_min = min(
-                score_min,
-                float(
-                    getattr(settings, "agent_trade_score_min_gated_ml_adoption", 30.0) or 30.0
-                ),
-            )
-        score_ok = trade_score.passed or (
-            float(trade_score.score) >= score_min and (final_long or final_short)
-        )
-        if policy_verdict.signal in _entry_signals and not score_ok:
+        if abstention and not policy_verdict.abstention:
             policy_verdict = PolicyVerdict(
-                signal="HOLD",
+                signal=policy_verdict.signal,
                 confidence=policy_verdict.confidence,
-                position_size=0.0,
-                reason_codes=list(policy_verdict.reason_codes)
-                + ["trade_score_below_min", f"score={trade_score.score:.1f}"],
+                position_size=policy_verdict.position_size,
+                reason_codes=list(policy_verdict.reason_codes),
                 ml_evidence_id=policy_verdict.ml_evidence_id,
-                adopted_ml_candidate=False,
+                adopted_ml_candidate=policy_verdict.adopted_ml_candidate,
+                memory_size_scale=policy_verdict.memory_size_scale,
+                conviction=policy_verdict.conviction,
+                size_fraction=policy_verdict.size_fraction,
+                evidence=policy_verdict.evidence,
+                abstention=abstention,
             )
+
+        if trade_score_hard_veto_enabled():
+            _gated_adopt_codes = frozenset(
+                {
+                    "fusion_ml_gated_thesis_neutral",
+                    "fusion_ml_or_thesis_gated_neutral",
+                    "fusion_ml_or_thesis_ml",
+                }
+            )
+            score_min = float(getattr(settings, "agent_trade_score_min", 35.0) or 35.0)
+            if any(c in _gated_adopt_codes for c in (policy_verdict.reason_codes or [])):
+                score_min = min(
+                    score_min,
+                    float(
+                        getattr(settings, "agent_trade_score_min_gated_ml_adoption", 30.0)
+                        or 30.0
+                    ),
+                )
+            score_ok = trade_score.passed or (
+                float(trade_score.score) >= score_min and (final_long or final_short)
+            )
+            if policy_verdict.signal in _entry_signals and not score_ok:
+                policy_verdict = PolicyVerdict(
+                    signal="HOLD",
+                    confidence=policy_verdict.confidence,
+                    position_size=0.0,
+                    reason_codes=list(policy_verdict.reason_codes)
+                    + ["trade_score_below_min", f"score={trade_score.score:.1f}"],
+                    ml_evidence_id=policy_verdict.ml_evidence_id,
+                    adopted_ml_candidate=False,
+                    conviction=policy_verdict.conviction,
+                    size_fraction=0.0,
+                    evidence=policy_verdict.evidence,
+                )
 
         policy_entry = policy_verdict.signal in _entry_signals
         v43_exec = {
@@ -1522,7 +1677,10 @@ class MCPOrchestrator:
             v43_cnt_trades_executed=_gc.trades_executed,
         )
         try:
-            from agent.core.signal_recovery_telemetry import record_decision_cycle
+            from agent.core.signal_recovery_telemetry import (
+                check_over_gating_regression,
+                record_decision_cycle,
+            )
 
             record_decision_cycle(
                 symbol=symbol,
@@ -1545,6 +1703,7 @@ class MCPOrchestrator:
                     "reject": reject_tail,
                 },
             )
+            check_over_gating_regression()
         except Exception:
             pass
         return result

@@ -9,8 +9,11 @@ import structlog
 
 from agent.core.config import settings
 from feature_store.jacksparrow_v43_build_matrix import build_v43_feature_matrix
+from feature_store.jacksparrow_v43_incremental_state import v43_incremental_state_registry
 
 logger = structlog.get_logger()
+
+_INCREMENTAL_TAIL_DEFAULT = 300
 
 
 class IncrementalFeatureEngine:
@@ -41,6 +44,10 @@ class IncrementalFeatureEngine:
         """Compute closed-bar features from frames (batch path; incremental hook)."""
         sym = str(symbol or "").strip().upper()
         use_incremental = bool(getattr(settings, "incremental_features_enabled", False))
+        tail_bars = int(
+            getattr(settings, "incremental_feature_tail_bars", _INCREMENTAL_TAIL_DEFAULT)
+            or _INCREMENTAL_TAIL_DEFAULT
+        )
 
         if (
             use_incremental
@@ -54,10 +61,20 @@ class IncrementalFeatureEngine:
             if cached_feats and cached_df is not None and len(cached_df) >= 2:
                 return cached_feats, cached_df
 
+        df5_use = df5
+        df15_use = df15
+        df1h_use = df1h
+        if use_incremental and not force_batch and len(df5) > tail_bars:
+            df5_use = df5.tail(tail_bars).reset_index(drop=True)
+            if df15 is not None and len(df15) > tail_bars // 3 + 5:
+                df15_use = df15.tail(tail_bars // 3 + 5).reset_index(drop=True)
+            if df1h is not None and len(df1h) > tail_bars // 12 + 5:
+                df1h_use = df1h.tail(tail_bars // 12 + 5).reset_index(drop=True)
+
         df_feat = build_v43_feature_matrix(
-            df5,
-            df15,
-            df1h,
+            df5_use,
+            df15_use,
+            df1h_use,
             df_fund,
             df_oi=df_oi,
             df_mark=df_mark,
@@ -81,6 +98,7 @@ class IncrementalFeatureEngine:
 
         self._closed_feats[sym] = closed_feats
         self._df_feat[sym] = df_feat
+        v43_incremental_state_registry.get(sym).note_matrix(df_feat)
         return closed_feats, df_feat
 
     def _detect_gap(self, df5: pd.DataFrame, symbol: str) -> bool:

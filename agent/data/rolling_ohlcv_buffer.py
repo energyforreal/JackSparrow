@@ -78,6 +78,28 @@ class RollingOhlcvBufferRegistry:
             return
         self._store.setdefault(symbol, {})[resolution] = df.reset_index(drop=True)
 
+    def hydrate_from_store(
+        self,
+        candle_store: Any,
+        symbol: str,
+        resolution: str,
+        n_bars: int,
+    ) -> bool:
+        """Seed buffer from CandleStore tail when empty (restart gap-fetch)."""
+        cached = self.get(symbol, resolution)
+        if cached is not None and not cached.empty and len(cached) >= n_bars:
+            return True
+        if not hasattr(candle_store, "load_tail"):
+            return False
+        df = candle_store.load_tail(symbol, resolution, n_bars)
+        if df is None or df.empty:
+            return False
+        if "timestamp" in df.columns:
+            df = df.copy()
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s", utc=True)
+        self.put(symbol, resolution, df)
+        return True
+
     def clear(self, symbol: Optional[str] = None) -> None:
         if symbol:
             self._store.pop(symbol, None)

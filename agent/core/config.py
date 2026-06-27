@@ -832,9 +832,9 @@ class Settings(BaseSettings):
         description="Refuse MSO node init when metadata export_gate_passed is false.",
     )
     mso_shadow_mode: bool = Field(
-        default=False,
+        default=True,
         env="MSO_SHADOW_MODE",
-        description="Log MSO policy vetoes/boosts without applying them (paper validation).",
+        description="Log MSO evidence without applying vetoes (default true for evidence-based pipeline).",
     )
     use_bracket_orders: bool = Field(
         default=True,
@@ -2134,11 +2134,11 @@ class Settings(BaseSettings):
         ),
     )
     agent_trade_score_min: float = Field(
-        default=55.0,
+        default=35.0,
         env="AGENT_TRADE_SCORE_MIN",
         ge=0.0,
         le=100.0,
-        description="Minimum confluence score (0-100) before policy may emit entry.",
+        description="Reference score (0-100) for conviction sizing; not a hard veto when EVIDENCE_BASED_SIZING=true.",
     )
     agent_trade_score_min_gated_ml_adoption: float = Field(
         default=30.0,
@@ -2162,6 +2162,67 @@ class Settings(BaseSettings):
             "In ml_and_thesis mode, adopt gated ML entries (final_long/final_short) when thesis "
             "is HOLD and not in crisis/veto/conflict. Enables perp shorts without a parallel thesis rule."
         ),
+    )
+    gate_profile: str = Field(
+        default="permissive",
+        env="GATE_PROFILE",
+        description="permissive | balanced | strict — permissive uses evidence sizing, not market vetoes.",
+    )
+    evidence_based_sizing: bool = Field(
+        default=True,
+        env="EVIDENCE_BASED_SIZING",
+        description="When True, conviction drives position size; trade score does not force HOLD.",
+    )
+    agent_trade_score_hard_veto: bool = Field(
+        default=False,
+        env="AGENT_TRADE_SCORE_HARD_VETO",
+        description="Legacy: downgrade entry to HOLD when trade score below min (disabled by default).",
+    )
+    conviction_entry_floor: float = Field(
+        default=0.35,
+        env="CONVICTION_ENTRY_FLOOR",
+        ge=0.0,
+        le=1.0,
+        description="Below this conviction, emit NO_EDGE HOLD (single quality floor).",
+    )
+    conviction_size_floor: float = Field(
+        default=0.25,
+        env="CONVICTION_SIZE_FLOOR",
+        ge=0.05,
+        le=1.0,
+        description="Minimum position size fraction when conviction passes entry floor.",
+    )
+    conviction_size_ceil: float = Field(
+        default=1.0,
+        env="CONVICTION_SIZE_CEIL",
+        ge=0.1,
+        le=1.0,
+        description="Maximum position size fraction from conviction.",
+    )
+    evidence_graph_enabled: bool = Field(
+        default=True,
+        env="EVIDENCE_GRAPH_ENABLED",
+        description="Build EvidenceGraph each cycle for reasoning and telemetry.",
+    )
+    reasoning_thesis_authority: bool = Field(
+        default=False,
+        env="REASONING_THESIS_AUTHORITY",
+        description="When True, reasoning engine synthesizes thesis from evidence graph.",
+    )
+    evidence_shadow_dual_pipeline: bool = Field(
+        default=True,
+        env="EVIDENCE_SHADOW_DUAL_PIPELINE",
+        description="Log legacy vs evidence conviction in parallel during rollout.",
+    )
+    agent_thesis_soft_evidence_mode: bool = Field(
+        default=True,
+        env="AGENT_THESIS_SOFT_EVIDENCE_MODE",
+        description="Convert chop/liquidity/ATR/funding checks to evidence scores instead of HOLD vetoes.",
+    )
+    jacksparrow_v43_crisis_regime_hard_block: bool = Field(
+        default=False,
+        env="JACKSPARROW_V43_CRISIS_REGIME_HARD_BLOCK",
+        description="When True, crisis regime hard-blocks v43 entries.",
     )
     agent_introspection_enabled: bool = Field(
         default=True,
@@ -2285,8 +2346,9 @@ class Settings(BaseSettings):
         env="AGENT_STRUCTURE_TRENDING_ADX_MIN",
     )
     agent_thesis_chop_veto_enabled: bool = Field(
-        default=True,
+        default=False,
         env="AGENT_THESIS_CHOP_VETO_ENABLED",
+        description="When True (legacy strict), chop market forces thesis HOLD.",
     )
     agent_thesis_min_atr_pct: float = Field(
         default=0.0,
@@ -2518,6 +2580,23 @@ class Settings(BaseSettings):
         default=False,
         env="INCREMENTAL_FEATURES_ENABLED",
         description="Use IncrementalFeatureEngine instead of full matrix rebuild",
+    )
+    candle_store_hydrate_enabled: bool = Field(
+        default=True,
+        env="CANDLE_STORE_HYDRATE_ENABLED",
+        description="Hydrate OHLCV buffers from CandleStore on restart before API fetch",
+    )
+    incremental_feature_tail_bars: int = Field(
+        default=300,
+        env="INCREMENTAL_FEATURE_TAIL_BARS",
+        ge=50,
+        le=2000,
+        description="5m bars recomputed on append-one-row incremental path",
+    )
+    market_state_redis_enabled: bool = Field(
+        default=False,
+        env="MARKET_STATE_REDIS_ENABLED",
+        description="Mirror MarketStateEngine trajectory to Redis",
     )
     market_intelligence_enabled: bool = Field(
         default=True,

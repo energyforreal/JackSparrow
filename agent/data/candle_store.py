@@ -132,3 +132,11 @@ class CandleStore:
                 exc_info=True,
             )
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "timestamp"])
+
+    def load_tail(self, symbol: str, interval: str, n_bars: int) -> pd.DataFrame:
+        """Return last n_bars candles from persisted store."""
+        n = max(1, int(n_bars))
+        df = self.query(symbol, interval)
+        if df.empty:
+            return df
+        return df.tail(n).reset_index(drop=True)

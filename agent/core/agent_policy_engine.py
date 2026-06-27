@@ -14,6 +14,10 @@ import structlog
 from agent.events.schemas import MLEvidenceSnapshot, PolicyVerdict
 from agent.core.reasoning_engine import MCPReasoningChain
 from agent.core.config import settings
+from agent.core.gate_profile import (
+    mso_veto_enabled,
+    state_head_hard_block_enabled,
+)
 from agent.core.agent_thesis_engine import AgentThesisEngine, ThesisVerdict, agent_thesis_engine
 from agent.core.multi_horizon_evidence import (
     MultiHorizonMLEvidence,
@@ -36,7 +40,7 @@ logger = structlog.get_logger()
 
 _ENTRY_SIGNALS = ENTRY_SIGNALS
 _POLICY_MODES = frozenset(
-    {"ml_only", "thesis_only", "ml_or_thesis", "ml_and_thesis", "thesis_veto_ml"}
+    {"ml_only", "thesis_only", "ml_or_thesis", "ml_and_thesis", "thesis_veto_ml", "risk_only"}
 )
 _MOMENTUM_BREAKOUT_STATES = frozenset({"BREAKOUT_FORMING", "BREAKOUT_CONFIRMED"})
 
@@ -78,7 +82,7 @@ def synthesize_market_state_intelligence(
     liq = str(primary.get("liquidity_condition") or "BALANCED")
     veto_raw = str(getattr(settings, "mso_liquidity_veto_classes", "") or "")
     veto_classes = {x.strip() for x in veto_raw.split(",") if x.strip()}
-    if liq in veto_classes and entry_signal in _ENTRY_SIGNALS:
+    if liq in veto_classes and entry_signal in _ENTRY_SIGNALS and mso_veto_enabled():
         veto = True
         reasons.append(f"mso_liquidity_veto:{liq}")
 
@@ -96,7 +100,7 @@ def synthesize_market_state_intelligence(
 
     if bool(getattr(settings, "mso_require_trend_regime", False)):
         trend = str(primary.get("trend_regime") or "RANGE")
-        if trend == "RANGE" and entry_signal in _ENTRY_SIGNALS:
+        if trend == "RANGE" and entry_signal in _ENTRY_SIGNALS and mso_veto_enabled():
             veto = True
             reasons.append("mso_trend_regime_range_veto")
 
@@ -109,7 +113,7 @@ def synthesize_market_state_intelligence(
         boost = 0.05
         reasons.append("mso_mtf_trend_align_bear")
 
-    if bool(getattr(settings, "mso_shadow_mode", False)):
+    if bool(getattr(settings, "mso_shadow_mode", False)) or not mso_veto_enabled():
         shadow_reasons = list(reasons)
         if shadow_reasons:
             reasons = shadow_reasons + ["mso_shadow_mode"]
@@ -380,7 +384,7 @@ def _state_head_policy_blocks_entry(
     scores: Dict[str, Optional[float]],
 ) -> Tuple[bool, List[str]]:
     """Apply migration spec §2.1 minima when state-head policy is enabled."""
-    if not bool(getattr(settings, "jacksparrow_v43_state_head_policy_enabled", True)):
+    if not state_head_hard_block_enabled():
         return False, []
     if not bool(getattr(settings, "jacksparrow_v43_state_heads_enabled", False)):
         return False, []
@@ -503,6 +507,35 @@ def _fuse_signals(
 
     reasons: List[str] = [f"fusion_mode={mode}", f"thesis_type={thesis.thesis_type}"]
     reasons.extend(thesis.reason_codes[:6])
+
+    if mode == "risk_only":
+        thesis_sig = market_context.get("trade_thesis_signal") if isinstance(market_context, dict) else None
+        if thesis_sig:
+            th_sig = _normalize_signal(thesis_sig)
+        else:
+            th_sig = _normalize_signal(thesis.signal)
+        if _is_entry(th_sig):
+            reasons.append("risk_only_thesis_adopted")
+            v = _verdict_from_ml(
+                ml_evidence,
+                th_sig,
+                conclusion,
+                reasons + ["fusion_risk_only"],
+            )
+            v.adopted_ml_candidate = False
+            return v
+        if _is_entry(ml_sig):
+            return _verdict_from_ml(
+                ml_evidence, ml_sig, conclusion, reasons + ["fusion_risk_only_ml_fallback"]
+            )
+        return PolicyVerdict(
+            signal="HOLD",
+            confidence=float(ml_evidence.ml_candidate_confidence or 0.0),
+            position_size=0.0,
+            reason_codes=reasons + ["risk_only_no_entry_thesis"],
+            ml_evidence_id=ml_evidence.evidence_id,
+            adopted_ml_candidate=False,
+        )
 
     if mode == "ml_only":
         return _verdict_from_ml(ml_evidence, ml_sig, conclusion, reasons + ["fusion_ml_only"])

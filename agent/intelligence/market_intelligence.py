@@ -154,7 +154,13 @@ def merge_intel_into_market_context(mc: Dict[str, Any]) -> Dict[str, Any]:
         "confidence",
         "thesis_verdict",
         "bar_index",
+        "market_state_trajectory",
+        "evidence_bundle",
+        "conviction",
     ):
         if key in intel_raw and key not in out:
             out[key] = intel_raw[key]
+    traj = mc.get("market_state_trajectory")
+    if isinstance(traj, dict) and "market_state_trajectory" not in out:
+        out["market_state_trajectory"] = traj
     return out

@@ -55,6 +55,30 @@ async def test_fetch_incremental_merges_tail() -> None:
     assert df2.iloc[-1]["close"] == pytest.approx(201.5)
 
 
+def test_hydrate_from_store_seeds_buffer(tmp_path) -> None:
+    from agent.data.candle_store import CandleStore
+
+    store = CandleStore(storage_root=tmp_path)
+    rows = [
+        {
+            "timestamp": 1_700_000_000 + i * 300,
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+            "volume": 1.0,
+        }
+        for i in range(20)
+    ]
+    store.append("BTCUSD", "5m", rows)
+    reg = RollingOhlcvBufferRegistry()
+    ok = reg.hydrate_from_store(store, "BTCUSD", "5m", 15)
+    assert ok
+    df = reg.get("BTCUSD", "5m")
+    assert df is not None
+    assert len(df) == 15
+
+
 @pytest.mark.asyncio
 async def test_fetch_incremental_does_not_shrink_buffer() -> None:
     """Small limit polls must not truncate a warmed buffer."""

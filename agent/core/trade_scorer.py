@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from agent.core.config import settings
+from agent.core.gate_profile import evidence_based_sizing_enabled, trade_score_hard_veto_enabled
 from agent.core.multi_horizon_evidence import MultiHorizonMLEvidence
 from agent.core.strategy_types import (
     MarketStructureSnapshot,
@@ -144,9 +145,11 @@ def score_trade_setup(
     components["multi_horizon"] = mh_pts
 
     total = sum(components.values())
-    min_score = float(getattr(settings, "agent_trade_score_min", 55.0) or 55.0)
+    min_score = float(getattr(settings, "agent_trade_score_min", 35.0) or 35.0)
     passed = total >= min_score and direction != "FLAT"
-    if not passed and direction != "FLAT":
+    if evidence_based_sizing_enabled() and not trade_score_hard_veto_enabled():
+        passed = direction != "FLAT"
+    elif not passed and direction != "FLAT":
         reasons.append(f"score_below_min={total:.1f}<{min_score:.1f}")
 
     return TradeScoreResult(

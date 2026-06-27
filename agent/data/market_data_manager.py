@@ -20,6 +20,7 @@ from agent.core.v43_market_frames import (
 from agent.core.v43_oi_frames import push_oi_from_ws_ticker
 from agent.data.market_data_service import MarketDataService
 from agent.data.rolling_ohlcv_buffer import RollingOhlcvBufferRegistry
+from agent.data.candle_store import CandleStore
 from agent.data.symbols import normalize_symbol_for_delta_api
 
 logger = structlog.get_logger()
@@ -58,6 +59,7 @@ class MarketDataManager(MarketDataService):
         if delta_client is not None:
             self.delta_client = delta_client
         self._ohlcv_buffers = RollingOhlcvBufferRegistry()
+        self._candle_store = CandleStore()
 
     @property
     def ohlcv_buffers(self) -> RollingOhlcvBufferRegistry:
@@ -75,6 +77,10 @@ class MarketDataManager(MarketDataService):
         sym = normalize_symbol_for_delta_api(symbol)
         iv = str(interval or "1h").strip().lower()
         n = max(2, int(limit))
+        if bool(getattr(settings, "candle_store_hydrate_enabled", True)):
+            self._ohlcv_buffers.hydrate_from_store(
+                self._candle_store, sym, iv, n
+            )
         return await self._ohlcv_buffers.fetch_incremental(
             self.delta_client,
             sym,

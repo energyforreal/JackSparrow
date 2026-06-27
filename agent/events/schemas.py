@@ -287,6 +287,22 @@ class PolicyVerdict(BaseModel):
         default=1.0,
         description="Bounded multiplier from vector-memory historical win rate (0.8–1.0).",
     )
+    conviction: Optional[float] = Field(
+        default=None,
+        description="Evidence-based conviction score 0–1.",
+    )
+    size_fraction: Optional[float] = Field(
+        default=None,
+        description="Position size fraction from conviction sizing.",
+    )
+    evidence: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="EvidenceBundle snapshot at decision time.",
+    )
+    abstention: Optional[str] = Field(
+        default=None,
+        description="Hard-tier abstention reason when signal is HOLD.",
+    )
 
 
 class AgentIntrospectionSnapshot(BaseModel):
@@ -316,6 +332,10 @@ class AgentIntrospectionSnapshot(BaseModel):
     portfolio_guard_reason_codes: List[str] = Field(default_factory=list)
     memory_enabled: bool = False
     memory_context_count: int = 0
+    conviction: Optional[float] = None
+    size_fraction: Optional[float] = None
+    abstention: Optional[str] = None
+    evidence_summary: Optional[Dict[str, float]] = None
     limits: Dict[str, Any] = Field(default_factory=dict)
 
 

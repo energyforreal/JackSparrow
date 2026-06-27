@@ -395,7 +395,9 @@ def apply_post_threshold_gates_short(
         state.counters.rejected_freq_cap += 1
         return V43GateResult(allow=False, reject_reason="freq_daily")
 
-    if regime == "crisis":
+    if regime == "crisis" and bool(
+        getattr(settings, "jacksparrow_v43_crisis_regime_hard_block", False)
+    ):
         state.counters.rejected_regime += 1
         return V43GateResult(allow=False, reject_reason="crisis_regime")
 
@@ -495,7 +497,9 @@ def apply_post_threshold_gates(
         state.counters.rejected_freq_cap += 1
         return V43GateResult(allow=False, reject_reason="freq_daily")
 
-    if regime == "crisis":
+    if regime == "crisis" and bool(
+        getattr(settings, "jacksparrow_v43_crisis_regime_hard_block", False)
+    ):
         state.counters.rejected_regime += 1
         return V43GateResult(allow=False, reject_reason="crisis_regime")
 

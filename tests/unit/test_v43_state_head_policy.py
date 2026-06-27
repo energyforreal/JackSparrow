@@ -14,6 +14,7 @@ from agent.core.v43_signal_gates import V43GateState, apply_uncertainty_gate
 
 
 def test_state_head_policy_blocks_low_regime(monkeypatch):
+    monkeypatch.setattr(settings, "gate_profile", "strict")
     monkeypatch.setattr(settings, "jacksparrow_v43_state_heads_enabled", True)
     monkeypatch.setattr(settings, "jacksparrow_v43_state_head_policy_enabled", True)
     monkeypatch.setattr(settings, "jacksparrow_v43_regime_min", 0.60)

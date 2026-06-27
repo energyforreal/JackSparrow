@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set
 import structlog
 
 from agent.core.config import settings
+from agent.core.gate_profile import thesis_soft_evidence_enabled
 from agent.core.signal_vocabulary import (
     ENTRY_SIGNALS,
     is_entry_signal,
@@ -53,6 +54,7 @@ class ThesisVerdict:
     thesis_type: str = "flat"  # breakout | trend_continuation | mean_reversion | flat | crisis_veto
     intended_horizon_bars: int = 0
     horizon_minutes: int = 0
+    evidence_contributions: Dict[str, float] = field(default_factory=dict)
 
 
 def get_last_thesis_snapshot() -> Dict[str, Any]:
@@ -70,6 +72,7 @@ def thesis_verdict_to_dict(verdict: ThesisVerdict) -> Dict[str, Any]:
         "thesis_type": verdict.thesis_type,
         "intended_horizon_bars": int(verdict.intended_horizon_bars),
         "horizon_minutes": int(verdict.horizon_minutes),
+        "evidence_contributions": dict(verdict.evidence_contributions),
     }
 
 
@@ -86,6 +89,7 @@ def thesis_verdict_from_dict(raw: Any) -> Optional[ThesisVerdict]:
             thesis_type=str(raw.get("thesis_type") or "flat"),
             intended_horizon_bars=int(raw.get("intended_horizon_bars") or 0),
             horizon_minutes=int(raw.get("horizon_minutes") or 0),
+            evidence_contributions=dict(raw.get("evidence_contributions") or {}),
         )
     except (TypeError, ValueError):
         return None
@@ -158,78 +162,105 @@ class AgentThesisEngine:
             _feat(features, "short_squeeze_risk"),
             float(mc.get("squeeze_risk") or 0.0),
         )
-        if squeeze > float(getattr(settings, "agent_thesis_squeeze_veto_threshold", 0.5) or 0.5):
+        evidence: Dict[str, float] = {}
+        squeeze_thr = float(
+            getattr(settings, "agent_thesis_squeeze_veto_threshold", 0.5) or 0.5
+        )
+        evidence["squeeze_risk"] = max(0.0, min(1.0, 1.0 - squeeze / max(squeeze_thr, 1e-9)))
+        if squeeze > squeeze_thr and not thesis_soft_evidence_enabled():
             verdict = ThesisVerdict(
                 signal="HOLD",
                 confidence=0.0,
                 position_size=0.0,
                 reason_codes=["thesis_squeeze_veto", f"squeeze_risk={squeeze:.3f}"],
                 thesis_type="flat",
+                evidence_contributions=evidence,
             )
             _store_snapshot(reg, allowed, verdict)
             return verdict
 
         if reg == "crisis" and bool(getattr(settings, "agent_thesis_crisis_veto", True)):
-            verdict = ThesisVerdict(
-                signal="HOLD",
-                confidence=0.0,
-                position_size=0.0,
-                reason_codes=["thesis_crisis_regime_veto"],
-                thesis_type="crisis_veto",
-            )
-            _store_snapshot(reg, allowed, verdict)
-            return verdict
+            if not thesis_soft_evidence_enabled():
+                verdict = ThesisVerdict(
+                    signal="HOLD",
+                    confidence=0.0,
+                    position_size=0.0,
+                    reason_codes=["thesis_crisis_regime_veto"],
+                    thesis_type="crisis_veto",
+                    evidence_contributions=evidence,
+                )
+                _store_snapshot(reg, allowed, verdict)
+                return verdict
+            evidence["regime"] = 0.2
 
         structure = mc.get("market_structure") if isinstance(mc.get("market_structure"), dict) else {}
-        if structure.get("chop_market") and bool(
-            getattr(settings, "agent_thesis_chop_veto_enabled", True)
-        ):
-            verdict = ThesisVerdict(
-                signal="HOLD",
-                confidence=0.0,
-                position_size=0.0,
-                reason_codes=["thesis_chop_market_veto"],
-                thesis_type="flat",
-            )
-            _store_snapshot(reg, allowed, verdict)
-            return verdict
+        if structure.get("chop_market"):
+            evidence["structure"] = 0.35
+            if bool(getattr(settings, "agent_thesis_chop_veto_enabled", False)):
+                verdict = ThesisVerdict(
+                    signal="HOLD",
+                    confidence=0.0,
+                    position_size=0.0,
+                    reason_codes=["thesis_chop_market_veto"],
+                    thesis_type="flat",
+                    evidence_contributions=evidence,
+                )
+                _store_snapshot(reg, allowed, verdict)
+                return verdict
+        else:
+            evidence["structure"] = 0.75
 
         if structure.get("liquidity_ok") is False:
-            verdict = ThesisVerdict(
-                signal="HOLD",
-                confidence=0.0,
-                position_size=0.0,
-                reason_codes=["thesis_liquidity_veto"],
-                thesis_type="flat",
-            )
-            _store_snapshot(reg, allowed, verdict)
-            return verdict
+            evidence["liquidity"] = 0.35
+            if not thesis_soft_evidence_enabled():
+                verdict = ThesisVerdict(
+                    signal="HOLD",
+                    confidence=0.0,
+                    position_size=0.0,
+                    reason_codes=["thesis_liquidity_veto"],
+                    thesis_type="flat",
+                    evidence_contributions=evidence,
+                )
+                _store_snapshot(reg, allowed, verdict)
+                return verdict
+        else:
+            evidence["liquidity"] = 0.8
 
         atr_pct = _feat(features, "atr_pct")
         atr_min = float(getattr(settings, "agent_thesis_min_atr_pct", 0.0) or 0.0)
+        if atr_min > 0 and atr_pct > 0:
+            evidence["volatility"] = max(0.0, min(1.0, atr_pct / max(atr_min, 1e-9)))
         if atr_min > 0 and atr_pct > 0 and atr_pct < atr_min:
-            verdict = ThesisVerdict(
-                signal="HOLD",
-                confidence=0.0,
-                position_size=0.0,
-                reason_codes=["thesis_atr_too_low", f"atr_pct={atr_pct:.5f}"],
-                thesis_type="flat",
-            )
-            _store_snapshot(reg, allowed, verdict)
-            return verdict
+            if not thesis_soft_evidence_enabled():
+                verdict = ThesisVerdict(
+                    signal="HOLD",
+                    confidence=0.0,
+                    position_size=0.0,
+                    reason_codes=["thesis_atr_too_low", f"atr_pct={atr_pct:.5f}"],
+                    thesis_type="flat",
+                    evidence_contributions=evidence,
+                )
+                _store_snapshot(reg, allowed, verdict)
+                return verdict
 
         funding = _feat(features, "funding_pressure", 0.0)
         fund_max = float(getattr(settings, "agent_thesis_funding_pressure_max", 2.0) or 2.0)
+        evidence["funding"] = max(0.0, min(1.0, 1.0 - abs(funding) / max(fund_max, 1e-9)))
         if abs(funding) > fund_max:
-            verdict = ThesisVerdict(
-                signal="HOLD",
-                confidence=0.0,
-                position_size=0.0,
-                reason_codes=["thesis_funding_spike_veto", f"funding_pressure={funding:.3f}"],
-                thesis_type="flat",
-            )
-            _store_snapshot(reg, allowed, verdict)
-            return verdict
+            if not thesis_soft_evidence_enabled():
+                verdict = ThesisVerdict(
+                    signal="HOLD",
+                    confidence=0.0,
+                    position_size=0.0,
+                    reason_codes=[
+                        "thesis_funding_spike_veto",
+                        f"funding_pressure={funding:.3f}",
+                    ],
+                    thesis_type="flat",
+                    evidence_contributions=evidence,
+                )
+                _store_snapshot(reg, allowed, verdict)
+                return verdict
 
         short_enabled = bool(
             getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
@@ -246,6 +277,7 @@ class AgentThesisEngine:
             pos_size=pos_size,
             regime=reg,
         )
+        verdict.evidence_contributions = {**evidence, **verdict.evidence_contributions}
         verdict = self._apply_price_band_veto(verdict, mc)
         _store_snapshot(reg, allowed, verdict)
         return verdict

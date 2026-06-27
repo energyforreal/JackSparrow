@@ -111,3 +111,58 @@ def record_decision_cycle(
                 f.write(json.dumps(row, separators=(",", ":")) + "\n")
     except OSError as exc:
         logger.warning("signal_recovery_telemetry_write_failed", error=str(exc), path=str(path))
+
+
+def check_over_gating_regression(
+    *,
+    lookback_days: int = 7,
+    min_raw_signals: int = 10,
+) -> Optional[Dict[str, Any]]:
+    """Alert when raw signals exist but zero executions (over-gating regression)."""
+    path = telemetry_path()
+    if not path.is_file():
+        return None
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    raw_signals = 0
+    executions = 0
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts_raw = row.get("ts")
+                if not ts_raw:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts < cutoff:
+                    continue
+                sig = str(row.get("signal") or "HOLD").upper()
+                extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
+                if extra.get("final_long") or extra.get("final_short"):
+                    raw_signals += 1
+                if sig in ("LONG", "SHORT", "STRONG_LONG", "STRONG_SHORT"):
+                    executions += 1
+    except OSError:
+        return None
+    if raw_signals >= min_raw_signals and executions == 0:
+        alert = {
+            "alert": "over_gating_regression",
+            "lookback_days": lookback_days,
+            "raw_signals": raw_signals,
+            "executed_trades": executions,
+        }
+        logger.warning("over_gating_regression_alert", **alert)
+        return alert
+    return None

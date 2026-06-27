@@ -130,6 +130,36 @@ class MCPReasoningEngine:
         return preds if isinstance(preds, list) else []
 
     @staticmethod
+    def _apply_evidence_thesis_authority(market_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Synthesize trade thesis direction from evidence graph + conviction."""
+        mc = dict(market_context or {})
+        conviction_raw = mc.get("conviction")
+        conviction_val: Optional[float] = None
+        direction: Optional[str] = None
+        if isinstance(conviction_raw, dict):
+            try:
+                conviction_val = float(conviction_raw.get("conviction"))
+            except (TypeError, ValueError):
+                conviction_val = None
+            direction = conviction_raw.get("direction")
+        ev_bundle = mc.get("evidence_bundle")
+        if isinstance(ev_bundle, dict) and conviction_val is None:
+            scores = ev_bundle.get("scores")
+            if isinstance(scores, dict) and scores:
+                try:
+                    conviction_val = sum(float(v) for v in scores.values()) / len(scores)
+                except (TypeError, ValueError):
+                    pass
+        strat = mc.get("strategy_candidate")
+        if not direction and isinstance(strat, dict):
+            direction = strat.get("signal")
+        if direction and conviction_val is not None:
+            mc["trade_thesis_signal"] = str(direction)
+            mc["trade_thesis_conviction"] = conviction_val
+            mc["reasoning_thesis_authority"] = True
+        return mc
+
+    @staticmethod
     def _normalize_market_context_predictions(
         market_context: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -291,6 +321,8 @@ class MCPReasoningEngine:
         from agent.intelligence.market_intelligence import merge_intel_into_market_context
 
         merged_mc = merge_intel_into_market_context(dict(request.market_context or {}))
+        if bool(getattr(settings, "reasoning_thesis_authority", False)):
+            merged_mc = self._apply_evidence_thesis_authority(merged_mc)
         request = request.model_copy(update={"market_context": merged_mc})
         normalized_context = self._normalize_market_context_predictions(
             request.market_context

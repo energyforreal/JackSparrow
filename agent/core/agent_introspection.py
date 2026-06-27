@@ -51,6 +51,10 @@ class AgentIntrospectionSnapshot:
     portfolio_guard_reason_codes: List[str] = field(default_factory=list)
     memory_enabled: bool = False
     memory_context_count: int = 0
+    conviction: Optional[float] = None
+    size_fraction: Optional[float] = None
+    abstention: Optional[str] = None
+    evidence_summary: Optional[Dict[str, float]] = None
     limits: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -79,6 +83,10 @@ class AgentIntrospectionSnapshot:
             "portfolio_guard_reason_codes": list(self.portfolio_guard_reason_codes),
             "memory_enabled": self.memory_enabled,
             "memory_context_count": self.memory_context_count,
+            "conviction": self.conviction,
+            "size_fraction": self.size_fraction,
+            "abstention": self.abstention,
+            "evidence_summary": dict(self.evidence_summary) if self.evidence_summary else None,
             "limits": dict(self.limits),
         }
 
@@ -212,6 +220,10 @@ def build_introspection_snapshot(
 
     limits: Dict[str, Any] = {
         "trade_score_min": min_score,
+        "conviction_entry_floor": float(
+            getattr(settings, "conviction_entry_floor", 0.35) or 0.35
+        ),
+        "evidence_based_sizing": bool(getattr(settings, "evidence_based_sizing", True)),
         "require_ic_validation_for_orders": bool(
             getattr(
                 settings,
@@ -221,6 +233,37 @@ def build_introspection_snapshot(
         ),
         "agent_policy_force_hold": bool(getattr(settings, "agent_policy_force_hold", False)),
     }
+
+    conv_val: Optional[float] = None
+    size_frac: Optional[float] = None
+    abstention_val: Optional[str] = None
+    evidence_summary: Optional[Dict[str, float]] = None
+    if pv.get("conviction") is not None:
+        try:
+            conv_val = float(pv["conviction"])
+        except (TypeError, ValueError):
+            pass
+    elif isinstance(mctx.get("conviction"), dict):
+        try:
+            conv_val = float(mctx["conviction"].get("conviction"))
+        except (TypeError, ValueError, AttributeError):
+            pass
+    if pv.get("size_fraction") is not None:
+        try:
+            size_frac = float(pv["size_fraction"])
+        except (TypeError, ValueError):
+            pass
+    elif isinstance(mctx.get("conviction"), dict):
+        try:
+            size_frac = float(mctx["conviction"].get("size_fraction"))
+        except (TypeError, ValueError, AttributeError):
+            pass
+    abstention_val = pv.get("abstention")
+    ev_raw = pv.get("evidence") or mctx.get("evidence_bundle")
+    if isinstance(ev_raw, dict):
+        scores = ev_raw.get("scores")
+        if isinstance(scores, dict):
+            evidence_summary = {str(k): float(v) for k, v in scores.items() if v is not None}
 
     return AgentIntrospectionSnapshot(
         version=INTROSPECTION_VERSION,
@@ -247,5 +290,9 @@ def build_introspection_snapshot(
         portfolio_guard_reason_codes=pg_codes,
         memory_enabled=memory_enabled,
         memory_context_count=int(memory_context_count),
+        conviction=conv_val,
+        size_fraction=size_frac,
+        abstention=str(abstention_val) if abstention_val else None,
+        evidence_summary=evidence_summary,
         limits=limits,
     )
