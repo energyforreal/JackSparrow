@@ -55,6 +55,85 @@ async def test_fetch_incremental_merges_tail() -> None:
     assert df2.iloc[-1]["close"] == pytest.approx(201.5)
 
 
+@pytest.mark.asyncio
+async def test_fetch_incremental_does_not_shrink_buffer() -> None:
+    """Small limit polls must not truncate a warmed buffer."""
+    reg = RollingOhlcvBufferRegistry()
+    client = AsyncMock()
+    base_ts = 1_700_000_000
+
+    async def _candles(*_args, **kwargs):
+        start = kwargs.get("start", 0)
+        end = kwargs.get("end", base_ts + 50 * 300)
+        bar_seconds = 300
+        count = max(1, (end - start) // bar_seconds)
+        return {
+            "result": [
+                {
+                    "time": base_ts + i * bar_seconds,
+                    "open": 100 + i,
+                    "high": 101 + i,
+                    "low": 99 + i,
+                    "close": 100.5 + i,
+                    "volume": 10,
+                }
+                for i in range(min(count, 50))
+            ]
+        }
+
+    client.get_candles = AsyncMock(side_effect=_candles)
+
+    warmed = await reg.fetch_incremental(client, "BTCUSD", "5m", 50)
+    assert len(warmed) == 50
+
+    polled = await reg.fetch_incremental(client, "BTCUSD", "5m", 10)
+    assert len(polled) == 50
+
+
+@pytest.mark.asyncio
+async def test_fetch_incremental_recovers_when_cache_smaller_than_request() -> None:
+    """Requesting n_candles > cached length must bootstrap full window."""
+    reg = RollingOhlcvBufferRegistry()
+    client = AsyncMock()
+    base_ts = 1_700_000_000
+
+    client.get_candles = AsyncMock(
+        return_value={
+            "result": [
+                {
+                    "time": base_ts + i * 300,
+                    "open": 100 + i,
+                    "high": 101 + i,
+                    "low": 99 + i,
+                    "close": 100.5 + i,
+                    "volume": 10,
+                }
+                for i in range(10)
+            ]
+        }
+    )
+    small = await reg.fetch_incremental(client, "BTCUSD", "5m", 10)
+    assert len(small) == 10
+
+    client.get_candles = AsyncMock(
+        return_value={
+            "result": [
+                {
+                    "time": base_ts + i * 300,
+                    "open": 100 + i,
+                    "high": 101 + i,
+                    "low": 99 + i,
+                    "close": 100.5 + i,
+                    "volume": 10,
+                }
+                for i in range(40)
+            ]
+        }
+    )
+    expanded = await reg.fetch_incremental(client, "BTCUSD", "5m", 40)
+    assert len(expanded) == 40
+
+
 def test_to_formatted_candles() -> None:
     reg = RollingOhlcvBufferRegistry()
     df = pd.DataFrame(

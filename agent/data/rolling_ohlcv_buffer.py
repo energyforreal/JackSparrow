@@ -98,12 +98,14 @@ class RollingOhlcvBufferRegistry:
         end_ts = int(datetime.now(timezone.utc).timestamp())
         cached = self.get(symbol, resolution) if use_incremental_cache else None
 
-        if (
+        cache_ready = (
             use_incremental_cache
             and cached is not None
             and not cached.empty
             and "timestamp" in cached.columns
-        ):
+            and len(cached) >= n_candles
+        )
+        if cache_ready:
             start_ts = end_ts - int(INCREMENTAL_TAIL_BARS * bar_seconds * 2)
         else:
             start_ts = end_ts - int(n_candles * bar_seconds * 1.05)
@@ -125,7 +127,9 @@ class RollingOhlcvBufferRegistry:
                 .drop_duplicates(subset=["timestamp"], keep="last")
                 .sort_values("timestamp")
             )
-            out = combined.tail(n_candles).reset_index(drop=True)
+            # Never shrink below existing cache (e.g. candle poll with limit=10).
+            keep_rows = max(n_candles, len(cached))
+            out = combined.tail(keep_rows).reset_index(drop=True)
         else:
             out = fresh.tail(n_candles).reset_index(drop=True)
 
