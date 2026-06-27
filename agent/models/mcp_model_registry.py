@@ -502,28 +502,29 @@ class MCPModelRegistry:
         """Safely get prediction from model."""
         import time
         start_time = time.time()
-        success = False
-        
+        dry_run = bool((request.context or {}).get("dry_run"))
+
         try:
             prediction = await model.predict(request)
-            success = True
             latency_ms = (time.time() - start_time) * 1000
-            
-            # Record successful prediction
-            self._record_prediction_result(model.model_name, latency_ms, True)
-            
+
+            if not dry_run:
+                self._record_prediction_result(model.model_name, latency_ms, True)
+
             return prediction
         except Exception as e:
             latency_ms = (time.time() - start_time) * 1000
-            
-            # Record failed prediction
-            self._record_prediction_result(model.model_name, latency_ms, False)
-            
-            logger.error(
+
+            if not dry_run:
+                self._record_prediction_result(model.model_name, latency_ms, False)
+
+            log_fn = logger.warning if dry_run else logger.error
+            log_fn(
                 "model_registry_prediction_failed",
                 model_name=model.model_name,
                 error=str(e),
-                exc_info=True
+                dry_run=dry_run,
+                exc_info=not dry_run,
             )
             # Return degraded prediction
             return MCPModelPrediction(

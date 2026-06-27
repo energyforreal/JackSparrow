@@ -468,7 +468,11 @@ class MCPOrchestrator:
             logger.error("mcp_orchestrator_shutdown_failed", error=str(e), exc_info=True)
 
     async def validate_models_dry_run(self) -> bool:
-        """Run a minimal inference pass to verify the v43 bundle loads correctly."""
+        """Verify registered models are load-ready without a full IC predict cycle.
+
+        Rule-based IC nodes require v43 market frames for predict(); warmup only
+        checks initialization. Legacy ML nodes still use a zero-feature dry run.
+        """
         import math
 
         if not self.model_registry or not self.model_registry.models:
@@ -476,25 +480,43 @@ class MCPOrchestrator:
         try:
             from agent.models.mcp_model_node import MCPModelRequest
 
-            names = self._required_feature_names_cache or get_feature_list()
-            feats = [0.0] * max(1, len(names))
-            req = MCPModelRequest(
-                request_id="dry_run_validation",
-                features=feats,
-                context={"dry_run": True, "symbol": getattr(settings, "trading_symbol", "BTCUSD")},
-            )
-            resp = await self.model_registry.get_predictions(req)
-            preds = getattr(resp, "predictions", None) or []
-            if not preds:
-                return False
-            p0 = preds[0]
-            ctx = getattr(p0, "context", None) or {}
-            er = ctx.get("expected_return") if isinstance(ctx, dict) else None
-            if er is None:
-                er = getattr(p0, "prediction", None)
-            if er is None:
-                return False
-            return math.isfinite(float(er))
+            symbol = getattr(settings, "trading_symbol", "BTCUSD")
+            all_ok = True
+
+            for model_name, model in self.model_registry.models.items():
+                if getattr(model, "model_type", "") == "rule_based_intelligence":
+                    health = await model.get_health_status()
+                    if not health.get("initialized"):
+                        logger.warning(
+                            "ic_dry_run_not_initialized",
+                            model_name=model_name,
+                        )
+                        all_ok = False
+                        continue
+                    logger.info("ic_dry_run_load_ok", model_name=model_name)
+                    continue
+
+                names = self._required_feature_names_cache or get_feature_list()
+                feats = [0.0] * max(1, len(names))
+                req = MCPModelRequest(
+                    request_id="dry_run_validation",
+                    features=feats,
+                    context={"dry_run": True, "symbol": symbol},
+                )
+                resp = await self.model_registry.get_predictions(req)
+                preds = getattr(resp, "predictions", None) or []
+                if not preds:
+                    all_ok = False
+                    continue
+                p0 = preds[0]
+                ctx = getattr(p0, "context", None) or {}
+                er = ctx.get("expected_return") if isinstance(ctx, dict) else None
+                if er is None:
+                    er = getattr(p0, "prediction", None)
+                if er is None or not math.isfinite(float(er)):
+                    all_ok = False
+
+            return all_ok
         except Exception as e:
             logger.warning("model_dry_run_validation_failed", error=str(e), exc_info=True)
             return False

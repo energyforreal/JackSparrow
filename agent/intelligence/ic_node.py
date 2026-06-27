@@ -178,7 +178,8 @@ class RuleBasedIntelligenceNode(MCPModelNode):
             return pred
         except Exception as exc:
             self._error_count += 1
-            self._health = "degraded"
+            if not (request.context or {}).get("dry_run"):
+                self._health = "degraded"
             logger.error("ic_predict_failed", error=str(exc), exc_info=True)
             raise
 
