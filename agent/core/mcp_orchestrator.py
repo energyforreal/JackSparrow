@@ -2102,6 +2102,17 @@ class MCPOrchestrator:
             if result.get("error") is not None:
                 return
 
+            ctx = context if isinstance(context, dict) else {}
+            if ctx.get("dry_run") or str(ctx.get("trigger") or "") == "model_health_warmup":
+                logger.info(
+                    "mcp_orchestrator_decision_ready_skipped_non_tradable",
+                    symbol=symbol,
+                    trigger=ctx.get("trigger"),
+                    dry_run=bool(ctx.get("dry_run")),
+                    correlation_id=event.event_id,
+                )
+                return
+
             # When a full decision is available from process_prediction_request,
             # emit a DecisionReadyEvent directly so downstream consumers
             # (backend/websocket/front-end) receive signals even if intermediate

@@ -119,6 +119,8 @@ Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_IC_VALID
 | `REASONING_IC_MINIMAL_MODE` | `true` | 3-step IC reasoning when `strategy_candidate` is in market context |
 | `MTF_DECISION_ENGINE_ENABLED` | `false` | Legacy MTF synthesis in reasoning Step 5 only; off for strategy-first IC |
 | `REQUIRE_IC_VALIDATION_FOR_ORDERS` | `true` | Policy-first entry guard before exchange orders (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`) |
+| `AGENT_STARTUP_ENTRY_GRACE_SECONDS` | `0` | Optional post-start entry block (seconds); candle cache seed is primary replay fix |
+| `MODEL_HEALTH_WARMUP_FULL_PIPELINE` | `false` | Startup warmup uses dry-run inference only when false |
 
 See [Canonical events](canonical_events.md) for the updated event-bus happy path.
 

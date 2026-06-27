@@ -2400,6 +2400,22 @@ class Settings(BaseSettings):
         env="AGENT_DECISION_IDEMPOTENCY_TTL_SECONDS",
         description="TTL for duplicate decision_event_id execution guard.",
     )
+    agent_startup_entry_grace_seconds: float = Field(
+        default=0.0,
+        env="AGENT_STARTUP_ENTRY_GRACE_SECONDS",
+        description=(
+            "Block new entries for this many seconds after agent start(). "
+            "0 disables. Use with candle cache seeding; not a substitute for it."
+        ),
+    )
+    model_health_warmup_full_pipeline: bool = Field(
+        default=False,
+        env="MODEL_HEALTH_WARMUP_FULL_PIPELINE",
+        description=(
+            "When true, startup warmup runs full IC orchestrator predict. "
+            "Default false uses dry-run registry inference only (no DecisionReady)."
+        ),
+    )
     manual_execute_requires_audit_reason_live: bool = Field(
         default=True,
         env="MANUAL_EXECUTE_REQUIRES_AUDIT_REASON_LIVE",

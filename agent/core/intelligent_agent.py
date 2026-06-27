@@ -808,11 +808,11 @@ class IntelligentAgent:
             return False
 
     async def _model_nodes_health_warmup(self) -> None:
-        """Trigger a quick prediction so model_nodes health becomes non-DEGRADED.
+        """Warm model registry health without emitting tradable decisions.
 
-        The UI marks `model_nodes` as DEGRADED when models exist but the model
-        registry has recorded 0 healthy predictions yet. After startup, we
-        run a single warmup prediction to populate model health.
+        Default: dry-run inference via orchestrator.validate_models_dry_run().
+        Optional MODEL_HEALTH_WARMUP_FULL_PIPELINE=true runs full IC predict
+        (telemetry only — no DecisionReady on direct call path).
         """
         try:
             registry = getattr(self, "model_registry", None)
@@ -821,6 +821,15 @@ class IntelligentAgent:
                     "model_nodes_warmup_skipped",
                     service="agent",
                     reason="no_registered_models",
+                )
+                return
+
+            if not bool(getattr(settings, "model_health_warmup_full_pipeline", False)):
+                ok = await self.mcp_orchestrator.validate_models_dry_run()
+                logger.info(
+                    "model_nodes_dry_run_warmup",
+                    service="agent",
+                    success=ok,
                 )
                 return
 
@@ -836,6 +845,7 @@ class IntelligentAgent:
                 warmup_context = {
                     "symbol": self.default_symbol,
                     "trigger": "model_health_warmup",
+                    "dry_run": True,
                     "requested_at": datetime.now(timezone.utc),
                 }
 
@@ -854,6 +864,7 @@ class IntelligentAgent:
                     attempt=attempt + 1,
                     total_models=total_models,
                     healthy_models=healthy_models,
+                    full_pipeline=True,
                 )
 
                 if total_models > 0 and healthy_models > 0:
@@ -925,8 +936,10 @@ class IntelligentAgent:
     async def start(self):
         """Start agent main loop."""
         from agent.core.exception_handlers import install_async_exception_handler_on_loop
+        from agent.core.startup_guard import mark_trading_started
 
         install_async_exception_handler_on_loop(asyncio.get_running_loop())
+        mark_trading_started()
         logger.info("agent_start_method_called")
         self.running = True
         logger.info("agent_running_set_to_true")

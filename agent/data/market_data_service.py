@@ -370,6 +370,9 @@ class MarketDataService:
                     symbols=self.streaming_symbols,
                 )
 
+        for symbol in self.streaming_symbols:
+            await self.seed_last_completed_candle_cache([symbol], interval)
+
         self._streaming_task = asyncio.create_task(self._stream_loop(interval))
 
         logger.info(
@@ -399,6 +402,43 @@ class MarketDataService:
             self._last_candle_cache.clear()
         
         logger.info("market_data_stream_stopped")
+
+    async def seed_last_completed_candle_cache(
+        self,
+        symbols: List[str],
+        interval: str,
+    ) -> None:
+        """Seed cache with the latest completed bar so startup does not replay it."""
+        for symbol in symbols:
+            sym = normalize_symbol_for_delta_api(symbol)
+            key = f"{sym}:{interval}"
+            try:
+                market_data = await self.get_market_data(sym, interval, limit=10)
+                candles = (market_data or {}).get("candles") or []
+                if len(candles) < 2:
+                    logger.info(
+                        "candle_cache_seed_skipped",
+                        symbol=sym,
+                        interval=interval,
+                        reason="insufficient_candles",
+                        count=len(candles),
+                    )
+                    continue
+                completed = candles[-2]
+                self._last_candle_cache[key] = completed
+                logger.info(
+                    "candle_cache_seeded",
+                    symbol=sym,
+                    interval=interval,
+                    timestamp=completed.get("timestamp"),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "candle_cache_seed_failed",
+                    symbol=sym,
+                    interval=interval,
+                    error=str(exc),
+                )
     
     async def _stream_loop(self, interval: str):
         """Main streaming loop - optimized for WebSocket or REST API fallback."""

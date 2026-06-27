@@ -52,6 +52,25 @@ def _tf_bar_seconds(tf: str) -> int:
     return 900
 
 
+def _non_tradable_entry_reason(
+    payload: Dict[str, Any],
+    market_context: Dict[str, Any],
+) -> Optional[str]:
+    """Return reject reason when decision must not reach execution."""
+    if payload.get("tradable") is False:
+        return "decision_not_tradable"
+    trigger = str(market_context.get("trigger") or "")
+    if trigger == "model_health_warmup":
+        return "warmup_trigger"
+    if market_context.get("dry_run") is True:
+        return "dry_run_context"
+    from agent.core.startup_guard import startup_grace_blocks_entry
+
+    if startup_grace_blocks_entry():
+        return "startup_entry_grace"
+    return None
+
+
 class TradingEventHandler:
     """Handler that bridges DecisionReadyEvent to RiskApprovedEvent."""
 
@@ -339,6 +358,20 @@ class TradingEventHandler:
                     return
                 self._log_entry_rejected(
                     "hold_at_synthesis",
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event.event_id,
+                    **diagnostics_base,
+                )
+                return
+
+            non_tradable = _non_tradable_entry_reason(
+                payload if isinstance(payload, dict) else {},
+                mc if isinstance(mc, dict) else {},
+            )
+            if non_tradable:
+                self._log_entry_rejected(
+                    non_tradable,
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
