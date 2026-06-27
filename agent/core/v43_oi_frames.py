@@ -269,3 +269,46 @@ async def fetch_oi_history(
 def export_oi_ring_buffer(symbol: str) -> List[Dict[str, Any]]:
     """Export ring-buffer rows for a symbol (training / persistence)."""
     return list(_OI_RING.get(str(symbol or "").strip().upper(), []))
+
+
+def push_oi_from_ws_ticker(symbol: str, ticker_data: Dict[str, Any]) -> None:
+    """Ingest WebSocket ticker fields into the OI ring buffer (5m bar slots)."""
+    sym = str(symbol or "").strip().upper()
+    if not sym or not isinstance(ticker_data, dict):
+        return
+    enabled, _, _ = _oi_settings()
+    if not enabled:
+        return
+
+    now_epoch = int(time.time())
+    bar_s = int(_OI_HISTORY_INTERVAL_S)
+    latest_bar = (now_epoch // bar_s) * bar_s
+
+    def _f(key: str, default: float = 0.0) -> float:
+        raw = ticker_data.get(key)
+        if raw is None and key == "oi_contracts":
+            raw = ticker_data.get("oi")
+        try:
+            return float(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    quotes = ticker_data.get("quotes") if isinstance(ticker_data.get("quotes"), dict) else {}
+    row: Dict[str, Any] = {
+        "timestamp": latest_bar,
+        "oi_contracts": _f("oi_contracts") or _f("oi"),
+        "oi_value_usd": _f("oi_value_usd"),
+        "taker_buy_ratio": _f("taker_buy_ratio", 0.5),
+        "mark_price": _f("mark_price") or _f("price"),
+        "spot_price": _f("spot_price"),
+        "best_bid": float(quotes.get("best_bid", 0) or 0),
+        "best_ask": float(quotes.get("best_ask", 0) or 0),
+        "bid_size": float(quotes.get("bid_size", 0) or 0),
+        "ask_size": float(quotes.get("ask_size", 0) or 0),
+        "price_band_upper": _f("price_band_upper"),
+        "price_band_lower": _f("price_band_lower"),
+        "predicted_funding_rate": _f("predicted_funding_rate"),
+    }
+    if row["oi_contracts"] <= 0 and row["mark_price"] <= 0 and row["spot_price"] <= 0:
+        return
+    _oi_ring_buffer_push(sym, row)

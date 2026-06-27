@@ -201,15 +201,22 @@ class RuleBasedIntelligenceNode(MCPModelNode):
         if df1h is None:
             df1h = pd.DataFrame()
 
-        closed_feats, df_feat = build_closed_feats_from_v43_dataframes(
-            df5, df15, df1h, df_fund, df_oi=df_oi, df_mark=df_mark
-        )
+        pre_feats = ctx.get("closed_feats_pre")
+        pre_matrix = ctx.get("df_feat_pre")
+        if isinstance(pre_feats, dict) and isinstance(pre_matrix, pd.DataFrame):
+            closed_feats = {str(k): float(v) for k, v in pre_feats.items()}
+            df_feat = pre_matrix
+        else:
+            closed_feats, df_feat = build_closed_feats_from_v43_dataframes(
+                df5, df15, df1h, df_fund, df_oi=df_oi, df_mark=df_mark
+            )
 
         short_enabled = bool(
             getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
         )
         market_context = {k: v for k, v in ctx.items() if not k.startswith("v43_df")}
         cached_thesis = market_context.get("thesis_verdict")
+        regime_override = market_context.get("regime") or market_context.get("v43_regime")
         out_ctx, pred_val, conf = build_ic_prediction_context(
             bundle_metadata=self._bundle_meta,
             closed_feats=closed_feats,
@@ -217,6 +224,7 @@ class RuleBasedIntelligenceNode(MCPModelNode):
             bar_index_hint=int(closed_5m_bar_index(df5)),
             short_enabled=short_enabled,
             thesis_5m=cached_thesis,
+            regime_override=str(regime_override) if regime_override else None,
         )
 
         ms = (time.perf_counter() - t0) * 1000.0

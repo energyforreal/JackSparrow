@@ -549,11 +549,15 @@ The MCP Orchestration Layer coordinates the strategy-first IC path. **`MCPOrches
 ```
 1. ModelPredictionRequestEvent (from candle close or feature path)
    │
-   ├─► Market frames + MTF cache warm (orchestrator)
+   ├─► MarketDataManager.get_v43_frames (shared OHLCV buffers + MTF warm once)
+   │
+   ├─► build_closed_feats_from_v43_dataframes (once) → closed_feats_pre in mctx
+   │
+   ├─► MarketIntelligence.from_cycle → store + diff (optional fast-path skip)
    │
    ├─► AgentThesisEngine.evaluate (once) → thesis_verdict in market_context
    │
-   ├─► RuleBasedIntelligenceNode.predict → MLValidationSnapshot + v43 gates
+   ├─► RuleBasedIntelligenceNode.predict (reuses closed_feats_pre; no 2nd matrix)
    │
    ├─► AgentPolicyEngine.evaluate → PolicyVerdict (authoritative signal)
    │
@@ -561,6 +565,21 @@ The MCP Orchestration Layer coordinates the strategy-first IC path. **`MCPOrches
        └─► IC minimal (3-step) or legacy (7-step) explanatory chain
            └─► DECISION_READY (ml_evidence_snapshot on payload)
 ```
+
+### MarketIntelligence contract
+
+Built once per v43 cycle in the orchestrator and exposed as `market_context["market_intelligence"]`:
+
+| Field | Description |
+|-------|-------------|
+| `symbol`, `bar_index`, `timestamp`, `version` | Identity and monotonic version for diffing |
+| `closed_feats` | Last closed 5m feature row (same source as IC matrix) |
+| `regime`, `v43_regime` | From `classify_regime` (alias keys for legacy consumers) |
+| `market_structure` | `MarketStructureSnapshot` dict |
+| `thesis_verdict` | Cached thesis output for policy/reasoning |
+| `trend_bias`, `volatility_state`, `liquidity_ok`, `confidence` | Derived summary fields |
+
+Consumers (`AgentPolicyEngine`, `MCPReasoningEngine`, `ContextManager.market_regime`) read via `merge_intel_into_market_context()` — they do not re-classify regime when intel is present. Health: `MCPOrchestrator.get_health_status()` includes `market_intelligence` and `market_data_manager` components.
 
 **Removed paths (2026 signal cleanup):** `REASONING_REQUEST` orchestrator handler, `EvidenceReadyEvent`, registry `_handle_prediction_request_event`. See [Canonical events](canonical_events.md).
 

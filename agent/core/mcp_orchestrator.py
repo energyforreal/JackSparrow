@@ -279,19 +279,21 @@ class MCPOrchestrator:
         self.vector_store: Optional[VectorMemoryStore] = None
         self._required_feature_names_cache: List[str] = []
         self.delta_client = None  # Set by agent for 15m trend (MTF confirmation)
+        self.market_data_manager: Optional[Any] = None
         self._initialized = False
         self._v43_gate_state = V43GateState()
         self._v43_gate_state_lock = asyncio.Lock()
         self._v43_gate_symbol: Optional[str] = None
         self._v43_last_entry_decision_bar: Optional[int] = None
     
-    async def initialize(self):
+    async def initialize(self, market_data_service: Optional[Any] = None):
         """Initialize all MCP components."""
         try:
             logger.info("mcp_orchestrator_initializing", message="Starting MCP Orchestrator initialization")
 
             # Initialize MCP Feature Server
-            self.feature_server = MCPFeatureServer()
+            self.feature_server = MCPFeatureServer(market_data_service=market_data_service)
+            self.market_data_manager = market_data_service
             await self.feature_server.initialize()
             logger.info("mcp_orchestrator_feature_server_initialized")
 
@@ -571,7 +573,6 @@ class MCPOrchestrator:
         _t0: float,
     ) -> Dict[str, Any]:
         """Strategy-first v43 path: frames → ML validation → thesis → score → policy → reasoning."""
-        from agent.core.v43_market_frames import fetch_v43_market_frames
         from agent.core.agent_thesis_engine import agent_thesis_engine
         from agent.core.market_structure import classify_market_structure
         from agent.core.ml_validator import (
@@ -582,6 +583,15 @@ class MCPOrchestrator:
             thesis_verdict_to_strategy_candidate,
         )
         from agent.core.trade_scorer import score_trade_setup
+        from agent.data.incremental_feature_engine import incremental_feature_engine
+        from agent.data.market_data_manager import MarketDataManager
+        from agent.intelligence.market_intelligence import MarketIntelligence
+        from agent.intelligence.market_intelligence_diff import (
+            diff_market_intelligence,
+            should_run_full_prediction,
+        )
+        from agent.intelligence.market_intelligence_store import market_intelligence_store
+
         if not self.delta_client:
             logger.warning(
                 "mcp_orchestrator_v43_no_delta_client",
@@ -592,30 +602,50 @@ class MCPOrchestrator:
 
         context = _merge_prediction_context_with_agent_state(symbol, context)
 
-        df5, df15, df1h, df_fund, df_oi, df_mark = await fetch_v43_market_frames(
-            self.delta_client, symbol
-        )
+        manager = self.market_data_manager
+        if isinstance(manager, MarketDataManager):
+            bundle = await manager.get_v43_frames(symbol)
+            df5, df15, df1h, df_fund, df_oi, df_mark = (
+                bundle.df5m,
+                bundle.df15m,
+                bundle.df1h,
+                bundle.df_funding,
+                bundle.df_oi,
+                bundle.df_mark,
+            )
+        else:
+            from agent.core.v43_market_frames import fetch_v43_market_frames
+
+            df5, df15, df1h, df_fund, df_oi, df_mark = await fetch_v43_market_frames(
+                self.delta_client, symbol
+            )
+            try:
+                if self.feature_server and getattr(
+                    self.feature_server, "market_data_service", None
+                ):
+                    mtf = settings.resolved_agent_timeframes()
+                    if mtf:
+                        await self.feature_server.market_data_service.warm_multi_timeframe_caches(
+                            str(symbol),
+                            mtf,
+                        )
+            except Exception as warm_err:
+                logger.debug(
+                    "v43_mtf_cache_warm_skipped",
+                    symbol=symbol,
+                    error=str(warm_err),
+                )
+
         if df5.empty or len(df5) < 2:
             return self._create_empty_prediction_response(symbol, context)
-
-        try:
-            if self.feature_server and getattr(self.feature_server, "market_data_service", None):
-                mtf = settings.resolved_agent_timeframes()
-                if mtf:
-                    await self.feature_server.market_data_service.warm_multi_timeframe_caches(
-                        str(symbol),
-                        mtf,
-                    )
-        except Exception as warm_err:
-            logger.debug(
-                "v43_mtf_cache_warm_skipped",
-                symbol=symbol,
-                error=str(warm_err),
-            )
 
         import pandas as pd
 
         from agent.core.v43_contract_state import get_contract_state
+        from agent.core.v43_market_frames import closed_5m_bar_index
+        from agent.intelligence.ic_node import build_closed_feats_from_v43_dataframes
+        from agent.intelligence.regime_classifier import classify_regime
+        from agent.core.agent_thesis_engine import thesis_verdict_to_dict
 
         ticker_row: Dict[str, Any] = {}
         if isinstance(df_oi, pd.DataFrame) and not df_oi.empty:
@@ -660,16 +690,24 @@ class MCPOrchestrator:
                 f"trading_status={contract_state.trading_status} "
                 f"reduce_only={contract_state.only_reduce_only_orders_allowed}"
             )
-        from agent.intelligence.ic_node import build_closed_feats_from_v43_dataframes
-        from agent.intelligence.regime_classifier import classify_regime
-        from agent.core.agent_thesis_engine import thesis_verdict_to_dict
 
         try:
-            closed_feats_pre, _ = build_closed_feats_from_v43_dataframes(
-                df5, df15, df1h, df_fund, df_oi=df_oi, df_mark=df_mark
+            closed_feats_pre, df_feat_pre = incremental_feature_engine.update_from_frames(
+                symbol,
+                df5,
+                df15,
+                df1h,
+                df_fund,
+                df_oi=df_oi,
+                df_mark=df_mark,
             )
         except ValueError:
-            return self._create_empty_prediction_response(symbol, context)
+            try:
+                closed_feats_pre, df_feat_pre = build_closed_feats_from_v43_dataframes(
+                    df5, df15, df1h, df_fund, df_oi=df_oi, df_mark=df_mark
+                )
+            except ValueError:
+                return self._create_empty_prediction_response(symbol, context)
 
         has_open_pre = bool(context.get("has_open_position", False))
         if not has_open_pre:
@@ -712,6 +750,55 @@ class MCPOrchestrator:
 
         thesis_verdict_cached = agent_thesis_engine.evaluate(regime_pre, thesis_mc_pre)
         mctx["thesis_verdict"] = thesis_verdict_to_dict(thesis_verdict_cached)
+        mctx["closed_feats_pre"] = closed_feats_pre
+        mctx["df_feat_pre"] = df_feat_pre
+        mctx["regime"] = regime_pre
+        mctx["v43_regime"] = regime_pre
+        mctx["market_structure"] = structure_pre.to_dict()
+
+        bar_idx = int(closed_5m_bar_index(df5))
+        if bool(getattr(settings, "market_intelligence_enabled", True)):
+            intel = MarketIntelligence.from_cycle(
+                symbol=symbol,
+                bar_index=bar_idx,
+                closed_feats=closed_feats_pre,
+                structure=structure_pre,
+                contract_state=contract_state,
+                thesis_verdict=mctx["thesis_verdict"],
+            )
+            prev_intel = market_intelligence_store.get(symbol)
+            material = diff_market_intelligence(prev_intel, intel)
+            intel = await market_intelligence_store.put(intel)
+            mctx["market_intelligence"] = intel.to_dict()
+
+            try:
+                from agent.core.context_manager import context_manager
+
+                await context_manager.update_state(
+                    {"market_regime": intel.regime, "volatility_regime": intel.volatility_state}
+                )
+            except Exception:
+                pass
+
+            if bool(getattr(settings, "market_intel_diff_log_only", True)) and material.changed:
+                logger.info(
+                    "market_intelligence_material_change",
+                    symbol=symbol,
+                    reasons=material.reasons,
+                    version=intel.version,
+                )
+
+            if not should_run_full_prediction(
+                material,
+                has_open_position=has_open_pre,
+            ):
+                logger.info(
+                    "prediction_skipped_intel_unchanged",
+                    symbol=symbol,
+                    bar_index=bar_idx,
+                    reasons=material.reasons,
+                )
+                return self._create_empty_prediction_response(symbol, context)
 
         model_request = MCPModelRequest(
             request_id=req_id,
@@ -1135,6 +1222,11 @@ class MCPOrchestrator:
             "p_vol_expansion": p_vol_expansion,
             "uncertainty_score": uncertainty_score,
         }
+        if isinstance(mctx.get("market_intelligence"), dict):
+            market_context_for_reasoning["market_intelligence"] = mctx["market_intelligence"]
+            market_context_for_reasoning["market_regime"] = mctx["market_intelligence"].get(
+                "regime", regime
+            )
 
         ml_evidence = MLEvidenceSnapshot(
             symbol=symbol,
@@ -2028,6 +2120,30 @@ class MCPOrchestrator:
         except Exception as e:
             logger.error("reasoning_engine_health_failed", error=str(e), exc_info=True)
             health_status["mcp_orchestrator"]["components"]["reasoning_engine"] = {"status": "unknown", "error": str(e)}
+
+        try:
+            from agent.intelligence.market_intelligence_store import market_intelligence_store
+
+            intel_health = market_intelligence_store.get_health_summary(
+                symbol=getattr(settings, "trading_symbol", None)
+                or getattr(settings, "agent_symbol", None)
+            )
+            health_status["mcp_orchestrator"]["components"]["market_intelligence"] = intel_health
+        except Exception as e:
+            health_status["mcp_orchestrator"]["components"]["market_intelligence"] = {
+                "status": "unknown",
+                "error": str(e),
+            }
+
+        if isinstance(self.market_data_manager, object) and self.market_data_manager is not None:
+            mgr = self.market_data_manager
+            mgr_health: Dict[str, Any] = {"status": "up"}
+            if hasattr(mgr, "get_health"):
+                try:
+                    mgr_health = mgr.get_health()
+                except Exception as e:
+                    mgr_health = {"status": "unknown", "error": str(e)}
+            health_status["mcp_orchestrator"]["components"]["market_data_manager"] = mgr_health
 
         return health_status
 

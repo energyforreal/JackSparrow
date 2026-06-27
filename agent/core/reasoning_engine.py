@@ -287,6 +287,10 @@ class MCPReasoningEngine:
 
     async def generate_reasoning(self, request: MCPReasoningRequest) -> MCPReasoningChain:
         """Generate 7-step reasoning chain (including trade adjudication)."""
+        from agent.intelligence.market_intelligence import merge_intel_into_market_context
+
+        merged_mc = merge_intel_into_market_context(dict(request.market_context or {}))
+        request = request.model_copy(update={"market_context": merged_mc})
         normalized_context = self._normalize_market_context_predictions(
             request.market_context
         )

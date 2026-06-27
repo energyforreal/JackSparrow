@@ -726,6 +726,9 @@ class AgentPolicyEngine:
     ) -> PolicyVerdict:
         """Return the agent policy verdict for this cycle."""
         mc = market_context if isinstance(market_context, dict) else {}
+        from agent.intelligence.market_intelligence import merge_intel_into_market_context
+
+        mc = merge_intel_into_market_context(mc)
         force_hold = bool(getattr(settings, "agent_policy_force_hold", False))
         if force_hold:
             return PolicyVerdict(

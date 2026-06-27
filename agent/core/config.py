@@ -2508,6 +2508,62 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Market state architecture (unified data + intelligence layers)
+    market_data_manager_enabled: bool = Field(
+        default=True,
+        env="MARKET_DATA_MANAGER_ENABLED",
+        description="Use MarketDataManager as single OHLCV/ticker authority",
+    )
+    incremental_features_enabled: bool = Field(
+        default=False,
+        env="INCREMENTAL_FEATURES_ENABLED",
+        description="Use IncrementalFeatureEngine instead of full matrix rebuild",
+    )
+    market_intelligence_enabled: bool = Field(
+        default=True,
+        env="MARKET_INTELLIGENCE_ENABLED",
+        description="Build persistent MarketIntelligence snapshot each cycle",
+    )
+    market_intel_redis_ttl_seconds: int = Field(
+        default=300,
+        env="MARKET_INTEL_REDIS_TTL_SECONDS",
+        ge=30,
+        le=3600,
+        description="Redis TTL for serialized MarketIntelligence snapshot",
+    )
+    market_intel_diff_enabled: bool = Field(
+        default=False,
+        env="MARKET_INTEL_DIFF_ENABLED",
+        description="Enable state-change detection on MarketIntelligence",
+    )
+    market_intel_diff_log_only: bool = Field(
+        default=True,
+        env="MARKET_INTEL_DIFF_LOG_ONLY",
+        description="Log material intel changes without skipping prediction",
+    )
+    market_intel_regime_change_triggers: bool = Field(
+        default=True,
+        env="MARKET_INTEL_REGIME_CHANGE_TRIGGERS",
+        description="Treat regime flip as material intelligence change",
+    )
+    market_intel_vol_expansion_triggers: bool = Field(
+        default=True,
+        env="MARKET_INTEL_VOL_EXPANSION_TRIGGERS",
+        description="Treat volatility state jump as material change",
+    )
+    market_intel_min_confidence_delta: float = Field(
+        default=0.10,
+        env="MARKET_INTEL_MIN_CONFIDENCE_DELTA",
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence delta to count as material change",
+    )
+    signal_staleness_skip_when_intel_unchanged: bool = Field(
+        default=False,
+        env="SIGNAL_STALENESS_SKIP_WHEN_INTEL_UNCHANGED",
+        description="Skip staleness watchdog refresh when intel unchanged and flat",
+    )
+
     # Candle monitoring cadence (REST calls) - can be different from ticker polling cadence.
     candle_poll_interval_seconds: int = Field(
         default=30,

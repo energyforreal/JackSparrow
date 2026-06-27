@@ -41,12 +41,13 @@ The Data Layer is responsible for:
 
 #### Components
 
-**Market Data Service**
+**Market Data Service / MarketDataManager**
 - Continuously monitors real-time BTCUSD ticker prices (every 0.5 seconds)
 - Emits PriceFluctuationEvent when price changes exceed threshold (≥0.5%)
 - Retrieves historical OHLCV data for analysis
 - Implements circuit breakers for API failures
 - Caches frequently accessed data
+- **Unified manager** (`MARKET_DATA_MANAGER_ENABLED`): one shared instance injected into `IntelligentAgent`, `MCPOrchestrator`, and `MCPFeatureServer` — eliminates duplicate REST for overlapping timeframes during v43 + MTF warm
 - **Delta WebSocket**: connect to **`WEBSOCKET_URL`** (India testnet: `wss://socket-ind.testnet.deltaex.org` — not the REST CDN host). After connect, send **`key-auth`** signed as `GET{unix_seconds}/live`. Falls back to REST polling when WSS is down or auth fails (e.g. IP not whitelisted on the API key).
 
 **Feature Store (MCP Feature Server)**
@@ -360,11 +361,14 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 - **Dependencies**: Market Data Service, TimescaleDB
 - **Output**: MCPFeatureResponse with quality scores
 
-#### Market Data Service
+#### Market Data Service / MarketDataManager
 - **Responsibility**: Fetch and cache market data from Delta Exchange
 - **Protocol**: Delta Exchange REST API + optional WSS (`DeltaExchangeWebSocketClient` in `agent/data/delta_client.py`)
 - **Dependencies**: Delta Exchange API, Redis cache
 - **Output**: OHLCV data, ticker data, `MarketTickEvent` / `CandleClosedEvent`
+- **`MarketDataManager`** (`agent/data/market_data_manager.py`, flag `MARKET_DATA_MANAGER_ENABLED`): process-wide authority for OHLCV buffers (`RollingOhlcvBufferRegistry`), streaming, `CandleStore`, and v43 frame fetch with single MTF warm. `MarketDataService` remains a thin backward-compatible facade delegating to the manager when enabled.
+- **`IncrementalFeatureEngine`** (`agent/data/incremental_feature_engine.py`, flag `INCREMENTAL_FEATURES_ENABLED`): closed-bar feature cache with batch bootstrap and gap recovery; orchestrator dedupes matrix build via `closed_feats_pre` / `df_feat_pre` in `mctx` regardless of flag.
+- **`MarketIntelligence`** (`agent/intelligence/market_intelligence.py`, flag `MARKET_INTELLIGENCE_ENABLED`): durable snapshot (regime, structure, thesis, contract state) built once per cycle in `MCPOrchestrator._process_jacksparrow_v43_prediction`; persisted in `MarketIntelligenceStore` (+ optional Redis `market_intel:{symbol}`).
 
 #### Vector Memory Store
 - **Responsibility**: Store and retrieve similar decision contexts
@@ -950,17 +954,20 @@ The startup and configuration validation system implements comprehensive error h
 ### Signal pipeline (strategy-first IC — default)
 
 ```
-1. Market Data Service → CandleClosedEvent (or PriceFluctuationEvent)
+1. Market Data Service / MarketDataManager → CandleClosedEvent (or PriceFluctuationEvent)
 2. market_data_handler → ModelPredictionRequestEvent
    (when CANDLE_CLOSE_DIRECT_PREDICTION=true, default;
     otherwise FeatureRequest → FeatureComputed → ModelPredictionRequest)
-3. MCPOrchestrator → fetch frames, warm caches, thesis once, IC predict, policy
+3. MCPOrchestrator → get_v43_frames (shared buffers + MTF warm once) → closed_feats once
+   → MarketIntelligence snapshot + optional diff fast-path → IC predict, policy
 4. Reasoning Engine → 3-step IC minimal chain (default) or 7-step legacy
 5. DECISION_READY → policy_authority=agent_policy + ml_evidence_snapshot
 6. Trading handler → entry_validation_guard → Risk Manager → RISK_APPROVED
 7. Execution Engine → Delta Exchange order
 8. WebSocket → data_update (signal + reasoning steps)
 ```
+
+**State-driven skip** (optional, `MARKET_INTEL_DIFF_ENABLED` + `MARKET_INTEL_DIFF_LOG_ONLY=false`): when intel is unchanged and no open position, orchestrator logs `prediction_skipped_intel_unchanged` and skips ML/reasoning; open positions always run the full path. Staleness watchdog respects `SIGNAL_STALENESS_SKIP_WHEN_INTEL_UNCHANGED`.
 
 `MODEL_PREDICTION_COMPLETE` is telemetry-only; `model_handler` syncs context (no `REASONING_REQUEST` fan-out). See [Canonical events](canonical_events.md).
 

@@ -80,10 +80,10 @@ class MCPFeatureResponse(BaseModel):
 class MCPFeatureServer:
     """MCP Feature Server implementing Feature Protocol."""
     
-    def __init__(self):
+    def __init__(self, market_data_service: Optional[MarketDataService] = None):
         """Initialize feature server."""
         self.feature_engineering = FeatureEngineering()
-        self.market_data_service = MarketDataService()
+        self.market_data_service = market_data_service or MarketDataService()
         self.feature_registry: Dict[str, str] = {
             "rsi_14": "1.0.0",
             "macd_signal": "1.0.0",

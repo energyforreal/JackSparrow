@@ -9,49 +9,35 @@ import pandas as pd
 import structlog
 
 from agent.core.v43_oi_frames import fetch_oi_history
-from agent.data.candle_validation import dataframe_from_delta_candles, validate_candles
+from agent.data.candle_validation import validate_candles
+from agent.data.rolling_ohlcv_buffer import RollingOhlcvBufferRegistry
 from agent.core.config import settings
 
 logger = structlog.get_logger()
 
-# Incremental OHLCV cache: symbol -> resolution -> DataFrame (PERF-01)
+# Legacy module-level cache when no MarketDataManager registry is supplied.
 _OHLCV_FRAME_CACHE: Dict[str, Dict[str, pd.DataFrame]] = {}
-_INCREMENTAL_TAIL_BARS = 3
+_LEGACY_BUFFER_REGISTRY = RollingOhlcvBufferRegistry()
 
 
-def _normalize_delta_candles(raw: List[dict[str, Any]]) -> List[dict[str, Any]]:
-    """Normalize Delta ``history/candles`` rows to candle_validation format."""
-    out: List[dict[str, Any]] = []
-    for c in raw:
-        if not isinstance(c, dict):
-            continue
-        ts = c.get("time")
-        if ts is None:
-            continue
-        out.append(
-            {
-                "timestamp": ts,
-                "open": float(c.get("open", 0) or 0),
-                "high": float(c.get("high", 0) or 0),
-                "low": float(c.get("low", 0) or 0),
-                "close": float(c.get("close", 0) or 0),
-                "volume": float(c.get("volume", 0) or 0),
-            }
-        )
-    return out
+def _legacy_registry_from_module_cache() -> RollingOhlcvBufferRegistry:
+    """Sync legacy dict cache into registry for backward-compatible fetch paths."""
+    reg = RollingOhlcvBufferRegistry()
+    for sym, res_map in _OHLCV_FRAME_CACHE.items():
+        for res, df in res_map.items():
+            if df is not None and not df.empty:
+                reg.put(sym, res, df)
+    return reg
 
 
-def _parse_candles_response(resp: Any) -> List[dict[str, Any]]:
-    candles: List[dict[str, Any]] = []
-    if isinstance(resp, dict):
-        result = resp.get("result")
-        if isinstance(result, dict):
-            candles = result.get("candles", []) or []
-        elif isinstance(result, list):
-            candles = result
-    elif isinstance(resp, list):
-        candles = resp
-    return _normalize_delta_candles([c for c in candles if isinstance(c, dict)])
+def _sync_module_cache_from_registry(
+    registry: RollingOhlcvBufferRegistry,
+    symbol: str,
+    resolution: str,
+) -> None:
+    df = registry.get(symbol, resolution)
+    if df is not None and not df.empty:
+        _OHLCV_FRAME_CACHE.setdefault(symbol, {})[resolution] = df
 
 
 async def _fetch_ohlcv_df(
@@ -62,46 +48,24 @@ async def _fetch_ohlcv_df(
     n_candles: int,
     *,
     use_incremental_cache: bool = True,
+    buffer_registry: Optional[RollingOhlcvBufferRegistry] = None,
 ) -> pd.DataFrame:
     """Fetch last ``n_candles`` bars ending now (incremental append when cached)."""
-    from datetime import datetime, timezone
+    registry = buffer_registry
+    if registry is None:
+        registry = _legacy_registry_from_module_cache()
 
-    end_ts = int(datetime.now(timezone.utc).timestamp())
-    sym_cache = _OHLCV_FRAME_CACHE.setdefault(symbol, {})
-    cached = sym_cache.get(resolution) if use_incremental_cache else None
-
-    if (
-        use_incremental_cache
-        and cached is not None
-        and not cached.empty
-        and "timestamp" in cached.columns
-    ):
-        start_ts = end_ts - int(_INCREMENTAL_TAIL_BARS * bar_seconds * 2)
-    else:
-        start_ts = end_ts - int(n_candles * bar_seconds * 1.05)
-
-    resp = await delta_client.get_candles(
-        symbol=symbol,
-        resolution=resolution,
-        start=start_ts,
-        end=end_ts,
+    out = await registry.fetch_incremental(
+        delta_client,
+        symbol,
+        resolution,
+        n_candles,
+        use_incremental_cache=use_incremental_cache,
     )
-    formatted = _parse_candles_response(resp)
-    fresh = dataframe_from_delta_candles(formatted)
-    if fresh.empty:
-        return cached.copy() if cached is not None and not cached.empty else fresh
-
-    if cached is not None and not cached.empty and use_incremental_cache:
-        combined = (
-            pd.concat([cached, fresh], ignore_index=True)
-            .drop_duplicates(subset=["timestamp"], keep="last")
-            .sort_values("timestamp")
-        )
-        out = combined.tail(n_candles).reset_index(drop=True)
+    if buffer_registry is None:
+        _OHLCV_FRAME_CACHE.setdefault(symbol, {})[resolution] = out
     else:
-        out = fresh.tail(n_candles).reset_index(drop=True)
-
-    sym_cache[resolution] = out
+        _sync_module_cache_from_registry(registry, symbol, resolution)
     return out
 
 
@@ -109,12 +73,19 @@ async def _fetch_funding_series(
     delta_client: Any,
     symbol: str,
     n1h: int,
+    *,
+    buffer_registry: Optional[RollingOhlcvBufferRegistry] = None,
 ) -> pd.DataFrame:
     """Fetch hourly funding proxy series; returns empty on failure."""
     fund_symbol = f"FUNDING:{symbol}"
     try:
         df_raw = await _fetch_ohlcv_df(
-            delta_client, fund_symbol, "1h", 3600, min(n1h, 500)
+            delta_client,
+            fund_symbol,
+            "1h",
+            3600,
+            min(n1h, 500),
+            buffer_registry=buffer_registry,
         )
         if not df_raw.empty and "close" in df_raw.columns:
             return df_raw.rename(columns={"close": "funding_rate"}).copy()
@@ -143,6 +114,8 @@ async def _fetch_oi_df(
 async def fetch_v43_market_frames(
     delta_client: Any,
     symbol: str,
+    *,
+    buffer_registry: Optional[RollingOhlcvBufferRegistry] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load 5m / 15m / 1h OHLCV, funding, ticker snapshots, and MARK candles for ``fe.transform``.
 
@@ -162,12 +135,20 @@ async def fetch_v43_market_frames(
     mark_symbol = f"MARK:{symbol}"
 
     df5m, df15m, df1h, df_funding, df_oi, df_mark = await asyncio.gather(
-        _fetch_ohlcv_df(delta_client, symbol, "5m", 300, n5),
-        _fetch_ohlcv_df(delta_client, symbol, "15m", 900, n15),
-        _fetch_ohlcv_df(delta_client, symbol, "1h", 3600, n1h),
-        _fetch_funding_series(delta_client, symbol, n1h),
+        _fetch_ohlcv_df(
+            delta_client, symbol, "5m", 300, n5, buffer_registry=buffer_registry
+        ),
+        _fetch_ohlcv_df(
+            delta_client, symbol, "15m", 900, n15, buffer_registry=buffer_registry
+        ),
+        _fetch_ohlcv_df(
+            delta_client, symbol, "1h", 3600, n1h, buffer_registry=buffer_registry
+        ),
+        _fetch_funding_series(delta_client, symbol, n1h, buffer_registry=buffer_registry),
         _fetch_oi_df(delta_client, symbol, n_oi),
-        _fetch_ohlcv_df(delta_client, mark_symbol, "5m", 300, n5),
+        _fetch_ohlcv_df(
+            delta_client, mark_symbol, "5m", 300, n5, buffer_registry=buffer_registry
+        ),
     )
 
     if df_funding.empty and not df_oi.empty and "predicted_funding_rate" in df_oi.columns:

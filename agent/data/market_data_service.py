@@ -3,6 +3,10 @@ Market data service.
 
 Fetches and caches market data from Delta Exchange.
 Supports event-driven streaming via event bus.
+
+When ``MARKET_DATA_MANAGER_ENABLED`` is true, prefer ``create_market_data_layer()``
+which returns ``MarketDataManager`` as the process-wide authority; this class remains
+the backward-compatible base implementation and thin facade for tests and legacy paths.
 """
 
 from typing import Dict, Any, Optional, List

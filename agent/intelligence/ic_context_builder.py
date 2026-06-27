@@ -115,11 +115,15 @@ def build_ic_prediction_context(
     bar_index_hint: int,
     short_enabled: bool,
     thesis_5m: Optional[Any] = None,
+    regime_override: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], float, float]:
     """Return (out_ctx, primary_prediction, primary_confidence)."""
-    regime = classify_regime(closed_feats)
-    if "regime_label" in closed_feats:
-        regime = str(closed_feats.get("regime_label", regime))
+    if regime_override:
+        regime = str(regime_override)
+    else:
+        regime = classify_regime(closed_feats)
+        if "regime_label" in closed_feats:
+            regime = str(closed_feats.get("regime_label", regime))
 
     mctx = {
         **market_context,

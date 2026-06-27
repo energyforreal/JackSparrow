@@ -71,6 +71,7 @@ from agent.risk.risk_manager import RiskManager
 from agent.data.delta_client import DeltaExchangeClient
 from agent.core.exchange_gateway import build_exchange_gateway
 from agent.data.market_data_service import MarketDataService
+from agent.data.market_data_manager import create_market_data_layer
 from agent.data.feature_server_api import FeatureServerAPI
 from agent.events.event_bus import event_bus
 from agent.events.schemas import EventType
@@ -124,8 +125,7 @@ class IntelligentAgent:
         )
         self.risk_manager = RiskManager(config=settings)
         self.delta_client = DeltaExchangeClient()
-        self.exchange_gateway = None
-        self.market_data_service = MarketDataService()
+        self.market_data_service = create_market_data_layer(delta_client=self.delta_client)
         # FeatureServerAPI is bound to the initialized MCP Feature Server in initialize().
         self.feature_server_api: FeatureServerAPI | None = None
         self.running = False
@@ -232,7 +232,9 @@ class IntelligentAgent:
         
         # Initialize MCP orchestrator once and bind HTTP feature bridge to its feature server.
         if not getattr(self.mcp_orchestrator, "_initialized", False):
-            await self.mcp_orchestrator.initialize()
+            await self.mcp_orchestrator.initialize(
+                market_data_service=self.market_data_service,
+            )
         if self.mcp_orchestrator.feature_server is not None:
             self.feature_server_api = FeatureServerAPI(
                 feature_server=self.mcp_orchestrator.feature_server,
@@ -344,7 +346,8 @@ class IntelligentAgent:
                     "v43 assumption affects gate diagnostics, not live leverage."
                 ),
             )
-        self.mcp_orchestrator.delta_client = self.delta_client  # For MTF trend_15m when enabled
+        self.mcp_orchestrator.delta_client = self.delta_client
+        self.mcp_orchestrator.market_data_manager = self.market_data_service
         try:
             from agent.core.fx_rate import refresh_usdinr_rate
 
@@ -1936,10 +1939,41 @@ class IntelligentAgent:
                             staleness_cooldown_ok = elapsed_since_trigger >= max(
                                 stale_seconds * 2, 600
                             )
+                        skip_stale_refresh = False
+                        if bool(
+                            getattr(settings, "signal_staleness_skip_when_intel_unchanged", False)
+                        ):
+                            try:
+                                from agent.intelligence.market_intelligence_store import (
+                                    market_intelligence_store,
+                                )
+
+                                intel = market_intelligence_store.get(self.default_symbol)
+                                open_count = 0
+                                try:
+                                    from agent.core import execution as execution_module
+
+                                    open_count = len(
+                                        execution_module.position_manager.get_all_positions()
+                                    )
+                                except Exception:
+                                    pass
+                                if intel is not None and open_count == 0:
+                                    skip_stale_refresh = True
+                                    logger.debug(
+                                        "agent_stale_refresh_skipped_intel_unchanged",
+                                        service="agent",
+                                        symbol=self.default_symbol,
+                                        intel_version=intel.version,
+                                    )
+                            except Exception:
+                                pass
+
                         if (
                             time_since_last_decision
                             and time_since_last_decision > stale_seconds
                             and staleness_cooldown_ok
+                            and not skip_stale_refresh
                         ):
                             logger.info(
                                 "agent_triggering_stale_signal_refresh",
