@@ -13,7 +13,7 @@ const DateSchema = z
   .union([z.string().datetime(), z.date()])
   .describe('ISO 8601 datetime string')
 const SignalTypeSchema = z
-  .enum(['STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL'])
+  .enum(['STRONG_LONG', 'LONG', 'HOLD', 'SHORT', 'STRONG_SHORT'])
   .describe('Trading signal type')
 const PositionStatusSchema = z
   .enum(['OPEN', 'CLOSED', 'LIQUIDATED'])

@@ -28,6 +28,7 @@ from agent.core.confidence_dynamics import (
     margin_enhanced_confidence,
     proportional_v43_entry_floor,
 )
+from agent.core.signal_vocabulary import is_entry_signal, is_long_signal, is_short_signal, same_direction
 import structlog
 
 logger = structlog.get_logger()
@@ -436,12 +437,9 @@ class MCPReasoningEngine:
             f"trade_score={score:.1f} passed={passed}",
         ]
 
-        entry = thesis_sig in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL")
-        ml_entry = ml_sig in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL")
-        same_dir = (
-            (thesis_sig in ("BUY", "STRONG_BUY") and ml_sig in ("BUY", "STRONG_BUY"))
-            or (thesis_sig in ("SELL", "STRONG_SELL") and ml_sig in ("SELL", "STRONG_SELL"))
-        )
+        entry = is_entry_signal(thesis_sig)
+        ml_entry = is_entry_signal(ml_sig)
+        same_dir = same_direction(thesis_sig, ml_sig)
         gated_floor = float(
             getattr(settings, "agent_trade_score_min_gated_ml_adoption", 30.0) or 30.0
         )
@@ -888,7 +886,7 @@ class MCPReasoningEngine:
             )
             if (
                 ml_gated
-                and ml_sig in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL")
+                and is_entry_signal(ml_sig)
                 and (score_passed or score >= gated_floor)
             ):
                 conclusion = f"{ml_sig} - gated ML candidate (thesis={thesis_sig}, score={score:.0f})"
@@ -1129,17 +1127,17 @@ class MCPReasoningEngine:
 
             decision_code = "HOLD"
             if consensus > strong_thresh:
-                decision_code = "STRONG_BUY"
-                conclusion = "STRONG_BUY - High confidence bullish signal"
+                decision_code = "STRONG_LONG"
+                conclusion = "STRONG_LONG - High confidence bullish signal"
             elif consensus > mild_thresh:
-                decision_code = "BUY"
-                conclusion = "BUY - Moderate bullish signal"
+                decision_code = "LONG"
+                conclusion = "LONG - Moderate bullish signal"
             elif consensus < -strong_thresh:
-                decision_code = "STRONG_SELL"
-                conclusion = "STRONG_SELL - High confidence bearish signal"
+                decision_code = "STRONG_SHORT"
+                conclusion = "STRONG_SHORT - High confidence bearish signal"
             elif consensus < -mild_thresh:
-                decision_code = "SELL"
-                conclusion = "SELL - Moderate bearish signal"
+                decision_code = "SHORT"
+                conclusion = "SHORT - Moderate bearish signal"
             else:
                 conclusion = "HOLD - Mixed signals, waiting for clearer direction"
 

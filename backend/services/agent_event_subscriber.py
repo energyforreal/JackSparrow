@@ -187,21 +187,21 @@ def _map_consensus_signal_to_string(value: Any, ic_thesis_signal: str = "") -> s
     numeric tanh-derived classification for legacy model outputs.
     """
     if ic_thesis_signal and isinstance(ic_thesis_signal, str) and SignalType.is_valid(ic_thesis_signal):
-        return ic_thesis_signal
+        return SignalType.normalize(ic_thesis_signal)
     if isinstance(value, str) and SignalType.is_valid(value):
-        return value
+        return SignalType.normalize(value)
     if not isinstance(value, (int, float)):
         return "HOLD"
     pred_value = float(value)
     if abs(pred_value) < 0.2:
         return "HOLD"
     if pred_value > 0.6:
-        return "STRONG_BUY"
+        return "STRONG_LONG"
     if pred_value > 0.2:
-        return "BUY"
+        return "LONG"
     if pred_value < -0.6:
-        return "STRONG_SELL"
-    return "SELL"
+        return "STRONG_SHORT"
+    return "SHORT"
 
 
 def _normalize_model_prediction_complete_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1595,8 +1595,8 @@ class AgentEventSubscriber:
         # - confidence_source: hints which field the UI should prioritize for display
         is_actionable = payload.get("is_actionable_entry")
         if is_actionable is None:
-            sig_u = str(signal or "").upper()
-            is_actionable = sig_u in ("BUY", "SELL", "STRONG_BUY", "STRONG_SELL")
+            from agent.core.signal_vocabulary import is_entry_signal
+            is_actionable = is_entry_signal(signal)
 
         signal_data = {
             "signal": signal,

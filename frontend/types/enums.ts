@@ -14,11 +14,27 @@
 export const TRADING_MODE_VALUES = ['testnet'] as const;
 export type TradingMode = typeof TRADING_MODE_VALUES[number];
 
-export const SIGNAL_TYPE_VALUES = ['STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL'] as const;
+export const SIGNAL_TYPE_VALUES = [
+  'STRONG_LONG',
+  'LONG',
+  'HOLD',
+  'SHORT',
+  'STRONG_SHORT',
+] as const;
 export type SignalType = typeof SIGNAL_TYPE_VALUES[number];
 
+const LEGACY_SIGNAL_MAP: Record<string, SignalType> = {
+  STRONG_BUY: 'STRONG_LONG',
+  BUY: 'LONG',
+  SELL: 'SHORT',
+  STRONG_SELL: 'STRONG_SHORT',
+};
+
 export const isValidSignal = (value: unknown): value is SignalType => {
-  return SIGNAL_TYPE_VALUES.includes(value as SignalType);
+  if (SIGNAL_TYPE_VALUES.includes(value as SignalType)) {
+    return true;
+  }
+  return typeof value === 'string' && value in LEGACY_SIGNAL_MAP;
 };
 
 /**
@@ -115,7 +131,10 @@ export const isValidServiceStatus = (value: unknown): value is ServiceStatusType
  */
 export function normalizeSignalType(signal: unknown): SignalType | null {
   if (isValidSignal(signal)) {
-    return signal;
+    if (SIGNAL_TYPE_VALUES.includes(signal as SignalType)) {
+      return signal as SignalType;
+    }
+    return LEGACY_SIGNAL_MAP[String(signal).toUpperCase()] ?? null;
   }
   console.warn(`Invalid signal type: ${signal}, treating as no signal`);
   return null;
@@ -126,11 +145,11 @@ export function normalizeSignalType(signal: unknown): SignalType | null {
  */
 export function getSignalLabel(signal: SignalType): string {
   const labels: Record<SignalType, string> = {
-    'STRONG_BUY': 'Strong Buy',
-    'BUY': 'Buy',
+    'STRONG_LONG': 'Strong Long',
+    'LONG': 'Long',
     'HOLD': 'Hold',
-    'SELL': 'Sell',
-    'STRONG_SELL': 'Strong Sell',
+    'SHORT': 'Short',
+    'STRONG_SHORT': 'Strong Short',
   };
   return labels[signal] || 'Unknown';
 }
@@ -140,11 +159,11 @@ export function getSignalLabel(signal: SignalType): string {
  */
 export function getSignalColor(signal: SignalType): string {
   const colors: Record<SignalType, string> = {
-    'STRONG_BUY': '#00c853',  // Green
-    'BUY': '#66bb6a',         // Light Green
+    'STRONG_LONG': '#00c853',  // Green
+    'LONG': '#66bb6a',         // Light Green
     'HOLD': '#ffa726',        // Orange
-    'SELL': '#ef5350',        // Light Red
-    'STRONG_SELL': '#c62828', // Dark Red
+    'SHORT': '#ef5350',        // Light Red
+    'STRONG_SHORT': '#c62828', // Dark Red
   };
   return colors[signal] || '#9e9e9e';
 }

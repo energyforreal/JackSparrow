@@ -126,7 +126,7 @@ export interface Prediction {
   timestamp: Date
 }
 
-export type SignalType = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL'
+export type SignalType = 'STRONG_LONG' | 'LONG' | 'HOLD' | 'SHORT' | 'STRONG_SHORT'
 
 export interface ModelConsensus {
   model_name: string

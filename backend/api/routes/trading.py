@@ -287,12 +287,12 @@ async def predict(request: PredictRequest, db: AsyncSession = Depends(get_db)):
                 if abs(pred_value) < 0.2:
                     return "HOLD"
                 if pred_value > 0.6:
-                    return "STRONG_BUY"
+                    return "STRONG_LONG"
                 if pred_value > 0.2:
-                    return "BUY"
+                    return "LONG"
                 if pred_value < -0.6:
-                    return "STRONG_SELL"
-                return "SELL"
+                    return "STRONG_SHORT"
+                return "SHORT"
 
             model_consensus: list[ModelConsensusEntry] = []
             individual_model_reasoning: list[ModelReasoningEntry] = []

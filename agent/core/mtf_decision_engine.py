@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from agent.core.entry_edge_tracker import EntryEdgeTracker
+from agent.core.signal_vocabulary import is_entry_signal, is_long_signal, is_short_signal, normalize_signal
 
 logger = structlog.get_logger()
 
@@ -129,12 +130,8 @@ def compute_context_position_size_multiplier(
     arch = (getattr(settings, "mtf_signal_architecture", "standard") or "standard").strip().lower()
     if arch != "short_tf_primary":
         return 1.0
-    if signal in ("HOLD", None, "") or signal not in (
-        "BUY",
-        "STRONG_BUY",
-        "SELL",
-        "STRONG_SELL",
-    ):
+    signal = normalize_signal(signal)
+    if signal in ("HOLD", None, "") or not is_entry_signal(signal):
         return 1.0
     by_tf = index_predictions_by_timeframe(model_predictions)
     if not by_tf:
@@ -158,7 +155,7 @@ def compute_context_position_size_multiplier(
     edge = float(getattr(settings, "mtf_context_agree_edge", 0.02))
     boost = float(getattr(settings, "mtf_context_aligned_size_multiplier", 1.15))
     cut = float(getattr(settings, "mtf_context_misaligned_size_multiplier", 0.75))
-    long_sig = signal in ("BUY", "STRONG_BUY")
+    long_sig = is_long_signal(signal)
     ctx_bull = (cb - cs) >= edge
     ctx_bear = (cs - cb) >= edge
     if long_sig:
@@ -286,14 +283,14 @@ def _synthesize_short_tf_primary(
         return _emit(blocked)
 
     if raw_signal > edge_long:
-        code = "STRONG_BUY" if buy >= slong else "BUY"
+        code = "STRONG_LONG" if buy >= slong else "LONG"
         conclusion = (
             f"{code} - short-primary {prim_tf} (long edge, context TF adjusts size only)"
         )
         return _emit((code, conclusion, conf, evidence))
 
     if raw_signal < -edge_short:
-        code = "STRONG_SELL" if sell >= sshort else "SELL"
+        code = "STRONG_SHORT" if sell >= sshort else "SHORT"
         conclusion = (
             f"{code} - short-primary {prim_tf} (short edge, context TF adjusts size only)"
         )
@@ -320,7 +317,7 @@ def synthesize_mtf_trading_decision(
     """
     Return (decision_code, conclusion, step5_confidence, evidence_lines) or None to use legacy consensus.
 
-    decision_code is one of: STRONG_BUY, BUY, STRONG_SELL, SELL, HOLD.
+    decision_code is one of: STRONG_LONG, LONG, STRONG_SHORT, SHORT, HOLD.
     """
     edge_hist_val: Optional[float] = None
 
@@ -634,15 +631,15 @@ def synthesize_mtf_trading_decision(
         if strong_long:
             return _emit(
                 (
-                    "STRONG_BUY",
-                    f"STRONG_BUY - MTF aligned (trend {trend_tf} + entry {entry_tf})",
+                    "STRONG_LONG",
+                    f"STRONG_LONG - MTF aligned (trend {trend_tf} + entry {entry_tf})",
                     e_conf,
                     evidence,
                 )
             )
         return _emit(
             (
-                "BUY",
+                "LONG",
                 f"BUY - MTF aligned (trend {trend_tf} + entry {entry_tf})",
                 e_conf,
                 evidence,
@@ -716,15 +713,15 @@ def synthesize_mtf_trading_decision(
     if strong_short:
         return _emit(
             (
-                "STRONG_SELL",
-                f"STRONG_SELL - MTF aligned (trend {trend_tf} + entry {entry_tf})",
+                "STRONG_SHORT",
+                f"STRONG_SHORT - MTF aligned (trend {trend_tf} + entry {entry_tf})",
                 e_conf,
                 evidence,
             )
         )
     return _emit(
         (
-            "SELL",
+            "SHORT",
             f"SELL - MTF aligned (trend {trend_tf} + entry {entry_tf})",
             e_conf,
             evidence,

@@ -47,7 +47,7 @@ def test_breakout_long_fires(mock_settings) -> None:
 
     engine = AgentThesisEngine()
     v = engine.evaluate("neutral", {"features": _breakout_features()})
-    assert v.signal == "BUY"
+    assert v.signal == "LONG"
     assert v.thesis_type == "breakout"
     assert "thesis_breakout_long" in v.reason_codes
 
@@ -79,7 +79,7 @@ def test_trending_regime_uses_trend_not_breakout(mock_settings) -> None:
 
     engine = AgentThesisEngine()
     v = engine.evaluate("trending", {"features": _trend_features()})
-    assert v.signal == "BUY"
+    assert v.signal == "LONG"
     assert v.thesis_type == "trend_continuation"
 
 

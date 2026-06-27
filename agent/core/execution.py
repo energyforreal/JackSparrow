@@ -36,6 +36,7 @@ from agent.core.sl_tp import (
     parse_risk_approved_side,
     rebase_sl_tp_to_fill,
 )
+from agent.core.signal_vocabulary import position_side_to_order_side, position_side_to_sl_side
 from agent.core.dynamic_sl_tp import (
     compute_sl_tp_levels,
     compute_flip_adjusted_levels,
@@ -575,8 +576,8 @@ class ExecutionEngine:
 
             payload = event.payload
             symbol = payload.get("symbol")
-            side_upper = parse_risk_approved_side(payload.get("side", "BUY"))
-            if side_upper is None:
+            side_pm = parse_risk_approved_side(payload.get("side", "long"))
+            if side_pm is None:
                 logger.warning(
                     "execution_risk_approved_invalid_side",
                     raw_side=payload.get("side"),
@@ -588,11 +589,11 @@ class ExecutionEngine:
                     symbol=symbol,
                     side=payload.get("side"),
                     stage="invalid_side",
-                    reason="side_must_be_buy_or_sell",
+                    reason="side_must_be_long_or_short",
                     trading_mode=str(getattr(settings, "trading_mode", "testnet")),
                 )
                 return
-            side_raw = side_upper
+            side_raw = side_pm
             quantity = payload.get("quantity", 0)
             price = payload.get("price", 0)
 
@@ -637,8 +638,8 @@ class ExecutionEngine:
                 )
                 return
 
-            # Normalize side to lowercase for execute_trade
-            side = "buy" if side_raw == "BUY" else "sell"
+            # Normalize to exchange order side (buy/sell)
+            side = position_side_to_order_side(side_raw)
 
             # Use payload stop_loss/take_profit when present (e.g. ATR-based), else shared helper
             stop_loss = payload.get("stop_loss")
@@ -664,7 +665,7 @@ class ExecutionEngine:
                     pf = 0.0
                 stop_loss, take_profit = compute_stop_take_prices(
                     pf,
-                    side_raw,
+                    position_side_to_sl_side(side_raw),
                     float(settings.stop_loss_percentage),
                     float(settings.take_profit_percentage),
                     use_atr_scaled=bool(getattr(settings, "use_atr_scaled_sl_tp", False))
@@ -1107,7 +1108,7 @@ class ExecutionEngine:
                 if pf0 > 0:
                     sl_c, tp_c = compute_stop_take_prices(
                         pf0,
-                        "BUY" if side == "buy" else "SELL",
+                        position_side_to_sl_side(side),
                         float(settings.stop_loss_percentage),
                         float(settings.take_profit_percentage),
                         use_atr_scaled=False,
@@ -1747,7 +1748,7 @@ class ExecutionEngine:
             return False
 
         side_pm = "long" if signed_size >= 0 else "short"
-        side_risk = "BUY" if side_pm == "long" else "SELL"
+        side_risk = position_side_to_sl_side(side_pm)
         tick_sz: Optional[float] = None
         try:
             from agent.core.product_specs import get_contract_specs
@@ -1936,7 +1937,7 @@ class ExecutionEngine:
         entry = float(position.get("entry_price") or 0)
         if entry <= 0:
             return
-        side = "BUY" if position.get("side") == "long" else "SELL"
+        side = position_side_to_sl_side(position.get("side", "long"))
         tick_raw = position.get("tick_size")
         tick_sz: Optional[float] = None
         if tick_raw is not None:
@@ -2045,7 +2046,7 @@ class ExecutionEngine:
                     atr_14 = float(atr_raw)
                 except (TypeError, ValueError):
                     atr_14 = None
-            side = "BUY" if position.get("side") == "long" else "SELL"
+            side = position_side_to_sl_side(position.get("side", "long"))
             levels = compute_sl_tp_levels(
                 entry,
                 side,

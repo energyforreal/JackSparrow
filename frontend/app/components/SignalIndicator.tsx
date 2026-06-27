@@ -2,8 +2,10 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Signal, SignalType, ReflectionSnapshot } from '@/types'
 import type { ModelEdgeSnapshot } from '@/hooks/useTradingData'
+import { Signal, ReflectionSnapshot } from '@/types'
+import type { SignalType } from '@/types'
+import { normalizeSignalType } from '@/types/enums'
 import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
@@ -21,15 +23,15 @@ interface SignalIndicatorProps {
 
 const getSignalBadgeClasses = (signal: SignalType) => {
   switch (signal) {
-    case 'STRONG_BUY':
+    case 'STRONG_LONG':
       return 'bg-emerald-700 text-white hover:bg-emerald-800'
-    case 'BUY':
+    case 'LONG':
       return 'bg-success text-white hover:bg-success/90'
     case 'HOLD':
       return 'bg-muted text-muted-foreground'
-    case 'SELL':
+    case 'SHORT':
       return 'bg-error text-white hover:bg-error/90'
-    case 'STRONG_SELL':
+    case 'STRONG_SHORT':
       return 'bg-red-800 text-white hover:bg-red-900'
     default:
       return ''
@@ -38,11 +40,11 @@ const getSignalBadgeClasses = (signal: SignalType) => {
 
 const getSignalIcon = (signal: SignalType) => {
   switch (signal) {
-    case 'STRONG_BUY':
-    case 'BUY':
+    case 'STRONG_LONG':
+    case 'LONG':
       return <TrendingUp className="h-4 w-4" />
-    case 'STRONG_SELL':
-    case 'SELL':
+    case 'STRONG_SHORT':
+    case 'SHORT':
       return <TrendingDown className="h-4 w-4" />
     default:
       return <Minus className="h-4 w-4" />
@@ -67,6 +69,8 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
     )
   }
 
+  const canonSignal = normalizeSignalType(signal.signal) ?? 'HOLD'
+
   return (
     <Card>
       <CardHeader>
@@ -83,7 +87,7 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
         <div className="flex items-center gap-4">
           {(() => {
             const isStrong =
-              signal.signal === 'STRONG_BUY' || signal.signal === 'STRONG_SELL'
+              canonSignal === 'STRONG_LONG' || canonSignal === 'STRONG_SHORT'
             return (
               <span className="relative inline-flex rounded-md">
                 {isStrong && (
@@ -95,12 +99,12 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
                 <Badge
                   className={cn(
                     'relative px-4 py-2 text-base flex items-center gap-1.5',
-                    getSignalBadgeClasses(signal.signal)
+                    getSignalBadgeClasses(canonSignal)
                   )}
-                  aria-label={`Trading signal: ${signal.signal}`}
+                  aria-label={`Trading signal: ${canonSignal}`}
                 >
-                  {getSignalIcon(signal.signal)}
-                  {signal.signal ? signal.signal.toString().replace('_', ' ') : 'Unknown'}
+                  {getSignalIcon(canonSignal)}
+                  {canonSignal ? canonSignal.toString().replace('_', ' ') : 'Unknown'}
                 </Badge>
               </span>
             )

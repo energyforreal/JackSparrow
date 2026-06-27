@@ -58,7 +58,7 @@ class StrategyCandidate:
 
     direction: str  # LONG, SHORT, FLAT
     strength: float  # 0.0 - 1.0
-    signal: str  # BUY, SELL, HOLD, STRONG_BUY, STRONG_SELL
+    signal: str  # STRONG_LONG, LONG, HOLD, SHORT, STRONG_SHORT
     reason_codes: List[str] = field(default_factory=list)
     thesis_type: str = "flat"
     confidence: float = 0.0

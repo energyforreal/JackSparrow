@@ -5,20 +5,15 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, Tuple
 
 from agent.core.config import settings
+from agent.core.signal_vocabulary import (
+    ENTRY_LONG_SIGNALS,
+    ENTRY_SHORT_SIGNALS,
+    is_long_signal,
+    is_short_signal,
+    normalize_signal,
+    signal_from_side_and_confidence,
+)
 from agent.core.strategy_types import MLValidationSnapshot
-
-
-_ENTRY_BUY = frozenset({"BUY", "STRONG_BUY"})
-_ENTRY_SELL = frozenset({"SELL", "STRONG_SELL"})
-
-
-def _signal_from_side(side: str, confidence: float) -> str:
-    s = str(side or "").upper()
-    if s in ("LONG", "BUY"):
-        return "STRONG_BUY" if confidence >= 0.85 else "BUY"
-    if s in ("SHORT", "SELL"):
-        return "STRONG_SELL" if confidence >= 0.85 else "SELL"
-    return "HOLD"
 
 
 def build_ml_validation_from_prediction(
@@ -119,21 +114,21 @@ def ml_candidate_signal_from_validation(
     if prefer_gated:
         if snapshot.final_long:
             return (
-                _signal_from_side("LONG", snapshot.model_confidence),
+                signal_from_side_and_confidence("LONG", snapshot.model_confidence),
                 snapshot.model_confidence,
                 0.05,
             )
         if snapshot.final_short:
             return (
-                _signal_from_side("SHORT", snapshot.model_confidence),
+                signal_from_side_and_confidence("SHORT", snapshot.model_confidence),
                 snapshot.model_confidence,
                 0.05,
             )
         return "HOLD", snapshot.model_confidence, 0.0
     if snapshot.confirms_long:
-        return _signal_from_side("LONG", snapshot.model_confidence), snapshot.model_confidence, 0.05
+        return signal_from_side_and_confidence("LONG", snapshot.model_confidence), snapshot.model_confidence, 0.05
     if snapshot.confirms_short:
-        return _signal_from_side("SHORT", snapshot.model_confidence), snapshot.model_confidence, 0.05
+        return signal_from_side_and_confidence("SHORT", snapshot.model_confidence), snapshot.model_confidence, 0.05
     return "HOLD", snapshot.model_confidence, 0.0
 
 
@@ -155,10 +150,10 @@ def thesis_verdict_to_strategy_candidate(verdict: Any) -> "StrategyCandidate":
     """Map ThesisVerdict to StrategyCandidate."""
     from agent.core.strategy_types import StrategyCandidate
 
-    sig = str(getattr(verdict, "signal", "HOLD") or "HOLD").upper()
-    if sig in _ENTRY_BUY:
+    sig = normalize_signal(getattr(verdict, "signal", "HOLD") or "HOLD")
+    if is_long_signal(sig):
         direction = "LONG"
-    elif sig in _ENTRY_SELL:
+    elif is_short_signal(sig):
         direction = "SHORT"
     else:
         direction = "FLAT"

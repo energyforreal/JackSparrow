@@ -7,11 +7,20 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from agent.core.config import settings
+from agent.core.signal_vocabulary import (
+    ENTRY_SIGNALS,
+    is_entry_signal,
+    is_long_signal,
+    is_short_signal,
+    normalize_signal,
+    parse_entry_side,
+    signal_to_position_side,
+)
 
 logger = structlog.get_logger()
 
-_BUY_SIGNALS = frozenset({"BUY", "STRONG_BUY"})
-_SELL_SIGNALS = frozenset({"SELL", "STRONG_SELL"})
+_BUY_SIGNALS = frozenset({"LONG", "STRONG_LONG", "BUY", "STRONG_BUY"})
+_SELL_SIGNALS = frozenset({"SHORT", "STRONG_SHORT", "SELL", "STRONG_SELL"})
 _POLICY_ENTRY_REASONS = frozenset(
     {
         "agent_thesis_confirms_ml",
@@ -37,12 +46,7 @@ def _ic_validation_enabled() -> bool:
 
 
 def _side_from_trade_signal(signal: str) -> Optional[str]:
-    s = str(signal or "").upper()
-    if s in _BUY_SIGNALS:
-        return "BUY"
-    if s in _SELL_SIGNALS:
-        return "SELL"
-    return None
+    return signal_to_position_side(signal)
 
 
 def _normalize_predictions(model_predictions: Any) -> List[Dict[str, Any]]:
@@ -77,11 +81,11 @@ def _policy_supports_entry(
     if not isinstance(policy_verdict, dict):
         return False, "missing_policy_verdict"
     reasons = {str(r) for r in (policy_verdict.get("reason_codes") or [])}
-    verdict_sig = str(policy_verdict.get("signal") or "").upper()
-    trade_sig = str(signal or "").upper()
+    verdict_sig = normalize_signal(policy_verdict.get("signal") or "")
+    trade_sig = normalize_signal(signal)
     if verdict_sig != trade_sig:
         return False, f"policy_signal_mismatch={verdict_sig}"
-    if verdict_sig not in _BUY_SIGNALS | _SELL_SIGNALS:
+    if not is_entry_signal(verdict_sig):
         return False, "policy_signal_not_entry"
     if reasons & _POLICY_ENTRY_REASONS:
         matched = sorted(reasons & _POLICY_ENTRY_REASONS)[0]
@@ -95,11 +99,11 @@ def _v43_gates_passed(market_context: Dict[str, Any], side: str) -> Tuple[bool, 
     ml_val = market_context.get("ml_validation")
     if not isinstance(ml_val, dict):
         return False, "ic_validation_missing"
-    if side == "BUY":
+    if side == "long":
         if not bool(ml_val.get("final_long")):
             return False, "ic_validation_final_long_false"
         return True, "ic_validation_long_gates_passed"
-    if side == "SELL":
+    if side == "short":
         if not bool(getattr(settings, "jacksparrow_v43_short_execution_enabled", False)):
             return False, "ic_validation_short_not_enabled"
         if not bool(ml_val.get("final_short")):
@@ -121,10 +125,8 @@ def validate_entry_signal(
     if not _ic_validation_enabled():
         return True, "ic_validation_guard_disabled"
 
-    trade_side = str(side or "").upper()
-    if trade_side not in ("BUY", "SELL"):
-        trade_side = _side_from_trade_signal(signal) or ""
-    if trade_side not in ("BUY", "SELL"):
+    trade_side = parse_entry_side(side) or signal_to_position_side(signal) or ""
+    if trade_side not in ("long", "short"):
         return False, "not_an_entry_signal"
 
     preds = _normalize_predictions(model_predictions)

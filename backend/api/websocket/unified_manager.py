@@ -76,7 +76,9 @@ def _should_replay_cached_signal(cached: Dict[str, Any]) -> bool:
         f = float(fc) if fc is not None else 0.0
     except (TypeError, ValueError):
         f = 0.0
-    actionable = sig in ("BUY", "SELL", "STRONG_BUY", "STRONG_SELL")
+    from agent.core.signal_vocabulary import is_entry_signal
+
+    actionable = is_entry_signal(sig)
     if c <= 0 and f <= 0 and not actionable:
         return False
     return True

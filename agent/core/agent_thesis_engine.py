@@ -13,6 +13,13 @@ from typing import Any, Dict, List, Optional, Set
 import structlog
 
 from agent.core.config import settings
+from agent.core.signal_vocabulary import (
+    ENTRY_SIGNALS,
+    is_entry_signal,
+    is_long_signal,
+    is_short_signal,
+    normalize_signal,
+)
 from feature_store.jacksparrow_v43_horizon import (
     forward_bars_to_minutes,
     thesis_intended_forward_bars,
@@ -20,7 +27,7 @@ from feature_store.jacksparrow_v43_horizon import (
 
 logger = structlog.get_logger()
 
-_ENTRY_SIGNALS = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
+_ENTRY_SIGNALS = ENTRY_SIGNALS
 _DEFAULT_POSITION_SIZE = 0.05
 
 # Regime -> which thesis rule families may run
@@ -39,7 +46,7 @@ _last_thesis_snapshot: Dict[str, Any] = {}
 class ThesisVerdict:
     """Rule-based agent thesis for one decision cycle."""
 
-    signal: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
+    signal: str  # STRONG_LONG, LONG, HOLD, SHORT, STRONG_SHORT
     confidence: float
     position_size: float
     reason_codes: List[str] = field(default_factory=list)
@@ -317,8 +324,8 @@ class AgentThesisEngine:
         if len(ranked) >= 2:
             runner = ranked[1]
             conf_delta = abs(float(best.confidence) - float(runner.confidence))
-            best_is_buy = str(best.signal).upper() in ("BUY", "STRONG_BUY")
-            runner_is_buy = str(runner.signal).upper() in ("BUY", "STRONG_BUY")
+            best_is_buy = is_long_signal(best.signal)
+            runner_is_buy = is_long_signal(runner.signal)
             if conf_delta < 0.05 and best_is_buy != runner_is_buy:
                 return ThesisVerdict(
                     signal="HOLD",
@@ -344,8 +351,8 @@ class AgentThesisEngine:
         market_context: Dict[str, Any],
     ) -> ThesisVerdict:
         """Downgrade entry signals near exchange price-band limits."""
-        sig = str(verdict.signal or "HOLD").upper()
-        if sig not in _ENTRY_SIGNALS:
+        sig = normalize_signal(verdict.signal)
+        if not is_entry_signal(sig):
             return verdict
         prox = market_context.get("price_band_proximity")
         if not isinstance(prox, dict):
@@ -355,7 +362,8 @@ class AgentThesisEngine:
         )
         dist_upper = float(prox.get("dist_upper_pct") or 999.0)
         dist_lower = float(prox.get("dist_lower_pct") or 999.0)
-        if sig in ("BUY", "STRONG_BUY") and dist_upper < veto_pct:
+        sig = normalize_signal(sig)
+        if is_long_signal(sig) and dist_upper < veto_pct:
             return ThesisVerdict(
                 signal="HOLD",
                 confidence=0.0,
@@ -366,7 +374,7 @@ class AgentThesisEngine:
                 ],
                 thesis_type="flat",
             )
-        if sig in ("SELL", "STRONG_SELL") and dist_lower < veto_pct:
+        if is_short_signal(sig) and dist_lower < veto_pct:
             return ThesisVerdict(
                 signal="HOLD",
                 confidence=0.0,
@@ -398,7 +406,7 @@ class AgentThesisEngine:
                 return None
             conf = min(0.88, 0.6 + 0.05 * min(basis_z - basis_thr, 4.0))
             return ThesisVerdict(
-                signal="SELL",
+                signal="SHORT",
                 confidence=conf,
                 position_size=0.0,
                 reason_codes=[
@@ -411,7 +419,7 @@ class AgentThesisEngine:
         if basis_z < -basis_thr:
             conf = min(0.88, 0.6 + 0.05 * min(-basis_z - basis_thr, 4.0))
             return ThesisVerdict(
-                signal="BUY",
+                signal="LONG",
                 confidence=conf,
                 position_size=0.0,
                 reason_codes=[
@@ -437,14 +445,14 @@ class AgentThesisEngine:
             if not short_enabled:
                 return None
             return ThesisVerdict(
-                signal="SELL",
+                signal="SHORT",
                 confidence=min(0.85, 0.62 + 0.03 * min(fxoi - thr, 5.0)),
                 position_size=0.0,
                 reason_codes=["thesis_funding_crowding_short", f"funding_x_oi={fxoi:.2f}"],
                 thesis_type="funding_crowding",
             )
         return ThesisVerdict(
-            signal="BUY",
+            signal="LONG",
             confidence=min(0.85, 0.62 + 0.03 * min(-fxoi - thr, 5.0)),
             position_size=0.0,
             reason_codes=["thesis_funding_crowding_long", f"funding_x_oi={fxoi:.2f}"],
@@ -467,7 +475,7 @@ class AgentThesisEngine:
 
         conf = min(0.92, 0.65 + 0.01 * min(adx - adx_min, 15))
         return ThesisVerdict(
-            signal="BUY",
+            signal="LONG",
             confidence=conf,
             position_size=0.0,
             reason_codes=[
@@ -496,7 +504,7 @@ class AgentThesisEngine:
 
         conf = min(0.88, 0.6 + 0.15 * min(h1 * 100, 1.0))
         return ThesisVerdict(
-            signal="BUY",
+            signal="LONG",
             confidence=conf,
             position_size=0.0,
             reason_codes=[
@@ -520,7 +528,7 @@ class AgentThesisEngine:
             return None
 
         return ThesisVerdict(
-            signal="BUY",
+            signal="LONG",
             confidence=0.62,
             position_size=0.0,
             reason_codes=[
@@ -547,7 +555,7 @@ class AgentThesisEngine:
 
         conf = min(0.92, 0.65 + 0.01 * min(adx - adx_min, 15))
         return ThesisVerdict(
-            signal="SELL",
+            signal="SHORT",
             confidence=conf,
             position_size=0.0,
             reason_codes=[
@@ -585,7 +593,7 @@ class AgentThesisEngine:
 
         conf = min(0.88, 0.6 + 0.15 * min(abs(h1) * 100, 1.0))
         return ThesisVerdict(
-            signal="SELL",
+            signal="SHORT",
             confidence=conf,
             position_size=0.0,
             reason_codes=[
@@ -607,7 +615,7 @@ class AgentThesisEngine:
             return None
 
         return ThesisVerdict(
-            signal="SELL",
+            signal="SHORT",
             confidence=0.62,
             position_size=0.0,
             reason_codes=[

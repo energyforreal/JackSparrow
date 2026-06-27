@@ -12,13 +12,16 @@ from typing import List
 class SignalType(str, Enum):
     """Trading signal type enumeration.
     
+    Canonical labels use LONG/SHORT. Legacy BUY/SELL aliases are accepted via
+    ``normalize()`` and ``is_valid()`` for backward compatibility.
+    
     Must match frontend SignalType in frontend/types/enums.ts
     """
-    STRONG_BUY = "STRONG_BUY"
-    BUY = "BUY"
+    STRONG_LONG = "STRONG_LONG"
+    LONG = "LONG"
     HOLD = "HOLD"
-    SELL = "SELL"
-    STRONG_SELL = "STRONG_SELL"
+    SHORT = "SHORT"
+    STRONG_SHORT = "STRONG_SHORT"
     
     @classmethod
     def get_valid_values(cls) -> List[str]:
@@ -27,8 +30,10 @@ class SignalType(str, Enum):
     
     @classmethod
     def is_valid(cls, value: str) -> bool:
-        """Check if value is a valid signal."""
-        return value in cls.get_valid_values()
+        """Check if value is a valid signal (canonical or legacy alias)."""
+        from agent.core.signal_vocabulary import normalize_signal
+        normalized = normalize_signal(value, default="")
+        return normalized in cls.get_valid_values()
     
     @classmethod
     def normalize(cls, value: str, default: str = "HOLD") -> str:
@@ -39,10 +44,12 @@ class SignalType(str, Enum):
             default: Default value if invalid
             
         Returns:
-            Valid signal value
+            Valid canonical signal value
         """
-        if cls.is_valid(value):
-            return value
+        from agent.core.signal_vocabulary import normalize_signal
+        normalized = normalize_signal(value, default=default)
+        if normalized in cls.get_valid_values():
+            return normalized
         return default
 
 
@@ -133,10 +140,10 @@ class WebSocketResource(str, Enum):
 
 # Confidence thresholds for signal mapping
 SIGNAL_CONFIDENCE_THRESHOLDS = {
-    "STRONG_BUY_MIN": 0.8,
-    "BUY_MIN": 0.65,
-    "SELL_MAX": 0.35,
-    "STRONG_SELL_MAX": 0.2,
+    "STRONG_LONG_MIN": 0.8,
+    "LONG_MIN": 0.65,
+    "SHORT_MAX": 0.35,
+    "STRONG_SHORT_MAX": 0.2,
 }
 
 
@@ -149,13 +156,13 @@ def get_signal_from_confidence(confidence: float) -> str:
     Returns:
         Corresponding SignalType value
     """
-    if confidence >= SIGNAL_CONFIDENCE_THRESHOLDS["STRONG_BUY_MIN"]:
-        return SignalType.STRONG_BUY.value
-    elif confidence >= SIGNAL_CONFIDENCE_THRESHOLDS["BUY_MIN"]:
-        return SignalType.BUY.value
-    elif confidence <= SIGNAL_CONFIDENCE_THRESHOLDS["STRONG_SELL_MAX"]:
-        return SignalType.STRONG_SELL.value
-    elif confidence <= SIGNAL_CONFIDENCE_THRESHOLDS["SELL_MAX"]:
-        return SignalType.SELL.value
+    if confidence >= SIGNAL_CONFIDENCE_THRESHOLDS["STRONG_LONG_MIN"]:
+        return SignalType.STRONG_LONG.value
+    elif confidence >= SIGNAL_CONFIDENCE_THRESHOLDS["LONG_MIN"]:
+        return SignalType.LONG.value
+    elif confidence <= SIGNAL_CONFIDENCE_THRESHOLDS["STRONG_SHORT_MAX"]:
+        return SignalType.STRONG_SHORT.value
+    elif confidence <= SIGNAL_CONFIDENCE_THRESHOLDS["SHORT_MAX"]:
+        return SignalType.SHORT.value
     else:
         return SignalType.HOLD.value

@@ -2,7 +2,9 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Signal, SignalType, Trade } from '@/types'
+import { Signal, Trade } from '@/types'
+import type { SignalType } from '@/types'
+import { normalizeSignalType } from '@/types/enums'
 import { cn } from '@/lib/utils'
 import { formatConfidence, formatCurrency, formatDateTime } from '@/utils/formatters'
 import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
@@ -25,15 +27,15 @@ interface TradingDecisionProps {
 
 const getSignalBadgeClasses = (signal: SignalType) => {
   switch (signal) {
-    case 'STRONG_BUY':
+    case 'STRONG_LONG':
       return 'bg-emerald-700 text-white hover:bg-emerald-800'
-    case 'BUY':
+    case 'LONG':
       return 'bg-success text-white hover:bg-success/90'
     case 'HOLD':
       return 'bg-muted text-muted-foreground'
-    case 'SELL':
+    case 'SHORT':
       return 'bg-error text-white hover:bg-error/90'
-    case 'STRONG_SELL':
+    case 'STRONG_SHORT':
       return 'bg-red-800 text-white hover:bg-red-900'
     default:
       return ''
@@ -42,11 +44,11 @@ const getSignalBadgeClasses = (signal: SignalType) => {
 
 const getDecisionAction = (signal: SignalType): string => {
   switch (signal) {
-    case 'STRONG_BUY':
-    case 'BUY':
+    case 'STRONG_LONG':
+    case 'LONG':
       return 'Enter Long Position'
-    case 'STRONG_SELL':
-    case 'SELL':
+    case 'STRONG_SHORT':
+    case 'SHORT':
       return 'Enter Short Position'
     case 'HOLD':
       return 'Wait for Better Opportunity'
@@ -73,7 +75,8 @@ export function TradingDecision({
   usdInrRate,
   contractValueBtc,
 }: TradingDecisionProps) {
-  const hasSignal = signal && signal.signal
+  const canonSignal = signal ? normalizeSignalType(signal.signal) ?? 'HOLD' : 'HOLD'
+  const hasSignal = signal && canonSignal !== 'HOLD'
   const hasRecentTrade = recentTrade !== null && recentTrade !== undefined
   const formatTradeValueInr = (trade: Trade) => {
     const explicit = parseFiniteNumber(trade.trade_value_inr)
@@ -111,14 +114,14 @@ export function TradingDecision({
                 <Badge
                   className={cn(
                     'px-4 py-2 text-base',
-                    getSignalBadgeClasses(signal.signal)
+                    getSignalBadgeClasses(canonSignal)
                   )}
                 >
-                  {signal.signal.replace('_', ' ')}
+                  {canonSignal.replace('_', ' ')}
                 </Badge>
                 <div className="flex-1">
                   <div className="text-sm font-medium">
-                    {getDecisionAction(signal.signal)}
+                    {getDecisionAction(canonSignal)}
                   </div>
                 </div>
               </div>

@@ -43,6 +43,14 @@ from agent.core.agent_policy_engine import (
     build_ml_evidence_from_orchestrator_result,
 )
 from agent.core.config import settings
+from agent.core.signal_vocabulary import (
+    ENTRY_SIGNALS,
+    is_entry_signal,
+    is_long_signal,
+    is_short_signal,
+    normalize_signal,
+    signal_to_position_side,
+)
 from agent.core.agent_introspection import build_introspection_snapshot
 from agent.core.v43_market_frames import V43_MIN_5M_ROWS, closed_5m_bar_index
 from agent.core.v43_signal_gates import (
@@ -230,8 +238,8 @@ def _enrich_confidence_semantics(payload: Dict[str, Any]) -> None:
             except (TypeError, ValueError):
                 chain_final = None
     display_conf = chain_final if chain_final is not None else policy_conf
-    signal = str(payload.get("signal") or "HOLD").upper()
-    actionable = signal in ("BUY", "SELL", "STRONG_BUY", "STRONG_SELL")
+    signal = normalize_signal(payload.get("signal") or "HOLD")
+    actionable = is_entry_signal(signal)
     payload["policy_confidence"] = policy_conf
     payload["display_confidence"] = display_conf
     payload["is_actionable_entry"] = actionable
@@ -1394,7 +1402,7 @@ class MCPOrchestrator:
             reason_codes=portfolio_guard.reason_codes,
         )
 
-        _entry_signals = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
+        _entry_signals = ENTRY_SIGNALS
         _gated_adopt_codes = frozenset(
             {
                 "fusion_ml_gated_thesis_neutral",
@@ -1431,11 +1439,7 @@ class MCPOrchestrator:
             "skip_volatility_requirement": True,
             "margin_cap_fraction": pos_hint if policy_entry else 0.0,
             "unc_scale": u_scale,
-            "desired_side": (
-                "long"
-                if policy_verdict.signal in ("BUY", "STRONG_BUY")
-                else ("short" if policy_verdict.signal in ("SELL", "STRONG_SELL") else None)
-            ),
+            "desired_side": signal_to_position_side(policy_verdict.signal),
         }
         market_context_for_reasoning["v43_execution_profile"] = v43_exec
         if policy_entry:
@@ -1781,20 +1785,20 @@ class MCPOrchestrator:
     def _extract_decision_from_reasoning(self, reasoning_chain: MCPReasoningChain) -> Dict[str, Any]:
         """Extract trading decision from reasoning chain conclusion."""
         conclusion = (reasoning_chain.conclusion or "").strip()
-        token = conclusion.upper().split()[0].rstrip(":-,") if conclusion else "HOLD"
+        token = normalize_signal(conclusion.upper().split()[0].rstrip(":-,") if conclusion else "HOLD")
 
         default_size = float(getattr(settings, "max_position_size", 0.1) or 0.1)
-        if token == "STRONG_BUY":
-            signal = "STRONG_BUY"
+        if token == "STRONG_LONG":
+            signal = "STRONG_LONG"
             position_size = default_size
-        elif token == "BUY":
-            signal = "BUY"
+        elif token == "LONG":
+            signal = "LONG"
             position_size = max(0.01, default_size * 0.5)
-        elif token == "STRONG_SELL":
-            signal = "STRONG_SELL"
+        elif token == "STRONG_SHORT":
+            signal = "STRONG_SHORT"
             position_size = default_size
-        elif token == "SELL":
-            signal = "SELL"
+        elif token == "SHORT":
+            signal = "SHORT"
             position_size = max(0.01, default_size * 0.5)
         else:
             signal = "HOLD"
@@ -1905,9 +1909,9 @@ class MCPOrchestrator:
             return "HOLD"
 
         if value > 0.3:
-            return "BUY"
+            return "LONG"
         if value < -0.3:
-            return "SELL"
+            return "SHORT"
         return "HOLD"
 
     def _build_model_predictions_for_reasoning(
@@ -2343,9 +2347,7 @@ class MCPOrchestrator:
                 position_size = verdict.position_size
                 confidence = verdict.confidence
 
-                _entry_signals = frozenset(
-                    {"BUY", "SELL", "STRONG_BUY", "STRONG_SELL"}
-                )
+                _entry_signals = ENTRY_SIGNALS
                 mctx = result.get("market_context") if isinstance(result.get("market_context"), dict) else {}
                 v43_bar = mctx.get("v43_closed_bar_index")
                 bar_i_hold_skip: Optional[int] = None

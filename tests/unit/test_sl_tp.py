@@ -10,18 +10,18 @@ from agent.core.sl_tp import (
 
 
 def test_parse_risk_approved_side():
-    assert parse_risk_approved_side("buy") == "BUY"
-    assert parse_risk_approved_side("  sell ") == "SELL"
-    assert parse_risk_approved_side("LONG") == "BUY"
-    assert parse_risk_approved_side("SHORT") == "SELL"
-    assert parse_risk_approved_side(None) == "BUY"
+    assert parse_risk_approved_side("buy") == "long"
+    assert parse_risk_approved_side("  sell ") == "short"
+    assert parse_risk_approved_side("LONG") == "long"
+    assert parse_risk_approved_side("SHORT") == "short"
+    assert parse_risk_approved_side(None) == "long"
     assert parse_risk_approved_side("HOLD") is None
 
 
-def test_compute_fixed_buy():
+def test_compute_fixed_long():
     sl, tp = compute_stop_take_prices(
         100_000.0,
-        "BUY",
+        "LONG",
         0.01,
         0.02,
         tick_size=0.5,
@@ -34,7 +34,7 @@ def test_compute_atr_wider_than_pct():
     # ATR branch: max(entry*pct, atr*mult)
     sl, tp = compute_stop_take_prices(
         100_000.0,
-        "BUY",
+        "LONG",
         0.01,
         0.015,
         use_atr_scaled=True,

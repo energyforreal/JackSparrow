@@ -10,19 +10,12 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 from agent.core.futures_utils import round_to_tick
+from agent.core.signal_vocabulary import parse_entry_side, position_side_to_sl_side
 
 
 def parse_risk_approved_side(side_raw: Any) -> Optional[str]:
-    """Normalize payload side to ``BUY`` or ``SELL``. Returns None if unusable."""
-    if side_raw is None:
-        s = "BUY"
-    else:
-        s = str(side_raw).strip().upper()
-    if s in ("BUY", "LONG"):
-        return "BUY"
-    if s in ("SELL", "SHORT"):
-        return "SELL"
-    return None
+    """Normalize payload side to lowercase ``long`` or ``short``. Returns None if unusable."""
+    return parse_entry_side(side_raw)
 
 
 def _enforce_min_sl_distance(
@@ -69,7 +62,7 @@ def compute_stop_take_prices(
 
     Args:
         entry_price: Reference entry (quote currency).
-        side: ``BUY`` or ``SELL`` (case-insensitive).
+        side: ``LONG``/``SHORT`` or legacy ``BUY``/``SELL`` (case-insensitive).
         stop_loss_pct: Fraction of price (e.g. 0.01 = 1%).
         take_profit_pct: Fraction of price.
         use_atr_scaled: Whether to try ATR scaling.
@@ -84,13 +77,11 @@ def compute_stop_take_prices(
     if entry_price <= 0 or not (entry_price == entry_price):  # NaN
         return None, None
 
-    s = str(side or "BUY").strip().upper()
-    if s in ("LONG",):
-        s = "BUY"
-    if s in ("SHORT",):
-        s = "SELL"
-    if s not in ("BUY", "SELL"):
+    pos_side = parse_entry_side(side)
+    if pos_side is None:
         return None, None
+    s = position_side_to_sl_side(pos_side)
+    is_long = s == "LONG"
 
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
@@ -101,7 +92,7 @@ def compute_stop_take_prices(
             if atr_f > 0:
                 sl_dist = max(entry_price * float(stop_loss_pct), atr_f * float(atr_sl_mult))
                 tp_dist = max(entry_price * float(take_profit_pct), atr_f * float(atr_tp_mult))
-                if s == "BUY":
+                if is_long:
                     stop_loss = entry_price - sl_dist
                     take_profit = entry_price + tp_dist
                 else:
@@ -115,12 +106,12 @@ def compute_stop_take_prices(
         stop_loss = None
         take_profit = None
         if stop_loss_pct:
-            if s == "BUY":
+            if is_long:
                 stop_loss = entry_price * (1.0 - float(stop_loss_pct))
             else:
                 stop_loss = entry_price * (1.0 + float(stop_loss_pct))
         if take_profit_pct:
-            if s == "BUY":
+            if is_long:
                 take_profit = entry_price * (1.0 + float(take_profit_pct))
             else:
                 take_profit = entry_price * (1.0 - float(take_profit_pct))

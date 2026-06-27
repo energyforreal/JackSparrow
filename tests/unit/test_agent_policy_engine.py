@@ -15,21 +15,21 @@ from agent.events.schemas import MLEvidenceSnapshot
 
 
 def test_conclusion_strong_buy_before_buy() -> None:
-    sig, _ = conclusion_to_ml_signal_and_size("STRONG_BUY consensus")
-    assert sig == "STRONG_BUY"
+    sig, _ = conclusion_to_ml_signal_and_size("STRONG_LONG consensus")
+    assert sig == "STRONG_LONG"
 
 
 def test_build_ml_evidence_from_orchestrator_result_shapes() -> None:
     result = {
         "symbol": "BTCUSD",
-        "decision": {"signal": "BUY", "confidence": 0.8, "position_size": 0.05},
+        "decision": {"signal": "LONG", "confidence": 0.8, "position_size": 0.05},
         "market_context": {"v43_gate_reject": None, "regime": "trend"},
         "models": {"consensus_prediction": 0.2, "consensus_confidence": 0.7, "predictions": []},
         "model_predictions": [],
     }
     snap = build_ml_evidence_from_orchestrator_result(result)
     assert snap.symbol == "BTCUSD"
-    assert snap.ml_candidate_signal == "BUY"
+    assert snap.ml_candidate_signal == "LONG"
     assert snap.source == "v43_orchestrator"
 
 
@@ -40,11 +40,11 @@ def test_force_hold_vetoes_entry(monkeypatch: pytest.MonkeyPatch) -> None:
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
-        ml_candidate_signal="BUY",
+        ml_candidate_signal="LONG",
         ml_candidate_confidence=0.9,
         ml_candidate_position_size=0.1,
     )
-    v = engine.evaluate(ml_evidence=ev, conclusion="BUY", market_context={})
+    v = engine.evaluate(ml_evidence=ev, conclusion="LONG", market_context={})
     assert v.signal == "HOLD"
     assert "agent_policy_force_hold" in v.reason_codes
     assert v.adopted_ml_candidate is False
@@ -57,12 +57,12 @@ def test_default_ratifies_ml_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
-        ml_candidate_signal="SELL",
+        ml_candidate_signal="SHORT",
         ml_candidate_confidence=0.72,
         ml_candidate_position_size=0.05,
     )
-    v = engine.evaluate(ml_evidence=ev, conclusion="SELL", market_context={})
-    assert v.signal == "SELL"
+    v = engine.evaluate(ml_evidence=ev, conclusion="SHORT", market_context={})
+    assert v.signal == "SHORT"
     assert v.adopted_ml_candidate is True
     assert "agent_ratified_ml_evidence" in v.reason_codes
 
@@ -82,7 +82,7 @@ def _mock_thesis(signal: str, thesis_type: str = "breakout") -> MagicMock:
 def test_ml_or_thesis_uses_thesis_when_ml_hold(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
     monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "ml_or_thesis")
-    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("BUY"))
+    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("LONG"))
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
@@ -91,7 +91,7 @@ def test_ml_or_thesis_uses_thesis_when_ml_hold(monkeypatch: pytest.MonkeyPatch) 
         ml_candidate_position_size=0.0,
     )
     v = engine.evaluate(ml_evidence=ev, market_context={"features": {}})
-    assert v.signal == "BUY"
+    assert v.signal == "LONG"
     assert "agent_thesis_origin" in v.reason_codes
     assert v.adopted_ml_candidate is False
 
@@ -99,11 +99,11 @@ def test_ml_or_thesis_uses_thesis_when_ml_hold(monkeypatch: pytest.MonkeyPatch) 
 def test_ml_and_thesis_requires_agreement(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
     monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "ml_and_thesis")
-    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("SELL"))
+    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("SHORT"))
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
-        ml_candidate_signal="BUY",
+        ml_candidate_signal="LONG",
         ml_candidate_confidence=0.8,
         ml_candidate_position_size=0.05,
     )
@@ -130,13 +130,13 @@ def test_ml_and_thesis_adopts_gated_ml_when_thesis_hold(monkeypatch: pytest.Monk
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
-        ml_candidate_signal="SELL",
+        ml_candidate_signal="SHORT",
         ml_candidate_confidence=0.72,
         ml_candidate_position_size=0.05,
         ml_confirms=True,
     )
     v = engine.evaluate(ml_evidence=ev, market_context={})
-    assert v.signal == "SELL"
+    assert v.signal == "SHORT"
     assert "fusion_ml_gated_thesis_neutral" in v.reason_codes
     assert v.adopted_ml_candidate is True
 
@@ -144,16 +144,16 @@ def test_ml_and_thesis_adopts_gated_ml_when_thesis_hold(monkeypatch: pytest.Monk
 def test_ml_and_thesis_agrees(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
     monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "ml_and_thesis")
-    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("BUY"))
+    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("LONG"))
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
-        ml_candidate_signal="BUY",
+        ml_candidate_signal="LONG",
         ml_candidate_confidence=0.8,
         ml_candidate_position_size=0.05,
     )
     v = engine.evaluate(ml_evidence=ev, market_context={})
-    assert v.signal == "BUY"
+    assert v.signal == "LONG"
     assert v.adopted_ml_candidate is True
     assert "agent_thesis_confirms_ml" in v.reason_codes
 
@@ -173,7 +173,7 @@ def test_thesis_veto_ml_blocks_on_crisis(monkeypatch: pytest.MonkeyPatch) -> Non
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
-        ml_candidate_signal="BUY",
+        ml_candidate_signal="LONG",
         ml_candidate_confidence=0.9,
         ml_candidate_position_size=0.1,
     )
@@ -185,7 +185,7 @@ def test_thesis_veto_ml_blocks_on_crisis(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_thesis_only_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
     monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "thesis_only")
-    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("BUY"))
+    engine = AgentPolicyEngine(thesis_engine=_mock_thesis("LONG"))
     ev = MLEvidenceSnapshot(
         symbol="BTCUSD",
         source="v43_orchestrator",
@@ -194,5 +194,5 @@ def test_thesis_only_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         ml_candidate_position_size=0.0,
     )
     v = engine.evaluate(ml_evidence=ev, market_context={})
-    assert v.signal == "BUY"
+    assert v.signal == "LONG"
     assert "agent_thesis_entry" in v.reason_codes

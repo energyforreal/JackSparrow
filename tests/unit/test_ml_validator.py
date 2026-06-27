@@ -48,7 +48,7 @@ def test_ml_candidate_signal_from_gated_validation() -> None:
         final_long=True,
     )
     sig, conf, size = ml_candidate_signal_from_validation(snap, prefer_gated=True)
-    assert sig in ("BUY", "STRONG_BUY")
+    assert sig in ("LONG", "STRONG_LONG")
     assert conf == pytest.approx(0.82)
 
 

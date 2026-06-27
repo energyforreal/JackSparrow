@@ -9,6 +9,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Mapping, Optional, Tuple
 
+from agent.core.signal_vocabulary import (
+    is_entry_signal,
+    is_long_signal,
+    normalize_signal,
+)
+
 
 class EntrySignalFilter:
     """Rolling max trades/hour and optional breakout score floor for BUY."""
@@ -38,12 +44,8 @@ class EntrySignalFilter:
         """
         Returns (signal, reason). Does not record a trade — call record_trade() after RiskApproved.
         """
-        if signal == "HOLD" or signal not in (
-            "BUY",
-            "STRONG_BUY",
-            "SELL",
-            "STRONG_SELL",
-        ):
+        signal = normalize_signal(signal)
+        if signal == "HOLD" or not is_entry_signal(signal):
             return signal, "not an entry signal"
 
         ts = now or datetime.now(timezone.utc)
@@ -55,7 +57,7 @@ class EntrySignalFilter:
         if self.max_trades_per_hour > 0 and len(self._trade_timestamps) >= self.max_trades_per_hour:
             return "HOLD", f"max_trades_per_hour={self.max_trades_per_hour}"
 
-        if signal in ("BUY", "STRONG_BUY") and self.min_breakout_score > 0:
+        if is_long_signal(signal) and self.min_breakout_score > 0:
             raw = features.get("bo_breakout_score")
             if raw is not None:
                 try:

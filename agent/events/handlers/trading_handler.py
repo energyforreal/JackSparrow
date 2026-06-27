@@ -27,6 +27,13 @@ from agent.core.product_specs import get_contract_specs
 from agent.core.decision_timestamp import decision_payload_age_seconds
 from agent.core.learning_system import LearningSystem
 from agent.core.signal_filter import EntrySignalFilter
+from agent.core.signal_vocabulary import (
+    is_entry_signal,
+    is_long_signal,
+    is_short_signal,
+    normalize_signal,
+    signal_to_position_side,
+)
 from agent.core.redis_config import get_cache
 from agent.learning.dynamic_thresholds import (
     get_effective_min_confidence_threshold,
@@ -126,7 +133,7 @@ class TradingEventHandler:
         """True if risk/reward ratio meets minimum (entry profit gate)."""
         if stop_loss_pct <= 0 or take_profit_pct <= 0:
             return True  # No stops configured, allow
-        if side == "long" or side == "BUY":
+        if side == "long" or side == "LONG":
             risk = entry_price * stop_loss_pct
             reward = entry_price * take_profit_pct
         else:
@@ -285,7 +292,7 @@ class TradingEventHandler:
     async def handle_decision_ready_for_trading(self, event: DecisionReadyEvent):
         """Handle decision ready event - validate risk and publish RiskApprovedEvent if approved.
 
-        For BUY/SELL signals, performs risk validation and publishes RiskApprovedEvent
+        For LONG/SHORT entry signals, performs risk validation and publishes RiskApprovedEvent
         to trigger trade execution. Skips HOLD signals.
 
         Args:
@@ -294,7 +301,7 @@ class TradingEventHandler:
         try:
             payload = event.payload
             symbol = payload.get("symbol", settings.trading_symbol or "BTCUSD")
-            signal = payload.get("signal")
+            signal = normalize_signal(payload.get("signal"))
             confidence = payload.get("confidence", 0.0)
             position_size = payload.get("position_size", 0.0)
 
@@ -436,13 +443,8 @@ class TradingEventHandler:
             signal_path_diag: Dict[str, Any] = {}
             if not minimal_entry and v43_exec_enabled:
                 signal_path_diag = {"v43_execution_profile": True}
-            if signal in ("BUY", "STRONG_BUY"):
-                side = "BUY"
-                risk_side = "long"
-            elif signal in ("SELL", "STRONG_SELL"):
-                side = "SELL"
-                risk_side = "short"
-            else:
+            entry_side = signal_to_position_side(signal)
+            if entry_side is None:
                 self._log_entry_rejected(
                     "unexpected_hold_signal",
                     symbol=symbol,
@@ -451,6 +453,8 @@ class TradingEventHandler:
                     **diagnostics_base,
                 )
                 return
+            side = entry_side
+            risk_side = entry_side
 
             # Signal-reversal exit: if open position contradicts signal, close first and return
             if self.execution_module:
@@ -475,8 +479,8 @@ class TradingEventHandler:
                         )
                 if open_pos and open_pos.get("status") == "open":
                     pos_side = open_pos.get("side", "")
-                    if (pos_side == "long" and signal in ("STRONG_SELL", "SELL")) or (
-                        pos_side == "short" and signal in ("STRONG_BUY", "BUY")
+                    if (pos_side == "long" and is_short_signal(signal)) or (
+                        pos_side == "short" and is_long_signal(signal)
                     ):
                         logger.info(
                             "signal_reversal_exit",
@@ -491,8 +495,8 @@ class TradingEventHandler:
                         if not close_result.success:
                             return
                         # Fall through to size and enter on the new side without waiting for next bar.
-                    elif (pos_side == "long" and signal in ("BUY", "STRONG_BUY")) or (
-                        pos_side == "short" and signal in ("SELL", "STRONG_SELL")
+                    elif (pos_side == "long" and is_long_signal(signal)) or (
+                        pos_side == "short" and is_short_signal(signal)
                     ):
                         self._log_entry_rejected(
                             "open_position_blocks_entry",
@@ -925,7 +929,7 @@ class TradingEventHandler:
             if not minimal_entry and getattr(settings, "mtf_confirmation_enabled", False):
                 trend_15m = features.get("trend_15m")
                 if trend_15m is not None:
-                    if signal in ("BUY", "STRONG_BUY") and trend_15m < 0:
+                    if is_long_signal(signal) and trend_15m < 0:
                         self._log_entry_rejected(
                             "mtf_filter",
                             symbol=symbol,
@@ -935,7 +939,7 @@ class TradingEventHandler:
                             **diagnostics_base,
                         )
                         return
-                    if signal in ("SELL", "STRONG_SELL") and trend_15m > 0:
+                    if is_short_signal(signal) and trend_15m > 0:
                         self._log_entry_rejected(
                             "mtf_filter",
                             symbol=symbol,
@@ -953,7 +957,7 @@ class TradingEventHandler:
                     getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)
                     or DEFAULT_ADX_RANGING_THRESHOLD
                 )
-                if adx is not None and float(adx) < adx_floor and signal in ("BUY", "SELL"):
+                if adx is not None and float(adx) < adx_floor and signal in ("LONG", "SHORT"):
                     self._log_entry_rejected(
                         "adx_ranging_filter",
                         symbol=symbol,
@@ -971,7 +975,7 @@ class TradingEventHandler:
                 if ema200 is not None:
                     try:
                         ema200_f = float(ema200)
-                        if signal in ("BUY", "STRONG_BUY") and entry_price < ema200_f:
+                        if is_long_signal(signal) and entry_price < ema200_f:
                             self._log_entry_rejected(
                                 "ema200_trend_filter",
                                 symbol=symbol,
@@ -982,7 +986,7 @@ class TradingEventHandler:
                                 **diagnostics_base,
                             )
                             return
-                        if signal in ("SELL", "STRONG_SELL") and entry_price > ema200_f:
+                        if is_short_signal(signal) and entry_price > ema200_f:
                             self._log_entry_rejected(
                                 "ema200_trend_filter",
                                 symbol=symbol,
@@ -996,10 +1000,9 @@ class TradingEventHandler:
                     except (TypeError, ValueError):
                         pass
 
-            # Feature gate: near upper Bollinger band = resistance — avoid chasing BUY
-            if not minimal_entry and getattr(settings, "feature_filter_enabled", True) and signal in (
-                "BUY",
-                "STRONG_BUY",
+            # Feature gate: near upper Bollinger band = resistance — avoid chasing longs
+            if not minimal_entry and getattr(settings, "feature_filter_enabled", True) and is_long_signal(
+                signal
             ):
                 bb_pos = features.get("bb_position")
                 if bb_pos is not None:
@@ -1023,7 +1026,7 @@ class TradingEventHandler:
                         pass
 
             if not minimal_entry and getattr(settings, "sr_strength_filter_enabled", True):
-                if signal in ("BUY", "STRONG_BUY"):
+                if is_long_signal(signal):
                     sr_at_res = features.get("sr_at_resistance")
                     if bool(sr_at_res):
                         self._log_entry_rejected(
@@ -1059,7 +1062,7 @@ class TradingEventHandler:
                                 return
                         except (TypeError, ValueError):
                             pass
-                if signal in ("SELL", "STRONG_SELL"):
+                if is_short_signal(signal):
                     sr_at_sup = features.get("sr_at_support")
                     if bool(sr_at_sup):
                         self._log_entry_rejected(
@@ -1108,7 +1111,7 @@ class TradingEventHandler:
                 signal = filtered
 
             # Clear opposite-side debounce so reversal can trade
-            opp_key = self._debounce_key(symbol, "SELL" if side == "BUY" else "BUY")
+            opp_key = self._debounce_key(symbol, "short" if side == "long" else "long")
             self._last_risk_approved.pop(opp_key, None)
 
             lots = entry_lots

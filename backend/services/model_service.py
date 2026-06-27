@@ -31,12 +31,12 @@ def _float_to_signal(value: float) -> str:
     if abs(value) < 0.2:
         return "HOLD"
     if value > 0.6:
-        return "STRONG_BUY"
+        return "STRONG_LONG"
     if value > 0.2:
-        return "BUY"
+        return "LONG"
     if value < -0.6:
-        return "STRONG_SELL"
-    return "SELL"
+        return "STRONG_SHORT"
+    return "SHORT"
 
 
 class ModelService:

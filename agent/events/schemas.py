@@ -274,7 +274,7 @@ class PolicyVerdict(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     authority: Literal["agent_policy"] = "agent_policy"
-    signal: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
+    signal: str  # STRONG_LONG, LONG, HOLD, SHORT, STRONG_SHORT
     confidence: float
     position_size: float
     reason_codes: List[str] = Field(default_factory=list)
@@ -346,7 +346,7 @@ class DecisionReadyEvent(BaseEvent):
     
     class Payload(BaseModel):
         symbol: str
-        signal: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
+        signal: str  # STRONG_LONG, LONG, HOLD, SHORT, STRONG_SHORT
         confidence: float
         position_size: float
         reasoning_chain: Dict[str, Any]
@@ -406,7 +406,7 @@ class RiskApprovedEvent(BaseEvent):
     
     class Payload(BaseModel):
         symbol: str
-        side: str  # BUY, SELL
+        side: str  # long, short (legacy BUY/SELL accepted at boundary)
         quantity: float
         price: float
         risk_score: float

@@ -20,11 +20,21 @@ from agent.core.multi_horizon_evidence import (
     build_multi_horizon_evidence,
     validate_thesis_against_multi_horizon,
 )
+from agent.core.signal_vocabulary import (
+    ENTRY_LONG_SIGNALS,
+    ENTRY_SHORT_SIGNALS,
+    ENTRY_SIGNALS,
+    is_entry_signal,
+    is_long_signal,
+    is_short_signal,
+    normalize_signal,
+    same_direction,
+)
 from feature_store.jacksparrow_v43_horizon import resolve_training_forward_bars
 
 logger = structlog.get_logger()
 
-_ENTRY_SIGNALS = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
+_ENTRY_SIGNALS = ENTRY_SIGNALS
 _POLICY_MODES = frozenset(
     {"ml_only", "thesis_only", "ml_or_thesis", "ml_and_thesis", "thesis_veto_ml"}
 )
@@ -92,10 +102,10 @@ def synthesize_market_state_intelligence(
 
     t30 = str(primary.get("trend_regime") or "")
     t1h = str(confirm.get("trend_regime") or "")
-    if t30 and t1h and t30 == t1h and "BULL" in t30 and entry_signal in ("BUY", "STRONG_BUY"):
+    if t30 and t1h and t30 == t1h and "BULL" in t30 and is_long_signal(entry_signal):
         boost = 0.05
         reasons.append("mso_mtf_trend_align_bull")
-    elif t30 and t1h and t30 == t1h and "BEAR" in t30 and entry_signal in ("SELL", "STRONG_SELL"):
+    elif t30 and t1h and t30 == t1h and "BEAR" in t30 and is_short_signal(entry_signal):
         boost = 0.05
         reasons.append("mso_mtf_trend_align_bear")
 
@@ -111,15 +121,15 @@ def synthesize_market_state_intelligence(
 def conclusion_to_ml_signal_and_size(conclusion: str) -> Tuple[str, float]:
     """Map a reasoning conclusion string to a discrete ML-style signal and default size."""
     text = (conclusion or "").strip()
-    token = text.upper().split()[0].rstrip(":-,") if text else "HOLD"
-    if token == "STRONG_BUY":
-        return "STRONG_BUY", 0.1
-    if token == "STRONG_SELL":
-        return "STRONG_SELL", 0.1
-    if token == "BUY":
-        return "BUY", 0.05
-    if token == "SELL":
-        return "SELL", 0.05
+    token = normalize_signal(text.upper().split()[0].rstrip(":-,") if text else "HOLD")
+    if token == "STRONG_LONG":
+        return "STRONG_LONG", 0.1
+    if token == "STRONG_SHORT":
+        return "STRONG_SHORT", 0.1
+    if token == "LONG":
+        return "LONG", 0.05
+    if token == "SHORT":
+        return "SHORT", 0.05
     return "HOLD", 0.0
 
 
@@ -287,14 +297,11 @@ def _opt_float(v: Any) -> Optional[float]:
 
 
 def _normalize_signal(sig: str) -> str:
-    s = str(sig or "HOLD").upper()
-    if s not in ("STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL"):
-        return "HOLD"
-    return s
+    return normalize_signal(sig)
 
 
 def _is_entry(sig: str) -> bool:
-    return _normalize_signal(sig) in _ENTRY_SIGNALS
+    return is_entry_signal(sig)
 
 
 def _ml_gated_from_context(
@@ -320,7 +327,7 @@ def _entry_signal_from_gated_context(
     market_context: Optional[Dict[str, Any]],
     ml_evidence: MLEvidenceSnapshot,
 ) -> Optional[str]:
-    """Map v43 final_long/final_short to BUY/SELL when ML candidate label is still HOLD."""
+    """Map v43 final_long/final_short to LONG/SHORT when ML candidate label is still HOLD."""
     mc = market_context if isinstance(market_context, dict) else {}
     excerpt = ml_evidence.market_context_excerpt or {}
     ml_val = mc.get("ml_validation")
@@ -330,14 +337,14 @@ def _entry_signal_from_gated_context(
         v43 = excerpt.get("v43_dedicated_decision") if isinstance(excerpt, dict) else None
         if isinstance(v43, dict):
             if v43.get("final_short"):
-                return "SELL"
+                return "SHORT"
             if v43.get("final_long"):
-                return "BUY"
+                return "LONG"
         return None
     if ml_val.get("final_short") and not ml_val.get("final_long"):
-        return "SELL"
+        return "SHORT"
     if ml_val.get("final_long") and not ml_val.get("final_short"):
-        return "BUY"
+        return "LONG"
     cand = str(ml_val.get("ml_candidate_signal") or ml_evidence.ml_candidate_signal or "")
     return cand if _is_entry(_normalize_signal(cand)) else None
 
@@ -418,12 +425,7 @@ def _thesis_blocks_gated_ml_adoption(thesis: ThesisVerdict) -> bool:
 
 
 def _same_direction(a: str, b: str) -> bool:
-    sa, sb = _normalize_signal(a), _normalize_signal(b)
-    if sa in ("BUY", "STRONG_BUY") and sb in ("BUY", "STRONG_BUY"):
-        return True
-    if sa in ("SELL", "STRONG_SELL") and sb in ("SELL", "STRONG_SELL"):
-        return True
-    return sa == sb == "HOLD"
+    return same_direction(a, b)
 
 
 def _multi_horizon_evidence_from_context(
@@ -618,8 +620,8 @@ def _fuse_signals(
             mh = _multi_horizon_evidence_from_context(mc, ml_evidence)
             th_h = int(thesis.intended_horizon_bars or 0)
             if mh is not None and th_h > 0:
-                th_dir = "LONG" if th_sig in ("BUY", "STRONG_BUY") else (
-                    "SHORT" if th_sig in ("SELL", "STRONG_SELL") else "FLAT"
+                th_dir = "LONG" if is_long_signal(th_sig) else (
+                    "SHORT" if is_short_signal(th_sig) else "FLAT"
                 )
                 ok, mh_reasons = validate_thesis_against_multi_horizon(
                     th_dir, th_h, mh
