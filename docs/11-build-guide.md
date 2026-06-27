@@ -359,7 +359,11 @@ These variables can be added to the root `.env` file if you need to customize ag
 IC_MODE=true
 MODEL_DIR=./agent/model_storage/JackSparrow_IC_BTCUSD
 AGENT_POLICY_MODE=ml_or_thesis
-REQUIRE_ML_SIGNAL_FOR_ORDERS=false
+REQUIRE_IC_VALIDATION_FOR_ORDERS=false
+# Deprecated alias: REQUIRE_ML_SIGNAL_FOR_ORDERS=false
+CANDLE_CLOSE_DIRECT_PREDICTION=true
+REASONING_IC_MINIMAL_MODE=true
+MTF_DECISION_ENGINE_ENABLED=false
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 

@@ -19,8 +19,6 @@ from agent.models.mcp_model_registry import (
     NoHealthyModelPredictionsError,
 )
 from agent.memory.vector_store import VectorMemoryStore
-from agent.events.event_bus import event_bus
-from agent.events.schemas import ReasoningRequestEvent, ReasoningCompleteEvent, DecisionReadyEvent
 from agent.core.config import settings
 from agent.core.mtf_decision_engine import synthesize_mtf_trading_decision
 from agent.learning.dynamic_thresholds import apply_redis_hold_band_overrides
@@ -237,184 +235,56 @@ class MCPReasoningEngine:
         """Initialize reasoning engine."""
         if self.vector_store:
             await self.vector_store.initialize()
-        # ReasoningRequestEvent is handled exclusively by MCPOrchestrator to avoid
-        # duplicate reasoning passes and duplicate DecisionReadyEvent emissions.
-        # See agent/core/mcp_orchestrator.py::_handle_reasoning_request.
-    
+
     async def shutdown(self):
         """Shutdown reasoning engine."""
         if self.vector_store:
             await self.vector_store.shutdown()
-    
-    async def _handle_reasoning_request_event(self, event: ReasoningRequestEvent):
-        """Deprecated: REASONING_REQUEST is handled by MCPOrchestrator only."""
-        logger.warning(
-            "reasoning_request_event_unexpected",
-            event_id=event.event_id,
-            message="ReasoningRequest should be processed by mcp_orchestrator; ignoring.",
+
+    async def _generate_ic_minimal_reasoning(
+        self,
+        request: MCPReasoningRequest,
+        model_predictions: List[Dict[str, Any]],
+        *,
+        chain_id: str,
+        timestamp: datetime,
+    ) -> MCPReasoningChain:
+        """IC strategy-first minimal chain: situational, adjudication, calibration."""
+        step1 = await self._step1_situational_assessment(request)
+        step6 = await asyncio.to_thread(self._step_trade_adjudication, request)
+        step6 = step6.model_copy(update={"step_number": 2, "step_name": "Trade Adjudication"})
+        steps = [step1, step6]
+        step7 = await self._step7_confidence_calibration(request, steps, model_predictions)
+        step7 = step7.model_copy(update={"step_number": 3, "step_name": "Confidence Calibration"})
+        steps.append(step7)
+
+        final_conclusion = step6.description
+        strength_meta = (
+            step7.step_metadata if isinstance(step7.step_metadata, dict) else {}
         )
-    
-    async def _emit_reasoning_complete_event(self, request_event: ReasoningRequestEvent, reasoning_chain: MCPReasoningChain):
-        """Emit reasoning complete event.
-        
-        Args:
-            request_event: Original reasoning request event
-            reasoning_chain: Generated reasoning chain
-        """
+        signal_strength = strength_meta.get("signal_strength")
         try:
-            event = ReasoningCompleteEvent(
-                source="reasoning_engine",
-                correlation_id=request_event.event_id,
-                payload={
-                    "symbol": reasoning_chain.market_context.get("symbol", request_event.payload.get("symbol")),
-                    "reasoning_chain": {
-                        "chain_id": reasoning_chain.chain_id,
-                        "steps": [step.model_dump() for step in reasoning_chain.steps],
-                        "conclusion": reasoning_chain.conclusion,
-                        "market_context": reasoning_chain.market_context
-                    },
-                    "final_confidence": reasoning_chain.final_confidence,
-                    "timestamp": datetime.now(timezone.utc),
-                }
+            signal_strength_f = (
+                float(signal_strength) if signal_strength is not None else None
             )
-            
-            await event_bus.publish(event)
-            
-            logger.info(
-                "reasoning_complete_event_emitted",
-                symbol=request_event.payload.get("symbol"),
-                chain_id=reasoning_chain.chain_id,
-                final_confidence=reasoning_chain.final_confidence,
-                event_id=event.event_id
-            )
-            
-        except Exception as e:
-            logger.error(
-                "reasoning_complete_event_emit_failed",
-                error=str(e),
-                exc_info=True
-            )
-    
-    async def _emit_decision_ready_event(self, request_event: ReasoningRequestEvent, reasoning_chain: MCPReasoningChain):
-        """Emit decision ready event.
-        
-        Args:
-            request_event: Original reasoning request event
-            reasoning_chain: Generated reasoning chain
-        """
-        try:
-            # Defensive check: ensure model_predictions are present before
-            # emitting any trading decision.
-            prediction_count = len(reasoning_chain.model_predictions or [])
-            if prediction_count == 0:
-                logger.error(
-                    "decision_ready_event_skipped_no_model_predictions",
-                    symbol=reasoning_chain.market_context.get(
-                        "symbol", request_event.payload.get("symbol")
-                    ),
-                    message="Skipping DecisionReadyEvent because reasoning_chain.model_predictions is empty.",
-                )
-                return
+        except (TypeError, ValueError):
+            signal_strength_f = None
 
-            # Extract signal from conclusion
-            conclusion = reasoning_chain.conclusion
-            mc = (
-                reasoning_chain.market_context
-                if isinstance(reasoning_chain.market_context, dict)
-                else {}
-            )
-            v43_dec = mc.get("v43_dedicated_decision") if isinstance(mc, dict) else None
-            position_size = 0.0
-            if isinstance(v43_dec, dict) and v43_dec.get("enabled"):
-                hint = v43_dec.get("position_size_hint")
-                if hint is not None:
-                    try:
-                        position_size = float(hint)
-                    except (TypeError, ValueError):
-                        position_size = 0.0
-            if "STRONG_BUY" in conclusion:
-                signal = "STRONG_BUY"
-                if position_size <= 0.0:
-                    position_size = 0.1  # Max position size
-            elif "BUY" in conclusion:
-                signal = "BUY"
-                if position_size <= 0.0:
-                    position_size = 0.05
-            elif "STRONG_SELL" in conclusion:
-                signal = "STRONG_SELL"
-                if position_size <= 0.0:
-                    position_size = 0.1
-            elif "SELL" in conclusion:
-                signal = "SELL"
-                if position_size <= 0.0:
-                    position_size = 0.05
-            else:
-                signal = "HOLD"
-                position_size = 0.0
-            
-            event = DecisionReadyEvent(
-                source="reasoning_engine",
-                correlation_id=request_event.event_id,
-                payload={
-                    "symbol": reasoning_chain.market_context.get("symbol", request_event.payload.get("symbol")),
-                    "signal": signal,
-                    "confidence": reasoning_chain.final_confidence,
-                    "position_size": position_size,
-                    "reasoning_chain": {
-                        "chain_id": reasoning_chain.chain_id,
-                        "steps": [step.model_dump() for step in reasoning_chain.steps],
-                        "conclusion": reasoning_chain.conclusion,
-                        "market_context": reasoning_chain.market_context,
-                        "model_predictions": reasoning_chain.model_predictions
-                    },
-                    "timestamp": datetime.now(timezone.utc),
-                    "server_timestamp_ms": int(time.time() * 1000),
-                }
-            )
-            
-            await event_bus.publish(event)
+        feature_context = request.market_context.get("features", {})
+        return MCPReasoningChain(
+            chain_id=chain_id,
+            timestamp=timestamp,
+            market_context=request.market_context,
+            steps=steps,
+            conclusion=final_conclusion,
+            final_confidence=step7.confidence,
+            model_predictions=model_predictions,
+            feature_context=[
+                {"name": k, "value": v} for k, v in feature_context.items()
+            ],
+            signal_strength=signal_strength_f,
+        )
 
-            proba_diag = self._summarize_entry_probabilities(
-                reasoning_chain.model_predictions or []
-            )
-            threshold_used = None
-            if signal in ("BUY", "STRONG_BUY"):
-                threshold_used = proba_diag.get("recommended_long_threshold_median")
-            elif signal in ("SELL", "STRONG_SELL"):
-                threshold_used = proba_diag.get("recommended_short_threshold_median")
-            else:
-                threshold_used = max(
-                    float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52),
-                    0.0,
-                )
-            logger.info(
-                "ml_signal_evaluated",
-                symbol=request_event.payload.get("symbol"),
-                signal=signal,
-                decision=reasoning_chain.conclusion,
-                confidence=reasoning_chain.final_confidence,
-                threshold_used=threshold_used,
-                **proba_diag,
-            )
-            
-            logger.info(
-                "decision_ready_event_emitted",
-                symbol=request_event.payload.get("symbol"),
-                signal=signal,
-                confidence=reasoning_chain.final_confidence,
-                position_size=position_size,
-                event_id=event.event_id,
-                timestamp=reasoning_chain.timestamp,
-                message="Decision ready event published - will trigger signal_update broadcast to frontend"
-            )
-            
-        except Exception as e:
-            logger.error(
-                "decision_ready_event_emit_failed",
-                error=str(e),
-                exc_info=True
-            )
-    
     async def generate_reasoning(self, request: MCPReasoningRequest) -> MCPReasoningChain:
         """Generate 7-step reasoning chain (including trade adjudication)."""
         normalized_context = self._normalize_market_context_predictions(
@@ -437,6 +307,18 @@ class MCPReasoningEngine:
 
         chain_id = str(uuid.uuid4())
         timestamp = datetime.now(timezone.utc)
+
+        if (
+            bool(getattr(settings, "reasoning_ic_minimal_mode", True))
+            and isinstance(request.market_context.get("strategy_candidate"), dict)
+        ):
+            return await self._generate_ic_minimal_reasoning(
+                request,
+                model_predictions,
+                chain_id=chain_id,
+                timestamp=timestamp,
+            )
+
         steps: List[ReasoningStep] = []
         step_timings_ms: Dict[str, float] = {}
 
@@ -1059,7 +941,7 @@ class MCPReasoningEngine:
                     message="Step 5 produced HOLD due to missing model predictions.",
                 )
         else:
-            # Skip MTF synthesis when predictions already encode regime/context (JackSparrow v43).
+            # Legacy multi-model path only (IC strategy-first returns early above).
             mtf_out = None
             all_jacksparrow_v43 = model_predictions and all(
                 isinstance(p, dict)

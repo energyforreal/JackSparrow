@@ -1,16 +1,18 @@
-"""ML signal guard tests for strategy-first ml_and_thesis mode."""
+"""Entry validation guard tests for strategy-first ml_and_thesis mode."""
 
 import pytest
 
-from agent.core import ml_signal_guard as guard_mod
+from agent.core.config import settings as app_settings
 from agent.core.ml_signal_guard import validate_ml_entry_signal
 
 
-def test_ml_and_thesis_requires_confirms_ml_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(guard_mod.settings, "require_ml_signal_for_orders", True)
-    monkeypatch.setattr(guard_mod.settings, "agent_policy_mode", "ml_and_thesis")
-    monkeypatch.setattr(guard_mod.settings, "require_strategy_ml_agreement", True)
-    monkeypatch.setattr(guard_mod.settings, "require_v43_gates_for_entry", False)
+@pytest.fixture(autouse=True)
+def enable_ic_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(app_settings, "require_ic_validation_for_orders", True)
+
+
+def test_ml_and_thesis_accepts_policy_confirms_ml(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(app_settings, "require_v43_gates_for_entry", False)
 
     ok, reason = validate_ml_entry_signal(
         signal="BUY",
@@ -29,18 +31,14 @@ def test_ml_and_thesis_requires_confirms_ml_reason(monkeypatch: pytest.MonkeyPat
         },
     )
     assert ok is True
-    assert "confirms_ml" in reason or reason == "policy_adopted_ml_candidate"
+    assert reason == "agent_thesis_confirms_ml"
 
 
-def test_ml_and_thesis_rejects_no_agreement(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(guard_mod.settings, "require_ml_signal_for_orders", True)
-    monkeypatch.setattr(guard_mod.settings, "agent_policy_mode", "ml_and_thesis")
-    monkeypatch.setattr(guard_mod.settings, "require_strategy_ml_agreement", True)
-
+def test_ml_and_thesis_rejects_policy_hold() -> None:
     ok, reason = validate_ml_entry_signal(
         signal="HOLD",
         side="BUY",
-        model_predictions=[{"model_name": "v43", "confidence": 0.8}],
+        model_predictions=[{"model_name": "v43", "confidence": 0.8, "prediction": 0.5}],
         market_context={"trade_score": {"passed": False}},
         policy_verdict={
             "signal": "HOLD",
@@ -48,14 +46,14 @@ def test_ml_and_thesis_rejects_no_agreement(monkeypatch: pytest.MonkeyPatch) -> 
         },
     )
     assert ok is False
+    assert "policy" in reason
 
 
-def test_strategy_ml_agreement_skipped_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(guard_mod.settings, "require_ml_signal_for_orders", True)
-    monkeypatch.setattr(guard_mod.settings, "agent_policy_mode", "ml_and_thesis")
-    monkeypatch.setattr(guard_mod.settings, "require_strategy_ml_agreement", False)
-    monkeypatch.setattr(guard_mod.settings, "require_v43_gates_for_entry", False)
-    monkeypatch.setattr(guard_mod.settings, "require_ml_consensus_alignment", False)
+def test_policy_adopted_ml_without_duplicate_strategy_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard trusts policy verdict; strategy/ML agreement is not re-checked here."""
+    monkeypatch.setattr(app_settings, "require_v43_gates_for_entry", False)
 
     ok, reason = validate_ml_entry_signal(
         signal="BUY",
@@ -72,4 +70,4 @@ def test_strategy_ml_agreement_skipped_when_disabled(monkeypatch: pytest.MonkeyP
         },
     )
     assert ok is True
-    assert reason in ("strategy_ml_agreement_not_required", "ml_predictions_present")
+    assert reason == "policy_adopted_ml_candidate"

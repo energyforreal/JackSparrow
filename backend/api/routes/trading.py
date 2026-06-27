@@ -37,6 +37,15 @@ from backend.api.middleware.auth import require_auth
 router = APIRouter(dependencies=[Depends(require_auth)])
 logger = structlog.get_logger()
 
+if not bool(getattr(settings, "enable_deprecated_rest_trading", False)):
+    logger.warning(
+        "deprecated_rest_trading_disabled",
+        message=(
+            "REST /predict and /execute_trade return 410; use WebSocket commands. "
+            "Set ENABLE_DEPRECATED_REST_TRADING=true only for legacy integrations."
+        ),
+    )
+
 _DEPRECATED_REST_DETAIL = (
     "This REST endpoint is disabled. Use WebSocket: "
     "{action: 'command', command: 'predict'|'execute_trade', request_id: '...', parameters: {...}}"

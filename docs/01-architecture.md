@@ -78,10 +78,11 @@ The Intelligence Layer contains the "brain" of the trading agent:
 - Legacy multi-model ML ensembles (XGBoost, LightGBM, LSTM, etc.) are **archived** — see [ML models](03-ml-models.md#runtime-discovery-no-ml-intelligence-component)
 
 **Decision Engine (MCP Reasoning Engine)**
-- 6-step structured reasoning chain
-- Multi-model consensus calculation
-- Context-aware decision making
-- Risk-adjusted position sizing
+- IC minimal reasoning chain (3 steps, default when `strategy_candidate` is present)
+- Legacy 7-step chain when `REASONING_IC_MINIMAL_MODE=false` or non-IC context
+- Multi-model consensus calculation (legacy multi-model payloads)
+- Context-aware explanatory narrative (not authoritative for `decision.signal`)
+- Risk-adjusted position sizing context for UI and introspection
 
 **Risk Manager**
 - Circuit breakers for portfolio protection
@@ -91,7 +92,9 @@ The Intelligence Layer contains the "brain" of the trading agent:
 
 **Decision authority (agent-first)**
 
-Trade *intent* on the event bus is issued only after the **Agent Policy** stage (`AgentPolicyEngine` in code): ML outputs are packaged as **evidence** (`EVIDENCE_READY` / `MLEvidenceSnapshot`), then the policy layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation; in `TRADING_MODE=live`, a non-empty `manual_trade_audit_reason` is required unless disabled via settings.
+Trade *intent* on the event bus is issued only after the **Agent Policy** stage (`AgentPolicyEngine` in code): IC validation outputs are packaged as **`MLEvidenceSnapshot`**, then the policy layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation; in `TRADING_MODE=live`, a non-empty `manual_trade_audit_reason` is required unless disabled via settings.
+
+**Deprecated settings (IC-only runtime):** `SINGLE_MODEL_MODE_ENABLED`, `CONSOLIDATED_MODEL_METADATA_GLOB`, `SINGLE_MODEL_STRICT_STARTUP`, and `JACKSPARROW_V43_INFERENCE_STACK` are ignored when `IC_MODE=true` (default). Model discovery loads only `metadata_ic.json` under `MODEL_DIR`.
 
 **Strategy-first pipeline (NO-ML / IC default)**
 
@@ -103,10 +106,21 @@ Default fusion mode is `AGENT_POLICY_MODE=ml_or_thesis` with `IC_MODE=true`: the
 4. **Agent thesis** — `AgentThesisEngine` proposes breakout / trend / mean-reversion candidates (deterministic rules).
 5. **Trade score** — `score_trade_setup()` confluence gate (`AGENT_TRADE_SCORE_MIN`, default 70).
 6. **Policy** — `AgentPolicyEngine` fuses thesis + ML (`ml_and_thesis` requires agreement).
-7. **Reasoning** — includes **Trade Adjudication** step; primary `decision.signal` comes from `PolicyVerdict`, not reasoning text alone.
-8. **Execution guard** — `ml_signal_guard` requires healthy ML predictions + policy reason `agent_thesis_confirms_ml` when `REQUIRE_STRATEGY_ML_AGREEMENT=true`.
+7. **Reasoning** — IC minimal mode (default) uses 3-step chain when `strategy_candidate` is present; primary `decision.signal` comes from `PolicyVerdict`, not reasoning text.
+8. **Execution guard** — `entry_validation_guard` (`ml_signal_guard` shim) validates policy verdict + optional v43 gates when `REQUIRE_IC_VALIDATION_FOR_ORDERS=true` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
 
-Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_ML_SIGNAL_FOR_ORDERS=false`.
+Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_IC_VALIDATION_FOR_ORDERS=false` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
+
+**Pipeline configuration (signal cleanup)**
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `CANDLE_CLOSE_DIRECT_PREDICTION` | `true` | Candle close publishes `MODEL_PREDICTION_REQUEST` directly (skips `FEATURE_REQUEST` → `FEATURE_COMPUTED` chain) |
+| `REASONING_IC_MINIMAL_MODE` | `true` | 3-step IC reasoning when `strategy_candidate` is in market context |
+| `MTF_DECISION_ENGINE_ENABLED` | `false` | Legacy MTF synthesis in reasoning Step 5 only; off for strategy-first IC |
+| `REQUIRE_IC_VALIDATION_FOR_ORDERS` | `true` | Policy-first entry guard before exchange orders (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`) |
+
+See [Canonical events](canonical_events.md) for the updated event-bus happy path.
 
 **Learning Module**
 - Performance tracking per model
@@ -121,7 +135,7 @@ Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_ML_SIGNA
 
 **Deterministic self-awareness (no LLM)**
 
-Read-only and advisory telemetry layered on the existing strategy-first pipeline. Trade authority is unchanged (`ML/gates → thesis → policy → risk → execution`).
+Read-only and advisory telemetry layered on the existing strategy-first pipeline. Trade authority is unchanged (`IC/gates → thesis (once) → policy → risk → execution`).
 
 | Phase | Module | Behavior |
 |-------|--------|----------|
@@ -207,13 +221,16 @@ MCP Orchestrator
         └── Uses Memory Store
 ```
 
-**Orchestration Flow (strategy-first v43)**:
-1. Request arrives at MCP Orchestrator
-2. Model Orchestrator runs v43 inference → ML validation snapshot
-3. Market structure + Agent thesis evaluate closed-bar features
-4. v43 execution gates + trade score + policy fusion (`ml_and_thesis`)
-5. Reasoning Orchestrator generates chain (including trade adjudication)
-6. `PolicyVerdict` drives `DECISION_READY`; risk manager and trading handler veto before execution
+**Orchestration Flow (strategy-first IC)**:
+1. `CandleClosedEvent` or `ModelPredictionRequestEvent` arrives at MCP Orchestrator (`_process_jacksparrow_v43_prediction`)
+2. Market frames fetched; MTF caches warmed in orchestrator
+3. **Agent thesis evaluated once** → `thesis_verdict` cached in `market_context`
+4. `RuleBasedIntelligenceNode` predict → `MLValidationSnapshot` + v43 gates
+5. Trade score + `AgentPolicyEngine` fusion → authoritative `PolicyVerdict`
+6. Reasoning engine generates IC minimal (3-step) or legacy (7-step) explanatory chain
+7. Single `DECISION_READY` per bar (`policy_authority=agent_policy`); trading handler + risk manager veto before execution
+
+The dormant `REASONING_REQUEST` bus path and `EvidenceReadyEvent` have been removed; IC evidence rides on `DECISION_READY.ml_evidence_snapshot`.
 
 For detailed orchestration documentation, see [MCP Layer Documentation - Orchestration](02-mcp-layer.md#mcp-orchestration).
 
@@ -224,10 +241,10 @@ For detailed orchestration documentation, see [MCP Layer Documentation - Orchest
 **Purpose**: Central coordinator for all MCP components providing unified AI agent functionality
 
 **Key Features**:
-- Unified prediction pipeline (Feature → Model → Reasoning)
-- Parallel model inference processing
-- Complete reasoning chain generation
-- Consensus calculation and decision synthesis
+- Unified IC prediction pipeline (orchestrator-owned; registry does not subscribe to `MODEL_PREDICTION_REQUEST`)
+- Single thesis evaluation per cycle (cached for IC + policy)
+- IC minimal or legacy reasoning chain generation
+- Policy-first `DECISION_READY` emission with deduplication per bar
 - Event-driven architecture integration
 
 **Implementation**: `agent/core/mcp_orchestrator.py`
@@ -235,12 +252,13 @@ For detailed orchestration documentation, see [MCP Layer Documentation - Orchest
 **Architecture**:
 ```python
 class MCPOrchestrator:
-    async def process_prediction_request(self, symbol, context):
-        # 1. Feature computation via MCP Feature Server
-        # 2. Parallel model inference via MCP Model Registry
-        # 3. Reasoning synthesis via MCP Reasoning Engine
-        # 4. Consensus and decision extraction
-        return complete_prediction_result
+    async def _process_jacksparrow_v43_prediction(self, event):
+        # 1. Fetch v43 market frames + warm MTF caches
+        # 2. Evaluate thesis once → market_context["thesis_verdict"]
+        # 3. IC predict + v43 gates → MLEvidenceSnapshot
+        # 4. Policy fusion → PolicyVerdict (authoritative signal)
+        # 5. Reasoning chain (explanatory) + single DECISION_READY
+        return decision_ready_event
 ```
 
 #### 2. MCP Feature Protocol
@@ -305,8 +323,8 @@ For detailed Model Protocol documentation, see [MCP Layer Documentation - Model 
 **Purpose**: Structured reasoning chains for decision transparency
 
 **Key Features**:
-- Multi-step reasoning process (6-step chain)
-- Evidence tracking
+- IC minimal (3-step) or legacy (7-step) reasoning process
+- Evidence tracking on `DECISION_READY` (no separate evidence event)
 - Confidence calibration
 - Decision context preservation
 - Integration with Feature and Model Protocols
@@ -500,7 +518,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 **Message Types**:
 - `agent_state` - Agent state updates
 - `signal_update` - AI signal updates (BUY/SELL/HOLD) with full decision data
-- `reasoning_chain_update` - Reasoning chain updates (6-step reasoning process)
+- `reasoning_chain_update` - Reasoning chain updates (IC minimal 3-step or legacy 7-step chain)
 - `model_prediction_update` - ML model prediction updates (consensus and individual models)
 - `market_tick` - Real-time price updates (BTCUSD and other symbols)
 **Simplified Message Format** (as of 2026-02-01):
@@ -927,45 +945,57 @@ The startup and configuration validation system implements comprehensive error h
 
 ## Data Flow
 
-### Prediction Flow
+### Signal pipeline (strategy-first IC — default)
+
+```
+1. Market Data Service → CandleClosedEvent (or PriceFluctuationEvent)
+2. market_data_handler → ModelPredictionRequestEvent
+   (when CANDLE_CLOSE_DIRECT_PREDICTION=true, default;
+    otherwise FeatureRequest → FeatureComputed → ModelPredictionRequest)
+3. MCPOrchestrator → fetch frames, warm caches, thesis once, IC predict, policy
+4. Reasoning Engine → 3-step IC minimal chain (default) or 7-step legacy
+5. DECISION_READY → policy_authority=agent_policy + ml_evidence_snapshot
+6. Trading handler → entry_validation_guard → Risk Manager → RISK_APPROVED
+7. Execution Engine → Delta Exchange order
+8. WebSocket → data_update (signal + reasoning steps)
+```
+
+`MODEL_PREDICTION_COMPLETE` is telemetry-only; `model_handler` syncs context (no `REASONING_REQUEST` fan-out). See [Canonical events](canonical_events.md).
+
+### Prediction Flow (legacy / fluctuation trigger)
 
 **Primary Flow (Fluctuation-Based):**
 ```
 1. Market Data Service → Continuous price monitoring (0.5s intervals)
 2. PriceFluctuationEvent → Triggered on ≥0.5% price change
-3. Feature Server → Compute all 50 features
-4. Model Registry → Get predictions from all models
-5. Reasoning Engine → Generate reasoning chain
-6. Risk Manager → Assess risks
-7. Decision Engine → Synthesize decision
-8. Backend API → Return prediction to client
-9. WebSocket → Broadcast signal_update
+3. ModelPredictionRequest → MCPOrchestrator (IC path above)
+4. Policy + reasoning → DECISION_READY
+5. Risk Manager → Assess risks
+6. Backend API / WebSocket → Return or broadcast update
 ```
 
-**Secondary Flow (Time-Based):**
+**Secondary Flow (Time-Based candle close):**
 ```
 1. Market Data Service → Monitor candle closes
-2. CandleClosedEvent → Periodic analysis (15m intervals)
-3. Feature Server → Compute features
-4. Model Registry → Get predictions
-5. Reasoning Engine → Generate reasoning chain
-6. Risk Manager → Assess risks
-7. Decision Engine → Synthesize decision
-8. WebSocket → Broadcast update
+2. CandleClosedEvent → ModelPredictionRequest (direct, default)
+3. MCPOrchestrator → IC predict + policy + reasoning
+4. DECISION_READY → trading handler + risk
+5. WebSocket → Broadcast update
 ```
 
 ### Trade Execution Flow
 
 **Entry Flow:**
 ```
-1. Decision Engine → Generate trade decision
-2. Risk Manager → Validate risk limits
-3. Execution Engine → Place order via Delta Exchange
-4. Order Management → Track order status
-5. Position Manager → Update positions (with stop loss/take profit); ExecutionEngine adds position to RiskManager portfolio
-6. State Machine → Transition to MONITORING_POSITION
-7. WebSocket → Broadcast trade execution
-8. Database → Store trade record
+1. AgentPolicyEngine → PolicyVerdict on DECISION_READY (authoritative signal)
+2. entry_validation_guard → Policy + optional v43 gate check
+3. Risk Manager → Validate risk limits
+4. Execution Engine → Place order via Delta Exchange
+5. Order Management → Track order status
+6. Position Manager → Update positions (with stop loss/take profit); ExecutionEngine adds position to RiskManager portfolio
+7. State Machine → Transition to MONITORING_POSITION
+8. WebSocket → Broadcast trade execution
+9. Database → Store trade record
 ```
 
 **SL/TP pricing (entry):** `agent/core/sl_tp.py` (`compute_stop_take_prices`) is the single implementation for optional ATR scaling (`USE_ATR_SCALED_SL_TP`, `ATR_SL_DISTANCE_MULT`, `ATR_TP_DISTANCE_MULT`), fixed percentages, and **tick-size rounding** (`round_to_tick`). `RiskApprovedEvent` may include `atr_14` (from features) so execution can recompute matching levels if SL/TP are omitted. **`parse_risk_approved_side`** normalizes payload side (`BUY`/`SELL`, strip/whitespace). In **paper trading**, `execute_trade` **rebases** absolute SL/TP by `fill_price − planned_price` before opening the position so `manage_position` compares levels to the simulated fill.
@@ -1090,6 +1120,7 @@ This architecture enables better scalability, testability, and maintainability b
 ## Related Documentation
 
 - [MCP Layer Documentation](02-mcp-layer.md) - Detailed MCP architecture and orchestration
+- [Canonical events](canonical_events.md) - Event-bus happy path and handler wiring
 - [ML Models Documentation](03-ml-models.md) - Model management and intelligence
 - [Features Documentation](04-features.md) - What the system does
 - [Logic & Reasoning Documentation](05-logic-reasoning.md) - How decisions are made

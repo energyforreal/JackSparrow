@@ -39,7 +39,6 @@ class EventType(str, Enum):
     # Reasoning events
     REASONING_REQUEST = "reasoning_request"
     REASONING_COMPLETE = "reasoning_complete"
-    EVIDENCE_READY = "evidence_ready"
     DECISION_READY = "decision_ready"
     
     # Risk events
@@ -338,18 +337,6 @@ class ReflectionSnapshot(BaseModel):
     quality_score: float = 0.0
     diagnostics: List[str] = Field(default_factory=list)
     reason_codes: List[str] = Field(default_factory=list)
-
-
-class EvidenceReadyEvent(BaseEvent):
-    """ML evidence computed; downstream policy may emit DecisionReady."""
-
-    event_type: EventType = EventType.EVIDENCE_READY
-
-    class Payload(BaseModel):
-        symbol: str
-        ml_evidence_snapshot: Dict[str, Any]
-        timestamp: datetime
-        correlation_id: Optional[str] = None
 
 
 class DecisionReadyEvent(BaseEvent):

@@ -9,19 +9,12 @@ from datetime import datetime, timezone
 import time
 import asyncio
 import structlog
-import uuid
 
 from pydantic import BaseModel
 
 from agent.core.config import settings
 from agent.models.mcp_model_node import MCPModelNode, MCPModelRequest, MCPModelPrediction
-from agent.events.event_bus import event_bus
-from agent.events.schemas import (
-    ModelPredictionRequestEvent,
-    ModelPredictionEvent,
-    ModelPredictionCompleteEvent,
-    EventType
-)
+from agent.events.schemas import EventType
 
 logger = structlog.get_logger()
 
@@ -567,145 +560,6 @@ class MCPModelRegistry:
                 self.model_weights[model_name] = weight
         self._normalize_weights()
     
-    async def _handle_prediction_request_event(self, event: ModelPredictionRequestEvent):
-        """Handle model prediction request event.
-        
-        Args:
-            event: Model prediction request event
-        """
-        try:
-            payload = event.payload
-            symbol = payload.get("symbol")
-            features = payload.get("features", {})
-            context = payload.get("context", {})
-            require_explanation = payload.get("require_explanation", True)
-            
-            # Create MCP request
-            request = MCPModelRequest(
-                request_id=str(uuid.uuid4()),
-                features=list(features.values()),
-                context=context,
-                require_explanation=require_explanation
-            )
-            
-            # Track predictions for this request
-            self._pending_predictions[request.request_id] = []
-            
-            # Get predictions from all models
-            response = await self.get_predictions(request)
-            
-            # Emit individual prediction events
-            for prediction in response.predictions:
-                await self._emit_prediction_event(event, prediction)
-            
-            # Emit complete event when all done
-            await self._emit_prediction_complete_event(event, response)
-            
-            # Clean up
-            if request.request_id in self._pending_predictions:
-                del self._pending_predictions[request.request_id]
-                
-        except Exception as e:
-            logger.error(
-                "model_prediction_request_event_handler_error",
-                event_id=event.event_id,
-                error=str(e),
-                exc_info=True
-            )
-    
-    async def _emit_prediction_event(self, request_event: ModelPredictionRequestEvent, prediction: MCPModelPrediction):
-        """Emit individual model prediction event.
-        
-        Args:
-            request_event: Original prediction request event
-            prediction: Model prediction
-        """
-        try:
-            event = ModelPredictionEvent(
-                source="model_registry",
-                correlation_id=request_event.event_id,
-                payload={
-                    "model_name": prediction.model_name,
-                    "model_version": prediction.model_version,
-                    "prediction": prediction.prediction,
-                    "confidence": prediction.confidence,
-                    "reasoning": prediction.reasoning,
-                    "features_used": prediction.features_used,
-                    "feature_importance": prediction.feature_importance,
-                    "computation_time_ms": prediction.computation_time_ms,
-                    "health_status": prediction.health_status
-                }
-            )
-            
-            await event_bus.publish(event)
-            
-            logger.debug(
-                "model_prediction_event_emitted",
-                model_name=prediction.model_name,
-                prediction=prediction.prediction,
-                confidence=prediction.confidence,
-                event_id=event.event_id
-            )
-            
-        except Exception as e:
-            logger.error(
-                "model_prediction_event_emit_failed",
-                error=str(e),
-                exc_info=True
-            )
-    
-    async def _emit_prediction_complete_event(self, request_event: ModelPredictionRequestEvent, response: MCPModelResponse):
-        """Emit model prediction complete event.
-        
-        Args:
-            request_event: Original prediction request event
-            response: Model response with all predictions
-        """
-        try:
-            # Convert predictions to dict format
-            predictions_dict = [
-                {
-                    "model_name": pred.model_name,
-                    "model_version": pred.model_version,
-                    "prediction": pred.prediction,
-                    "confidence": pred.confidence,
-                    "reasoning": pred.reasoning,
-                    "health_status": pred.health_status,
-                    "context": pred.context if isinstance(pred.context, dict) else pred.context,
-                }
-                for pred in response.predictions
-            ]
-            
-            event = ModelPredictionCompleteEvent(
-                source="model_registry",
-                correlation_id=request_event.event_id,
-                payload={
-                    "symbol": request_event.payload.get("symbol"),
-                    "predictions": predictions_dict,
-                    "consensus_signal": response.consensus_prediction,
-                    "consensus_confidence": response.consensus_confidence,
-                    "timestamp": response.timestamp
-                }
-            )
-            
-            await event_bus.publish(event)
-            
-            logger.info(
-                "model_prediction_complete_event_emitted",
-                symbol=request_event.payload.get("symbol"),
-                prediction_count=len(predictions_dict),
-                consensus_signal=response.consensus_prediction,
-                consensus_confidence=response.consensus_confidence,
-                event_id=event.event_id
-            )
-            
-        except Exception as e:
-            logger.error(
-                "model_prediction_complete_event_emit_failed",
-                error=str(e),
-                exc_info=True
-            )
-
     def add_pending_model(self, model: MCPModelNode):
         """Store model node in pending cache for manual activation."""
         self._pending_models[model.model_name] = model

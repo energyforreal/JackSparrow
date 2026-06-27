@@ -544,27 +544,34 @@ class MCPReasoningEngine:
 
 ### Orchestration Flow
 
-The MCP Orchestration Layer coordinates the interaction between all MCP components:
+The MCP Orchestration Layer coordinates the strategy-first IC path. **`MCPOrchestrator._process_jacksparrow_v43_prediction`** is the sole owner of IC predict, policy fusion, reasoning, and `DECISION_READY` (the model registry does **not** subscribe to `MODEL_PREDICTION_REQUEST`).
+
+```
+1. ModelPredictionRequestEvent (from candle close or feature path)
+   │
+   ├─► Market frames + MTF cache warm (orchestrator)
+   │
+   ├─► AgentThesisEngine.evaluate (once) → thesis_verdict in market_context
+   │
+   ├─► RuleBasedIntelligenceNode.predict → MLValidationSnapshot + v43 gates
+   │
+   ├─► AgentPolicyEngine.evaluate → PolicyVerdict (authoritative signal)
+   │
+   └─► MCP Reasoning Engine
+       └─► IC minimal (3-step) or legacy (7-step) explanatory chain
+           └─► DECISION_READY (ml_evidence_snapshot on payload)
+```
+
+**Removed paths (2026 signal cleanup):** `REASONING_REQUEST` orchestrator handler, `EvidenceReadyEvent`, registry `_handle_prediction_request_event`. See [Canonical events](canonical_events.md).
+
+**Legacy multi-model diagram** (forks / archived ensembles):
 
 ```
 1. Request arrives at MCP Orchestrator
    │
-   ├─► MCP Feature Orchestrator
-   │   └─► Feature Server (MCP Feature Protocol)
-   │       └─► Market Data Service
-   │
-   ├─► MCP Model Orchestrator
-   │   └─► Model Registry (MCP Model Protocol)
-   │       ├─► XGBoost Node
-   │       ├─► LSTM Node
-   │       ├─► Transformer Node
-   │       └─► Other Model Nodes
-   │
-   └─► MCP Reasoning Orchestrator
-       └─► Reasoning Engine (MCP Reasoning Protocol)
-           ├─► Uses Feature Server
-           ├─► Uses Model Registry
-           └─► Uses Memory Store
+   ├─► MCP Feature Orchestrator → Feature Server
+   ├─► MCP Model Orchestrator → Model Registry (XGBoost, LSTM, …)
+   └─► MCP Reasoning Orchestrator → 7-step chain
 ```
 
 ### Orchestrator Implementation

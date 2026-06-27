@@ -212,8 +212,12 @@ def build_introspection_snapshot(
 
     limits: Dict[str, Any] = {
         "trade_score_min": min_score,
-        "require_ml_signal_for_orders": bool(
-            getattr(settings, "require_ml_signal_for_orders", False)
+        "require_ic_validation_for_orders": bool(
+            getattr(
+                settings,
+                "require_ic_validation_for_orders",
+                getattr(settings, "require_ml_signal_for_orders", False),
+            )
         ),
         "agent_policy_force_hold": bool(getattr(settings, "agent_policy_force_hold", False)),
     }

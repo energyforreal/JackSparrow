@@ -17,7 +17,7 @@ def introspection_settings():
     with patch("agent.core.agent_introspection.settings") as mock:
         mock.agent_policy_mode = "ml_and_thesis"
         mock.agent_trade_score_min = 70.0
-        mock.require_ml_signal_for_orders = True
+        mock.require_ic_validation_for_orders = True
         mock.agent_policy_force_hold = False
         yield mock
 

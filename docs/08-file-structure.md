@@ -77,7 +77,11 @@ JackSparrow/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── intelligent_agent.py       # Main agent class
-│   │   ├── reasoning_engine.py        # MCP Reasoning Engine
+│   │   ├── reasoning_engine.py        # MCP Reasoning Engine (IC minimal + legacy 7-step)
+│   │   ├── entry_validation_guard.py # Policy-first entry guard (IC validation)
+│   │   ├── ml_signal_guard.py        # Back-compat shim → entry_validation_guard
+│   │   ├── agent_policy_engine.py    # Authoritative PolicyVerdict / DECISION_READY signal
+│   │   ├── agent_thesis_engine.py    # Thesis evaluation (cached once per orchestrator cycle)
 │   │   ├── execution.py                # Trade execution engine (now lot-based for futures)
 │   │   ├── sl_tp.py                    # Shared stop/take-profit pricing (ATR + fixed %, tick rounding, paper rebase helper)
 │   │   ├── audit_time.py               # IST/UTC helpers for paper + signal-audit logs
@@ -349,7 +353,9 @@ Each directory has a clear, single responsibility:
 |----------------|----------------------------------------------------|-----------------------------------------------------------|
 | REST endpoint  | `backend/api/routes/trading.py`                    | Thin controller validates payloads and delegates to service layer |
 | Business logic | `backend/services/agent_service.py`                | Coordinates with MCP orchestrator and handles retries     |
-| Core reasoning | `agent/core/reasoning_engine.py`                   | Encodes the six-step reasoning flow                       |
+| Core reasoning | `agent/core/reasoning_engine.py`                   | IC minimal (3-step) or legacy 7-step explanatory chain   |
+| Entry guard      | `agent/core/entry_validation_guard.py`             | Policy-first validation before exchange orders (`ml_signal_guard` shim) |
+| Policy authority | `agent/core/agent_policy_engine.py`                | Sole source of tradable `decision.signal`                 |
 | UI rendering   | `frontend/app/components/ReasoningChainView.tsx`   | Visualises reasoning chains received over WebSocket       |
 
 When creating new functionality, choose the row that matches the responsibility; if a file starts to span multiple rows, split it before merging.

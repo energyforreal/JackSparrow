@@ -743,7 +743,13 @@ class AgentPolicyEngine:
             mode = "ml_only"
 
         regime = ml_evidence.v43_regime or mc.get("regime") or mc.get("v43_regime")
-        thesis = self._thesis_engine.evaluate(regime, mc)
+        from agent.core.agent_thesis_engine import thesis_verdict_from_dict
+
+        cached_thesis = thesis_verdict_from_dict(mc.get("thesis_verdict"))
+        if cached_thesis is not None:
+            thesis = cached_thesis
+        else:
+            thesis = self._thesis_engine.evaluate(regime, mc)
         verdict = _fuse_signals(ml_evidence, thesis, mode, conclusion, market_context=mc)
 
         mso_adj = synthesize_market_state_intelligence(

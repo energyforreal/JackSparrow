@@ -26,7 +26,7 @@ This document describes how intelligence bundles are managed, discovered, and in
 
 ## Runtime discovery (NO-ML: Intelligence Component)
 
-Point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_IC_BTCUSD/`** containing **`metadata_ic.json`** only (no `.pkl` artifacts). Set **`IC_MODE=true`** (default). **`ModelDiscovery`** registers **`RuleBasedIntelligenceNode`** from [`agent/intelligence/ic_node.py`](../agent/intelligence/ic_node.py). Features are computed at runtime via [`feature_store/jacksparrow_v43_build_matrix.py`](../feature_store/jacksparrow_v43_build_matrix.py); policy fusion uses **`AGENT_POLICY_MODE=ml_or_thesis`** with **`REQUIRE_ML_SIGNAL_FOR_ORDERS=false`** for paper/live without legacy ML guards.
+Point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_IC_BTCUSD/`** containing **`metadata_ic.json`** only (no `.pkl` artifacts). Set **`IC_MODE=true`** (default). **`ModelDiscovery`** registers **`RuleBasedIntelligenceNode`** from [`agent/intelligence/ic_node.py`](../agent/intelligence/ic_node.py). Features are computed at runtime via [`feature_store/jacksparrow_v43_build_matrix.py`](../feature_store/jacksparrow_v43_build_matrix.py); policy fusion uses **`AGENT_POLICY_MODE=ml_or_thesis`** with **`REQUIRE_IC_VALIDATION_FOR_ORDERS=false`** (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`) for paper/live without the entry guard blocking thesis-only paths.
 
 ### Archived: JackSparrow v43 XGBoost + MSO v50
 
@@ -106,7 +106,7 @@ There are **four** training/export families documented here. **Deployed inferenc
 
 **D — Intelligence Component (IC — Compose / NO-ML default)**  
 - **Bundle**: `agent/model_storage/JackSparrow_IC_BTCUSD/` — **`metadata_ic.json`** only (four horizon heads: `scalp_10m`, `intraday_30m`, `trend_1h`, `swing_2h`).  
-- **Runtime**: **`RuleBasedIntelligenceNode`** when **`IC_MODE=true`**; policy via **`AGENT_POLICY_MODE=ml_or_thesis`** and **`REQUIRE_ML_SIGNAL_FOR_ORDERS=false`**.  
+- **Runtime**: **`RuleBasedIntelligenceNode`** when **`IC_MODE=true`**; policy via **`AGENT_POLICY_MODE=ml_or_thesis`** and **`REQUIRE_IC_VALIDATION_FOR_ORDERS=false`** (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`). Entry guard: [`agent/core/entry_validation_guard.py`](../agent/core/entry_validation_guard.py) (shim: `ml_signal_guard`).
 - **Features**: **`build_v43_feature_matrix`** + **`V43_CANONICAL_FEATURES`**; gates in **`agent/core/v43_signal_gates.py`**.  
 - **Checks**: `pytest tests/unit/test_intelligence_ic_node.py tests/unit/test_intelligence_ic_signals.py tests/unit/trading_agent_tests/test_model_discovery.py -q`.
 
@@ -162,7 +162,11 @@ The root `.env` file (documented in [Deployment Documentation](10-deployment.md#
 IC_MODE=true
 MODEL_DIR=./agent/model_storage/JackSparrow_IC_BTCUSD
 AGENT_POLICY_MODE=ml_or_thesis
-REQUIRE_ML_SIGNAL_FOR_ORDERS=false
+REQUIRE_IC_VALIDATION_FOR_ORDERS=false
+# Deprecated alias: REQUIRE_ML_SIGNAL_FOR_ORDERS=false
+CANDLE_CLOSE_DIRECT_PREDICTION=true
+REASONING_IC_MINIMAL_MODE=true
+MTF_DECISION_ENGINE_ENABLED=false
 MODEL_DISCOVERY_ENABLED=true
 MODEL_AUTO_REGISTER=true
 MIN_CONFIDENCE_THRESHOLD=0.70
@@ -1325,7 +1329,7 @@ Override **`AGENT_MODEL_DIR`** when you duplicate the IC bundle folder under a d
 
 Older branches scanned **`metadata_BTCUSD_*.json`** and registered **`PipelineV15Node`** or **`V4EnsembleNode`** per timeframe. Restore that scanner in `agent/models/model_discovery.py` if you deliberately run those bundles again.
 
-**Entry vs exit at execution**: ML output is packaged as **evidence** (`EVIDENCE_READY`); the **AgentPolicyEngine** emits `DECISION_READY` with `policy_authority=agent_policy` before the trading handler and risk manager. **`exit_signal`** semantics from ensemble-era nodes do not apply verbatim to **`JackSparrowV43Node`**. Position closes follow risk rules—see [Logic & Reasoning](05-logic-reasoning.md#entry-vs-exit-signals-and-position-closes).
+**Entry vs exit at execution**: IC output is packaged as **`MLEvidenceSnapshot`** on **`DECISION_READY`**; the **AgentPolicyEngine** sets `policy_authority=agent_policy` before the trading handler and risk manager. **`exit_signal`** semantics from ensemble-era nodes do not apply verbatim to **`JackSparrowV43Node`**. Position closes follow risk rules—see [Logic & Reasoning](05-logic-reasoning.md#entry-vs-exit-signals-and-position-closes).
 
 ## Training, parity, and promotion
 

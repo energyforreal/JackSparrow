@@ -745,17 +745,15 @@ class AgentFunctionalityTestSuite(TestSuiteBase):
             # Check for event bus or similar mechanism
             mcp_orchestrator = getattr(self.agent, "mcp_orchestrator", None)
             if mcp_orchestrator:
-                reasoning_engine = getattr(mcp_orchestrator, "reasoning_engine", None)
-                if reasoning_engine:
-                    # Check if reasoning engine can emit events
-                    has_emit = hasattr(reasoning_engine, "_emit_decision_ready_event")
-                    result.details["can_emit_events"] = has_emit
-                    
-                    if has_emit:
-                        result.details["event_publishing_available"] = True
-                    else:
-                        result.status = TestStatus.WARNING
-                        result.issues.append("Reasoning engine missing event emission capability")
+                has_policy_path = hasattr(mcp_orchestrator, "process_prediction_request")
+                result.details["policy_orchestrator_path"] = has_policy_path
+                if has_policy_path:
+                    result.details["event_publishing_available"] = True
+                else:
+                    result.status = TestStatus.WARNING
+                    result.issues.append(
+                        "MCP orchestrator missing process_prediction_request (policy signal path)"
+                    )
         
         except Exception as e:
             result.status = TestStatus.WARNING

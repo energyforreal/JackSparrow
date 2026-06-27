@@ -944,7 +944,13 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `AGENT_MODEL_DIR` | Docker-only override for in-container `MODEL_DIR` | No | See `docker-compose.yml` agent service |
 | `MODEL_FORMAT` | Integration label for health payloads | No | `jacksparrow_ic` |
 | `AGENT_POLICY_MODE` | Policy fusion mode (`ml_or_thesis`, `thesis_only`, etc.) | No | `ml_or_thesis` |
-| `REQUIRE_ML_SIGNAL_FOR_ORDERS` | When `false`, IC/thesis path is not blocked by legacy ML-only guards | No | `false` |
+| `REQUIRE_IC_VALIDATION_FOR_ORDERS` | When `true`, `entry_validation_guard` enforces policy + optional v43 gates before orders | No | `true` |
+| `REQUIRE_ML_SIGNAL_FOR_ORDERS` | **Deprecated alias** for `REQUIRE_IC_VALIDATION_FOR_ORDERS` | No | *(use IC name)* |
+| `REQUIRE_IC_CONSENSUS_ALIGNMENT` | Legacy consensus alignment (non-v43 paths) | No | `false` |
+| `REQUIRE_ML_CONSENSUS_ALIGNMENT` | **Deprecated alias** for `REQUIRE_IC_CONSENSUS_ALIGNMENT` | No | *(use IC name)* |
+| `CANDLE_CLOSE_DIRECT_PREDICTION` | Skip `FEATURE_REQUEST` chain; publish `MODEL_PREDICTION_REQUEST` on candle close | No | `true` |
+| `REASONING_IC_MINIMAL_MODE` | 3-step IC reasoning when `strategy_candidate` present | No | `true` |
+| `MTF_DECISION_ENGINE_ENABLED` | Legacy MTF synthesis in reasoning Step 5 | No | `false` |
 | `JACKSPARROW_V43_ARTIFACT_BASENAME` | *(Archived v43 only)* Optional pickle basename inside a v43 bundle | No | *(unused on NO-ML)* |
 | `JACKSPARROW_V43_SHORT_EXECUTION_ENABLED` | When `true`, allow symmetric **SELL** entries when strong negative edge passes v43 gates | No | `false` |
 | `ADAPTIVE_RETRAIN_ENABLED` | When `true`, agent runs periodic KS drift + optional warm-start retrain (v15 parquet path) | No | `false` |

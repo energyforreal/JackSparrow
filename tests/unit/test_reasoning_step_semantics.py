@@ -12,11 +12,18 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from agent.core.config import settings as app_settings
 from agent.core.reasoning_engine import (
     MCPReasoningEngine,
     MCPReasoningRequest,
     ReasoningStep,
 )
+
+
+@pytest.fixture(autouse=True)
+def full_reasoning_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests in this module assert the legacy 7-step chain."""
+    monkeypatch.setattr(app_settings, "reasoning_ic_minimal_mode", False)
 
 
 def _make_engine() -> MCPReasoningEngine:

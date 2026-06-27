@@ -1,7 +1,8 @@
 """
 Model event handler.
 
-Handles model prediction events and triggers reasoning.
+Updates agent context when model prediction completes. Decision emission is
+owned exclusively by MCPOrchestrator on MODEL_PREDICTION_REQUEST.
 """
 
 from typing import Dict, Any
@@ -9,7 +10,6 @@ import structlog
 
 from agent.events.schemas import (
     ModelPredictionCompleteEvent,
-    ReasoningRequestEvent,
     EventType
 )
 from agent.events.event_bus import event_bus
@@ -19,67 +19,33 @@ logger = structlog.get_logger()
 
 
 class ModelEventHandler:
-    """Handler for model events."""
+    """Handler for model prediction complete events (context sync only)."""
     
     def __init__(self):
         """Initialize model event handler."""
         self.context_manager = context_manager
     
     async def handle_prediction_complete(self, event: ModelPredictionCompleteEvent):
-        """Handle model prediction complete event.
-        
-        Args:
-            event: Model prediction complete event
-        """
+        """Sync model predictions into agent context."""
         try:
             payload = event.payload
             symbol = payload.get("symbol")
 
-            # Support both legacy flat payloads and the richer MCP orchestrator result
             predictions = payload.get("predictions")
-            consensus_signal = payload.get("consensus_signal")
-            consensus_confidence = payload.get("consensus_confidence")
-
             models_section = payload.get("models") or {}
             if predictions is None and isinstance(models_section, dict):
                 predictions = models_section.get("predictions", [])
-                # Use consensus values from models block when available
-                if consensus_signal is None:
-                    consensus_signal = models_section.get("consensus_prediction", 0.0)
-                if consensus_confidence is None:
-                    consensus_confidence = models_section.get("consensus_confidence", 0.0)
-
             if predictions is None:
                 predictions = []
 
-            # If the MCP orchestrator already produced a full decision for this event,
-            # we skip triggering a second reasoning pass to avoid duplicate decisions.
-            if event.source == "mcp_orchestrator" and isinstance(payload.get("decision"), dict):
-                logger.info(
-                    "model_prediction_complete_decision_already_emitted",
-                    symbol=symbol,
-                    prediction_count=len(predictions),
-                    event_id=event.event_id,
-                    message="Skipping reasoning because MCP orchestrator already emitted DecisionReadyEvent.",
-                )
-                return
-
-            prediction_count = len(predictions)
-
-            if prediction_count == 0:
-                # Hard-stop: do not trigger reasoning when no model predictions
-                logger.error(
+            if not predictions:
+                logger.debug(
                     "model_prediction_complete_no_predictions",
                     symbol=symbol,
-                    prediction_count=prediction_count,
-                    consensus_signal=consensus_signal or 0.0,
-                    consensus_confidence=consensus_confidence or 0.0,
                     event_id=event.event_id,
-                    message="ModelPredictionCompleteEvent received with zero predictions. Skipping reasoning.",
                 )
                 return
 
-            # Update context with predictions (canonical key: model_predictions)
             await self.context_manager.update_state(
                 {
                     "model_predictions": predictions,
@@ -87,32 +53,12 @@ class ModelEventHandler:
                 }
             )
 
-            # Trigger reasoning request only when predictions are available
-            reasoning_request = ReasoningRequestEvent(
-                source="model_handler",
-                correlation_id=event.event_id,
-                payload={
-                    "symbol": symbol,
-                    "market_context": {
-                        "model_predictions": predictions,
-                        "predictions": predictions,
-                        "consensus_signal": consensus_signal or 0.0,
-                        "consensus_confidence": consensus_confidence or 0.0,
-                        "symbol": symbol,
-                    },
-                    "use_memory": True,
-                },
-            )
-
-            await event_bus.publish(reasoning_request)
-
             logger.info(
                 "model_prediction_complete_handled",
                 symbol=symbol,
-                prediction_count=prediction_count,
-                consensus_signal=consensus_signal,
+                prediction_count=len(predictions),
                 event_id=event.event_id,
-                reasoning_request_id=reasoning_request.event_id,
+                source=event.source,
             )
             
         except Exception as e:
@@ -132,4 +78,3 @@ class ModelEventHandler:
 
 # Global handler instance
 model_handler = ModelEventHandler()
-

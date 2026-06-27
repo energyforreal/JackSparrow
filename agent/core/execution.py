@@ -1041,7 +1041,7 @@ class ExecutionEngine:
                 ),
             )
 
-        if bool(getattr(settings, "require_ml_signal_for_orders", True)):
+        if bool(getattr(settings, "require_ic_validation_for_orders", getattr(settings, "require_ml_signal_for_orders", True))):
             if not trade.get("ml_signal_validated"):
                 logger.warning(
                     "trade_execution_rejected_no_ml_signal",

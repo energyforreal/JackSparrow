@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import structlog
 
-from agent.core.agent_thesis_engine import AgentThesisEngine, ThesisVerdict
+from agent.core.agent_thesis_engine import AgentThesisEngine, ThesisVerdict, thesis_verdict_from_dict
 from agent.core.config import settings
 from agent.intelligence.direction_signal import compute_direction_signal
 from agent.intelligence.mtf_synthesizer import compute_mtf_alignment
@@ -114,6 +114,7 @@ def build_ic_prediction_context(
     market_context: Dict[str, Any],
     bar_index_hint: int,
     short_enabled: bool,
+    thesis_5m: Optional[Any] = None,
 ) -> Tuple[Dict[str, Any], float, float]:
     """Return (out_ctx, primary_prediction, primary_confidence)."""
     regime = classify_regime(closed_feats)
@@ -126,7 +127,12 @@ def build_ic_prediction_context(
         "v43_regime": regime,
         "regime": regime,
     }
-    thesis_5m = _thesis_engine.evaluate(regime, mctx)
+    if thesis_5m is None:
+        thesis_5m = _thesis_engine.evaluate(regime, mctx)
+    elif isinstance(thesis_5m, dict):
+        thesis_5m = thesis_verdict_from_dict(thesis_5m) or _thesis_engine.evaluate(regime, mctx)
+    elif not isinstance(thesis_5m, ThesisVerdict):
+        thesis_5m = _thesis_engine.evaluate(regime, mctx)
     thesis_15m = _thesis_from_htf_bias(closed_feats, "h")
     thesis_1h = _thesis_from_htf_bias(closed_feats, "h1")
     alignment = compute_mtf_alignment(thesis_5m, thesis_15m, thesis_1h)

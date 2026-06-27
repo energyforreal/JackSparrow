@@ -118,6 +118,35 @@ class MarketDataEventHandler:
                 }
             })
             
+            # Direct prediction path (skips FeatureRequest -> FeatureComputed hop).
+            if bool(getattr(settings, "candle_close_direct_prediction", False)):
+                from agent.events.schemas import ModelPredictionRequestEvent
+
+                model_request = ModelPredictionRequestEvent(
+                    source="market_data_handler",
+                    correlation_id=event.event_id,
+                    payload={
+                        "symbol": symbol,
+                        "features": {},
+                        "context": {
+                            "trigger": "candle_closed",
+                            "interval": interval,
+                            "current_price": payload.get("close"),
+                            "active_timeframes": settings.resolved_agent_timeframes(),
+                        },
+                        "require_explanation": True,
+                    },
+                )
+                await event_bus.publish(model_request)
+                logger.info(
+                    "candle_closed_direct_prediction",
+                    symbol=symbol,
+                    interval=interval,
+                    event_id=event.event_id,
+                    model_request_id=model_request.event_id,
+                )
+                return
+
             # Trigger feature computation using model-required feature names first.
             runtime_feature_names = self._get_runtime_feature_names()
             feature_request = FeatureRequestEvent(

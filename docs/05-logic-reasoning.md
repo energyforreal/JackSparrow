@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes **JackSparrow's** reasoning engine, decision-making process, and learning algorithms. The agent uses a structured 6-step reasoning chain to make decisions, not simple rule-based logic.
+This document describes **JackSparrow's** reasoning engine, decision-making process, and learning algorithms. The agent uses structured reasoning chains for transparency: **IC minimal (3 steps, default)** on the strategy-first path, or a **legacy 7-step chain** when `REASONING_IC_MINIMAL_MODE=false` or non-IC context. **Trade authority** always comes from `AgentPolicyEngine`, not reasoning text.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -13,7 +13,8 @@ This document describes **JackSparrow's** reasoning engine, decision-making proc
 - [Overview](#overview)
 - [Agent Reasoning Engine](#agent-reasoning-engine)
 - [Agent State Machine](#agent-state-machine)
-- [6-Step Reasoning Chain](#6-step-reasoning-chain)
+- [6-Step Reasoning Chain (legacy)](#6-step-reasoning-chain-legacy)
+- [IC Minimal Reasoning Chain (default)](#ic-minimal-reasoning-chain-default)
 - [Decision Framework](#decision-framework)
 - [Learning Algorithms](#learning-algorithms)
 - [Vector Memory System](#vector-memory-system)
@@ -48,6 +49,16 @@ The reasoning engine is implemented as part of the MCP (Model Context Protocol) 
 
 For detailed MCP Reasoning Protocol documentation, see [MCP Layer Documentation - Reasoning Protocol](02-mcp-layer.md#mcp-reasoning-protocol).
 
+### Policy authority and IC minimal reasoning
+
+**Authoritative signal**: `AgentPolicyEngine` (`agent/core/agent_policy_engine.py`) emits the only tradable signal via `DecisionReadyEvent`. The reasoning engine produces an explanatory chain only; it does not parse conclusion text into orders.
+
+**IC minimal mode** (`REASONING_IC_MINIMAL_MODE`, default `true`): When `strategy_candidate` is present in market context (strategy-first IC path), reasoning runs a 3-step chain — situational assessment, trade adjudication, confidence calibration — instead of the full 7-step legacy chain.
+
+**Thesis cache**: `MCPOrchestrator` evaluates `AgentThesisEngine` once per cycle and passes `thesis_verdict` through IC predict and policy fusion to avoid duplicate evaluations.
+
+**Entry validation**: `entry_validation_guard.validate_entry_signal()` (shim: `ml_signal_guard`) checks policy verdict + optional v43 gates before execution. Configure with `REQUIRE_IC_VALIDATION_FOR_ORDERS` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
+
 ---
 
 ## Agent State Machine
@@ -73,8 +84,8 @@ The agent uses an enhanced state machine that reflects its thinking process:
 
 3. **THINKING**
    - Active analysis in progress
-   - Generating reasoning chain (6-step process)
-   - Processing model predictions
+   - Generating reasoning chain (IC minimal 3-step or legacy 7-step)
+   - Processing IC / model predictions
    - **Transition to**: DELIBERATING when reasoning chain complete
 
 4. **DELIBERATING**
@@ -195,7 +206,23 @@ The AgentContext is used throughout the reasoning process to make context-aware 
 
 ---
 
-## 6-Step Reasoning Chain
+## IC Minimal Reasoning Chain (default)
+
+When `REASONING_IC_MINIMAL_MODE=true` (default) and `strategy_candidate` is present in market context, `generate_reasoning()` returns a **3-step** chain:
+
+| Step | Name | Source |
+|------|------|--------|
+| 1 | Situational Assessment | `_step1_situational_assessment` |
+| 2 | Trade Adjudication | `_step_trade_adjudication` (thesis vs IC alignment) |
+| 3 | Confidence Calibration | `_step7_confidence_calibration` |
+
+The frontend reasoning viewer accepts any non-empty `steps` array; step count is not fixed. Conclusion text is explanatory; **`PolicyVerdict.signal`** on `DECISION_READY` is authoritative.
+
+Set `REASONING_IC_MINIMAL_MODE=false` to force the legacy chain below (integration tests, forks, or non-IC payloads).
+
+---
+
+## 6-Step Reasoning Chain (legacy)
 
 ## Perpetual Futures Reasoning Integration
 
@@ -459,7 +486,9 @@ Favorable risk/reward ratio with low risk factors
 
 ### Step 5: Decision Synthesis
 
-**Purpose**: Synthesize all information into a final decision.
+**Purpose**: Synthesize all information into a final recommendation (legacy chain only).
+
+> **IC / strategy-first note**: When `strategy_candidate` is present and `REASONING_IC_MINIMAL_MODE=true`, this step is **skipped**; trade adjudication (Step 2 in the minimal chain) carries synthesis semantics. **`MTF_DECISION_ENGINE_ENABLED`** defaults to `false` and applies only to legacy multi-model payloads in this step.
 
 **Process**:
 1. Extract key factors from previous steps
@@ -783,13 +812,13 @@ Controlled by `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED` (default `true`). Qdrant e
 
 ## Deterministic Self-Awareness
 
-Deterministic, **non-LLM** telemetry: introspection at decision time, memory outcome closure, and advisory reflection after trades. Does not override `AgentPolicyEngine`, `ml_signal_guard`, or risk gates.
+Deterministic, **non-LLM** telemetry: introspection at decision time, memory outcome closure, and advisory reflection after trades. Does not override `AgentPolicyEngine`, `entry_validation_guard`, or risk gates.
 
 ### Phase 1 — Introspection (read-only)
 
 - **Builder**: [`agent/core/agent_introspection.py`](../agent/core/agent_introspection.py) → `build_introspection_snapshot()`
 - **Emit**: `DecisionReadyEvent.payload.agent_introspection` (version `1.0`)
-- **Contents**: policy mode/signal/confidence, reason codes, ML candidate, thesis signal, trade score pass/fail vs `AGENT_TRADE_SCORE_MIN`, v43 regime/gate reject, portfolio guard action, memory store size
+- **Contents**: policy mode/signal/confidence, reason codes, ML candidate, thesis signal, trade score pass/fail vs `AGENT_TRADE_SCORE_MIN`, v43 regime/gate reject, portfolio guard action, memory store size, `limits.require_ic_validation_for_orders`
 - **Flag**: `AGENT_INTROSPECTION_ENABLED` (default `true`)
 
 ### Phase 2 — Memory close loop
@@ -996,7 +1025,7 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 2. **`_step3_model_consensus()`**: If per-model prediction stdev exceeds `model_disagreement_threshold` (default `0.4`), consensus magnitude is scaled down, pushing more outcomes into the HOLD band.
 3. **Ensemble mapping** (`V4EnsembleNode`): Entry signal is often `buy_prob - sell_prob`; confidence uses class probabilities. Near-neutral ensemble output maps to HOLD after step 5.
 4. **`TradingEventHandler`**: `signal == "HOLD"` skips new entries; with an open position, optional **ML reversal exit** may still close before `hold_at_synthesis` when configured.
-5. **`AGENT_POLICY_MODE`**: Default `ml_or_thesis` fuses thesis and ML. For **true NO-ML** (IC/thesis-only authority), set `AGENT_POLICY_MODE=thesis_only` and keep `REQUIRE_ML_SIGNAL_FOR_ORDERS=false`.
+5. **`AGENT_POLICY_MODE`**: Default `ml_or_thesis` fuses thesis and ML. For **true NO-ML** (IC/thesis-only authority), set `AGENT_POLICY_MODE=thesis_only` and keep `REQUIRE_IC_VALIDATION_FOR_ORDERS=false` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
 
 **Scalping**: Align training horizon, `PRICE_FLUCTUATION_THRESHOLD_PCT`, TP/SL, and position monitor intervals with the intended timeframe; defaults may still reflect swing-style risk. See [Features – Signal triggers](04-features.md#market-signal-generation-triggers).
 
@@ -1015,7 +1044,7 @@ See [ML models – v15 pipeline](03-ml-models.md#jacksparrow-v15-pipeline-5m--15
 
 ## Multi-timeframe decision engine and exits
 
-When `MTF_DECISION_ENGINE_ENABLED=true`, `agent/core/mtf_decision_engine.py` participates in decisions; `reasoning_engine` may early-return in `_step5` when MTF synthesis applies.
+**Default: off.** `MTF_DECISION_ENGINE_ENABLED=false` for strategy-first IC. When set to `true`, `agent/core/mtf_decision_engine.py` participates in **legacy** reasoning Step 5 only; `reasoning_engine` may early-return in `_step5` when MTF synthesis applies (multi-model payloads without `strategy_candidate`).
 
 | Role | Default TF | Notes |
 |------|------------|--------|

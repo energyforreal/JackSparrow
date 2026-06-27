@@ -53,6 +53,37 @@ def get_last_thesis_snapshot() -> Dict[str, Any]:
     return dict(_last_thesis_snapshot)
 
 
+def thesis_verdict_to_dict(verdict: ThesisVerdict) -> Dict[str, Any]:
+    """Serialize thesis for market_context / IC cache."""
+    return {
+        "signal": verdict.signal,
+        "confidence": float(verdict.confidence),
+        "position_size": float(verdict.position_size),
+        "reason_codes": list(verdict.reason_codes),
+        "thesis_type": verdict.thesis_type,
+        "intended_horizon_bars": int(verdict.intended_horizon_bars),
+        "horizon_minutes": int(verdict.horizon_minutes),
+    }
+
+
+def thesis_verdict_from_dict(raw: Any) -> Optional[ThesisVerdict]:
+    """Restore thesis from orchestrator market_context cache."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return ThesisVerdict(
+            signal=str(raw.get("signal") or "HOLD"),
+            confidence=float(raw.get("confidence") or 0.0),
+            position_size=float(raw.get("position_size") or 0.0),
+            reason_codes=list(raw.get("reason_codes") or []),
+            thesis_type=str(raw.get("thesis_type") or "flat"),
+            intended_horizon_bars=int(raw.get("intended_horizon_bars") or 0),
+            horizon_minutes=int(raw.get("horizon_minutes") or 0),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 def _feat(features: Dict[str, Any], key: str, default: float = 0.0) -> float:
     raw = features.get(key)
     if raw is None:

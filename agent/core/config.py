@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator, AliasChoices
 
 # Determine project root and env file paths, with Colab fallback.
 #
@@ -328,19 +328,31 @@ class Settings(BaseSettings):
         env="DATA_DIR",
         description="Directory for agent_state.json, open orders snapshot, etc.",
     )
-    require_ml_signal_for_orders: bool = Field(
+    require_ic_validation_for_orders: bool = Field(
         default=True,
-        env="REQUIRE_ML_SIGNAL_FOR_ORDERS",
+        validation_alias=AliasChoices(
+            "REQUIRE_IC_VALIDATION_FOR_ORDERS",
+            "REQUIRE_ML_SIGNAL_FOR_ORDERS",
+            "require_ic_validation_for_orders",
+            "require_ml_signal_for_orders",
+        ),
         description=(
-            "When True, entry orders on Delta require validated ML model predictions "
-            "(v43 gates passed and policy adopted ML evidence)."
+            "When True, entry orders require validated IC evidence "
+            "(v43 gates passed and policy adopted IC evidence). "
+            "REQUIRE_ML_SIGNAL_FOR_ORDERS is a deprecated alias."
         ),
     )
-    require_ml_consensus_alignment: bool = Field(
+    require_ic_consensus_alignment: bool = Field(
         default=False,
-        env="REQUIRE_ML_CONSENSUS_ALIGNMENT",
+        validation_alias=AliasChoices(
+            "REQUIRE_IC_CONSENSUS_ALIGNMENT",
+            "REQUIRE_ML_CONSENSUS_ALIGNMENT",
+            "require_ic_consensus_alignment",
+            "require_ml_consensus_alignment",
+        ),
         description=(
-            "When True (non-v43 path), trade side must align with model consensus_signal."
+            "When True (non-v43 path), trade side must align with model consensus_signal. "
+            "REQUIRE_ML_CONSENSUS_ALIGNMENT is a deprecated alias."
         ),
     )
     require_v43_gates_for_entry: bool = Field(
@@ -1506,6 +1518,22 @@ class Settings(BaseSettings):
         env="REASONING_FAST_PATH_ON_BLOCKED_ENTRY",
         description="Skip full 7-step reasoning when open_position gate blocks with no gated entry",
     )
+    candle_close_direct_prediction: bool = Field(
+        default=True,
+        env="CANDLE_CLOSE_DIRECT_PREDICTION",
+        description=(
+            "When True, candle close publishes ModelPredictionRequest directly "
+            "instead of FeatureRequest -> FeatureComputed chain."
+        ),
+    )
+    reasoning_ic_minimal_mode: bool = Field(
+        default=True,
+        env="REASONING_IC_MINIMAL_MODE",
+        description=(
+            "When True and strategy_candidate is present, use 3-step IC minimal "
+            "reasoning (situational, adjudication, calibration) instead of full chain."
+        ),
+    )
     trailing_stop_percentage: float = Field(
         default=0.015,
         env="TRAILING_STOP_PERCENTAGE",
@@ -1540,11 +1568,11 @@ class Settings(BaseSettings):
         description="Require higher-timeframe trend confirmation before entry"
     )
     mtf_decision_engine_enabled: bool = Field(
-        default=True,
+        default=False,
         env="MTF_DECISION_ENGINE_ENABLED",
         description=(
-            "Use multi-timeframe model rules (trend TF + entry TF ± optional filter) "
-            "instead of averaging all models into one consensus"
+            "Legacy multi-model MTF rules in reasoning Step 5. Ignored when "
+            "strategy_candidate is present (IC strategy-first path)."
         ),
     )
     mtf_signal_architecture: str = Field(
@@ -2094,7 +2122,7 @@ class Settings(BaseSettings):
         env="AGENT_POLICY_FORCE_HOLD",
         description=(
             "When True, AgentPolicyEngine vetoes all autonomous entries (DecisionReady stays HOLD). "
-            "ML evidence is still emitted on EvidenceReady for audit/UI."
+            "IC evidence is attached on DecisionReady via ml_evidence_snapshot for audit/UI."
         ),
     )
     agent_policy_mode: str = Field(
@@ -2682,6 +2710,62 @@ class Settings(BaseSettings):
                     file=sys.stderr,
                 )
 
+        return self
+
+    @model_validator(mode="after")
+    def warn_deprecated_ic_ignored_settings(self) -> "Settings":
+        """Log once when legacy ML-bundle settings are set but ignored under IC discovery."""
+        import structlog
+
+        log = structlog.get_logger()
+        if self.single_model_mode_enabled:
+            log.warning(
+                "deprecated_setting_ignored",
+                setting="SINGLE_MODEL_MODE_ENABLED",
+                message="IC-only discovery ignores single_model_mode_enabled.",
+            )
+        if (self.consolidated_model_metadata_glob or "").strip() not in (
+            "",
+            "metadata_BTCUSD_consolidated*.json",
+        ):
+            log.warning(
+                "deprecated_setting_ignored",
+                setting="CONSOLIDATED_MODEL_METADATA_GLOB",
+                value=self.consolidated_model_metadata_glob,
+            )
+        if self.single_model_strict_startup:
+            log.warning(
+                "deprecated_setting_ignored",
+                setting="SINGLE_MODEL_STRICT_STARTUP",
+            )
+        stack = (self.jacksparrow_v43_inference_stack or "").strip().lower()
+        if stack and stack != "meta_calibrator":
+            log.warning(
+                "deprecated_setting_ignored",
+                setting="JACKSPARROW_V43_INFERENCE_STACK",
+                value=self.jacksparrow_v43_inference_stack,
+                message="Rule-based IC runtime does not load pickle inference stacks.",
+            )
+        if os.getenv("REQUIRE_ML_SIGNAL_FOR_ORDERS") and not os.getenv(
+            "REQUIRE_IC_VALIDATION_FOR_ORDERS"
+        ):
+            import structlog
+
+            structlog.get_logger().warning(
+                "deprecated_env_var",
+                old="REQUIRE_ML_SIGNAL_FOR_ORDERS",
+                new="REQUIRE_IC_VALIDATION_FOR_ORDERS",
+            )
+        if os.getenv("REQUIRE_ML_CONSENSUS_ALIGNMENT") and not os.getenv(
+            "REQUIRE_IC_CONSENSUS_ALIGNMENT"
+        ):
+            import structlog
+
+            structlog.get_logger().warning(
+                "deprecated_env_var",
+                old="REQUIRE_ML_CONSENSUS_ALIGNMENT",
+                new="REQUIRE_IC_CONSENSUS_ALIGNMENT",
+            )
         return self
 
     def parsed_timeframes(self) -> List[str]:

@@ -634,7 +634,6 @@ class AgentEventSubscriber:
                     "reasoning_request",
                     "price_fluctuation",
                     "risk_approved",
-                    "evidence_ready",
                 }
                 if event_type in known_ignored_events:
                     logger.debug(

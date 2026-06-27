@@ -38,6 +38,51 @@ def _ctx_dataframe(ctx: Dict[str, Any], primary_key: str, fallback_key: str) -> 
     return None
 
 
+def build_closed_feats_from_v43_dataframes(
+    df5: pd.DataFrame,
+    df15: pd.DataFrame,
+    df1h: pd.DataFrame,
+    df_fund: pd.DataFrame,
+    df_oi: Optional[pd.DataFrame] = None,
+    df_mark: Optional[pd.DataFrame] = None,
+) -> tuple[Dict[str, float], pd.DataFrame]:
+    """Extract closed-bar features and feature matrix (second-to-last row)."""
+    if df15 is None or not isinstance(df15, pd.DataFrame):
+        df15 = pd.DataFrame()
+    if df1h is None or not isinstance(df1h, pd.DataFrame):
+        df1h = pd.DataFrame()
+    if df_oi is None or not isinstance(df_oi, pd.DataFrame):
+        df_oi = None
+    if df_mark is None or not isinstance(df_mark, pd.DataFrame):
+        df_mark = None
+
+    df_feat = build_v43_feature_matrix(
+        df5,
+        df15,
+        df1h,
+        df_fund,
+        df_oi=df_oi,
+        df_mark=df_mark,
+        for_training=False,
+    )
+    if df_feat is None or len(df_feat) < 2:
+        raise ValueError("IC feature matrix returned < 2 rows")
+
+    closed_row = df_feat.iloc[-2]
+    closed_feats: Dict[str, float] = {}
+    for k in df_feat.columns:
+        try:
+            v = closed_row[k]
+            if pd.isna(v):
+                continue
+            fv = float(v)
+            if np.isfinite(fv):
+                closed_feats[str(k)] = fv
+        except (TypeError, ValueError):
+            continue
+    return closed_feats, df_feat
+
+
 class RuleBasedIntelligenceNode(MCPModelNode):
     """Deterministic intelligence layer implementing MCPModelNode."""
 
@@ -155,41 +200,22 @@ class RuleBasedIntelligenceNode(MCPModelNode):
         if df1h is None:
             df1h = pd.DataFrame()
 
-        df_feat = build_v43_feature_matrix(
-            df5,
-            df15,
-            df1h,
-            df_fund,
-            df_oi=df_oi,
-            df_mark=df_mark,
-            for_training=False,
+        closed_feats, df_feat = build_closed_feats_from_v43_dataframes(
+            df5, df15, df1h, df_fund, df_oi=df_oi, df_mark=df_mark
         )
-        if df_feat is None or len(df_feat) < 2:
-            raise ValueError("IC feature matrix returned < 2 rows")
-
-        closed_row = df_feat.iloc[-2]
-        closed_feats: Dict[str, float] = {}
-        for k in df_feat.columns:
-            try:
-                v = closed_row[k]
-                if pd.isna(v):
-                    continue
-                fv = float(v)
-                if np.isfinite(fv):
-                    closed_feats[str(k)] = fv
-            except (TypeError, ValueError):
-                continue
 
         short_enabled = bool(
             getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
         )
         market_context = {k: v for k, v in ctx.items() if not k.startswith("v43_df")}
+        cached_thesis = market_context.get("thesis_verdict")
         out_ctx, pred_val, conf = build_ic_prediction_context(
             bundle_metadata=self._bundle_meta,
             closed_feats=closed_feats,
             market_context=market_context,
             bar_index_hint=int(closed_5m_bar_index(df5)),
             short_enabled=short_enabled,
+            thesis_5m=cached_thesis,
         )
 
         ms = (time.perf_counter() - t0) * 1000.0

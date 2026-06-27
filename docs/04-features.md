@@ -218,7 +218,7 @@ The example illustrates how raw market context, historical success rate, and mod
 
 ### 4b. Deterministic Self-Awareness (agent telemetry)
 
-**Description**: Adds structured self-knowledge to the agent without LLM reasoning or policy overrides. Complements the 6-step chain and strategy-first pipeline.
+**Description**: Adds structured self-knowledge to the agent without LLM reasoning or policy overrides. Complements the IC minimal / legacy reasoning chains and strategy-first pipeline.
 
 **Capabilities**:
 
@@ -377,11 +377,11 @@ The example illustrates how raw market context, historical success rate, and mod
 **Explanation Features**:
 
 **Reasoning Chain Display**:
-- Complete 6-step reasoning process
+- IC minimal (3-step) or legacy 7-step reasoning process
 - Each step shows thought process
 - Evidence tracking for each step
 - Confidence levels per step
-- Final conclusion with rationale
+- Final conclusion with rationale (explanatory; policy signal is authoritative)
 
 **Model Explanations**:
 - SHAP-based feature importance

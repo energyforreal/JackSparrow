@@ -32,10 +32,7 @@ from agent.events.event_bus import event_bus
 from agent.events.schemas import (
     ModelPredictionRequestEvent,
     ModelPredictionCompleteEvent,
-    ReasoningRequestEvent,
-    ReasoningCompleteEvent,
     DecisionReadyEvent,
-    EvidenceReadyEvent,
     EventType,
     PolicyAuthority,
     PolicyVerdict,
@@ -44,7 +41,6 @@ from agent.events.schemas import (
 from agent.core.agent_policy_engine import (
     agent_policy_engine,
     build_ml_evidence_from_orchestrator_result,
-    build_ml_evidence_from_reasoning_context,
 )
 from agent.core.config import settings
 from agent.core.agent_introspection import build_introspection_snapshot
@@ -404,7 +400,6 @@ class MCPOrchestrator:
 
             # Register event handlers
             event_bus.subscribe(EventType.MODEL_PREDICTION_REQUEST, self._handle_prediction_request)
-            event_bus.subscribe(EventType.REASONING_REQUEST, self._handle_reasoning_request)
 
             gate_symbol = str(getattr(settings, "trading_symbol", "BTCUSD") or "BTCUSD").upper()
             self._v43_gate_symbol = gate_symbol
@@ -581,6 +576,21 @@ class MCPOrchestrator:
         if df5.empty or len(df5) < 2:
             return self._create_empty_prediction_response(symbol, context)
 
+        try:
+            if self.feature_server and getattr(self.feature_server, "market_data_service", None):
+                mtf = settings.resolved_agent_timeframes()
+                if mtf:
+                    await self.feature_server.market_data_service.warm_multi_timeframe_caches(
+                        str(symbol),
+                        mtf,
+                    )
+        except Exception as warm_err:
+            logger.debug(
+                "v43_mtf_cache_warm_skipped",
+                symbol=symbol,
+                error=str(warm_err),
+            )
+
         import pandas as pd
 
         from agent.core.v43_contract_state import get_contract_state
@@ -628,6 +638,59 @@ class MCPOrchestrator:
                 f"trading_status={contract_state.trading_status} "
                 f"reduce_only={contract_state.only_reduce_only_orders_allowed}"
             )
+        from agent.intelligence.ic_node import build_closed_feats_from_v43_dataframes
+        from agent.intelligence.regime_classifier import classify_regime
+        from agent.core.agent_thesis_engine import thesis_verdict_to_dict
+
+        try:
+            closed_feats_pre, _ = build_closed_feats_from_v43_dataframes(
+                df5, df15, df1h, df_fund, df_oi=df_oi, df_mark=df_mark
+            )
+        except ValueError:
+            return self._create_empty_prediction_response(symbol, context)
+
+        has_open_pre = bool(context.get("has_open_position", False))
+        if not has_open_pre:
+            has_open_pre = await _exchange_has_open_position_async(symbol)
+
+        regime_pre = classify_regime(closed_feats_pre)
+        if "regime_label" in closed_feats_pre:
+            regime_pre = str(closed_feats_pre.get("regime_label", regime_pre))
+
+        features_pre: Dict[str, Any] = {
+            str(k): float(v) for k, v in closed_feats_pre.items()
+        }
+        if "volatility" not in features_pre:
+            atr_pre = features_pre.get("atr_pct")
+            if atr_pre is not None:
+                features_pre["volatility"] = float(atr_pre) * 100.0
+
+        structure_pre = classify_market_structure(
+            features_pre,
+            v43_regime=regime_pre,
+            contract_state=contract_state,
+        )
+        thesis_mc_pre: Dict[str, Any] = {
+            **(context or {}),
+            "symbol": symbol,
+            "features": features_pre,
+            "regime": regime_pre,
+            "v43_regime": regime_pre,
+            "market_structure": structure_pre.to_dict(),
+            "has_open_position": has_open_pre,
+            "v43_contract_state": contract_state,
+            "price_band_proximity": {
+                "dist_upper_pct": contract_state.dist_to_upper_band_pct(),
+                "dist_lower_pct": contract_state.dist_to_lower_band_pct(),
+            },
+        }
+        if mctx.get("v43_market_health_hold"):
+            thesis_mc_pre["market_health_hold"] = True
+            thesis_mc_pre["market_health_reason"] = mctx.get("v43_market_health_reason")
+
+        thesis_verdict_cached = agent_thesis_engine.evaluate(regime_pre, thesis_mc_pre)
+        mctx["thesis_verdict"] = thesis_verdict_to_dict(thesis_verdict_cached)
+
         model_request = MCPModelRequest(
             request_id=req_id,
             features=[],
@@ -768,7 +831,7 @@ class MCPOrchestrator:
         if mctx.get("v43_market_health_hold"):
             thesis_mc["market_health_hold"] = True
             thesis_mc["market_health_reason"] = mctx.get("v43_market_health_reason")
-        thesis_verdict = agent_thesis_engine.evaluate(regime, thesis_mc)
+        thesis_verdict = thesis_verdict_cached
         _ic_thesis_pre_reconcile = str(pctx.get("ic_thesis_signal") or "").upper()
         _policy_thesis = str(thesis_verdict.signal).upper()
         if _ic_thesis_pre_reconcile and _ic_thesis_pre_reconcile != _policy_thesis:
@@ -1040,14 +1103,7 @@ class MCPOrchestrator:
             "v43_bundle_metadata": bundle_metadata,
             "ml_validation": ml_validation.to_dict(),
             "strategy_candidate": strategy_candidate.to_dict(),
-            "thesis_verdict": {
-                "signal": thesis_verdict.signal,
-                "confidence": thesis_verdict.confidence,
-                "thesis_type": thesis_verdict.thesis_type,
-                "reason_codes": thesis_verdict.reason_codes,
-                "intended_horizon_bars": thesis_verdict.intended_horizon_bars,
-                "horizon_minutes": thesis_verdict.horizon_minutes,
-            },
+            "thesis_verdict": thesis_verdict_to_dict(thesis_verdict),
             "market_structure": structure.to_dict(),
             "trade_score": trade_score.to_dict(),
             "regime": regime,
@@ -2070,18 +2126,6 @@ class MCPOrchestrator:
                         else {},
                     )
 
-                evidence_event = EvidenceReadyEvent(
-                    source="agent_policy_engine",
-                    correlation_id=event.event_id,
-                    payload={
-                        "symbol": decision_symbol,
-                        "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
-                        "timestamp": timestamp,
-                        "correlation_id": event.event_id,
-                    },
-                )
-                await event_bus.publish(evidence_event)
-
                 signal = verdict.signal
                 position_size = verdict.position_size
                 confidence = verdict.confidence
@@ -2242,147 +2286,6 @@ class MCPOrchestrator:
                         event_id=event.event_id,
                         error=str(e),
                         exc_info=True)
-
-    async def _handle_reasoning_request(self, event):
-        """Handle reasoning request event."""
-        try:
-            payload = event.payload
-            symbol = payload.get("symbol")
-            market_context = payload.get("market_context", {})
-
-            request = MCPReasoningRequest(
-                symbol=symbol,
-                market_context=market_context,
-                use_memory=bool(self.vector_store)
-            )
-
-            reasoning_chain = await self.reasoning_engine.generate_reasoning(request)
-
-            # Normalize per-model predictions so downstream consumers can build
-            # model-level views from the reasoning payload alone.
-            raw_model_predictions = getattr(reasoning_chain, "model_predictions", None) or market_context.get(
-                "model_predictions", []
-            )
-            model_predictions_for_reasoning = self._build_model_predictions_for_reasoning(
-                raw_model_predictions
-            )
-
-            reasoning_chain_payload: Dict[str, Any] = {
-                "chain_id": reasoning_chain.chain_id,
-                "steps": [step.model_dump() for step in reasoning_chain.steps],
-                "conclusion": reasoning_chain.conclusion,
-                "final_confidence": reasoning_chain.final_confidence,
-                "model_predictions": model_predictions_for_reasoning,
-                "market_context": market_context or getattr(reasoning_chain, "market_context", {}) or {},
-            }
-
-            # Emit completion event
-            completion_event = ReasoningCompleteEvent(
-                source="mcp_orchestrator",
-                correlation_id=event.event_id,
-                payload={
-                    "symbol": symbol,
-                    "reasoning_chain": reasoning_chain_payload,
-                    "final_confidence": reasoning_chain.final_confidence,
-                    "timestamp": datetime.now(timezone.utc),
-                },
-            )
-            await event_bus.publish(completion_event)
-
-            # ML candidate from reasoning conclusion (text-derived); agent policy ratifies/vetoes.
-            decision_ml = self._extract_decision_from_reasoning(reasoning_chain)
-            ml_evidence = build_ml_evidence_from_reasoning_context(
-                str(symbol or settings.trading_symbol or "BTCUSD"),
-                market_context if isinstance(market_context, dict) else {},
-                str(decision_ml.get("signal") or "HOLD"),
-                float(decision_ml.get("confidence") or reasoning_chain.final_confidence or 0.0),
-                float(decision_ml.get("position_size") or 0.0),
-                model_predictions_for_reasoning,
-            )
-            verdict = agent_policy_engine.evaluate(
-                ml_evidence=ml_evidence,
-                conclusion=reasoning_chain.conclusion,
-                market_context=market_context if isinstance(market_context, dict) else {},
-            )
-            ts_decision = datetime.now(timezone.utc)
-
-            evidence_event = EvidenceReadyEvent(
-                source="agent_policy_engine",
-                correlation_id=event.event_id,
-                payload={
-                    "symbol": symbol,
-                    "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
-                    "timestamp": ts_decision,
-                    "correlation_id": event.event_id,
-                },
-            )
-            await event_bus.publish(evidence_event)
-
-            decision_payload = {
-                    "symbol": symbol,
-                    "signal": verdict.signal,
-                    "confidence": verdict.confidence,
-                    "position_size": verdict.position_size,
-                    "reasoning_chain": reasoning_chain_payload,
-                    "timestamp": ts_decision,
-                    "policy_authority": PolicyAuthority.AGENT_POLICY.value,
-                    "policy_reason_codes": list(verdict.reason_codes),
-                    "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
-                    "policy_verdict": verdict.model_dump(mode="json"),
-            }
-            decision_payload.update(
-                _decision_ws_metadata(
-                    {"model_predictions": model_predictions_for_reasoning}
-                )
-            )
-            _enrich_confidence_semantics(decision_payload)
-            decision_event = DecisionReadyEvent(
-                source="agent_policy_engine",
-                correlation_id=event.event_id,
-                payload=decision_payload,
-            )
-
-            decision_for_store = {
-                "signal": verdict.signal,
-                "confidence": verdict.confidence,
-                "position_size": verdict.position_size,
-            }
-            await self._enrich_decision_event_self_awareness(
-                decision_event,
-                symbol=str(symbol or ""),
-                signal=verdict.signal,
-                confidence=float(verdict.confidence or 0.0),
-                verdict=verdict,
-                ml_evidence=ml_evidence,
-                market_context=market_context if isinstance(market_context, dict) else {},
-                chain_id=reasoning_chain.chain_id,
-                timestamp=ts_decision,
-                decision_for_store=decision_for_store,
-                market_context_for_store=reasoning_chain_payload.get("market_context", {}),
-            )
-            await event_bus.publish(decision_event)
-
-            self._schedule_prediction_audit(
-                correlation_id=event.event_id,
-                symbol=symbol,
-                confidence=float(verdict.confidence or 0.0) or 0.0,
-                decision_payload=decision_event.payload,
-                latency_ms=None,
-            )
-
-        except NoHealthyModelPredictionsError:
-            logger.debug(
-                "mcp_orchestrator_reasoning_skipped_no_predictions",
-                event_id=event.event_id,
-                symbol=payload.get("symbol"),
-                message="Skipping reasoning - no model_predictions in context.",
-            )
-        except Exception as e:
-            logger.error("mcp_orchestrator_reasoning_request_failed",
-                        event_id=event.event_id,
-                        error=str(e),
-                        exc_info=True)
-
 
     async def _persist_v43_gate_state_locked(self, symbol: str) -> None:
         """Persist gate state (caller must hold ``_v43_gate_state_lock``)."""
