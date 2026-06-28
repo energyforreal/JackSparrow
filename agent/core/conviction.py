@@ -38,9 +38,26 @@ def _conviction_weights() -> Dict[str, float]:
 def compute_conviction(
     bundle: EvidenceBundle,
     direction: Optional[str] = None,
+    *,
+    dominant_thesis_type: Optional[str] = None,
 ) -> ConvictionResult:
     """Aggregate evidence into conviction and size_fraction (no multi-gate HOLD)."""
     weights = _conviction_weights()
+    dtype = str(dominant_thesis_type or "").strip().lower()
+    if dtype == "breakout":
+        weights[EvidenceDimension.BREAKOUT.value] = weights.get(
+            EvidenceDimension.BREAKOUT.value, 0.12
+        ) * 1.15
+    elif dtype in ("trend_continuation", "basis_crowding", "funding_crowding"):
+        weights[EvidenceDimension.TREND.value] = weights.get(
+            EvidenceDimension.TREND.value, 0.15
+        ) * 1.15
+    elif dtype == "mean_reversion":
+        weights[EvidenceDimension.MOMENTUM.value] = weights.get(
+            EvidenceDimension.MOMENTUM.value, 0.10
+        ) * 1.15
+    total_w = sum(weights.values()) or 1.0
+    weights = {k: v / total_w for k, v in weights.items()}
     dim_scores: Dict[str, float] = {}
     weighted_sum = 0.0
     weight_used = 0.0

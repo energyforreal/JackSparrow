@@ -2219,6 +2219,26 @@ class Settings(BaseSettings):
         env="AGENT_THESIS_SOFT_EVIDENCE_MODE",
         description="Convert chop/liquidity/ATR/funding checks to evidence scores instead of HOLD vetoes.",
     )
+    agent_thesis_hard_veto_enabled: bool = Field(
+        default=False,
+        env="AGENT_THESIS_HARD_VETO_ENABLED",
+        description=(
+            "When True, legacy binary market-quality vetoes (squeeze, crisis, liquidity, "
+            "ATR, funding) force thesis HOLD. Default False uses continuous evidence only."
+        ),
+    )
+    agent_hypothesis_mode: str = Field(
+        default="portfolio",
+        env="AGENT_HYPOTHESIS_MODE",
+        description="legacy | portfolio — portfolio evaluates all hypotheses with aggregation.",
+    )
+    hypothesis_min_margin: float = Field(
+        default=0.03,
+        env="HYPOTHESIS_MIN_MARGIN",
+        ge=0.0,
+        le=0.5,
+        description="Min long-vs-short pressure margin before aggregate direction is FLAT.",
+    )
     jacksparrow_v43_crisis_regime_hard_block: bool = Field(
         default=False,
         env="JACKSPARROW_V43_CRISIS_REGIME_HARD_BLOCK",

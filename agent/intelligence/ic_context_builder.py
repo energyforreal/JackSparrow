@@ -8,6 +8,8 @@ import numpy as np
 import structlog
 
 from agent.core.agent_thesis_engine import AgentThesisEngine, ThesisVerdict, thesis_verdict_from_dict
+from agent.core.hypothesis_aggregator import aggregate_direction_to_signal
+from agent.core.hypothesis_types import hypothesis_snapshot_from_dict
 from agent.core.config import settings
 from agent.intelligence.direction_signal import compute_direction_signal
 from agent.intelligence.mtf_synthesizer import compute_mtf_alignment
@@ -107,6 +109,25 @@ def _thesis_from_htf_bias(features: Dict[str, Any], prefix: str) -> ThesisVerdic
     )
 
 
+_AGGREGATE_ER_BASE = {"LONG": 0.012, "SHORT": -0.012, "FLAT": 0.0}
+
+
+def _primary_er_from_hypothesis_or_thesis(
+    market_context: Dict[str, Any],
+    thesis_5m: ThesisVerdict,
+) -> Tuple[float, str]:
+    """Use hypothesis aggregate direction when cached; else thesis signal."""
+    snap = hypothesis_snapshot_from_dict(market_context.get("hypothesis_snapshot"))
+    if snap is not None and str(snap.aggregate_direction or "FLAT").upper() != "FLAT":
+        direction = str(snap.aggregate_direction).upper()
+        conf = max(float(snap.aggregate_confidence or 0.0), 0.5)
+        base = _AGGREGATE_ER_BASE.get(direction, 0.0)
+        ic_sig = aggregate_direction_to_signal(direction, conf)
+        return float(base * conf), ic_sig
+    ic_sig = str(thesis_5m.signal or "HOLD").upper()
+    return compute_direction_signal(thesis_5m), ic_sig
+
+
 def build_ic_prediction_context(
     *,
     bundle_metadata: Mapping[str, Any],
@@ -141,7 +162,7 @@ def build_ic_prediction_context(
     thesis_1h = _thesis_from_htf_bias(closed_feats, "h1")
     alignment = compute_mtf_alignment(thesis_5m, thesis_15m, thesis_1h)
 
-    primary_er = compute_direction_signal(thesis_5m)
+    primary_er, ic_thesis_sig = _primary_er_from_hypothesis_or_thesis(mctx, thesis_5m)
     if alignment >= 0.6 and primary_er != 0.0:
         primary_er *= 1.0 + 0.15 * alignment
 
@@ -164,14 +185,14 @@ def build_ic_prediction_context(
     gate_thr_hint = float(floor)
     _er_before_micro = primary_er
     primary_er = apply_ic_micro_momentum_er(
-        str(thesis_5m.signal),
+        ic_thesis_sig,
         primary_er,
         closed_feats,
         threshold=gate_thr_hint,
         short_enabled=short_enabled,
     )
     ic_micro_applied = (
-        str(thesis_5m.signal).upper() == "HOLD"
+        str(ic_thesis_sig).upper() == "HOLD"
         and _er_before_micro == 0.0
         and primary_er != 0.0
     )
@@ -214,7 +235,7 @@ def build_ic_prediction_context(
     primary_conf = head_confidence(edge, primary_thr, u_scale)
 
     entry_proba = synthetic_entry_proba_from_ic(
-        str(thesis_5m.signal),
+        ic_thesis_sig,
         edge,
         primary_thr,
         u_scale,
@@ -242,7 +263,7 @@ def build_ic_prediction_context(
         "p_setup_quality": p_quality,
         "p_vol_expansion": p_vol,
         "ic_alignment_score": alignment,
-        "ic_thesis_signal": thesis_5m.signal,
+        "ic_thesis_signal": ic_thesis_sig,
         "ic_thesis_signal_is_pre_reconcile": True,
         "expected_return_is_synthetic": True,
         "ic_reason_codes": list(thesis_5m.reason_codes),

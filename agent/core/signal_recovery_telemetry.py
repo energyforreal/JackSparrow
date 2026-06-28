@@ -48,6 +48,9 @@ def record_decision_cycle(
     expected_return: Optional[float] = None,
     trade_score: Optional[float] = None,
     thesis_signal: Optional[str] = None,
+    hypothesis_dominant: Optional[str] = None,
+    aggregate_confidence: Optional[float] = None,
+    hypothesis_margin: Optional[float] = None,
     policy_reason_codes: Optional[List[str]] = None,
     v43_collapse_rate: Optional[float] = None,
     proba: Optional[float] = None,
@@ -72,6 +75,12 @@ def record_decision_cycle(
         row["trade_score"] = float(trade_score)
     if thesis_signal is not None:
         row["thesis_signal"] = thesis_signal
+    if hypothesis_dominant is not None:
+        row["hypothesis_dominant"] = hypothesis_dominant
+    if aggregate_confidence is not None:
+        row["aggregate_confidence"] = float(aggregate_confidence)
+    if hypothesis_margin is not None:
+        row["hypothesis_margin"] = float(hypothesis_margin)
     if policy_reason_codes:
         row["policy_reason_codes"] = list(policy_reason_codes)
     if v43_collapse_rate is not None:

@@ -336,6 +336,8 @@ class AgentIntrospectionSnapshot(BaseModel):
     size_fraction: Optional[float] = None
     abstention: Optional[str] = None
     evidence_summary: Optional[Dict[str, float]] = None
+    hypothesis_top: Optional[List[Dict[str, Any]]] = None
+    environment_scores: Optional[Dict[str, float]] = None
     limits: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -384,6 +386,10 @@ class DecisionReadyEvent(BaseEvent):
         )
         trade_score: Optional[float] = None
         thesis_signal: Optional[str] = None
+        hypothesis_snapshot: Optional[Dict[str, Any]] = Field(
+            default=None,
+            description="Competing market hypotheses and environment scores at decision time.",
+        )
         anticipated_horizon_bars: Optional[int] = Field(
             default=None,
             description="Expected movement horizon in 5m bars (2/6/12/24).",

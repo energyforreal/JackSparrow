@@ -63,3 +63,45 @@ def test_build_evidence_bundle_no_passed_bool() -> None:
     )
     assert "passed" not in bundle.scores
     assert bundle.get(EvidenceDimension.ML_EDGE.value) > 0.4
+
+
+def test_build_evidence_bundle_includes_environment_metadata() -> None:
+    ml = MLValidationSnapshot(
+        expected_return=0.01,
+        threshold=0.01,
+        short_threshold=0.01,
+        uncertainty=0.02,
+        final_long=False,
+        final_short=False,
+        regime="neutral",
+    )
+    structure = MarketStructureSnapshot(
+        market_type="NEUTRAL",
+        regime="neutral",
+        liquidity_ok=True,
+        chop_market=False,
+    )
+    env = {
+        "liquidity": 0.77,
+        "volatility": 0.31,
+        "funding_risk": 0.2,
+        "squeeze_prob": 0.1,
+        "trend_strength": 0.68,
+        "crisis_risk": 0.72,
+    }
+    bundle = build_evidence_bundle(
+        market_context={
+            "features": {"atr_pct": 0.01, "vol_regime": 1.0},
+            "environment_scores": env,
+        },
+        ml_validation=ml,
+        structure=structure,
+        strategy=StrategyCandidate(
+            direction="LONG",
+            signal="LONG",
+            strength=0.5,
+        ),
+        ml_confirms=False,
+    )
+    assert bundle.metadata.get("environment") == env
+    assert bundle.get("env_liquidity") == 0.77

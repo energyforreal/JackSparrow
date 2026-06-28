@@ -60,4 +60,4 @@ def test_collect_candidates_includes_short_when_enabled() -> None:
             short_enabled=True,
         )
     signals = {c.signal for c in candidates}
-    assert "SELL" in signals or "STRONG_SELL" in signals
+    assert "SHORT" in signals or "SELL" in signals or "STRONG_SELL" in signals

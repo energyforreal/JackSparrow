@@ -33,8 +33,9 @@ def _trend_features() -> dict:
     }
 
 
+@patch("agent.core.agent_thesis_engine.hypothesis_portfolio_mode", return_value=True)
 @patch("agent.core.agent_thesis_engine.settings")
-def test_breakout_long_fires(mock_settings) -> None:
+def test_breakout_long_fires(mock_settings, _portfolio) -> None:
     mock_settings.agent_thesis_breakout_enabled = True
     mock_settings.agent_thesis_trend_enabled = True
     mock_settings.agent_thesis_crisis_veto = True
@@ -49,11 +50,12 @@ def test_breakout_long_fires(mock_settings) -> None:
     v = engine.evaluate("neutral", {"features": _breakout_features()})
     assert v.signal == "LONG"
     assert v.thesis_type == "breakout"
-    assert "thesis_breakout_long" in v.reason_codes
+    assert "thesis_breakout_long" in v.reason_codes or "hypothesis_dominant=breakout_long" in v.reason_codes
 
 
+@patch("agent.core.agent_thesis_engine.thesis_market_hard_veto_enabled", return_value=True)
 @patch("agent.core.agent_thesis_engine.settings")
-def test_crisis_regime_forces_hold(mock_settings) -> None:
+def test_crisis_regime_forces_hold(mock_settings, _hard) -> None:
     mock_settings.agent_thesis_crisis_veto = True
     mock_settings.agent_thesis_breakout_enabled = True
     mock_settings.agent_thesis_squeeze_veto_threshold = 0.5
@@ -64,8 +66,9 @@ def test_crisis_regime_forces_hold(mock_settings) -> None:
     assert v.thesis_type == "crisis_veto"
 
 
+@patch("agent.core.agent_thesis_engine.hypothesis_portfolio_mode", return_value=False)
 @patch("agent.core.agent_thesis_engine.settings")
-def test_trending_regime_uses_trend_not_breakout(mock_settings) -> None:
+def test_trending_regime_uses_trend_not_breakout_legacy(mock_settings, _legacy) -> None:
     mock_settings.agent_thesis_breakout_enabled = True
     mock_settings.agent_thesis_trend_enabled = True
     mock_settings.agent_thesis_crisis_veto = True

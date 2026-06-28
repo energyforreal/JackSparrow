@@ -55,6 +55,8 @@ class AgentIntrospectionSnapshot:
     size_fraction: Optional[float] = None
     abstention: Optional[str] = None
     evidence_summary: Optional[Dict[str, float]] = None
+    hypothesis_top: Optional[List[Dict[str, Any]]] = None
+    environment_scores: Optional[Dict[str, float]] = None
     limits: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -87,6 +89,10 @@ class AgentIntrospectionSnapshot:
             "size_fraction": self.size_fraction,
             "abstention": self.abstention,
             "evidence_summary": dict(self.evidence_summary) if self.evidence_summary else None,
+            "hypothesis_top": list(self.hypothesis_top) if self.hypothesis_top else None,
+            "environment_scores": (
+                dict(self.environment_scores) if self.environment_scores else None
+            ),
             "limits": dict(self.limits),
         }
 
@@ -265,6 +271,26 @@ def build_introspection_snapshot(
         if isinstance(scores, dict):
             evidence_summary = {str(k): float(v) for k, v in scores.items() if v is not None}
 
+    hypothesis_top: Optional[List[Dict[str, Any]]] = None
+    environment_scores: Optional[Dict[str, float]] = None
+    hyp_raw = mctx.get("hypothesis_snapshot")
+    if isinstance(hyp_raw, dict):
+        hyps = hyp_raw.get("hypotheses")
+        if isinstance(hyps, list):
+            ranked = sorted(
+                [h for h in hyps if isinstance(h, dict)],
+                key=lambda x: float(x.get("weighted_confidence") or x.get("confidence") or 0),
+                reverse=True,
+            )
+            hypothesis_top = ranked[:3]
+        env = hyp_raw.get("environment")
+        if isinstance(env, dict):
+            environment_scores = {str(k): float(v) for k, v in env.items()}
+    if environment_scores is None and isinstance(mctx.get("environment_scores"), dict):
+        environment_scores = {
+            str(k): float(v) for k, v in mctx["environment_scores"].items()
+        }
+
     return AgentIntrospectionSnapshot(
         version=INTROSPECTION_VERSION,
         timestamp=now,
@@ -294,5 +320,7 @@ def build_introspection_snapshot(
         size_fraction=size_frac,
         abstention=str(abstention_val) if abstention_val else None,
         evidence_summary=evidence_summary,
+        hypothesis_top=hypothesis_top,
+        environment_scores=environment_scores,
         limits=limits,
     )

@@ -104,6 +104,31 @@ export const ReasoningChainSchema = z.object({
   final_confidence: z.number().min(0).max(1).describe('Final confidence score (0.0 to 1.0)'),
 });
 
+export const HypothesisCandidateSnapshotSchema = z.object({
+  id: z.string(),
+  direction: z.string(),
+  confidence: z.number(),
+  thesis_type: z.string(),
+  horizon_bars: z.number().optional(),
+  horizon_minutes: z.number().optional(),
+  reason_codes: z.array(z.string()).optional(),
+  regime_weight: z.number().optional(),
+  weighted_confidence: z.number().optional(),
+});
+
+export const MarketHypothesisSnapshotSchema = z.object({
+  hypotheses: z.array(HypothesisCandidateSnapshotSchema).optional(),
+  environment: z.record(z.string(), z.number()).optional(),
+  regime: z.string().optional(),
+  dominant: HypothesisCandidateSnapshotSchema.nullable().optional(),
+  aggregate_direction: z.string().optional(),
+  aggregate_confidence: z.number().optional(),
+  hypothesis_margin: z.number().optional(),
+  long_pressure: z.number().optional(),
+  short_pressure: z.number().optional(),
+  reason_codes: z.array(z.string()).optional(),
+});
+
 export const AgentIntrospectionSnapshotSchema = z.object({
   version: z.string(),
   timestamp: z.string(),
@@ -123,6 +148,8 @@ export const AgentIntrospectionSnapshotSchema = z.object({
   portfolio_guard_reason_codes: z.array(z.string()).default([]),
   memory_enabled: z.boolean(),
   memory_context_count: z.number(),
+  hypothesis_top: z.array(HypothesisCandidateSnapshotSchema).optional(),
+  environment_scores: z.record(z.string(), z.number()).optional(),
   limits: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -180,6 +207,7 @@ export const PredictResponseSchema = z
       .default({}),
     timestamp: DateSchema,
     agent_introspection: AgentIntrospectionSnapshotSchema.optional(),
+    hypothesis_snapshot: MarketHypothesisSnapshotSchema.optional(),
     policy_verdict: z.record(z.string(), z.unknown()).optional(),
     trade_score: z.number().optional(),
     ml_evidence_snapshot: z.record(z.string(), z.unknown()).optional(),

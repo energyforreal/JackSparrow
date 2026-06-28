@@ -1653,6 +1653,7 @@ class AgentEventSubscriber:
             "policy_reason_codes",
             "strategy_origin",
             "thesis_signal",
+            "hypothesis_snapshot",
             "ml_evidence_snapshot",
             "agent_introspection",
             "memory_context_id",

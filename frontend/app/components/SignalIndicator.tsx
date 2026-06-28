@@ -172,6 +172,60 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
+        {(() => {
+          const hypSnap = signal.hypothesis_snapshot
+          const topHyps =
+            hypSnap?.hypotheses?.slice(0, 3) ??
+            signal.agent_introspection?.hypothesis_top ??
+            []
+          const aggregateDir =
+            hypSnap?.aggregate_direction ??
+            topHyps[0]?.direction ??
+            undefined
+          const env =
+            hypSnap?.environment ?? signal.agent_introspection?.environment_scores
+          if (!topHyps.length && !aggregateDir) return null
+          return (
+            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-1">
+              <p className="font-medium text-foreground text-xs">Hypotheses</p>
+              {aggregateDir && (
+                <p>
+                  aggregate {aggregateDir}
+                  {hypSnap?.aggregate_confidence != null
+                    ? ` · conf ${formatConfidence(hypSnap.aggregate_confidence * 100)}`
+                    : ''}
+                  {hypSnap?.hypothesis_margin != null
+                    ? ` · margin ${(hypSnap.hypothesis_margin * 100).toFixed(1)}%`
+                    : ''}
+                </p>
+              )}
+              {topHyps.length > 0 && (
+                <ul className="space-y-0.5">
+                  {topHyps.map((h) => (
+                    <li key={h.id}>
+                      {h.id} · {h.direction} ·{' '}
+                      {formatConfidence(
+                        (h.weighted_confidence ?? h.confidence) <= 1
+                          ? (h.weighted_confidence ?? h.confidence) * 100
+                          : (h.weighted_confidence ?? h.confidence)
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {env && Object.keys(env).length > 0 && (
+                <p className="truncate">
+                  env:{' '}
+                  {Object.entries(env)
+                    .slice(0, 4)
+                    .map(([k, v]) => `${k} ${(v * 100).toFixed(0)}%`)
+                    .join(' · ')}
+                </p>
+              )}
+            </div>
+          )
+        })()}
+
         {/* Latest reflection */}
         {(lastReflection ?? signal.reflection_snapshot) && (
           <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">

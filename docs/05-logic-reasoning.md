@@ -55,7 +55,7 @@ For detailed MCP Reasoning Protocol documentation, see [MCP Layer Documentation 
 
 **IC minimal mode** (`REASONING_IC_MINIMAL_MODE`, default `true`): When `strategy_candidate` is present in market context (strategy-first IC path), reasoning runs a 3-step chain — situational assessment, trade adjudication, confidence calibration — instead of the full 7-step legacy chain.
 
-**Thesis cache**: `MCPOrchestrator` evaluates `AgentThesisEngine` once per cycle and passes `thesis_verdict` through IC predict and policy fusion to avoid duplicate evaluations.
+**Thesis / hypothesis cache**: `MCPOrchestrator` evaluates `AgentThesisEngine` once per cycle. In **portfolio mode** (`AGENT_HYPOTHESIS_MODE=portfolio`, default), all rule families run every bar; competing hypotheses are aggregated into `hypothesis_snapshot` (aggregate direction, margin, environment scores). Legacy `thesis_verdict` remains for backward compatibility. Market-quality concerns (squeeze, crisis, liquidity, ATR, funding) are continuous evidence scores via `evidence_engine.build_environment_scores`, not binary thesis HOLDs unless `AGENT_THESIS_HARD_VETO_ENABLED=true`. Operational hard tier only: `market_health_hold`, `has_open_position`. Policy still fuses aggregate hypothesis direction + conviction sizing; reasoning narrates the portfolio in trade adjudication.
 
 **Entry validation**: `entry_validation_guard.validate_entry_signal()` (shim: `ml_signal_guard`) checks policy verdict + optional v43 gates before execution. Configure with `REQUIRE_IC_VALIDATION_FOR_ORDERS` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
 

@@ -468,6 +468,32 @@ class MCPReasoningEngine:
             f"ml_confirms={ml_confirms}",
             f"trade_score={score:.1f} passed={passed}",
         ]
+        hyp_raw = mc.get("hypothesis_snapshot") if isinstance(mc, dict) else None
+        if isinstance(hyp_raw, dict):
+            agg_dir = str(hyp_raw.get("aggregate_direction") or "FLAT")
+            agg_conf = hyp_raw.get("aggregate_confidence")
+            margin = hyp_raw.get("hypothesis_margin")
+            evidence.append(f"hypothesis_aggregate={agg_dir}")
+            if agg_conf is not None:
+                evidence.append(f"aggregate_confidence={float(agg_conf):.3f}")
+            if margin is not None:
+                evidence.append(f"hypothesis_margin={float(margin):.3f}")
+            hyps = hyp_raw.get("hypotheses")
+            if isinstance(hyps, list):
+                for h in sorted(
+                    [x for x in hyps if isinstance(x, dict)],
+                    key=lambda x: float(x.get("weighted_confidence") or 0),
+                    reverse=True,
+                )[:3]:
+                    evidence.append(
+                        f"hypothesis_{h.get('id', '?')}="
+                        f"{float(h.get('weighted_confidence', 0)):.2f}"
+                    )
+            env = hyp_raw.get("environment")
+            if isinstance(env, dict):
+                for k in ("liquidity", "trend_strength", "crisis_risk", "squeeze_prob"):
+                    if k in env:
+                        evidence.append(f"env_{k}={float(env[k]):.2f}")
 
         entry = is_entry_signal(thesis_sig)
         ml_entry = is_entry_signal(ml_sig)

@@ -669,7 +669,11 @@ class MCPOrchestrator:
         from agent.core.v43_market_frames import closed_5m_bar_index
         from agent.intelligence.ic_node import build_closed_feats_from_v43_dataframes
         from agent.intelligence.regime_classifier import classify_regime
-        from agent.core.agent_thesis_engine import thesis_verdict_to_dict
+        from agent.core.agent_thesis_engine import (
+            agent_thesis_engine,
+            get_last_hypothesis_snapshot,
+            thesis_verdict_to_dict,
+        )
 
         ticker_row: Dict[str, Any] = {}
         if isinstance(df_oi, pd.DataFrame) and not df_oi.empty:
@@ -792,6 +796,11 @@ class MCPOrchestrator:
 
         thesis_verdict_cached = agent_thesis_engine.evaluate(regime_pre, thesis_mc_pre)
         mctx["thesis_verdict"] = thesis_verdict_to_dict(thesis_verdict_cached)
+        _hyp_snap = get_last_hypothesis_snapshot()
+        if _hyp_snap:
+            mctx["hypothesis_snapshot"] = _hyp_snap
+            if isinstance(_hyp_snap.get("environment"), dict):
+                mctx["environment_scores"] = dict(_hyp_snap["environment"])
         mctx["closed_feats_pre"] = closed_feats_pre
         mctx["df_feat_pre"] = df_feat_pre
         mctx["regime"] = regime_pre
@@ -1270,6 +1279,8 @@ class MCPOrchestrator:
             "ml_validation": ml_validation.to_dict(),
             "strategy_candidate": strategy_candidate.to_dict(),
             "thesis_verdict": thesis_verdict_to_dict(thesis_verdict),
+            "hypothesis_snapshot": mctx.get("hypothesis_snapshot"),
+            "environment_scores": mctx.get("environment_scores"),
             "market_structure": structure.to_dict(),
             "trade_score": trade_score.to_dict(),
             "regime": regime,
@@ -1430,7 +1441,17 @@ class MCPOrchestrator:
         )
 
         _entry_signals = ENTRY_SIGNALS
-        conviction_result = compute_conviction(evidence_bundle, policy_verdict.signal)
+        _dominant_type: Optional[str] = None
+        _hyp_raw = market_context_for_reasoning.get("hypothesis_snapshot")
+        if isinstance(_hyp_raw, dict):
+            _dom = _hyp_raw.get("dominant")
+            if isinstance(_dom, dict):
+                _dominant_type = str(_dom.get("thesis_type") or "") or None
+        conviction_result = compute_conviction(
+            evidence_bundle,
+            policy_verdict.signal,
+            dominant_thesis_type=_dominant_type,
+        )
         market_context_for_reasoning["conviction"] = conviction_result.to_dict()
 
         if evidence_based_sizing_enabled() and policy_verdict.signal in _entry_signals:
@@ -2582,6 +2603,7 @@ class MCPOrchestrator:
                         "strategy_origin": strategy_origin,
                         "trade_score": ts_val,
                         "thesis_signal": ml_evidence.thesis_signal,
+                        "hypothesis_snapshot": (mctx or {}).get("hypothesis_snapshot"),
                         "anticipated_horizon_bars": int(
                             (mctx or {}).get("v43_execution_horizon_bars", 0) or 0
                         )
@@ -2640,6 +2662,20 @@ class MCPOrchestrator:
                 try:
                     from agent.core.signal_recovery_telemetry import record_decision_cycle
 
+                    _hyp_extra: Dict[str, Any] = {"event_id": decision_event.event_id}
+                    _hyp_raw = (mctx or {}).get("hypothesis_snapshot")
+                    if isinstance(_hyp_raw, dict):
+                        _dom = _hyp_raw.get("dominant")
+                        if isinstance(_dom, dict) and _dom.get("id"):
+                            _hyp_extra["hypothesis_dominant"] = str(_dom["id"])
+                        if _hyp_raw.get("aggregate_confidence") is not None:
+                            _hyp_extra["aggregate_confidence"] = float(
+                                _hyp_raw["aggregate_confidence"]
+                            )
+                        if _hyp_raw.get("hypothesis_margin") is not None:
+                            _hyp_extra["hypothesis_margin"] = float(
+                                _hyp_raw["hypothesis_margin"]
+                            )
                     record_decision_cycle(
                         symbol=decision_symbol,
                         signal=str(signal),
@@ -2648,9 +2684,12 @@ class MCPOrchestrator:
                         thesis_signal=str(ml_evidence.thesis_signal)
                         if ml_evidence.thesis_signal
                         else None,
+                        hypothesis_dominant=_hyp_extra.get("hypothesis_dominant"),
+                        aggregate_confidence=_hyp_extra.get("aggregate_confidence"),
+                        hypothesis_margin=_hyp_extra.get("hypothesis_margin"),
                         policy_reason_codes=list(verdict.reason_codes),
                         event="decision_ready_emitted",
-                        extra={"event_id": decision_event.event_id},
+                        extra=_hyp_extra,
                     )
                 except Exception:
                     pass

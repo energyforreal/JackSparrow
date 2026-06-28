@@ -58,6 +58,54 @@ def squeeze_risk_score(features: Dict[str, Any], market_context: Dict[str, Any])
     return _clamp01(1.0 - squeeze / max(thr, 1e-9), 0.5)
 
 
+def crisis_risk_score(regime: str) -> float:
+    """Higher score = lower crisis risk (more favorable)."""
+    r = str(regime or "neutral").strip().lower()
+    if r == "crisis":
+        return 0.18
+    if r == "trending":
+        return 0.82
+    if r == "ranging":
+        return 0.65
+    return 0.72
+
+
+def trend_strength_score(structure: MarketStructureSnapshot, features: Dict[str, Any]) -> float:
+    """Trend strength from structure and ADX (inverse of chop penalty)."""
+    if structure.chop_market:
+        return 0.29
+    adx = float(features.get("adx_14") or 0.0)
+    trending_min = float(getattr(settings, "agent_structure_trending_adx_min", 22.0) or 22.0)
+    if adx >= trending_min:
+        return _clamp01(0.55 + (adx - trending_min) / 40.0, 0.55)
+    return 0.45
+
+
+def build_environment_scores(
+    features: Dict[str, Any],
+    structure: MarketStructureSnapshot,
+    market_context: Dict[str, Any],
+    *,
+    regime: Optional[str] = None,
+) -> Dict[str, float]:
+    """Canonical continuous environment scores for hypothesis and evidence layers."""
+    mc = market_context if isinstance(market_context, dict) else {}
+    reg = str(regime or mc.get("regime") or mc.get("v43_regime") or "neutral").lower()
+    liq = liquidity_score_from_structure(structure)
+    vol = volatility_score_from_features(features)
+    funding_risk = 1.0 - funding_pressure_score(features)
+    squeeze_prob = 1.0 - squeeze_risk_score(features, mc)
+    return {
+        "liquidity": liq,
+        "volatility": vol,
+        "funding_risk": _clamp01(funding_risk),
+        "squeeze_prob": _clamp01(squeeze_prob),
+        "trend_strength": trend_strength_score(structure, features),
+        "crisis_risk": crisis_risk_score(reg),
+        "structure": structure_quality_from_structure(structure),
+    }
+
+
 def ml_edge_score(ml_validation: MLValidationSnapshot) -> float:
     if ml_validation.final_long or ml_validation.final_short:
         thr = ml_validation.threshold if ml_validation.final_long else ml_validation.short_threshold
@@ -221,6 +269,11 @@ def build_evidence_bundle(
     scores.update(mso_evidence_scores(mc))
     scores.update(thesis_evidence_contributions(thesis_verdict))
 
+    env_block = mc.get("environment_scores")
+    if isinstance(env_block, dict):
+        for k, v in env_block.items():
+            scores[f"env_{k}"] = _clamp01(v)
+
     ts = score_trade_setup(
         strategy=strategy or StrategyCandidate(),
         ml_validation=ml_validation,
@@ -232,12 +285,19 @@ def build_evidence_bundle(
 
     regime_dist = market_forecast_from_context(mc, ml_validation).regime_distribution
 
+    metadata: Dict[str, Any] = {
+        "legacy_trade_score": ts.score,
+        "trade_score_components": ts.components,
+        "trade_score_reasons": ts.reason_codes,
+    }
+    if isinstance(mc.get("environment_scores"), dict):
+        metadata["environment"] = dict(mc["environment_scores"])
+    hyp_raw = mc.get("hypothesis_snapshot")
+    if isinstance(hyp_raw, dict):
+        metadata["hypothesis_snapshot"] = hyp_raw
+
     return EvidenceBundle(
         scores=scores,
-        metadata={
-            "legacy_trade_score": ts.score,
-            "trade_score_components": ts.components,
-            "trade_score_reasons": ts.reason_codes,
-        },
+        metadata=metadata,
         regime_distribution=regime_dist,
     )

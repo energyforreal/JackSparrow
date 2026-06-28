@@ -141,6 +141,54 @@ def test_ml_and_thesis_adopts_gated_ml_when_thesis_hold(monkeypatch: pytest.Monk
     assert v.adopted_ml_candidate is True
 
 
+def test_ml_and_thesis_adopts_gated_ml_with_aggregate_hypothesis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Aggregate LONG in snapshot relaxes thesis_no_rule_fired block on HOLD thesis."""
+    monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
+    monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "ml_and_thesis")
+    monkeypatch.setattr(
+        ape_mod.settings, "agent_policy_adopt_gated_ml_when_thesis_neutral", True
+    )
+    eng = MagicMock()
+    eng.evaluate.return_value = ThesisVerdict(
+        signal="HOLD",
+        confidence=0.0,
+        position_size=0.0,
+        reason_codes=["thesis_no_rule_fired"],
+        thesis_type="flat",
+    )
+    engine = AgentPolicyEngine(thesis_engine=eng)
+    ev = MLEvidenceSnapshot(
+        symbol="BTCUSD",
+        source="v43_orchestrator",
+        ml_candidate_signal="LONG",
+        ml_candidate_confidence=0.75,
+        ml_candidate_position_size=0.05,
+        ml_confirms=True,
+    )
+    mctx = {
+        "hypothesis_snapshot": {
+            "hypotheses": [
+                {
+                    "id": "breakout_long",
+                    "direction": "LONG",
+                    "confidence": 0.72,
+                    "thesis_type": "breakout",
+                    "weighted_confidence": 0.72,
+                }
+            ],
+            "aggregate_direction": "LONG",
+            "aggregate_confidence": 0.72,
+            "hypothesis_margin": 0.15,
+            "environment": {"liquidity": 0.8},
+        }
+    }
+    v = engine.evaluate(ml_evidence=ev, market_context=mctx)
+    assert v.signal == "LONG"
+    assert "fusion_ml_gated_thesis_neutral" in v.reason_codes
+
+
 def test_ml_and_thesis_agrees(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ape_mod.settings, "agent_policy_force_hold", False)
     monkeypatch.setattr(ape_mod.settings, "agent_policy_mode", "ml_and_thesis")

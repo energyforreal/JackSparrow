@@ -104,7 +104,7 @@ Default fusion mode is `AGENT_POLICY_MODE=ml_or_thesis` with `IC_MODE=true`: the
 1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
 2. **Intelligence validation** — `RuleBasedIntelligenceNode` produces `MLValidationSnapshot` (thresholds, `confirms_long` / `confirms_short`, gates).
 3. **Market structure** — `classify_market_structure()` (trending / ranging / low-vol / crisis) from closed-bar features.
-4. **Agent thesis** — `AgentThesisEngine` proposes breakout / trend / mean-reversion candidates (deterministic rules).
+4. **Agent hypothesis portfolio** — `AgentThesisEngine` evaluates all rule families (breakout / trend / mean-reversion), aggregates competing hypotheses into `hypothesis_snapshot`, and attaches continuous environment scores; legacy `thesis_verdict` adapter preserved for IC/policy cache.
 5. **Trade score** — `score_trade_setup()` confluence gate (`AGENT_TRADE_SCORE_MIN`, default 70).
 6. **Policy** — `AgentPolicyEngine` fuses thesis + ML (`ml_and_thesis` requires agreement).
 7. **Reasoning** — IC minimal mode (default) uses 3-step chain when `strategy_candidate` is present; primary `decision.signal` comes from `PolicyVerdict`, not reasoning text.

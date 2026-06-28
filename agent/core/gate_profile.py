@@ -56,3 +56,12 @@ def v43_soft_ml_gates_enabled() -> bool:
 
 def thesis_soft_evidence_enabled() -> bool:
     return bool(getattr(settings, "agent_thesis_soft_evidence_mode", True))
+
+
+def thesis_market_hard_veto_enabled() -> bool:
+    """Binary market-quality vetoes in thesis (squeeze, crisis, liquidity, etc.)."""
+    return bool(getattr(settings, "agent_thesis_hard_veto_enabled", False))
+
+
+def hypothesis_portfolio_mode() -> bool:
+    return str(getattr(settings, "agent_hypothesis_mode", "portfolio") or "portfolio").strip().lower() == "portfolio"

@@ -408,12 +408,23 @@ def _state_head_policy_blocks_entry(
     return bool(reasons), reasons
 
 
-def _thesis_blocks_gated_ml_adoption(thesis: ThesisVerdict) -> bool:
+def _thesis_blocks_gated_ml_adoption(
+    thesis: ThesisVerdict,
+    market_context: Optional[Dict[str, Any]] = None,
+) -> bool:
     """True when rule thesis explicitly vetoes adopting gated ML while thesis is HOLD."""
+    from agent.core.hypothesis_types import hypothesis_snapshot_from_dict
+
+    mc = market_context if isinstance(market_context, dict) else {}
+    snap = hypothesis_snapshot_from_dict(mc.get("hypothesis_snapshot"))
+    aggregate_active = snap is not None and str(
+        snap.aggregate_direction or "FLAT"
+    ).upper() not in ("FLAT", "HOLD", "")
+
     if thesis.thesis_type in ("crisis_veto",):
         return True
     codes = {str(r) for r in (thesis.reason_codes or [])}
-    if "thesis_direction_conflict" in codes:
+    if "thesis_direction_conflict" in codes and not aggregate_active:
         return True
     if any("veto" in c for c in codes):
         return True
@@ -421,8 +432,9 @@ def _thesis_blocks_gated_ml_adoption(thesis: ThesisVerdict) -> bool:
         "thesis_open_position",
         "thesis_atr_too_low",
         "non_operational",
-        "thesis_no_rule_fired",
     })
+    if not aggregate_active:
+        _HARD_BLOCK_CODES = _HARD_BLOCK_CODES | frozenset({"thesis_no_rule_fired"})
     if codes & _HARD_BLOCK_CODES:
         return True
     return False
@@ -614,7 +626,7 @@ def _fuse_signals(
                 bool(ml_evidence.ml_confirms)
                 or _ml_gated_from_context(market_context, ml_evidence)
             )
-            and not _thesis_blocks_gated_ml_adoption(thesis)
+            and not _thesis_blocks_gated_ml_adoption(thesis, market_context)
         )
         if gated_neutral and not ml_entry:
             adopt_sig = _entry_signal_from_gated_context(market_context, ml_evidence) or ml_sig
@@ -688,7 +700,7 @@ def _fuse_signals(
                 bool(ml_evidence.ml_confirms)
                 or _ml_gated_from_context(market_context, ml_evidence)
             )
-            and not _thesis_blocks_gated_ml_adoption(thesis)
+            and not _thesis_blocks_gated_ml_adoption(thesis, market_context)
         ):
             return _verdict_from_ml(
                 ml_evidence,
@@ -789,6 +801,22 @@ class AgentPolicyEngine:
         else:
             thesis = self._thesis_engine.evaluate(regime, mc)
         verdict = _fuse_signals(ml_evidence, thesis, mode, conclusion, market_context=mc)
+
+        from agent.core.hypothesis_types import hypothesis_snapshot_from_dict
+
+        hyp_snap = hypothesis_snapshot_from_dict(mc.get("hypothesis_snapshot"))
+        if hyp_snap is not None:
+            hyp_codes: List[str] = []
+            if hyp_snap.dominant:
+                hyp_codes.append(f"hypothesis_dominant={hyp_snap.dominant.id}")
+            hyp_codes.append(f"hypothesis_margin={hyp_snap.hypothesis_margin:.3f}")
+            hyp_codes.append(f"aggregate_confidence={hyp_snap.aggregate_confidence:.3f}")
+            if hyp_codes:
+                verdict = verdict.model_copy(
+                    update={
+                        "reason_codes": list(verdict.reason_codes) + hyp_codes,
+                    }
+                )
 
         mso_adj = synthesize_market_state_intelligence(
             mc, entry_signal=str(verdict.signal or "HOLD")

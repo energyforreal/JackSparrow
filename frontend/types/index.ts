@@ -222,9 +222,35 @@ export interface Signal {
   thesis_signal?: string
   ml_evidence_snapshot?: Record<string, unknown>
   market_context_excerpt?: Record<string, unknown>
+  hypothesis_snapshot?: MarketHypothesisSnapshot
   agent_introspection?: AgentIntrospectionSnapshot
   memory_context_id?: string
   reflection_snapshot?: ReflectionSnapshot
+}
+
+export interface HypothesisCandidateSnapshot {
+  id: string
+  direction: string
+  confidence: number
+  thesis_type: string
+  horizon_bars?: number
+  horizon_minutes?: number
+  reason_codes?: string[]
+  regime_weight?: number
+  weighted_confidence?: number
+}
+
+export interface MarketHypothesisSnapshot {
+  hypotheses?: HypothesisCandidateSnapshot[]
+  environment?: Record<string, number>
+  regime?: string
+  dominant?: HypothesisCandidateSnapshot | null
+  aggregate_direction?: string
+  aggregate_confidence?: number
+  hypothesis_margin?: number
+  long_pressure?: number
+  short_pressure?: number
+  reason_codes?: string[]
 }
 
 export interface AgentIntrospectionSnapshot {
@@ -246,6 +272,8 @@ export interface AgentIntrospectionSnapshot {
   portfolio_guard_reason_codes?: string[]
   memory_enabled: boolean
   memory_context_count: number
+  hypothesis_top?: HypothesisCandidateSnapshot[]
+  environment_scores?: Record<string, number>
   limits?: Record<string, unknown>
 }
 
