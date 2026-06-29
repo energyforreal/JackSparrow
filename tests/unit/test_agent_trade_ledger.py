@@ -39,19 +39,60 @@ async def test_build_closed_trade_from_position_event_round_trip():
 
 
 @pytest.mark.asyncio
+async def test_build_closed_trade_includes_snapshot_summary():
+    payload = {
+        "position_id": "pos_snap",
+        "symbol": "BTCUSD",
+        "side": "long",
+        "entry_price": 78000.0,
+        "exit_price": 79000.0,
+        "quantity": 1,
+        "pnl": 8.0,
+        "entry_time": "2026-05-16T10:00:00+00:00",
+        "timestamp": "2026-05-16T10:15:00+00:00",
+        "entry_decision_snapshot": {
+            "snapshot_version": 1,
+            "system_context": {"config_hash": "abcd1234"},
+            "decision_context": {
+                "reasoning_chain_id": "chain-1",
+                "rule_based_pipeline": {
+                    "market_state": {"regime": "trending_bull"},
+                    "structural_gates": {
+                        "setup_type": "breakout",
+                        "categories": {"trend": True},
+                    },
+                    "fsm_decision": {"fsm_state": "EntryReady"},
+                },
+            },
+        },
+    }
+    row = await build_closed_trade_from_position_event(payload, usdinr_rate=Decimal("83"))
+    assert row["config_hash"] == "abcd1234"
+    assert row["setup_type"] == "breakout"
+    assert row["regime"] == "trending_bull"
+    assert row["fsm_state"] == "EntryReady"
+
+
+@pytest.mark.asyncio
 async def test_record_and_list_agent_trades(tmp_path, monkeypatch):
     ledger_file = tmp_path / "agent_closed_trades.jsonl"
     monkeypatch.setattr(
         "backend.services.agent_trade_ledger_service._LEDGER_FILE",
         ledger_file,
     )
+    async def _mock_redis_lpush(row):
+        return False
+
+    async def _mock_redis_read(**kwargs):
+        return None
+
     monkeypatch.setattr(
         "backend.services.agent_trade_ledger_service._redis_lpush_row",
-        lambda row: False,
+        _mock_redis_lpush,
     )
     monkeypatch.setattr(
         "backend.services.agent_trade_ledger_service._redis_read_rows",
-        lambda **kwargs: None,
+        _mock_redis_read,
     )
 
     await clear_agent_trade_ledger()

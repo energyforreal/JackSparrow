@@ -40,6 +40,7 @@ JackSparrow/
 │   │   │   ├── portfolio.py            # Portfolio management endpoints
 │   │   │   ├── market.py               # Market data endpoints
 │   │   │   ├── admin.py                # Admin/control endpoints
+│   │   │   ├── analytics.py            # Trade snapshot analytics (read-only)
 │   │   │   └── system.py               # System/time synchronization endpoints
 │   │   ├── middleware/
 │   │   │   ├── __init__.py
@@ -64,6 +65,8 @@ JackSparrow/
 │   │   ├── market_service.py           # Market data service
 │   │   ├── portfolio_service.py        # Portfolio calculations service
 │   │   ├── trade_persistence_service.py # Trade + position persistence helpers
+│   │   ├── agent_trade_ledger_service.py # Agent closed-trade JSONL + Redis hot cache
+│   │   ├── analytics_service.py        # Read-only trade_outcomes / rollups queries
 │   │   ├── feature_service.py          # MCP Feature Server client (currently not wired in runtime)
 │   │   └── time_service.py             # Time normalization and formatting service
 │   ├── core/
@@ -82,12 +85,21 @@ JackSparrow/
 │   │   ├── ml_signal_guard.py        # Back-compat shim → entry_validation_guard
 │   │   ├── agent_policy_engine.py    # Authoritative PolicyVerdict / DECISION_READY signal
 │   │   ├── agent_thesis_engine.py    # Thesis evaluation (cached once per orchestrator cycle)
+│   │   ├── structural_gate_engine.py # Six-category structural gates (rule-based pipeline)
+│   │   ├── mcp_orchestrator.py         # MCP Orchestrator — IC path + rule-based pipeline
 │   │   ├── execution.py                # Trade execution engine (now lot-based for futures)
 │   │   ├── sl_tp.py                    # Shared stop/take-profit pricing (ATR + fixed %, tick rounding, paper rebase helper)
 │   │   ├── audit_time.py               # IST/UTC helpers for paper + signal-audit logs
 │   │   ├── paper_trade_logger.py       # Rotating `paper_trades.log` (TRADE|/CLOSE|)
 │   │   ├── signal_audit_md.py          # Append-only `live_audit.md` (ai_signal, gates, paper echo)
 │   │   ├── config.py                   # Agent configuration includes perpetual futures parameters
+│   ├── intelligence/                   # Rule-based decision pipeline (see rule-based-decision-engine.md)
+│   │   ├── market_types.py             # MarketStateSnapshot, StructuralGateResult, FSMDecision
+│   │   ├── market_understanding_engine.py
+│   │   ├── market_narrative_engine.py
+│   │   ├── market_fsm.py               # Primary FSM when DECISION_ENGINE_MODE=rule_based
+│   │   ├── rule_based_pipeline.py      # Orchestrates understanding → narrative → gates → FSM
+│   │   └── trade_archetype_memory.py   # Post-close archetype snapshots
 │   ├── data/
 │   │   ├── perpetual_data_fetcher.py   # Perpetual futures candles/orderbook loader and normalizer
 │   │   ├── ...
@@ -173,6 +185,10 @@ JackSparrow/
 │   │   ├── threshold_adapter.py       # Periodic threshold nudging from recent trade_outcomes
 │   │   ├── retraining_scheduler.py    # Trigger + execute retraining command with cooldown/state
 │   │   └── adaptive/                  # Optional v15: KS drift, warm-start XGBoost, F1 gate, versioned saves
+│   ├── persistence/                    # Analytics warehouse writers (fire-and-forget)
+│   │   ├── trade_snapshot.py          # Snapshot schema v1 builders + size cap
+│   │   ├── performance_context.py     # In-memory streak/PnL counters for entry snapshots
+│   │   └── db_writes.py               # trade_outcomes, entry_decisions, analytics_rollups
 │   │       ├── adaptive_controller.py # Orchestration + hot reload hook
 │   │       ├── drift_detector.py
 │   │       ├── retrain_engine.py
@@ -256,6 +272,7 @@ JackSparrow/
 │   └── …                            # Other training, audit, and migration scripts
 │
 ├── tools/                             # Command toolkit
+│   ├── analyze_agent_logs.py          # Rule-based vs legacy log metrics (stdin or file)
 │   ├── commands/
 │   │   ├── start_parallel.py          # Parallel process manager (Python, cross-platform)
 │   │   ├── start.sh                   # Start stack wrapper (macOS/Linux)
@@ -283,7 +300,9 @@ JackSparrow/
 │   ├── 12-logging.md                  # Logging documentation
 │   ├── 13-debugging.md                # Debugging guide
 │   ├── 14-project-rules.md            # Project rules documentation
-│   └── 15-audit-report.md             # Audit report
+│   ├── 15-audit-report.md             # Audit report
+│   ├── rule-based-decision-engine.md  # FSM + structural gates rollout
+│   └── canonical_events.md            # Event-bus wiring
 │
 ├── reference/                          # Reference specifications
 │   ├── tradingagent_rebuild_spec.md
@@ -658,6 +677,7 @@ tests/unit/backend/test_agent_service.py
 - `restart.sh` / `restart.ps1`: Stops running services, clears temporary artefacts, re-executes start command, and archives previous logs under `logs/restart/`.
 - `audit.sh` / `audit.ps1`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
 - `error.sh` / `error.ps1`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
+- `trade_analytics.py`: Snapshot integrity, reject breakdown, regime performance, config-hash diff, timing summary, archive verify (requires `DATABASE_URL`).
 - `validate-prerequisites.py`: Validates system prerequisites (Python, Node.js, PostgreSQL, Redis).
 - `health_check.py`: Checks health of running services.
 
@@ -668,8 +688,16 @@ Supporting helper scripts live under `scripts/` and are invoked automatically by
 ## Command Toolkit
 
 ### Location
-- Directory: `tools/commands/`
-- Companion docs: `tools/README.md`
+- Directory: `tools/commands/` (startup/audit) and `tools/` (utilities)
+- Companion docs: `tools/README.md`, [Rule-Based Decision Engine](rule-based-decision-engine.md)
+
+### Log analysis (`tools/analyze_agent_logs.py`)
+
+Parses agent structlog output for decision cycles, gated-ML-neutral entries, BUY→HOLD flips, and shadow block rate:
+
+```bash
+docker logs jacksparrow-agent 2>&1 | python tools/analyze_agent_logs.py
+```
 
 ### Core Startup System
 
@@ -924,7 +952,8 @@ JackSparrow stores intelligence bundles under **`agent/model_storage/`**, refere
 
 **Typical layouts**:
 
-- **IC (Compose default)**: **`JackSparrow_IC_BTCUSD/`** — **`metadata_ic.json`** only; logic in **`agent/intelligence/`**.
+- **IC (Compose default)**: **`JackSparrow_IC_BTCUSD/`** — **`metadata_ic.json`** only; logic in **`agent/intelligence/`** and **`agent/core/structural_gate_engine.py`**.
+- **Rule-based runtime data** (created at runtime): **`data/market_narrative/`**, **`data/market_fsm/`**, **`data/trade_archetypes/`**.
 - **v43 regression (archived)**: **`JackSparrow_v43_models_BTCUSD/`** — **`metadata_v43.json`** + **`model_artifact_v43*.pkl`** — not loaded by current discovery.
 - **Historical v5 / v4 ensemble** (entry + exit joblibs per timeframe), e.g. `jacksparrow_v5_BTCUSD_2026-03-19/` — **`V4EnsembleNode`** in forks only.
 - **Historical v15 pipeline** (single `pipeline_{tf}_v14.pkl` per TF), e.g. `jacksparrow_v15_BTCUSD_2026-04-05/{5m,15m}/` — retained for parquet **adaptive retrain**, not paired with today's v43 **`ModelDiscovery`**.
@@ -978,6 +1007,7 @@ For detailed model management documentation, see [ML Models Documentation](03-ml
 
 ## Related Documentation
 
+- [Rule-Based Decision Engine](rule-based-decision-engine.md) - FSM pipeline modules and rollout
 - [MCP Layer Documentation](02-mcp-layer.md) - MCP architecture and protocols
 - [ML Models Documentation](03-ml-models.md) - Model management and intelligence
 - [Architecture Documentation](01-architecture.md) - System design

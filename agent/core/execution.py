@@ -420,6 +420,48 @@ class ExecutionEngine:
         self._initialized = False
         logger.info("execution_engine_shutdown")
 
+    def _schedule_entry_decision_executed(
+        self,
+        *,
+        payload: Dict[str, Any],
+        position_id: str,
+        entry_snapshot: Optional[Dict[str, Any]],
+    ) -> None:
+        """Fire-and-forget entry_decisions row for executed fills."""
+        if not getattr(settings, "entry_decisions_writes_enabled", True):
+            return
+        db_url = getattr(settings, "database_url", None)
+        if not db_url:
+            return
+        try:
+            import asyncio
+
+            from agent.persistence.db_writes import persist_entry_decision_async
+
+            snap = entry_snapshot if isinstance(entry_snapshot, dict) else {}
+            sys_ctx = snap.get("system_context") if isinstance(snap.get("system_context"), dict) else {}
+            dc = snap.get("decision_context") if isinstance(snap.get("decision_context"), dict) else {}
+
+            async def _run() -> None:
+                await persist_entry_decision_async(
+                    db_url,
+                    decision_id=str(payload.get("decision_event_id") or uuid.uuid4()),
+                    symbol=str(payload.get("symbol") or ""),
+                    outcome="executed",
+                    signal=str(payload.get("side") or dc.get("signal") or ""),
+                    side=str(payload.get("side") or ""),
+                    confidence=payload.get("confidence"),
+                    reasoning_chain_id=payload.get("reasoning_chain_id")
+                    or dc.get("reasoning_chain_id"),
+                    config_hash=sys_ctx.get("config_hash"),
+                    position_id=position_id,
+                    metadata=snap,
+                )
+
+            asyncio.create_task(_run(), name="entry_decision_executed")
+        except Exception as exc:
+            logger.warning("entry_decision_executed_schedule_failed", error=str(exc))
+
     async def _connect_exchange(self):
         """Verify Delta testnet connectivity via wallet balances API."""
         try:
@@ -689,6 +731,18 @@ class ExecutionEngine:
                 "decision_event_id": event.correlation_id or event.event_id,
             }
 
+            risk_approved_iso = None
+            if event.timestamp:
+                ts = event.timestamp
+                if getattr(ts, "tzinfo", None) is None and hasattr(ts, "replace"):
+                    ts = ts.replace(tzinfo=timezone.utc)
+                risk_approved_iso = ts.isoformat()
+            trade["_timing_ctx"] = {
+                "risk_approved_at": risk_approved_iso,
+                "decision_created_at": payload.get("decision_created_at"),
+            }
+            trade["_risk_payload_snapshot"] = dict(payload)
+
             pex = dict(trade.get("position_extras") or {})
             pex["agent_controlled"] = True
             if payload.get("contract_value_btc") is not None:
@@ -848,6 +902,40 @@ class ExecutionEngine:
                     )
                 if payload.get("confidence") is not None:
                     pos["confidence_at_entry"] = payload.get("confidence")
+                try:
+                    from agent.persistence.performance_context import (
+                        snapshot_performance_context,
+                    )
+                    from agent.persistence.trade_snapshot import build_entry_snapshot
+
+                    timing_ctx = trade.get("_timing_ctx")
+                    if not isinstance(timing_ctx, dict):
+                        timing_ctx = {}
+                    fill_ts = datetime.now(timezone.utc).isoformat()
+                    timing_ctx["exchange_filled_at"] = fill_ts
+                    if pos.get("entry_time") is not None:
+                        et = pos["entry_time"]
+                        timing_ctx["position_opened_at"] = (
+                            et.isoformat() if hasattr(et, "isoformat") else str(et)
+                        )
+                    pos["execution_timing"] = dict(timing_ctx)
+                    snap_payload = trade.get("_risk_payload_snapshot")
+                    if not isinstance(snap_payload, dict):
+                        snap_payload = dict(payload)
+                    snap_payload["confidence"] = payload.get("confidence")
+                    entry_snap = build_entry_snapshot(
+                        risk_payload=snap_payload,
+                        timing_ctx=timing_ctx,
+                        performance_ctx=snapshot_performance_context(),
+                    )
+                    if entry_snap:
+                        pos["entry_decision_snapshot"] = entry_snap
+                except Exception as snap_exc:
+                    logger.warning(
+                        "entry_decision_snapshot_failed",
+                        symbol=symbol,
+                        error=str(snap_exc),
+                    )
             if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                 from agent.risk.risk_manager import Position as RMPosition
                 rm_pos = RMPosition(
@@ -864,6 +952,16 @@ class ExecutionEngine:
             # Publish OrderFillEvent for backend persistence and WebSocket broadcast
             order_id = result.order_id or str(uuid.uuid4())[:8]
             trade_id = f"trade_{order_id}_{datetime.now(timezone.utc).timestamp()}"
+
+            pos_after = self.position_manager.get_position(symbol)
+            if pos_after:
+                self._schedule_entry_decision_executed(
+                    payload=trade.get("_risk_payload_snapshot")
+                    if isinstance(trade.get("_risk_payload_snapshot"), dict)
+                    else payload,
+                    position_id=f"pos_{order_id}",
+                    entry_snapshot=pos_after.get("entry_decision_snapshot"),
+                )
 
             ex_raw = result.details.get("exchange_order_id")
             exchange_order_id = str(ex_raw) if ex_raw is not None else None
@@ -1085,6 +1183,9 @@ class ExecutionEngine:
             self._inflight_symbols.add(symbol)
 
         trade["submitted_at_monotonic"] = time.perf_counter()
+        timing_ctx = trade.get("_timing_ctx")
+        if isinstance(timing_ctx, dict):
+            timing_ctx["order_submitted_at"] = datetime.now(timezone.utc).isoformat()
 
         try:
             side = trade["side"]  # 'buy' or 'sell'
@@ -1520,6 +1621,27 @@ class ExecutionEngine:
                     )
                 if confidence_at_entry is not None:
                     payload_data["confidence_at_entry"] = confidence_at_entry
+                entry_snap = position.get("entry_decision_snapshot")
+                if isinstance(entry_snap, dict):
+                    payload_data["entry_decision_snapshot"] = entry_snap
+                    try:
+                        from agent.persistence.trade_snapshot import (
+                            merge_close_fields,
+                            reconstruct_market_context_from_snapshot,
+                        )
+
+                        payload_data["market_context"] = (
+                            reconstruct_market_context_from_snapshot(entry_snap)
+                        )
+                        payload_data["entry_decision_snapshot"] = merge_close_fields(
+                            entry_snap, payload_data
+                        )
+                    except Exception as merge_exc:
+                        logger.warning(
+                            "position_closed_snapshot_merge_failed",
+                            symbol=symbol,
+                            error=str(merge_exc),
+                        )
                 if entry_time is not None:
                     try:
                         closed_ts = payload_data["timestamp"]

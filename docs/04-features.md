@@ -643,6 +643,23 @@ The example illustrates how raw market context, historical success rate, and mod
 
 ---
 
+### Trade decision snapshots and analytics warehouse
+
+**Description**: Full rule-based decision context is captured at entry and merged on close for long-term optimization queries.
+
+**Capabilities**:
+- Versioned snapshot (`snapshot_version=1`) with `system_context.config_hash` for cohort analysis
+- `gate_evaluation` stores real structural gate categories and `block_reasons` (not synthetic scores)
+- `entry_decisions` table records approve/reject/executed funnel for filter tuning
+- `analytics_rollups` precomputes daily/regime/setup_type/config_hash aggregates
+- REST analytics API (`/api/v1/analytics/*`) and `tools/commands/trade_analytics.py` CLI
+
+**Key env flags**: `TRADE_ENTRY_SNAPSHOT_ENABLED`, `ENTRY_DECISIONS_WRITES_ENABLED`, `AGENT_CLOSED_TRADES_MAX_ROWS`
+
+See [Trading persistence model](../reference/trading-persistence-model.md) for schema v1 reference.
+
+---
+
 ## Feature Roadmap
 
 ### Current Phase (v1.0)

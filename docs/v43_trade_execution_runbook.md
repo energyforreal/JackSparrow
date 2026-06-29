@@ -2,6 +2,8 @@
 
 Operational guide for tuning **v43 signal gates** and entry frequency while keeping rollback discipline (**one environment knob change per deploy window**). On branch **NO-ML**, the **Intelligence Component (IC)** drives predictions at runtime (no pickle load); gate env vars in [`agent/core/v43_signal_gates.py`](../agent/core/v43_signal_gates.py) still apply. Pair with [`.env.example`](../.env.example), [ML models – IC discovery](03-ml-models.md#runtime-discovery-no-ml-intelligence-component), and [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py).
 
+**Alternative path**: For ML-free structural authority, see [Rule-Based Decision Engine](rule-based-decision-engine.md) (`DECISION_ENGINE_MODE=rule_based`, shadow rollout via `MARKET_FSM_ENFORCE`). Log comparison: `docker logs jacksparrow-agent 2>&1 | python tools/analyze_agent_logs.py`.
+
 ### NO-ML gate relaxation (committed defaults)
 
 [`config.py`](../agent/core/config.py) and [`.env.example`](../.env.example) ship relaxed Tier 1–3 defaults for throughput recovery: `AGENT_POLICY_MODE=ml_or_thesis`, lower trade-score floors (`AGENT_TRADE_SCORE_MIN`, `AGENT_TRADE_SCORE_MIN_GATED_ML_ADOPTION`), horizon fusion off, consensus/strategy agreement off, and handler filters (`VOLATILITY_FILTER_ENABLED`, `V15_ADX_REGIME_FILTER_ENABLED`) disabled. **Uncertainty and state-head policy gates run only when `JACKSPARROW_V43_STATE_HEADS_ENABLED=true`**; keep that `false` on NO-ML unless real state-head scores are supplied (orchestrator leaves `uncertainty_score` unset instead of defaulting to 0.05). Local overrides live in `.env` (Docker loads `.env.example` then `.env`).

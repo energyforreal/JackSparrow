@@ -601,6 +601,21 @@ For field mapping from `logs/agent.log` / structlog, retrieval commands, and rec
 
 Keep the reference under `reference/` for manual summaries; the `logs/` tree is typically gitignored, so copy `live_audit.md` or `paper_trades.log` out if you need them in version control.
 
+### Trade snapshot and analytics correlation
+
+Join structlog events to PostgreSQL analytics rows on **`reasoning_chain_id`**:
+
+| Source | Field |
+|--------|-------|
+| `trading_entry_rejected` / `trading_handler_risk_approved_published` | `reasoning_chain_id` in event context |
+| `entry_decisions` | `reasoning_chain_id` column |
+| `trade_outcomes.metadata` | `decision_context.reasoning_chain_id` |
+| Agent closed-trade JSONL | `reasoning_chain_id` summary field |
+
+**Execution timing** in snapshot `execution_timing` complements rolling Redis `metrics:latency:execution` (p50/p95 aggregates). Per-trade deltas: `decision_to_risk_ms`, `risk_to_fill_ms` after close merge.
+
+CLI: `python tools/commands/trade_analytics.py timing-summary` reads `risk_to_fill_ms` from closed snapshots.
+
 ---
 
 ## References
@@ -616,6 +631,7 @@ Keep the reference under `reference/` for manual summaries; the `logs/` tree is 
 
 | Date       | Version | Description                              |
 |------------|---------|------------------------------------------|
+| 2026-06-29 | 2.3.0   | Trade snapshot analytics: `reasoning_chain_id` join table, per-trade `execution_timing` fields, `trade_analytics.py` CLI cross-links. |
 | 2026-04-12 | 2.2.0   | Audit journal section (three-layer model, `audit_time.py`, host paths vs `LOGS_ROOT`); execution-engine structlog events and risk-approval reconciliation CLI (`reconcile_risk_approvals.py`); cross-links from this section. |
 | 2026-04-12 | 2.1.0   | Paper/signal audit logs document IST-primary timestamps and UTC companion fields (`reference/ai-signal-action-audit-log.md`). |
 | 2025-01-12 | 1.0.0   | Initial logging system documentation     |

@@ -15,14 +15,20 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 
+from backend.core.config import settings
 from backend.services.fx_rate_service import get_usdinr_rate
 from backend.services.portfolio_service import PortfolioService
 
 logger = structlog.get_logger()
 
 _REDIS_LIST_KEY = "agent:closed_trades"
-_MAX_ROWS = 500
+_MAX_ROWS = int(getattr(settings, "agent_closed_trades_max_rows", 5000) or 5000)
 _LEDGER_FILE = Path(__file__).resolve().parents[2] / "data" / "agent_closed_trades.jsonl"
+_ARCHIVE_DIR = _LEDGER_FILE.parent / "archive"
+_MANIFEST_FILE = _ARCHIVE_DIR / "manifest.json"
+_ARCHIVE_MAX_BYTES = int(
+    getattr(settings, "agent_closed_trades_archive_max_bytes", 10 * 1024 * 1024) or 10 * 1024 * 1024
+)
 
 AGENT_CLIENT_ORDER_PREFIX = "js_"
 
@@ -46,6 +52,58 @@ def _parse_ts(value: Any) -> datetime:
         except ValueError:
             pass
     return datetime.now(timezone.utc)
+
+
+def _snapshot_summary_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Denormalize analytics fields from entry_decision_snapshot on close payload."""
+    snap = payload.get("entry_decision_snapshot")
+    if not isinstance(snap, dict):
+        return {}
+    dc = snap.get("decision_context") if isinstance(snap.get("decision_context"), dict) else {}
+    rb = dc.get("rule_based_pipeline") if isinstance(dc.get("rule_based_pipeline"), dict) else {}
+    gates = rb.get("structural_gates") if isinstance(rb.get("structural_gates"), dict) else {}
+    mstate = rb.get("market_state") if isinstance(rb.get("market_state"), dict) else {}
+    fsm = rb.get("fsm_decision") if isinstance(rb.get("fsm_decision"), dict) else {}
+    sys_ctx = snap.get("system_context") if isinstance(snap.get("system_context"), dict) else {}
+    return {
+        "snapshot_version": snap.get("snapshot_version"),
+        "config_hash": sys_ctx.get("config_hash"),
+        "reasoning_chain_id": dc.get("reasoning_chain_id") or payload.get("reasoning_chain_id"),
+        "setup_type": gates.get("setup_type"),
+        "regime": mstate.get("regime"),
+        "gate_categories": dict(gates.get("categories") or {}),
+        "fsm_state": fsm.get("fsm_state"),
+    }
+
+
+def _maybe_rotate_ledger_file() -> None:
+    """Archive JSONL when it exceeds configured size."""
+    if not _LEDGER_FILE.is_file():
+        return
+    try:
+        if _LEDGER_FILE.stat().st_size < _ARCHIVE_MAX_BYTES:
+            return
+        _ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        dest = _ARCHIVE_DIR / f"agent_closed_trades_{stamp}.jsonl"
+        _LEDGER_FILE.replace(dest)
+        manifest: List[Dict[str, Any]] = []
+        if _MANIFEST_FILE.is_file():
+            try:
+                manifest = json.loads(_MANIFEST_FILE.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                manifest = []
+        line_count = sum(1 for _ in dest.open(encoding="utf-8"))
+        manifest.append(
+            {
+                "path": str(dest.name),
+                "archived_at": datetime.now(timezone.utc).isoformat(),
+                "row_count": line_count,
+            }
+        )
+        _MANIFEST_FILE.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("agent_trade_ledger_archive_failed", error=str(exc))
 
 
 async def build_closed_trade_from_position_event(
@@ -96,6 +154,7 @@ async def build_closed_trade_from_position_event(
         "reasoning_chain_id": payload.get("reasoning_chain_id"),
         "exchange_order_id": payload.get("exchange_order_id"),
     }
+    row.update(_snapshot_summary_from_payload(payload))
     return row
 
 
@@ -103,6 +162,7 @@ def _append_file(row: Dict[str, Any]) -> None:
     _LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
     with _LEDGER_FILE.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, default=str) + "\n")
+    _maybe_rotate_ledger_file()
 
 
 def _read_file(*, limit: int, symbol: Optional[str]) -> List[Dict[str, Any]]:

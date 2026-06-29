@@ -544,10 +544,31 @@ class MCPReasoningEngine:
 
 ### Orchestration Flow
 
-The MCP Orchestration Layer coordinates the strategy-first IC path. **`MCPOrchestrator._process_jacksparrow_v43_prediction`** is the sole owner of IC predict, policy fusion, reasoning, and `DECISION_READY` (the model registry does **not** subscribe to `MODEL_PREDICTION_REQUEST`).
+The MCP Orchestration Layer coordinates the strategy-first IC path and optional **rule-based pipeline** (shadow or cutover). **`MCPOrchestrator`** owns `DECISION_READY` (the model registry does **not** subscribe to `MODEL_PREDICTION_REQUEST`).
+
+**Legacy path** (`DECISION_ENGINE_MODE=ml_legacy`): `_process_jacksparrow_v43_prediction` + optional `_maybe_apply_rule_based_pipeline` shadow.
+
+**Rule-based path** (`DECISION_ENGINE_MODE=rule_based`): `_process_rule_based_prediction` only.
 
 ```
 1. ModelPredictionRequestEvent (from candle close or feature path)
+   │
+   ├─► ml_legacy: MarketDataManager frames → thesis → IC predict → AgentPolicyEngine
+   │              → optional rule-based shadow / FSM enforce
+   │
+   ├─► rule_based: frames → rule_based_pipeline.run_cycle()
+   │              → Understanding → Narrative → Structural Gates → FSM
+   │
+   └─► MCP Reasoning Engine (explanatory)
+       └─► DECISION_READY (ml_evidence_snapshot or structural fields)
+```
+
+See [Rule-Based Decision Engine](rule-based-decision-engine.md).
+
+**Legacy IC flow (detail)**:
+
+```
+1. ModelPredictionRequestEvent
    │
    ├─► MarketDataManager.get_v43_frames (shared OHLCV buffers + MTF warm once)
    │
@@ -757,6 +778,7 @@ class MCPHealthMonitor:
 
 ## Related Documentation
 
+- [Rule-Based Decision Engine](rule-based-decision-engine.md) - FSM pipeline and rollout
 - [Architecture Documentation](01-architecture.md) - System architecture overview
 - [Logic & Reasoning Documentation](05-logic-reasoning.md) - Reasoning engine details
 - [ML Models Documentation](03-ml-models.md) - Model management

@@ -777,10 +777,36 @@ Per-model `model_consensus[]` rows for **`jacksparrow_v43`** may include the sam
 |-------|-------------|
 | `policy_verdict` | Agent policy output (`signal`, `confidence`, `reason_codes`, …). |
 | `policy_reason_codes` | Auditable fusion codes (e.g. `agent_thesis_confirms_ml`). |
-| `trade_score` | Confluence score 0–100. |
+| `trade_score` | Confluence score 0–100 (scalar; backward compatible). |
+| `trade_score_detail` | Full confluence object (`score`, `passed`, `components`, `reason_codes`). |
+| `policy_confidence` | Explicit policy/ML confidence (same as `confidence` on `decision_ready`). |
+| `display_confidence` / `calibrated_confidence` | Reasoning display value when split from policy. |
+| `final_confidence` | Reasoning chain Step 7 value on `reasoning_chain` / top-level signal. |
+| `reasoning_confidence_raw` | Step 7 before display floors (dashboard diagnostics only). |
+| `economic_edge` | Signed `expected_return − threshold` (display-only). |
+| `entry_proba_margin` | Mean entry-proba buy−sell margin (0–1). |
+| `signal_strength` | Blended entry-margin strength for UI. |
+| `metric_correlation_hint` | Optional `{ policy_reasoning_delta, … }` for audit. |
+| `is_actionable_entry` | `false` on non-entry HOLD — UI dims bars but preserves values. |
 | `thesis_signal` | Deterministic thesis label. |
 | `ml_evidence_snapshot` | Structured ML + gate excerpt. |
 | `market_context_excerpt` | Subset of orchestrator `market_context` (trade_score, ml_validation, …). |
+
+**Rule-based extensions** (from rule-based pipeline, relayed on `signal` `data_update` when present):
+
+| Field | Description |
+|-------|-------------|
+| `market_state` | `MarketStateSnapshot` dict (trend, breakout, liquidity, MTF roles). |
+| `narrative_tail` | Last N narrative events from `data/market_narrative/`. |
+| `structural_gates` | Six-category gate pass/fail + `setup_type`. |
+| `fsm_state` | Current FSM state (`Watching`, `EntryReady`, `PositionActive`, …). |
+| `entry_signal` | FSM entry intent; actionable when flat + `EntryReady` + gates pass. |
+| `thesis_health` | `healthy` \| `weakening` \| `broken` while in a position. |
+| `position_lifecycle` | UI lifecycle label (`watching`, `entry_ready`, `managing`, `exit_ready`). |
+
+See [Rule-Based Decision Engine](rule-based-decision-engine.md).
+
+Populated by **`agent/core/display_metrics.py`** via **`_enrich_confidence_semantics()`** in the orchestrator before `DecisionReady` publish. **Policy `confidence` is unchanged** — these fields are for dashboard consumers only.
 
 **Self-awareness extensions** (deterministic telemetry, optional):
 
@@ -1141,6 +1167,49 @@ class ModelPerformance(Base):
     win_rate = Column(Float)
     avg_contribution = Column(Float)
     current_weight = Column(Float)
+```
+
+### Trade outcomes, entry decisions, and rollups
+
+**`trade_outcomes`** — closed positions with full decision snapshot in `metadata` JSONB (`snapshot_version`, `system_context`, `decision_context`, `outcome`, `execution_timing`). Written fire-and-forget from the agent state machine on `PositionClosedEvent`.
+
+**`entry_decisions`** — funnel rows (`rejected` | `approved` | `executed`) with `reject_reason`, `config_hash`, `reasoning_chain_id`. Migration `002_entry_decisions`.
+
+**`analytics_rollups`** — incremental aggregates by `period_type` (`daily`, `weekly`, `regime`, `setup_type`, `config_hash`). Migration `003_analytics_rollups`.
+
+Schema reference: [Trading persistence model](../reference/trading-persistence-model.md).
+
+### Analytics REST API
+
+Registered at `/api/v1/analytics/` ([`backend/api/routes/analytics.py`](../backend/api/routes/analytics.py)):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/trade-outcomes` | Paginated closed trades; filters: `regime`, `setup_type`, `close_reason`, `config_hash`, date range |
+| GET | `/entry-decisions` | Outcome funnel + `reject_breakdown` |
+| GET | `/performance-by-regime` | Win rate and PnL by regime (rollups or raw scan) |
+| GET | `/performance-by-config` | Cohort comparison by `config_hash` |
+| GET | `/rollups` | Precomputed rollup rows |
+
+Example — reject breakdown for last 7 days:
+
+```sql
+SELECT reject_reason, COUNT(*)
+FROM entry_decisions
+WHERE outcome = 'rejected' AND timestamp >= NOW() - INTERVAL '7 days'
+GROUP BY reject_reason
+ORDER BY COUNT(*) DESC;
+```
+
+Example — win rate by regime from snapshots:
+
+```sql
+SELECT
+  metadata->'decision_context'->'rule_based_pipeline'->'market_state'->>'regime' AS regime,
+  COUNT(*) AS n,
+  AVG(CASE WHEN pnl > 0 THEN 1.0 ELSE 0.0 END) AS win_rate
+FROM trade_outcomes
+GROUP BY 1;
 ```
 
 ---

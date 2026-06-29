@@ -780,8 +780,8 @@ class AgentEventSubscriber:
                     quantity=quantity,
                     fill_price=fill_price,
                     order_type="MARKET",
-                    reasoning_chain_id=None,  # Could be enhanced to include this
-                    model_predictions=None,  # Could be enhanced to include this
+                    reasoning_chain_id=payload.get("reasoning_chain_id"),
+                    model_predictions=payload.get("model_predictions"),
                     stop_loss=stop_loss,
                     take_profit=take_profit,
                     executed_at=timestamp

@@ -183,6 +183,91 @@ class TradingEventHandler:
                 reason=reason,
                 error=str(e),
             )
+        self._schedule_entry_decision_persist(
+            outcome="rejected",
+            reject_reason=reason,
+            symbol=symbol,
+            signal=signal,
+            event_id=event_id,
+            context=context,
+        )
+
+    def _schedule_entry_decision_persist(
+        self,
+        *,
+        outcome: str,
+        symbol: str,
+        event_id: str,
+        reject_reason: Optional[str] = None,
+        signal: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+        risk_payload: Optional[Dict[str, Any]] = None,
+        entry_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Fire-and-forget entry_decisions row."""
+        from agent.core.config import settings as agent_settings
+
+        if not getattr(agent_settings, "entry_decisions_writes_enabled", True):
+            return
+        db_url = getattr(agent_settings, "database_url", None)
+        if not db_url:
+            return
+        try:
+            import asyncio
+
+            from agent.persistence.db_writes import persist_entry_decision_async
+            from agent.persistence.trade_snapshot import build_entry_snapshot, build_reject_snapshot
+
+            ctx = context if isinstance(context, dict) else {}
+            mc = ctx.get("market_context")
+            if not isinstance(mc, dict):
+                mc = None
+
+            if outcome == "rejected":
+                meta = build_reject_snapshot(
+                    symbol=symbol,
+                    signal=signal,
+                    event_id=event_id,
+                    reject_reason=str(reject_reason or ""),
+                    diagnostics=ctx,
+                    market_context=mc,
+                )
+            elif entry_snapshot:
+                meta = entry_snapshot
+            elif risk_payload:
+                meta = build_entry_snapshot(risk_payload=risk_payload)
+            else:
+                meta = {}
+
+            sys_ctx = meta.get("system_context") if isinstance(meta.get("system_context"), dict) else {}
+            dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
+            conf = ctx.get("calibrated_confidence") or ctx.get("raw_confidence")
+            if risk_payload and risk_payload.get("confidence") is not None:
+                conf = risk_payload.get("confidence")
+
+            async def _run() -> None:
+                await persist_entry_decision_async(
+                    db_url,
+                    decision_id=str(event_id),
+                    symbol=str(symbol),
+                    outcome=outcome,
+                    reject_reason=reject_reason,
+                    signal=str(signal or dc.get("signal") or ""),
+                    side=str(dc.get("side") or risk_payload.get("side") if risk_payload else ""),
+                    confidence=float(conf) if conf is not None else None,
+                    reasoning_chain_id=(
+                        (risk_payload or {}).get("reasoning_chain_id")
+                        or dc.get("reasoning_chain_id")
+                    ),
+                    config_hash=sys_ctx.get("config_hash"),
+                    metadata=meta,
+                )
+
+            asyncio.get_running_loop().create_task(_run())
+        except RuntimeError:
+            asyncio.create_task(_run())
+        except Exception as exc:
+            logger.warning("entry_decision_persist_schedule_failed", error=str(exc))
 
     def _reasoning_pipeline_diagnostics(
         self, reasoning_chain: Optional[Dict[str, Any]]
@@ -328,6 +413,7 @@ class TradingEventHandler:
             entry_proba_summary = self._summarize_model_entry_proba(model_predictions)
             diagnostics_base: Dict[str, Any] = {
                 "hour_bucket_utc": hour_bucket_utc,
+                "market_context": mc,
                 **entry_proba_summary,
                 **self._reasoning_pipeline_diagnostics(
                     reasoning_chain if isinstance(reasoning_chain, dict) else {}
@@ -1210,6 +1296,26 @@ class TradingEventHandler:
                     risk_payload["v43_closed_bar_index"] = int(v43_bar)
                 except (TypeError, ValueError):
                     pass
+            decision_ts = getattr(event, "timestamp", None)
+            if decision_ts is not None:
+                if getattr(decision_ts, "tzinfo", None) is None and hasattr(
+                    decision_ts, "replace"
+                ):
+                    decision_ts = decision_ts.replace(tzinfo=timezone.utc)
+                risk_payload["decision_created_at"] = decision_ts.isoformat()
+            risk_payload["decision_event_id"] = event.event_id
+            from agent.persistence.trade_snapshot import build_entry_snapshot
+
+            approved_snapshot = None
+            if getattr(settings, "trade_entry_snapshot_enabled", True):
+                approved_snapshot = build_entry_snapshot(risk_payload=risk_payload)
+            self._schedule_entry_decision_persist(
+                outcome="approved",
+                symbol=symbol,
+                event_id=event.event_id,
+                risk_payload=risk_payload,
+                entry_snapshot=approved_snapshot,
+            )
             risk_approved = RiskApprovedEvent(
                 source="trading_handler",
                 correlation_id=event.event_id,

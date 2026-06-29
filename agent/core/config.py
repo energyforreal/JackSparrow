@@ -1317,7 +1317,45 @@ class Settings(BaseSettings):
         ge=60,
         description="How often to run ThresholdAdapter (seconds).",
     )
-    
+    trade_entry_snapshot_enabled: bool = Field(
+        default=True,
+        env="TRADE_ENTRY_SNAPSHOT_ENABLED",
+        description="When True, capture entry decision snapshots on position open.",
+    )
+    trade_snapshot_version: int = Field(
+        default=1,
+        env="TRADE_SNAPSHOT_VERSION",
+        ge=1,
+        description="Schema version stamped on trade decision snapshots.",
+    )
+    trade_snapshot_feature_keys: Optional[str] = Field(
+        default=None,
+        env="TRADE_SNAPSHOT_FEATURE_KEYS",
+        description="Comma-separated v43 feature keys to persist in snapshots.",
+    )
+    trade_snapshot_max_bytes: int = Field(
+        default=32768,
+        env="TRADE_SNAPSHOT_MAX_BYTES",
+        ge=4096,
+        le=262144,
+        description="Max JSON size for a single trade snapshot.",
+    )
+    trade_snapshot_include_performance_context: bool = Field(
+        default=True,
+        env="TRADE_SNAPSHOT_INCLUDE_PERFORMANCE_CONTEXT",
+        description="Include in-memory performance counters in entry snapshots.",
+    )
+    entry_decisions_writes_enabled: bool = Field(
+        default=True,
+        env="ENTRY_DECISIONS_WRITES_ENABLED",
+        description="When True, persist entry approve/reject rows to entry_decisions.",
+    )
+    threshold_adapter_regime_aware: bool = Field(
+        default=False,
+        env="THRESHOLD_ADAPTER_REGIME_AWARE",
+        description="When True, threshold adapter may segment by regime when sample size allows.",
+    )
+
     # Agent Configuration
     agent_start_mode: str = Field(
         default="MONITORING",

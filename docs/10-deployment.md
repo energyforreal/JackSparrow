@@ -944,6 +944,17 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `AGENT_MODEL_DIR` | Docker-only override for in-container `MODEL_DIR` | No | See `docker-compose.yml` agent service |
 | `MODEL_FORMAT` | Integration label for health payloads | No | `jacksparrow_ic` |
 | `AGENT_POLICY_MODE` | Policy fusion mode (`ml_or_thesis`, `thesis_only`, etc.) | No | `ml_or_thesis` |
+| `DECISION_ENGINE_MODE` | `ml_legacy` (IC + policy) or `rule_based` (FSM authority) | No | `ml_legacy` |
+| `MARKET_UNDERSTANDING_SHADOW_ENABLED` | Run market understanding each cycle | No | `true` |
+| `MARKET_NARRATIVE_SHADOW_ENABLED` | Run narrative engine each cycle | No | `true` |
+| `STRUCTURAL_GATE_SHADOW_ENABLED` | Run structural gates each cycle | No | `true` |
+| `STRUCTURAL_GATE_SHADOW_LOG_ONLY` | Shadow gates log without blocking ML entries | No | `true` |
+| `MARKET_FSM_SHADOW_ENABLED` | Run market FSM each cycle | No | `true` |
+| `MARKET_FSM_ENFORCE` | FSM `entry_signal` overrides policy on legacy path | No | `false` |
+| `STRUCTURAL_GATE_MIN_TREND_AGE` | Minimum trend age (bars) for trend gate | No | `3` |
+| `STRUCTURAL_GATE_MAX_FAILED_BREAKOUTS` | Narrative veto after N failed breakouts | No | `2` |
+| `STRUCTURAL_GATE_BREAKOUT_REQUIRE_RETEST` | Require retest for breakout setups | No | `true` |
+| `ARCHETYPE_MEMORY_SHADOW` | Archetype similarity hints only (no sizing) | No | `true` |
 | `REQUIRE_IC_VALIDATION_FOR_ORDERS` | When `true`, `entry_validation_guard` enforces policy + optional v43 gates before orders | No | `true` |
 | `REQUIRE_ML_SIGNAL_FOR_ORDERS` | **Deprecated alias** for `REQUIRE_IC_VALIDATION_FOR_ORDERS` | No | *(use IC name)* |
 | `REQUIRE_IC_CONSENSUS_ALIGNMENT` | Legacy consensus alignment (non-v43 paths) | No | `false` |
@@ -985,6 +996,11 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `DELTA_ENV` | Delta environment label (`india_testnet` only at runtime) | No | `india_testnet` |
 | `AI_SIGNAL_MINIMAL_ENTRY_GATES` | When `true`, trading handler approves using **raw** payload AI `confidence` ≥ `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` plus price, margin, min lots, and open-position rules; skips v15 entry gate, stale-signal age, feature/MTF/SR filters, profit/R:R gate, Redis-blended confidence, `validate_trade`, debounce, and v15 gap/daily caps | No | false |
 | `AI_SIGNAL_MIN_ENTRY_CONFIDENCE` | Minimum **raw** (uncalibrated) payload `confidence` when `AI_SIGNAL_MINIMAL_ENTRY_GATES` is enabled | No | 0.70 |
+| `REASONING_DISPLAY_CALIBRATION_ENABLED` | When `true`, relaxed display-only Step 7 floors and rebalanced step weights; policy confidence unchanged | No | `false` |
+| `REASONING_DISPLAY_HOLD_FLOOR_ENABLED` | Apply unanimous-HOLD 50% floor to reasoning **display** confidence | No | `true` (ignored when display calibration master is on unless explicitly `true`) |
+| `REASONING_DISPLAY_MODEL_AVG_FLOOR_ENABLED` | Apply `model_avg × 0.8` floor to reasoning display confidence | No | `true` |
+| `REASONING_DISPLAY_V43_ENTRY_FLOOR_ENABLED` | Apply proportional v43 entry floor to reasoning display confidence | No | `true` |
+| `REASONING_DISPLAY_SIGNAL_STRENGTH_BLEND` | Step 7 blend weight for `signal_strength` (use `0.20` with display calibration for wider spread) | No | `0.40` |
 | `V15_SIGNAL_LOGIC_ENABLED` | Apply v15 entry/exit filters when v15 models are active | No | true |
 | `AGENT_INTROSPECTION_ENABLED` | Emit `agent_introspection` on `DECISION_READY` (read-only telemetry) | No | true |
 | `AGENT_MEMORY_OUTCOME_BACKFILL_ENABLED` | Backfill vector memory outcomes on position close | No | true |

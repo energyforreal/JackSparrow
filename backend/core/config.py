@@ -322,6 +322,19 @@ class Settings(BaseSettings):
             "Raised from 5s to reduce false timeouts during CPU spikes."
         ),
     )
+    agent_closed_trades_max_rows: int = Field(
+        default=5000,
+        env="AGENT_CLOSED_TRADES_MAX_ROWS",
+        ge=100,
+        le=100000,
+        description="Max agent closed-trade rows in Redis hot cache.",
+    )
+    agent_closed_trades_archive_max_bytes: int = Field(
+        default=10485760,
+        env="AGENT_CLOSED_TRADES_ARCHIVE_MAX_BYTES",
+        ge=1048576,
+        description="Rotate agent_closed_trades.jsonl when file exceeds this size.",
+    )
 
     @field_validator("trading_mode", mode="before")
     @classmethod

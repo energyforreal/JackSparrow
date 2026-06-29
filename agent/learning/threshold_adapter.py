@@ -36,6 +36,36 @@ def _sync_database_url(url: str) -> str:
     return url
 
 
+def _extract_regime_from_row(row: Dict[str, Any]) -> str:
+    """Read regime from trade_outcomes.metadata when present."""
+    meta = row.get("metadata")
+    if not isinstance(meta, dict):
+        return "unknown"
+    dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
+    rb = dc.get("rule_based_pipeline") if isinstance(dc.get("rule_based_pipeline"), dict) else {}
+    ms = rb.get("market_state") if isinstance(rb.get("market_state"), dict) else {}
+    return str(ms.get("regime") or "unknown")
+
+
+def _segment_rows_by_regime(
+    rows: List[Dict[str, Any]],
+    *,
+    min_rows: int,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Keep rows for the dominant regime when the segment has enough samples."""
+    if not rows:
+        return rows, None
+    counts: Dict[str, int] = {}
+    for row in rows:
+        regime = _extract_regime_from_row(row)
+        counts[regime] = counts.get(regime, 0) + 1
+    dominant = max(counts, key=counts.get)
+    segmented = [r for r in rows if _extract_regime_from_row(r) == dominant]
+    if len(segmented) >= min_rows:
+        return segmented, dominant
+    return rows, dominant
+
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         parsed = float(value)
@@ -72,6 +102,16 @@ class ThresholdAdapter:
                     return None
 
                 rows = await self._fetch_recent_outcomes(db_url, self.WINDOW)
+                regime_aware = bool(
+                    getattr(settings, "threshold_adapter_regime_aware", False)
+                )
+                segment_regime: Optional[str] = None
+                if regime_aware and rows:
+                    rows, segment_regime = _segment_rows_by_regime(
+                        rows,
+                        min_rows=self.MIN_ROWS,
+                    )
+
                 if len(rows) < self.MIN_ROWS:
                     logger.debug(
                         "threshold_adapter_skipped_insufficient_data",
@@ -174,6 +214,8 @@ class ThresholdAdapter:
                     "old_min_confidence": cur_conf,
                     "new_min_confidence": new_conf,
                     "sample_size": len(rows),
+                    "regime_segment": segment_regime,
+                    "regime_aware": regime_aware,
                 }
                 logger.info("threshold_adapter_applied", **summary)
                 return summary
@@ -192,7 +234,7 @@ class ThresholdAdapter:
                     result = conn.execute(
                         text(
                             """
-                            SELECT signal, pnl, closed_at
+                            SELECT signal, pnl, closed_at, metadata
                             FROM trade_outcomes
                             ORDER BY closed_at DESC
                             LIMIT :lim
@@ -200,7 +242,19 @@ class ThresholdAdapter:
                         ),
                         {"lim": limit},
                     )
-                    return [dict(row._mapping) for row in result]
+                    out: List[Dict[str, Any]] = []
+                    for row in result:
+                        mapped = dict(row._mapping)
+                        meta = mapped.get("metadata")
+                        if isinstance(meta, str):
+                            try:
+                                import json
+
+                                mapped["metadata"] = json.loads(meta)
+                            except (TypeError, ValueError):
+                                mapped["metadata"] = {}
+                        out.append(mapped)
+                    return out
             finally:
                 engine.dispose()
 

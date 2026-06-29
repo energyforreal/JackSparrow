@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
@@ -231,6 +231,210 @@ async def persist_trade_outcome_async(
         logger.warning(
             "trade_outcome_persist_failed",
             position_id=position_id,
+            symbol=symbol,
+            error=str(e),
+            exc_info=True,
+        )
+
+
+def _insert_entry_decision_sync(
+    database_url: str,
+    *,
+    decision_id: str,
+    symbol: str,
+    timestamp: datetime,
+    outcome: str,
+    reject_reason: Optional[str],
+    signal: Optional[str],
+    side: Optional[str],
+    confidence: Optional[float],
+    reasoning_chain_id: Optional[str],
+    config_hash: Optional[str],
+    position_id: Optional[str],
+    metadata: Optional[Dict[str, Any]],
+) -> None:
+    engine = _get_engine(database_url)
+    meta_json = json.dumps(metadata if metadata is not None else {})
+    conf_dec = Decimal(str(round(confidence, 6))) if confidence is not None else None
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO entry_decisions (
+                    decision_id, symbol, timestamp, outcome, reject_reason,
+                    signal, side, confidence, reasoning_chain_id, config_hash,
+                    position_id, metadata
+                ) VALUES (
+                    :decision_id, :symbol, :timestamp, :outcome, :reject_reason,
+                    :signal, :side, :confidence, :reasoning_chain_id, :config_hash,
+                    :position_id, (:metadata)::jsonb
+                )
+                ON CONFLICT (decision_id) DO UPDATE SET
+                    outcome = EXCLUDED.outcome,
+                    position_id = COALESCE(EXCLUDED.position_id, entry_decisions.position_id),
+                    metadata = EXCLUDED.metadata
+                """
+            ),
+            {
+                "decision_id": decision_id,
+                "symbol": symbol,
+                "timestamp": timestamp,
+                "outcome": outcome,
+                "reject_reason": reject_reason,
+                "signal": signal,
+                "side": side,
+                "confidence": conf_dec,
+                "reasoning_chain_id": reasoning_chain_id,
+                "config_hash": config_hash,
+                "position_id": position_id,
+                "metadata": meta_json,
+            },
+        )
+        conn.commit()
+
+
+async def persist_entry_decision_async(
+    database_url: str,
+    *,
+    decision_id: str,
+    symbol: str,
+    outcome: str,
+    reject_reason: Optional[str] = None,
+    signal: Optional[str] = None,
+    side: Optional[str] = None,
+    confidence: Optional[float] = None,
+    reasoning_chain_id: Optional[str] = None,
+    config_hash: Optional[str] = None,
+    position_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    timestamp: Optional[datetime] = None,
+) -> None:
+    """Insert or update one entry_decisions row."""
+
+    ts = timestamp or datetime.now(timezone.utc)
+
+    def _run() -> None:
+        _insert_entry_decision_sync(
+            database_url,
+            decision_id=decision_id,
+            symbol=symbol,
+            timestamp=ts,
+            outcome=outcome,
+            reject_reason=reject_reason,
+            signal=signal,
+            side=side,
+            confidence=confidence,
+            reasoning_chain_id=reasoning_chain_id,
+            config_hash=config_hash,
+            position_id=position_id,
+            metadata=metadata,
+        )
+
+    try:
+        await asyncio.to_thread(_run)
+        logger.debug(
+            "entry_decision_persisted",
+            decision_id=decision_id,
+            symbol=symbol,
+            outcome=outcome,
+        )
+    except Exception as e:
+        logger.warning(
+            "entry_decision_persist_failed",
+            decision_id=decision_id,
+            symbol=symbol,
+            error=str(e),
+            exc_info=True,
+        )
+
+
+def _upsert_analytics_rollup_sync(
+    database_url: str,
+    *,
+    period_type: str,
+    period_key: str,
+    symbol: str,
+    pnl_usd: float,
+    won: bool,
+) -> None:
+    engine = _get_engine(database_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO analytics_rollups (
+                    period_type, period_key, symbol,
+                    trade_count, win_count, total_pnl_usd, updated_at
+                ) VALUES (
+                    :period_type, :period_key, :symbol,
+                    1, :win_count, :pnl_usd, NOW()
+                )
+                ON CONFLICT (period_type, period_key, symbol)
+                DO UPDATE SET
+                    trade_count = analytics_rollups.trade_count + 1,
+                    win_count = analytics_rollups.win_count + EXCLUDED.win_count,
+                    total_pnl_usd = analytics_rollups.total_pnl_usd + EXCLUDED.total_pnl_usd,
+                    updated_at = NOW()
+                """
+            ),
+            {
+                "period_type": period_type,
+                "period_key": period_key,
+                "symbol": symbol,
+                "win_count": 1 if won else 0,
+                "pnl_usd": pnl_usd,
+            },
+        )
+        conn.commit()
+
+
+async def persist_analytics_rollups_async(
+    database_url: str,
+    *,
+    symbol: str,
+    pnl_usd: float,
+    closed_at: datetime,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Increment rollup buckets for a closed trade."""
+    won = float(pnl_usd or 0) > 0
+    day_key = closed_at.strftime("%Y-%m-%d")
+    iso_year, iso_week, _ = closed_at.isocalendar()
+    week_key = f"{iso_year}-W{iso_week:02d}"
+
+    meta = metadata if isinstance(metadata, dict) else {}
+    dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
+    rb = dc.get("rule_based_pipeline") if isinstance(dc.get("rule_based_pipeline"), dict) else {}
+    gates = rb.get("structural_gates") if isinstance(rb.get("structural_gates"), dict) else {}
+    mstate = rb.get("market_state") if isinstance(rb.get("market_state"), dict) else {}
+    sys_ctx = meta.get("system_context") if isinstance(meta.get("system_context"), dict) else {}
+
+    buckets = [
+        ("daily", day_key),
+        ("weekly", week_key),
+        ("regime", str(mstate.get("regime") or "unknown")),
+        ("setup_type", str(gates.get("setup_type") or "none")),
+    ]
+    cfg_hash = sys_ctx.get("config_hash")
+    if cfg_hash:
+        buckets.append(("config_hash", str(cfg_hash)))
+
+    def _run() -> None:
+        for period_type, period_key in buckets:
+            _upsert_analytics_rollup_sync(
+                database_url,
+                period_type=period_type,
+                period_key=period_key,
+                symbol=symbol,
+                pnl_usd=float(pnl_usd or 0),
+                won=won,
+            )
+
+    try:
+        await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning(
+            "analytics_rollup_persist_failed",
             symbol=symbol,
             error=str(e),
             exc_info=True,

@@ -275,6 +275,59 @@ class TradeOutcomeRecord(Base):
     )
 
 
+class EntryDecisionRecord(Base):
+    """Entry approve/reject/execute funnel for optimization analytics."""
+
+    __tablename__ = "entry_decisions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(String(255), unique=True, nullable=False, index=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    timestamp = Column(TIMESTAMPTZ, nullable=False, index=True)
+    outcome = Column(String(32), nullable=False, index=True)
+    reject_reason = Column(String(128), nullable=True, index=True)
+    signal = Column(String(64), nullable=True)
+    side = Column(String(16), nullable=True)
+    confidence = Column(DECIMAL(8, 6), nullable=True)
+    reasoning_chain_id = Column(String(255), nullable=True, index=True)
+    config_hash = Column(String(16), nullable=True, index=True)
+    position_id = Column(String(255), nullable=True, index=True)
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_entry_decisions_symbol_ts", "symbol", "timestamp"),
+        Index("idx_entry_decisions_outcome_reason", "outcome", "reject_reason"),
+    )
+
+
+class AnalyticsRollupRecord(Base):
+    """Precomputed performance aggregates for fast dashboards."""
+
+    __tablename__ = "analytics_rollups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    period_type = Column(String(32), nullable=False, index=True)
+    period_key = Column(String(128), nullable=False, index=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    trade_count = Column(Integer, nullable=False, default=0)
+    win_count = Column(Integer, nullable=False, default=0)
+    total_pnl_usd = Column(DECIMAL(24, 8), nullable=False, default=Decimal("0"))
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    updated_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index(
+            "idx_analytics_rollups_unique",
+            "period_type",
+            "period_key",
+            "symbol",
+            unique=True,
+        ),
+    )
+
+
 class PredictionAudit(Base):
     """Audit log for prediction requests: request_id, model version, confidence, latency, outcome reference."""
     __tablename__ = "prediction_audit"

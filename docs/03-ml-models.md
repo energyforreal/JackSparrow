@@ -1186,6 +1186,17 @@ The `ModelPerformanceTracker` tracks **trade outcomes** (per-model PnL and win/l
 
 **If adding prediction-level outcome recording:** For classifiers, use directional accuracy (e.g. `sign(prediction) == sign(actual_return)`) or a classification metric (e.g. AUC), not `abs(prediction - actual_outcome)`, so correct direction is rewarded regardless of magnitude.
 
+### Rule-based / IC trade snapshots (NO-ML optimization)
+
+When `DECISION_ENGINE_MODE=rule_based`, closed-trade learning uses **`trade_outcomes.metadata`** (full snapshot v1) rather than per-model `model_predictions` weights:
+
+- **Structural context**: `decision_context.rule_based_pipeline`, `gate_evaluation`, `market_state.regime`, `setup_type`
+- **Config cohorts**: `system_context.config_hash` — compare win rate before/after gate or risk knob changes
+- **Funnel**: `entry_decisions` reject reasons vs log `trading_entry_rejected` events
+- **Threshold adapter**: reads `trade_outcomes` (optional `THRESHOLD_ADAPTER_REGIME_AWARE` segmentation)
+
+IC/rule-based snapshots are orthogonal to archived XGBoost weight learning; see [Trading persistence model](../reference/trading-persistence-model.md).
+
 ---
 
 ## Model Inference Testing

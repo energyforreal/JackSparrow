@@ -28,6 +28,8 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 14 | [Project rules](docs/14-project-rules.md) | Standards and contribution |
 | 15 | [Audit report](docs/15-audit-report.md) | Audit workflow, gaps, remediation, ML confidence checks |
 | 16 | [v43 trade execution runbook](docs/v43_trade_execution_runbook.md) | v43 **signal gate** tuning (IC + archived ML), metrics, rollback, log analysis |
+| — | [Rule-based decision engine](docs/rule-based-decision-engine.md) | FSM + structural gates, shadow rollout, `DECISION_ENGINE_MODE`, UI payloads |
+| — | [Canonical events](docs/canonical_events.md) | Event-bus wiring and `DECISION_READY` payload fields |
 
 ---
 
@@ -53,10 +55,13 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | Delta WebSocket (testnet) | [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), `.env.example` (`socket-ind` host, `key-auth`) |
 | Entry lot sizing (60% portfolio, fixed leverage) | [Logic & reasoning – Entry lot sizing](docs/05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction), `.env.example` (`ENTRY_PORTFOLIO_MARGIN_FRACTION`, `PORTFOLIO_FRACTION_LOT_SIZING`) |
 | Adaptive drift / warm-start retrain (v15) | [ML models – Runtime adaptive retrain](docs/03-ml-models.md#runtime-adaptive-retrain-v15-pipeline-optional), [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), [.env.example](.env.example) |
+| Trading Signal hero metrics (policy / edge / margin / score) | [Frontend – signal fields](docs/07-frontend.md#v15--v43-signal-fields-optional), [Logic – Dashboard confidence](docs/05-logic-reasoning.md#dashboard-confidence-semantics-policy-vs-reasoning-vs-display), [Backend – signal payload](docs/06-backend.md#websocket-protocol) |
 | WebSocket message shape | [Backend – WebSocket](docs/06-backend.md#websocket-protocol), [Frontend – WebSocket](docs/07-frontend.md#websocket-integration) |
 | Latest signal REST hydrate | [Backend – GET `/api/v1/signal/latest`](docs/06-backend.md#get-apiv1signallatest), [Frontend – `useTradingData`](docs/07-frontend.md#unified-dashboard-state-usetradingdata) |
 | No trades / stale UI signal | [Debugging – No trades](docs/13-debugging.md#no-trades-executed), [Logging – `trading_entry_rejected`](docs/12-logging.md#6-trading-handler-events-agenteventshandlerstrading_handlerpy) |
 | Self-awareness flags & telemetry | [Logic & reasoning – Self-awareness](docs/05-logic-reasoning.md#deterministic-self-awareness), [Canonical events](docs/canonical_events.md), `.env.example` |
+| Rule-based FSM rollout / shadow logs | [Rule-based decision engine](docs/rule-based-decision-engine.md), `tools/analyze_agent_logs.py`, [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables) |
+| Trade snapshot analytics / optimization | [Trading persistence model](reference/trading-persistence-model.md), `tools/commands/trade_analytics.py`, [Backend – Analytics API](docs/06-backend.md#analytics-rest-api) |
 | Troubleshooting | [Debugging](docs/13-debugging.md), [Deployment – Troubleshooting](docs/10-deployment.md#troubleshooting) |
 | AI signal / paper trade audit (IST ledger + markdown + structlog) | [reference/ai-signal-action-audit-log.md](reference/ai-signal-action-audit-log.md), [Logging – Audit journal](docs/12-logging.md#ai-signal-and-action-audit-journal), [Deployment – host log paths](docs/10-deployment.md#common-operations) |
 
@@ -66,4 +71,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-06-03 — Signal REST hydrate (`/api/v1/signal/latest`), WS HOLD replay, `mergeSignalPayload` timestamp fix, no-trades debugging notes, `trading_entry_rejected` / reconcile logging.
+**Last updated**: 2026-06-29 — Trade decision snapshots v1, analytics API, `entry_decisions` / `analytics_rollups`, `trade_analytics.py` CLI.

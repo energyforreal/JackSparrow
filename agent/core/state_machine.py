@@ -284,6 +284,10 @@ class AgentStateMachine:
         if getattr(settings, "trade_outcomes_writes_enabled", True):
             try:
                 from agent.persistence.db_writes import persist_trade_outcome_async
+                from agent.persistence.performance_context import record_position_closed
+
+                pnl_usd = float(payload.get("pnl") or 0)
+                record_position_closed(pnl_usd=pnl_usd)
 
                 async def _persist_sql_outcome() -> None:
                     raw_closed = payload.get("timestamp")
@@ -300,6 +304,11 @@ class AgentStateMachine:
                     pnl = float(payload.get("pnl") or 0)
                     denom = (entry * qty) if entry and qty else 0.0
                     pnl_pct = (pnl / denom * 100.0) if denom else None
+                    merged_meta = payload.get("entry_decision_snapshot")
+                    if not isinstance(merged_meta, dict):
+                        merged_meta = {
+                            "reasoning_chain_id": payload.get("reasoning_chain_id"),
+                        }
                     await persist_trade_outcome_async(
                         settings.database_url,
                         position_id=payload.get("position_id"),
@@ -314,10 +323,25 @@ class AgentStateMachine:
                         close_reason=payload.get("exit_reason"),
                         opened_at=opened_at,
                         closed_at=closed_at,
-                        metadata={
-                            "reasoning_chain_id": payload.get("reasoning_chain_id"),
-                        },
+                        metadata=merged_meta,
                     )
+                    try:
+                        from agent.persistence.db_writes import (
+                            persist_analytics_rollups_async,
+                        )
+
+                        await persist_analytics_rollups_async(
+                            settings.database_url,
+                            symbol=str(payload.get("symbol", "")),
+                            pnl_usd=pnl,
+                            closed_at=closed_at,
+                            metadata=merged_meta,
+                        )
+                    except Exception as rollup_exc:
+                        logger.warning(
+                            "analytics_rollup_schedule_failed",
+                            error=str(rollup_exc),
+                        )
 
                 asyncio.create_task(_persist_sql_outcome(), name="trade_outcome_write")
             except Exception as e:

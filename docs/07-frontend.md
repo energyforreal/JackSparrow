@@ -82,6 +82,23 @@ The dashboard reads all trading-related state from a single hook backed by a `us
 
 `frontend/types/index.ts` extends **`Signal`** and **`ModelConsensus`** with optional **`edge`**, **`p_buy`**, **`p_sell`**, **`p_hold`**, **`v15_timeframe`** (v15 pipeline), and—with **JackSparrow v43**—**`expected_return`**, **`threshold`**, **`regime`**, **`mcp_tanh_prediction`**, **`v43_gate_reject`**, plus top-level **`conclusion`** when the backend surfaces it outside **`reasoning_chain_full`**. WebSocket `data_update` / `resource: "signal"` merges these when the backend forwards agent metadata (see [Backend – WebSocket](06-backend.md#websocket-protocol)).
 
+**Dashboard display metrics** (orthogonal hero row; display-only — do not gate execution):
+
+| Field | Role |
+|-------|------|
+| `policy_confidence` / `confidence` | **Execution gate** — authoritative for `DecisionReady` and trading handler |
+| `final_confidence` | Reasoning Step 7 calibrated value (may include display floors) |
+| `reasoning_confidence_raw` | Step 7 output **before** display floors (diagnostics) |
+| `economic_edge` | Signed `expected_return − threshold` (SHORT uses short threshold) |
+| `entry_proba_margin` | Mean buy−sell entry-proba separation (0–1) |
+| `signal_strength` | Blended entry-margin strength for UI when margin not set |
+| `trade_score_detail` | Full confluence object: `score`, `passed`, `components`, `reason_codes` |
+| `metric_correlation_hint` | Optional audit: `policy_reasoning_delta`, etc. |
+
+Resolved in **`frontend/utils/signalConfidence.ts`**: `resolveHeroMetrics`, `resolvePolicyEntryPercent`, `resolveDisplayConfidence`, `resolveTradeScore`. **HOLD** (non-actionable) dims metrics but **does not zero** backend values.
+
+**Model channel** (`data_update` / `resource: "model"`): `useTradingData` stores **`modelConsensus`** (mean ensemble confidence). The Trading Signal card labels this **Model consensus** — not economic edge.
+
 Signal merges use **`frontend/utils/mergeSignalPayload.ts`** (imported by `useTradingData`). Partial HOLD patches preserve prior confidence fields; **`v43_gate_reject`** is preserved when a later patch omits it (e.g. `decision_ready` after `reasoning_complete`). When an incoming patch **omits** `timestamp`, the merge stamps **`new Date().toISOString()`** so **`DataFreshnessIndicator`** reflects the last WebSocket update instead of inheriting an old decision time.
 
 **Initial signal hydrate**: On first connect (not a light portfolio reconnect), `fetchInitialData` calls **`GET /api/backend/.../api/v1/signal/latest?symbol=BTCUSD`** and dispatches **`UPDATE_SIGNAL`** so the Overview / Trading cards are not blank until the next live `data_update` / `signal` message. The backend caches that payload in Redis when it broadcasts each `decision_ready` signal.
@@ -89,6 +106,8 @@ Signal merges use **`frontend/utils/mergeSignalPayload.ts`** (imported by `useTr
 **Decision time display**: `TradingDecision` and `SignalIndicator` pass **`signal.timestamp`** (UTC decision time from the agent payload) to **`DataFreshnessIndicator`** (“Decision time” / “Last update”). Dot and text colours use age thresholds (&lt;30s green through ≥15m red) in `formatters.ts` / `DataFreshnessIndicator.tsx`. This is separate from **`lastUpdate`** on `AgentStatus`, which tracks last reducer activity (any WS message).
 
 **Self-awareness** (optional on the same `Signal` payload): **`agent_introspection`** (`AgentIntrospectionSnapshot`), **`policy_verdict`**, **`policy_reason_codes`**, **`trade_score`**, **`thesis_signal`**, **`ml_evidence_snapshot`**, **`memory_context_id`**, **`decision_event_id`**. Zod schemas: `AgentIntrospectionSnapshotSchema`, `ReflectionSnapshotSchema` in `frontend/schemas/api.validation.ts`. Post-trade **`reflection_snapshot`** arrives on **`agent_update`** with `state: "POSITION_REFLECTION"` (not merged into `Signal` today). UI panels can consume these incrementally; existing components remain compatible when fields are absent.
+
+**Rule-based lifecycle** (optional on `Signal` when the agent runs the rule-based pipeline): **`market_state`**, **`narrative_tail`**, **`structural_gates`**, **`fsm_state`**, **`entry_signal`**, **`thesis_health`**, **`position_lifecycle`**. The Trading tab renders **`MarketStateCard`** and **`NarrativeTimeline`**; **`SignalIndicator`** shows **`position_lifecycle`** when managing (so a post-entry HOLD does not look like a fresh BUY). See [Rule-Based Decision Engine](rule-based-decision-engine.md).
 
 **Components** (under `app/components/v15/`):
 
@@ -99,7 +118,7 @@ Signal merges use **`frontend/utils/mergeSignalPayload.ts`** (imported by `useTr
 `TradingDecision.tsx` shows **EdgeGauge** and **ProbabilityBar** when `signal.edge` is present, and **ModelStatusPanel** in the empty-state card when no signal yet.
 
 **Returned data (selected)**:
-- `signal`, `portfolio`, `recentTrades`, `modelData`, `health`, `performanceData`
+- `signal`, `portfolio`, `recentTrades`, `modelData`, `modelConsensus`, `health`, `performanceData`
 - `agentState`, `isConnected`, `lastUpdate`, `isLoading`, `isPortfolioLoading`, `error`
 
 **Reducer actions**: `UPDATE_SIGNAL` applies REST-hydrated or manually set signal snapshots (`dataSource: 'api'`).
@@ -266,7 +285,9 @@ interface RecentTradesProps {
 ```typescript
 interface SignalIndicatorProps {
   signal?: Signal;
-  modelData?: { model_consensus?; inference_latency_ms?; ... };
+  modelConsensus?: ModelConsensusSnapshot;  // from model WebSocket channel
+  modelEdge?: ModelConsensusSnapshot;       // deprecated alias
+  lastReflection?: ReflectionSnapshot;
 }
 ```
 
@@ -346,8 +367,9 @@ interface ReasoningChainViewProps {
 - Per-step confidence badge and **`ConfidenceProgress`** bar
 - Evidence bullets, **Conclusion** from `chainMeta` or synthesized `signal.conclusion`
 - Header **Final confidence** from `chainMeta.final_confidence` or `overallConfidence`
+- When **`reasoning_confidence_raw`** differs from final by ≥2%, header shows **Raw (pre-floor)** for diagnostics
 
-**Dashboard wiring** (`Dashboard.tsx`): `reasoningChainMetaFromSignal()` builds `ReasoningChain` metadata when `reasoning_chain_full` is missing.
+**Dashboard wiring** (`Dashboard.tsx`): `reasoningChainMetaFromSignal()` builds `ReasoningChain` metadata when `reasoning_chain_full` is missing (includes `reasoning_confidence_raw` when present).
 
 ---
 
@@ -724,7 +746,7 @@ The WebSocket communication has been simplified from 10+ message types to 3 core
      - Updates real-time price display
    - **Resource: `model`**: ML model prediction updates (replaces `model_prediction_update`)
      - Includes model consensus and individual model reasoning
-     - Updates model reasoning view component
+     - Updates `modelConsensus` in `useTradingData` (secondary to decision `signal` payload; not shown as hero “edge”)
 
 2. **`agent_update`**: Agent state transitions (replaces `agent_state`)
    - Updates agent status display

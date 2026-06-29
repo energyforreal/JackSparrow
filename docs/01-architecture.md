@@ -93,11 +93,19 @@ The Intelligence Layer contains the "brain" of the trading agent:
 
 **Decision authority (agent-first)**
 
-Trade *intent* on the event bus is issued only after the **Agent Policy** stage (`AgentPolicyEngine` in code): IC validation outputs are packaged as **`MLEvidenceSnapshot`**, then the policy layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation; in `TRADING_MODE=live`, a non-empty `manual_trade_audit_reason` is required unless disabled via settings.
+Trade *intent* on the event bus is issued after policy fusion (`AgentPolicyEngine` or, when enabled, the **rule-based FSM**). IC validation outputs are packaged as **`MLEvidenceSnapshot`** on the legacy path; the rule-based path uses structural confidence instead. The layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution.
+
+**Rule-based decision engine (optional cutover)**
+
+When `DECISION_ENGINE_MODE=rule_based`, the hot path skips ML inference and runs:
+
+`Understanding → Narrative → Structural Gates → FSM → Risk → Execution`
+
+Shadow mode (`DECISION_ENGINE_MODE=ml_legacy` with shadow flags) logs the same pipeline alongside the legacy IC path for comparison. See [Rule-Based Decision Engine](rule-based-decision-engine.md).
 
 **Deprecated settings (IC-only runtime):** `SINGLE_MODEL_MODE_ENABLED`, `CONSOLIDATED_MODEL_METADATA_GLOB`, `SINGLE_MODEL_STRICT_STARTUP`, and `JACKSPARROW_V43_INFERENCE_STACK` are ignored when `IC_MODE=true` (default). Model discovery loads only `metadata_ic.json` under `MODEL_DIR`.
 
-**Strategy-first pipeline (NO-ML / IC default)**
+**Strategy-first pipeline (legacy `ml_legacy` default)**
 
 Default fusion mode is `AGENT_POLICY_MODE=ml_or_thesis` with `IC_MODE=true`: the **RuleBasedIntelligenceNode** produces the same `MLValidationSnapshot` shape as legacy v43 (no pickle load).
 
@@ -122,8 +130,11 @@ Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_IC_VALID
 | `REQUIRE_IC_VALIDATION_FOR_ORDERS` | `true` | Policy-first entry guard before exchange orders (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`) |
 | `AGENT_STARTUP_ENTRY_GRACE_SECONDS` | `0` | Optional post-start entry block (seconds); candle cache seed is primary replay fix |
 | `MODEL_HEALTH_WARMUP_FULL_PIPELINE` | `false` | Startup warmup uses dry-run inference only when false |
+| `DECISION_ENGINE_MODE` | `ml_legacy` | `ml_legacy` (IC + policy) or `rule_based` (FSM authority) |
+| `MARKET_FSM_ENFORCE` | `false` | FSM `entry_signal` overrides policy on legacy path |
+| `STRUCTURAL_GATE_SHADOW_LOG_ONLY` | `true` | Shadow structural gates without blocking ML entries |
 
-See [Canonical events](canonical_events.md) for the updated event-bus happy path.
+See [Rule-Based Decision Engine](rule-based-decision-engine.md) for shadow rollout.
 
 **Learning Module**
 - Performance tracking per model
@@ -225,15 +236,12 @@ MCP Orchestrator
 ```
 
 **Orchestration Flow (strategy-first IC)**:
-1. `CandleClosedEvent` or `ModelPredictionRequestEvent` arrives at MCP Orchestrator (`_process_jacksparrow_v43_prediction`)
-2. Market frames fetched; MTF caches warmed in orchestrator
-3. **Agent thesis evaluated once** → `thesis_verdict` cached in `market_context`
-4. `RuleBasedIntelligenceNode` predict → `MLValidationSnapshot` + v43 gates
-5. Trade score + `AgentPolicyEngine` fusion → authoritative `PolicyVerdict`
-6. Reasoning engine generates IC minimal (3-step) or legacy (7-step) explanatory chain
-7. Single `DECISION_READY` per bar (`policy_authority=agent_policy`); trading handler + risk manager veto before execution
+1. `CandleClosedEvent` or `ModelPredictionRequestEvent` arrives at MCP Orchestrator
+2. **`ml_legacy`**: `_process_jacksparrow_v43_prediction` — frames, thesis, IC predict, policy, reasoning, optional rule-based shadow
+3. **`rule_based`**: `_process_rule_based_prediction` — frames, feature matrix, rule-based pipeline only
+4. Single `DECISION_READY` per bar; trading handler + risk manager veto before execution
 
-The dormant `REASONING_REQUEST` bus path and `EvidenceReadyEvent` have been removed; IC evidence rides on `DECISION_READY.ml_evidence_snapshot`.
+See [Rule-Based Decision Engine](rule-based-decision-engine.md).
 
 For detailed orchestration documentation, see [MCP Layer Documentation - Orchestration](02-mcp-layer.md#mcp-orchestration).
 
@@ -640,9 +648,13 @@ The frontend automatically normalizes legacy message types (`signal_update`, `po
   "chain_id": "chain_456",
   "steps": [...],
   "conclusion": "...",
-  "final_confidence": 0.75
+  "final_confidence": 0.75,
+  "reasoning_confidence_raw": 0.62,
+  "signal_strength": 0.71
 }
 ```
+
+Dashboard WebSocket `signal` payloads may also include display-only fields from **`display_metrics`**: `economic_edge`, `entry_proba_margin`, `trade_score_detail`, `metric_correlation_hint` (see [Frontend – signal fields](07-frontend.md#v15--v43-signal-fields-optional)).
 
 ---
 
@@ -1128,6 +1140,7 @@ This architecture enables better scalability, testability, and maintainability b
 
 ## Related Documentation
 
+- [Rule-Based Decision Engine](rule-based-decision-engine.md) - FSM + structural gates rollout
 - [MCP Layer Documentation](02-mcp-layer.md) - Detailed MCP architecture and orchestration
 - [Canonical events](canonical_events.md) - Event-bus happy path and handler wiring
 - [ML Models Documentation](03-ml-models.md) - Model management and intelligence

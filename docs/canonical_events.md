@@ -55,6 +55,22 @@ Populated by `mcp_orchestrator._enrich_decision_event_self_awareness` before pub
 | `memory_context_id` | Vector store key for outcome backfill (`decision-{chain_id}-{ts}`). |
 | `decision_event_id` | Same as `DecisionReadyEvent.event_id` for audit correlation. |
 
+#### Rule-based pipeline fields (optional, additive)
+
+Populated when the rule-based pipeline runs (shadow or `DECISION_ENGINE_MODE=rule_based`):
+
+| Field | Description |
+|-------|-------------|
+| `market_state` | `MarketStateSnapshot` from market understanding engine. |
+| `narrative_tail` | Recent narrative events. |
+| `structural_gates` | Six-category gate results + `trade_allowed`. |
+| `fsm_state` | Current market FSM state. |
+| `entry_signal` | FSM entry intent (`LONG` / `SHORT` / none). |
+| `thesis_health` | Position thesis health while managing. |
+| `position_lifecycle` | UI lifecycle (`watching`, `entry_ready`, `managing`, `exit_ready`). |
+
+See [Rule-Based Decision Engine](rule-based-decision-engine.md).
+
 `TradingEventHandler` forwards `memory_context_id` and `agent_introspection` on `RISK_APPROVED` so execution can attach them to open positions.
 
 ### `POSITION_CLOSED` self-awareness

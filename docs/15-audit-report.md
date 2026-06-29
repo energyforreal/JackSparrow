@@ -359,6 +359,46 @@ See [ML Models](03-ml-models.md) for learning and threshold adapters.
 
 ---
 
+## Optimization query cookbook
+
+After enabling snapshots (`TRADE_ENTRY_SNAPSHOT_ENABLED=true`), verify rollout:
+
+```bash
+python tools/commands/trade_analytics.py snapshot-integrity
+```
+
+Target: >95% of `trade_outcomes` rows with non-empty `rule_based_pipeline` in metadata.
+
+| Question | Query / tool |
+|----------|----------------|
+| Why are entries rejected? | `GET /api/v1/analytics/entry-decisions` or `trade_analytics.py reject-breakdown` |
+| Win rate by regime / setup | `GET /api/v1/analytics/performance-by-regime` or `regime-performance` CLI |
+| Did a config change help? | `GET /api/v1/analytics/performance-by-config` or `config-diff --hash-a X --hash-b Y` |
+| Fill latency after risk approval | `trade_analytics.py timing-summary` (`risk_to_fill_ms` in metadata) |
+| Snapshot schema fields | [Trading persistence model](../reference/trading-persistence-model.md) |
+
+```sql
+SELECT
+  metadata->'system_context'->>'config_hash' AS config_hash,
+  COUNT(*) AS n,
+  AVG(CASE WHEN pnl > 0 THEN 1.0 ELSE 0.0 END) AS win_rate,
+  SUM(pnl) AS net_pnl
+FROM trade_outcomes
+WHERE metadata->>'snapshot_version' = '1'
+GROUP BY 1
+ORDER BY n DESC;
+```
+
+```sql
+SELECT outcome, reject_reason, COUNT(*)
+FROM entry_decisions
+WHERE timestamp >= NOW() - INTERVAL '7 days'
+GROUP BY 1, 2
+ORDER BY COUNT(*) DESC;
+```
+
+---
+
 ## Intelligence layer remediation (2026-06-04)
 
 Audit-driven fixes applied across agent execution, sizing, data loaders, and signal pipeline:

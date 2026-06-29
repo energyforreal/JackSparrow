@@ -2,7 +2,14 @@
 
 ## Overview
 
-This document describes **JackSparrow's** reasoning engine, decision-making process, and learning algorithms. The agent uses structured reasoning chains for transparency: **IC minimal (3 steps, default)** on the strategy-first path, or a **legacy 7-step chain** when `REASONING_IC_MINIMAL_MODE=false` or non-IC context. **Trade authority** always comes from `AgentPolicyEngine`, not reasoning text.
+This document describes **JackSparrow's** reasoning engine, decision-making process, and learning algorithms. The agent uses structured reasoning chains for transparency: **IC minimal (3 steps, default)** on the strategy-first path, or a **legacy 7-step chain** when `REASONING_IC_MINIMAL_MODE=false` or non-IC context.
+
+**Trade authority** depends on `DECISION_ENGINE_MODE`:
+- **`ml_legacy`** (default): `AgentPolicyEngine` fuses thesis + IC validation.
+- **`rule_based`**: Market FSM + structural gates (no ML inference).
+- **`ml_legacy` + `MARKET_FSM_ENFORCE=true`**: FSM can override policy when gates pass.
+
+Reasoning text is always explanatory; it does not parse conclusions into orders. See [Rule-Based Decision Engine](rule-based-decision-engine.md).
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -51,13 +58,34 @@ For detailed MCP Reasoning Protocol documentation, see [MCP Layer Documentation 
 
 ### Policy authority and IC minimal reasoning
 
-**Authoritative signal**: `AgentPolicyEngine` (`agent/core/agent_policy_engine.py`) emits the only tradable signal via `DecisionReadyEvent`. The reasoning engine produces an explanatory chain only; it does not parse conclusion text into orders.
+**Authoritative signal (legacy path)**: `AgentPolicyEngine` (`agent/core/agent_policy_engine.py`) emits the tradable signal via `DecisionReadyEvent` when `DECISION_ENGINE_MODE=ml_legacy`.
+
+**Rule-based path**: When `DECISION_ENGINE_MODE=rule_based`, `MCPOrchestrator._process_rule_based_prediction` runs `rule_based_pipeline.run_cycle()` and maps FSM `entry_signal` to `PolicyVerdict` with reason `rule_based_fsm_entry`. Reasoning still runs for explainability but does not override FSM authority.
+
+**Shadow comparison**: With `DECISION_ENGINE_MODE=ml_legacy` and shadow flags enabled, `_maybe_apply_rule_based_pipeline()` logs `rule_based_pipeline_shadow` each cycle without blocking ML entries unless `MARKET_FSM_ENFORCE=true`.
 
 **IC minimal mode** (`REASONING_IC_MINIMAL_MODE`, default `true`): When `strategy_candidate` is present in market context (strategy-first IC path), reasoning runs a 3-step chain — situational assessment, trade adjudication, confidence calibration — instead of the full 7-step legacy chain.
 
 **Thesis / hypothesis cache**: `MCPOrchestrator` evaluates `AgentThesisEngine` once per cycle. In **portfolio mode** (`AGENT_HYPOTHESIS_MODE=portfolio`, default), all rule families run every bar; competing hypotheses are aggregated into `hypothesis_snapshot` (aggregate direction, margin, environment scores). Legacy `thesis_verdict` remains for backward compatibility. Market-quality concerns (squeeze, crisis, liquidity, ATR, funding) are continuous evidence scores via `evidence_engine.build_environment_scores`, not binary thesis HOLDs unless `AGENT_THESIS_HARD_VETO_ENABLED=true`. Operational hard tier only: `market_health_hold`, `has_open_position`. Policy still fuses aggregate hypothesis direction + conviction sizing; reasoning narrates the portfolio in trade adjudication.
 
-**Entry validation**: `entry_validation_guard.validate_entry_signal()` (shim: `ml_signal_guard`) checks policy verdict + optional v43 gates before execution. Configure with `REQUIRE_IC_VALIDATION_FOR_ORDERS` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
+**Entry validation**: `entry_validation_guard.validate_entry_signal()` checks policy verdict + optional v43 gates before execution. When `DECISION_ENGINE_MODE=rule_based`, validation requires FSM `EntryReady`, structural `trade_allowed`, and `rule_based_fsm_entry`. Configure with `REQUIRE_IC_VALIDATION_FOR_ORDERS` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
+
+### Rule-based decision pipeline
+
+Deterministic stages (see [Rule-Based Decision Engine](rule-based-decision-engine.md)):
+
+1. **Market Understanding** — `MarketStateSnapshot` from rolling feature history (trend, breakout, liquidity, MTF roles).
+2. **Market Narrative** — append-only timeline (`data/market_narrative/{symbol}.jsonl`).
+3. **Structural Gates** — six categories must pass (`structural_gate_engine.py`).
+4. **Market FSM** — lifecycle states (`Watching` → `EntryReady` → `PositionActive` → …).
+
+Conviction sizing uses `structural_confidence_to_fraction()` when FSM enforce or rule-based mode is active.
+
+### `gate_evaluation` vs structural gates
+
+[`structural_gate_engine.py`](../agent/core/structural_gate_engine.py) emits **boolean categories** (`trend`, `structure`, `breakout`, `liquidity`, `volatility`, `risk`) plus **`block_reasons`** strings — not per-gate confidence deltas. Snapshots denormalize this into `gate_evaluation` for analytics SQL without deep JSON paths. `structural_confidence` in the pipeline is `base + 0.03` per passed category ([`rule_based_pipeline.py`](../agent/intelligence/rule_based_pipeline.py)). Legacy IC paths may still attach `confluence_components` from `trade_score` / `environment_scores` when present.
+
+Trade decision snapshots bind this context to `position_id` via [`agent/persistence/trade_snapshot.py`](../agent/persistence/trade_snapshot.py) at fill and persist on close to `trade_outcomes.metadata`.
 
 ---
 
@@ -638,6 +666,20 @@ This decision has a 72.5% probability of success based on:
 
 This table provides a quick health check when auditing individual decisions—if any column looks inconsistent, debug that stage before moving on.
 
+### Dashboard confidence semantics (policy vs reasoning vs display)
+
+The agent exposes **three distinct confidence concepts** on `DecisionReady` / WebSocket `signal` payloads:
+
+| Concept | Source | Used for |
+|---------|--------|----------|
+| **Policy confidence** | `PolicyVerdict.confidence` → `ml_validation.model_confidence` (or thesis confidence in thesis modes) | **Entry gating**, `RiskApproved`, trading handler |
+| **Reasoning confidence** | Reasoning Step 7 `final_confidence` | Dashboard narrative, Analysis tab |
+| **Display metrics** | `agent/core/display_metrics.py` | Orthogonal UI: `economic_edge`, `entry_proba_margin`, `trade_score_detail`, `reasoning_confidence_raw` |
+
+Step 7 applies optional **display-only floors** (HOLD 50% floor, model-average floor, v43 proportional entry floor) controlled by **`REASONING_DISPLAY_*`** env vars (see [Deployment](10-deployment.md#agent-environment-variables)). When **`REASONING_DISPLAY_CALIBRATION_ENABLED=true`**, floors default off and Step 7 reweights toward adjudication/risk steps; **policy confidence is never modified**.
+
+v43 **Step 5 synthesis** uses entry-proba strength (`signal_strength` / max-class mean) rather than raw `pred0.confidence` so reasoning is less duplicated with policy.
+
 ---
 
 ## Decision Framework
@@ -1038,7 +1080,7 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 2. **`_step3_model_consensus()`**: If per-model prediction stdev exceeds `model_disagreement_threshold` (default `0.4`), consensus magnitude is scaled down, pushing more outcomes into the HOLD band.
 3. **Ensemble mapping** (`V4EnsembleNode`): Entry signal is often `buy_prob - sell_prob`; confidence uses class probabilities. Near-neutral ensemble output maps to HOLD after step 5.
 4. **`TradingEventHandler`**: `signal == "HOLD"` skips new entries; with an open position, optional **ML reversal exit** may still close before `hold_at_synthesis` when configured.
-5. **`AGENT_POLICY_MODE`**: Default `ml_or_thesis` fuses thesis and ML. For **true NO-ML** (IC/thesis-only authority), set `AGENT_POLICY_MODE=thesis_only` and keep `REQUIRE_IC_VALIDATION_FOR_ORDERS=false` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
+5. **`AGENT_POLICY_MODE`**: Default `ml_or_thesis` fuses thesis and ML. For **true NO-ML** (IC/thesis-only authority), set `AGENT_POLICY_MODE=thesis_only` and keep `REQUIRE_IC_VALIDATION_FOR_ORDERS=false` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`). For **full ML-free FSM authority**, set `DECISION_ENGINE_MODE=rule_based` (see [Rule-Based Decision Engine](rule-based-decision-engine.md)).
 
 **Scalping**: Align training horizon, `PRICE_FLUCTUATION_THRESHOLD_PCT`, TP/SL, and position monitor intervals with the intended timeframe; defaults may still reflect swing-style risk. See [Features – Signal triggers](04-features.md#market-signal-generation-triggers).
 
@@ -1093,6 +1135,7 @@ Env names for the above are documented in root `.env.example`.
 
 ## Related Documentation
 
+- [Rule-Based Decision Engine](rule-based-decision-engine.md) - FSM + structural gates (ML-free cutover)
 - [MCP Layer Documentation](02-mcp-layer.md) - MCP architecture and protocols
 - [ML Models Documentation](03-ml-models.md) - Model management and intelligence
 - [Architecture Documentation](01-architecture.md) - System design
