@@ -3,6 +3,8 @@ import { describe, expect, it } from '@jest/globals'
 import {
   isHoldNonActionableDisplay,
   resolveDisplayConfidence,
+  resolveEconomicEdgeBarPercent,
+  resolveHeroMetrics,
   resolvePolicyEntryPercent,
   resolveSignalEntryMetrics,
   resolveTradeScore,
@@ -65,6 +67,19 @@ describe('resolveTradeScore', () => {
     expect(resolveTradeScore({ trade_score: 93 })?.score).toBe(93)
   })
 
+  it('reads trade_score_detail with components', () => {
+    const ts = resolveTradeScore({
+      trade_score_detail: {
+        score: 88,
+        passed: true,
+        components: { thesis: 20, ml: 15 },
+      },
+    })
+    expect(ts?.score).toBe(88)
+    expect(ts?.passed).toBe(true)
+    expect(ts?.components?.thesis).toBe(20)
+  })
+
   it('reads trade_score object with passed flag', () => {
     expect(
       resolveTradeScore({ trade_score: { score: 88, passed: true } })
@@ -103,16 +118,17 @@ describe('resolveSignalEntryMetrics', () => {
     expect(m?.tradeScore?.passed).toBe(true)
   })
 
-  it('zeros confidence bars for non-actionable HOLD', () => {
+  it('preserves confidence values for non-actionable HOLD (dimmed in UI)', () => {
     const m = resolveSignalEntryMetrics({
       signal: 'HOLD',
       confidence: 0.85,
       final_confidence: 0.72,
       is_actionable_entry: false,
     })
-    expect(m?.reasoningPercent).toBe(0)
-    expect(m?.policyEntryPercent).toBe(0)
-    expect(m?.showSplitConfidence).toBe(false)
+    expect(m?.reasoningPercent).toBeCloseTo(72, 5)
+    expect(m?.policyEntryPercent).toBeCloseTo(85, 5)
+    expect(m?.holdDim).toBe(true)
+    expect(m?.showSplitConfidence).toBe(true)
   })
 })
 
@@ -125,5 +141,33 @@ describe('isHoldNonActionableDisplay', () => {
     expect(
       isHoldNonActionableDisplay({ signal: 'BUY', is_actionable_entry: true })
     ).toBe(false)
+  })
+})
+
+describe('resolveHeroMetrics', () => {
+  it('returns orthogonal hero fields', () => {
+    const h = resolveHeroMetrics({
+      signal: 'LONG',
+      confidence: 0.7,
+      policy_confidence: 0.7,
+      final_confidence: 0.72,
+      economic_edge: 0.003,
+      threshold: 0.005,
+      entry_proba_margin: 0.25,
+      trade_score_detail: { score: 80, passed: true, components: { thesis: 20 } },
+      reasoning_confidence_raw: 0.6,
+    })
+    expect(h?.policyEntryPercent).toBeCloseTo(70, 5)
+    expect(h?.economicEdge).toBeCloseTo(0.003, 5)
+    expect(h?.entryMarginPercent).toBeCloseTo(25, 5)
+    expect(h?.tradeScore?.score).toBe(80)
+    expect(h?.reasoningRawPercent).toBeCloseTo(60, 5)
+  })
+})
+
+describe('resolveEconomicEdgeBarPercent', () => {
+  it('centers bar at threshold crossing', () => {
+    expect(resolveEconomicEdgeBarPercent(0, 0.005)).toBeCloseTo(50, 5)
+    expect(resolveEconomicEdgeBarPercent(0.005, 0.005)).toBeCloseTo(75, 5)
   })
 })

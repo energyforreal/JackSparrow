@@ -62,6 +62,8 @@ class MCPReasoningChain(BaseModel):
     feature_context: List[Dict[str, Any]]
     # Peak conviction from entry_proba margins (0–1); may differ from calibrated final_confidence.
     signal_strength: Optional[float] = None
+    # Step 7 confidence before display floors (dashboard diagnostics).
+    reasoning_confidence_raw: Optional[float] = None
 
 
 class MCPReasoningRequest(BaseModel):
@@ -294,12 +296,17 @@ class MCPReasoningEngine:
             step7.step_metadata if isinstance(step7.step_metadata, dict) else {}
         )
         signal_strength = strength_meta.get("signal_strength")
+        raw_conf = strength_meta.get("reasoning_confidence_raw")
         try:
             signal_strength_f = (
                 float(signal_strength) if signal_strength is not None else None
             )
         except (TypeError, ValueError):
             signal_strength_f = None
+        try:
+            raw_conf_f = float(raw_conf) if raw_conf is not None else None
+        except (TypeError, ValueError):
+            raw_conf_f = None
 
         feature_context = request.market_context.get("features", {})
         return MCPReasoningChain(
@@ -314,6 +321,7 @@ class MCPReasoningEngine:
                 {"name": k, "value": v} for k, v in feature_context.items()
             ],
             signal_strength=signal_strength_f,
+            reasoning_confidence_raw=raw_conf_f,
         )
 
     async def generate_reasoning(self, request: MCPReasoningRequest) -> MCPReasoningChain:
@@ -423,12 +431,17 @@ class MCPReasoningEngine:
             step7.step_metadata if isinstance(step7.step_metadata, dict) else {}
         )
         signal_strength = strength_meta.get("signal_strength")
+        raw_conf = strength_meta.get("reasoning_confidence_raw")
         try:
             signal_strength_f = (
                 float(signal_strength) if signal_strength is not None else None
             )
         except (TypeError, ValueError):
             signal_strength_f = None
+        try:
+            raw_conf_f = float(raw_conf) if raw_conf is not None else None
+        except (TypeError, ValueError):
+            raw_conf_f = None
 
         return MCPReasoningChain(
             chain_id=chain_id,
@@ -440,6 +453,7 @@ class MCPReasoningEngine:
             model_predictions=model_predictions,
             feature_context=[{"name": k, "value": v} for k, v in feature_context.items()],
             signal_strength=signal_strength_f,
+            reasoning_confidence_raw=raw_conf_f,
         )
     
     def _step_trade_adjudication(self, request: MCPReasoningRequest) -> ReasoningStep:
@@ -966,7 +980,16 @@ class MCPReasoningEngine:
         v43_dec = request.market_context.get("v43_dedicated_decision")
         if isinstance(v43_dec, dict) and v43_dec.get("enabled"):
             conclusion = str(v43_dec.get("conclusion", "HOLD - v43"))
-            avg_confidence = float(v43_dec.get("confidence", 0.5))
+            preds_for_synth = self._get_model_predictions(request.market_context)
+            strength_bundle = aggregate_entry_proba_strength(preds_for_synth)
+            synth_conf = strength_bundle.get("signal_strength")
+            max_class = strength_bundle.get("entry_proba_max_class_mean")
+            if synth_conf is not None:
+                avg_confidence = float(synth_conf)
+            elif max_class is not None:
+                avg_confidence = float(max_class)
+            else:
+                avg_confidence = float(v43_dec.get("confidence", 0.5))
             evidence = list(v43_dec.get("evidence") or [])
             evidence.append("v43 diagnostic path — MTF synthesis skipped")
             data_freshness_seconds = self._compute_data_freshness_seconds(
@@ -1274,14 +1297,46 @@ class MCPReasoningEngine:
         decision_desc = (decision_step.description if decision_step else "").upper()
         is_hold = "HOLD" in decision_desc
 
+        display_cal = bool(
+            getattr(settings, "reasoning_display_calibration_enabled", False)
+        )
         step_weights = {
-            1: 0.01,  # Situational assessment
-            2: 0.12,  # Historical context
-            3: 0.30,  # Model consensus
-            4: 0.04,  # Risk assessment
-            5: 0.25,  # Decision synthesis
-            6: 0.28,  # Trade adjudication (final BUY/SELL/HOLD gate)
+            1: 0.01,
+            2: 0.12,
+            3: 0.30,
+            4: 0.04,
+            5: 0.25,
+            6: 0.28,
         }
+        if display_cal:
+            step_weights = {
+                1: 0.02,
+                2: 0.12,
+                3: 0.22,
+                4: 0.08,
+                5: 0.20,
+                6: 0.36,
+            }
+
+        hold_floor_on = bool(
+            getattr(settings, "reasoning_display_hold_floor_enabled", True)
+        )
+        model_avg_floor_on = bool(
+            getattr(settings, "reasoning_display_model_avg_floor_enabled", True)
+        )
+        v43_floor_on = bool(
+            getattr(settings, "reasoning_display_v43_entry_floor_enabled", True)
+        )
+        if display_cal:
+            hold_floor_on = bool(
+                getattr(settings, "reasoning_display_hold_floor_enabled", False)
+            )
+            model_avg_floor_on = bool(
+                getattr(settings, "reasoning_display_model_avg_floor_enabled", False)
+            )
+            v43_floor_on = bool(
+                getattr(settings, "reasoning_display_v43_entry_floor_enabled", False)
+            )
 
         calibration_steps = [s for s in steps if s.step_number <= 6]
         weighted_sum = sum(
@@ -1296,8 +1351,16 @@ class MCPReasoningEngine:
         strength_bundle = aggregate_entry_proba_strength(model_predictions)
         signal_strength = strength_bundle.get("signal_strength")
         margin_mean = float(strength_bundle.get("entry_proba_margin_mean") or 0.0)
+        if display_cal:
+            blend_w = float(
+                getattr(settings, "reasoning_display_signal_strength_blend", 0.20) or 0.20
+            )
+        else:
+            blend_w = float(
+                getattr(settings, "reasoning_display_signal_strength_blend", 0.40) or 0.40
+            )
+        blend_w = max(0.0, min(1.0, blend_w))
         if signal_strength is not None:
-            blend_w = 0.40
             base_confidence = max(
                 0.0,
                 min(
@@ -1321,15 +1384,16 @@ class MCPReasoningEngine:
 
         final_confidence = base_confidence * consistency_adjustment
         reasoning_only_confidence = final_confidence
+        final_confidence_raw = max(0.0, min(1.0, final_confidence))
 
         # Apply model_avg floor only when reasoning confidence is meaningfully positive
         if model_predictions:
             model_confidences = [max(0.0, min(1.0, float(p.get("confidence", 0)))) for p in model_predictions]
             model_avg = sum(model_confidences) / len(model_confidences) if model_confidences else 0.0
-            if reasoning_only_confidence > 0.1 and model_avg > 0:
+            if model_avg_floor_on and reasoning_only_confidence > 0.1 and model_avg > 0:
                 final_confidence = max(final_confidence, model_avg * 0.8)
             # Unanimous HOLD: all models agree on neutral (confidence 0). Avoid showing 0% in UI.
-            if model_avg == 0 and model_confidences:
+            if hold_floor_on and model_avg == 0 and model_confidences:
                 final_confidence = max(final_confidence, 0.5)
 
             # Probability separation boost: if entry buy/sell margins are strong
@@ -1361,7 +1425,8 @@ class MCPReasoningEngine:
         mc = request.market_context or {}
         v43_dec = mc.get("v43_dedicated_decision")
         if (
-            isinstance(v43_dec, dict)
+            v43_floor_on
+            and isinstance(v43_dec, dict)
             and v43_dec.get("enabled")
             and (v43_dec.get("final_long") or v43_dec.get("final_short"))
         ):
@@ -1442,6 +1507,7 @@ class MCPReasoningEngine:
             "entry_proba_margin_mean": strength_bundle.get("entry_proba_margin_mean"),
             "entry_proba_margin_max": strength_bundle.get("entry_proba_margin_max"),
             "calibrated_confidence": final_confidence,
+            "reasoning_confidence_raw": final_confidence_raw,
         }
 
         return ReasoningStep(

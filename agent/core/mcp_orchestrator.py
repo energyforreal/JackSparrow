@@ -235,6 +235,8 @@ def _merge_prediction_context_with_agent_state(
 
 def _enrich_confidence_semantics(payload: Dict[str, Any]) -> None:
     """Split policy vs calibrated display confidence for dashboard consumers."""
+    from agent.core.display_metrics import build_display_metrics
+
     reasoning_chain = payload.get("reasoning_chain")
     policy_conf = float(payload.get("confidence") or 0.0)
     chain_final: Optional[float] = None
@@ -261,6 +263,22 @@ def _enrich_confidence_semantics(payload: Dict[str, Any]) -> None:
                 payload["signal_strength"] = float(ss)
             except (TypeError, ValueError):
                 pass
+
+    mc = None
+    preds = None
+    if isinstance(reasoning_chain, dict):
+        mc = reasoning_chain.get("market_context")
+        preds = reasoning_chain.get("model_predictions")
+    payload.update(
+        build_display_metrics(
+            signal=str(signal),
+            policy_confidence=policy_conf,
+            reasoning_chain=reasoning_chain if isinstance(reasoning_chain, dict) else None,
+            market_context=mc if isinstance(mc, dict) else None,
+            model_predictions=preds if isinstance(preds, list) else None,
+            payload=payload,
+        )
+    )
 
 
 def _decision_ws_metadata(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -2579,16 +2597,31 @@ class MCPOrchestrator:
                     "steps": reasoning.get("steps", []),
                     "conclusion": reasoning.get("conclusion"),
                     "final_confidence": reasoning.get("final_confidence"),
+                    "reasoning_confidence_raw": reasoning.get("reasoning_confidence_raw"),
                     "signal_strength": reasoning.get("signal_strength"),
                     "model_predictions": model_predictions_for_reasoning,
                     "market_context": result.get("market_context") or {},
                 }
+                step7_meta = None
+                for st in reasoning.get("steps") or []:
+                    if isinstance(st, dict) and st.get("step_number") == 7:
+                        step7_meta = st.get("step_metadata")
+                        break
+                if isinstance(step7_meta, dict) and step7_meta.get("entry_proba_margin_mean") is not None:
+                    reasoning_chain_payload["entry_proba_margin_mean"] = step7_meta.get(
+                        "entry_proba_margin_mean"
+                    )
 
                 strategy_origin = (
                     "agent_thesis_origin" in verdict.reason_codes
                     or "agent_thesis_confirms_ml" in verdict.reason_codes
                 )
                 ts_val = ml_evidence.trade_score
+                ts_detail = None
+                if isinstance(mctx, dict):
+                    ts_raw = mctx.get("trade_score")
+                    if isinstance(ts_raw, dict):
+                        ts_detail = ts_raw
                 decision_payload = {
                         "symbol": decision_symbol,
                         "signal": signal,
@@ -2602,6 +2635,7 @@ class MCPOrchestrator:
                         "policy_verdict": verdict.model_dump(mode="json"),
                         "strategy_origin": strategy_origin,
                         "trade_score": ts_val,
+                        "trade_score_detail": ts_detail,
                         "thesis_signal": ml_evidence.thesis_signal,
                         "hypothesis_snapshot": (mctx or {}).get("hypothesis_snapshot"),
                         "anticipated_horizon_bars": int(

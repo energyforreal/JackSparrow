@@ -50,6 +50,13 @@ function reasoningChainMetaFromSignal(signal: Signal | null): ReasoningChain | u
   if (fc > 1) fc = fc / 100
   fc = Math.min(1, Math.max(0, fc))
 
+  let rawFc: number | undefined
+  if (signal.reasoning_confidence_raw != null && Number.isFinite(signal.reasoning_confidence_raw)) {
+    rawFc = signal.reasoning_confidence_raw
+    if (rawFc > 1) rawFc = rawFc / 100
+    rawFc = Math.min(1, Math.max(0, rawFc))
+  }
+
   const ts = signal.timestamp != null ? signal.timestamp : new Date().toISOString()
 
   return {
@@ -58,6 +65,7 @@ function reasoningChainMetaFromSignal(signal: Signal | null): ReasoningChain | u
     steps: steps ?? [],
     conclusion: signal.conclusion ?? '',
     final_confidence: fc,
+    reasoning_confidence_raw: rawFc,
   }
 }
 

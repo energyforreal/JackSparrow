@@ -64,11 +64,14 @@ export interface MarketData {
 }
 
 /** Live model-channel snapshot (does not overwrite decision signal). */
-export interface ModelEdgeSnapshot {
+export interface ModelConsensusSnapshot {
   signal?: SignalType
   confidence: number
   timestamp?: string
 }
+
+/** @deprecated Use ModelConsensusSnapshot */
+export type ModelEdgeSnapshot = ModelConsensusSnapshot
 
 export interface ModelData {
   symbol: string

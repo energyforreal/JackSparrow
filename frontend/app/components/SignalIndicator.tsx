@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import type { ModelEdgeSnapshot } from '@/hooks/useTradingData'
+import type { ModelConsensusSnapshot } from '@/hooks/useTradingData'
 import { Signal, ReflectionSnapshot } from '@/types'
 import type { SignalType } from '@/types'
 import { normalizeSignalType } from '@/types/enums'
@@ -10,7 +10,7 @@ import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
 import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
-import { resolveDecisionReasoning } from '@/utils/signalConfidence'
+import { resolveDecisionReasoning, resolveHeroMetrics } from '@/utils/signalConfidence'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
@@ -18,7 +18,10 @@ import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 interface SignalIndicatorProps {
   signal?: Signal
   lastReflection?: ReflectionSnapshot | null
-  modelEdge?: ModelEdgeSnapshot | null
+  /** Live ensemble confidence from the model WebSocket channel. */
+  modelConsensus?: ModelConsensusSnapshot | null
+  /** @deprecated Use modelConsensus */
+  modelEdge?: ModelConsensusSnapshot | null
 }
 
 const getSignalBadgeClasses = (signal: SignalType) => {
@@ -51,7 +54,50 @@ const getSignalIcon = (signal: SignalType) => {
   }
 }
 
-export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalIndicatorProps) {
+function SignalEconomicsBlock({ signal }: { signal: Signal }) {
+  const hasEconomics =
+    signal.expected_return != null ||
+    signal.threshold != null ||
+    Boolean(signal.v43_gate_reject)
+  if (!hasEconomics) return null
+
+  return (
+    <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
+      <p className="font-medium text-foreground">Signal economics</p>
+      <ul className="list-inside list-disc space-y-0.5 tabular-nums">
+        {signal.expected_return != null && Number.isFinite(Number(signal.expected_return)) && (
+          <li>
+            Expected return:{' '}
+            <span className="text-foreground font-medium">
+              {Number(signal.expected_return).toFixed(5)}
+            </span>
+          </li>
+        )}
+        {signal.threshold != null && Number.isFinite(Number(signal.threshold)) && (
+          <li>
+            Threshold:{' '}
+            <span className="text-foreground">{Number(signal.threshold).toFixed(5)}</span>
+          </li>
+        )}
+        {signal.v43_gate_reject != null && signal.v43_gate_reject !== '' && (
+          <li>
+            Gate reject:{' '}
+            <span className="text-foreground">{String(signal.v43_gate_reject)}</span>
+          </li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+export function SignalIndicator({
+  signal,
+  lastReflection,
+  modelConsensus,
+  modelEdge,
+}: SignalIndicatorProps) {
+  const consensus = modelConsensus ?? modelEdge
+
   if (!signal) {
     return (
       <Card>
@@ -70,6 +116,7 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
   }
 
   const canonSignal = normalizeSignalType(signal.signal) ?? 'HOLD'
+  const entryMetrics = resolveHeroMetrics(signal)
 
   return (
     <Card>
@@ -114,50 +161,36 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         </div>
 
-        {modelEdge && modelEdge.confidence > 0 && (
-          <div className="rounded-md border border-dashed border-border/60 px-3 py-2">
+        <SignalEconomicsBlock signal={signal} />
+
+        {entryMetrics?.entryMarginPercent != null && (
+          <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
             <div className="flex justify-between text-xs mb-1">
-              <span className="text-muted-foreground">Model edge</span>
+              <span className="text-muted-foreground">Entry margin</span>
               <span className="font-medium tabular-nums">
-                {formatConfidence(normalizeConfidenceToPercent(modelEdge.confidence))}
-                {modelEdge.signal ? ` · ${modelEdge.signal}` : ''}
+                {formatConfidence(entryMetrics.entryMarginPercent)}
               </span>
             </div>
-            <ConfidenceProgress
-              value={normalizeConfidenceToPercent(modelEdge.confidence)}
-              className="h-1.5 opacity-80"
-            />
+            <ConfidenceProgress value={entryMetrics.entryMarginPercent} className="h-1.5" />
           </div>
         )}
 
-        {/* v43 Signal Economics */}
-        {(signal.expected_return != null ||
-          signal.threshold != null ||
-          Boolean(signal.v43_gate_reject)) && (
-          <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
-            <p className="font-medium text-foreground">Signal economics</p>
-            <ul className="list-inside list-disc space-y-0.5 tabular-nums">
-              {signal.expected_return != null && Number.isFinite(Number(signal.expected_return)) && (
-                <li>
-                  Expected return:{' '}
-                  <span className="text-foreground font-medium">
-                    {Number(signal.expected_return).toFixed(5)}
-                  </span>
-                </li>
-              )}
-              {signal.threshold != null && Number.isFinite(Number(signal.threshold)) && (
-                <li>
-                  Threshold:{' '}
-                  <span className="text-foreground">{Number(signal.threshold).toFixed(5)}</span>
-                </li>
-              )}
-              {signal.v43_gate_reject != null && signal.v43_gate_reject !== '' && (
-                <li>
-                  Gate reject:{' '}
-                  <span className="text-foreground">{String(signal.v43_gate_reject)}</span>
-                </li>
-              )}
-            </ul>
+        {consensus && consensus.confidence > 0 && (
+          <div className="rounded-md border border-dashed border-border/60 px-3 py-2">
+            <div className="flex justify-between text-xs mb-1">
+              <span className="text-muted-foreground">Model consensus</span>
+              <span className="font-medium tabular-nums">
+                {formatConfidence(normalizeConfidenceToPercent(consensus.confidence))}
+                {consensus.signal ? ` · ${consensus.signal}` : ''}
+              </span>
+            </div>
+            <ConfidenceProgress
+              value={normalizeConfidenceToPercent(consensus.confidence)}
+              className="h-1.5 opacity-80"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Mean ensemble confidence from the model channel; not economic edge.
+            </p>
           </div>
         )}
 
@@ -226,7 +259,6 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           )
         })()}
 
-        {/* Latest reflection */}
         {(lastReflection ?? signal.reflection_snapshot) && (
           <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
             <p className="font-medium text-foreground text-xs">Latest reflection</p>

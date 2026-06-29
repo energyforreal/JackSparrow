@@ -96,17 +96,33 @@ export function ReasoningChainView({
       ? normalizeConfidenceToPercent(chainMeta.final_confidence)
       : normalizeConfidenceToPercent(overallConfidence ?? 0)
 
+  const rawConfidencePercent =
+    chainMeta?.reasoning_confidence_raw != null
+      ? normalizeConfidenceToPercent(chainMeta.reasoning_confidence_raw)
+      : undefined
+
+  const showRawDelta =
+    rawConfidencePercent != null &&
+    Math.abs(rawConfidencePercent - finalConfidencePercent) >= 2
+
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Signal Rationale</CardTitle>
           {finalConfidencePercent > 0 && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Final confidence</span>
-              <span className="font-semibold tabular-nums">
-                {formatConfidence(finalConfidencePercent)}
-              </span>
+            <div className="flex flex-col items-end gap-0.5 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Final confidence</span>
+                <span className="font-semibold tabular-nums">
+                  {formatConfidence(finalConfidencePercent)}
+                </span>
+              </div>
+              {showRawDelta && rawConfidencePercent != null && (
+                <p className="text-[10px] text-muted-foreground tabular-nums">
+                  Raw (pre-floor): {formatConfidence(rawConfidencePercent)}
+                </p>
+              )}
             </div>
           )}
         </div>

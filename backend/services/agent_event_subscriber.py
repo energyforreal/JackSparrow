@@ -1583,6 +1583,15 @@ class AgentEventSubscriber:
                 chain_final = chain_final / 100.0
             chain_final = max(0.0, min(1.0, chain_final))
 
+        reasoning_raw = None
+        if isinstance(reasoning_chain, dict):
+            rcr = reasoning_chain.get("reasoning_confidence_raw")
+            if rcr is not None:
+                try:
+                    reasoning_raw = max(0.0, min(1.0, float(rcr)))
+                except (TypeError, ValueError):
+                    reasoning_raw = None
+
         ts_raw = payload.get("timestamp", datetime.now(timezone.utc))
         if hasattr(ts_raw, "isoformat"):
             ts_str = ts_raw.isoformat()
@@ -1610,6 +1619,7 @@ class AgentEventSubscriber:
             "model_consensus": model_consensus,
             "chain_id": chain_id,
             "final_confidence": chain_final,
+            "reasoning_confidence_raw": reasoning_raw,
             "confidence_source": "reasoning" if final_from_chain is not None else "policy",
             "is_actionable_entry": bool(is_actionable),
             "timestamp": ts_str,
@@ -1620,6 +1630,7 @@ class AgentEventSubscriber:
                 "steps": reasoning_steps,
                 "conclusion": conclusion,
                 "final_confidence": chain_final,
+                "reasoning_confidence_raw": reasoning_raw,
             },
         }
         signal_data.update(
@@ -1647,6 +1658,37 @@ class AgentEventSubscriber:
         trade_score_val = payload.get("trade_score")
         if trade_score_val is not None:
             signal_data["trade_score"] = trade_score_val
+
+        for k in (
+            "trade_score_detail",
+            "economic_edge",
+            "entry_proba_margin",
+            "reasoning_confidence_raw",
+            "metric_correlation_hint",
+        ):
+            v = payload.get(k)
+            if v is not None:
+                signal_data[k] = v
+        if signal_data.get("reasoning_confidence_raw") is None and isinstance(
+            reasoning_chain, dict
+        ):
+            rcr = reasoning_chain.get("reasoning_confidence_raw")
+            if rcr is not None:
+                try:
+                    signal_data["reasoning_confidence_raw"] = max(
+                        0.0, min(1.0, float(rcr))
+                    )
+                except (TypeError, ValueError):
+                    pass
+        if signal_data.get("entry_proba_margin") is None and isinstance(
+            reasoning_chain, dict
+        ):
+            epm = reasoning_chain.get("entry_proba_margin_mean")
+            if epm is not None:
+                try:
+                    signal_data["entry_proba_margin"] = max(0.0, min(1.0, float(epm)))
+                except (TypeError, ValueError):
+                    pass
 
         for k in (
             "policy_verdict",

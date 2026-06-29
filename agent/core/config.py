@@ -2117,6 +2117,39 @@ class Settings(BaseSettings):
         le=1.0,
         description="Minimum payload confidence when AI_SIGNAL_MINIMAL_ENTRY_GATES is True.",
     )
+    reasoning_display_calibration_enabled: bool = Field(
+        default=False,
+        env="REASONING_DISPLAY_CALIBRATION_ENABLED",
+        description=(
+            "When True, apply relaxed display-only floors to reasoning final_confidence "
+            "for dashboard; policy/execution confidence is unchanged."
+        ),
+    )
+    reasoning_display_hold_floor_enabled: bool = Field(
+        default=True,
+        env="REASONING_DISPLAY_HOLD_FLOOR_ENABLED",
+        description="Apply unanimous-HOLD 50% floor to reasoning display confidence.",
+    )
+    reasoning_display_model_avg_floor_enabled: bool = Field(
+        default=True,
+        env="REASONING_DISPLAY_MODEL_AVG_FLOOR_ENABLED",
+        description="Apply model_avg*0.8 floor to reasoning display confidence.",
+    )
+    reasoning_display_v43_entry_floor_enabled: bool = Field(
+        default=True,
+        env="REASONING_DISPLAY_V43_ENTRY_FLOOR_ENABLED",
+        description="Apply proportional v43 entry floor to reasoning display confidence.",
+    )
+    reasoning_display_signal_strength_blend: float = Field(
+        default=0.40,
+        env="REASONING_DISPLAY_SIGNAL_STRENGTH_BLEND",
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Blend weight for entry_proba signal_strength in Step 7; "
+            "use 0.20 when REASONING_DISPLAY_CALIBRATION_ENABLED for wider spread."
+        ),
+    )
     agent_policy_force_hold: bool = Field(
         default=False,
         env="AGENT_POLICY_FORCE_HOLD",

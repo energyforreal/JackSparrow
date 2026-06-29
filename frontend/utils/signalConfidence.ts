@@ -1,4 +1,5 @@
 import { normalizeConfidenceToPercent } from '@/utils/formatters'
+import type { TradeScoreDetail } from '@/types'
 
 type SignalWithFreshness = {
   server_timestamp_ms?: number | null
@@ -63,9 +64,12 @@ export interface DisplayConfidenceResult {
 
 type TradeScoreRaw =
   | number
+  | TradeScoreDetail
   | {
       score?: number | null
       passed?: boolean | null
+      components?: Record<string, number>
+      reason_codes?: string[]
     }
   | null
   | undefined
@@ -79,17 +83,46 @@ type ConfidenceCarrier = {
   policy_confidence?: number | null
   display_confidence?: number | null
   trade_score?: TradeScoreRaw
+  trade_score_detail?: TradeScoreDetail | null
+  economic_edge?: number | null
+  entry_proba_margin?: number | null
+  reasoning_confidence_raw?: number | null
+  threshold?: number | null
+  expected_return?: number | null
   is_actionable_entry?: boolean | null
   signal?: string | null
   agent_introspection?: {
     trade_score?: number | null
     trade_score_pass?: boolean | null
   } | null
+  market_context_excerpt?: {
+    trade_score?: TradeScoreDetail | number | null
+    ml_validation?: {
+      expected_return?: number
+      threshold?: number
+      short_threshold?: number
+    }
+  } | null
 }
 
 export interface TradeScoreInfo {
   score: number
   passed?: boolean
+  components?: Record<string, number>
+  reason_codes?: string[]
+}
+
+export interface HeroMetrics {
+  policyEntryPercent: number
+  economicEdge?: number
+  economicEdgeBarPercent?: number
+  entryMarginPercent?: number
+  tradeScore?: TradeScoreInfo
+  reasoningPercent?: number
+  reasoningRawPercent?: number
+  holdDim: boolean
+  showSplitConfidence: boolean
+  policyReasoningDelta?: number
 }
 
 export interface SignalEntryMetrics {
@@ -99,6 +132,9 @@ export interface SignalEntryMetrics {
   signalStrengthPercent?: number
   isActionableEntry?: boolean
   showSplitConfidence: boolean
+  /** Policy minus reasoning (percentage points), when both are defined. */
+  policyReasoningDelta?: number
+  holdDim: boolean
 }
 
 /**
@@ -158,17 +194,114 @@ export function resolvePolicyEntryPercent(
   return normalizeConfidenceToPercent(signal.confidence)
 }
 
-function parseTradeScoreRaw(raw: TradeScoreRaw): { score: number; passed?: boolean } | undefined {
+function parseTradeScoreRaw(
+  raw: TradeScoreRaw
+): { score: number; passed?: boolean; components?: Record<string, number>; reason_codes?: string[] } | undefined {
   if (raw == null) return undefined
   if (typeof raw === 'object' && !Array.isArray(raw)) {
     const score = raw.score
     if (score == null || !Number.isFinite(Number(score))) return undefined
     const passed =
       raw.passed != null && raw.passed !== undefined ? Boolean(raw.passed) : undefined
-    return { score: Number(score), passed }
+    const components =
+      raw.components && typeof raw.components === 'object' ? raw.components : undefined
+    const reason_codes = Array.isArray(raw.reason_codes) ? raw.reason_codes : undefined
+    return { score: Number(score), passed, components, reason_codes }
   }
   if (!Number.isFinite(Number(raw))) return undefined
   return { score: Number(raw) }
+}
+
+function resolveEconomicEdgeValue(signal: ConfidenceCarrier): number | undefined {
+  if (signal.economic_edge != null && Number.isFinite(Number(signal.economic_edge))) {
+    return Number(signal.economic_edge)
+  }
+  const er = signal.expected_return
+  const thr = signal.threshold
+  if (er != null && thr != null && Number.isFinite(Number(er)) && Number.isFinite(Number(thr))) {
+    return Number(er) - Number(thr)
+  }
+  const ml = signal.market_context_excerpt?.ml_validation
+  if (ml?.expected_return != null && ml?.threshold != null) {
+    try {
+      return Number(ml.expected_return) - Number(ml.threshold)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+/** Map signed economic edge to 0–100 bar (50 = at threshold). */
+export function resolveEconomicEdgeBarPercent(
+  edge: number,
+  threshold: number | undefined | null
+): number {
+  if (!Number.isFinite(edge)) return 50
+  const thr =
+    threshold != null && Number.isFinite(Number(threshold)) && Number(threshold) > 0
+      ? Number(threshold)
+      : 0.005
+  const ratio = edge / thr
+  return Math.max(0, Math.min(100, 50 + ratio * 25))
+}
+
+export function resolveEntryMarginPercent(
+  signal: ConfidenceCarrier | null | undefined
+): number | undefined {
+  if (!signal) return undefined
+  if (signal.entry_proba_margin != null && Number.isFinite(Number(signal.entry_proba_margin))) {
+    return normalizeConfidenceToPercent(signal.entry_proba_margin)
+  }
+  if (signal.signal_strength != null && Number.isFinite(Number(signal.signal_strength))) {
+    return normalizeConfidenceToPercent(signal.signal_strength)
+  }
+  return undefined
+}
+
+/** Four orthogonal hero metrics for the Trading Signal card. */
+export function resolveHeroMetrics(
+  signal: ConfidenceCarrier | null | undefined
+): HeroMetrics | null {
+  if (!signal) return null
+  const entry = resolveSignalEntryMetrics(signal)
+  if (!entry) return null
+
+  const economicEdge = resolveEconomicEdgeValue(signal)
+  const entryMarginPercent = resolveEntryMarginPercent(signal)
+  const tradeFromDetail = parseTradeScoreRaw(signal.trade_score_detail)
+  const tradeScore = tradeFromDetail
+    ? {
+        score: tradeFromDetail.score,
+        passed: tradeFromDetail.passed ?? entry.tradeScore?.passed,
+        components: tradeFromDetail.components,
+        reason_codes: tradeFromDetail.reason_codes,
+      }
+    : entry.tradeScore
+
+  let reasoningRawPercent: number | undefined
+  if (
+    signal.reasoning_confidence_raw != null &&
+    Number.isFinite(Number(signal.reasoning_confidence_raw))
+  ) {
+    reasoningRawPercent = normalizeConfidenceToPercent(signal.reasoning_confidence_raw)
+  }
+
+  return {
+    policyEntryPercent: entry.policyEntryPercent,
+    economicEdge,
+    economicEdgeBarPercent:
+      economicEdge != null
+        ? resolveEconomicEdgeBarPercent(economicEdge, signal.threshold)
+        : undefined,
+    entryMarginPercent,
+    tradeScore,
+    reasoningPercent: entry.reasoningPercent,
+    reasoningRawPercent,
+    holdDim: entry.holdDim,
+    showSplitConfidence: entry.showSplitConfidence,
+    policyReasoningDelta: entry.policyReasoningDelta,
+  }
 }
 
 export function resolveTradeScore(
@@ -176,13 +309,22 @@ export function resolveTradeScore(
 ): TradeScoreInfo | undefined {
   if (!signal) return undefined
   const intro = signal.agent_introspection
+  const excerptTs = signal.market_context_excerpt?.trade_score
   const parsed =
-    parseTradeScoreRaw(signal.trade_score) ?? parseTradeScoreRaw(intro?.trade_score)
+    parseTradeScoreRaw(signal.trade_score_detail) ??
+    parseTradeScoreRaw(signal.trade_score) ??
+    parseTradeScoreRaw(excerptTs) ??
+    parseTradeScoreRaw(intro?.trade_score)
   if (!parsed) return undefined
   const passed =
     parsed.passed ??
     (intro?.trade_score_pass != null ? Boolean(intro.trade_score_pass) : undefined)
-  return { score: parsed.score, passed }
+  return {
+    score: parsed.score,
+    passed,
+    components: parsed.components,
+    reason_codes: parsed.reason_codes,
+  }
 }
 
 /** True when UI should de-emphasize confidence bars (non-entry HOLD). */
@@ -201,26 +343,24 @@ export function resolveSignalEntryMetrics(
   if (!signal) return null
   const holdDim = isHoldNonActionableDisplay(signal)
   const display = resolveDisplayConfidence(signal)
-  let policyEntryPercent = resolvePolicyEntryPercent(signal, display)
-  let reasoningPercent = display.percent
-  if (holdDim) {
-    policyEntryPercent = 0
-    reasoningPercent = 0
-  }
+  const policyEntryPercent = resolvePolicyEntryPercent(signal, display)
+  const reasoningPercent = display.percent
   const tradeScore = resolveTradeScore(signal)
+  const policyReasoningDelta = policyEntryPercent - reasoningPercent
   const showSplitConfidence =
-    !holdDim &&
     display.source === 'reasoning' &&
-    Math.abs(policyEntryPercent - display.percent) >= 1
+    Math.abs(policyReasoningDelta) >= 1
   return {
     reasoningPercent,
     policyEntryPercent,
     tradeScore,
-    signalStrengthPercent: holdDim ? undefined : display.signalStrengthPercent,
+    signalStrengthPercent: display.signalStrengthPercent,
     isActionableEntry:
       signal.is_actionable_entry != null
         ? Boolean(signal.is_actionable_entry)
         : undefined,
     showSplitConfidence,
+    policyReasoningDelta,
+    holdDim,
   }
 }

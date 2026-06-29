@@ -210,6 +210,17 @@ export const PredictResponseSchema = z
     hypothesis_snapshot: MarketHypothesisSnapshotSchema.optional(),
     policy_verdict: z.record(z.string(), z.unknown()).optional(),
     trade_score: z.number().optional(),
+    trade_score_detail: z
+      .object({
+        score: z.number(),
+        passed: z.boolean().nullable().optional(),
+        components: z.record(z.string(), z.number()).optional(),
+        reason_codes: z.array(z.string()).optional(),
+      })
+      .optional(),
+    economic_edge: z.number().optional(),
+    entry_proba_margin: z.number().optional(),
+    reasoning_confidence_raw: z.number().min(0).max(1).optional(),
     ml_evidence_snapshot: z.record(z.string(), z.unknown()).optional(),
     memory_context_id: z.string().optional(),
     reflection_snapshot: ReflectionSnapshotSchema.optional(),

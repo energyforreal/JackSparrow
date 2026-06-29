@@ -115,6 +115,21 @@ export interface ReasoningChain {
   steps: ReasoningStep[]
   conclusion: string
   final_confidence: number
+  reasoning_confidence_raw?: number
+}
+
+export interface TradeScoreDetail {
+  score: number
+  passed?: boolean | null
+  components?: Record<string, number>
+  reason_codes?: string[]
+}
+
+export interface MetricCorrelationHint {
+  policy_reasoning_delta?: number
+  policy_confidence?: number
+  reasoning_confidence?: number
+  reasoning_raw_delta?: number
 }
 
 export interface Prediction {
@@ -193,6 +208,14 @@ export interface Signal {
   raw_confidence?: number
   /** Entry-proba margin strength (0–1), distinct from calibrated confidence. */
   signal_strength?: number
+  /** Signed expected_return − threshold (display-only). */
+  economic_edge?: number
+  /** Mean buy−sell entry proba margin (0–1). */
+  entry_proba_margin?: number
+  /** Step 7 confidence before display floors. */
+  reasoning_confidence_raw?: number
+  trade_score_detail?: TradeScoreDetail
+  metric_correlation_hint?: MetricCorrelationHint
   /** False when signal is HOLD / non-entry. */
   is_actionable_entry?: boolean
   server_timestamp_ms?: number
@@ -218,7 +241,7 @@ export interface Signal {
   policy_verdict?: Record<string, unknown>
   policy_reason_codes?: string[]
   strategy_origin?: boolean
-  trade_score?: number
+  trade_score?: number | TradeScoreDetail
   thesis_signal?: string
   ml_evidence_snapshot?: Record<string, unknown>
   market_context_excerpt?: Record<string, unknown>

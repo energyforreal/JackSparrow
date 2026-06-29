@@ -271,10 +271,17 @@ interface SignalIndicatorProps {
 ```
 
 **Features**:
-- Main signal uses **`signal.signal`** (`SignalType`: BUY, SELL, HOLD, STRONG_BUY, STRONG_SELL)
-- **STRONG_BUY** / **STRONG_SELL**: extra **animate-ping** ring on the badge (and on strong per-model badges)
-- **v43 strip** (when **`expected_return`** or **`mcp_tanh_prediction`** is present): shows forward edge, dynamic **`threshold`**, **`regime`**, and **`v43_gate_reject`** when trading is blocked after gates
-- Reasoning confidence bar, model consensus accordion, agent decision text, freshness indicator
+- Main signal uses **`signal.signal`** (`SignalType`: LONG, SHORT, HOLD, STRONG_LONG, STRONG_SHORT)
+- **STRONG_LONG** / **STRONG_SHORT**: extra **animate-ping** ring on the badge
+- **Hero metrics** (orthogonal decision row via `SignalEntryMetricsBlock` / `resolveHeroMetrics`):
+  - **Policy entry confidence** — execution gate (`policy_confidence` / `confidence` on DecisionReady)
+  - **Economic edge** — signed `expected_return − threshold` (`economic_edge` on WebSocket)
+  - **Entry margin** — buy/sell separation (`entry_proba_margin` or `signal_strength`)
+  - **Trade score** — confluence 0–100 with component chips (`trade_score_detail`)
+- **Reasoning confidence** — secondary diagnostic line; **raw vs calibrated** in Analysis tab (`reasoning_confidence_raw`)
+- **Signal economics** — expected return, threshold, gate reject (promoted under hero row)
+- **Model consensus** — mean ensemble confidence from the model WebSocket channel (not labeled "Model edge")
+- Agent context, hypotheses, reflection, decision text, freshness indicator
 
 ---
 
