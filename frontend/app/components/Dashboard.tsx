@@ -10,6 +10,8 @@ import { SignalIndicator } from './SignalIndicator'
 import { SelfAwarenessPanel } from './SelfAwarenessPanel'
 import { HealthMonitor } from './HealthMonitor'
 import { ActivePositions } from './ActivePositions'
+import { MarketStateCard } from './MarketStateCard'
+import { NarrativeTimeline } from './NarrativeTimeline'
 import { RecentTrades } from './RecentTrades'
 import { PerformanceChart } from './PerformanceChart'
 import { LoadingSkeleton } from './LoadingSpinner'
@@ -248,6 +250,18 @@ export function Dashboard() {
 
           {/* Trading Tab */}
           <TabsContent value="trading" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <ErrorBoundary>
+                <MarketStateCard
+                  marketState={signal?.market_state}
+                  fsmState={signal?.fsm_state}
+                  positionLifecycle={signal?.position_lifecycle}
+                />
+              </ErrorBoundary>
+              <ErrorBoundary>
+                <NarrativeTimeline events={signal?.narrative_tail} />
+              </ErrorBoundary>
+            </div>
             {/* Active Positions and Recent Trades */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <ErrorBoundary>
@@ -255,6 +269,8 @@ export function Dashboard() {
                   positions={positions}
                   isLoading={portfolioBlockLoading}
                   expectedOpenCount={portfolio?.open_positions ?? 0}
+                  thesisHealth={signal?.thesis_health}
+                  fsmState={signal?.fsm_state}
                 />
               </ErrorBoundary>
               <ErrorBoundary>

@@ -249,6 +249,13 @@ export interface Signal {
   agent_introspection?: AgentIntrospectionSnapshot
   memory_context_id?: string
   reflection_snapshot?: ReflectionSnapshot
+  market_state?: Record<string, unknown>
+  narrative_tail?: Array<Record<string, unknown>>
+  structural_gates?: Record<string, unknown>
+  fsm_state?: string
+  entry_signal?: string
+  thesis_health?: string
+  position_lifecycle?: string
 }
 
 export interface HypothesisCandidateSnapshot {

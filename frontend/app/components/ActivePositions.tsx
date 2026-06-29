@@ -20,6 +20,8 @@ interface ActivePositionsProps {
   isLoading?: boolean
   /** When set, show banner if exchange reports open positions but list is empty */
   expectedOpenCount?: number
+  thesisHealth?: string | null
+  fsmState?: string | null
 }
 
 function resolveMarkPriceUsd(position: Position): number | null {
@@ -46,6 +48,8 @@ export function ActivePositions({
   positions,
   isLoading = false,
   expectedOpenCount = 0,
+  thesisHealth,
+  fsmState,
 }: ActivePositionsProps) {
   if (isLoading) {
     return (
@@ -180,8 +184,19 @@ export function ActivePositions({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
         <CardTitle>Active Positions</CardTitle>
+        <div className="flex gap-1 flex-wrap">
+          {fsmState && <Badge variant="outline">{fsmState}</Badge>}
+          {thesisHealth && (
+            <Badge
+              variant={thesisHealth === 'healthy' ? 'default' : 'destructive'}
+              className="capitalize"
+            >
+              thesis {thesisHealth}
+            </Badge>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto -mx-6 px-6">

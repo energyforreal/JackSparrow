@@ -96,4 +96,29 @@ describe('mergeSignalPayload', () => {
 
     expect(merged.v43_gate_reject).toBe('regime_unfavorable')
   })
+
+  it('preserves rule-based lifecycle fields on partial HOLD patch', () => {
+    const prev: Signal = {
+      signal: 'LONG',
+      confidence: 0.7,
+      market_state: { trend: 'bullish', confidence: 'high' },
+      narrative_tail: [{ event_type: 'breakout_confirmed', timestamp: '2026-06-29T08:00:00Z' }],
+      fsm_state: 'EntryReady',
+      position_lifecycle: 'entry_ready',
+      thesis_health: 'healthy',
+    }
+
+    const merged = mergeSignalPayload(prev, {
+      signal: 'HOLD',
+      is_actionable_entry: false,
+      position_lifecycle: 'managing',
+      fsm_state: 'Managing',
+      thesis_health: 'healthy',
+    })
+
+    expect(merged.market_state).toEqual(prev.market_state)
+    expect(merged.narrative_tail).toEqual(prev.narrative_tail)
+    expect(merged.fsm_state).toBe('Managing')
+    expect(merged.position_lifecycle).toBe('managing')
+  })
 })

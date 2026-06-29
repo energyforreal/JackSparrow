@@ -114,3 +114,23 @@ def confluence_score_to_size_multiplier(score_0_100: float) -> float:
         return min(1.0, size_floor + (1.0 - size_floor) * (s - ref_min) / max(100.0 - ref_min, 1.0))
     span = max(ref_min, 1.0)
     return max(size_floor, size_floor * (s / span))
+
+
+def structural_confidence_to_fraction(
+    structural_confidence: float,
+    entry_signal: str,
+) -> float:
+    """Map rule-based structural confidence (0–1) to position size fraction."""
+    dir_norm = normalize_signal(entry_signal) if entry_signal else "HOLD"
+    if not (is_long_signal(dir_norm) or is_short_signal(dir_norm)):
+        return 0.0
+    size_floor = float(getattr(settings, "conviction_size_floor", 0.25) or 0.25)
+    size_ceil = float(getattr(settings, "conviction_size_ceil", 1.0) or 1.0)
+    try:
+        conf = max(0.0, min(1.0, float(structural_confidence)))
+    except (TypeError, ValueError):
+        conf = 0.5
+    entry_floor = float(getattr(settings, "conviction_entry_floor", 0.35) or 0.35)
+    if conf < entry_floor:
+        return 0.0
+    return max(size_floor, min(size_ceil, size_floor + (size_ceil - size_floor) * conf))

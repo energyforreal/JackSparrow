@@ -1217,6 +1217,16 @@ class TradingEventHandler:
             )
             await event_bus.publish(risk_approved)
             self._last_trade_wall_time = time.time()
+            try:
+                from agent.intelligence.market_fsm import market_fsm
+
+                market_fsm.on_position_opened(symbol)
+            except Exception as fsm_err:
+                logger.debug(
+                    "market_fsm_position_opened_hook_failed",
+                    symbol=symbol,
+                    error=str(fsm_err),
+                )
             if not minimal_entry and getattr(settings, "entry_signal_filter_enabled", True):
                 self._entry_signal_filter.record_trade()
 

@@ -407,6 +407,34 @@ class DecisionReadyEvent(BaseEvent):
             default=None,
             description="DecisionReadyEvent.event_id for audit correlation.",
         )
+        market_state: Optional[Dict[str, Any]] = Field(
+            default=None,
+            description="Rule-based MarketStateSnapshot at decision time.",
+        )
+        narrative_tail: Optional[List[Dict[str, Any]]] = Field(
+            default=None,
+            description="Recent market narrative events.",
+        )
+        structural_gates: Optional[Dict[str, Any]] = Field(
+            default=None,
+            description="Structural gate category pass/fail snapshot.",
+        )
+        fsm_state: Optional[str] = Field(
+            default=None,
+            description="Market FSM lifecycle state.",
+        )
+        entry_signal: Optional[str] = Field(
+            default=None,
+            description="FSM entry signal (actionable when flat + EntryReady).",
+        )
+        thesis_health: Optional[str] = Field(
+            default=None,
+            description="Thesis health while positioned: healthy | weakening | broken.",
+        )
+        position_lifecycle: Optional[str] = Field(
+            default=None,
+            description="watching | entry_ready | managing | exit_ready",
+        )
 
 
 # Risk Events

@@ -601,6 +601,110 @@ class MCPOrchestrator:
             "ensure metadata_ic.json is loaded on RuleBasedIntelligenceNode"
         )
 
+    def _maybe_apply_rule_based_pipeline(
+        self,
+        *,
+        symbol: str,
+        bar_idx: int,
+        features_dict: Dict[str, Any],
+        regime: str,
+        structure: Any,
+        thesis_verdict: Any,
+        has_open: bool,
+        contract_state: Any,
+        market_context: Dict[str, Any],
+        policy_verdict: Any,
+        pos_hint: float,
+        df_feat: Any = None,
+    ) -> Any:
+        """Run rule-based pipeline (shadow or enforce) and optionally override policy."""
+        from agent.core.signal_vocabulary import ENTRY_SIGNALS, is_entry_signal
+        from agent.intelligence.market_understanding_engine import features_history_from_matrix
+        from agent.intelligence.rule_based_pipeline import (
+            is_shadow_enabled,
+            log_shadow_comparison,
+            rule_based_pipeline,
+            should_enforce_fsm,
+        )
+        from agent.events.schemas import PolicyVerdict
+
+        if not is_shadow_enabled() and not should_enforce_fsm():
+            return policy_verdict
+
+        thesis_type = str(getattr(thesis_verdict, "thesis_type", "flat") or "flat")
+        thesis_signal = str(getattr(thesis_verdict, "signal", "HOLD") or "HOLD")
+        feat_hist = features_history_from_matrix(df_feat) if df_feat is not None else None
+        rb = rule_based_pipeline.run_cycle(
+            symbol=symbol,
+            bar_index=bar_idx,
+            features=features_dict,
+            regime=regime,
+            thesis_signal=thesis_signal,
+            thesis_type=thesis_type,
+            has_open_position=has_open,
+            structure=structure,
+            gate_state=self._v43_gate_state,
+            contract_state=contract_state,
+            features_history=feat_hist,
+        )
+        market_context["rule_based_pipeline"] = rb.to_dict()
+        market_context["market_state"] = rb.market_state.to_dict()
+        market_context["narrative_tail"] = rb.narrative_tail
+        market_context["structural_gates"] = rb.structural_gates.to_dict()
+        market_context["fsm_state"] = rb.fsm_decision.fsm_state
+        market_context["entry_signal"] = rb.fsm_decision.entry_signal
+        market_context["thesis_health"] = rb.fsm_decision.thesis_health
+        market_context["position_lifecycle"] = rb.fsm_decision.position_lifecycle
+
+        from agent.intelligence.trade_archetype_memory import trade_archetype_memory
+
+        sim = trade_archetype_memory.similar_setups(
+            symbol,
+            setup_type=rb.structural_gates.setup_type,
+            regime=regime,
+            narrative_tail=rb.narrative_tail,
+        )
+        market_context["archetype_similarity"] = sim
+
+        live_entry = policy_verdict.signal in ENTRY_SIGNALS
+        log_shadow_comparison(
+            symbol=symbol,
+            pipeline=rb,
+            live_signal=policy_verdict.signal,
+            live_is_entry=live_entry,
+        )
+
+        if not should_enforce_fsm():
+            return policy_verdict
+
+        fsm_sig = rb.fsm_decision.entry_signal
+        reasons = list(policy_verdict.reason_codes or [])
+        if is_entry_signal(fsm_sig) and rb.structural_gates.trade_allowed:
+            reasons.append("rule_based_fsm_entry")
+            size = float(pos_hint) * float(rb.position_size_fraction or 0.0)
+            if size <= 0:
+                size = float(pos_hint) * 0.5
+            return PolicyVerdict(
+                signal=fsm_sig,
+                confidence=float(rb.structural_confidence),
+                position_size=size,
+                reason_codes=reasons,
+                adopted_ml_candidate=False,
+                conviction=rb.structural_confidence,
+                size_fraction=rb.position_size_fraction,
+            )
+        reasons.append(rb.fsm_decision.abstention_reason or "fsm_hold")
+        return PolicyVerdict(
+            signal="HOLD",
+            confidence=float(policy_verdict.confidence or 0.0),
+            position_size=0.0,
+            reason_codes=reasons,
+            adopted_ml_candidate=False,
+            conviction=rb.structural_confidence,
+            size_fraction=0.0,
+            abstention=rb.fsm_decision.abstention_reason,
+        )
+
     async def _process_jacksparrow_v43_prediction(
         self,
         symbol: str,
@@ -861,6 +965,46 @@ class MCPOrchestrator:
                 material,
                 has_open_position=has_open_pre,
             ):
+                try:
+                    from agent.intelligence.rule_based_pipeline import (
+                        is_shadow_enabled,
+                        log_shadow_comparison,
+                        rule_based_pipeline,
+                    )
+
+                    if is_shadow_enabled():
+                        from agent.intelligence.market_understanding_engine import (
+                            features_history_from_matrix,
+                        )
+
+                        features_pre_dict = {
+                            str(k): float(v) for k, v in closed_feats_pre.items()
+                        }
+                        rb = rule_based_pipeline.run_cycle(
+                            symbol=symbol,
+                            bar_index=bar_idx,
+                            features=features_pre_dict,
+                            regime=regime_pre,
+                            thesis_signal=str(thesis_verdict_cached.signal),
+                            thesis_type=str(thesis_verdict_cached.thesis_type),
+                            has_open_position=has_open_pre,
+                            structure=structure_pre,
+                            gate_state=self._v43_gate_state,
+                            contract_state=contract_state,
+                            features_history=features_history_from_matrix(df_feat_pre),
+                        )
+                        log_shadow_comparison(
+                            symbol=symbol,
+                            pipeline=rb,
+                            live_signal="HOLD",
+                            live_is_entry=False,
+                        )
+                except Exception as shadow_err:
+                    logger.debug(
+                        "rule_based_shadow_intel_skip_failed",
+                        symbol=symbol,
+                        error=str(shadow_err),
+                    )
                 logger.info(
                     "prediction_skipped_intel_unchanged",
                     symbol=symbol,
@@ -1454,6 +1598,20 @@ class MCPOrchestrator:
             market_context=market_context_for_reasoning,
             reasoning_chain=reasoning_chain,
         )
+        policy_verdict = self._maybe_apply_rule_based_pipeline(
+            symbol=symbol,
+            bar_idx=bar_idx,
+            features_dict=features_dict,
+            regime=regime,
+            structure=structure,
+            thesis_verdict=thesis_verdict,
+            has_open=has_open,
+            contract_state=contract_state,
+            market_context=market_context_for_reasoning,
+            policy_verdict=policy_verdict,
+            pos_hint=pos_hint,
+            df_feat=mctx.get("df_feat_pre"),
+        )
         market_context_for_reasoning["policy_verdict"] = policy_verdict.model_dump(
             mode="json"
         )
@@ -1465,11 +1623,35 @@ class MCPOrchestrator:
             _dom = _hyp_raw.get("dominant")
             if isinstance(_dom, dict):
                 _dominant_type = str(_dom.get("thesis_type") or "") or None
-        conviction_result = compute_conviction(
-            evidence_bundle,
-            policy_verdict.signal,
-            dominant_thesis_type=_dominant_type,
+
+        from agent.intelligence.rule_based_pipeline import is_rule_based_mode, should_enforce_fsm
+        from agent.core.evidence_types import ConvictionResult
+        from agent.core.signal_vocabulary import is_entry_signal as _is_entry
+
+        rb_ctx = market_context_for_reasoning.get("rule_based_pipeline")
+        use_structural_conviction = (
+            isinstance(rb_ctx, dict)
+            and (is_rule_based_mode() or should_enforce_fsm())
         )
+        if use_structural_conviction:
+            conf = float(rb_ctx.get("structural_confidence") or 0.5)
+            size_frac = float(rb_ctx.get("position_size_fraction") or 0.0)
+            sig = str(policy_verdict.signal or "HOLD")
+            below = conf < float(getattr(settings, "conviction_entry_floor", 0.35) or 0.35)
+            conviction_result = ConvictionResult(
+                conviction=conf,
+                direction=sig if _is_entry(sig) else None,
+                size_fraction=0.0 if below or not _is_entry(sig) else size_frac,
+                dimensions={"structural": conf},
+                reason_codes=[f"structural_conviction={conf:.3f}"],
+                below_entry_floor=below,
+            )
+        else:
+            conviction_result = compute_conviction(
+                evidence_bundle,
+                policy_verdict.signal,
+                dominant_thesis_type=_dominant_type,
+            )
         market_context_for_reasoning["conviction"] = conviction_result.to_dict()
 
         if evidence_based_sizing_enabled() and policy_verdict.signal in _entry_signals:
@@ -1747,6 +1929,235 @@ class MCPOrchestrator:
             pass
         return result
 
+    async def _process_rule_based_prediction(
+        self,
+        symbol: str,
+        context: Dict[str, Any],
+        _t0: float,
+    ) -> Dict[str, Any]:
+        """ML-free path: features → Understanding → Narrative → Gates → FSM."""
+        from agent.core.agent_thesis_engine import (
+            agent_thesis_engine,
+            thesis_verdict_to_dict,
+        )
+        from agent.core.market_structure import classify_market_structure
+        from agent.core.reasoning_engine import ReasoningStep
+        from agent.data.incremental_feature_engine import incremental_feature_engine
+        from agent.data.market_data_manager import MarketDataManager
+        from agent.intelligence.ic_node import build_closed_feats_from_v43_dataframes
+        from agent.intelligence.regime_classifier import classify_regime
+        from agent.intelligence.rule_based_pipeline import rule_based_pipeline
+        from agent.intelligence.market_understanding_engine import features_history_from_matrix
+        from agent.events.schemas import PolicyVerdict, MLEvidenceSnapshot
+
+        if not self.delta_client:
+            return self._create_empty_prediction_response(
+                symbol, context, reason="delta_client_unavailable"
+            )
+
+        context = _merge_prediction_context_with_agent_state(symbol, context)
+        manager = self.market_data_manager
+        if isinstance(manager, MarketDataManager):
+            bundle = await manager.get_v43_frames(symbol)
+            df5, df15, df1h, df_fund, df_oi, df_mark = (
+                bundle.df5m,
+                bundle.df15m,
+                bundle.df1h,
+                bundle.df_funding,
+                bundle.df_oi,
+                bundle.df_mark,
+            )
+        else:
+            from agent.core.v43_market_frames import fetch_v43_market_frames
+
+            df5, df15, df1h, df_fund, df_oi, df_mark = await fetch_v43_market_frames(
+                self.delta_client, symbol
+            )
+
+        if df5.empty or len(df5) < V43_MIN_5M_ROWS:
+            return self._create_empty_prediction_response(
+                symbol,
+                context,
+                reason=f"insufficient_5m_rows:{len(df5) if not df5.empty else 0}",
+            )
+
+        import pandas as pd
+
+        from agent.core.v43_contract_state import get_contract_state
+
+        ticker_row: Dict[str, Any] = {}
+        if isinstance(df_oi, pd.DataFrame) and not df_oi.empty:
+            ticker_row = df_oi.iloc[-1].to_dict()
+        contract_state = await get_contract_state(symbol, ticker_row=ticker_row)
+
+        try:
+            closed_feats, _df_feat = await asyncio.to_thread(
+                incremental_feature_engine.update_from_frames,
+                symbol,
+                df5,
+                df15,
+                df1h,
+                df_fund,
+                df_oi=df_oi,
+                df_mark=df_mark,
+            )
+        except ValueError:
+            closed_feats, _df_feat = await asyncio.to_thread(
+                build_closed_feats_from_v43_dataframes,
+                df5,
+                df15,
+                df1h,
+                df_fund,
+                df_oi=df_oi,
+                df_mark=df_mark,
+            )
+
+        has_open = bool(context.get("has_open_position", False))
+        if not has_open:
+            has_open = await _exchange_has_open_position_async(symbol)
+
+        regime = classify_regime(closed_feats)
+        features_dict = {str(k): float(v) for k, v in closed_feats.items()}
+        structure = classify_market_structure(
+            features_dict,
+            v43_regime=regime,
+            contract_state=contract_state,
+        )
+        thesis_mc: Dict[str, Any] = {
+            **(context or {}),
+            "symbol": symbol,
+            "features": features_dict,
+            "regime": regime,
+            "market_structure": structure.to_dict(),
+            "has_open_position": has_open,
+            "v43_contract_state": contract_state,
+        }
+        thesis_verdict = agent_thesis_engine.evaluate(regime, thesis_mc)
+        bar_idx = int(closed_5m_bar_index(df5))
+
+        rb = rule_based_pipeline.run_cycle(
+            symbol=symbol,
+            bar_index=bar_idx,
+            features=features_dict,
+            regime=regime,
+            thesis_signal=str(thesis_verdict.signal),
+            thesis_type=str(thesis_verdict.thesis_type),
+            has_open_position=has_open,
+            structure=structure,
+            gate_state=self._v43_gate_state,
+            contract_state=contract_state,
+            features_history=features_history_from_matrix(_df_feat),
+        )
+
+        pos_hint = float(getattr(settings, "default_position_size_fraction", 0.05) or 0.05)
+        fsm_sig = rb.fsm_decision.entry_signal
+        from agent.core.signal_vocabulary import is_entry_signal
+
+        reasons: List[str] = []
+        if is_entry_signal(fsm_sig) and rb.structural_gates.trade_allowed:
+            reasons.append("rule_based_fsm_entry")
+            signal = fsm_sig
+            size = pos_hint * float(rb.position_size_fraction or 0.5)
+        else:
+            signal = "HOLD"
+            size = 0.0
+            reasons.append(rb.fsm_decision.abstention_reason or "fsm_hold")
+
+        policy_verdict = PolicyVerdict(
+            signal=signal,
+            confidence=float(rb.structural_confidence),
+            position_size=size,
+            reason_codes=reasons,
+            adopted_ml_candidate=False,
+            conviction=rb.structural_confidence,
+            size_fraction=rb.position_size_fraction,
+        )
+
+        market_context: Dict[str, Any] = {
+            **context,
+            "symbol": symbol,
+            "features": features_dict,
+            "regime": regime,
+            "thesis_verdict": thesis_verdict_to_dict(thesis_verdict),
+            "market_structure": structure.to_dict(),
+            "rule_based_pipeline": rb.to_dict(),
+            "market_state": rb.market_state.to_dict(),
+            "narrative_tail": rb.narrative_tail,
+            "structural_gates": rb.structural_gates.to_dict(),
+            "fsm_state": rb.fsm_decision.fsm_state,
+            "entry_signal": rb.fsm_decision.entry_signal,
+            "thesis_health": rb.fsm_decision.thesis_health,
+            "position_lifecycle": rb.fsm_decision.position_lifecycle,
+            "policy_verdict": policy_verdict.model_dump(mode="json"),
+            "decision_engine_mode": "rule_based",
+        }
+
+        conclusion = (
+            f"{signal} — rule-based FSM ({rb.fsm_decision.fsm_state}) "
+            f"setup={rb.structural_gates.setup_type}"
+        )
+        chain_id = f"rb_{symbol}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        step = ReasoningStep(
+            step_number=1,
+            step_name="rule_based_pipeline",
+            description="Market Understanding → Narrative → Gates → FSM",
+            evidence=[conclusion],
+            confidence=float(rb.structural_confidence),
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        ml_evidence = MLEvidenceSnapshot(
+            symbol=symbol,
+            source="rule_based_pipeline",
+            ml_candidate_signal=signal,
+            ml_candidate_confidence=float(rb.structural_confidence),
+            ml_candidate_position_size=size,
+            thesis_signal=str(thesis_verdict.signal),
+        )
+
+        result = {
+            "symbol": symbol,
+            "timestamp": datetime.now(timezone.utc),
+            "features": {"data": [], "count": 0},
+            "models": {"predictions": [], "consensus_prediction": 0.0, "consensus_confidence": 0.0},
+            "model_predictions": [],
+            "market_context": market_context,
+            "reasoning": {
+                "chain_id": chain_id,
+                "steps": [
+                    {
+                        "step_number": step.step_number,
+                        "step_name": step.step_name,
+                        "description": step.description,
+                        "evidence": step.evidence,
+                        "confidence": step.confidence,
+                        "timestamp": step.timestamp.isoformat(),
+                    }
+                ],
+                "conclusion": conclusion,
+                "final_confidence": float(rb.structural_confidence),
+            },
+            "decision": {
+                "signal": signal,
+                "position_size": size,
+                "confidence": float(rb.structural_confidence),
+                "reasoning": conclusion,
+                "policy_reason_codes": reasons,
+            },
+            "policy_verdict": policy_verdict.model_dump(mode="json"),
+            "ml_evidence_snapshot": ml_evidence.model_dump(mode="json"),
+        }
+        result["inference_latency_ms"] = (time.perf_counter() - _t0) * 1000.0
+        logger.info(
+            "mcp_orchestrator_rule_based_prediction_complete",
+            symbol=symbol,
+            signal=signal,
+            fsm_state=rb.fsm_decision.fsm_state,
+            trade_allowed=rb.structural_gates.trade_allowed,
+            setup_type=rb.structural_gates.setup_type,
+        )
+        return result
+
     async def process_prediction_request(
         self,
         symbol: str,
@@ -1793,6 +2204,11 @@ class MCPOrchestrator:
                 )
 
                 context = context or {}
+
+                from agent.intelligence.rule_based_pipeline import is_rule_based_mode
+
+                if is_rule_based_mode():
+                    return await self._process_rule_based_prediction(symbol, context, _t0)
 
                 if not self.model_registry or not self.model_registry.models:
                     logger.warning(
@@ -2646,6 +3062,13 @@ class MCPOrchestrator:
                             (mctx or {}).get("v43_horizon_minutes", 0) or 0
                         )
                         or None,
+                        "market_state": (mctx or {}).get("market_state"),
+                        "narrative_tail": (mctx or {}).get("narrative_tail"),
+                        "structural_gates": (mctx or {}).get("structural_gates"),
+                        "fsm_state": (mctx or {}).get("fsm_state"),
+                        "entry_signal": (mctx or {}).get("entry_signal"),
+                        "thesis_health": (mctx or {}).get("thesis_health"),
+                        "position_lifecycle": (mctx or {}).get("position_lifecycle"),
                 }
                 decision_payload.update(_decision_ws_metadata(result))
                 _enrich_confidence_semantics(decision_payload)

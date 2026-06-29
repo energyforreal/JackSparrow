@@ -122,7 +122,16 @@ export function SignalIndicator({
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>Trading Signal</CardTitle>
+          <CardTitle>
+            {signal.position_lifecycle === 'managing' || signal.position_lifecycle === 'exit_ready'
+              ? 'Position Lifecycle'
+              : 'Trading Signal'}
+          </CardTitle>
+          {signal.position_lifecycle && (
+            <Badge variant="secondary" className="text-xs capitalize">
+              {signal.position_lifecycle.replace(/_/g, ' ')}
+            </Badge>
+          )}
           {signal.regime && (
             <Badge variant="outline" className="text-xs font-normal capitalize">
               {signal.regime} regime

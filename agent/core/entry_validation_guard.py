@@ -31,6 +31,7 @@ _POLICY_ENTRY_REASONS = frozenset(
         "policy_ml_gated_thesis_neutral",
         "policy_thesis_entry",
         "policy_adopted_ml_candidate",
+        "rule_based_fsm_entry",
     }
 )
 
@@ -128,6 +129,20 @@ def validate_entry_signal(
     trade_side = parse_entry_side(side) or signal_to_position_side(signal) or ""
     if trade_side not in ("long", "short"):
         return False, "not_an_entry_signal"
+
+    mc = market_context if isinstance(market_context, dict) else {}
+    if str(getattr(settings, "decision_engine_mode", "ml_legacy")).lower() == "rule_based":
+        rb = mc.get("rule_based_pipeline")
+        if isinstance(rb, dict):
+            fsm = rb.get("fsm_decision") or {}
+            gates = rb.get("structural_gates") or {}
+            if (
+                fsm.get("fsm_state") == "EntryReady"
+                and gates.get("trade_allowed")
+                and is_entry_signal(normalize_signal(signal))
+            ):
+                return True, "rule_based_fsm_entry"
+        return False, "rule_based_entry_not_ready"
 
     preds = _normalize_predictions(model_predictions)
     if not _has_healthy_predictions(preds):

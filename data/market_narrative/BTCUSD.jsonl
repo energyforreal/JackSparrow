@@ -1,0 +1,12 @@
+{"event_type": "uptrend_begins", "timestamp": "2026-06-29T04:15:54.655477+00:00", "bar_index": 1, "detail": {}}
+{"event_type": "breakout_confirmed", "timestamp": "2026-06-29T04:15:54.658480+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "retest_successful", "timestamp": "2026-06-29T04:15:54.658480+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "uptrend_begins", "timestamp": "2026-06-29T04:15:54.719189+00:00", "bar_index": 200, "detail": {}}
+{"event_type": "uptrend_begins", "timestamp": "2026-06-29T04:19:24.305152+00:00", "bar_index": 1, "detail": {}}
+{"event_type": "breakout_confirmed", "timestamp": "2026-06-29T04:19:24.308155+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "retest_successful", "timestamp": "2026-06-29T04:19:24.308155+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "uptrend_begins", "timestamp": "2026-06-29T04:19:24.356480+00:00", "bar_index": 200, "detail": {}}
+{"event_type": "uptrend_begins", "timestamp": "2026-06-29T04:22:34.952050+00:00", "bar_index": 1, "detail": {}}
+{"event_type": "breakout_confirmed", "timestamp": "2026-06-29T04:22:34.954066+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "retest_successful", "timestamp": "2026-06-29T04:22:34.954066+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "uptrend_begins", "timestamp": "2026-06-29T04:22:34.991179+00:00", "bar_index": 200, "detail": {}}

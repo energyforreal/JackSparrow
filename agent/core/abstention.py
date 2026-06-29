@@ -77,6 +77,8 @@ def classify_abstention(
         return AbstentionReason.NO_EDGE
     if any("fusion_ml_and_thesis_no_agreement" in c for c in codes):
         return AbstentionReason.NO_EDGE
+    if any(c.startswith("fsm_") or c.startswith("structural_") for c in codes):
+        return AbstentionReason.NO_EDGE
 
     if any(any(c.startswith(p) for p in _SOFT_PREFIXES) for c in codes):
         return None

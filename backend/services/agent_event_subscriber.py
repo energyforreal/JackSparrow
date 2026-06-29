@@ -1700,6 +1700,13 @@ class AgentEventSubscriber:
             "agent_introspection",
             "memory_context_id",
             "decision_event_id",
+            "market_state",
+            "narrative_tail",
+            "structural_gates",
+            "fsm_state",
+            "entry_signal",
+            "thesis_health",
+            "position_lifecycle",
         ):
             v = payload.get(k)
             if v is not None:

@@ -182,6 +182,39 @@ class AgentStateMachine:
                 "position_opened": False
             })
 
+        try:
+            from agent.intelligence.market_fsm import market_fsm
+            from agent.intelligence.trade_archetype_memory import trade_archetype_memory
+
+            sym = str(payload.get("symbol") or "")
+            pnl_raw = payload.get("pnl_percent", payload.get("pnl", 0))
+            try:
+                pnl = float(pnl_raw or 0)
+            except (TypeError, ValueError):
+                pnl = 0.0
+            outcome = "win" if pnl > 0 else "loss" if pnl < 0 else "flat"
+            mc = payload.get("market_context")
+            mc = mc if isinstance(mc, dict) else {}
+            rb = mc.get("rule_based_pipeline")
+            rb = rb if isinstance(rb, dict) else {}
+            gates = rb.get("structural_gates") if isinstance(rb.get("structural_gates"), dict) else {}
+            mstate = rb.get("market_state") if isinstance(rb.get("market_state"), dict) else {}
+            fsm = rb.get("fsm_decision") if isinstance(rb.get("fsm_decision"), dict) else {}
+            if sym:
+                trade_archetype_memory.record_close(
+                    symbol=sym,
+                    setup_type=str(gates.get("setup_type") or "unknown"),
+                    regime=str(mstate.get("regime") or "neutral"),
+                    narrative_tail=list(mc.get("narrative_tail") or rb.get("narrative_tail") or []),
+                    gate_snapshot=dict(gates.get("categories") or {}),
+                    fsm_path=[str(fsm.get("fsm_state") or "")],
+                    outcome=outcome,
+                    pnl_pct=pnl,
+                )
+                market_fsm.on_position_closed(sym)
+        except Exception as exc:
+            logger.debug("trade_archetype_record_skipped", error=str(exc))
+
         # Trade outcome feedback loop: record outcome and update model weights
         model_predictions = payload.get("model_predictions")
         if model_predictions is not None and len(model_predictions) > 0 and self.learning_system and self.model_registry:

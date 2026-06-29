@@ -2696,6 +2696,67 @@ class Settings(BaseSettings):
         description="Skip staleness watchdog refresh when intel unchanged and flat",
     )
 
+    # Rule-based decision engine (ML-free architecture)
+    decision_engine_mode: str = Field(
+        default="ml_legacy",
+        env="DECISION_ENGINE_MODE",
+        description="ml_legacy | rule_based — rule_based skips ML inference on hot path",
+    )
+    market_understanding_shadow_enabled: bool = Field(
+        default=True,
+        env="MARKET_UNDERSTANDING_SHADOW_ENABLED",
+        description="Run Market Understanding Engine each cycle (shadow or rule_based)",
+    )
+    market_narrative_shadow_enabled: bool = Field(
+        default=True,
+        env="MARKET_NARRATIVE_SHADOW_ENABLED",
+        description="Run Market Narrative Engine each cycle",
+    )
+    structural_gate_shadow_enabled: bool = Field(
+        default=True,
+        env="STRUCTURAL_GATE_SHADOW_ENABLED",
+        description="Run Structural Gate Engine each cycle",
+    )
+    structural_gate_shadow_log_only: bool = Field(
+        default=True,
+        env="STRUCTURAL_GATE_SHADOW_LOG_ONLY",
+        description="Log structural gate shadow without blocking live ML entries",
+    )
+    structural_gate_min_trend_age: int = Field(
+        default=3,
+        env="STRUCTURAL_GATE_MIN_TREND_AGE",
+        ge=1,
+        le=50,
+        description="Minimum trend age in candles for structural trend gate",
+    )
+    structural_gate_max_failed_breakouts: int = Field(
+        default=2,
+        env="STRUCTURAL_GATE_MAX_FAILED_BREAKOUTS",
+        ge=0,
+        le=10,
+        description="Max failed breakouts before structural breakout veto",
+    )
+    structural_gate_breakout_require_retest: bool = Field(
+        default=True,
+        env="STRUCTURAL_GATE_BREAKOUT_REQUIRE_RETEST",
+        description="Require retest_successful for breakout setup entries",
+    )
+    market_fsm_shadow_enabled: bool = Field(
+        default=True,
+        env="MARKET_FSM_SHADOW_ENABLED",
+        description="Run Market FSM each cycle",
+    )
+    market_fsm_enforce: bool = Field(
+        default=False,
+        env="MARKET_FSM_ENFORCE",
+        description="FSM entry_signal overrides policy fusion when true",
+    )
+    archetype_memory_shadow: bool = Field(
+        default=True,
+        env="ARCHETYPE_MEMORY_SHADOW",
+        description="Log archetype similarity hints without sizing impact",
+    )
+
     # Candle monitoring cadence (REST calls) - can be different from ticker polling cadence.
     candle_poll_interval_seconds: int = Field(
         default=30,
