@@ -439,8 +439,29 @@ class TradingEventHandler:
             diagnostics_base["ai_signal_min_entry_confidence_floor"] = ai_floor
             diagnostics_base["ai_signal_minimal_entry_gates"] = minimal_entry
 
+            lifecycle_handled = await self._run_trade_lifecycle_if_positioned(
+                symbol=symbol,
+                event_id=event.event_id,
+                payload=payload,
+                mc=mc if isinstance(mc, dict) else {},
+                signal=signal,
+            )
+            if lifecycle_handled is True:
+                return
+            if lifecycle_handled == "fall_through":
+                pass  # lifecycle EXIT cleared position; continue to entry path
+
             # HOLD: optional gated-ML reversal exit while positioned (PIPE-01)
             if signal == "HOLD" or not signal:
+                if bool(getattr(settings, "trade_lifecycle_enabled", False)):
+                    self._log_entry_rejected(
+                        "hold_at_synthesis",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        **diagnostics_base,
+                    )
+                    return
                 rc = payload.get("reasoning_chain") or {}
                 if isinstance(rc, dict) and await self._try_ml_reversal_exit_while_policy_hold(
                     symbol=symbol,
@@ -564,9 +585,11 @@ class TradingEventHandler:
                             exc_info=True,
                         )
                 if open_pos and open_pos.get("status") == "open":
+                    tle_on = bool(getattr(settings, "trade_lifecycle_enabled", False))
                     pos_side = open_pos.get("side", "")
-                    if (pos_side == "long" and is_short_signal(signal)) or (
-                        pos_side == "short" and is_long_signal(signal)
+                    if not tle_on and (
+                        (pos_side == "long" and is_short_signal(signal))
+                        or (pos_side == "short" and is_long_signal(signal))
                     ):
                         logger.info(
                             "signal_reversal_exit",
@@ -1474,6 +1497,168 @@ class TradingEventHandler:
                 **diagnostics_base,
             )
             return False
+        return True
+
+    async def _run_trade_lifecycle_if_positioned(
+        self,
+        *,
+        symbol: str,
+        event_id: str,
+        payload: Dict[str, Any],
+        mc: Dict[str, Any],
+        signal: Optional[str],
+    ) -> Any:
+        """Run TLE when positioned. Returns True if handled, False if skipped, 'fall_through' after EXIT for reversal entry."""
+        if not bool(getattr(settings, "trade_lifecycle_enabled", False)):
+            return False
+        if not self.execution_module:
+            return False
+
+        open_pos = self.execution_module.position_manager.get_position(symbol)
+        if (
+            bool(getattr(settings, "exchange_position_reconcile_enabled", True))
+            and (not open_pos or open_pos.get("status") != "open")
+        ):
+            try:
+                from agent.core.mcp_orchestrator import _exchange_has_open_position_async
+                from agent.core.position_reconcile import reconcile_positions_with_exchange
+
+                if await _exchange_has_open_position_async(symbol):
+                    await reconcile_positions_with_exchange(self.execution_module)
+                    open_pos = self.execution_module.position_manager.get_position(symbol)
+            except Exception as e:
+                logger.warning(
+                    "trade_lifecycle_reconcile_failed",
+                    symbol=symbol,
+                    error=str(e),
+                )
+
+        if not open_pos or open_pos.get("status") != "open":
+            return False
+
+        pos_side = str(open_pos.get("side") or "long").lower()
+        live_mc = dict(mc) if isinstance(mc, dict) else {}
+        if signal and not live_mc.get("signal"):
+            live_mc["signal"] = signal
+        pv = payload.get("policy_verdict")
+        if isinstance(pv, dict) and "policy_verdict" not in live_mc:
+            live_mc["policy_verdict"] = pv
+        ml_snap = payload.get("ml_evidence_snapshot")
+        if isinstance(ml_snap, dict):
+            live_mc.setdefault("ml_validation", ml_snap)
+
+        from agent.core.trade_lifecycle_engine import evaluate_lifecycle
+
+        entry_snap = open_pos.get("entry_decision_snapshot")
+        if not isinstance(entry_snap, dict):
+            entry_snap = {
+                "decision_context": {
+                    "features": {},
+                    "conviction_at_entry": open_pos.get("conviction_at_entry"),
+                    "take_profit_at_entry": open_pos.get("take_profit_at_entry"),
+                }
+            }
+
+        verdict = evaluate_lifecycle(open_pos, entry_snap, live_mc)
+        open_pos["last_lifecycle_verdict"] = verdict.action
+        open_pos["last_health_score"] = verdict.health_score
+        open_pos["last_opportunity_score"] = verdict.opportunity_score
+
+        tp_before = open_pos.get("take_profit")
+        try:
+            tp_before_f = float(tp_before) if tp_before is not None else None
+        except (TypeError, ValueError):
+            tp_before_f = None
+
+        logger.info(
+            "trade_lifecycle_verdict",
+            symbol=symbol,
+            action=verdict.action,
+            health_score=verdict.health_score,
+            opportunity_score=verdict.opportunity_score,
+            conviction_delta=verdict.conviction_delta,
+            tp_direction=verdict.tp_direction,
+            event_id=event_id,
+        )
+
+        try:
+            from agent.core.signal_audit_md import append_trade_lifecycle_verdict
+
+            append_trade_lifecycle_verdict(
+                symbol=symbol,
+                action=verdict.action,
+                health_score=verdict.health_score,
+                opportunity_score=verdict.opportunity_score,
+                tp_before=tp_before_f,
+                tp_after=verdict.new_take_profit,
+                exit_reason_detail=verdict.exit_reason_detail,
+                event_id=event_id,
+            )
+        except Exception as exc:
+            logger.debug("trade_lifecycle_audit_append_failed", error=str(exc))
+
+        opposite_entry = (pos_side == "long" and is_short_signal(signal)) or (
+            pos_side == "short" and is_long_signal(signal)
+        )
+
+        if verdict.action == "EXIT":
+            close_result = await self.execution_module.close_position(
+                symbol, exit_reason="lifecycle_exit"
+            )
+            if close_result.success and opposite_entry and is_entry_signal(signal):
+                return "fall_through"
+            return True
+
+        if verdict.action == "TIGHTEN_SL" and verdict.tighten_stop_to is not None:
+            if verdict.new_take_profit is not None and verdict.tp_direction:
+                await self.execution_module.apply_lifecycle_modify_levels(
+                    symbol,
+                    verdict.tighten_stop_to,
+                    verdict.new_take_profit,
+                )
+            elif verdict.secondary_action == "MODIFY_TP" and verdict.secondary_new_take_profit:
+                await self.execution_module.apply_lifecycle_tighten(
+                    symbol, verdict.tighten_stop_to
+                )
+                await self.execution_module.apply_lifecycle_modify_tp(
+                    symbol,
+                    verdict.secondary_new_take_profit,
+                    "extend",
+                )
+            else:
+                await self.execution_module.apply_lifecycle_tighten(
+                    symbol, verdict.tighten_stop_to
+                )
+            return True
+
+        if (
+            verdict.action == "MODIFY_TP"
+            and verdict.new_take_profit is not None
+            and verdict.tp_direction
+        ):
+            await self.execution_module.apply_lifecycle_modify_tp(
+                symbol,
+                verdict.new_take_profit,
+                verdict.tp_direction,
+            )
+            return True
+
+        same_side_entry = (pos_side == "long" and is_long_signal(signal)) or (
+            pos_side == "short" and is_short_signal(signal)
+        )
+        if same_side_entry and is_entry_signal(signal):
+            self._log_entry_rejected(
+                "open_position_blocks_entry",
+                symbol=symbol,
+                signal=signal,
+                event_id=event_id,
+                position_side=pos_side,
+            )
+            return True
+
+        if signal == "HOLD" or not signal:
+            return True
+
         return True
 
     async def _get_current_price(self, symbol: str, state: Optional[Any]) -> Optional[float]:

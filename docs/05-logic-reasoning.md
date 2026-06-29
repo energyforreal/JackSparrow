@@ -535,11 +535,11 @@ Favorable risk/reward ratio with low risk factors
 **Decision Logic**:
 
 **If already in position**:
-- Position is actively monitored via MarketTickEvent
-- Risk manager checks stop loss and take profit levels on each price update
-- Exit decision is automatically emitted when exit conditions are met
-- Execution module closes position and emits PositionClosedEvent
-- State machine transitions back to OBSERVING state
+
+- With **`TRADE_LIFECYCLE_ENABLED=true`**, each `DecisionReadyEvent` runs the [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md): dual-axis health/opportunity scores → `HOLD`, `TIGHTEN_SL`, `MODIFY_TP`, or `EXIT` before any legacy signal-reversal path.
+- Between candles, `manage_position` still enforces mechanical SL/TP/trailing as a hard backstop.
+- Without TLE, position monitoring is primarily price-driven via `MarketTickEvent` / `manage_position` against static SL/TP.
+- Exit closes position and emits `PositionClosedEvent`; state machine transitions back to OBSERVING.
 
 **If not in position**:
 - Evaluate entry conditions

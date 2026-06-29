@@ -192,6 +192,35 @@ def append_paper_trade(
     _append_raw(line)
 
 
+def append_trade_lifecycle_verdict(
+    *,
+    symbol: str,
+    action: str,
+    health_score: float,
+    opportunity_score: float,
+    tp_before: Optional[float] = None,
+    tp_after: Optional[float] = None,
+    exit_reason_detail: str = "",
+    event_id: str = "",
+) -> None:
+    ts_ist, ts_utc = _audit_ts_pair()
+    line = (
+        f"- **{ts_ist}** | `trade_lifecycle_verdict` | action=`{action}` | "
+        f"symbol={symbol} | health={health_score:.1f} | opportunity={opportunity_score:.1f} | "
+        f"utc=`{ts_utc}`"
+    )
+    if tp_before is not None:
+        line += f" | tp_before={tp_before}"
+    if tp_after is not None:
+        line += f" | tp_after={tp_after}"
+    if exit_reason_detail:
+        line += f" | detail=`{exit_reason_detail}`"
+    if event_id:
+        line += f" | event_id=`{event_id}`"
+    line += "\n"
+    _append_raw(line)
+
+
 def append_position_close(
     *,
     position_id: str,

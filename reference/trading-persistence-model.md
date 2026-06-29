@@ -70,7 +70,10 @@ Rule-based pipeline subset at entry (or reject):
 - `gate_evaluation` — denormalized copy: `categories`, `block_reasons`, `setup_type`, `structural_confidence` (not invented per-gate deltas)
 - `features` — curated v43 allowlist only (`TRADE_SNAPSHOT_FEATURE_KEYS` or defaults)
 - Risk: `stop_loss`, `take_profit`, `atr_14`, `leverage`, `entry_lots`
+- Lifecycle baselines (TLE): `conviction_at_entry`, `evidence_at_entry`, `take_profit_at_entry`, `stop_loss_at_entry`
 - Optional `confluence_components` when legacy `trade_score` / `environment_scores` exist
+
+In-memory position fields updated post-fill by TLE: `last_lifecycle_verdict`, `last_health_score`, `last_opportunity_score`, `last_tp_modify_at`. See [trade-lifecycle-engine.md](trade-lifecycle-engine.md).
 
 ### `performance_context`
 

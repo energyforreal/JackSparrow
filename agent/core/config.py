@@ -1585,6 +1585,92 @@ class Settings(BaseSettings):
             "positions are not force-closed by hold duration."
         ),
     )
+    trade_lifecycle_enabled: bool = Field(
+        default=False,
+        env="TRADE_LIFECYCLE_ENABLED",
+        description="Enable Trade Lifecycle Engine for post-entry HOLD/TIGHTEN/MODIFY_TP/EXIT.",
+    )
+    trade_lifecycle_health_hold_min: float = Field(
+        default=70.0,
+        env="TRADE_LIFECYCLE_HEALTH_HOLD_MIN",
+        ge=0.0,
+        le=100.0,
+        description="Health score floor for HOLD without tighten.",
+    )
+    trade_lifecycle_health_tighten_min: float = Field(
+        default=50.0,
+        env="TRADE_LIFECYCLE_HEALTH_TIGHTEN_MIN",
+        ge=0.0,
+        le=100.0,
+        description="Health score floor for TIGHTEN_SL band.",
+    )
+    trade_lifecycle_health_exit_max: float = Field(
+        default=50.0,
+        env="TRADE_LIFECYCLE_HEALTH_EXIT_MAX",
+        ge=0.0,
+        le=100.0,
+        description="Health below this triggers EXIT (unless already exited).",
+    )
+    trade_lifecycle_conviction_exit_delta: float = Field(
+        default=-0.25,
+        env="TRADE_LIFECYCLE_CONVICTION_EXIT_DELTA",
+        description="Conviction drop from entry that contributes to exit risk.",
+    )
+    trade_lifecycle_flip_exit_score: float = Field(
+        default=0.70,
+        env="TRADE_LIFECYCLE_FLIP_EXIT_SCORE",
+        ge=0.0,
+        le=1.0,
+        description="Flip-risk score at or above which health is penalized heavily.",
+    )
+    trade_lifecycle_fsm_broken_exit: bool = Field(
+        default=True,
+        env="TRADE_LIFECYCLE_FSM_BROKEN_EXIT",
+        description="Treat FSM thesis_broken as hard EXIT when continuation flags it.",
+    )
+    trade_lifecycle_tighten_lock_fraction: float = Field(
+        default=0.5,
+        env="TRADE_LIFECYCLE_TIGHTEN_LOCK_FRACTION",
+        ge=0.0,
+        le=1.0,
+        description="Fraction of open profit to lock when tightening stop.",
+    )
+    trade_lifecycle_opportunity_extend_min: float = Field(
+        default=80.0,
+        env="TRADE_LIFECYCLE_OPPORTUNITY_EXTEND_MIN",
+        ge=0.0,
+        le=100.0,
+        description="Opportunity score minimum for MODIFY_TP extend.",
+    )
+    trade_lifecycle_opportunity_reduce_min: float = Field(
+        default=40.0,
+        env="TRADE_LIFECYCLE_OPPORTUNITY_REDUCE_MIN",
+        ge=0.0,
+        le=100.0,
+        description="Opportunity below this (with weakening health) triggers TP reduce.",
+    )
+    trade_lifecycle_conviction_extend_delta: float = Field(
+        default=0.10,
+        env="TRADE_LIFECYCLE_CONVICTION_EXTEND_DELTA",
+        description="Minimum conviction rise from entry required for MODIFY_TP extend.",
+    )
+    trade_lifecycle_tp_recompute_use_live_atr: bool = Field(
+        default=True,
+        env="TRADE_LIFECYCLE_TP_RECOMPUTE_USE_LIVE_ATR",
+        description="Recompute extend TP from live ATR/regime via dynamic_sl_tp.",
+    )
+    trade_lifecycle_tp_modify_min_interval_seconds: int = Field(
+        default=60,
+        env="TRADE_LIFECYCLE_TP_MODIFY_MIN_INTERVAL_SECONDS",
+        ge=0,
+        description="Minimum seconds between intelligence-driven TP modifications.",
+    )
+    trade_lifecycle_tp_modify_min_change_pct: float = Field(
+        default=0.002,
+        env="TRADE_LIFECYCLE_TP_MODIFY_MIN_CHANGE_PCT",
+        ge=0.0,
+        description="Minimum relative TP change before MODIFY_TP executes.",
+    )
     websocket_sl_tp_enabled: bool = Field(
         default=True,
         env="WEBSOCKET_SL_TP_ENABLED",

@@ -221,3 +221,34 @@ async def persist_position_stop_loss(symbol: str, stop_loss: float) -> None:
         path.write_text(json.dumps(data), encoding="utf-8")
     except OSError as exc:
         logger.warning("position_stop_persistence_write_failed", symbol=symbol, error=str(exc))
+
+
+async def persist_position_take_profit(symbol: str, take_profit: float) -> None:
+    """Persist take-profit level for crash recovery (same file as stop-loss)."""
+    if not bool(getattr(settings, "order_persistence_enabled", True)):
+        return
+    path = _position_stops_path()
+    data: Dict[str, Any] = {}
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data = raw
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    stops = data.get("stops") if isinstance(data.get("stops"), dict) else {}
+    entry = stops.get(str(symbol).upper())
+    if not isinstance(entry, dict):
+        entry = {}
+    entry["take_profit"] = float(take_profit)
+    entry["updated_at"] = datetime.now(timezone.utc).isoformat()
+    stops[str(symbol).upper()] = entry
+    data["stops"] = stops
+    try:
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError as exc:
+        logger.warning(
+            "position_take_profit_persistence_write_failed",
+            symbol=symbol,
+            error=str(exc),
+        )

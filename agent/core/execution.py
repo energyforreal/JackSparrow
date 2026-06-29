@@ -930,6 +930,24 @@ class ExecutionEngine:
                     )
                     if entry_snap:
                         pos["entry_decision_snapshot"] = entry_snap
+                    dc = (
+                        entry_snap.get("decision_context")
+                        if isinstance(entry_snap, dict)
+                        else {}
+                    )
+                    if isinstance(dc, dict):
+                        if dc.get("conviction_at_entry") is not None:
+                            pos["conviction_at_entry"] = dc.get("conviction_at_entry")
+                        if dc.get("evidence_at_entry") is not None:
+                            pos["evidence_at_entry"] = dc.get("evidence_at_entry")
+                    if pos.get("take_profit") is not None:
+                        pos["take_profit_at_entry"] = pos.get("take_profit")
+                    if pos.get("stop_loss") is not None:
+                        pos["stop_loss_at_entry"] = pos.get("stop_loss")
+                    pv = snap_payload.get("policy_verdict")
+                    if isinstance(pv, dict) and pos.get("conviction_at_entry") is None:
+                        if pv.get("conviction") is not None:
+                            pos["conviction_at_entry"] = pv.get("conviction")
                 except Exception as snap_exc:
                     logger.warning(
                         "entry_decision_snapshot_failed",
@@ -2310,6 +2328,203 @@ class ExecutionEngine:
                     error=str(exc),
                 )
 
+    async def _update_position_take_profit(
+        self,
+        symbol: str,
+        new_tp: float,
+        position: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Update in-memory take-profit and persist when order persistence is enabled."""
+        pos = position or self.position_manager.get_position(symbol)
+        if not pos:
+            return
+        pos["take_profit"] = new_tp
+        pos["last_tp_modify_at"] = datetime.now(timezone.utc).isoformat()
+        logger.info(
+            "lifecycle_take_profit_updated",
+            symbol=symbol,
+            new_take_profit=new_tp,
+        )
+        if bool(getattr(settings, "order_persistence_enabled", True)):
+            try:
+                from agent.core.order_persistence import persist_position_take_profit
+
+                await persist_position_take_profit(symbol, new_tp)
+            except Exception as exc:
+                logger.debug(
+                    "position_take_profit_persist_failed",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+
+    async def _update_bracket_levels(
+        self,
+        symbol: str,
+        *,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> None:
+        """PUT bracket stop-loss and/or take-profit to exchange."""
+        if not getattr(settings, "dynamic_sl_tp_enabled", False):
+            return
+        if not getattr(settings, "use_delta_position_bracket_api", True) or not self.delta_client:
+            return
+        position = self.position_manager.get_position(symbol)
+        if not position or position.get("status") != "open":
+            return
+        bid = position.get("bracket_order_id")
+        if bid is None:
+            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            if bid is not None:
+                position["bracket_order_id"] = bid
+        if bid is None:
+            return
+        trigger = str(
+            position.get("bracket_trigger_method")
+            or getattr(settings, "bracket_stop_trigger_method", "mark_price")
+            or "mark_price"
+        )
+        sl = stop_loss if stop_loss is not None else position.get("stop_loss")
+        tp = take_profit if take_profit is not None else position.get("take_profit")
+        try:
+            await self.delta_client.update_bracket_order(
+                int(bid),
+                symbol,
+                stop_loss_price=sl,
+                take_profit_price=tp,
+                trail_amount=position.get("bracket_trail_amount"),
+                bracket_stop_trigger_method=trigger,
+                use_product_symbol_only=True,
+            )
+            position["bracket_sl_tp_updated_at"] = datetime.now(timezone.utc).isoformat()
+            logger.info(
+                "lifecycle_bracket_levels_synced",
+                symbol=symbol,
+                bracket_order_id=bid,
+                stop_loss=sl,
+                take_profit=tp,
+            )
+        except Exception as exc:
+            logger.warning(
+                "lifecycle_bracket_levels_sync_failed",
+                symbol=symbol,
+                error=str(exc),
+            )
+            if getattr(settings, "bracket_fallback_local_sl_tp", True):
+                position["bracket_api_degraded"] = True
+
+    async def apply_lifecycle_tighten(
+        self,
+        symbol: str,
+        new_stop: float,
+    ) -> Dict[str, Any]:
+        """Ratchet stop-loss from Trade Lifecycle Engine (never loosens)."""
+        async with self._position_lock:
+            position = self.position_manager.get_position(symbol)
+            if not position or position.get("status") != "open":
+                return {"success": False, "reason": "position_not_open"}
+            side = str(position.get("side") or "long").lower()
+            current_sl = position.get("stop_loss")
+            try:
+                current_sl_f = float(current_sl) if current_sl is not None else None
+            except (TypeError, ValueError):
+                current_sl_f = None
+            if side in ("long", "buy"):
+                if current_sl_f is not None and new_stop <= current_sl_f:
+                    return {"success": False, "reason": "stop_not_tightened"}
+            else:
+                if current_sl_f is not None and new_stop >= current_sl_f:
+                    return {"success": False, "reason": "stop_not_tightened"}
+            await self._update_position_stop_loss(symbol, new_stop, position)
+            if position.get("exchange_bracket_sl_tp") and not position.get(
+                "bracket_api_degraded"
+            ):
+                await self._update_bracket_levels(symbol, stop_loss=new_stop)
+            position["last_lifecycle_verdict"] = "TIGHTEN_SL"
+            return {"success": True, "new_stop": new_stop}
+
+    async def apply_lifecycle_modify_tp(
+        self,
+        symbol: str,
+        new_tp: float,
+        direction: str,
+    ) -> Dict[str, Any]:
+        """Update take-profit from Trade Lifecycle Engine with ratchet rules."""
+        async with self._position_lock:
+            position = self.position_manager.get_position(symbol)
+            if not position or position.get("status") != "open":
+                return {"success": False, "reason": "position_not_open"}
+            side = str(position.get("side") or "long").lower()
+            current_raw = position.get("current_price", position.get("entry_price"))
+            try:
+                current = float(current_raw) if current_raw is not None else 0.0
+            except (TypeError, ValueError):
+                current = 0.0
+            current_tp = position.get("take_profit")
+            try:
+                current_tp_f = float(current_tp) if current_tp is not None else None
+            except (TypeError, ValueError):
+                current_tp_f = None
+            if current_tp_f is None:
+                return {"success": False, "reason": "no_current_tp"}
+            is_long = side in ("long", "buy")
+            if direction == "extend":
+                if is_long and new_tp < current_tp_f:
+                    return {"success": False, "reason": "extend_violates_ratchet"}
+                if not is_long and new_tp > current_tp_f:
+                    return {"success": False, "reason": "extend_violates_ratchet"}
+            elif direction == "reduce":
+                if is_long and not (current < new_tp < current_tp_f):
+                    return {"success": False, "reason": "reduce_violates_ratchet"}
+                if not is_long and not (current > new_tp > current_tp_f):
+                    return {"success": False, "reason": "reduce_violates_ratchet"}
+            tp_before = current_tp_f
+            await self._update_position_take_profit(symbol, new_tp, position)
+            if position.get("exchange_bracket_sl_tp") and not position.get(
+                "bracket_api_degraded"
+            ):
+                await self._update_bracket_levels(symbol, take_profit=new_tp)
+            position["last_lifecycle_verdict"] = "MODIFY_TP"
+            return {
+                "success": True,
+                "tp_before": tp_before,
+                "tp_after": new_tp,
+                "direction": direction,
+            }
+
+    async def apply_lifecycle_modify_levels(
+        self,
+        symbol: str,
+        stop_loss: float,
+        take_profit: float,
+    ) -> Dict[str, Any]:
+        """Single-candle combined SL tighten + TP modify."""
+        tighten = await self.apply_lifecycle_tighten(symbol, stop_loss)
+        if not tighten.get("success"):
+            return tighten
+        position = self.position_manager.get_position(symbol)
+        side = str((position or {}).get("side") or "long").lower()
+        is_long = side in ("long", "buy")
+        direction = "reduce"
+        current_tp = (position or {}).get("take_profit")
+        try:
+            current_tp_f = float(current_tp) if current_tp is not None else None
+        except (TypeError, ValueError):
+            current_tp_f = None
+        if current_tp_f is not None:
+            if is_long and take_profit > current_tp_f:
+                direction = "extend"
+            elif not is_long and take_profit < current_tp_f:
+                direction = "extend"
+        modify = await self.apply_lifecycle_modify_tp(symbol, take_profit, direction)
+        return {
+            "success": modify.get("success", False),
+            "new_stop": stop_loss,
+            "tp_before": modify.get("tp_before"),
+            "tp_after": modify.get("tp_after"),
+            "direction": direction,
+        }
+
     def _prune_closed_orders(self, max_closed: int = 500) -> None:
         """Remove terminal orders from OrderManager to prevent unbounded growth."""
         terminal = [
@@ -2343,7 +2558,8 @@ class ExecutionEngine:
 
         exchange_bracket = bool(position.get("exchange_bracket_sl_tp"))
         use_position_api = bool(getattr(settings, "use_delta_position_bracket_api", True))
-        if exchange_bracket and use_position_api:
+        tle_enabled = bool(getattr(settings, "trade_lifecycle_enabled", False))
+        if exchange_bracket and use_position_api and not tle_enabled:
             await self._maybe_update_dynamic_bracket(position_symbol, position)
 
         if (

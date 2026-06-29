@@ -943,6 +943,10 @@ class MCPOrchestrator:
             material = diff_market_intelligence(prev_intel, intel)
             intel = await market_intelligence_store.put(intel)
             mctx["market_intelligence"] = intel.to_dict()
+            mctx["market_intel_material_change"] = {
+                "changed": material.changed,
+                "reasons": list(material.reasons),
+            }
 
             try:
                 from agent.core.context_manager import context_manager

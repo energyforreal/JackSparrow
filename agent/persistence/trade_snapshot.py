@@ -206,6 +206,24 @@ def build_entry_snapshot(
         "entry_lots": risk_payload.get("entry_lots"),
     }
 
+    pv = risk_payload.get("policy_verdict")
+    if isinstance(pv, dict) and pv.get("conviction") is not None:
+        decision_context["conviction_at_entry"] = pv.get("conviction")
+    elif risk_payload.get("conviction") is not None:
+        decision_context["conviction_at_entry"] = risk_payload.get("conviction")
+
+    ml_ev = risk_payload.get("ml_evidence_snapshot")
+    if isinstance(ml_ev, dict):
+        decision_context["evidence_at_entry"] = {
+            k: ml_ev.get(k)
+            for k in ("trade_score", "thesis_signal", "model_confidence", "consensus_confidence")
+            if ml_ev.get(k) is not None
+        }
+    if risk_payload.get("take_profit") is not None:
+        decision_context["take_profit_at_entry"] = risk_payload.get("take_profit")
+    if risk_payload.get("stop_loss") is not None:
+        decision_context["stop_loss_at_entry"] = risk_payload.get("stop_loss")
+
     diag = risk_payload.get("signal_path_diagnostics")
     if isinstance(diag, dict):
         decision_context["signal_path_diagnostics"] = dict(diag)
