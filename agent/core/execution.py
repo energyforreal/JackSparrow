@@ -2099,14 +2099,17 @@ class ExecutionEngine:
             use_trailing=bool(getattr(settings, "use_atr_trailing_stop", False)),
         )
         try:
-            await self.delta_client.create_position_bracket(
+            bracket_resp = await self.delta_client.create_position_bracket(
                 symbol,
                 stop_loss_order=body.get("stop_loss_order"),
                 take_profit_order=body.get("take_profit_order"),
                 bracket_stop_trigger_method=body.get("bracket_stop_trigger_method", trigger),
                 use_product_symbol_only=True,
             )
-            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            bid = await self.delta_client.resolve_bracket_order_id(
+                symbol,
+                create_response=bracket_resp if isinstance(bracket_resp, dict) else None,
+            )
             position["bracket_order_id"] = bid
             position["exchange_bracket_sl_tp"] = True
             position["bracket_trail_amount"] = levels.trail_amount
@@ -2200,7 +2203,7 @@ class ExecutionEngine:
 
         bid = position.get("bracket_order_id")
         if bid is None:
-            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            bid = await self.delta_client.resolve_bracket_order_id(symbol, retries=2, delay_s=0.3)
             if bid is not None:
                 position["bracket_order_id"] = bid
         trigger = str(
@@ -2225,14 +2228,17 @@ class ExecutionEngine:
                     trigger_method=trigger,
                     use_trailing=bool(getattr(settings, "use_atr_trailing_stop", False)),
                 )
-                await self.delta_client.create_position_bracket(
+                bracket_resp = await self.delta_client.create_position_bracket(
                     symbol,
                     stop_loss_order=body.get("stop_loss_order"),
                     take_profit_order=body.get("take_profit_order"),
                     bracket_stop_trigger_method=trigger,
                     use_product_symbol_only=True,
                 )
-                bid = await self.delta_client.find_open_bracket_order_id(symbol)
+                bid = await self.delta_client.resolve_bracket_order_id(
+                    symbol,
+                    create_response=bracket_resp if isinstance(bracket_resp, dict) else None,
+                )
                 position["bracket_order_id"] = bid
             position["stop_loss"] = levels.stop_loss
             position["take_profit"] = levels.take_profit
@@ -2264,7 +2270,7 @@ class ExecutionEngine:
             return
         bid = position.get("bracket_order_id")
         if bid is None:
-            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            bid = await self.delta_client.resolve_bracket_order_id(symbol, retries=2, delay_s=0.3)
             if bid is not None:
                 position["bracket_order_id"] = bid
         if bid is None:
@@ -2374,7 +2380,7 @@ class ExecutionEngine:
             return
         bid = position.get("bracket_order_id")
         if bid is None:
-            bid = await self.delta_client.find_open_bracket_order_id(symbol)
+            bid = await self.delta_client.resolve_bracket_order_id(symbol, retries=2, delay_s=0.3)
             if bid is not None:
                 position["bracket_order_id"] = bid
         if bid is None:

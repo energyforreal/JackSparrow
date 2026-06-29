@@ -24,6 +24,92 @@ from agent.core.logging_utils import log_error_with_context, log_warning_with_co
 logger = structlog.get_logger()
 
 
+def _parse_order_id(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def pick_bracket_order_id_from_rows(
+    rows: List[Dict[str, Any]],
+    symbol: str,
+) -> Optional[int]:
+    """Select bracket order id from GET /v2/orders rows for PUT /v2/orders/bracket.
+
+    Position brackets created via POST /orders/bracket appear as separate SL/TP
+    legs, usually in ``pending`` state with ``stop_order_type`` set. Prefer the
+    stop-loss leg id (Delta PUT expects the bracket controller order id).
+    """
+    sym_u = (symbol or "").strip().upper()
+    sl_ids: List[int] = []
+    tp_ids: List[int] = []
+    legacy_ids: List[int] = []
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        ps = str(row.get("product_symbol") or "").upper()
+        if sym_u and ps and ps != sym_u:
+            continue
+
+        oid = _parse_order_id(row.get("id"))
+        if oid is None:
+            continue
+
+        stop_type = str(row.get("stop_order_type") or "").lower()
+        if stop_type == "stop_loss_order":
+            sl_ids.append(oid)
+            continue
+        if stop_type == "take_profit_order":
+            tp_ids.append(oid)
+            continue
+
+        if (
+            row.get("bracket_take_profit_price") is not None
+            or row.get("bracket_stop_loss_price") is not None
+        ):
+            legacy_ids.append(oid)
+            continue
+
+        meta = row.get("meta_data")
+        if isinstance(meta, dict) and meta.get("bracket"):
+            legacy_ids.append(oid)
+
+    if sl_ids:
+        return sl_ids[0]
+    if legacy_ids:
+        return legacy_ids[0]
+    if tp_ids:
+        return tp_ids[0]
+    return None
+
+
+def parse_bracket_id_from_api_response(response: Any) -> Optional[int]:
+    """Extract order id from POST /orders/bracket when exchange returns one."""
+    if not isinstance(response, dict):
+        return None
+    for key in ("id", "order_id", "bracket_order_id"):
+        oid = _parse_order_id(response.get(key))
+        if oid is not None:
+            return oid
+    result = response.get("result")
+    if isinstance(result, dict):
+        for key in ("id", "order_id", "bracket_order_id"):
+            oid = _parse_order_id(result.get(key))
+            if oid is not None:
+                return oid
+    if isinstance(result, list):
+        for item in result:
+            if isinstance(item, dict):
+                oid = _parse_order_id(item.get("id"))
+                if oid is not None:
+                    return oid
+    return None
+
+
 class RateLimiter:
     """Token-bucket rate limiter for Delta API calls."""
 
@@ -890,46 +976,49 @@ class DeltaExchangeClient:
             data["bracket_stop_trigger_method"] = bracket_stop_trigger_method
         return await self._make_request("PUT", "/v2/orders/bracket", data=data)
 
+    async def resolve_bracket_order_id(
+        self,
+        symbol: str,
+        *,
+        create_response: Optional[Dict[str, Any]] = None,
+        retries: int = 3,
+        delay_s: float = 0.5,
+    ) -> Optional[int]:
+        """Resolve bracket order id after POST attach (response parse + GET retry)."""
+        if isinstance(create_response, dict):
+            from_response = parse_bracket_id_from_api_response(create_response)
+            if from_response is not None:
+                return from_response
+
+        attempts = max(1, int(retries))
+        for attempt in range(attempts):
+            oid = await self.find_open_bracket_order_id(symbol)
+            if oid is not None:
+                return oid
+            if attempt < attempts - 1 and delay_s > 0:
+                await asyncio.sleep(delay_s)
+
+        logger.warning(
+            "bracket_order_id_resolve_failed",
+            symbol=symbol,
+            retries=attempts,
+        )
+        return None
+
     async def find_open_bracket_order_id(self, symbol: str) -> Optional[int]:
-        """Return open order id that carries bracket params for ``symbol``, if any."""
+        """Return bracket order id for PUT /v2/orders/bracket (open or pending legs)."""
         try:
             pid = await self.resolve_product_id(symbol)
         except Exception:
             pid = None
-        params: Dict[str, Any] = {"page_size": 50, "states": "open"}
+        params: Dict[str, Any] = {"page_size": 50, "states": "open,pending"}
         if pid is not None:
             params["product_ids"] = str(pid)
         resp = await self._make_request("GET", "/v2/orders", params=params)
         rows = resp.get("result") if isinstance(resp, dict) else None
         if not isinstance(rows, list):
             return None
-        sym_u = (symbol or "").strip().upper()
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            ps = str(row.get("product_symbol") or "").upper()
-            if sym_u and ps and ps != sym_u:
-                continue
-            if (
-                row.get("bracket_take_profit_price") is not None
-                or row.get("bracket_stop_loss_price") is not None
-                or row.get("meta_data", {}).get("bracket")
-            ):
-                oid = row.get("id")
-                if oid is not None:
-                    try:
-                        return int(oid)
-                    except (TypeError, ValueError):
-                        continue
-            meta = row.get("meta_data")
-            if isinstance(meta, dict) and meta.get("bracket"):
-                oid = row.get("id")
-                if oid is not None:
-                    try:
-                        return int(oid)
-                    except (TypeError, ValueError):
-                        continue
-        return None
+        return pick_bracket_order_id_from_rows(rows, symbol)
 
     @staticmethod
     def parse_fill_timestamp(value: Any) -> Optional[datetime]:
