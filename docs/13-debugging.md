@@ -68,6 +68,15 @@ uvicorn backend.api.main:app --reload --log-level debug
 - Attach a debugger (VS Code, PyCharm) to the FastAPI process; breakpoints in route handlers and services are honoured when `--reload` is active.
 - All exceptions are captured by custom handlers and written as `ERROR` events with stack traces (see [Logging Documentation](12-logging.md#service-integration)).
 
+**Docker: backend unhealthy / schema drift** — log contains `Database schema drift` or `backend_database_schema_init_failed`:
+
+```bash
+docker compose logs backend --tail=40
+docker compose exec postgres psql -U jacksparrow -d trading_agent -c "SELECT * FROM alembic_version;"
+```
+
+If analytics tables exist but version lags: `docker compose run --rm --no-deps backend sh -c "cd /app && alembic -c alembic.ini stamp head"`, then `docker compose up -d --force-recreate backend`. See [Deployment – Alembic migrations](10-deployment.md#alembic-migrations).
+
 ### Agent Core
 
 - Use `LOG_LEVEL=DEBUG` and `LOG_AGENT_TRACE=1` (if available) to surface state transitions.

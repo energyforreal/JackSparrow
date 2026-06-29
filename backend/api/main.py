@@ -50,6 +50,33 @@ async def _initialize_database_schema() -> None:
         await connection.run_sync(Base.metadata.create_all)
 
 
+async def _run_alembic_upgrade_head() -> None:
+    """Apply pending Alembic revisions (sync Alembic in a worker thread)."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    repo_root = Path(__file__).resolve().parents[2]
+    alembic_ini = repo_root / "alembic.ini"
+    if not alembic_ini.is_file():
+        alt_root = Path(__file__).resolve().parents[3]
+        if (alt_root / "alembic.ini").is_file():
+            alembic_ini = alt_root / "alembic.ini"
+        else:
+            raise RuntimeError(
+                f"Alembic config not found at {repo_root / 'alembic.ini'}; "
+                "ensure alembic.ini is copied into the image."
+            )
+
+    def _upgrade() -> None:
+        cfg = Config(str(alembic_ini))
+        command.upgrade(cfg, "head")
+
+    await asyncio.to_thread(_upgrade)
+    logger.info("backend_alembic_upgrade_applied", service="backend")
+
+
 async def _verify_alembic_at_head() -> None:
     """Ensure database revision matches Alembic head (fatal on mismatch)."""
     from pathlib import Path
@@ -231,6 +258,7 @@ async def lifespan(app: FastAPI):
 
     if settings.auto_create_db_schema:
         try:
+            await _run_alembic_upgrade_head()
             await _initialize_database_schema()
             await _migrate_database_schema()
             await _verify_alembic_at_head()

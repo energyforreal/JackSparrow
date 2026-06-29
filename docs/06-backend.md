@@ -1212,6 +1212,17 @@ FROM trade_outcomes
 GROUP BY 1;
 ```
 
+### Application startup and schema
+
+When `AUTO_CREATE_DB_SCHEMA=true` (default), the FastAPI lifespan handler (`backend/api/main.py`) on backend start:
+
+1. Runs `alembic upgrade head`
+2. Calls `Base.metadata.create_all` for any models not yet in migrations
+3. Applies lightweight SQL patches (e.g. `positions.unrealized_pnl`)
+4. Verifies `alembic_version` matches head (startup fails closed on drift)
+
+Docker rebuild procedure: [Deployment – Common operations](10-deployment.md#common-operations).
+
 ---
 
 ## Service Layer Architecture

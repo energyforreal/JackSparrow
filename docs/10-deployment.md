@@ -644,14 +644,36 @@ Each container writes to `/logs` internally, which is bind-mounted to `./logs/<s
 
 **Execute commands in containers:**
 ```bash
-# Run database migrations
+# Apply Alembic migrations (usually automatic on backend startup when AUTO_CREATE_DB_SCHEMA=true)
+docker compose run --rm --no-deps backend sh -c "cd /app && alembic -c alembic.ini upgrade head"
+
+# If tables already exist from create_all but alembic_version lags (schema drift on startup):
+docker compose run --rm --no-deps backend sh -c "cd /app && alembic -c alembic.ini stamp head"
+
+# Legacy one-shot schema helper (local dev without Alembic)
 docker compose exec backend python scripts/setup_db.py
 
 # Access PostgreSQL
 docker compose exec postgres psql -U jacksparrow -d trading_agent
 
-# Access Redis CLI
-docker compose exec redis redis-cli
+# Trade snapshot analytics (host needs DATABASE_URL or run inside backend with env)
+docker compose exec postgres psql -U jacksparrow -d trading_agent -c "SELECT version_num FROM alembic_version;"
+```
+
+**Rebuild and redeploy after code changes:**
+```bash
+# Windows PowerShell (use ; not && between commands if chaining)
+docker compose build --pull
+docker compose up -d --force-recreate
+
+# Backend-only after API/migration changes
+docker compose build backend
+docker compose up -d --force-recreate backend frontend
+```
+
+**Access Redis CLI** (password from `.env`):
+```bash
+docker compose exec redis redis-cli -a "$REDIS_PASSWORD" ping
 ```
 
 **Shutdown & teardown:**
@@ -689,6 +711,7 @@ See [Troubleshooting](#troubleshooting) in this document for Docker-related issu
 - **Volume permissions**: Fix with `sudo chown -R $USER:$USER logs/ models/`
 - **Database connection**: Verify `DATABASE_URL` uses service name `postgres`, not `localhost`
 - **Health checks failing**: Check logs with `docker compose logs [service]`
+- **Backend crash loop — schema drift**: Log shows `Database schema drift: current='001_baseline' expected head='003_analytics_rollups'`. Run `alembic stamp head` if analytics tables already exist, or `alembic upgrade head` on a fresh DB. See [Database maintenance – Alembic](#alembic-migrations).
 
 ### Model prerequisites and degraded behaviour (Docker)
 
@@ -2505,6 +2528,38 @@ Containers on Docker bridge **`jacksparrow-network`** (service DNS names):
 **Agent ↔ Delta Exchange**: REST (`DELTA_EXCHANGE_BASE_URL`, HMAC `METHOD+timestamp+path+query+payload`) and optional WSS (`WEBSOCKET_URL` on the **socket** host). WSS auth: connect, then send JSON `key-auth` with signature `GET{unix_seconds}/live`. Credentials and IP whitelist in agent env.
 
 ## Database maintenance
+
+### Alembic migrations
+
+Revisions live under `backend/migrations/versions/`:
+
+| Revision | Purpose |
+|----------|---------|
+| `001_baseline` | Baseline marker for existing `create_all` deployments |
+| `002_entry_decisions` | `entry_decisions` funnel table |
+| `003_analytics_rollups` | Precomputed `analytics_rollups` aggregates |
+
+When `AUTO_CREATE_DB_SCHEMA=true` (default), backend startup (`backend/api/main.py` lifespan) runs:
+
+1. `alembic upgrade head`
+2. `Base.metadata.create_all` (safety net for new SQLAlchemy models)
+3. Lightweight column patches
+4. Head revision verification (fatal on mismatch)
+
+**Docker / existing volumes:** If `create_all` already created `entry_decisions` / `analytics_rollups` but `alembic_version` is still `001_baseline`, stamp instead of re-running `upgrade`:
+
+```bash
+docker compose run --rm --no-deps backend sh -c "cd /app && alembic -c alembic.ini stamp head"
+docker compose up -d --force-recreate backend
+```
+
+**Host / local dev** (repo root, `DATABASE_URL` in `.env`):
+
+```bash
+alembic -c alembic.ini upgrade head
+```
+
+See also [`backend/migrations/README.md`](../backend/migrations/README.md) and [Trading persistence model](../reference/trading-persistence-model.md).
 
 **VARCHAR vs enum mismatch** (`positions.status`, `trades.status`): run `python scripts/migrate_enum_types.py` after backup; see SQLAlchemy `PostgresEnum` in `backend/core/database.py`. Rollback: convert columns back to `VARCHAR` and restore from dump if needed.
 

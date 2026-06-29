@@ -30,6 +30,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 16 | [v43 trade execution runbook](docs/v43_trade_execution_runbook.md) | v43 **signal gate** tuning (IC + archived ML), metrics, rollback, log analysis |
 | — | [Rule-based decision engine](docs/rule-based-decision-engine.md) | FSM + structural gates, shadow rollout, `DECISION_ENGINE_MODE`, UI payloads |
 | — | [Canonical events](docs/canonical_events.md) | Event-bus wiring and `DECISION_READY` payload fields |
+| — | [Trading persistence model](reference/trading-persistence-model.md) | Testnet three-layer model, snapshot schema v1, analytics tables, Docker notes |
 
 ---
 
@@ -62,6 +63,8 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | Self-awareness flags & telemetry | [Logic & reasoning – Self-awareness](docs/05-logic-reasoning.md#deterministic-self-awareness), [Canonical events](docs/canonical_events.md), `.env.example` |
 | Rule-based FSM rollout / shadow logs | [Rule-based decision engine](docs/rule-based-decision-engine.md), `tools/analyze_agent_logs.py`, [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables) |
 | Trade snapshot analytics / optimization | [Trading persistence model](reference/trading-persistence-model.md), `tools/commands/trade_analytics.py`, [Backend – Analytics API](docs/06-backend.md#analytics-rest-api) |
+| Docker rebuild / redeploy | [Deployment – Common operations](docs/10-deployment.md#common-operations), `docker compose build --pull` + `up -d --force-recreate` |
+| Alembic / schema drift after upgrade | [Deployment – Alembic migrations](docs/10-deployment.md#alembic-migrations), `backend/migrations/README.md` |
 | Troubleshooting | [Debugging](docs/13-debugging.md), [Deployment – Troubleshooting](docs/10-deployment.md#troubleshooting) |
 | AI signal / paper trade audit (IST ledger + markdown + structlog) | [reference/ai-signal-action-audit-log.md](reference/ai-signal-action-audit-log.md), [Logging – Audit journal](docs/12-logging.md#ai-signal-and-action-audit-journal), [Deployment – host log paths](docs/10-deployment.md#common-operations) |
 
@@ -71,4 +74,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-06-29 — Trade decision snapshots v1, analytics API, `entry_decisions` / `analytics_rollups`, `trade_analytics.py` CLI.
+**Last updated**: 2026-06-29 — Trade snapshots v1, analytics API, Alembic auto-migrate on Docker backend startup, rebuild/redeploy docs.

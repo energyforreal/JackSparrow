@@ -158,3 +158,11 @@ CLI: [`tools/commands/trade_analytics.py`](../tools/commands/trade_analytics.py)
 ## Join key for logs and DB
 
 Use **`reasoning_chain_id`** to correlate structlog events, `entry_decisions`, and `trade_outcomes.metadata.decision_context.reasoning_chain_id`.
+
+---
+
+## Docker deploy notes
+
+- Rebuild images after agent/backend code changes: `docker compose build --pull` then `docker compose up -d --force-recreate` ([Deployment](../docs/10-deployment.md)).
+- Backend applies Alembic on startup when `AUTO_CREATE_DB_SCHEMA=true`; see [Database maintenance – Alembic](../docs/10-deployment.md#alembic-migrations) if the backend fails with schema drift.
+- Analytics CLI against the compose Postgres network: set `DATABASE_URL` to the host-mapped URL or run queries via `docker compose exec postgres psql ...`.

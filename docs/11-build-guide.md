@@ -272,14 +272,19 @@ PERPETUAL_LIQUIDATION_BUFFER_PCT=0.015
 **Important**: Database initialization must be completed before starting services.
 
 ```bash
-# From project root directory
+# From project root directory (recommended — applies Alembic revisions 001→head)
+alembic -c alembic.ini upgrade head
+
+# Legacy helper (TimescaleDB hypertables + create_all; use if not using Alembic yet)
 python scripts/setup_db.py
 ```
 
-This script will:
-- Enable TimescaleDB extension
-- Create all required tables (trades, positions, decisions, performance_metrics, model_performance)
-- Convert time-series tables to hypertables for optimal performance
+Alembic revisions include `entry_decisions` and `analytics_rollups` for trade snapshot analytics. With `AUTO_CREATE_DB_SCHEMA=true`, the backend also runs `alembic upgrade head` on startup.
+
+This will:
+- Enable TimescaleDB extension (via `setup_db.py` or existing DB)
+- Create or migrate tables (`trades`, `positions`, `trade_outcomes`, `entry_decisions`, `analytics_rollups`, …)
+- Convert time-series tables to hypertables when using `setup_db.py`
 - Create necessary indexes
 
 **Troubleshooting**:
