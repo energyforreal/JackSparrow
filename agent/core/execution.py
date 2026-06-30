@@ -1269,17 +1269,33 @@ class ExecutionEngine:
 
             # Execute the order (optional atomic bracket SL/TP on Delta)
             ref_px = trade.get("reference_price") or trade.get("price") or price
-            order_result = await self._place_order(
-                symbol=symbol,
-                side=side,
-                quantity=quantity,
-                order_type=order_type,
-                price=price,
-                bracket_stop_loss_price=float(stop_loss) if stop_loss is not None else None,
-                bracket_take_profit_price=float(take_profit) if take_profit is not None else None,
-                reference_price=float(ref_px) if ref_px is not None else None,
-                idempotency_key=trade.get("idempotency_key") or trade.get("correlation_id"),
+            use_limit_entry = (
+                bool(getattr(settings, "entry_limit_order_enabled", False))
+                and str(order_type or "market").lower() == "market"
             )
+            if use_limit_entry:
+                order_result = await self._execute_limit_entry_with_fallback(
+                    trade,
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    reference_price=float(ref_px) if ref_px is not None else None,
+                    idempotency_key=trade.get("idempotency_key") or trade.get("correlation_id"),
+                )
+            else:
+                order_result = await self._place_order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    order_type=order_type,
+                    price=price,
+                    bracket_stop_loss_price=float(stop_loss) if stop_loss is not None else None,
+                    bracket_take_profit_price=float(take_profit) if take_profit is not None else None,
+                    reference_price=float(ref_px) if ref_px is not None else None,
+                    idempotency_key=trade.get("idempotency_key") or trade.get("correlation_id"),
+                )
 
             if not order_result["success"]:
                 return ExecutionResult(False, error_message=order_result["error"])
@@ -1631,6 +1647,18 @@ class ExecutionEngine:
                     payload_data["predicted_signal"] = predicted_signal
                 if entry_time is not None:
                     payload_data["entry_time"] = entry_time
+                elif position.get("entry_time") is not None:
+                    payload_data["entry_time"] = position.get("entry_time")
+                    logger.warning(
+                        "position_close_entry_time_recovered_from_position",
+                        symbol=symbol,
+                    )
+                else:
+                    logger.warning(
+                        "position_close_missing_entry_time",
+                        symbol=symbol,
+                        position_id=position_id,
+                    )
                 if memory_context_id is not None:
                     payload_data["memory_context_id"] = memory_context_id
                 if agent_introspection_at_entry is not None:
@@ -1639,13 +1667,21 @@ class ExecutionEngine:
                     )
                 if confidence_at_entry is not None:
                     payload_data["confidence_at_entry"] = confidence_at_entry
+                lifecycle_exit = position.get("lifecycle_exit")
+                if isinstance(lifecycle_exit, dict):
+                    payload_data["lifecycle_exit"] = lifecycle_exit
                 entry_snap = position.get("entry_decision_snapshot")
                 if isinstance(entry_snap, dict):
                     payload_data["entry_decision_snapshot"] = entry_snap
                     try:
                         from agent.persistence.trade_snapshot import (
+                            build_entry_state_summary,
                             merge_close_fields,
                             reconstruct_market_context_from_snapshot,
+                        )
+
+                        payload_data["entry_state_summary"] = build_entry_state_summary(
+                            entry_snap, position
                         )
 
                         payload_data["market_context"] = (
@@ -2806,6 +2842,186 @@ class ExecutionEngine:
             return "MARKET"
         return "MARKET"
 
+    async def _execute_limit_entry_with_fallback(
+        self,
+        trade: Dict[str, Any],
+        *,
+        symbol: str,
+        side: str,
+        quantity: float,
+        stop_loss: Optional[float],
+        take_profit: Optional[float],
+        reference_price: Optional[float],
+        idempotency_key: Optional[str],
+    ) -> Dict[str, Any]:
+        """Post-only limit entry with timeout, optional revalidation, and market fallback."""
+        import time as time_mod
+
+        t0 = time_mod.perf_counter()
+        timeout = float(getattr(settings, "entry_limit_timeout_seconds", 10.0) or 10.0)
+        post_only = bool(getattr(settings, "entry_limit_post_only", True))
+        max_reprices = int(getattr(settings, "entry_limit_max_reprices", 2) or 2)
+        reprice_enabled = bool(getattr(settings, "entry_limit_reprice_enabled", False))
+
+        ref = reference_price
+        try:
+            ref = float(ref) if ref is not None else None
+        except (TypeError, ValueError):
+            ref = None
+        if ref is None or ref <= 0:
+            return {"success": False, "error": "Limit entry requires a positive reference_price"}
+
+        pex = trade.get("position_extras") or {}
+        tick_sz: Optional[float] = None
+        if pex.get("tick_size") is not None:
+            try:
+                tick_sz = float(pex["tick_size"])
+            except (TypeError, ValueError):
+                tick_sz = None
+
+        def _limit_px(px: float) -> float:
+            if side.lower() == "buy":
+                candidate = px * 0.9999
+            else:
+                candidate = px * 1.0001
+            if tick_sz and tick_sz > 0:
+                from agent.core.futures_utils import round_to_tick
+
+                return round_to_tick(candidate, tick_sz)
+            return candidate
+
+        limit_price = _limit_px(ref)
+        reprices = 0
+
+        def _audit(event: str, **kwargs: Any) -> None:
+            try:
+                from agent.core.signal_audit_md import append_limit_entry_event
+
+                append_limit_entry_event(symbol=symbol, event=event, **kwargs)
+            except Exception:
+                pass
+
+        _audit("submitted", limit_price=limit_price)
+        logger.info(
+            "limit_entry_submitted",
+            symbol=symbol,
+            side=side,
+            limit_price=limit_price,
+            post_only=post_only,
+        )
+
+        order_result = await self._place_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type="limit",
+            price=limit_price,
+            bracket_stop_loss_price=float(stop_loss) if stop_loss is not None else None,
+            bracket_take_profit_price=float(take_profit) if take_profit is not None else None,
+            reference_price=ref,
+            idempotency_key=idempotency_key,
+            post_only=post_only,
+        )
+
+        if not order_result.get("success"):
+            return order_result
+
+        exchange_id = order_result.get("exchange_order_id")
+        poll_interval = max(0.5, timeout / 10.0)
+        attempts = max(1, int(timeout / poll_interval))
+        filled = bool(order_result.get("filled_immediately"))
+
+        while not filled and reprices <= max_reprices:
+            polled_qty, polled_px, polled_state = await self._poll_order_fill_status(
+                symbol=symbol,
+                exchange_order_id=exchange_id,
+                requested_qty=quantity,
+                attempts=attempts,
+                delay_seconds=poll_interval,
+            )
+            if polled_qty >= quantity * 0.999:
+                filled = True
+                if polled_px is not None:
+                    order_result["average_fill_price"] = polled_px
+                order_result["filled_quantity"] = polled_qty
+                order_result["filled_immediately"] = True
+                break
+            elapsed = time_mod.perf_counter() - t0
+            if elapsed >= timeout:
+                break
+            if reprice_enabled and reprices < max_reprices:
+                await self.cancel_order(str(order_result.get("order_id", "")), symbol=symbol)
+                reprices += 1
+                limit_price = _limit_px(ref)
+                order_result = await self._place_order(
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    order_type="limit",
+                    price=limit_price,
+                    reference_price=ref,
+                    idempotency_key=idempotency_key,
+                    post_only=post_only,
+                )
+                if not order_result.get("success"):
+                    return order_result
+                exchange_id = order_result.get("exchange_order_id")
+                continue
+            await asyncio.sleep(poll_interval)
+
+        latency_ms = (time_mod.perf_counter() - t0) * 1000.0
+
+        if filled:
+            _audit(
+                "filled",
+                limit_price=limit_price,
+                fill_price=order_result.get("average_fill_price"),
+                latency_ms=latency_ms,
+            )
+            logger.info(
+                "limit_entry_filled",
+                symbol=symbol,
+                latency_ms=latency_ms,
+                reprices=reprices,
+            )
+            order_result["limit_entry_maker"] = post_only
+            return order_result
+
+        await self.cancel_order(str(order_result.get("order_id", "")), symbol=symbol)
+        _audit("timeout", limit_price=limit_price, latency_ms=latency_ms)
+        logger.info("limit_entry_timeout", symbol=symbol, latency_ms=latency_ms)
+
+        revalidate = bool(getattr(settings, "entry_limit_revalidate_signal", True))
+        signal_ok = trade.get("signal_still_valid", True)
+        if revalidate and not signal_ok:
+            _audit("abandoned", detail="signal_no_longer_valid")
+            logger.info("limit_entry_abandoned", symbol=symbol, reason="signal_invalid")
+            return {
+                "success": False,
+                "error": "Limit entry timeout; signal no longer valid",
+                "limit_entry_abandoned": True,
+            }
+
+        if bool(getattr(settings, "entry_limit_fallback_to_market", True)):
+            _audit("fallback_market", detail="timeout_revalidated")
+            logger.info("limit_entry_fallback_market", symbol=symbol)
+            return await self._place_order(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type="market",
+                bracket_stop_loss_price=float(stop_loss) if stop_loss is not None else None,
+                bracket_take_profit_price=float(take_profit) if take_profit is not None else None,
+                reference_price=ref,
+                idempotency_key=idempotency_key,
+            )
+
+        return {
+            "success": False,
+            "error": "Limit entry timeout; fallback disabled",
+            "limit_entry_abandoned": True,
+        }
+
     async def _place_order(
         self,
         symbol: str,
@@ -2821,6 +3037,7 @@ class ExecutionEngine:
         leverage: Optional[int] = None,
         reference_price: Optional[float] = None,
         idempotency_key: Optional[str] = None,
+        post_only: bool = False,
     ) -> Dict[str, Any]:
         """Place market/limit/stop orders on Delta testnet via delta_client."""
         try:
@@ -2918,6 +3135,7 @@ class ExecutionEngine:
                         stop_price=trigger_price,
                         reduce_only=reduce_only,
                         client_order_id=client_order_id,
+                        post_only=post_only,
                     )
             else:
                 result = await self.delta_client.place_order(
@@ -2929,6 +3147,7 @@ class ExecutionEngine:
                     stop_price=trigger_price,
                     reduce_only=reduce_only,
                     client_order_id=client_order_id,
+                    post_only=post_only,
                 )
             order_obj = self._parse_delta_order_result(result)
             exchange_order_id = order_obj.get("id")

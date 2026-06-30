@@ -812,6 +812,7 @@ class DeltaExchangeClient:
         reduce_only: bool = False,
         client_order_id: Optional[str] = None,
         use_product_symbol_only: bool = False,
+        post_only: bool = False,
     ) -> Dict[str, Any]:
         """Place order on Delta Exchange (live/testnet)."""
         if quantity != int(quantity):
@@ -846,6 +847,8 @@ class DeltaExchangeClient:
             data["client_order_id"] = str(client_order_id)[:32]
         if delta_order_type == "limit_order" and price is not None:
             data["limit_price"] = str(price)
+        if post_only:
+            data["post_only"] = "true"
         if stop_price is not None:
             data["stop_price"] = str(stop_price)
             data["stop_order_type"] = str(stop_order_type or "stop_loss_order")

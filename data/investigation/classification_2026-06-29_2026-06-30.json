@@ -1,0 +1,323 @@
+{
+  "summary": {
+    "health_threshold": {
+      "count": 31,
+      "wins": 0,
+      "win_rate_pct": 0.0,
+      "total_pnl": 0,
+      "avg_pnl": 0
+    }
+  },
+  "rows": [
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "e849af27-36ab-4b02-85d9-795e7d123ac9",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "a12b1b06-4cf6-4b17-8e9f-1ddb129c3f96",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "a684c2fd-af46-4248-8af5-0353c93c057b",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "aaed0eeb-58a5-402e-9eca-744a14a6b228",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "485cb3b9-15d4-403e-be53-dcfd205c45af",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "4f071a00-253f-4c18-a24c-935fd93a5116",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 38.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "20218144-c04e-405e-ba75-7ab818f531b2",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "11491b64-b7c5-4063-9ce4-d7c57616f825",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "5ce5f5ed-8120-4099-b8d3-b517a3db40e9",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "bec9aff8-9247-4a8a-82ab-d2c5c606f746",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "4838e9aa-95f2-4719-b16c-fb10883d924b",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "2f96a089-72a4-4129-be69-3ad6de033bc3",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "262f7f51-fa18-4ea5-9b39-35cf8a65856d",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "2c33b9b0-43aa-44d1-9572-b9a6d7f2b482",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "6652e7a3-dbd3-40d2-96b2-e0bbd44e7eb3",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "b8a56089-1e6d-483e-a010-551f75a8cbac",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "acc9d221-d2f2-41b9-abdf-6b10fbb0b686",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "782f0e67-c452-4659-b7bc-86dbfb7f075d",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "3becfb44-baf0-4e48-810a-e6d2b3f9bd21",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "4cd25c42-0175-40dd-9c9c-52efef2d86b0",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "55188984-813f-4b43-afb9-4f1ba5390d72",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "c58439fa-4f78-44f2-89d0-98cddd11a6b6",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "3933d9f7-f72e-4c10-8f21-7376a3ea18cf",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "829ef7f0-d564-4696-be12-d2ef22bb7a73",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "54d6807b-345d-49e9-9d68-2b7af9718504",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "6d0c8c67-fc45-454c-80b0-1d662a102117",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 25.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "951159b7-9734-48d9-8012-26f3321d58f4",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 15.0,
+      "opportunity": 50.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "abc1c092-ccda-4db4-82ba-9ec5c0b30d3f",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "83db3fba-3864-49a6-ad31-3bb48f7f4d34",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "4aec3397-e2c5-4791-ad0a-d249fdc2142b",
+      "source": "audit_log"
+    },
+    {
+      "symbol": "BTCUSD",
+      "health": 48.0,
+      "opportunity": 65.0,
+      "detail": "health_below_exit_threshold",
+      "trigger": "health_threshold",
+      "utc": "",
+      "event_id": "d3c7f36d-3d43-49a9-80d5-696e3e6b394a",
+      "source": "audit_log"
+    }
+  ]
+}

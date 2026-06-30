@@ -1602,6 +1602,19 @@ class TradingEventHandler:
         )
 
         if verdict.action == "EXIT":
+            open_pos["lifecycle_exit"] = {
+                "exit_trigger": verdict.exit_trigger,
+                "exit_flags": dict(verdict.exit_flags),
+                "exit_reason_detail": verdict.exit_reason_detail,
+                "health_score": verdict.health_score,
+                "opportunity_score": verdict.opportunity_score,
+                "health_breakdown": dict(verdict.health_breakdown),
+                "invalidation_reasons": list(verdict.invalidation_reasons),
+                "opportunity_reasons": list(verdict.opportunity_reasons),
+                "conviction_at_entry": verdict.conviction_at_entry,
+                "conviction_now": verdict.conviction_now,
+                "conviction_delta": verdict.conviction_delta,
+            }
             close_result = await self.execution_module.close_position(
                 symbol, exit_reason="lifecycle_exit"
             )

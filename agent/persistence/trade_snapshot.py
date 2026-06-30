@@ -255,6 +255,36 @@ def build_entry_snapshot(
     return enforce_snapshot_size_cap(snap)
 
 
+def build_entry_state_summary(
+    entry_snapshot: Dict[str, Any],
+    position: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Normalized entry fields for analytics without deep JSON traversal."""
+    dc = (
+        entry_snapshot.get("decision_context")
+        if isinstance(entry_snapshot.get("decision_context"), dict)
+        else entry_snapshot
+    )
+    if not isinstance(dc, dict):
+        dc = {}
+    rb = dc.get("rule_based_pipeline") if isinstance(dc.get("rule_based_pipeline"), dict) else {}
+    mstate = rb.get("market_state") if isinstance(rb.get("market_state"), dict) else {}
+    fsm = rb.get("fsm_decision") if isinstance(rb.get("fsm_decision"), dict) else {}
+    pos = position or {}
+    summary: Dict[str, Any] = {
+        "confidence": dc.get("confidence"),
+        "conviction": dc.get("conviction_at_entry") or pos.get("conviction_at_entry"),
+        "regime": mstate.get("regime") or dc.get("regime"),
+        "signal": dc.get("signal") or dc.get("side"),
+        "fsm_thesis_health": fsm.get("thesis_health"),
+        "structural_confidence": rb.get("structural_confidence"),
+        "entry_lots": dc.get("entry_lots") or pos.get("lots") or pos.get("quantity"),
+        "stop_loss_at_entry": dc.get("stop_loss_at_entry") or pos.get("stop_loss_at_entry"),
+        "take_profit_at_entry": dc.get("take_profit_at_entry") or pos.get("take_profit_at_entry"),
+    }
+    return {k: v for k, v in summary.items() if v is not None}
+
+
 def merge_close_fields(
     entry_snapshot: Dict[str, Any],
     close_payload: Dict[str, Any],
@@ -283,6 +313,14 @@ def merge_close_fields(
     reflection = close_payload.get("reflection_snapshot")
     if isinstance(reflection, dict):
         outcome["reflection_snapshot"] = reflection
+    lifecycle_exit = close_payload.get("lifecycle_exit")
+    if isinstance(lifecycle_exit, dict):
+        outcome["lifecycle_exit"] = lifecycle_exit
+    entry_summary = close_payload.get("entry_state_summary")
+    if isinstance(entry_summary, dict):
+        merged["entry_state_summary"] = entry_summary
+    elif entry_snapshot:
+        merged["entry_state_summary"] = build_entry_state_summary(entry_snapshot)
     merged["outcome"] = outcome
 
     timing = merged.get("execution_timing")

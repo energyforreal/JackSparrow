@@ -1,0 +1,43 @@
+{
+  "captured_at": "2026-06-30T06:39:55.762123+00:00",
+  "window": {
+    "start": "2026-06-29",
+    "end": "2026-06-30"
+  },
+  "data_gaps": [
+    "opened_at NULL on 38/38 rows"
+  ],
+  "trades": {
+    "count": 38,
+    "wins": 3,
+    "win_rate_pct": 7.89,
+    "total_pnl_usd": -24.7342,
+    "avg_pnl_usd": -0.6509,
+    "fee_dominated_count": 20,
+    "avg_fees_usd": 0.6446
+  },
+  "by_close_reason": [
+    {
+      "close_reason": "lifecycle_exit",
+      "count": 31,
+      "total_pnl": -20.5667
+    },
+    {
+      "close_reason": "stop_loss_hit",
+      "count": 6,
+      "total_pnl": -6.3942
+    },
+    {
+      "close_reason": "reconcile_exchange_flat",
+      "count": 1,
+      "total_pnl": 2.2267
+    }
+  ],
+  "exit_triggers_audit_heuristic": {
+    "health_threshold": 31
+  },
+  "mfe_mae": {
+    "status": "partial_price_delta_only",
+    "note": "Full MFE/MAE via replay_trade_excursions.py"
+  }
+}

@@ -221,6 +221,32 @@ def append_trade_lifecycle_verdict(
     _append_raw(line)
 
 
+def append_limit_entry_event(
+    *,
+    symbol: str,
+    event: str,
+    limit_price: Optional[float] = None,
+    fill_price: Optional[float] = None,
+    latency_ms: Optional[float] = None,
+    detail: str = "",
+) -> None:
+    """Audit limit-entry workflow events (submitted, filled, timeout, abandoned)."""
+    ts_ist, ts_utc = _audit_ts_pair()
+    line = (
+        f"- **{ts_ist}** | `limit_entry` | event=`{event}` | symbol={symbol} | utc=`{ts_utc}`"
+    )
+    if limit_price is not None:
+        line += f" | limit_price={limit_price}"
+    if fill_price is not None:
+        line += f" | fill_price={fill_price}"
+    if latency_ms is not None:
+        line += f" | latency_ms={latency_ms:.1f}"
+    if detail:
+        line += f" | detail=`{detail}`"
+    line += "\n"
+    _append_raw(line)
+
+
 def append_position_close(
     *,
     position_id: str,

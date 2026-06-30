@@ -21,6 +21,15 @@ from agent.core.signal_vocabulary import is_long_signal, is_short_signal, normal
 
 LifecycleAction = Literal["HOLD", "TIGHTEN_SL", "MODIFY_TP", "EXIT"]
 TpDirection = Literal["extend", "reduce"]
+ExitTrigger = Literal[
+    "",
+    "opposite_signal",
+    "ml_reversal",
+    "health_threshold",
+    "fsm_broken",
+    "health_and_fsm",
+    "hard_exit_unknown",
+]
 
 
 @dataclass
@@ -40,6 +49,9 @@ class LifecycleVerdict:
     tp_direction: Optional[TpDirection] = None
     tp_reason: str = ""
     exit_reason_detail: str = ""
+    exit_trigger: ExitTrigger = ""
+    exit_flags: Dict[str, bool] = field(default_factory=dict)
+    health_breakdown: Dict[str, Any] = field(default_factory=dict)
     continuation: Optional[ContinuationResult] = None
     secondary_action: Optional[LifecycleAction] = None
     secondary_new_take_profit: Optional[float] = None
@@ -56,6 +68,12 @@ class LifecycleVerdict:
             "opportunity_reasons": list(self.opportunity_reasons),
             "exit_reason_detail": self.exit_reason_detail,
         }
+        if self.exit_trigger:
+            out["exit_trigger"] = self.exit_trigger
+        if self.exit_flags:
+            out["exit_flags"] = dict(self.exit_flags)
+        if self.health_breakdown:
+            out["health_breakdown"] = dict(self.health_breakdown)
         if self.tighten_stop_to is not None:
             out["tighten_stop_to"] = self.tighten_stop_to
         if self.new_take_profit is not None:
@@ -153,41 +171,87 @@ def _compute_health_score(
     flip_score: float,
     live_mc: Dict[str, Any],
     opposite: bool,
-) -> Tuple[float, List[str]]:
-    """0-100 risk score (higher = healthier)."""
-    score = 100.0 * continuation.alignment
+) -> Tuple[float, List[str], Dict[str, Any]]:
+    """0-100 risk score (higher = healthier) with component breakdown."""
+    alignment_base = 100.0 * continuation.alignment
+    score = alignment_base
     reasons: List[str] = list(continuation.invalidation_codes)
+    penalties: Dict[str, float] = {}
 
     exit_delta = float(
         getattr(settings, "trade_lifecycle_conviction_exit_delta", -0.25) or -0.25
     )
     if conviction_delta <= exit_delta:
         reasons.append(f"conviction_drop:{conviction_delta:.3f}")
+        penalties["conviction_drop"] = -25.0
         score -= 25.0
 
     flip_exit = float(getattr(settings, "trade_lifecycle_flip_exit_score", 0.70) or 0.70)
     if flip_score >= flip_exit:
         reasons.append(f"flip_risk:{flip_score:.3f}")
+        penalties["flip_risk"] = -20.0
         score -= 20.0
     elif flip_score >= flip_exit * 0.75:
+        penalties["flip_risk_elevated"] = -10.0
         score -= 10.0
 
     fsm = (live_mc.get("rule_based_pipeline") or {}).get("fsm_decision")
     if isinstance(fsm, dict):
         if fsm.get("exit_signal"):
             reasons.append("fsm_exit_signal")
+            penalties["fsm_exit_signal"] = -15.0
             score -= 15.0
         health = str(fsm.get("thesis_health") or "").lower()
         if health == "broken":
+            penalties["fsm_thesis_broken"] = -20.0
             score -= 20.0
         elif health == "weakening":
+            penalties["fsm_thesis_weakening"] = -10.0
             score -= 10.0
 
     if opposite:
         reasons.append("opposite_or_ml_reversal")
+        penalties["opposite_or_ml_reversal"] = -30.0
         score -= 30.0
 
-    return max(0.0, min(100.0, score)), reasons
+    final = max(0.0, min(100.0, score))
+    breakdown: Dict[str, Any] = {
+        "alignment_base": round(alignment_base, 2),
+        "penalties": {k: round(v, 2) for k, v in penalties.items()},
+        "final": round(final, 2),
+        "invalidation_codes": list(continuation.invalidation_codes),
+    }
+    return final, reasons, breakdown
+
+
+def _resolve_exit_trigger_and_detail(
+    *,
+    opposite: bool,
+    opp_reason: str,
+    health: float,
+    exit_max: float,
+    fsm_broken: bool,
+) -> Tuple[ExitTrigger, str, Dict[str, bool]]:
+    """Map hard-exit inputs to structured trigger, detail string, and flags."""
+    health_below = health < exit_max
+    flags: Dict[str, bool] = {
+        "opposite": opposite,
+        "health_below_exit_max": health_below,
+        "fsm_thesis_broken": fsm_broken,
+        "ml_reversal": opposite and opp_reason.startswith("ml_reversal"),
+    }
+
+    if opposite:
+        if opp_reason.startswith("ml_reversal"):
+            return "ml_reversal", opp_reason, flags
+        return "opposite_signal", opp_reason or "opposite_entry_signal", flags
+    if health_below and fsm_broken:
+        return "health_and_fsm", "health_and_fsm_thesis_broken", flags
+    if fsm_broken:
+        return "fsm_broken", "fsm_thesis_broken", flags
+    if health_below:
+        return "health_threshold", "health_below_exit_threshold", flags
+    return "hard_exit_unknown", "hard_exit_unknown", flags
 
 
 def _compute_opportunity_score(
@@ -407,7 +471,7 @@ def evaluate_lifecycle(
     flip_score = _flip_score(live_mc, pos_side, symbol)
     opposite, opp_reason = _opposite_signal_inputs(live_mc, pos_side)
 
-    health, inv_reasons = _compute_health_score(
+    health, inv_reasons, health_breakdown = _compute_health_score(
         continuation, conviction_delta, flip_score, live_mc, opposite
     )
     opportunity, opp_reasons = _compute_opportunity_score(
@@ -424,13 +488,22 @@ def evaluate_lifecycle(
         getattr(settings, "trade_lifecycle_opportunity_reduce_min", 40.0) or 40.0
     )
     fsm_broken_exit = bool(getattr(settings, "trade_lifecycle_fsm_broken_exit", True))
+    fsm_broken = (
+        fsm_broken_exit and "fsm_thesis_broken" in continuation.invalidation_codes
+    )
 
     hard_exit = opposite or health < exit_max
-    if fsm_broken_exit and "fsm_thesis_broken" in continuation.invalidation_codes:
+    if fsm_broken:
         hard_exit = True
 
     if hard_exit:
-        detail = opp_reason if opposite else "health_below_exit_threshold"
+        exit_trigger, detail, exit_flags = _resolve_exit_trigger_and_detail(
+            opposite=opposite,
+            opp_reason=opp_reason,
+            health=health,
+            exit_max=exit_max,
+            fsm_broken=fsm_broken,
+        )
         return LifecycleVerdict(
             action="EXIT",
             health_score=health,
@@ -441,6 +514,9 @@ def evaluate_lifecycle(
             invalidation_reasons=inv_reasons,
             opportunity_reasons=opp_reasons,
             exit_reason_detail=detail,
+            exit_trigger=exit_trigger,
+            exit_flags=exit_flags,
+            health_breakdown=health_breakdown,
             continuation=continuation,
         )
 
@@ -490,6 +566,7 @@ def evaluate_lifecycle(
             conviction_delta=conviction_delta,
             invalidation_reasons=inv_reasons,
             opportunity_reasons=opp_reasons,
+            health_breakdown=health_breakdown,
             tighten_stop_to=tighten_stop,
             new_take_profit=new_tp,
             tp_direction=tp_dir,
@@ -509,6 +586,7 @@ def evaluate_lifecycle(
             conviction_delta=conviction_delta,
             invalidation_reasons=inv_reasons,
             opportunity_reasons=opp_reasons,
+            health_breakdown=health_breakdown,
             new_take_profit=new_tp,
             tp_direction=tp_dir,
             tp_reason=tp_reason,
@@ -524,5 +602,6 @@ def evaluate_lifecycle(
         conviction_delta=conviction_delta,
         invalidation_reasons=inv_reasons,
         opportunity_reasons=opp_reasons,
+        health_breakdown=health_breakdown,
         continuation=continuation,
     )

@@ -107,6 +107,40 @@ def test_lifecycle_exit_broken_thesis(mock_settings) -> None:
     )
     verdict = evaluate_lifecycle(_position(), _snapshot(), mc)
     assert verdict.action == "EXIT"
+    assert verdict.exit_trigger in ("fsm_broken", "health_and_fsm")
+    assert "fsm" in verdict.exit_reason_detail
+
+
+def test_lifecycle_exit_health_only(mock_settings) -> None:
+    mc = _live_mc(
+        policy_verdict={"conviction": 0.2, "signal": "HOLD"},
+        features={"adx_14": 10.0, "rsi_14": 35.0, "ema_9": 95.0, "ema_21": 100.0, "atr_14": 2.0},
+    )
+    verdict = evaluate_lifecycle(_position(), _snapshot(), mc)
+    assert verdict.action == "EXIT"
+    assert verdict.exit_trigger == "health_threshold"
+    assert verdict.exit_reason_detail == "health_below_exit_threshold"
+
+
+def test_lifecycle_exit_health_and_fsm(mock_settings) -> None:
+    mc = _live_mc(
+        policy_verdict={"conviction": 0.2, "signal": "HOLD"},
+        features={"adx_14": 10.0, "rsi_14": 35.0, "ema_9": 95.0, "ema_21": 100.0, "atr_14": 2.0},
+        rule_based_pipeline={
+            "fsm_decision": {"thesis_health": "broken", "exit_signal": True},
+        },
+    )
+    verdict = evaluate_lifecycle(_position(), _snapshot(), mc)
+    assert verdict.action == "EXIT"
+    assert verdict.exit_trigger == "health_and_fsm"
+    assert verdict.exit_reason_detail == "health_and_fsm_thesis_broken"
+
+
+def test_lifecycle_health_breakdown_present(mock_settings) -> None:
+    verdict = evaluate_lifecycle(_position(), _snapshot(), _live_mc())
+    assert verdict.health_breakdown
+    assert "final" in verdict.health_breakdown
+    assert verdict.health_breakdown["final"] == verdict.health_score
 
 
 def test_lifecycle_modify_tp_extend(mock_settings) -> None:

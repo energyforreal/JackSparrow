@@ -1671,6 +1671,43 @@ class Settings(BaseSettings):
         ge=0.0,
         description="Minimum relative TP change before MODIFY_TP executes.",
     )
+    entry_limit_order_enabled: bool = Field(
+        default=False,
+        env="ENTRY_LIMIT_ORDER_ENABLED",
+        description="Use post-only limit orders for entries with timeout and optional market fallback.",
+    )
+    entry_limit_timeout_seconds: float = Field(
+        default=10.0,
+        env="ENTRY_LIMIT_TIMEOUT_SECONDS",
+        ge=1.0,
+        description="Max seconds to wait for limit entry fill before cancel/ fallback.",
+    )
+    entry_limit_post_only: bool = Field(
+        default=True,
+        env="ENTRY_LIMIT_POST_ONLY",
+        description="Submit entry limits as post-only (maker) orders.",
+    )
+    entry_limit_reprice_enabled: bool = Field(
+        default=False,
+        env="ENTRY_LIMIT_REPRICE_ENABLED",
+        description="Cancel and replace limit entry when book moves beyond tick threshold.",
+    )
+    entry_limit_fallback_to_market: bool = Field(
+        default=True,
+        env="ENTRY_LIMIT_FALLBACK_TO_MARKET",
+        description="Fall back to market entry after limit timeout if signal still valid.",
+    )
+    entry_limit_revalidate_signal: bool = Field(
+        default=True,
+        env="ENTRY_LIMIT_REVALIDATE_SIGNAL",
+        description="Require signal_still_valid on trade before market fallback.",
+    )
+    entry_limit_max_reprices: int = Field(
+        default=2,
+        env="ENTRY_LIMIT_MAX_REPRICES",
+        ge=0,
+        description="Max cancel/replace cycles per limit entry attempt.",
+    )
     websocket_sl_tp_enabled: bool = Field(
         default=True,
         env="WEBSOCKET_SL_TP_ENABLED",
