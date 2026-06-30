@@ -16,12 +16,14 @@ interface PortfolioSummaryProps {
   portfolio?: Portfolio
   isLoading?: boolean
   isRecovering?: boolean
+  onViewPositions?: () => void
 }
 
 export function PortfolioSummary({
   portfolio,
   isLoading = false,
   isRecovering = false,
+  onViewPositions,
 }: PortfolioSummaryProps) {
   if (isLoading) {
     return (
@@ -193,6 +195,18 @@ export function PortfolioSummary({
             </div>
             <div className="text-xs text-muted-foreground mt-1">
               {portfolio.open_positions || 0} open
+              {(portfolio.open_positions ?? 0) > 0 && onViewPositions && (
+                <>
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={onViewPositions}
+                    className="text-primary underline-offset-2 hover:underline"
+                  >
+                    View positions
+                  </button>
+                </>
+              )}
             </div>
           </div>
           <div>

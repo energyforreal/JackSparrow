@@ -1,12 +1,10 @@
 'use client'
 import dynamic from 'next/dynamic'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import type { ReasoningChain, Signal } from '@/types'
-import { AgentStatus } from './AgentStatus'
 import { PortfolioSummary } from './PortfolioSummary'
 import { Header } from './Header'
-import { SignalIndicator } from './SignalIndicator'
 import { SelfAwarenessPanel } from './SelfAwarenessPanel'
 import { HealthMonitor } from './HealthMonitor'
 import { ActivePositions } from './ActivePositions'
@@ -15,9 +13,9 @@ import { NarrativeTimeline } from './NarrativeTimeline'
 import { RecentTrades } from './RecentTrades'
 import { PerformanceChart } from './PerformanceChart'
 import { LoadingSkeleton } from './LoadingSpinner'
-import { TradingDecision } from './TradingDecision'
 import { RealTimePrice } from './RealTimePrice'
 import { ErrorBoundary } from './ErrorBoundary'
+import { AgentOverviewCard } from './agent-overview/AgentOverviewCard'
 import { useTradingData } from '@/hooks/useTradingData'
 import { apiClient } from '@/services/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -72,6 +70,8 @@ function reasoningChainMetaFromSignal(signal: Signal | null): ReasoningChain | u
 }
 
 export function Dashboard() {
+  const [activeTab, setActiveTab] = useState('overview')
+
   // Use the unified trading data hook - replaces multiple specialized hooks
   const {
     signal,
@@ -80,7 +80,6 @@ export function Dashboard() {
     health,
     agentState,
     isConnected,
-    lastUpdate,
     isLoading,
     isPortfolioLoading,
     isPortfolioRecovering,
@@ -90,7 +89,6 @@ export function Dashboard() {
     error,
     performanceData,
     marketData,
-    syncStatus,
     lastReflection,
     modelEdge,
   } = useTradingData()
@@ -180,7 +178,7 @@ export function Dashboard() {
           </Card>
         )}
 
-        <Tabs defaultValue="overview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4" />
@@ -202,67 +200,44 @@ export function Dashboard() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            {/* Real-Time Price, Agent Status, Signal Indicator, Health Monitor */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <ErrorBoundary>
-                <RealTimePrice
-                  symbol="BTCUSD"
-                  positions={positions}
-                  showPositionImpact={true}
-                  sharedConnected={isConnected}
-                  sharedMarketTick={marketData?.BTCUSD ?? null}
-                />
-              </ErrorBoundary>
-              <ErrorBoundary>
-                <AgentStatus
-                  state={agentState}
-                  lastUpdate={lastUpdate}
-                  isConnected={isConnected}
-                />
-              </ErrorBoundary>
-              <ErrorBoundary>
-                <div className="space-y-1">
-                  <SignalIndicator
-                    signal={signal || undefined}
-                    lastReflection={lastReflection}
-                    modelEdge={modelEdge}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              <div className="lg:col-span-7">
+                <ErrorBoundary>
+                  <AgentOverviewCard
+                    signal={signal}
+                    agentState={agentState}
+                    health={health}
+                    modelConsensus={modelEdge}
+                    isConnected={isConnected}
+                    onOpenAnalysis={() => setActiveTab('analysis')}
                   />
-                  <p className="text-[10px] text-muted-foreground text-center px-1">
-                    Press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">P</kbd> for
-                    prediction
-                  </p>
-                </div>
-              </ErrorBoundary>
-              <ErrorBoundary>
-                <HealthMonitor health={health || undefined} />
-              </ErrorBoundary>
+                </ErrorBoundary>
+              </div>
+              <div className="lg:col-span-5">
+                <ErrorBoundary>
+                  <RealTimePrice
+                    symbol="BTCUSD"
+                    positions={positions}
+                    showPositionImpact={true}
+                    sharedConnected={isConnected}
+                    sharedMarketTick={marketData?.BTCUSD ?? null}
+                  />
+                </ErrorBoundary>
+              </div>
             </div>
 
-            {/* Portfolio Summary */}
             <ErrorBoundary>
               <PortfolioSummary
                 portfolio={portfolio || undefined}
                 isLoading={portfolioBlockLoading}
                 isRecovering={isPortfolioRecovering}
+                onViewPositions={() => setActiveTab('trading')}
               />
             </ErrorBoundary>
           </TabsContent>
 
           {/* Trading Tab */}
           <TabsContent value="trading" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <ErrorBoundary>
-                <MarketStateCard
-                  marketState={signal?.market_state}
-                  fsmState={signal?.fsm_state}
-                  positionLifecycle={signal?.position_lifecycle}
-                />
-              </ErrorBoundary>
-              <ErrorBoundary>
-                <NarrativeTimeline events={signal?.narrative_tail} />
-              </ErrorBoundary>
-            </div>
-            {/* Active Positions and Recent Trades */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <ErrorBoundary>
                 <ActivePositions
@@ -285,15 +260,16 @@ export function Dashboard() {
               </ErrorBoundary>
             </div>
 
-            {/* Trading Decision */}
             <ErrorBoundary>
-              <TradingDecision
-                signal={signal}
-                recentTrade={recentTrades?.[0] || null}
-                exchangeEnvironment={health?.delta_environment ?? health?.trading_mode}
-                usdInrRate={portfolio?.usd_inr_rate}
-                contractValueBtc={portfolio?.contract_value_btc}
+              <MarketStateCard
+                marketState={signal?.market_state}
+                fsmState={signal?.fsm_state}
+                positionLifecycle={signal?.position_lifecycle}
               />
+            </ErrorBoundary>
+
+            <ErrorBoundary>
+              <NarrativeTimeline events={signal?.narrative_tail} />
             </ErrorBoundary>
           </TabsContent>
 

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { EmergencyStopButton } from './EmergencyStopButton'
 import { SystemClock } from './SystemClock'
 import { cn } from '@/lib/utils'
+import { coerceOverallSystemStatus } from '@/lib/healthNormalize'
 import { useTestnetContext } from '@/hooks/useTestnetContext'
 import type { HealthStatus } from '@/types'
 import { Wifi, WifiOff } from 'lucide-react'
@@ -17,6 +18,26 @@ interface HeaderProps {
 
 export function Header({ isConnected = false, health }: HeaderProps) {
   const { isTestnet, testnetConnected } = useTestnetContext(health)
+
+  const healthScore =
+    typeof health?.health_score === 'number'
+      ? health.health_score > 1
+        ? Math.round(health.health_score)
+        : Math.round(health.health_score * 100)
+      : typeof health?.score === 'number'
+        ? health.score > 1
+          ? Math.round(health.score)
+          : Math.round(health.score * 100)
+        : null
+
+  const rollup = health?.status
+    ? coerceOverallSystemStatus(health.status)
+    : healthScore != null && healthScore >= 90
+      ? 'healthy'
+      : healthScore != null && healthScore >= 70
+        ? 'degraded'
+        : null
+
   return (
     <header className="border-b bg-card">
       <div className="container mx-auto flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -42,6 +63,23 @@ export function Header({ isConnected = false, health }: HeaderProps) {
           <SystemClock className="w-full sm:w-auto" />
           <div className="flex flex-wrap items-center gap-2 self-start sm:self-end">
             <EmergencyStopButton />
+            {healthScore != null && rollup && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  'text-xs tabular-nums',
+                  rollup === 'healthy' &&
+                    'border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-300',
+                  rollup === 'degraded' &&
+                    'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+                  rollup === 'unhealthy' &&
+                    'border-destructive/50 bg-destructive/10 text-destructive'
+                )}
+                title="System health score"
+              >
+                Health {healthScore}%
+              </Badge>
+            )}
             {isTestnet && (
               <Badge
                 variant="outline"
