@@ -17,6 +17,9 @@ from agent.intelligence.market_types import RuleBasedPipelineResult
 from agent.intelligence.market_understanding_engine import market_understanding_engine
 from agent.core.structural_gate_engine import structural_gate_engine
 from agent.intelligence.market_state_engine import market_state_engine
+from agent.intelligence.market_validation import validate_market
+from agent.intelligence.regime_benchmark import derive_regime_benchmark
+from agent.intelligence.signal_explainer import explain_signal
 
 logger = structlog.get_logger()
 
@@ -126,6 +129,21 @@ class RuleBasedPipeline:
         conf = _structural_confidence_score(snapshot, gates)
         size_frac = structural_confidence_to_fraction(conf, fsm_decision.entry_signal)
 
+        snapshot.regime_benchmark = derive_regime_benchmark(snapshot.to_dict())
+        mv_result = validate_market(
+            market_state=snapshot.to_dict(),
+            gate_categories=gates.categories,
+        )
+        signal_expl = explain_signal(
+            signal=fsm_decision.entry_signal,
+            structural_confidence=conf,
+            gate_categories=gates.categories,
+            block_reasons=gates.block_reasons,
+            fsm_state=fsm_decision.fsm_state,
+            setup_type=gates.setup_type,
+            market_state=snapshot.to_dict(),
+        )
+
         result = RuleBasedPipelineResult(
             market_state=snapshot,
             narrative_events=new_events,
@@ -134,6 +152,8 @@ class RuleBasedPipeline:
             fsm_decision=fsm_decision,
             structural_confidence=conf,
             position_size_fraction=size_frac,
+            market_validation=mv_result.to_dict(),
+            signal_explanation=signal_expl,
         )
         _emit_cycle_shadow_logs(symbol=symbol, result=result)
         return result

@@ -49,6 +49,7 @@ async def test_lifecycle_exit_closes_position(handler: TradingEventHandler) -> N
 
     with patch("agent.events.handlers.trading_handler.settings") as s:
         s.trade_lifecycle_enabled = True
+        s.trade_lifecycle_log_only = False
         s.exchange_position_reconcile_enabled = False
         with patch(
             "agent.core.trade_lifecycle_engine.evaluate_lifecycle",
@@ -93,6 +94,7 @@ async def test_lifecycle_exit_fall_through_on_reversal_entry(
 
     with patch("agent.events.handlers.trading_handler.settings") as s:
         s.trade_lifecycle_enabled = True
+        s.trade_lifecycle_log_only = False
         s.exchange_position_reconcile_enabled = False
         with patch(
             "agent.core.trade_lifecycle_engine.evaluate_lifecycle",
@@ -136,6 +138,7 @@ async def test_lifecycle_modify_tp(handler: TradingEventHandler) -> None:
 
     with patch("agent.events.handlers.trading_handler.settings") as s:
         s.trade_lifecycle_enabled = True
+        s.trade_lifecycle_log_only = False
         s.exchange_position_reconcile_enabled = False
         with patch(
             "agent.core.trade_lifecycle_engine.evaluate_lifecycle",
@@ -153,6 +156,50 @@ async def test_lifecycle_modify_tp(handler: TradingEventHandler) -> None:
     handler.execution_module.apply_lifecycle_modify_tp.assert_awaited_once_with(
         "BTCUSD", 110.0, "extend"
     )
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_log_only_skips_execution(handler: TradingEventHandler) -> None:
+    handler.execution_module.position_manager.get_position.return_value = {
+        "symbol": "BTCUSD",
+        "side": "long",
+        "status": "open",
+        "conviction_at_entry": 0.8,
+        "entry_decision_snapshot": {"decision_context": {"features": {}}},
+    }
+    handler.execution_module.close_position = AsyncMock()
+
+    verdict = LifecycleVerdict(
+        action="EXIT",
+        health_score=30.0,
+        opportunity_score=20.0,
+        conviction_now=0.3,
+        conviction_at_entry=0.8,
+        conviction_delta=-0.5,
+        exit_reason_detail="health_below_exit_threshold",
+        exit_trigger="health_threshold",
+    )
+
+    with patch("agent.events.handlers.trading_handler.settings") as s:
+        s.trade_lifecycle_enabled = True
+        s.trade_lifecycle_log_only = True
+        s.exchange_position_reconcile_enabled = False
+        with patch(
+            "agent.core.trade_lifecycle_engine.evaluate_lifecycle",
+            return_value=verdict,
+        ):
+            result = await handler._run_trade_lifecycle_if_positioned(
+                symbol="BTCUSD",
+                event_id="evt-log-only",
+                payload={},
+                mc={"rule_based_pipeline": {"market_state": {"trend": "bullish"}}},
+                signal="HOLD",
+            )
+
+    assert result is False
+    handler.execution_module.close_position.assert_not_awaited()
+    pos = handler.execution_module.position_manager.get_position.return_value
+    assert "lifecycle_monitoring" in pos or pos.get("lifecycle_monitoring") is not None
 
 
 @pytest.mark.asyncio

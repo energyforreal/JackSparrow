@@ -376,6 +376,11 @@ Target: >95% of `trade_outcomes` rows with non-empty `rule_based_pipeline` in me
 | Did a config change help? | `GET /api/v1/analytics/performance-by-config` or `config-diff --hash-a X --hash-b Y` |
 | Fill latency after risk approval | `trade_analytics.py timing-summary` (`risk_to_fill_ms` in metadata) |
 | Snapshot schema fields | [Trading persistence model](../reference/trading-persistence-model.md) |
+| Phase readiness gates | `python tools/commands/phase_readiness_gate.py --gate <id>` |
+| TLE agreement before live | `python tools/commands/tle_agreement_score.py` |
+| Economic metrics (Sharpe, DD) | `trade_analytics.py economic-summary` |
+| Experiment cohort status | `python tools/commands/experiment_status.py --id <experiment_id>` |
+| Signal replay robustness | `python tools/commands/replay_signal_context.py` |
 
 ```sql
 SELECT

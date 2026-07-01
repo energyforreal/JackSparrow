@@ -107,3 +107,73 @@ async def get_rollups(
         symbol=symbol,
         limit=limit,
     )
+
+
+@router.get("/attribution-summary")
+async def get_attribution_summary(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Root cause and four-dimension quality breakdown."""
+    return await analytics_service.attribution_summary(
+        db,
+        from_date=_parse_dt(from_date),
+        to_date=_parse_dt(to_date),
+    )
+
+
+@router.get("/trade-quality")
+async def get_trade_quality(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Entry/execution/exit/market quality distributions."""
+    return await analytics_service.trade_quality_distribution(
+        db,
+        from_date=_parse_dt(from_date),
+        to_date=_parse_dt(to_date),
+    )
+
+
+@router.get("/regime-benchmarks")
+async def get_regime_benchmarks(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Performance grouped by regime_benchmark label."""
+    return await analytics_service.regime_benchmark_performance(
+        db,
+        from_date=_parse_dt(from_date),
+        to_date=_parse_dt(to_date),
+    )
+
+
+@router.get("/rule-evaluation")
+async def get_rule_evaluation(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Per-rule stats, interactions, and FP/FN counts."""
+    return await analytics_service.rule_evaluation_report(
+        db,
+        from_date=_parse_dt(from_date),
+        to_date=_parse_dt(to_date),
+    )
+
+
+@router.get("/confidence-calibration")
+async def get_confidence_calibration(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Structural confidence bucket vs actual win rate."""
+    return await analytics_service.confidence_calibration(
+        db,
+        from_date=_parse_dt(from_date),
+        to_date=_parse_dt(to_date),
+    )

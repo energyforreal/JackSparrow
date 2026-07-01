@@ -25,6 +25,7 @@ class MarketStateSnapshot:
     confidence: str = "low"  # low | medium | high
     mtf: Dict[str, str] = field(default_factory=dict)
     direction_bias: str = "HOLD"  # LONG | SHORT | HOLD
+    regime_benchmark: str = "ranging"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -43,6 +44,7 @@ class MarketStateSnapshot:
             "confidence": self.confidence,
             "mtf": dict(self.mtf),
             "direction_bias": self.direction_bias,
+            "regime_benchmark": self.regime_benchmark,
         }
 
     @classmethod
@@ -63,6 +65,7 @@ class MarketStateSnapshot:
             confidence=str(raw.get("confidence") or "low"),
             mtf=dict(raw.get("mtf") or {}),
             direction_bias=str(raw.get("direction_bias") or "HOLD"),
+            regime_benchmark=str(raw.get("regime_benchmark") or "ranging"),
         )
 
 
@@ -145,9 +148,11 @@ class RuleBasedPipelineResult:
     )
     structural_confidence: float = 0.5
     position_size_fraction: float = 0.0
+    market_validation: Optional[Dict[str, Any]] = None
+    signal_explanation: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out = {
             "market_state": self.market_state.to_dict(),
             "narrative_events": [e.to_dict() for e in self.narrative_events],
             "narrative_tail": list(self.narrative_tail),
@@ -156,3 +161,8 @@ class RuleBasedPipelineResult:
             "structural_confidence": self.structural_confidence,
             "position_size_fraction": self.position_size_fraction,
         }
+        if self.market_validation:
+            out["market_validation"] = dict(self.market_validation)
+        if self.signal_explanation:
+            out["signal_explanation"] = dict(self.signal_explanation)
+        return out

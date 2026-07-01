@@ -1670,6 +1670,12 @@ class ExecutionEngine:
                 lifecycle_exit = position.get("lifecycle_exit")
                 if isinstance(lifecycle_exit, dict):
                     payload_data["lifecycle_exit"] = lifecycle_exit
+                monitoring = position.get("lifecycle_monitoring")
+                if isinstance(monitoring, list) and monitoring:
+                    payload_data["position_monitoring"] = monitoring
+                timeline = position.get("market_structure_timeline")
+                if isinstance(timeline, list) and timeline:
+                    payload_data["market_structure_timeline"] = timeline
                 entry_snap = position.get("entry_decision_snapshot")
                 if isinstance(entry_snap, dict):
                     payload_data["entry_decision_snapshot"] = entry_snap

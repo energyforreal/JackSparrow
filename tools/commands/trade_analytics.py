@@ -246,7 +246,236 @@ def cmd_fee_dominance(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def cmd_economic_summary(args: argparse.Namespace) -> int:
+    """Sharpe, Sortino, max drawdown, recovery factor from trade_outcomes."""
+    conn = _connect()
+    if conn is None:
+        return 2
+    date_sql, params = _date_filter_sql(args.start, args.end)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT closed_at, COALESCE(pnl::float, 0) AS pnl
+                FROM trade_outcomes
+                WHERE 1=1 {date_sql}
+                ORDER BY closed_at
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        print("No trades in window.")
+        return 0
+
+    import math
+
+    pnls = [float(r[1]) for r in rows]
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    avg_win = sum(wins) / len(wins) if wins else 0.0
+    avg_loss = abs(sum(losses) / len(losses)) if losses else 0.0
+    expectancy = sum(pnls) / len(pnls)
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
+
+    mean = expectancy
+    var = sum((p - mean) ** 2 for p in pnls) / max(len(pnls) - 1, 1)
+    std = math.sqrt(var) if var > 0 else 0.0
+    sharpe = (mean / std) * math.sqrt(len(pnls)) if std > 0 else 0.0
+
+    downside = [min(0.0, p) for p in pnls]
+    d_var = sum(d ** 2 for d in downside) / max(len(downside) - 1, 1)
+    d_std = math.sqrt(d_var) if d_var > 0 else 0.0
+    sortino = (mean / d_std) * math.sqrt(len(pnls)) if d_std > 0 else 0.0
+
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for p in pnls:
+        cumulative += p
+        peak = max(peak, cumulative)
+        dd = peak - cumulative
+        max_dd = max(max_dd, dd)
+    max_dd_pct = (max_dd / peak * 100.0) if peak > 0 else 0.0
+    recovery_factor = sum(pnls) / max_dd if max_dd > 0 else 0.0
+
+    summary = {
+        "trade_count": len(pnls),
+        "expectancy_per_trade": round(expectancy, 4),
+        "profit_factor": round(profit_factor, 4),
+        "avg_win": round(avg_win, 4),
+        "avg_loss": round(avg_loss, 4),
+        "win_loss_ratio": round(avg_win / avg_loss, 4) if avg_loss > 0 else None,
+        "sharpe_ratio": round(sharpe, 4),
+        "sortino_ratio": round(sortino, 4),
+        "max_drawdown_usd": round(max_dd, 4),
+        "max_drawdown_pct": round(max_dd_pct, 2),
+        "recovery_factor": round(recovery_factor, 4),
+        "net_pnl": round(sum(pnls), 4),
+    }
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+def _fetch_metadata_trades(conn, start: Optional[str], end: Optional[str]) -> List[Dict[str, Any]]:
+    from psycopg2.extras import RealDictCursor
+
+    date_sql, params = _date_filter_sql(start, end)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            f"SELECT pnl, metadata FROM trade_outcomes WHERE 1=1 {date_sql} ORDER BY closed_at",
+            params,
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def cmd_market_validation(args: argparse.Namespace) -> int:
+    conn = _connect()
+    if conn is None:
+        return 2
+    try:
+        trades = _fetch_metadata_trades(conn, args.start, args.end)
+    finally:
+        conn.close()
+    scores: List[float] = []
+    with_mv = 0
+    for row in trades:
+        meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
+        mv = dc.get("market_validation")
+        if isinstance(mv, dict):
+            with_mv += 1
+            try:
+                scores.append(float(mv.get("validation_score") or 0))
+            except (TypeError, ValueError):
+                pass
+    n = len(trades)
+    mean_score = sum(scores) / len(scores) if scores else 0.0
+    print(f"trades={n} with_market_validation={with_mv} mean_validation_score={mean_score:.2f}")
+    return 0
+
+
+def cmd_regime_benchmarks(args: argparse.Namespace) -> int:
+    conn = _connect()
+    if conn is None:
+        return 2
+    try:
+        trades = _fetch_metadata_trades(conn, args.start, args.end)
+    finally:
+        conn.close()
+    buckets: Dict[str, Dict[str, float]] = {}
+    for row in trades:
+        meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
+        bench = dc.get("regime_benchmark")
+        if not bench:
+            rb = dc.get("rule_based_pipeline") if isinstance(dc.get("rule_based_pipeline"), dict) else {}
+            ms = rb.get("market_state") if isinstance(rb.get("market_state"), dict) else {}
+            bench = ms.get("regime_benchmark") or ms.get("regime") or "unknown"
+        key = str(bench)
+        if key not in buckets:
+            buckets[key] = {"count": 0, "wins": 0, "pnl": 0.0}
+        buckets[key]["count"] += 1
+        try:
+            pnl = float(row.get("pnl") or 0)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        buckets[key]["pnl"] += pnl
+        if pnl > 0:
+            buckets[key]["wins"] += 1
+    for key, b in sorted(buckets.items(), key=lambda x: -x[1]["count"]):
+        wr = b["wins"] / b["count"] * 100 if b["count"] else 0
+        print(f"{key:20s}  n={int(b['count']):4d}  win_rate={wr:5.1f}%  pnl={b['pnl']:.4f}")
+    return 0
+
+
+def cmd_signal_explainability(args: argparse.Namespace) -> int:
+    conn = _connect()
+    if conn is None:
+        return 2
+    try:
+        trades = _fetch_metadata_trades(conn, args.start, args.end)
+    finally:
+        conn.close()
+    limit = int(args.limit or 5)
+    shown = 0
+    for row in trades:
+        meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
+        expl = dc.get("signal_explanation")
+        if not isinstance(expl, dict):
+            continue
+        print(json.dumps(expl, indent=2))
+        shown += 1
+        if shown >= limit:
+            break
+    if shown == 0:
+        print("No signal_explanation blocks found in snapshots.")
+    return 0
+
+
+def cmd_rule_evaluation(args: argparse.Namespace) -> int:
+    conn = _connect()
+    if conn is None:
+        return 2
+    try:
+        trades = _fetch_metadata_trades(conn, args.start, args.end)
+    finally:
+        conn.close()
+    from agent.intelligence.rule_evaluation_engine import (
+        evaluate_confidence_calibration,
+        evaluate_rules_from_trades,
+    )
+
+    report = {
+        "rules": evaluate_rules_from_trades(trades),
+        "calibration": evaluate_confidence_calibration(trades),
+    }
+    print(json.dumps(report, indent=2, default=str))
+    return 0
+
+
 def cmd_lifecycle_window(args: argparse.Namespace) -> int:
+    conn = _connect()
+    if conn is None:
+        return 2
+    date_sql, params = _date_filter_sql(args.start, args.end)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                  COUNT(*) AS trades,
+                  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                  ROUND(SUM(COALESCE(pnl::float, 0))::numeric, 4) AS total_net,
+                  ROUND(SUM(COALESCE((metadata->'outcome'->>'gross_pnl_usd')::float, 0))::numeric, 4)
+                    AS total_gross,
+                  ROUND(AVG(quantity::float)::numeric, 2) AS avg_lots
+                FROM trade_outcomes
+                WHERE close_reason = 'lifecycle_exit' {date_sql}
+                """,
+                params,
+            )
+            row = cur.fetchone()
+        if not row or not row[0]:
+            print("No lifecycle_exit trades in window.")
+            return 0
+        trades, wins, total_net, total_gross, avg_lots = row
+        wr = (wins / trades * 100.0) if trades else 0.0
+        print(f"lifecycle_exit trades={trades} wins={wins} win_rate={wr:.1f}%")
+        print(f"total_net_pnl={float(total_net):.4f} total_gross_pnl={float(total_gross):.4f}")
+        print(f"avg_lots={float(avg_lots):.2f}")
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_baseline_capture(args: argparse.Namespace) -> int:
     conn = _connect()
     if conn is None:
         return 2
@@ -398,6 +627,27 @@ def main() -> int:
     bc.add_argument("--audit-log", default=None)
     bc.add_argument("--out", default=None)
 
+    es = sub.add_parser("economic-summary", help="Sharpe, Sortino, drawdown, recovery factor")
+    es.add_argument("--start", default=None)
+    es.add_argument("--end", default=None)
+
+    mv = sub.add_parser("market-validation", help="Market validation score summary")
+    mv.add_argument("--start", default=None)
+    mv.add_argument("--end", default=None)
+
+    rb2 = sub.add_parser("regime-benchmarks", help="Performance by regime_benchmark")
+    rb2.add_argument("--start", default=None)
+    rb2.add_argument("--end", default=None)
+
+    se = sub.add_parser("signal-explainability", help="Sample signal explanation blocks")
+    se.add_argument("--start", default=None)
+    se.add_argument("--end", default=None)
+    se.add_argument("--limit", type=int, default=5)
+
+    re = sub.add_parser("rule-evaluation", help="Per-rule and calibration report")
+    re.add_argument("--start", default=None)
+    re.add_argument("--end", default=None)
+
     args = parser.parse_args()
     handlers = {
         "snapshot-integrity": cmd_snapshot_integrity,
@@ -408,6 +658,11 @@ def main() -> int:
         "fee-dominance": cmd_fee_dominance,
         "lifecycle-window": cmd_lifecycle_window,
         "baseline-capture": cmd_baseline_capture,
+        "economic-summary": cmd_economic_summary,
+        "market-validation": cmd_market_validation,
+        "regime-benchmarks": cmd_regime_benchmarks,
+        "signal-explainability": cmd_signal_explainability,
+        "rule-evaluation": cmd_rule_evaluation,
     }
     return handlers[args.command](args)
 

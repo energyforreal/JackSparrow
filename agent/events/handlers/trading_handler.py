@@ -1564,6 +1564,37 @@ class TradingEventHandler:
         open_pos["last_health_score"] = verdict.health_score
         open_pos["last_opportunity_score"] = verdict.opportunity_score
 
+        try:
+            from datetime import datetime, timezone
+
+            from agent.intelligence.structure_timeline import (
+                build_monitoring_record,
+                condense_structure_timeline,
+            )
+
+            prior_structure = None
+            mon_list = open_pos.get("lifecycle_monitoring")
+            if isinstance(mon_list, list) and mon_list:
+                prior_structure = mon_list[-1].get("structure_state")
+            rec = build_monitoring_record(
+                verdict=verdict,
+                live_mc=live_mc,
+                position=open_pos,
+                prior_structure=prior_structure,
+            )
+            rec["captured_at"] = datetime.now(timezone.utc).isoformat()
+            if not isinstance(mon_list, list):
+                mon_list = []
+            mon_list.append(rec)
+            open_pos["lifecycle_monitoring"] = mon_list[-200:]
+            open_pos["market_structure_timeline"] = condense_structure_timeline(
+                open_pos["lifecycle_monitoring"]
+            )
+        except Exception as mon_exc:
+            logger.debug("lifecycle_monitoring_record_failed", error=str(mon_exc))
+
+        log_only = bool(getattr(settings, "trade_lifecycle_log_only", False))
+
         tp_before = open_pos.get("take_profit")
         try:
             tp_before_f = float(tp_before) if tp_before is not None else None
@@ -1596,6 +1627,9 @@ class TradingEventHandler:
             )
         except Exception as exc:
             logger.debug("trade_lifecycle_audit_append_failed", error=str(exc))
+
+        if log_only:
+            return False
 
         opposite_entry = (pos_side == "long" and is_short_signal(signal)) or (
             pos_side == "short" and is_long_signal(signal)

@@ -139,6 +139,23 @@ See [`.env.example`](../.env.example):
 - `ENTRY_DECISIONS_WRITES_ENABLED`, `TRADE_OUTCOMES_WRITES_ENABLED`
 - `THRESHOLD_ADAPTER_REGIME_AWARE` — segment threshold learning by dominant regime when sample size allows
 - `BUILD_ID` / `GIT_COMMIT` — optional deploy fingerprint in `system_context`
+- `logic_version` — component hashes in `system_context` (`rule_set`, `signal_logic`, `market_validation`, `analysis_engine`, …)
+- `TRADE_LIFECYCLE_LOG_ONLY` — TLE observation mode (see [trade-lifecycle-engine.md](trade-lifecycle-engine.md))
+
+### Intelligence platform fields (snapshot v1 extensions)
+
+| Field | Location | Purpose |
+|-------|----------|---------|
+| `market_validation` | `decision_context` | Pre-trade checks + `validation_score` |
+| `signal_explanation` | `decision_context` | Reasons, rejected rules, FSM, confidence |
+| `regime_benchmark` | `decision_context` / `market_state` | Analytics cohort label |
+| `position_monitoring[]` | root metadata on close | Per-cycle TLE assessments |
+| `market_structure_timeline[]` | root metadata on close | Structure evolution sequence |
+| `post_trade_assessment` | root metadata on close | 4-dimension quality + root cause |
+
+Facade: [`agent/intelligence/trade_analysis_engine.py`](../agent/intelligence/trade_analysis_engine.py) — unified assessment over snapshot.
+
+Experiment registry: [`data/experiments/registry.json`](../data/experiments/registry.json).
 
 ---
 
@@ -153,8 +170,15 @@ Read-only routes under `/api/v1/analytics/` ([`backend/api/routes/analytics.py`]
 | `GET /performance-by-regime` | Win rate / PnL by regime |
 | `GET /performance-by-config` | Compare `config_hash` cohorts |
 | `GET /rollups` | Precomputed daily/regime summaries |
+| `GET /attribution-summary` | Root cause + 4-dimension quality breakdown |
+| `GET /trade-quality` | Entry/execution/exit/market quality distributions |
+| `GET /regime-benchmarks` | Performance by `regime_benchmark` label |
+| `GET /rule-evaluation` | Per-rule stats, interactions, FP/FN |
+| `GET /confidence-calibration` | Structural confidence bucket vs win rate |
 
-CLI: [`tools/commands/trade_analytics.py`](../tools/commands/trade_analytics.py) — `snapshot-integrity`, `reject-breakdown`, `regime-performance`, `config-diff`, `timing-summary`, `archive-verify`.
+CLI: [`tools/commands/trade_analytics.py`](../tools/commands/trade_analytics.py) — `snapshot-integrity`, `reject-breakdown`, `regime-performance`, `config-diff`, `economic-summary`, `market-validation`, `regime-benchmarks`, `signal-explainability`, `rule-evaluation`, `archive-verify`.
+
+Phase gates: [`tools/commands/phase_readiness_gate.py`](../tools/commands/phase_readiness_gate.py).
 
 ---
 

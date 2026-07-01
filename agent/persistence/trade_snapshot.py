@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from agent.core.config import settings
 from agent.core.gate_profile import gate_profile
 from agent.core.logging_utils import get_session_id
+from agent.intelligence.logic_version import get_logic_version
 
 DEFAULT_FEATURE_KEYS: tuple[str, ...] = (
     "atr_14",
@@ -31,7 +32,7 @@ DEFAULT_FEATURE_KEYS: tuple[str, ...] = (
     "volume",
 )
 
-_TRUNCATABLE_KEYS = ("narrative_tail", "features", "confluence_components")
+_TRUNCATABLE_KEYS = ("narrative_tail", "features", "confluence_components", "position_monitoring")
 
 
 def _iso_now() -> str:
@@ -78,6 +79,7 @@ def build_system_context() -> Dict[str, Any]:
     build_id = os.environ.get("BUILD_ID") or os.environ.get("GIT_COMMIT")
     if build_id:
         ctx["build_id"] = str(build_id).strip()[:64]
+    ctx["logic_version"] = get_logic_version()
     return ctx
 
 
@@ -237,6 +239,15 @@ def build_entry_snapshot(
     elif isinstance(mc.get("environment_scores"), dict):
         decision_context["confluence_components"] = dict(mc["environment_scores"])
 
+    rb_full = mc.get("rule_based_pipeline") if isinstance(mc.get("rule_based_pipeline"), dict) else {}
+    if rb_full.get("market_validation"):
+        decision_context["market_validation"] = dict(rb_full["market_validation"])
+    if rb_full.get("signal_explanation"):
+        decision_context["signal_explanation"] = dict(rb_full["signal_explanation"])
+    ms_rb = rb_subset.get("market_state") if isinstance(rb_subset.get("market_state"), dict) else {}
+    if ms_rb.get("regime_benchmark"):
+        decision_context["regime_benchmark"] = ms_rb.get("regime_benchmark")
+
     snap: Dict[str, Any] = {
         "snapshot_version": int(getattr(settings, "trade_snapshot_version", 1) or 1),
         "captured_at": _iso_now(),
@@ -350,6 +361,24 @@ def merge_close_fields(
             pass
     merged["execution_timing"] = timing
 
+    monitoring = close_payload.get("position_monitoring")
+    if isinstance(monitoring, list) and monitoring:
+        merged["position_monitoring"] = monitoring[-200:]
+    timeline = close_payload.get("market_structure_timeline")
+    if isinstance(timeline, list) and timeline:
+        merged["market_structure_timeline"] = timeline
+
+    post_assessment = close_payload.get("post_trade_assessment")
+    if isinstance(post_assessment, dict):
+        merged["post_trade_assessment"] = post_assessment
+    else:
+        try:
+            from agent.intelligence.post_trade_analyzer import analyze_post_trade
+
+            merged["post_trade_assessment"] = analyze_post_trade(merged)
+        except Exception:
+            pass
+
     return enforce_snapshot_size_cap(merged)
 
 
@@ -426,4 +455,7 @@ def enforce_snapshot_size_cap(snapshot: Dict[str, Any]) -> Dict[str, Any]:
 
     if len(_canonical_json(trimmed).encode("utf-8")) > max_bytes:
         trimmed["_truncated"] = True
+        mon = trimmed.get("position_monitoring")
+        if isinstance(mon, list) and len(mon) > 50:
+            trimmed["position_monitoring"] = mon[-50:]
     return trimmed

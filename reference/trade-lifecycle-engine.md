@@ -81,3 +81,22 @@ Persisted at fill and updated each verdict:
 - `take_profit_at_entry`, `stop_loss_at_entry`
 - `last_lifecycle_verdict`, `last_health_score`, `last_opportunity_score`
 - `last_tp_modify_at`
+
+## Observation mode (Phase 2)
+
+Set `TRADE_LIFECYCLE_LOG_ONLY=true` with `TRADE_LIFECYCLE_ENABLED=true` to evaluate and log verdicts **without** executing `EXIT` / `TIGHTEN_SL` / `MODIFY_TP`. Bracket SL/TP remains the live exit path.
+
+Per-cycle records append to `lifecycle_monitoring[]` on the open position and merge into `trade_outcomes.metadata.position_monitoring` on close. Each record includes `health_score`, `opportunity_score`, `action_would_be`, `structure_state`, `structure_transition`, and distance-to-TP/SL estimates.
+
+`market_structure_timeline[]` on close condenses structure evolution (e.g. `bullish → neutral → bearish`).
+
+## Promotion gate (Phase 2b → 3)
+
+Before enabling live TLE (`TRADE_LIFECYCLE_LOG_ONLY=false`), run:
+
+```bash
+python tools/commands/tle_agreement_score.py --start YYYY-MM-DD --end YYYY-MM-DD
+python tools/commands/phase_readiness_gate.py --gate 2b_to_3
+```
+
+Targets: `overall_agreement ≥ 0.80`, `exit_agreement_rate ≥ 0.75`, `opportunity_precision ≥ 0.65`.

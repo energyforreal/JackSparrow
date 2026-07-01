@@ -1590,6 +1590,16 @@ class Settings(BaseSettings):
         env="TRADE_LIFECYCLE_ENABLED",
         description="Enable Trade Lifecycle Engine for post-entry HOLD/TIGHTEN/MODIFY_TP/EXIT.",
     )
+    trade_lifecycle_log_only: bool = Field(
+        default=False,
+        env="TRADE_LIFECYCLE_LOG_ONLY",
+        description="Evaluate TLE and log verdicts without executing lifecycle actions.",
+    )
+    gate_category_weights: Optional[str] = Field(
+        default=None,
+        env="GATE_CATEGORY_WEIGHTS",
+        description="JSON map of gate category weights for composite scoring.",
+    )
     trade_lifecycle_health_hold_min: float = Field(
         default=70.0,
         env="TRADE_LIFECYCLE_HEALTH_HOLD_MIN",

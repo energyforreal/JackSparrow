@@ -5,3 +5,17 @@
 {"event_type": "breakout_attempt", "timestamp": "2026-06-29T04:22:35.015118+00:00", "bar_index": 3, "detail": {}}
 {"event_type": "breakout_confirmed", "timestamp": "2026-06-29T04:22:35.017112+00:00", "bar_index": 4, "detail": {}}
 {"event_type": "retest_successful", "timestamp": "2026-06-29T04:22:35.019112+00:00", "bar_index": 5, "detail": {}}
+{"event_type": "uptrend_begins", "timestamp": "2026-07-01T16:44:35.396214+00:00", "bar_index": 1, "detail": {}}
+{"event_type": "pullback_starts", "timestamp": "2026-07-01T16:44:35.397219+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "pullback_ends", "timestamp": "2026-07-01T16:44:35.398134+00:00", "bar_index": 3, "detail": {}}
+{"event_type": "compression_detected", "timestamp": "2026-07-01T16:44:35.398134+00:00", "bar_index": 3, "detail": {}}
+{"event_type": "breakout_attempt", "timestamp": "2026-07-01T16:44:35.398134+00:00", "bar_index": 3, "detail": {}}
+{"event_type": "breakout_confirmed", "timestamp": "2026-07-01T16:44:35.400190+00:00", "bar_index": 4, "detail": {}}
+{"event_type": "retest_successful", "timestamp": "2026-07-01T16:44:35.401201+00:00", "bar_index": 5, "detail": {}}
+{"event_type": "uptrend_begins", "timestamp": "2026-07-01T16:44:54.458264+00:00", "bar_index": 1, "detail": {}}
+{"event_type": "pullback_starts", "timestamp": "2026-07-01T16:44:54.458264+00:00", "bar_index": 2, "detail": {}}
+{"event_type": "pullback_ends", "timestamp": "2026-07-01T16:44:54.459264+00:00", "bar_index": 3, "detail": {}}
+{"event_type": "compression_detected", "timestamp": "2026-07-01T16:44:54.459264+00:00", "bar_index": 3, "detail": {}}
+{"event_type": "breakout_attempt", "timestamp": "2026-07-01T16:44:54.459264+00:00", "bar_index": 3, "detail": {}}
+{"event_type": "breakout_confirmed", "timestamp": "2026-07-01T16:44:54.461350+00:00", "bar_index": 4, "detail": {}}
+{"event_type": "retest_successful", "timestamp": "2026-07-01T16:44:54.461350+00:00", "bar_index": 5, "detail": {}}

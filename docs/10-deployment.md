@@ -978,6 +978,10 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `STRUCTURAL_GATE_MAX_FAILED_BREAKOUTS` | Narrative veto after N failed breakouts | No | `2` |
 | `STRUCTURAL_GATE_BREAKOUT_REQUIRE_RETEST` | Require retest for breakout setups | No | `true` |
 | `ARCHETYPE_MEMORY_SHADOW` | Archetype similarity hints only (no sizing) | No | `true` |
+| `TRADE_LIFECYCLE_ENABLED` | Enable Trade Lifecycle Engine post-entry | No | `false` |
+| `TRADE_LIFECYCLE_LOG_ONLY` | Log TLE verdicts without executing (Phase 2 observation) | No | `false` |
+| `TRADE_ENTRY_SNAPSHOT_ENABLED` | Persist entry decision snapshots | No | `true` |
+| `GATE_CATEGORY_WEIGHTS` | Optional JSON map for composite gate scoring | No | *(empty)* |
 | `REQUIRE_IC_VALIDATION_FOR_ORDERS` | When `true`, `entry_validation_guard` enforces policy + optional v43 gates before orders | No | `true` |
 | `REQUIRE_ML_SIGNAL_FOR_ORDERS` | **Deprecated alias** for `REQUIRE_IC_VALIDATION_FOR_ORDERS` | No | *(use IC name)* |
 | `REQUIRE_IC_CONSENSUS_ALIGNMENT` | Legacy consensus alignment (non-v43 paths) | No | `false` |

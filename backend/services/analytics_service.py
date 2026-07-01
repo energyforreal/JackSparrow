@@ -168,6 +168,116 @@ class AnalyticsService:
             b["win_rate"] = b["win_count"] / tc if tc else 0.0
         return list(buckets.values())
 
+    async def attribution_summary(
+        self,
+        db: AsyncSession,
+        *,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        rows = await self.list_trade_outcomes(
+            db, from_date=from_date, to_date=to_date, limit=2000, offset=0
+        )
+        causes: Dict[str, int] = {}
+        dimensions: Dict[str, Dict[str, int]] = {
+            "entry_quality": {},
+            "exit_quality": {},
+            "execution_quality": {},
+            "market_conditions": {},
+            "strategy_quality": {},
+        }
+        for row in rows:
+            meta = row.get("metadata") or {}
+            assessment = meta.get("post_trade_assessment") or {}
+            if not isinstance(assessment, dict):
+                continue
+            cause = str(assessment.get("root_cause") or "unknown")
+            causes[cause] = causes.get(cause, 0) + 1
+            for dim in dimensions:
+                val = str(assessment.get(dim) or "unknown")
+                dimensions[dim][val] = dimensions[dim].get(val, 0) + 1
+        return {"root_causes": causes, "dimensions": dimensions, "trade_count": len(rows)}
+
+    async def trade_quality_distribution(
+        self,
+        db: AsyncSession,
+        *,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        return await self.attribution_summary(db, from_date=from_date, to_date=to_date)
+
+    async def regime_benchmark_performance(
+        self,
+        db: AsyncSession,
+        *,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
+        rows = await self.list_trade_outcomes(
+            db, from_date=from_date, to_date=to_date, limit=2000, offset=0
+        )
+        buckets: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            meta = row.get("metadata") or {}
+            dc = meta.get("decision_context") or {}
+            bench = dc.get("regime_benchmark")
+            if not bench:
+                rb = dc.get("rule_based_pipeline") or {}
+                ms = rb.get("market_state") or {}
+                bench = ms.get("regime_benchmark") or ms.get("regime") or "unknown"
+            key = str(bench)
+            b = buckets.setdefault(
+                key,
+                {"regime_benchmark": key, "trade_count": 0, "win_count": 0, "total_pnl_usd": 0.0},
+            )
+            b["trade_count"] += 1
+            pnl = float(row.get("pnl") or 0)
+            b["total_pnl_usd"] += pnl
+            if pnl > 0:
+                b["win_count"] += 1
+        for b in buckets.values():
+            tc = b["trade_count"]
+            b["win_rate"] = b["win_count"] / tc if tc else 0.0
+            b["expectancy"] = b["total_pnl_usd"] / tc if tc else 0.0
+        return list(buckets.values())
+
+    async def rule_evaluation_report(
+        self,
+        db: AsyncSession,
+        *,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        rows = await self.list_trade_outcomes(
+            db, from_date=from_date, to_date=to_date, limit=2000, offset=0
+        )
+        from agent.intelligence.rule_evaluation_engine import (
+            evaluate_confidence_calibration,
+            evaluate_rules_from_trades,
+        )
+
+        trade_rows = [{"pnl": r.get("pnl"), "metadata": r.get("metadata")} for r in rows]
+        return {
+            "rules": evaluate_rules_from_trades(trade_rows),
+            "calibration": evaluate_confidence_calibration(trade_rows),
+        }
+
+    async def confidence_calibration(
+        self,
+        db: AsyncSession,
+        *,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        rows = await self.list_trade_outcomes(
+            db, from_date=from_date, to_date=to_date, limit=2000, offset=0
+        )
+        from agent.intelligence.rule_evaluation_engine import evaluate_confidence_calibration
+
+        trade_rows = [{"pnl": r.get("pnl"), "metadata": r.get("metadata")} for r in rows]
+        return evaluate_confidence_calibration(trade_rows)
+
     async def performance_by_config(
         self,
         db: AsyncSession,

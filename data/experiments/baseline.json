@@ -1,0 +1,12 @@
+{
+  "captured_at": null,
+  "note": "Run: python tools/commands/trade_analytics.py baseline-capture --out data/experiments/baseline.json",
+  "phase": "0",
+  "metrics": {
+    "profit_factor": null,
+    "expectancy_per_trade": null,
+    "snapshot_integrity_pct": null,
+    "sharpe_ratio": null,
+    "max_drawdown_pct": null
+  }
+}
