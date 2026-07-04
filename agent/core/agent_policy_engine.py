@@ -434,10 +434,92 @@ def _thesis_blocks_gated_ml_adoption(
         "non_operational",
     })
     if not aggregate_active:
-        _HARD_BLOCK_CODES = _HARD_BLOCK_CODES | frozenset({"thesis_no_rule_fired"})
+        from agent.core.hypothesis_reason_codes import FLAT_HYPOTHESIS_CODES
+
+        _HARD_BLOCK_CODES = _HARD_BLOCK_CODES | FLAT_HYPOTHESIS_CODES
     if codes & _HARD_BLOCK_CODES:
         return True
+    if snap is not None and not aggregate_active:
+        snap_codes = {str(r) for r in (snap.reason_codes or [])}
+        from agent.core.hypothesis_reason_codes import FLAT_HYPOTHESIS_CODES
+
+        if snap_codes & FLAT_HYPOTHESIS_CODES:
+            return True
     return False
+
+
+ADJUDICATION_BLOCK_VERDICTS = frozenset({"ml_reject", "conflict", "score_reject"})
+
+
+def adjudication_verdict_from_chain(
+    reasoning_chain: Optional[MCPReasoningChain],
+) -> Optional[str]:
+    """Extract structured adjudication verdict from reasoning step 6."""
+    if reasoning_chain is None:
+        return None
+    step6 = next((s for s in reasoning_chain.steps if s.step_number == 6), None)
+    if step6 is None:
+        return None
+    meta = step6.step_metadata if isinstance(step6.step_metadata, dict) else {}
+    tag = meta.get("adjudication_verdict")
+    if tag:
+        return str(tag)
+    for ev in step6.evidence or []:
+        if str(ev).startswith("adjudication_verdict="):
+            return str(ev).split("=", 1)[1]
+    return None
+
+
+def apply_adjudication_authority(
+    policy_verdict: PolicyVerdict,
+    reasoning_chain: Optional[MCPReasoningChain],
+) -> PolicyVerdict:
+    """Force HOLD when policy entry conflicts with reasoning adjudication."""
+    if not _is_entry(policy_verdict.signal):
+        return policy_verdict
+    verdict = adjudication_verdict_from_chain(reasoning_chain)
+    if verdict not in ADJUDICATION_BLOCK_VERDICTS:
+        return policy_verdict
+    return PolicyVerdict(
+        signal="HOLD",
+        confidence=policy_verdict.confidence,
+        position_size=0.0,
+        reason_codes=list(policy_verdict.reason_codes)
+        + ["authority_mismatch", f"adjudication_verdict={verdict}"],
+        ml_evidence_id=policy_verdict.ml_evidence_id,
+        adopted_ml_candidate=policy_verdict.adopted_ml_candidate,
+        memory_size_scale=policy_verdict.memory_size_scale,
+        conviction=policy_verdict.conviction,
+        size_fraction=0.0,
+        evidence=policy_verdict.evidence,
+        abstention=policy_verdict.abstention,
+    )
+
+
+def _thesis_entry_blocked_without_ml(
+    thesis: ThesisVerdict,
+    market_context: Optional[Dict[str, Any]],
+) -> bool:
+    """Block thesis-only entry in neutral regime when ML gates failed and conf is low."""
+    mc = market_context if isinstance(market_context, dict) else {}
+    regime = str(mc.get("regime") or "").strip().lower()
+    if regime not in ("neutral", ""):
+        return False
+    ml_val = mc.get("ml_validation") if isinstance(mc.get("ml_validation"), dict) else {}
+    ml_confirms = bool(ml_val.get("final_long") or ml_val.get("final_short"))
+    if ml_confirms:
+        return False
+    floor = float(
+        getattr(settings, "entry_quality_structural_conf_floor_neutral", 0.65) or 0.65
+    )
+    strat = mc.get("strategy_candidate") if isinstance(mc.get("strategy_candidate"), dict) else {}
+    structural_conf = float(strat.get("confidence") or thesis.confidence or 0.0)
+    hyp_raw = mc.get("hypothesis_snapshot")
+    if isinstance(hyp_raw, dict) and hyp_raw.get("aggregate_confidence") is not None:
+        structural_conf = max(
+            structural_conf, float(hyp_raw.get("aggregate_confidence") or 0.0)
+        )
+    return structural_conf < floor
 
 
 def _same_direction(a: str, b: str) -> bool:
@@ -609,12 +691,31 @@ def _fuse_signals(
 
     if mode == "ml_or_thesis":
         if th_entry:
+            if _thesis_entry_blocked_without_ml(thesis, market_context):
+                return PolicyVerdict(
+                    signal="HOLD",
+                    confidence=float(thesis.confidence),
+                    position_size=0.0,
+                    reason_codes=reasons
+                    + ["fusion_ml_or_thesis_thesis_blocked", "thesis_neutral_no_ml_confirm"],
+                    ml_evidence_id=ml_evidence.evidence_id,
+                    adopted_ml_candidate=False,
+                )
             reasons.append("agent_thesis_entry")
             return PolicyVerdict(
                 signal=th_sig,
                 confidence=float(thesis.confidence),
                 position_size=float(thesis.position_size or 0.05),
                 reason_codes=reasons + ["fusion_ml_or_thesis_thesis", "agent_thesis_origin"],
+                ml_evidence_id=ml_evidence.evidence_id,
+                adopted_ml_candidate=False,
+            )
+        if th_sig == "HOLD" and _thesis_blocks_gated_ml_adoption(thesis, market_context):
+            return PolicyVerdict(
+                signal="HOLD",
+                confidence=float(ml_evidence.ml_candidate_confidence or 0.0),
+                position_size=0.0,
+                reason_codes=reasons + ["fusion_ml_or_thesis_blocked", "thesis_blocks_ml_adoption"],
                 ml_evidence_id=ml_evidence.evidence_id,
                 adopted_ml_candidate=False,
             )

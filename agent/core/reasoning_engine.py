@@ -523,32 +523,34 @@ class MCPReasoningEngine:
         )
 
         if gated_ml_adopt:
+            verdict_tag = "gated_ml_adopt"
             desc = (
                 f"{ml_sig} - trade adjudication: gated ML adoption "
                 f"(neutral thesis, score={score:.0f})"
             )
             conf = adjudication_confidence(score, verdict="agree")
-            evidence.append("adjudication_verdict=gated_ml_adopt")
         elif entry and same_dir and ml_confirms and passed:
+            verdict_tag = "agree"
             desc = f"{thesis_sig} - trade adjudication: thesis and ML agree (score={score:.0f})"
             conf = adjudication_confidence(score, verdict="agree")
-            evidence.append("adjudication_verdict=agree")
         elif entry and not ml_confirms:
+            verdict_tag = "ml_reject"
             desc = f"HOLD - trade adjudication: thesis {thesis_sig} lacks ML confirmation"
             conf = adjudication_confidence(score, verdict="ml_reject")
-            evidence.append("adjudication_verdict=ml_reject")
         elif entry and not same_dir:
+            verdict_tag = "conflict"
             desc = f"HOLD - trade adjudication: thesis {thesis_sig} vs ML {ml_sig} conflict"
             conf = adjudication_confidence(score, verdict="conflict")
-            evidence.append("adjudication_verdict=conflict")
         elif entry and not passed:
+            verdict_tag = "score_reject"
             desc = f"HOLD - trade adjudication: score {score:.0f} below minimum"
             conf = adjudication_confidence(score, verdict="score_reject")
-            evidence.append("adjudication_verdict=score_reject")
         else:
+            verdict_tag = "flat"
             desc = "HOLD - trade adjudication: no aligned strategy+ML setup"
             conf = adjudication_confidence(score, verdict="flat")
-            evidence.append("adjudication_verdict=flat")
+
+        evidence.append(f"adjudication_verdict={verdict_tag}")
 
         return ReasoningStep(
             step_number=6,
@@ -557,6 +559,7 @@ class MCPReasoningEngine:
             evidence=evidence,
             confidence=conf,
             timestamp=datetime.now(timezone.utc),
+            step_metadata={"adjudication_verdict": verdict_tag},
         )
     
     async def _step1_situational_assessment(self, request: MCPReasoningRequest) -> ReasoningStep:

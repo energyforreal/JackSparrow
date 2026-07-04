@@ -84,6 +84,13 @@ JackSparrow/
 │   │   ├── entry_validation_guard.py # Policy-first entry guard (IC validation)
 │   │   ├── ml_signal_guard.py        # Back-compat shim → entry_validation_guard
 │   │   ├── agent_policy_engine.py    # Authoritative PolicyVerdict / DECISION_READY signal
+│   │   ├── entry_quality.py          # Advisory 8-dimension entry quality scorer + policy hook
+│   │   ├── trade_scorer.py           # Facade over entry_quality (legacy TradeScoreResult API)
+│   │   ├── hypothesis_reason_codes.py # Shared flat-hypothesis reason codes (policy blocks)
+│   │   ├── position_intelligence.py  # Post-entry health / opportunity scoring (TLE)
+│   │   ├── exit_engine.py            # EV arbiter + fee-aware hold (TLE)
+│   │   ├── trade_lifecycle_engine.py # TLE wrapper; delegates to position intel + exit engine
+│   │   ├── single_decision_engine.py # Deferred PR6 unified pipeline (UNIFIED_PIPELINE_ENABLED)
 │   │   ├── agent_thesis_engine.py    # Thesis evaluation (cached once per orchestrator cycle)
 │   │   ├── structural_gate_engine.py # Six-category structural gates (rule-based pipeline)
 │   │   ├── mcp_orchestrator.py         # MCP Orchestrator — IC path + rule-based pipeline
@@ -374,7 +381,12 @@ Each directory has a clear, single responsibility:
 | Business logic | `backend/services/agent_service.py`                | Coordinates with MCP orchestrator and handles retries     |
 | Core reasoning | `agent/core/reasoning_engine.py`                   | IC minimal (3-step) or legacy 7-step explanatory chain   |
 | Entry guard      | `agent/core/entry_validation_guard.py`             | Policy-first validation before exchange orders (`ml_signal_guard` shim) |
-| Policy authority | `agent/core/agent_policy_engine.py`                | Sole source of tradable `decision.signal`                 |
+| Entry quality    | `agent/core/entry_quality.py`                      | Advisory quality score (8 dimensions); policy consumes `ENTRY_QUALITY_MIN_SCORE` |
+| Trade score      | `agent/core/trade_scorer.py`                       | Facade over `evaluate_entry_quality()` for legacy callers |
+| Policy authority | `agent/core/agent_policy_engine.py`                | Sole source of tradable `decision.signal`; adjudication + quality hooks |
+| Position intel   | `agent/core/position_intelligence.py`              | TLE health/opportunity axes |
+| Exit engine      | `agent/core/exit_engine.py`                        | TLE EV arbiter; fee-aware hold when `TRADE_LIFECYCLE_EV_EXIT_ENABLED` |
+| TLE wrapper      | `agent/core/trade_lifecycle_engine.py`             | Backward-compat lifecycle verdicts; delegates to position intel + exit engine |
 | UI rendering   | `frontend/app/components/ReasoningChainView.tsx`   | Visualises reasoning chains received over WebSocket       |
 
 When creating new functionality, choose the row that matches the responsibility; if a file starts to span multiple rows, split it before merging.
@@ -1008,6 +1020,7 @@ For detailed model management documentation, see [ML Models Documentation](03-ml
 ## Related Documentation
 
 - [Rule-Based Decision Engine](rule-based-decision-engine.md) - FSM pipeline modules and rollout
+- [Entry Quality and Lifecycle](entry-quality-and-lifecycle.md) - Quality-first entry scoring, policy authority, EV exits
 - [MCP Layer Documentation](02-mcp-layer.md) - MCP architecture and protocols
 - [ML Models Documentation](03-ml-models.md) - Model management and intelligence
 - [Architecture Documentation](01-architecture.md) - System design

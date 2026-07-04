@@ -2354,6 +2354,84 @@ class Settings(BaseSettings):
             "(ml_and_thesis / ml_or_thesis adoption paths)."
         ),
     )
+    entry_quality_min_score: float = Field(
+        default=55.0,
+        env="ENTRY_QUALITY_MIN_SCORE",
+        ge=0.0,
+        le=100.0,
+        description="Advisory quality floor; policy HOLD when quality_score is below this.",
+    )
+    entry_quality_structural_conf_floor_neutral: float = Field(
+        default=0.65,
+        env="ENTRY_QUALITY_STRUCTURAL_CONF_FLOOR_NEUTRAL",
+        ge=0.0,
+        le=1.0,
+        description="In neutral regime, structural conf below this sets required_ml_confirmation.",
+    )
+    entry_quality_collapse_trust_cap: float = Field(
+        default=0.95,
+        env="ENTRY_QUALITY_COLLAPSE_TRUST_CAP",
+        ge=0.0,
+        le=1.0,
+        description="Max collapse rate used to scale ML trust in entry quality.",
+    )
+    entry_quality_freshness_half_life_bars: float = Field(
+        default=6.0,
+        env="ENTRY_QUALITY_FRESHNESS_HALF_LIFE_BARS",
+        ge=1.0,
+        le=100.0,
+        description="Exponential half-life for signal freshness dimension (bars).",
+    )
+    entry_quality_microstructure_spread_bps_max: float = Field(
+        default=30.0,
+        env="ENTRY_QUALITY_MICROSTRUCTURE_SPREAD_BPS_MAX",
+        ge=0.0,
+        description="Spread bps above which microstructure quality is penalized.",
+    )
+    entry_quality_learning_enabled: bool = Field(
+        default=False,
+        env="ENTRY_QUALITY_LEARNING_ENABLED",
+        description="Apply post-trade reflection feedback to entry quality dimension weights.",
+    )
+    entry_quality_learning_shadow_mode: bool = Field(
+        default=True,
+        env="ENTRY_QUALITY_LEARNING_SHADOW_MODE",
+        description="Log dimension calibration adjustments without applying (PR7).",
+    )
+    unified_pipeline_enabled: bool = Field(
+        default=False,
+        env="UNIFIED_PIPELINE_ENABLED",
+        description="Deferred PR6: use consolidated decision pipeline when stable.",
+    )
+    trade_lifecycle_ev_exit_enabled: bool = Field(
+        default=True,
+        env="TRADE_LIFECYCLE_EV_EXIT_ENABLED",
+        description="Use EV arbiter in exit engine instead of health-only exits.",
+    )
+    trade_lifecycle_fee_aware_hold_enabled: bool = Field(
+        default=True,
+        env="TRADE_LIFECYCLE_FEE_AWARE_HOLD_ENABLED",
+        description="Hold positions when exit would lock in fee-dominated loss.",
+    )
+    exit_engine_min_stay_ev_delta: float = Field(
+        default=0.0,
+        env="EXIT_ENGINE_MIN_STAY_EV_DELTA",
+        description="Minimum EV delta required to prefer exit over hold.",
+    )
+    agent_thesis_breakout_bb_pos_max: float = Field(
+        default=0.85,
+        env="AGENT_THESIS_BREAKOUT_BB_POS_MAX",
+        ge=0.0,
+        le=1.0,
+        description="Long breakout extension veto when bb_pos exceeds this.",
+    )
+    agent_thesis_breakout_bb_pos_short_min: float = Field(
+        default=0.15,
+        env="AGENT_THESIS_BREAKOUT_BB_POS_SHORT_MIN",
+        ge=0.0,
+        le=1.0,
+        description="Short breakout extension veto when bb_pos below this.",
+    )
     require_strategy_ml_agreement: bool = Field(
         default=False,
         env="REQUIRE_STRATEGY_ML_AGREEMENT",

@@ -1,0 +1,6 @@
+{
+  "scenario": "trending_bull",
+  "regime": "trending",
+  "structure": {"market_type": "TRENDING", "liquidity_ok": true},
+  "expected_min_quality_score": 50
+}

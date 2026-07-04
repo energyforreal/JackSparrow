@@ -30,6 +30,8 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 16 | [v43 trade execution runbook](docs/v43_trade_execution_runbook.md) | v43 **signal gate** tuning (IC + archived ML), metrics, rollback, log analysis |
 | — | [Rule-based decision engine](docs/rule-based-decision-engine.md) | FSM + structural gates, shadow rollout, `DECISION_ENGINE_MODE`, UI payloads |
 | — | [Canonical events](docs/canonical_events.md) | Event-bus wiring and `DECISION_READY` payload fields |
+| — | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md) | Quality-first entry scoring, single policy authority, Gate 5 economics, TLE EV exits, learning loop |
+| — | [Trade lifecycle engine](reference/trade-lifecycle-engine.md) | Position intelligence, exit engine, promotion replay |
 | — | [Trading persistence model](reference/trading-persistence-model.md) | Testnet three-layer model, snapshot schema v1, analytics tables, Docker notes |
 
 ---
@@ -62,6 +64,8 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | No trades / stale UI signal | [Debugging – No trades](docs/13-debugging.md#no-trades-executed), [Logging – `trading_entry_rejected`](docs/12-logging.md#6-trading-handler-events-agenteventshandlerstrading_handlerpy) |
 | Self-awareness flags & telemetry | [Logic & reasoning – Self-awareness](docs/05-logic-reasoning.md#deterministic-self-awareness), [Canonical events](docs/canonical_events.md), `.env.example` |
 | Rule-based FSM rollout / shadow logs | [Rule-based decision engine](docs/rule-based-decision-engine.md), `tools/analyze_agent_logs.py`, [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables) |
+| Entry quality / July replay | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md), `tests/integration/test_july2_telemetry_replay.py`, `tools/commands/monte_carlo_replay.py` |
+| TLE promotion / EV exit replay | [Trade lifecycle engine](reference/trade-lifecycle-engine.md), `tools/commands/run_tle_investigation.py` |
 | Trade snapshot analytics / optimization | [Trading persistence model](reference/trading-persistence-model.md), `tools/commands/trade_analytics.py`, [Backend – Analytics API](docs/06-backend.md#analytics-rest-api) |
 | Docker rebuild / redeploy | [Deployment – Common operations](docs/10-deployment.md#common-operations), `docker compose build --pull` + `up -d --force-recreate` |
 | Alembic / schema drift after upgrade | [Deployment – Alembic migrations](docs/10-deployment.md#alembic-migrations), `backend/migrations/README.md` |

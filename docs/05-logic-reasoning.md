@@ -70,6 +70,21 @@ For detailed MCP Reasoning Protocol documentation, see [MCP Layer Documentation 
 
 **Entry validation**: `entry_validation_guard.validate_entry_signal()` checks policy verdict + optional v43 gates before execution. When `DECISION_ENGINE_MODE=rule_based`, validation requires FSM `EntryReady`, structural `trade_allowed`, and `rule_based_fsm_entry`. Configure with `REQUIRE_IC_VALIDATION_FOR_ORDERS` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
 
+### Entry quality and single policy authority
+
+**Advisory scoring**: [`entry_quality.py`](../agent/core/entry_quality.py) computes `quality_score` (0–100) across eight dimensions. Results land in `market_context.entry_quality`. [`trade_scorer.py`](../agent/core/trade_scorer.py) delegates to the same evaluator for backward compatibility.
+
+**Authoritative policy**: [`agent_policy_engine.py`](../agent/core/agent_policy_engine.py) remains the sole entry authority. After fusion:
+
+- `apply_adjudication_authority()` — HOLD if Step 6 `adjudication_verdict` is `ml_reject`, `conflict`, or `score_reject`.
+- `apply_entry_quality_policy()` — HOLD if `quality_score < ENTRY_QUALITY_MIN_SCORE` or neutral regime requires ML confirmation without gated ML.
+
+**Flat hypothesis bug fix**: Portfolio mode emits `hypothesis_no_rule_fired`; policy blocks gated ML adoption when aggregate hypothesis is inactive (shared codes in `hypothesis_reason_codes.py`).
+
+**Economics**: Gate 5 edge is always computed (`gate5_economic` on market context); economic dimension penalizes sub-cost edges even when permissive profile sets `final_long`/`final_short`.
+
+Full reference: [Entry Quality and Lifecycle](entry-quality-and-lifecycle.md).
+
 ### Rule-based decision pipeline
 
 Deterministic stages (see [Rule-Based Decision Engine](rule-based-decision-engine.md)):
@@ -536,7 +551,7 @@ Favorable risk/reward ratio with low risk factors
 
 **If already in position**:
 
-- With **`TRADE_LIFECYCLE_ENABLED=true`**, each `DecisionReadyEvent` runs the [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md): dual-axis health/opportunity scores → `HOLD`, `TIGHTEN_SL`, `MODIFY_TP`, or `EXIT` before any legacy signal-reversal path.
+- With **`TRADE_LIFECYCLE_ENABLED=true`**, each `DecisionReadyEvent` runs the [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md): **Position Intelligence** → **Exit Engine** (EV arbiter) → `HOLD`, `TIGHTEN_SL`, `MODIFY_TP`, or `EXIT` before any legacy signal-reversal path. Fee-aware hold avoids exits that lock in sub-fee profits when opportunity and continuation remain valid.
 - Between candles, `manage_position` still enforces mechanical SL/TP/trailing as a hard backstop.
 - Without TLE, position monitoring is primarily price-driven via `MarketTickEvent` / `manage_position` against static SL/TP.
 - Exit closes position and emits `PositionClosedEvent`; state machine transitions back to OBSERVING.
@@ -1136,6 +1151,7 @@ Env names for the above are documented in root `.env.example`.
 ## Related Documentation
 
 - [Rule-Based Decision Engine](rule-based-decision-engine.md) - FSM + structural gates (ML-free cutover)
+- [Entry Quality and Lifecycle](entry-quality-and-lifecycle.md) - Advisory scoring, policy authority, EV exits
 - [MCP Layer Documentation](02-mcp-layer.md) - MCP architecture and protocols
 - [ML Models Documentation](03-ml-models.md) - Model management and intelligence
 - [Architecture Documentation](01-architecture.md) - System design

@@ -76,12 +76,16 @@ def mock_settings(monkeypatch):
     s.flip_score_threshold_low = 0.55
     s.position_exit_ml_confidence_min = 0.70
     s.jacksparrow_v43_short_execution_enabled = False
+    s.trade_lifecycle_ev_exit_enabled = True
+    s.trade_lifecycle_fee_aware_hold_enabled = True
+    s.exit_engine_min_stay_ev_delta = 0.0
     s.stop_loss_percentage = 0.01
     s.take_profit_percentage = 0.02
     s.use_atr_scaled_sl_tp = True
     s.atr_sl_distance_mult = 1.0
     s.atr_tp_distance_mult = 1.5
     monkeypatch.setattr("agent.core.trade_lifecycle_engine.settings", s)
+    monkeypatch.setattr("agent.core.exit_engine.settings", s)
     return s
 
 
@@ -112,6 +116,7 @@ def test_lifecycle_exit_broken_thesis(mock_settings) -> None:
 
 
 def test_lifecycle_exit_health_only(mock_settings) -> None:
+    mock_settings.trade_lifecycle_ev_exit_enabled = False
     mc = _live_mc(
         policy_verdict={"conviction": 0.2, "signal": "HOLD"},
         features={"adx_14": 10.0, "rsi_14": 35.0, "ema_9": 95.0, "ema_21": 100.0, "atr_14": 2.0},

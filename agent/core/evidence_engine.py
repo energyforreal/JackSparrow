@@ -12,6 +12,7 @@ from agent.core.strategy_types import (
     StrategyCandidate,
 )
 from agent.core.trade_scorer import score_trade_setup
+from agent.core.v43_signal_gates import round_trip_cost_pct
 
 
 def _clamp01(val: Any, default: float = 0.5) -> float:
@@ -107,16 +108,19 @@ def build_environment_scores(
 
 
 def ml_edge_score(ml_validation: MLValidationSnapshot) -> float:
+    rtc = round_trip_cost_pct()
     if ml_validation.final_long or ml_validation.final_short:
         thr = ml_validation.threshold if ml_validation.final_long else ml_validation.short_threshold
-        edge = abs(ml_validation.expected_return) - thr
+        edge = abs(ml_validation.expected_return) - thr - rtc
         return _clamp01(0.5 + edge * 20.0, 0.5)
     proba = ml_validation.expected_return
     thr = ml_validation.threshold
     if proba > thr:
-        return _clamp01(0.4 + (proba - thr) * 15.0, 0.4)
+        edge = (proba - thr) - rtc
+        return _clamp01(0.4 + edge * 15.0, 0.4)
     if proba < -ml_validation.short_threshold:
-        return _clamp01(0.4 + (abs(proba) - ml_validation.short_threshold) * 15.0, 0.4)
+        edge = (abs(proba) - ml_validation.short_threshold) - rtc
+        return _clamp01(0.4 + edge * 15.0, 0.4)
     return 0.35
 
 

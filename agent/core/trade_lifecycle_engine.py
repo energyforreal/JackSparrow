@@ -463,20 +463,22 @@ def evaluate_lifecycle(
     symbol = str(position.get("symbol") or live_mc.get("symbol") or "")
     pos_side = _position_side(position)
 
-    conviction_at_entry = _f(position.get("conviction_at_entry"), 0.5)
-    conviction_now = _conviction_from_context(live_mc)
-    conviction_delta = conviction_now - conviction_at_entry
+    from agent.core.exit_engine import decide_exit
+    from agent.core.position_intelligence import evaluate_position_quality
 
-    continuation = evaluate_continuation(position, entry_snapshot, live_mc)
-    flip_score = _flip_score(live_mc, pos_side, symbol)
-    opposite, opp_reason = _opposite_signal_inputs(live_mc, pos_side)
-
-    health, inv_reasons, health_breakdown = _compute_health_score(
-        continuation, conviction_delta, flip_score, live_mc, opposite
-    )
-    opportunity, opp_reasons = _compute_opportunity_score(
-        continuation, conviction_delta, live_mc
-    )
+    position_quality = evaluate_position_quality(position, entry_snapshot, live_mc)
+    health = position_quality.health_score
+    opportunity = position_quality.opportunity_score
+    conviction_now = position_quality.conviction_now
+    conviction_at_entry = position_quality.conviction_at_entry
+    conviction_delta = position_quality.conviction_delta
+    continuation = position_quality.continuation
+    opposite = position_quality.opposite
+    opp_reason = position_quality.opposite_reason
+    inv_reasons = position_quality.invalidation_reasons
+    opp_reasons = position_quality.opportunity_reasons
+    health_breakdown = position_quality.health_breakdown
+    flip_score = position_quality.flip_score
 
     hold_min = float(getattr(settings, "trade_lifecycle_health_hold_min", 70.0) or 70.0)
     tighten_min = float(getattr(settings, "trade_lifecycle_health_tighten_min", 50.0) or 50.0)
@@ -487,23 +489,11 @@ def evaluate_lifecycle(
     reduce_opp = float(
         getattr(settings, "trade_lifecycle_opportunity_reduce_min", 40.0) or 40.0
     )
-    fsm_broken_exit = bool(getattr(settings, "trade_lifecycle_fsm_broken_exit", True))
-    fsm_broken = (
-        fsm_broken_exit and "fsm_thesis_broken" in continuation.invalidation_codes
-    )
 
-    hard_exit = opposite or health < exit_max
-    if fsm_broken:
-        hard_exit = True
-
-    if hard_exit:
-        exit_trigger, detail, exit_flags = _resolve_exit_trigger_and_detail(
-            opposite=opposite,
-            opp_reason=opp_reason,
-            health=health,
-            exit_max=exit_max,
-            fsm_broken=fsm_broken,
-        )
+    exit_decision = decide_exit(position, position_quality)
+    if exit_decision.should_exit:
+        exit_trigger = exit_decision.exit_trigger or "health_threshold"
+        detail = exit_decision.reason_detail or "health_below_exit_threshold"
         return LifecycleVerdict(
             action="EXIT",
             health_score=health,
@@ -515,7 +505,7 @@ def evaluate_lifecycle(
             opportunity_reasons=opp_reasons,
             exit_reason_detail=detail,
             exit_trigger=exit_trigger,
-            exit_flags=exit_flags,
+            exit_flags=dict(exit_decision.exit_flags or {}),
             health_breakdown=health_breakdown,
             continuation=continuation,
         )

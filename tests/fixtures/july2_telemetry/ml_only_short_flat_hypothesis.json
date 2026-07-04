@@ -1,0 +1,29 @@
+{
+  "description": "Frozen July 2 ML-only entry cycle (flat hypothesis, gated ML short)",
+  "market_context": {
+    "regime": "neutral",
+    "hypothesis_snapshot": {
+      "aggregate_direction": "FLAT",
+      "aggregate_confidence": 0.0,
+      "reason_codes": ["hypothesis_no_rule_fired", "regime=neutral"]
+    },
+    "ml_validation": {
+      "final_long": false,
+      "final_short": true,
+      "expected_return": -0.012,
+      "threshold": 0.005,
+      "short_threshold": 0.005
+    },
+    "gate5_economic": {"pass": true, "side": "short"},
+    "features": {"spread_bps": 8.0, "hurst_60": 0.52}
+  },
+  "strategy": {
+    "direction": "FLAT",
+    "signal": "HOLD",
+    "thesis_type": "flat",
+    "confidence": 0.0,
+    "strength": 0.0
+  },
+  "collapse_rate": 0.967,
+  "expected_policy_signal": "HOLD"
+}

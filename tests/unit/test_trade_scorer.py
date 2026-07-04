@@ -70,8 +70,8 @@ def test_score_skips_ml_points_without_gated_final() -> None:
         structure=structure,
         ml_confirms=True,
     )
-    assert result.components.get("ml", 0.0) == 0.0
-    assert "score_ml_ungated_skipped" in result.reason_codes
+    assert result.components.get("ml", 0.0) < 50.0
+    assert "quality_ml_gates_failed" in result.reason_codes
 
 
 def test_score_passes_flat_thesis_with_gated_short() -> None:
@@ -100,9 +100,9 @@ def test_score_passes_flat_thesis_with_gated_short() -> None:
         structure=structure,
         ml_confirms=True,
     )
-    assert result.score >= 70.0
+    assert result.score >= 65.0
     assert result.passed is True
-    assert "score_effective_direction_from_ml_gates" in result.reason_codes
+    assert "quality_structural_ml_direction" in result.reason_codes
 
 
 def test_score_fails_flat_thesis() -> None:

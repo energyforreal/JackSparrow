@@ -281,6 +281,39 @@ class AgentStateMachine:
                     exc_info=True,
                 )
 
+        if getattr(settings, "entry_quality_learning_enabled", False):
+            try:
+                from agent.intelligence.post_trade_analyzer import analyze_post_trade
+                from agent.core.entry_quality import apply_dimension_calibration_feedback
+                from agent.persistence.trade_snapshot import merge_close_fields
+
+                entry_snap = payload.get("entry_decision_snapshot") or {}
+                if isinstance(entry_snap, dict) and entry_snap:
+                    merged = merge_close_fields(entry_snap, payload)
+                    analysis = analyze_post_trade(merged)
+                    eq_at_entry = entry_snap.get("entry_quality") or {}
+                    dims = (
+                        eq_at_entry.get("dimensions")
+                        if isinstance(eq_at_entry.get("dimensions"), dict)
+                        else {}
+                    )
+                    pnl = float(payload.get("pnl") or payload.get("pnl_usd") or 0.0)
+                    shadow = bool(
+                        getattr(settings, "entry_quality_learning_shadow_mode", True)
+                    )
+                    apply_dimension_calibration_feedback(
+                        dims,
+                        str(analysis.get("root_cause") or "unknown"),
+                        pnl,
+                        shadow=shadow,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "entry_quality_learning_failed",
+                    error=str(e),
+                    exc_info=True,
+                )
+
         if getattr(settings, "trade_outcomes_writes_enabled", True):
             try:
                 from agent.persistence.db_writes import persist_trade_outcome_async

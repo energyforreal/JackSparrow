@@ -548,8 +548,17 @@ class TradingEventHandler:
                     return
 
             signal_path_diag: Dict[str, Any] = {}
+            structural_quality_low = False
+            eq_raw = mc.get("entry_quality") if isinstance(mc, dict) else None
+            if isinstance(eq_raw, dict):
+                dims = eq_raw.get("dimensions")
+                if isinstance(dims, dict):
+                    structural_quality_low = float(dims.get("structural", 1.0)) < 0.5
             if not minimal_entry and v43_exec_enabled:
-                signal_path_diag = {"v43_execution_profile": True}
+                signal_path_diag = {
+                    "v43_execution_profile": True,
+                    "structural_quality_low": structural_quality_low,
+                }
             entry_side = signal_to_position_side(signal)
             if entry_side is None:
                 self._log_entry_rejected(
@@ -1059,8 +1068,8 @@ class TradingEventHandler:
                         )
                         return
 
-            # ADX ranging market filter: block mild BUY/SELL in very low trend strength
-            if not minimal_entry and not v43_exec_enabled:
+            # ADX ranging market filter: also run on v43 when entry structural quality is low
+            if not minimal_entry and (not v43_exec_enabled or structural_quality_low):
                 adx = features.get("adx_14")
                 adx_floor = float(
                     getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)

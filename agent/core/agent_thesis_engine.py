@@ -629,7 +629,16 @@ class AgentThesisEngine:
         if adx <= adx_min or di <= di_min or vol_reg <= vol_min or h_trend <= 0:
             return None
 
-        conf = min(0.92, 0.65 + 0.01 * min(adx - adx_min, 15))
+        bb = _feat(features, "bb_pos", 0.5)
+        bb_max = float(getattr(settings, "agent_thesis_breakout_bb_pos_max", 0.85) or 0.85)
+        if bb > bb_max:
+            return None
+
+        adx_boost = min(0.15, 0.01 * min(adx - adx_min, 15))
+        extension_penalty = max(0.0, (bb - 0.7) * 0.2) if bb > 0.7 else 0.0
+        conf = min(0.92, 0.65 + adx_boost - extension_penalty)
+        if conf < 0.55:
+            return None
         return ThesisVerdict(
             signal="LONG",
             confidence=conf,
@@ -709,7 +718,16 @@ class AgentThesisEngine:
         if adx <= adx_min or di >= -di_min or vol_reg <= vol_min or h_trend >= 0:
             return None
 
-        conf = min(0.92, 0.65 + 0.01 * min(adx - adx_min, 15))
+        bb = _feat(features, "bb_pos", 0.5)
+        bb_min = float(getattr(settings, "agent_thesis_breakout_bb_pos_short_min", 0.15) or 0.15)
+        if bb < bb_min:
+            return None
+
+        adx_boost = min(0.15, 0.01 * min(adx - adx_min, 15))
+        extension_penalty = max(0.0, (0.3 - bb) * 0.2) if bb < 0.3 else 0.0
+        conf = min(0.92, 0.65 + adx_boost - extension_penalty)
+        if conf < 0.55:
+            return None
         return ThesisVerdict(
             signal="SHORT",
             confidence=conf,

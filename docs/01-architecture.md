@@ -113,10 +113,13 @@ Default fusion mode is `AGENT_POLICY_MODE=ml_or_thesis` with `IC_MODE=true`: the
 2. **Intelligence validation** — `RuleBasedIntelligenceNode` produces `MLValidationSnapshot` (thresholds, `confirms_long` / `confirms_short`, gates).
 3. **Market structure** — `classify_market_structure()` (trending / ranging / low-vol / crisis) from closed-bar features.
 4. **Agent hypothesis portfolio** — `AgentThesisEngine` evaluates all rule families (breakout / trend / mean-reversion), aggregates competing hypotheses into `hypothesis_snapshot`, and attaches continuous environment scores; legacy `thesis_verdict` adapter preserved for IC/policy cache.
-5. **Trade score** — `score_trade_setup()` confluence gate (`AGENT_TRADE_SCORE_MIN`, default 70).
-6. **Policy** — `AgentPolicyEngine` fuses thesis + ML (`ml_and_thesis` requires agreement).
-7. **Reasoning** — IC minimal mode (default) uses 3-step chain when `strategy_candidate` is present; primary `decision.signal` comes from `PolicyVerdict`, not reasoning text.
-8. **Execution guard** — `entry_validation_guard` (`ml_signal_guard` shim) validates policy verdict + optional v43 gates when `REQUIRE_IC_VALIDATION_FOR_ORDERS=true` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
+5. **Entry quality** — `evaluate_entry_quality()` (8 dimensions: structural, ML, economic, regime, position, microstructure, trend stability, freshness); `score_trade_setup()` is a facade over quality score (`ENTRY_QUALITY_MIN_SCORE`).
+6. **Policy** — `AgentPolicyEngine` fuses thesis + ML; enforces adjudication authority + quality floors; flat hypothesis blocks gated ML (`hypothesis_no_rule_fired`).
+7. **Reasoning** — IC minimal mode (default) + Step 6 trade adjudication (`adjudication_verdict` in `step_metadata`); **authoritative** `decision.signal` comes from `PolicyVerdict`, not reasoning text.
+8. **Conviction / risk** — `compute_conviction()` with collapse-weighted ML; trading handler + risk manager before execution.
+9. **Execution guard** — `entry_validation_guard` validates policy verdict + optional v43 gates; partial structural filters on v43 path when `entry_quality.structural` is low.
+
+See [Entry Quality and Lifecycle](entry-quality-and-lifecycle.md) for full detail.
 
 Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_IC_VALIDATION_FOR_ORDERS=false` (alias: `REQUIRE_ML_SIGNAL_FOR_ORDERS`).
 
@@ -1159,6 +1162,7 @@ This architecture enables better scalability, testability, and maintainability b
 - [ML Models Documentation](03-ml-models.md) - Model management and intelligence
 - [Features Documentation](04-features.md) - What the system does
 - [Logic & Reasoning Documentation](05-logic-reasoning.md) - How decisions are made
+- [Entry Quality and Lifecycle](entry-quality-and-lifecycle.md) - Advisory scoring, policy authority, EV exits
 - [Backend Documentation](06-backend.md) - API implementation
 - [Frontend Documentation](07-frontend.md) - UI implementation
 - [Deployment Documentation](10-deployment.md) - Setup and deployment

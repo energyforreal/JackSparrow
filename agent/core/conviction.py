@@ -40,9 +40,19 @@ def compute_conviction(
     direction: Optional[str] = None,
     *,
     dominant_thesis_type: Optional[str] = None,
+    collapse_rate: Optional[float] = None,
 ) -> ConvictionResult:
     """Aggregate evidence into conviction and size_fraction (no multi-gate HOLD)."""
     weights = _conviction_weights()
+    if collapse_rate is not None:
+        cap = float(getattr(settings, "entry_quality_collapse_trust_cap", 0.95) or 0.95)
+        ml_trust = max(0.05, 1.0 - min(cap, float(collapse_rate)))
+        for key in (
+            EvidenceDimension.ML_EDGE.value,
+            EvidenceDimension.MODEL_CERTAINTY.value,
+        ):
+            if key in weights:
+                weights[key] *= ml_trust
     dtype = str(dominant_thesis_type or "").strip().lower()
     if dtype == "breakout":
         weights[EvidenceDimension.BREAKOUT.value] = weights.get(

@@ -980,6 +980,19 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `ARCHETYPE_MEMORY_SHADOW` | Archetype similarity hints only (no sizing) | No | `true` |
 | `TRADE_LIFECYCLE_ENABLED` | Enable Trade Lifecycle Engine post-entry | No | `false` |
 | `TRADE_LIFECYCLE_LOG_ONLY` | Log TLE verdicts without executing (Phase 2 observation) | No | `false` |
+| `TRADE_LIFECYCLE_EV_EXIT_ENABLED` | EV arbiter in exit engine (vs legacy health-only exit) | No | `true` |
+| `TRADE_LIFECYCLE_FEE_AWARE_HOLD_ENABLED` | Hold when exit would lock in fee-dominated loss | No | `true` |
+| `EXIT_ENGINE_MIN_STAY_EV_DELTA` | Minimum EV delta to prefer exit over hold | No | `0` |
+| `ENTRY_QUALITY_MIN_SCORE` | Policy HOLD when advisory `quality_score` is below this | No | `55` |
+| `ENTRY_QUALITY_STRUCTURAL_CONF_FLOOR_NEUTRAL` | Neutral regime: require ML when structural conf below this | No | `0.65` |
+| `ENTRY_QUALITY_COLLAPSE_TRUST_CAP` | Max collapse rate for ML trust scaling in entry quality | No | `0.95` |
+| `ENTRY_QUALITY_FRESHNESS_HALF_LIFE_BARS` | Signal freshness decay half-life (bars) | No | `6` |
+| `ENTRY_QUALITY_MICROSTRUCTURE_SPREAD_BPS_MAX` | Spread bps above which microstructure is penalized | No | `30` |
+| `ENTRY_QUALITY_LEARNING_ENABLED` | Post-trade dimension weight calibration (PR7) | No | `false` |
+| `ENTRY_QUALITY_LEARNING_SHADOW_MODE` | Log calibration without applying offsets | No | `true` |
+| `UNIFIED_PIPELINE_ENABLED` | Deferred PR6: `single_decision_engine` consolidation | No | `false` |
+| `AGENT_THESIS_BREAKOUT_BB_POS_MAX` | Long breakout extension veto when `bb_pos` exceeds | No | `0.85` |
+| `AGENT_THESIS_BREAKOUT_BB_POS_SHORT_MIN` | Short breakout extension veto when `bb_pos` below | No | `0.15` |
 | `TRADE_ENTRY_SNAPSHOT_ENABLED` | Persist entry decision snapshots | No | `true` |
 | `GATE_CATEGORY_WEIGHTS` | Optional JSON map for composite gate scoring | No | *(empty)* |
 | `REQUIRE_IC_VALIDATION_FOR_ORDERS` | When `true`, `entry_validation_guard` enforces policy + optional v43 gates before orders | No | `true` |

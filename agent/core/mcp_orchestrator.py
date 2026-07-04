@@ -66,6 +66,8 @@ from agent.core.v43_signal_gates import (
     V43GateState,
     apply_gate5_min_edge,
     apply_gate5_min_edge_short,
+    gate5_long_edge_metrics,
+    gate5_short_edge_metrics,
     apply_uncertainty_gate,
     apply_post_threshold_gates,
     apply_post_threshold_gates_short,
@@ -1225,6 +1227,7 @@ class MCPOrchestrator:
         eps_eff = float(eps) + float(self._v43_gate_state.effective_epsilon_bump())
 
         soft_ml_gates = v43_soft_ml_gates_enabled()
+        gate5_economic: Dict[str, Any] = {}
 
         async with self._v43_gate_state_lock:
             self._v43_gate_state.note_regime(regime)
@@ -1249,11 +1252,18 @@ class MCPOrchestrator:
                             reject_tail = gu.reject_reason or "high_uncertainty"
                             gr2 = V43GateResult(allow=False, reject_reason=reject_tail)
                     if gr2.allow:
+                        g5_metrics = gate5_long_edge_metrics(proba, thr)
+                        g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
+                        gate5_economic = {
+                            "pass": bool(g5_metrics.passes),
+                            "edge_pct": g5_metrics.edge_pct,
+                            "side": "long",
+                            "reject_reason": g5.reject_reason,
+                        }
                         if soft_ml_gates:
                             final_long = True
                             reject_tail = "gates_passed_long"
                         else:
-                            g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
                             final_long = bool(g5.allow)
                             if not final_long:
                                 reject_tail = g5.reject_reason or "min_edge_cost"
@@ -1280,13 +1290,20 @@ class MCPOrchestrator:
                             reject_tail = gu.reject_reason or "high_uncertainty"
                             gr2s = V43GateResult(allow=False, reject_reason=reject_tail)
                     if gr2s.allow:
+                        g5s_metrics = gate5_short_edge_metrics(proba, short_thr)
+                        g5s = apply_gate5_min_edge_short(
+                            proba, short_thr, self._v43_gate_state
+                        )
+                        gate5_economic = {
+                            "pass": bool(g5s_metrics.passes),
+                            "edge_pct": g5s_metrics.edge_pct,
+                            "side": "short",
+                            "reject_reason": g5s.reject_reason,
+                        }
                         if soft_ml_gates:
                             final_short = True
                             reject_tail = "gates_passed_short"
                         else:
-                            g5s = apply_gate5_min_edge_short(
-                                proba, short_thr, self._v43_gate_state
-                            )
                             final_short = bool(g5s.allow)
                             if not final_short:
                                 reject_tail = g5s.reject_reason or "min_edge_cost"
@@ -1341,11 +1358,32 @@ class MCPOrchestrator:
             else False
         )
         ml_gates_passed = bool(final_long or final_short)
+        collapse_rate_val = self._v43_gate_state.counters.collapse_rate()
+        quality_mc: Dict[str, Any] = {
+            **(mctx or {}),
+            "gate5_economic": gate5_economic,
+            "bar_index": bar_idx,
+            "regime": regime,
+            "has_open_position": has_open,
+            "features": features_dict,
+        }
         trade_score = score_trade_setup(
             strategy=strategy_candidate,
             ml_validation=ml_validation,
             structure=structure,
             ml_confirms=ml_confirms,
+            market_context=quality_mc,
+            collapse_rate=collapse_rate_val,
+        )
+        from agent.core.entry_quality import evaluate_entry_quality
+
+        entry_quality_result = evaluate_entry_quality(
+            strategy=strategy_candidate,
+            ml_validation=ml_validation,
+            structure=structure,
+            ml_confirms=ml_confirms,
+            market_context=quality_mc,
+            collapse_rate=collapse_rate_val,
         )
 
         ml_sig, ml_conf, ml_size = ml_candidate_signal_from_validation(
@@ -1446,6 +1484,8 @@ class MCPOrchestrator:
             "strategy_candidate": strategy_candidate.to_dict(),
             "thesis_verdict": thesis_verdict_to_dict(thesis_verdict),
             "hypothesis_snapshot": mctx.get("hypothesis_snapshot"),
+            "entry_quality": entry_quality_result.to_dict(),
+            "gate5_economic": gate5_economic,
             "environment_scores": mctx.get("environment_scores"),
             "market_structure": structure.to_dict(),
             "trade_score": trade_score.to_dict(),
@@ -1616,6 +1656,15 @@ class MCPOrchestrator:
             pos_hint=pos_hint,
             df_feat=mctx.get("df_feat_pre"),
         )
+        from agent.core.agent_policy_engine import apply_adjudication_authority
+        from agent.core.entry_quality import apply_entry_quality_policy
+
+        policy_verdict = apply_adjudication_authority(
+            policy_verdict, reasoning_chain
+        )
+        policy_verdict = apply_entry_quality_policy(
+            policy_verdict, entry_quality_result, ml_confirms
+        )
         market_context_for_reasoning["policy_verdict"] = policy_verdict.model_dump(
             mode="json"
         )
@@ -1655,6 +1704,7 @@ class MCPOrchestrator:
                 evidence_bundle,
                 policy_verdict.signal,
                 dominant_thesis_type=_dominant_type,
+                collapse_rate=collapse_rate_val,
             )
         market_context_for_reasoning["conviction"] = conviction_result.to_dict()
 
