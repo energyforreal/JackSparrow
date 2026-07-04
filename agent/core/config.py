@@ -1350,6 +1350,52 @@ class Settings(BaseSettings):
         env="ENTRY_DECISIONS_WRITES_ENABLED",
         description="When True, persist entry approve/reject rows to entry_decisions.",
     )
+    trade_decision_events_enabled: bool = Field(
+        default=False,
+        env="TRADE_DECISION_EVENTS_ENABLED",
+        description="When True, emit append-only trade decision events per position.",
+    )
+    trade_decision_events_shadow_mode: bool = Field(
+        default=True,
+        env="TRADE_DECISION_EVENTS_SHADOW_MODE",
+        description="When True with events enabled, dual-write without analytics cutover.",
+    )
+    trade_decision_event_min_conviction_delta: float = Field(
+        default=0.05,
+        env="TRADE_DECISION_EVENT_MIN_CONVICTION_DELTA",
+        ge=0.01,
+        le=0.5,
+        description="Min conviction change to emit conviction_change event.",
+    )
+    trade_decision_events_max_per_position: int = Field(
+        default=500,
+        env="TRADE_DECISION_EVENTS_MAX_PER_POSITION",
+        ge=50,
+        le=5000,
+        description="Cap decision events retained per open position.",
+    )
+    trade_mfe_mae_at_close_enabled: bool = Field(
+        default=False,
+        env="TRADE_MFE_MAE_AT_CLOSE_ENABLED",
+        description="When True, compute MFE/MAE asynchronously on position close.",
+    )
+    trade_intelligence_learning_enabled: bool = Field(
+        default=False,
+        env="TRADE_INTELLIGENCE_LEARNING_ENABLED",
+        description="When True, learning loop consumes v2 trade intelligence artifacts.",
+    )
+    trade_intelligence_learning_shadow_mode: bool = Field(
+        default=True,
+        env="TRADE_INTELLIGENCE_LEARNING_SHADOW_MODE",
+        description="When True, log learning nudges without applying weight changes.",
+    )
+    entry_decision_label_horizon_bars: int = Field(
+        default=12,
+        env="ENTRY_DECISION_LABEL_HORIZON_BARS",
+        ge=1,
+        le=200,
+        description="Bars after reject to label forward outcome.",
+    )
     threshold_adapter_regime_aware: bool = Field(
         default=False,
         env="THRESHOLD_ADAPTER_REGIME_AWARE",

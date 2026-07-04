@@ -84,6 +84,30 @@ GATES: Dict[str, Dict[str, Any]] = {
         "min_sharpe": 0.5,
         "max_drawdown_pct": 15.0,
     },
+    "v1_to_v2_snapshot": {
+        "description": "Snapshot v2: entry_quality coverage",
+        "min_entry_quality_coverage_pct": 95.0,
+        "min_trades": 10,
+    },
+    "v2_events": {
+        "description": "Decision event stream coverage",
+        "min_decision_event_coverage_pct": 90.0,
+        "min_trades": 10,
+    },
+    "v2_causality": {
+        "description": "Lifecycle exits have causal chain",
+        "min_causal_links": 2,
+        "min_lifecycle_trades": 5,
+    },
+    "v2_mfe_mae": {
+        "description": "MFE/MAE excursions at close",
+        "min_excursion_coverage_pct": 90.0,
+        "min_trades": 10,
+    },
+    "v2_reject_labels": {
+        "description": "Rejected entry forward labels",
+        "min_labeled_rejects": 50,
+    },
 }
 
 
@@ -250,6 +274,115 @@ def evaluate_gate(gate_id: str, *, start: Optional[str], end: Optional[str]) -> 
         checks = [
             {"check": "post_trade_coverage_pct", "value": round(cov, 2), "pass": cov >= 100},
             {"check": "calibration_error", "value": cal_err, "pass": ok_cal},
+        ]
+
+    elif gate_id == "v1_to_v2_snapshot":
+        n = len(trades)
+        eq_n = sum(
+            1
+            for t in trades
+            if isinstance(
+                ((t.get("metadata") or {}).get("decision_context") or {}).get(
+                    "entry_quality"
+                ),
+                dict,
+            )
+        )
+        cov = eq_n / n * 100 if n else 0
+        passed = n >= int(spec["min_trades"]) and cov >= float(
+            spec["min_entry_quality_coverage_pct"]
+        )
+        checks = [
+            {"check": "trade_count", "value": n, "pass": n >= int(spec["min_trades"])},
+            {
+                "check": "entry_quality_coverage_pct",
+                "value": round(cov, 2),
+                "pass": cov >= float(spec["min_entry_quality_coverage_pct"]),
+            },
+        ]
+
+    elif gate_id == "v2_events":
+        n = len(trades)
+        with_events = sum(
+            1
+            for t in trades
+            if int((t.get("metadata") or {}).get("decision_event_count") or 0) > 0
+        )
+        cov = with_events / n * 100 if n else 0
+        passed = n >= int(spec["min_trades"]) and cov >= float(
+            spec["min_decision_event_coverage_pct"]
+        )
+        checks = [
+            {"check": "trade_count", "value": n, "pass": n >= int(spec["min_trades"])},
+            {
+                "check": "decision_event_coverage_pct",
+                "value": round(cov, 2),
+                "pass": cov >= float(spec["min_decision_event_coverage_pct"]),
+            },
+        ]
+
+    elif gate_id == "v2_causality":
+        lifecycle = [
+            t
+            for t in trades
+            if str(
+                ((t.get("metadata") or {}).get("outcome") or {}).get("exit_reason") or ""
+            )
+            == "lifecycle_exit"
+        ]
+        linked = 0
+        for t in lifecycle:
+            graph = (t.get("metadata") or {}).get("causality_graph") or {}
+            edges = graph.get("edges") if isinstance(graph, dict) else []
+            if isinstance(edges, list) and len(edges) >= int(spec["min_causal_links"]):
+                linked += 1
+        n = len(lifecycle)
+        passed = n >= int(spec["min_lifecycle_trades"]) and (
+            linked == n if n else False
+        )
+        checks = [
+            {"check": "lifecycle_trade_count", "value": n, "pass": n >= 5},
+            {"check": "causal_chain_count", "value": linked, "pass": linked == n if n else False},
+        ]
+
+    elif gate_id == "v2_mfe_mae":
+        n = len(trades)
+        exc_n = sum(
+            1
+            for t in trades
+            if isinstance(
+                ((t.get("metadata") or {}).get("outcome") or {}).get("excursions"),
+                dict,
+            )
+        )
+        cov = exc_n / n * 100 if n else 0
+        passed = n >= int(spec["min_trades"]) and cov >= float(
+            spec["min_excursion_coverage_pct"]
+        )
+        checks = [
+            {"check": "trade_count", "value": n, "pass": n >= int(spec["min_trades"])},
+            {
+                "check": "excursion_coverage_pct",
+                "value": round(cov, 2),
+                "pass": cov >= float(spec["min_excursion_coverage_pct"]),
+            },
+        ]
+
+    elif gate_id == "v2_reject_labels":
+        conn2 = _connect()
+        labeled = 0
+        if conn2 is not None:
+            with conn2.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM entry_decision_labels")
+                labeled = int(cur.fetchone()[0])
+            conn2.close()
+        passed = labeled >= int(spec["min_labeled_rejects"])
+        checks = [
+            {
+                "check": "labeled_rejects",
+                "value": labeled,
+                "pass": passed,
+            }
         ]
 
     else:

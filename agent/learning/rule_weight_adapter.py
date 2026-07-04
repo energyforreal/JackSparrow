@@ -62,3 +62,34 @@ def nudge_weights(rule_eval: Dict[str, Any]) -> Dict[str, float]:
 
     total = sum(weights.values()) or 1.0
     return {k: round(v / total, 4) for k, v in weights.items()}
+
+
+def false_negative_rate_from_labels(labels: Dict[str, Any]) -> float:
+    """Compute false-negative rate from entry_decision_labels aggregate."""
+    total = int(labels.get("total") or 0)
+    fn = int(labels.get("false_negatives") or 0)
+    if total <= 0:
+        return 0.0
+    return fn / total
+
+
+def nudge_weights_with_reject_labels(
+    rule_eval: Dict[str, Any],
+    reject_labels: Dict[str, Any],
+) -> Dict[str, float]:
+    """Nudge gate weights using rule eval and reject-label false negatives."""
+    weights = nudge_weights(rule_eval)
+    fnr = false_negative_rate_from_labels(reject_labels)
+    if fnr > 0.4 and getattr(settings, "trade_intelligence_learning_enabled", False):
+        shadow = bool(getattr(settings, "trade_intelligence_learning_shadow_mode", True))
+        logger.info(
+            "reject_label_fnr_observed",
+            false_negative_rate=round(fnr, 4),
+            shadow_only=shadow,
+        )
+        if not shadow:
+            for cat in list(weights.keys()):
+                weights[cat] = min(_MAX_W, weights.get(cat, 0.2) + _NUDGE * 0.5)
+            total = sum(weights.values()) or 1.0
+            weights = {k: round(v / total, 4) for k, v in weights.items()}
+    return weights

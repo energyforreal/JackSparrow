@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Dict, Any, AsyncGenerator
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     String,
@@ -268,11 +269,59 @@ class TradeOutcomeRecord(Base):
     opened_at = Column(TIMESTAMPTZ, nullable=True)
     closed_at = Column(TIMESTAMPTZ, nullable=False, default=lambda: datetime.now(timezone.utc))
     metadata_json = Column("metadata", JSONB, nullable=True)
+    config_hash = Column(String(16), nullable=True, index=True)
+    setup_type = Column(String(64), nullable=True, index=True)
+    regime = Column(String(64), nullable=True, index=True)
+    root_cause = Column(String(64), nullable=True, index=True)
+    entry_quality_score = Column(DECIMAL(8, 6), nullable=True)
+    mfe_pct = Column(DECIMAL(12, 6), nullable=True)
+    mae_pct = Column(DECIMAL(12, 6), nullable=True)
+    slippage_bps_entry = Column(DECIMAL(12, 4), nullable=True)
+    decision_event_count = Column(Integer, nullable=True)
     created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_trade_outcomes_symbol_closed", "symbol", "closed_at"),
     )
+
+
+class TradeDecisionEventRecord(Base):
+    """Append-only decision timeline events per position."""
+
+    __tablename__ = "trade_decision_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String(64), unique=True, nullable=False, index=True)
+    position_id = Column(String(255), nullable=True, index=True)
+    reasoning_chain_id = Column(String(255), nullable=True, index=True)
+    symbol = Column(String(50), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    bar_index = Column(Integer, nullable=True)
+    sequence_num = Column(Integer, nullable=False, default=0)
+    captured_at = Column(TIMESTAMPTZ, nullable=False, index=True)
+    caused_by_json = Column("caused_by", JSONB, nullable=True)
+    delta_json = Column("delta", JSONB, nullable=True)
+    payload_json = Column("payload", JSONB, nullable=True)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_trade_decision_events_position_seq", "position_id", "sequence_num"),
+    )
+
+
+class EntryDecisionLabelRecord(Base):
+    """Forward outcome labels for rejected entry decisions."""
+
+    __tablename__ = "entry_decision_labels"
+
+    decision_id = Column(String(255), primary_key=True)
+    label_horizon_bars = Column(Integer, nullable=False)
+    forward_return_pct = Column(DECIMAL(12, 6), nullable=True)
+    forward_mfe_pct = Column(DECIMAL(12, 6), nullable=True)
+    forward_mae_pct = Column(DECIMAL(12, 6), nullable=True)
+    would_have_won = Column(Boolean, nullable=True)
+    labeled_at = Column(TIMESTAMPTZ, nullable=False, index=True)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
 
 class EntryDecisionRecord(Base):

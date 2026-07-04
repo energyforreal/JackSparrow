@@ -1,0 +1,7 @@
+{
+  "scenario": "high_volatility",
+  "regime": "volatile",
+  "structure": {"market_type": "NEUTRAL", "liquidity_ok": false},
+  "features": {"spread_bps": 45.0, "returns_std_20": 0.04},
+  "expected_max_microstructure": 0.56
+}

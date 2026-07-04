@@ -1112,7 +1112,7 @@ Phased testnet rollout without architectural rewrite:
 - **Phase readiness gates** — `tools/commands/phase_readiness_gate.py`
 - **Experiment registry** — `data/experiments/registry.json`; portfolio layer explicitly deferred
 
-See [Trading persistence model](../reference/trading-persistence-model.md) and [TLE reference](../reference/trade-lifecycle-engine.md).
+See [Trading persistence model](../reference/trading-persistence-model.md), [Trade Intelligence Snapshot v2](../reference/trade-intelligence-snapshot-v2.md), and [TLE reference](../reference/trade-lifecycle-engine.md).
 
 As of 2025-01-27, the system has undergone major architectural improvements. Subsequent changes are reflected in the canonical numbered guides (`docs/01`–`docs/15`) and repository history.
 

@@ -291,7 +291,10 @@ class AgentStateMachine:
                 if isinstance(entry_snap, dict) and entry_snap:
                     merged = merge_close_fields(entry_snap, payload)
                     analysis = analyze_post_trade(merged)
-                    eq_at_entry = entry_snap.get("entry_quality") or {}
+                    dc_eq = {}
+                    if isinstance(entry_snap.get("decision_context"), dict):
+                        dc_eq = entry_snap["decision_context"].get("entry_quality") or {}
+                    eq_at_entry = dc_eq if isinstance(dc_eq, dict) else {}
                     dims = (
                         eq_at_entry.get("dimensions")
                         if isinstance(eq_at_entry.get("dimensions"), dict)
@@ -301,6 +304,14 @@ class AgentStateMachine:
                     shadow = bool(
                         getattr(settings, "entry_quality_learning_shadow_mode", True)
                     )
+                    if getattr(settings, "trade_intelligence_learning_enabled", False):
+                        shadow = shadow or bool(
+                            getattr(
+                                settings,
+                                "trade_intelligence_learning_shadow_mode",
+                                True,
+                            )
+                        )
                     apply_dimension_calibration_feedback(
                         dims,
                         str(analysis.get("root_cause") or "unknown"),
@@ -342,10 +353,87 @@ class AgentStateMachine:
                         merged_meta = {
                             "reasoning_chain_id": payload.get("reasoning_chain_id"),
                         }
+
+                    position_id = str(payload.get("position_id") or "")
+                    symbol_str = str(payload.get("symbol", ""))
+
+                    if getattr(settings, "trade_mfe_mae_at_close_enabled", False):
+                        try:
+                            from agent.persistence.trade_excursions import (
+                                compute_excursions_for_close,
+                            )
+
+                            excursions = await compute_excursions_for_close(
+                                symbol=symbol_str,
+                                side=str(payload.get("side") or "long"),
+                                entry_price=entry,
+                                exit_price=exitp,
+                                opened_at=opened_at or closed_at,
+                                closed_at=closed_at,
+                                metadata=merged_meta,
+                            )
+                            outcome = merged_meta.get("outcome")
+                            if not isinstance(outcome, dict):
+                                outcome = {}
+                                merged_meta["outcome"] = outcome
+                            outcome["excursions"] = excursions
+                            payload["excursions"] = excursions
+                        except Exception as exc_exc:
+                            logger.warning(
+                                "mfe_mae_at_close_failed",
+                                position_id=position_id,
+                                error=str(exc_exc),
+                            )
+
+                    try:
+                        from agent.persistence.decision_events import (
+                            decision_event_emitter,
+                            extract_denorm_from_metadata,
+                        )
+
+                        if position_id and getattr(
+                            settings, "trade_decision_events_enabled", False
+                        ):
+                            if payload.get("excursions"):
+                                decision_event_emitter.emit_if_changed(
+                                    position_id=position_id,
+                                    symbol=symbol_str,
+                                    event_type="mfe_mae_computed",
+                                    reasoning_chain_id=payload.get("reasoning_chain_id"),
+                                    payload={"excursions": payload.get("excursions")},
+                                )
+                            decision_event_emitter.emit_if_changed(
+                                position_id=position_id,
+                                symbol=symbol_str,
+                                event_type="close_outcome",
+                                reasoning_chain_id=payload.get("reasoning_chain_id"),
+                                payload={
+                                    "pnl": pnl,
+                                    "exit_reason": payload.get("exit_reason"),
+                                    "exit_price": exitp,
+                                },
+                            )
+                            graph = decision_event_emitter.build_causality_graph(
+                                position_id
+                            )
+                            merged_meta["causality_graph"] = graph
+                            merged_meta["decision_event_count"] = graph.get(
+                                "event_count", 0
+                            )
+                            decision_event_emitter.reset_position(position_id)
+
+                        denorm = extract_denorm_from_metadata(merged_meta)
+                    except Exception as denorm_exc:
+                        logger.warning(
+                            "trade_outcome_denorm_failed",
+                            error=str(denorm_exc),
+                        )
+                        denorm = None
+
                     await persist_trade_outcome_async(
                         settings.database_url,
                         position_id=payload.get("position_id"),
-                        symbol=str(payload.get("symbol", "")),
+                        symbol=symbol_str,
                         side=payload.get("side"),
                         signal=payload.get("predicted_signal"),
                         entry_price=entry,
@@ -357,6 +445,7 @@ class AgentStateMachine:
                         opened_at=opened_at,
                         closed_at=closed_at,
                         metadata=merged_meta,
+                        denorm=denorm,
                     )
                     try:
                         from agent.persistence.db_writes import (

@@ -1319,6 +1319,28 @@ class MCPOrchestrator:
                 else:
                     reject_tail = "below_threshold"
 
+            if not gate5_economic:
+                if short_enabled and proba < -short_thr:
+                    g5s_metrics = gate5_short_edge_metrics(proba, short_thr)
+                    g5s = apply_gate5_min_edge_short(
+                        proba, short_thr, self._v43_gate_state
+                    )
+                    gate5_economic = {
+                        "pass": bool(g5s_metrics.passes),
+                        "edge_pct": g5s_metrics.edge_pct,
+                        "side": "short",
+                        "reject_reason": g5s.reject_reason or reject_tail,
+                    }
+                else:
+                    g5_metrics = gate5_long_edge_metrics(proba, thr)
+                    g5 = apply_gate5_min_edge(proba, thr, self._v43_gate_state)
+                    gate5_economic = {
+                        "pass": bool(g5_metrics.passes),
+                        "edge_pct": g5_metrics.edge_pct,
+                        "side": "long",
+                        "reject_reason": g5.reject_reason or reject_tail,
+                    }
+
             collapse_rate = self._v43_gate_state.counters.collapse_rate()
             self._v43_gate_state.record_collapse_sample(collapse_rate)
             score_std = float(features_dict.get("returns_std_20", 0.0) or 0.0)

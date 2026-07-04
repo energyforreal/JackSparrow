@@ -1599,6 +1599,33 @@ class TradingEventHandler:
             open_pos["market_structure_timeline"] = condense_structure_timeline(
                 open_pos["lifecycle_monitoring"]
             )
+            try:
+                from agent.persistence.decision_events import emit_tle_cycle_events
+
+                position_id = str(
+                    open_pos.get("position_id")
+                    or f"pos_{open_pos.get('entry_order_id', symbol)}"
+                )
+                prior_regime = None
+                prior_conviction = open_pos.get("conviction_at_entry")
+                if isinstance(mon_list, list) and len(mon_list) >= 2:
+                    prev_ms = (mon_list[-2].get("market_state") or {})
+                    if isinstance(prev_ms, dict):
+                        prior_regime = prev_ms.get("regime")
+                emit_tle_cycle_events(
+                    position_id=position_id,
+                    symbol=symbol,
+                    reasoning_chain_id=open_pos.get("reasoning_chain_id"),
+                    monitoring_record=rec,
+                    verdict=verdict,
+                    prior_regime=str(prior_regime) if prior_regime else None,
+                    prior_structure=prior_structure,
+                    prior_conviction=float(prior_conviction)
+                    if prior_conviction is not None
+                    else None,
+                )
+            except Exception as ev_exc:
+                logger.debug("decision_events_tle_emit_failed", error=str(ev_exc))
         except Exception as mon_exc:
             logger.debug("lifecycle_monitoring_record_failed", error=str(mon_exc))
 
@@ -1658,6 +1685,22 @@ class TradingEventHandler:
                 "conviction_now": verdict.conviction_now,
                 "conviction_delta": verdict.conviction_delta,
             }
+            try:
+                from agent.persistence.decision_events import decision_event_emitter
+
+                position_id = str(
+                    open_pos.get("position_id")
+                    or f"pos_{open_pos.get('entry_order_id', symbol)}"
+                )
+                decision_event_emitter.emit_if_changed(
+                    position_id=position_id,
+                    symbol=symbol,
+                    event_type="lifecycle_exit",
+                    reasoning_chain_id=open_pos.get("reasoning_chain_id"),
+                    payload=dict(open_pos["lifecycle_exit"]),
+                )
+            except Exception as ev_exc:
+                logger.debug("decision_events_lifecycle_exit_failed", error=str(ev_exc))
             close_result = await self.execution_module.close_position(
                 symbol, exit_reason="lifecycle_exit"
             )

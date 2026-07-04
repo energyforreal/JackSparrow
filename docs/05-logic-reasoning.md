@@ -100,7 +100,7 @@ Conviction sizing uses `structural_confidence_to_fraction()` when FSM enforce or
 
 [`structural_gate_engine.py`](../agent/core/structural_gate_engine.py) emits **boolean categories** (`trend`, `structure`, `breakout`, `liquidity`, `volatility`, `risk`) plus **`block_reasons`** strings — not per-gate confidence deltas. Snapshots denormalize this into `gate_evaluation` for analytics SQL without deep JSON paths. `structural_confidence` in the pipeline is `base + 0.03` per passed category ([`rule_based_pipeline.py`](../agent/intelligence/rule_based_pipeline.py)). Legacy IC paths may still attach `confluence_components` from `trade_score` / `environment_scores` when present.
 
-Trade decision snapshots bind this context to `position_id` via [`agent/persistence/trade_snapshot.py`](../agent/persistence/trade_snapshot.py) at fill and persist on close to `trade_outcomes.metadata`.
+Trade decision snapshots bind this context to `position_id` via [`agent/persistence/trade_snapshot.py`](../agent/persistence/trade_snapshot.py) at fill and persist on close to `trade_outcomes.metadata`. **Snapshot v2** additionally persists `entry_quality`, full `hypothesis_snapshot`, `policy_verdict` / `thesis_verdict`, execution slippage, and `tp_sl_history`; in-trade reasoning is appended to `trade_decision_events` (see [Trade Intelligence Snapshot v2](../reference/trade-intelligence-snapshot-v2.md)).
 
 ---
 

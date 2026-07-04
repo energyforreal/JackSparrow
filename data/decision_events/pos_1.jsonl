@@ -1,0 +1,1 @@
+{"event_id": "558baf25-4336-46ab-904f-d6fe8b98997b", "position_id": "pos_1", "reasoning_chain_id": null, "symbol": "BTCUSD", "event_type": "tle_verdict", "bar_index": null, "sequence_num": 1, "captured_at": "2026-07-04T12:37:41.325583+00:00", "caused_by": [], "delta": null, "payload": {"action": "HOLD"}}

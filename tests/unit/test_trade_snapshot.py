@@ -22,6 +22,80 @@ def test_build_system_context_config_hash_stable():
     assert a["gate_profile"] in ("permissive", "strict")
 
 
+def test_build_entry_snapshot_v2_fields():
+    risk_payload = {
+        "symbol": "BTCUSD",
+        "side": "long",
+        "confidence": 0.72,
+        "policy_verdict": {
+            "signal": "LONG",
+            "conviction": 0.81,
+            "reason_codes": ["agent_thesis_entry"],
+            "abstention": None,
+        },
+        "market_context": {
+            "entry_quality": {
+                "quality_score": 0.75,
+                "passed": True,
+                "dimensions": {"structural": 0.8},
+                "reason_codes": [],
+                "required_ml_confirmation": False,
+            },
+            "hypothesis_snapshot": {
+                "long_pressure": 0.62,
+                "short_pressure": 0.31,
+                "aggregate_direction": "LONG",
+            },
+            "thesis_verdict": {"signal": "LONG", "confidence": 0.7},
+            "rule_based_pipeline": {"structural_gates": {"setup_type": "breakout"}},
+        },
+    }
+    snap = build_entry_snapshot(
+        risk_payload=risk_payload,
+        timing_ctx={
+            "execution_slippage_bps_entry": 2.5,
+            "reference_price_entry": 90000.0,
+            "fill_price_entry": 90018.0,
+        },
+    )
+    dc = snap["decision_context"]
+    assert dc["entry_quality"]["quality_score"] == 0.75
+    assert dc["hypothesis_snapshot"]["long_pressure"] == 0.62
+    assert dc["policy_verdict"]["signal"] == "LONG"
+    assert dc["thesis_verdict"]["signal"] == "LONG"
+    assert snap["execution_timing"]["execution_slippage_bps_entry"] == 2.5
+
+
+def test_merge_close_fields_includes_slippage_and_tp_history():
+    entry = build_entry_snapshot(
+        risk_payload={
+            "symbol": "BTCUSD",
+            "side": "long",
+            "market_context": {"rule_based_pipeline": {"structural_gates": {"setup_type": "none"}}},
+        },
+    )
+    merged = merge_close_fields(
+        entry,
+        {
+            "position_id": "pos_1",
+            "exit_price": 91000.0,
+            "entry_price": 90000.0,
+            "pnl": 10.0,
+            "exit_reason": "take_profit",
+            "timestamp": "2026-06-29T11:00:00+00:00",
+            "reference_price_exit": 90950.0,
+            "fill_price_exit": 91000.0,
+            "execution_slippage_bps_exit": 5.5,
+            "tp_sl_history": [
+                {"change_type": "take_profit", "before": 95000.0, "after": 94000.0}
+            ],
+        },
+    )
+    assert merged["outcome"]["fill_price_exit"] == 91000.0
+    assert merged["execution_timing"]["execution_slippage_bps_exit"] == 5.5
+    assert len(merged["outcome"]["tp_sl_history"]) == 1
+
+
 def test_build_entry_snapshot_includes_rule_based_pipeline():
     risk_payload = {
         "symbol": "BTCUSD",

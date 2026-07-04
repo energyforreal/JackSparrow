@@ -193,15 +193,11 @@ JackSparrow/
 │   │   ├── retraining_scheduler.py    # Trigger + execute retraining command with cooldown/state
 │   │   └── adaptive/                  # Optional v15: KS drift, warm-start XGBoost, F1 gate, versioned saves
 │   ├── persistence/                    # Analytics warehouse writers (fire-and-forget)
-│   │   ├── trade_snapshot.py          # Snapshot schema v1 builders + size cap
+│   │   ├── trade_snapshot.py          # Snapshot schema v1/v2 builders + size cap
+│   │   ├── decision_events.py         # Append-only decision timeline emitter
+│   │   ├── trade_excursions.py        # MFE/MAE computation at close
 │   │   ├── performance_context.py     # In-memory streak/PnL counters for entry snapshots
-│   │   └── db_writes.py               # trade_outcomes, entry_decisions, analytics_rollups
-│   │       ├── adaptive_controller.py # Orchestration + hot reload hook
-│   │       ├── drift_detector.py
-│   │       ├── retrain_engine.py
-│   │       ├── model_validator.py
-│   │       ├── model_registry.py
-│   │       └── labeled_data.py        # Parquet loader for labeled_{tf}.parquet
+│   │   └── db_writes.py               # trade_outcomes, entry_decisions, decision_events, rollups
 │   └── requirements.txt               # Python dependencies
 │
 ├── frontend/                            # Frontend web application
@@ -689,7 +685,10 @@ tests/unit/backend/test_agent_service.py
 - `restart.sh` / `restart.ps1`: Stops running services, clears temporary artefacts, re-executes start command, and archives previous logs under `logs/restart/`.
 - `audit.sh` / `audit.ps1`: Runs formatting, linting, tests, health checks, and log aggregation; produces reports in `logs/audit/`.
 - `error.sh` / `error.ps1`: Performs a lightweight diagnostic (process status + log tail) and stores results in `logs/error/summary.log`.
-- `trade_analytics.py`: Snapshot integrity, reject breakdown, regime performance, config-hash diff, timing summary, archive verify (requires `DATABASE_URL`).
+- `trade_analytics.py`: Snapshot integrity (v1/v2 fields), reject breakdown, regime performance, config-hash diff, timing summary, archive verify (requires `DATABASE_URL`).
+- `label_entry_decisions.py`: Forward-label rejected entries for false-negative analysis.
+- `phase_readiness_gate.py`: v2 gates (`v1_to_v2_snapshot`, `v2_events`, `v2_causality`, `v2_mfe_mae`, `v2_reject_labels`).
+- `replay_trade_excursions.py`: Backfill MFE/MAE for historical trades.
 - `validate-prerequisites.py`: Validates system prerequisites (Python, Node.js, PostgreSQL, Redis).
 - `health_check.py`: Checks health of running services.
 

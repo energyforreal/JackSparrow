@@ -114,11 +114,28 @@ def cmd_snapshot_integrity(_: argparse.Namespace) -> int:
                 WHERE metadata->>'snapshot_version' IS NOT NULL
                 """
             )
-            versioned = int(cur.fetchone()[0])
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM trade_outcomes
+                WHERE metadata->'decision_context'->'entry_quality' IS NOT NULL
+                """
+            )
+            with_eq = int(cur.fetchone()[0])
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM trade_outcomes
+                WHERE metadata->'execution_timing'->'execution_slippage_bps_entry' IS NOT NULL
+                """
+            )
+            with_slip = int(cur.fetchone()[0])
         pct = (with_rb / total * 100.0) if total else 0.0
+        eq_pct = (with_eq / total * 100.0) if total else 0.0
+        slip_pct = (with_slip / total * 100.0) if total else 0.0
         print(f"trade_outcomes total: {total}")
         print(f"with rule_based_pipeline: {with_rb} ({pct:.1f}%)")
         print(f"with snapshot_version: {versioned}")
+        print(f"with entry_quality: {with_eq} ({eq_pct:.1f}%)")
+        print(f"with entry slippage: {with_slip} ({slip_pct:.1f}%)")
         return 0
     finally:
         conn.close()

@@ -9,6 +9,9 @@ Alembic revisions for the JackSparrow PostgreSQL analytics and governance tables
 | `001_baseline` | `001_baseline_schema.py` | No-op baseline for deployments that used `create_all` |
 | `002_entry_decisions` | `002_entry_decisions.py` | `entry_decisions` — approve/reject/executed funnel |
 | `003_analytics_rollups` | `003_analytics_rollups.py` | `analytics_rollups` — daily/regime/config_hash aggregates |
+| `004_trade_decision_events` | `004_trade_decision_events.py` | `trade_decision_events` — append-only decision timeline |
+| `005_entry_decision_labels` | `005_entry_decision_labels.py` | `entry_decision_labels` — reject forward outcomes |
+| `006_trade_outcomes_denorm` | `006_trade_outcomes_denorm.py` | Denormalized columns on `trade_outcomes` |
 
 ## Apply migrations
 

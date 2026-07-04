@@ -2,7 +2,9 @@
 
 from agent.persistence.db_writes import (
     persist_analytics_rollups_async,
+    persist_decision_event_async,
     persist_entry_decision_async,
+    persist_entry_decision_label_async,
     persist_prediction_audit_async,
     persist_trade_outcome_async,
 )
@@ -18,6 +20,8 @@ __all__ = [
     "persist_prediction_audit_async",
     "persist_trade_outcome_async",
     "persist_entry_decision_async",
+    "persist_decision_event_async",
+    "persist_entry_decision_label_async",
     "persist_analytics_rollups_async",
     "build_entry_snapshot",
     "build_reject_snapshot",

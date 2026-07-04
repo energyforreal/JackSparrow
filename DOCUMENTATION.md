@@ -33,6 +33,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | — | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md) | Quality-first entry scoring, single policy authority, Gate 5 economics, TLE EV exits, learning loop |
 | — | [Trade lifecycle engine](reference/trade-lifecycle-engine.md) | Position intelligence, exit engine, promotion replay |
 | — | [Trading persistence model](reference/trading-persistence-model.md) | Testnet three-layer model, snapshot schema v1, analytics tables, Docker notes |
+| — | [Trade Intelligence Snapshot v2](reference/trade-intelligence-snapshot-v2.md) | Decision events, causality graph, MFE/MAE, reject labels, shadow rollout |
 
 ---
 
@@ -66,7 +67,8 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | Rule-based FSM rollout / shadow logs | [Rule-based decision engine](docs/rule-based-decision-engine.md), `tools/analyze_agent_logs.py`, [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables) |
 | Entry quality / July replay | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md), `tests/integration/test_july2_telemetry_replay.py`, `tools/commands/monte_carlo_replay.py` |
 | TLE promotion / EV exit replay | [Trade lifecycle engine](reference/trade-lifecycle-engine.md), `tools/commands/run_tle_investigation.py` |
-| Trade snapshot analytics / optimization | [Trading persistence model](reference/trading-persistence-model.md), `tools/commands/trade_analytics.py`, [Backend – Analytics API](docs/06-backend.md#analytics-rest-api) |
+| Trade snapshot analytics / optimization | [Trading persistence model](reference/trading-persistence-model.md), [Snapshot v2](reference/trade-intelligence-snapshot-v2.md), `tools/commands/trade_analytics.py`, [Backend – Analytics API](docs/06-backend.md#analytics-rest-api) |
+| Snapshot v2 shadow rollout / decision events | [Trade Intelligence Snapshot v2](reference/trade-intelligence-snapshot-v2.md), [Deployment – Alembic](docs/10-deployment.md#alembic-migrations), `tools/commands/phase_readiness_gate.py`, `tools/commands/label_entry_decisions.py` |
 | Docker rebuild / redeploy | [Deployment – Common operations](docs/10-deployment.md#common-operations), `docker compose build --pull` + `up -d --force-recreate` |
 | Alembic / schema drift after upgrade | [Deployment – Alembic migrations](docs/10-deployment.md#alembic-migrations), `backend/migrations/README.md` |
 | Troubleshooting | [Debugging](docs/13-debugging.md), [Deployment – Troubleshooting](docs/10-deployment.md#troubleshooting) |
@@ -78,4 +80,4 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 
 When you change behavior, update the **numbered** doc that owns that topic. Do not add new standalone markdown under `docs/` except the `01`–`15` set (see [Project rules](docs/14-project-rules.md)).
 
-**Last updated**: 2026-06-29 — Trade snapshots v1, analytics API, Alembic auto-migrate on Docker backend startup, rebuild/redeploy docs.
+**Last updated**: 2026-07-04 — Trade Intelligence Snapshot v2 (decision events, MFE/MAE, reject labels, denorm analytics API), migrations 004–006, shadow rollout env flags.

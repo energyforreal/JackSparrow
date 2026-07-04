@@ -1,0 +1,6 @@
+{
+  "scenario": "mixed_regime",
+  "regime_sequence": ["trending", "neutral", "trending"],
+  "structure": {"market_type": "NEUTRAL", "liquidity_ok": true},
+  "expected_min_quality_score": 45
+}

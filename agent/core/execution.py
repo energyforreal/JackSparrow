@@ -193,6 +193,7 @@ class PositionManager:
             "status": "open",
             "stop_loss": stop_loss,
             "take_profit": take_profit,
+            "tp_sl_history": [],
         }
         if position_extras:
             position.update(position_extras)
@@ -332,6 +333,53 @@ class ExecutionResult:
             "execution_time": self.execution_time.isoformat(),
             "details": self.details
         }
+
+
+def _compute_slippage_bps(
+    reference_price: float,
+    fill_price: float,
+    side: str,
+) -> Optional[float]:
+    """Return signed slippage in bps (positive = worse fill for buyer)."""
+    try:
+        ref_f = float(reference_price)
+        fill_f = float(fill_price)
+    except (TypeError, ValueError):
+        return None
+    if ref_f <= 0 or fill_f <= 0:
+        return None
+    slip_bps = (fill_f - ref_f) / ref_f * 10000.0
+    side_l = str(side or "").lower()
+    if side_l in ("sell", "short"):
+        slip_bps = -slip_bps
+    return round(slip_bps, 4)
+
+
+def _append_tp_sl_history(
+    position: Dict[str, Any],
+    *,
+    change_type: str,
+    before: Optional[float],
+    after: Optional[float],
+    **extra: Any,
+) -> None:
+    """Append one TP/SL modification record on the open position."""
+    hist = position.get("tp_sl_history")
+    if not isinstance(hist, list):
+        hist = []
+        position["tp_sl_history"] = hist
+    record: Dict[str, Any] = {
+        "change_type": change_type,
+        "before": before,
+        "after": after,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+    }
+    for key, val in extra.items():
+        if val is not None:
+            record[key] = val
+    hist.append(record)
+    if len(hist) > 100:
+        position["tp_sl_history"] = hist[-100:]
 
 
 class ExecutionEngine:
@@ -918,6 +966,17 @@ class ExecutionEngine:
                         timing_ctx["position_opened_at"] = (
                             et.isoformat() if hasattr(et, "isoformat") else str(et)
                         )
+                    ref_px = trade.get("reference_price") or trade.get("price") or fill_price
+                    try:
+                        ref_f = float(ref_px)
+                        fill_f = float(fill_price)
+                        slip = _compute_slippage_bps(ref_f, fill_f, side)
+                        if slip is not None:
+                            timing_ctx["reference_price_entry"] = ref_f
+                            timing_ctx["fill_price_entry"] = fill_f
+                            timing_ctx["execution_slippage_bps_entry"] = slip
+                    except (TypeError, ValueError):
+                        pass
                     pos["execution_timing"] = dict(timing_ctx)
                     snap_payload = trade.get("_risk_payload_snapshot")
                     if not isinstance(snap_payload, dict):
@@ -930,6 +989,24 @@ class ExecutionEngine:
                     )
                     if entry_snap:
                         pos["entry_decision_snapshot"] = entry_snap
+                    try:
+                        from agent.persistence.decision_events import decision_event_emitter
+
+                        pos_id = f"pos_{pos.get('entry_order_id') or result.order_id or ''}"
+                        pos["position_id"] = pos_id
+                        decision_event_emitter.emit_if_changed(
+                            position_id=pos_id,
+                            symbol=symbol,
+                            event_type="entry_decision",
+                            reasoning_chain_id=payload.get("reasoning_chain_id"),
+                            payload=entry_snap if isinstance(entry_snap, dict) else {},
+                        )
+                    except Exception as ev_exc:
+                        logger.debug(
+                            "decision_events_entry_emit_failed",
+                            symbol=symbol,
+                            error=str(ev_exc),
+                        )
                     dc = (
                         entry_snap.get("decision_context")
                         if isinstance(entry_snap, dict)
@@ -1610,10 +1687,17 @@ class ExecutionEngine:
                     realized_pnl_net_usd=net_usd,
                 )
 
-                position_id = f"pos_{closed_position.get('entry_order_id', order_result.get('order_id', ''))}"
+                position_id = str(
+                    position.get("position_id")
+                    or f"pos_{closed_position.get('entry_order_id', order_result.get('order_id', ''))}"
+                )
                 usdinr_exit = await self._resolve_usdinr_paper()
                 try:
-                    usdinr_entry = float(position.get("paper_usdinr_entry")) if position.get("paper_usdinr_entry") is not None else usdinr_exit
+                    usdinr_entry = (
+                        float(position.get("paper_usdinr_entry"))
+                        if position.get("paper_usdinr_entry") is not None
+                        else usdinr_exit
+                    )
                 except (TypeError, ValueError):
                     usdinr_entry = usdinr_exit
 
@@ -1667,6 +1751,32 @@ class ExecutionEngine:
                     )
                 if confidence_at_entry is not None:
                     payload_data["confidence_at_entry"] = confidence_at_entry
+                ref_exit = price or position.get("current_price") or exit_price
+                try:
+                    ref_exit_f = float(ref_exit)
+                    slip_exit = _compute_slippage_bps(
+                        ref_exit_f,
+                        exit_price,
+                        close_side,
+                    )
+                    payload_data["reference_price_exit"] = ref_exit_f
+                    payload_data["fill_price_exit"] = exit_price
+                    if slip_exit is not None:
+                        payload_data["execution_slippage_bps_exit"] = slip_exit
+                    etiming = position.get("execution_timing")
+                    if isinstance(etiming, dict):
+                        payload_data["reference_price_entry"] = etiming.get(
+                            "reference_price_entry"
+                        )
+                        payload_data["fill_price_entry"] = etiming.get("fill_price_entry")
+                        payload_data["execution_slippage_bps_entry"] = etiming.get(
+                            "execution_slippage_bps_entry"
+                        )
+                except (TypeError, ValueError):
+                    pass
+                tp_hist = position.get("tp_sl_history")
+                if isinstance(tp_hist, list) and tp_hist:
+                    payload_data["tp_sl_history"] = list(tp_hist)
                 lifecycle_exit = position.get("lifecycle_exit")
                 if isinstance(lifecycle_exit, dict):
                     payload_data["lifecycle_exit"] = lifecycle_exit
@@ -2358,7 +2468,34 @@ class ExecutionEngine:
         pos = position or self.position_manager.get_position(symbol)
         if not pos:
             return
+        prev_sl = pos.get("stop_loss")
+        try:
+            prev_sl_f = float(prev_sl) if prev_sl is not None else None
+        except (TypeError, ValueError):
+            prev_sl_f = None
         pos["stop_loss"] = new_stop
+        _append_tp_sl_history(
+            pos,
+            change_type="stop_loss",
+            before=prev_sl_f,
+            after=float(new_stop),
+        )
+        try:
+            from agent.persistence.decision_events import decision_event_emitter
+
+            pos_id = str(
+                pos.get("position_id") or f"pos_{pos.get('entry_order_id', symbol)}"
+            )
+            decision_event_emitter.emit_if_changed(
+                position_id=pos_id,
+                symbol=symbol,
+                event_type="tp_sl_modified",
+                reasoning_chain_id=pos.get("reasoning_chain_id"),
+                delta={"field": "stop_loss", "from": prev_sl_f, "to": float(new_stop)},
+                payload={"change_type": "stop_loss"},
+            )
+        except Exception:
+            pass
         logger.info(
             "trailing_stop_updated",
             symbol=symbol,
@@ -2386,8 +2523,35 @@ class ExecutionEngine:
         pos = position or self.position_manager.get_position(symbol)
         if not pos:
             return
+        prev_tp = pos.get("take_profit")
+        try:
+            prev_tp_f = float(prev_tp) if prev_tp is not None else None
+        except (TypeError, ValueError):
+            prev_tp_f = None
         pos["take_profit"] = new_tp
+        _append_tp_sl_history(
+            pos,
+            change_type="take_profit",
+            before=prev_tp_f,
+            after=float(new_tp),
+        )
         pos["last_tp_modify_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            from agent.persistence.decision_events import decision_event_emitter
+
+            pos_id = str(
+                pos.get("position_id") or f"pos_{pos.get('entry_order_id', symbol)}"
+            )
+            decision_event_emitter.emit_if_changed(
+                position_id=pos_id,
+                symbol=symbol,
+                event_type="tp_sl_modified",
+                reasoning_chain_id=pos.get("reasoning_chain_id"),
+                delta={"field": "take_profit", "from": prev_tp_f, "to": float(new_tp)},
+                payload={"change_type": "take_profit"},
+            )
+        except Exception:
+            pass
         logger.info(
             "lifecycle_take_profit_updated",
             symbol=symbol,

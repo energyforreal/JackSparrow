@@ -35,6 +35,74 @@ DEFAULT_FEATURE_KEYS: tuple[str, ...] = (
 _TRUNCATABLE_KEYS = ("narrative_tail", "features", "confluence_components", "position_monitoring")
 
 
+def _copy_dict_if_present(src: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(src, dict) and src:
+        return dict(src)
+    return None
+
+
+def _policy_verdict_subset(pv: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(pv, dict):
+        return None
+    out: Dict[str, Any] = {}
+    for key in (
+        "signal",
+        "confidence",
+        "conviction",
+        "reason_codes",
+        "abstention",
+        "ml_evidence_id",
+        "adopted_ml_candidate",
+        "evidence",
+    ):
+        if pv.get(key) is not None:
+            out[key] = pv.get(key)
+    return out or None
+
+
+def _thesis_verdict_subset(tv: Any) -> Optional[Dict[str, Any]]:
+    if tv is None:
+        return None
+    if hasattr(tv, "to_dict"):
+        try:
+            raw = tv.to_dict()
+            return dict(raw) if isinstance(raw, dict) else None
+        except Exception:
+            pass
+    if isinstance(tv, dict):
+        return dict(tv)
+    return None
+
+
+def _enrich_decision_context_v2(
+    decision_context: Dict[str, Any],
+    *,
+    risk_payload: Dict[str, Any],
+    market_context: Dict[str, Any],
+) -> None:
+    """Attach v2 learning fields from risk payload and market context."""
+    mc = market_context if isinstance(market_context, dict) else {}
+    eq = mc.get("entry_quality")
+    if not isinstance(eq, dict):
+        eq = risk_payload.get("entry_quality")
+    if isinstance(eq, dict):
+        decision_context["entry_quality"] = dict(eq)
+
+    hyp = mc.get("hypothesis_snapshot")
+    if isinstance(hyp, dict):
+        decision_context["hypothesis_snapshot"] = dict(hyp)
+
+    pv = _policy_verdict_subset(risk_payload.get("policy_verdict"))
+    if pv:
+        decision_context["policy_verdict"] = pv
+        if decision_context.get("conviction_at_entry") is None and pv.get("conviction") is not None:
+            decision_context["conviction_at_entry"] = pv.get("conviction")
+
+    tv = _thesis_verdict_subset(mc.get("thesis_verdict"))
+    if tv:
+        decision_context["thesis_verdict"] = tv
+
+
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -248,6 +316,12 @@ def build_entry_snapshot(
     if ms_rb.get("regime_benchmark"):
         decision_context["regime_benchmark"] = ms_rb.get("regime_benchmark")
 
+    _enrich_decision_context_v2(
+        decision_context,
+        risk_payload=risk_payload,
+        market_context=mc,
+    )
+
     snap: Dict[str, Any] = {
         "snapshot_version": int(getattr(settings, "trade_snapshot_version", 1) or 1),
         "captured_at": _iso_now(),
@@ -321,6 +395,20 @@ def merge_close_fields(
         "quantity": close_payload.get("quantity"),
         "side": close_payload.get("side"),
     }
+    for key in (
+        "reference_price_entry",
+        "fill_price_entry",
+        "reference_price_exit",
+        "fill_price_exit",
+    ):
+        if close_payload.get(key) is not None:
+            outcome[key] = close_payload.get(key)
+    tp_sl_hist = close_payload.get("tp_sl_history")
+    if isinstance(tp_sl_hist, list) and tp_sl_hist:
+        outcome["tp_sl_history"] = tp_sl_hist[-100:]
+    excursions = close_payload.get("excursions")
+    if isinstance(excursions, dict):
+        outcome["excursions"] = dict(excursions)
     reflection = close_payload.get("reflection_snapshot")
     if isinstance(reflection, dict):
         outcome["reflection_snapshot"] = reflection
@@ -359,11 +447,24 @@ def merge_close_fields(
             timing["decision_to_risk_ms"] = (t_risk - t_dec).total_seconds() * 1000.0
         except (ValueError, TypeError):
             pass
+    for slip_key in (
+        "execution_slippage_bps_entry",
+        "execution_slippage_bps_exit",
+        "reference_price_entry",
+        "fill_price_entry",
+        "reference_price_exit",
+        "fill_price_exit",
+    ):
+        if close_payload.get(slip_key) is not None:
+            timing[slip_key] = close_payload.get(slip_key)
     merged["execution_timing"] = timing
 
     monitoring = close_payload.get("position_monitoring")
     if isinstance(monitoring, list) and monitoring:
-        merged["position_monitoring"] = monitoring[-200:]
+        max_mon = int(getattr(settings, "trade_snapshot_monitoring_summary_cycles", 10) or 10)
+        merged["position_monitoring"] = monitoring[-max_mon:]
+        if len(monitoring) > max_mon:
+            merged["position_monitoring_total_cycles"] = len(monitoring)
     timeline = close_payload.get("market_structure_timeline")
     if isinstance(timeline, list) and timeline:
         merged["market_structure_timeline"] = timeline
@@ -433,6 +534,9 @@ def build_reject_snapshot(
             for k, v in diagnostics.items()
             if k not in ("symbol", "signal", "event_id", "reason")
         }
+    dc = snap.get("decision_context")
+    if isinstance(dc, dict) and isinstance(mc, dict):
+        _enrich_decision_context_v2(dc, risk_payload={}, market_context=mc)
     return enforce_snapshot_size_cap(snap)
 
 

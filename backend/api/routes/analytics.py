@@ -177,3 +177,23 @@ async def get_confidence_calibration(
         from_date=_parse_dt(from_date),
         to_date=_parse_dt(to_date),
     )
+
+
+@router.get("/decision-events")
+async def get_decision_events(
+    position_id: Optional[str] = Query(None),
+    reasoning_chain_id: Optional[str] = Query(None),
+    symbol: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Append-only decision timeline for a position or reasoning chain."""
+    return await analytics_service.list_decision_events(
+        db,
+        position_id=position_id,
+        reasoning_chain_id=reasoning_chain_id,
+        symbol=symbol,
+        limit=limit,
+        offset=offset,
+    )

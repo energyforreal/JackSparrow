@@ -12,7 +12,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 from sqlalchemy import create_engine, text
@@ -100,9 +100,11 @@ def _insert_trade_outcome_sync(
     opened_at: Optional[datetime],
     closed_at: datetime,
     metadata: Optional[Dict[str, Any]],
+    denorm: Optional[Dict[str, Any]] = None,
 ) -> None:
     engine = _get_engine(database_url)
     meta_json = json.dumps(metadata if metadata is not None else {})
+    d = denorm if isinstance(denorm, dict) else {}
     with engine.connect() as conn:
         conn.execute(
             text(
@@ -110,11 +112,17 @@ def _insert_trade_outcome_sync(
                 INSERT INTO trade_outcomes (
                     position_id, symbol, side, signal,
                     entry_price, exit_price, quantity, pnl, pnl_pct,
-                    close_reason, opened_at, closed_at, metadata
+                    close_reason, opened_at, closed_at, metadata,
+                    config_hash, setup_type, regime, root_cause,
+                    entry_quality_score, mfe_pct, mae_pct, slippage_bps_entry,
+                    decision_event_count
                 ) VALUES (
                     :position_id, :symbol, :side, :signal,
                     :entry_price, :exit_price, :quantity, :pnl, :pnl_pct,
-                    :close_reason, :opened_at, :closed_at, (:metadata)::jsonb
+                    :close_reason, :opened_at, :closed_at, (:metadata)::jsonb,
+                    :config_hash, :setup_type, :regime, :root_cause,
+                    :entry_quality_score, :mfe_pct, :mae_pct, :slippage_bps_entry,
+                    :decision_event_count
                 )
                 """
             ),
@@ -132,6 +140,15 @@ def _insert_trade_outcome_sync(
                 "opened_at": opened_at,
                 "closed_at": closed_at,
                 "metadata": meta_json,
+                "config_hash": d.get("config_hash"),
+                "setup_type": d.get("setup_type"),
+                "regime": d.get("regime"),
+                "root_cause": d.get("root_cause"),
+                "entry_quality_score": d.get("entry_quality_score"),
+                "mfe_pct": d.get("mfe_pct"),
+                "mae_pct": d.get("mae_pct"),
+                "slippage_bps_entry": d.get("slippage_bps_entry"),
+                "decision_event_count": d.get("decision_event_count"),
             },
         )
         conn.commit()
@@ -199,6 +216,7 @@ async def persist_trade_outcome_async(
     opened_at: Optional[datetime],
     closed_at: datetime,
     metadata: Optional[Dict[str, Any]] = None,
+    denorm: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Insert one trade_outcomes row."""
 
@@ -218,6 +236,7 @@ async def persist_trade_outcome_async(
             opened_at=opened_at,
             closed_at=closed_at,
             metadata=metadata,
+            denorm=denorm,
         )
 
     try:
@@ -436,6 +455,181 @@ async def persist_analytics_rollups_async(
         logger.warning(
             "analytics_rollup_persist_failed",
             symbol=symbol,
+            error=str(e),
+            exc_info=True,
+        )
+
+
+def _insert_decision_event_sync(
+    database_url: str,
+    *,
+    event_id: str,
+    position_id: Optional[str],
+    reasoning_chain_id: Optional[str],
+    symbol: str,
+    event_type: str,
+    bar_index: Optional[int],
+    sequence_num: int,
+    captured_at: datetime,
+    caused_by: Optional[List[str]],
+    delta: Optional[Dict[str, Any]],
+    payload: Optional[Dict[str, Any]],
+) -> None:
+    engine = _get_engine(database_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO trade_decision_events (
+                    event_id, position_id, reasoning_chain_id, symbol,
+                    event_type, bar_index, sequence_num, captured_at,
+                    caused_by, delta, payload
+                ) VALUES (
+                    :event_id, :position_id, :reasoning_chain_id, :symbol,
+                    :event_type, :bar_index, :sequence_num, :captured_at,
+                    (:caused_by)::jsonb, (:delta)::jsonb, (:payload)::jsonb
+                )
+                """
+            ),
+            {
+                "event_id": event_id,
+                "position_id": position_id,
+                "reasoning_chain_id": reasoning_chain_id,
+                "symbol": symbol,
+                "event_type": event_type,
+                "bar_index": bar_index,
+                "sequence_num": sequence_num,
+                "captured_at": captured_at,
+                "caused_by": json.dumps(caused_by or []),
+                "delta": json.dumps(delta if delta is not None else {}),
+                "payload": json.dumps(payload if payload is not None else {}),
+            },
+        )
+        conn.commit()
+
+
+async def persist_decision_event_async(
+    database_url: str,
+    *,
+    event_id: str,
+    position_id: Optional[str],
+    reasoning_chain_id: Optional[str],
+    symbol: str,
+    event_type: str,
+    bar_index: Optional[int],
+    sequence_num: int,
+    captured_at: datetime,
+    caused_by: Optional[List[str]] = None,
+    delta: Optional[Dict[str, Any]] = None,
+    payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Insert one trade_decision_events row."""
+
+    def _run() -> None:
+        _insert_decision_event_sync(
+            database_url,
+            event_id=event_id,
+            position_id=position_id,
+            reasoning_chain_id=reasoning_chain_id,
+            symbol=symbol,
+            event_type=event_type,
+            bar_index=bar_index,
+            sequence_num=sequence_num,
+            captured_at=captured_at,
+            caused_by=caused_by,
+            delta=delta,
+            payload=payload,
+        )
+
+    try:
+        await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning(
+            "decision_event_persist_failed",
+            event_id=event_id,
+            symbol=symbol,
+            error=str(e),
+            exc_info=True,
+        )
+
+
+def _insert_entry_decision_label_sync(
+    database_url: str,
+    *,
+    decision_id: str,
+    label_horizon_bars: int,
+    forward_return_pct: Optional[float],
+    forward_mfe_pct: Optional[float],
+    forward_mae_pct: Optional[float],
+    would_have_won: Optional[bool],
+    labeled_at: datetime,
+) -> None:
+    engine = _get_engine(database_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO entry_decision_labels (
+                    decision_id, label_horizon_bars, forward_return_pct,
+                    forward_mfe_pct, forward_mae_pct, would_have_won, labeled_at
+                ) VALUES (
+                    :decision_id, :label_horizon_bars, :forward_return_pct,
+                    :forward_mfe_pct, :forward_mae_pct, :would_have_won, :labeled_at
+                )
+                ON CONFLICT (decision_id) DO UPDATE SET
+                    forward_return_pct = EXCLUDED.forward_return_pct,
+                    forward_mfe_pct = EXCLUDED.forward_mfe_pct,
+                    forward_mae_pct = EXCLUDED.forward_mae_pct,
+                    would_have_won = EXCLUDED.would_have_won,
+                    labeled_at = EXCLUDED.labeled_at
+                """
+            ),
+            {
+                "decision_id": decision_id,
+                "label_horizon_bars": label_horizon_bars,
+                "forward_return_pct": forward_return_pct,
+                "forward_mfe_pct": forward_mfe_pct,
+                "forward_mae_pct": forward_mae_pct,
+                "would_have_won": would_have_won,
+                "labeled_at": labeled_at,
+            },
+        )
+        conn.commit()
+
+
+async def persist_entry_decision_label_async(
+    database_url: str,
+    *,
+    decision_id: str,
+    label_horizon_bars: int,
+    forward_return_pct: Optional[float] = None,
+    forward_mfe_pct: Optional[float] = None,
+    forward_mae_pct: Optional[float] = None,
+    would_have_won: Optional[bool] = None,
+    labeled_at: Optional[datetime] = None,
+) -> None:
+    """Insert or update one entry_decision_labels row."""
+
+    ts = labeled_at or datetime.now(timezone.utc)
+
+    def _run() -> None:
+        _insert_entry_decision_label_sync(
+            database_url,
+            decision_id=decision_id,
+            label_horizon_bars=label_horizon_bars,
+            forward_return_pct=forward_return_pct,
+            forward_mfe_pct=forward_mfe_pct,
+            forward_mae_pct=forward_mae_pct,
+            would_have_won=would_have_won,
+            labeled_at=ts,
+        )
+
+    try:
+        await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning(
+            "entry_decision_label_persist_failed",
+            decision_id=decision_id,
             error=str(e),
             exc_info=True,
         )

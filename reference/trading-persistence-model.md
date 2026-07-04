@@ -182,6 +182,16 @@ Phase gates: [`tools/commands/phase_readiness_gate.py`](../tools/commands/phase_
 
 ---
 
+## Trade Intelligence Snapshot v2
+
+Event-driven decision timelines and enriched entry/close fields. See [trade-intelligence-snapshot-v2.md](trade-intelligence-snapshot-v2.md).
+
+- Append-only `trade_decision_events` table (outside 32KB metadata cap)
+- Snapshot v2: `entry_quality`, `hypothesis_snapshot`, slippage, `tp_sl_history`
+- MFE/MAE at close, reject forward labels, denormalized `trade_outcomes` columns
+
+---
+
 ## Join key for logs and DB
 
 Use **`reasoning_chain_id`** to correlate structlog events, `entry_decisions`, and `trade_outcomes.metadata.decision_context.reasoning_chain_id`.

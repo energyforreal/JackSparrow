@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.database import (
     AnalyticsRollupRecord,
     EntryDecisionRecord,
+    TradeDecisionEventRecord,
     TradeOutcomeRecord,
 )
 
@@ -333,6 +334,51 @@ class AnalyticsService:
             for r in result.scalars().all()
         ]
 
+    async def list_decision_events(
+        self,
+        db: AsyncSession,
+        *,
+        position_id: Optional[str] = None,
+        reasoning_chain_id: Optional[str] = None,
+        symbol: Optional[str] = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        query = select(TradeDecisionEventRecord)
+        if position_id:
+            query = query.where(TradeDecisionEventRecord.position_id == position_id)
+        if reasoning_chain_id:
+            query = query.where(
+                TradeDecisionEventRecord.reasoning_chain_id == reasoning_chain_id
+            )
+        if symbol:
+            query = query.where(TradeDecisionEventRecord.symbol == symbol)
+        query = (
+            query.order_by(
+                TradeDecisionEventRecord.position_id,
+                TradeDecisionEventRecord.sequence_num,
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await db.execute(query)
+        return [
+            {
+                "event_id": r.event_id,
+                "position_id": r.position_id,
+                "reasoning_chain_id": r.reasoning_chain_id,
+                "symbol": r.symbol,
+                "event_type": r.event_type,
+                "bar_index": r.bar_index,
+                "sequence_num": r.sequence_num,
+                "captured_at": r.captured_at.isoformat() if r.captured_at else None,
+                "caused_by": r.caused_by_json,
+                "delta": r.delta_json,
+                "payload": r.payload_json,
+            }
+            for r in result.scalars().all()
+        ]
+
     @staticmethod
     def _trade_outcome_row(record: TradeOutcomeRecord) -> Dict[str, Any]:
         return {
@@ -349,6 +395,31 @@ class AnalyticsService:
             "opened_at": record.opened_at.isoformat() if record.opened_at else None,
             "closed_at": record.closed_at.isoformat() if record.closed_at else None,
             "metadata": record.metadata_json,
+            "config_hash": getattr(record, "config_hash", None),
+            "setup_type": getattr(record, "setup_type", None),
+            "regime": getattr(record, "regime", None),
+            "root_cause": getattr(record, "root_cause", None),
+            "entry_quality_score": (
+                float(record.entry_quality_score)
+                if getattr(record, "entry_quality_score", None) is not None
+                else None
+            ),
+            "mfe_pct": (
+                float(record.mfe_pct)
+                if getattr(record, "mfe_pct", None) is not None
+                else None
+            ),
+            "mae_pct": (
+                float(record.mae_pct)
+                if getattr(record, "mae_pct", None) is not None
+                else None
+            ),
+            "slippage_bps_entry": (
+                float(record.slippage_bps_entry)
+                if getattr(record, "slippage_bps_entry", None) is not None
+                else None
+            ),
+            "decision_event_count": getattr(record, "decision_event_count", None),
         }
 
 

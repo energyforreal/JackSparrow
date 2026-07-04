@@ -658,6 +658,11 @@ docker compose exec postgres psql -U jacksparrow -d trading_agent
 
 # Trade snapshot analytics (host needs DATABASE_URL or run inside backend with env)
 docker compose exec postgres psql -U jacksparrow -d trading_agent -c "SELECT version_num FROM alembic_version;"
+
+# Snapshot v2 shadow validation (after enabling v2 env flags and collecting trades)
+docker compose exec backend python tools/commands/phase_readiness_gate.py --gate v1_to_v2_snapshot
+docker compose exec backend python tools/commands/trade_analytics.py snapshot-integrity
+docker compose exec backend python tools/commands/label_entry_decisions.py --limit 100
 ```
 
 **Rebuild and redeploy after code changes:**
@@ -711,7 +716,7 @@ See [Troubleshooting](#troubleshooting) in this document for Docker-related issu
 - **Volume permissions**: Fix with `sudo chown -R $USER:$USER logs/ models/`
 - **Database connection**: Verify `DATABASE_URL` uses service name `postgres`, not `localhost`
 - **Health checks failing**: Check logs with `docker compose logs [service]`
-- **Backend crash loop — schema drift**: Log shows `Database schema drift: current='001_baseline' expected head='003_analytics_rollups'`. Run `alembic stamp head` if analytics tables already exist, or `alembic upgrade head` on a fresh DB. See [Database maintenance – Alembic](#alembic-migrations).
+- **Backend crash loop — schema drift**: Log shows `Database schema drift: current='001_baseline' expected head='006_trade_outcomes_denorm'` (or an earlier head). Run `alembic stamp head` if analytics tables already exist, or `alembic upgrade head` on a fresh DB. See [Database maintenance – Alembic](#alembic-migrations).
 
 ### Model prerequisites and degraded behaviour (Docker)
 
@@ -994,6 +999,15 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `AGENT_THESIS_BREAKOUT_BB_POS_MAX` | Long breakout extension veto when `bb_pos` exceeds | No | `0.85` |
 | `AGENT_THESIS_BREAKOUT_BB_POS_SHORT_MIN` | Short breakout extension veto when `bb_pos` below | No | `0.15` |
 | `TRADE_ENTRY_SNAPSHOT_ENABLED` | Persist entry decision snapshots | No | `true` |
+| `TRADE_SNAPSHOT_VERSION` | Snapshot schema version written to `trade_outcomes.metadata` | No | `1` |
+| `TRADE_SNAPSHOT_MAX_BYTES` | Max JSONB snapshot size before condensation | No | `32768` |
+| `TRADE_DECISION_EVENTS_ENABLED` | Persist append-only `trade_decision_events` timeline | No | `false` |
+| `TRADE_DECISION_EVENTS_SHADOW_MODE` | Emit events to JSONL/logs only (no DB writes) | No | `true` |
+| `TRADE_DECISION_EVENT_MIN_CONVICTION_DELTA` | Min conviction change to emit `conviction_change` | No | `0.05` |
+| `TRADE_MFE_MAE_AT_CLOSE_ENABLED` | Compute MFE/MAE on close + `mfe_mae_computed` event | No | `false` |
+| `TRADE_INTELLIGENCE_LEARNING_ENABLED` | Post-trade learning from snapshot v2 fields | No | `false` |
+| `TRADE_INTELLIGENCE_LEARNING_SHADOW_MODE` | Log learning nudges without applying | No | `true` |
+| `ENTRY_DECISION_LABEL_HORIZON_BARS` | Forward horizon for reject false-negative labels | No | `12` |
 | `GATE_CATEGORY_WEIGHTS` | Optional JSON map for composite gate scoring | No | *(empty)* |
 | `REQUIRE_IC_VALIDATION_FOR_ORDERS` | When `true`, `entry_validation_guard` enforces policy + optional v43 gates before orders | No | `true` |
 | `REQUIRE_ML_SIGNAL_FOR_ORDERS` | **Deprecated alias** for `REQUIRE_IC_VALIDATION_FOR_ORDERS` | No | *(use IC name)* |
@@ -2555,6 +2569,20 @@ Revisions live under `backend/migrations/versions/`:
 | `001_baseline` | Baseline marker for existing `create_all` deployments |
 | `002_entry_decisions` | `entry_decisions` funnel table |
 | `003_analytics_rollups` | Precomputed `analytics_rollups` aggregates |
+| `004_trade_decision_events` | Append-only `trade_decision_events` timeline |
+| `005_entry_decision_labels` | Forward outcomes for rejected entries |
+| `006_trade_outcomes_denorm` | Denormalized columns on `trade_outcomes` for analytics SQL |
+
+**Snapshot v2 shadow rollout** (recommended before enabling live event writes):
+
+```env
+TRADE_SNAPSHOT_VERSION=2
+TRADE_DECISION_EVENTS_ENABLED=true
+TRADE_DECISION_EVENTS_SHADOW_MODE=true
+TRADE_MFE_MAE_AT_CLOSE_ENABLED=true
+```
+
+After redeploy, confirm `alembic_version` is `006_trade_outcomes_denorm` (or current head), then run phase gates inside the backend container (see [Common operations](#common-operations)).
 
 When `AUTO_CREATE_DB_SCHEMA=true` (default), backend startup (`backend/api/main.py` lifespan) runs:
 

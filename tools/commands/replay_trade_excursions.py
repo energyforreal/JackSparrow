@@ -48,17 +48,9 @@ def _fetch_trades(start: str, end: str) -> List[Dict[str, Any]]:
 
 
 def _sl_tp_from_meta(meta: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
-    summary = meta.get("entry_state_summary") if isinstance(meta.get("entry_state_summary"), dict) else {}
-    sl = summary.get("stop_loss_at_entry")
-    tp = summary.get("take_profit_at_entry")
-    if sl is None or tp is None:
-        dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
-        sl = sl or dc.get("stop_loss_at_entry")
-        tp = tp or dc.get("take_profit_at_entry")
-    try:
-        return (float(sl) if sl is not None else None, float(tp) if tp is not None else None)
-    except (TypeError, ValueError):
-        return None, None
+    from agent.persistence.trade_excursions import sl_tp_from_metadata
+
+    return sl_tp_from_metadata(meta)
 
 
 def _compute_excursions(
@@ -69,51 +61,15 @@ def _compute_excursions(
     sl: Optional[float],
     tp: Optional[float],
 ) -> Dict[str, Any]:
-    is_long = str(side).lower() in ("long", "buy")
-    mfe = 0.0
-    mae = 0.0
-    mfe_bar = 0
-    mae_bar = 0
-    bars_until_tp: Optional[int] = None
-    bars_until_sl: Optional[int] = None
+    from agent.persistence.trade_excursions import compute_excursions as _compute
 
-    for i, c in enumerate(candles):
-        high = float(c.get("high") or c.get("close") or entry_price)
-        low = float(c.get("low") or c.get("close") or entry_price)
-        if is_long:
-            fav = high - entry_price
-            adv = entry_price - low
-            hit_tp = tp is not None and high >= tp
-            hit_sl = sl is not None and low <= sl
-        else:
-            fav = entry_price - low
-            adv = high - entry_price
-            hit_tp = tp is not None and low <= tp
-            hit_sl = sl is not None and high >= sl
-        if fav > mfe:
-            mfe = fav
-            mfe_bar = i + 1
-        if adv > mae:
-            mae = adv
-            mae_bar = i + 1
-        if bars_until_tp is None and hit_tp:
-            bars_until_tp = i + 1
-        if bars_until_sl is None and hit_sl:
-            bars_until_sl = i + 1
-
-    return {
-        "bars_held": len(candles),
-        "mfe_usd": round(mfe, 2),
-        "mae_usd": round(mae, 2),
-        "mfe_pct": round(mfe / entry_price * 100, 4) if entry_price else 0,
-        "mae_pct": round(mae / entry_price * 100, 4) if entry_price else 0,
-        "time_to_mfe_bars": mfe_bar,
-        "time_to_mae_bars": mae_bar,
-        "bars_until_tp": bars_until_tp,
-        "bars_until_sl": bars_until_sl,
-        "tp_would_hit": bars_until_tp is not None,
-        "sl_would_hit": bars_until_sl is not None,
-    }
+    return _compute(
+        side=side,
+        entry_price=entry_price,
+        candles=candles,
+        sl=sl,
+        tp=tp,
+    )
 
 
 async def _fetch_candles(

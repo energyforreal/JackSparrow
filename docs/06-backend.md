@@ -1169,15 +1169,19 @@ class ModelPerformance(Base):
     current_weight = Column(Float)
 ```
 
-### Trade outcomes, entry decisions, and rollups
+### Trade outcomes, entry decisions, rollups, and decision events
 
-**`trade_outcomes`** — closed positions with full decision snapshot in `metadata` JSONB (`snapshot_version`, `system_context`, `decision_context`, `outcome`, `execution_timing`). Written fire-and-forget from the agent state machine on `PositionClosedEvent`.
+**`trade_outcomes`** — closed positions with full decision snapshot in `metadata` JSONB (`snapshot_version` 1 or 2, `system_context`, `decision_context`, `outcome`, `execution_timing`, optional `causality_graph`). Denormalized columns (migration `006_trade_outcomes_denorm`): `config_hash`, `setup_type`, `regime`, `root_cause`, `entry_quality_score`, `mfe_pct`, `mae_pct`, `slippage_bps_entry`, `decision_event_count`. Written fire-and-forget from the agent state machine on `PositionClosedEvent`.
+
+**`trade_decision_events`** — append-only event-driven decision timeline per position (`entry_decision`, `tle_verdict`, `regime_shift`, `conviction_change`, `lifecycle_exit`, `mfe_mae_computed`, etc.) with `caused_by` edges. Migration `004_trade_decision_events`. JSONL fallback: `data/decision_events/{position_id}.jsonl`.
 
 **`entry_decisions`** — funnel rows (`rejected` | `approved` | `executed`) with `reject_reason`, `config_hash`, `reasoning_chain_id`. Migration `002_entry_decisions`.
 
+**`entry_decision_labels`** — forward outcomes for rejected entries (false-negative labeling). Migration `005_entry_decision_labels`. CLI: `tools/commands/label_entry_decisions.py`.
+
 **`analytics_rollups`** — incremental aggregates by `period_type` (`daily`, `weekly`, `regime`, `setup_type`, `config_hash`). Migration `003_analytics_rollups`.
 
-Schema reference: [Trading persistence model](../reference/trading-persistence-model.md).
+Schema reference: [Trading persistence model](../reference/trading-persistence-model.md), [Trade Intelligence Snapshot v2](../reference/trade-intelligence-snapshot-v2.md).
 
 ### Analytics REST API
 
@@ -1187,9 +1191,14 @@ Registered at `/api/v1/analytics/` ([`backend/api/routes/analytics.py`](../backe
 |--------|------|-------------|
 | GET | `/trade-outcomes` | Paginated closed trades; filters: `regime`, `setup_type`, `close_reason`, `config_hash`, date range |
 | GET | `/entry-decisions` | Outcome funnel + `reject_breakdown` |
+| GET | `/decision-events` | Append-only timeline; filters: `position_id`, `reasoning_chain_id`, `symbol` |
 | GET | `/performance-by-regime` | Win rate and PnL by regime (rollups or raw scan) |
 | GET | `/performance-by-config` | Cohort comparison by `config_hash` |
 | GET | `/rollups` | Precomputed rollup rows |
+| GET | `/attribution-summary` | Root-cause and quality-dimension breakdown |
+| GET | `/trade-quality` | Entry/execution/exit/market quality distributions |
+| GET | `/regime-benchmarks` | Performance by `regime_benchmark` label |
+| GET | `/rule-evaluation` | Per-rule stats and confidence calibration |
 
 Example — reject breakdown for last 7 days:
 
