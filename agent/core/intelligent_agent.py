@@ -319,6 +319,21 @@ class IntelligentAgent:
                     error=str(exc),
                     exc_info=True,
                 )
+        if getattr(settings, "wallet_ledger_sync_enabled", False):
+            try:
+                from agent.core.wallet_ledger_service import get_wallet_ledger_service
+
+                asyncio.create_task(
+                    get_wallet_ledger_service(self.delta_client).sync_incremental(
+                        reason="startup"
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "wallet_ledger_startup_sync_failed",
+                    service="agent",
+                    error=str(exc),
+                )
         try:
             from agent.core.portfolio_seed import seed_risk_manager_portfolio_from_exchange
 
@@ -562,6 +577,31 @@ class IntelligentAgent:
             except Exception as e:
                 logger.warning(
                     "threshold_adapter_loop_tick_failed",
+                    service="agent",
+                    error=str(e),
+                    exc_info=True,
+                )
+
+    async def _wallet_ledger_loop(self) -> None:
+        """Periodically sync Delta wallet transactions to PostgreSQL."""
+        from agent.core.wallet_ledger_service import get_wallet_ledger_service
+
+        interval = float(
+            getattr(settings, "wallet_ledger_sync_interval_seconds", 600) or 600
+        )
+        interval = max(60.0, interval)
+        service = get_wallet_ledger_service(self.delta_client)
+        while self.running:
+            try:
+                await asyncio.sleep(interval)
+                if not self.running:
+                    break
+                await service.sync_incremental(reason="periodic")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(
+                    "wallet_ledger_loop_tick_failed",
                     service="agent",
                     error=str(e),
                     exc_info=True,
@@ -961,6 +1001,16 @@ class IntelligentAgent:
                 "agent_threshold_adapter_started",
                 service="agent",
                 interval_seconds=getattr(settings, "threshold_adapter_interval_seconds", 3600),
+            )
+
+        if getattr(settings, "wallet_ledger_sync_enabled", False):
+            self._wallet_ledger_task = asyncio.create_task(self._wallet_ledger_loop())
+            logger.info(
+                "agent_wallet_ledger_sync_started",
+                service="agent",
+                interval_seconds=getattr(
+                    settings, "wallet_ledger_sync_interval_seconds", 600
+                ),
             )
 
         # Start command handler (for backward compatibility)

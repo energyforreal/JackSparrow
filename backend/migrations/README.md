@@ -12,6 +12,8 @@ Alembic revisions for the JackSparrow PostgreSQL analytics and governance tables
 | `004_trade_decision_events` | `004_trade_decision_events.py` | `trade_decision_events` — append-only decision timeline |
 | `005_entry_decision_labels` | `005_entry_decision_labels.py` | `entry_decision_labels` — reject forward outcomes |
 | `006_trade_outcomes_denorm` | `006_trade_outcomes_denorm.py` | Denormalized columns on `trade_outcomes` |
+| `007_wallet_ledger` | `007_wallet_ledger.py` | `wallet_transactions`, `wallet_sync_state` |
+| `008_trade_outcomes_wallet_denorm` | `008_trade_outcomes_wallet_denorm.py` | Wallet cost columns on `trade_outcomes` |
 
 ## Apply migrations
 

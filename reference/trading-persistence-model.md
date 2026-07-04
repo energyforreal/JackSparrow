@@ -5,7 +5,7 @@
 | Layer | Role | Primary store |
 |-------|------|----------------|
 | **Execution** | Authoritative fills, open legs, brackets | Delta Exchange (testnet) |
-| **Analytics warehouse** | Decision context, funnel, cohort rollups | PostgreSQL: `trade_outcomes`, `entry_decisions`, `analytics_rollups` |
+| **Analytics warehouse** | Decision context, funnel, cohort rollups | PostgreSQL: `trade_outcomes`, `entry_decisions`, `analytics_rollups`, `wallet_transactions` |
 | **Hot UI cache** | Recent closed trades for dashboard | Redis + `data/agent_closed_trades.jsonl` (archived when capped) |
 
 On **testnet**, PostgreSQL does not mirror every exchange fill as `trades`/`positions` rows (`trade_persistence_service` skips with `testnet_exchange_ledger`). **`trade_outcomes`** plus full **decision snapshots** in `metadata` JSONB are the optimization target.
@@ -116,6 +116,10 @@ Migration `002_entry_decisions`. Rows for `rejected`, `approved`, `executed` wit
 ### `analytics_rollups`
 
 Migration `003_analytics_rollups`. Precomputed buckets: `daily`, `weekly`, `regime`, `setup_type`, `config_hash`. Incremented async on `PositionClosedEvent`.
+
+### `wallet_transactions` / `wallet_sync_state`
+
+Migration `007_wallet_ledger`. Incremental sync from Delta `GET /v2/wallet/transactions` (commission, funding, rebates). Checkpoint in `wallet_sync_state`. Attribution rules: [wallet-attribution-spec.md](wallet-attribution-spec.md). Denormalized wallet costs on `trade_outcomes`: migration `008_trade_outcomes_wallet_denorm`.
 
 ---
 

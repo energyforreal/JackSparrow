@@ -1462,6 +1462,16 @@ class ExecutionEngine:
                         reduce_only=False,
                         reasoning_chain_id=trade.get("reasoning_chain_id"),
                     )
+                    try:
+                        from agent.core.wallet_ledger_service import (
+                            get_wallet_ledger_service,
+                        )
+
+                        get_wallet_ledger_service(self.delta_client).schedule_debounced_sync(
+                            "fill"
+                        )
+                    except Exception:
+                        pass
 
             if order_result.get("partial_fill"):
                 partial_event = PartialFillEvent(

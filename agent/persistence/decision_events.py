@@ -358,4 +358,9 @@ def extract_denorm_from_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
         "slippage_bps_entry": timing.get("execution_slippage_bps_entry"),
         "decision_event_count": meta.get("decision_event_count"),
     }
+    wallet_attr = meta.get("wallet_attribution")
+    if isinstance(wallet_attr, dict):
+        for key in ("commission_usd", "funding_usd", "net_wallet_impact_usd"):
+            if wallet_attr.get(key) is not None:
+                out[key] = wallet_attr.get(key)
     return {k: v for k, v in out.items() if v is not None}

@@ -1073,6 +1073,32 @@ class DeltaExchangeClient:
             params["before"] = before
         return await self._make_request("GET", "/v2/fills", params=params)
 
+    async def get_wallet_transactions(
+        self,
+        asset_ids: Optional[str] = None,
+        transaction_types: Optional[str] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        page_size: int = 100,
+        after: Optional[str] = None,
+        before: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GET /v2/wallet/transactions — wallet ledger (commission, funding, etc.)."""
+        params: Dict[str, Any] = {"page_size": int(page_size)}
+        if asset_ids:
+            params["asset_ids"] = asset_ids
+        if transaction_types:
+            params["transaction_types"] = transaction_types
+        if start_time is not None:
+            params["start_time"] = int(start_time)
+        if end_time is not None:
+            params["end_time"] = int(end_time)
+        if after:
+            params["after"] = after
+        if before:
+            params["before"] = before
+        return await self._make_request("GET", "/v2/wallet/transactions", params=params)
+
     async def get_orders(
         self,
         product_ids: Optional[str] = None,

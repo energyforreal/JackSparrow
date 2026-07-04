@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     Integer,
+    BigInteger,
     String,
     DECIMAL,
     DateTime,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     text,
     TIMESTAMP,
     Index,
+    Text,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -278,6 +280,9 @@ class TradeOutcomeRecord(Base):
     mae_pct = Column(DECIMAL(12, 6), nullable=True)
     slippage_bps_entry = Column(DECIMAL(12, 4), nullable=True)
     decision_event_count = Column(Integer, nullable=True)
+    commission_usd = Column(DECIMAL(24, 8), nullable=True)
+    funding_usd = Column(DECIMAL(24, 8), nullable=True, index=True)
+    net_wallet_impact_usd = Column(DECIMAL(24, 8), nullable=True)
     created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
@@ -375,6 +380,49 @@ class AnalyticsRollupRecord(Base):
             unique=True,
         ),
     )
+
+
+class WalletTransactionRecord(Base):
+    """Synced wallet ledger rows from Delta /v2/wallet/transactions."""
+
+    __tablename__ = "wallet_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(32), nullable=False, default="delta")
+    exchange_transaction_id = Column(BigInteger, nullable=False)
+    transaction_type = Column(String(64), nullable=False, index=True)
+    asset_symbol = Column(String(16), nullable=False, index=True)
+    product_id = Column(Integer, nullable=True)
+    order_id = Column(BigInteger, nullable=True, index=True)
+    amount = Column(DECIMAL(24, 8), nullable=False)
+    balance_after = Column(DECIMAL(24, 8), nullable=True)
+    occurred_at = Column(TIMESTAMPTZ, nullable=False, index=True)
+    metadata_json = Column("metadata", JSONB, nullable=True)
+    created_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index(
+            "uq_wallet_transactions_exchange_tx_id",
+            "exchange",
+            "exchange_transaction_id",
+            unique=True,
+        ),
+    )
+
+
+class WalletSyncStateRecord(Base):
+    """Checkpoint for incremental wallet transaction sync."""
+
+    __tablename__ = "wallet_sync_state"
+
+    exchange = Column(String(32), primary_key=True)
+    scope_key = Column(String(64), primary_key=True)
+    last_cursor = Column(Text, nullable=True)
+    last_transaction_id = Column(BigInteger, nullable=True)
+    last_occurred_at = Column(TIMESTAMPTZ, nullable=True)
+    last_synced_at = Column(TIMESTAMPTZ, nullable=True)
+    last_error = Column(Text, nullable=True)
+    updated_at = Column(TIMESTAMPTZ, default=lambda: datetime.now(timezone.utc))
 
 
 class PredictionAudit(Base):

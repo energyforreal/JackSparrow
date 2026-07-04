@@ -115,14 +115,14 @@ def _insert_trade_outcome_sync(
                     close_reason, opened_at, closed_at, metadata,
                     config_hash, setup_type, regime, root_cause,
                     entry_quality_score, mfe_pct, mae_pct, slippage_bps_entry,
-                    decision_event_count
+                    decision_event_count, commission_usd, funding_usd, net_wallet_impact_usd
                 ) VALUES (
                     :position_id, :symbol, :side, :signal,
                     :entry_price, :exit_price, :quantity, :pnl, :pnl_pct,
                     :close_reason, :opened_at, :closed_at, (:metadata)::jsonb,
                     :config_hash, :setup_type, :regime, :root_cause,
                     :entry_quality_score, :mfe_pct, :mae_pct, :slippage_bps_entry,
-                    :decision_event_count
+                    :decision_event_count, :commission_usd, :funding_usd, :net_wallet_impact_usd
                 )
                 """
             ),
@@ -149,6 +149,9 @@ def _insert_trade_outcome_sync(
                 "mae_pct": d.get("mae_pct"),
                 "slippage_bps_entry": d.get("slippage_bps_entry"),
                 "decision_event_count": d.get("decision_event_count"),
+                "commission_usd": d.get("commission_usd"),
+                "funding_usd": d.get("funding_usd"),
+                "net_wallet_impact_usd": d.get("net_wallet_impact_usd"),
             },
         )
         conn.commit()
@@ -633,3 +636,281 @@ async def persist_entry_decision_label_async(
             error=str(e),
             exc_info=True,
         )
+
+
+def _load_wallet_sync_state_sync(
+    database_url: str,
+    *,
+    exchange: str,
+    scope_key: str,
+) -> Optional[Dict[str, Any]]:
+    engine = _get_engine(database_url)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT exchange, scope_key, last_cursor, last_transaction_id,
+                       last_occurred_at, last_synced_at, last_error
+                FROM wallet_sync_state
+                WHERE exchange = :exchange AND scope_key = :scope_key
+                """
+            ),
+            {"exchange": exchange, "scope_key": scope_key},
+        ).mappings().first()
+        return dict(row) if row else None
+
+
+def _persist_wallet_transactions_batch_sync(
+    database_url: str,
+    records: List[Dict[str, Any]],
+) -> int:
+    """Insert wallet rows; ignore duplicates. Returns count of rows attempted."""
+    if not records:
+        return 0
+    engine = _get_engine(database_url)
+    inserted = 0
+    with engine.connect() as conn:
+        for rec in records:
+            meta_json = json.dumps(rec.get("metadata") or {})
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO wallet_transactions (
+                        exchange, exchange_transaction_id, transaction_type,
+                        asset_symbol, product_id, order_id, amount, balance_after,
+                        occurred_at, metadata
+                    ) VALUES (
+                        :exchange, :exchange_transaction_id, :transaction_type,
+                        :asset_symbol, :product_id, :order_id, :amount, :balance_after,
+                        :occurred_at, (:metadata)::jsonb
+                    )
+                    ON CONFLICT (exchange, exchange_transaction_id) DO NOTHING
+                    """
+                ),
+                {
+                    "exchange": rec["exchange"],
+                    "exchange_transaction_id": rec["exchange_transaction_id"],
+                    "transaction_type": rec["transaction_type"],
+                    "asset_symbol": rec["asset_symbol"],
+                    "product_id": rec.get("product_id"),
+                    "order_id": rec.get("order_id"),
+                    "amount": rec["amount"],
+                    "balance_after": rec.get("balance_after"),
+                    "occurred_at": rec["occurred_at"],
+                    "metadata": meta_json,
+                },
+            )
+            inserted += 1
+        conn.commit()
+    return inserted
+
+
+def _update_wallet_sync_state_sync(
+    database_url: str,
+    *,
+    exchange: str,
+    scope_key: str,
+    last_cursor: Optional[str] = None,
+    last_transaction_id: Optional[int] = None,
+    last_occurred_at: Optional[datetime] = None,
+    last_error: Optional[str] = None,
+) -> None:
+    now = datetime.now(timezone.utc)
+    engine = _get_engine(database_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO wallet_sync_state (
+                    exchange, scope_key, last_cursor, last_transaction_id,
+                    last_occurred_at, last_synced_at, last_error, updated_at
+                ) VALUES (
+                    :exchange, :scope_key, :last_cursor, :last_transaction_id,
+                    :last_occurred_at, :last_synced_at, :last_error, :updated_at
+                )
+                ON CONFLICT (exchange, scope_key) DO UPDATE SET
+                    last_cursor = COALESCE(EXCLUDED.last_cursor, wallet_sync_state.last_cursor),
+                    last_transaction_id = COALESCE(
+                        EXCLUDED.last_transaction_id, wallet_sync_state.last_transaction_id
+                    ),
+                    last_occurred_at = COALESCE(
+                        EXCLUDED.last_occurred_at, wallet_sync_state.last_occurred_at
+                    ),
+                    last_synced_at = EXCLUDED.last_synced_at,
+                    last_error = EXCLUDED.last_error,
+                    updated_at = EXCLUDED.updated_at
+                """
+            ),
+            {
+                "exchange": exchange,
+                "scope_key": scope_key,
+                "last_cursor": last_cursor,
+                "last_transaction_id": last_transaction_id,
+                "last_occurred_at": last_occurred_at,
+                "last_synced_at": now if last_error is None else None,
+                "last_error": last_error,
+                "updated_at": now,
+            },
+        )
+        conn.commit()
+
+
+def _fetch_wallet_transactions_sync(
+    database_url: str,
+    *,
+    exchange: str = "delta",
+    transaction_types: Optional[List[str]] = None,
+    product_id: Optional[int] = None,
+    from_time: Optional[datetime] = None,
+    to_time: Optional[datetime] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    engine = _get_engine(database_url)
+    clauses = ["exchange = :exchange"]
+    params: Dict[str, Any] = {"exchange": exchange, "limit": int(limit)}
+    if transaction_types:
+        clauses.append("transaction_type = ANY(:transaction_types)")
+        params["transaction_types"] = transaction_types
+    if product_id is not None:
+        clauses.append("product_id = :product_id")
+        params["product_id"] = int(product_id)
+    if from_time is not None:
+        clauses.append("occurred_at > :from_time")
+        params["from_time"] = from_time
+    if to_time is not None:
+        clauses.append("occurred_at <= :to_time")
+        params["to_time"] = to_time
+    where = " AND ".join(clauses)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT exchange, exchange_transaction_id, transaction_type,
+                       asset_symbol, product_id, order_id, amount, balance_after,
+                       occurred_at, metadata
+                FROM wallet_transactions
+                WHERE {where}
+                ORDER BY occurred_at ASC
+                LIMIT :limit
+                """
+            ),
+            params,
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+async def load_wallet_sync_state_async(
+    database_url: str,
+    *,
+    exchange: str = "delta",
+    scope_key: str = "default",
+) -> Optional[Dict[str, Any]]:
+    """Load wallet sync checkpoint."""
+
+    def _run() -> Optional[Dict[str, Any]]:
+        return _load_wallet_sync_state_sync(
+            database_url, exchange=exchange, scope_key=scope_key
+        )
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning(
+            "wallet_sync_state_load_failed",
+            exchange=exchange,
+            scope_key=scope_key,
+            error=str(e),
+            exc_info=True,
+        )
+        return None
+
+
+async def persist_wallet_transactions_batch_async(
+    database_url: str,
+    records: List[Dict[str, Any]],
+) -> int:
+    """Idempotent batch insert for wallet transactions."""
+
+    def _run() -> int:
+        return _persist_wallet_transactions_batch_sync(database_url, records)
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning(
+            "wallet_transactions_persist_failed",
+            count=len(records),
+            error=str(e),
+            exc_info=True,
+        )
+        return 0
+
+
+async def update_wallet_sync_state_async(
+    database_url: str,
+    *,
+    exchange: str = "delta",
+    scope_key: str = "default",
+    last_cursor: Optional[str] = None,
+    last_transaction_id: Optional[int] = None,
+    last_occurred_at: Optional[datetime] = None,
+    last_error: Optional[str] = None,
+) -> None:
+    """Advance or record error on wallet sync checkpoint."""
+
+    def _run() -> None:
+        _update_wallet_sync_state_sync(
+            database_url,
+            exchange=exchange,
+            scope_key=scope_key,
+            last_cursor=last_cursor,
+            last_transaction_id=last_transaction_id,
+            last_occurred_at=last_occurred_at,
+            last_error=last_error,
+        )
+
+    try:
+        await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning(
+            "wallet_sync_state_update_failed",
+            exchange=exchange,
+            scope_key=scope_key,
+            error=str(e),
+            exc_info=True,
+        )
+
+
+async def fetch_wallet_transactions_async(
+    database_url: str,
+    *,
+    exchange: str = "delta",
+    transaction_types: Optional[List[str]] = None,
+    product_id: Optional[int] = None,
+    from_time: Optional[datetime] = None,
+    to_time: Optional[datetime] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """Read wallet rows for attribution / analytics."""
+
+    def _run() -> List[Dict[str, Any]]:
+        return _fetch_wallet_transactions_sync(
+            database_url,
+            exchange=exchange,
+            transaction_types=transaction_types,
+            product_id=product_id,
+            from_time=from_time,
+            to_time=to_time,
+            limit=limit,
+        )
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning(
+            "wallet_transactions_fetch_failed",
+            error=str(e),
+            exc_info=True,
+        )
+        return []
+

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from agent.core.config import settings
+
 
 def _quality_entry(dc: Dict[str, Any], outcome: Dict[str, Any]) -> str:
     mv = dc.get("market_validation") if isinstance(dc.get("market_validation"), dict) else {}
@@ -94,10 +96,20 @@ def _root_cause(
     exec_q: str,
     market_q: str,
     outcome: Dict[str, Any],
+    wallet_attr: Optional[Dict[str, Any]] = None,
 ) -> str:
     pnl = float(outcome.get("pnl_usd") or 0.0)
     fees = float(outcome.get("fees_usd") or 0.0)
     gross = float(outcome.get("gross_pnl_usd") or 0.0)
+    wa = wallet_attr if isinstance(wallet_attr, dict) else {}
+    funding_usd = float(wa.get("funding_usd") or 0.0)
+    net_wallet = float(wa.get("net_wallet_impact_usd") or 0.0)
+    use_wallet = bool(wa) and abs(funding_usd) + abs(net_wallet) > 0
+
+    if use_wallet and gross != 0 and abs(funding_usd) > abs(gross):
+        return "funding_dominated"
+    if use_wallet and gross > 0 and net_wallet < 0:
+        return "cost_drag"
     if gross > 0 and pnl < 0 and fees >= gross:
         return "fee_dominated"
     if entry_q == "poor":
@@ -133,7 +145,22 @@ def analyze_post_trade(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     exit_q = _quality_exit(outcome, monitoring, timeline)
     market_q = _market_conditions(timeline, dc)
     strategy_q = _derive_strategy_quality(entry_q, exit_q, market_q, pnl)
-    root = _root_cause(entry_q, exit_q, exec_q, market_q, outcome)
+    wallet_attr = snapshot.get("wallet_attribution")
+    if not isinstance(wallet_attr, dict):
+        wallet_attr = outcome.get("wallet_attribution")
+    if not isinstance(wallet_attr, dict):
+        wallet_attr = None
+    use_wallet_learning = bool(
+        getattr(settings, "wallet_attribution_in_learning_enabled", False)
+    )
+    root = _root_cause(
+        entry_q,
+        exit_q,
+        exec_q,
+        market_q,
+        outcome,
+        wallet_attr if use_wallet_learning else None,
+    )
 
     recommendations: List[str] = []
     if root == "poor_entry":
@@ -142,6 +169,10 @@ def analyze_post_trade(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         recommendations.append("increase_lifecycle_threshold")
     if root == "fee_dominated":
         recommendations.append("increase_position_size_or_reduce_frequency")
+    if root == "funding_dominated":
+        recommendations.append("reduce_hold_duration_or_avoid_negative_funding")
+    if root == "cost_drag":
+        recommendations.append("review_wallet_costs_vs_gross_edge")
     if root == "wrong_trend":
         recommendations.append("tighten_regime_filter")
 

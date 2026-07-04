@@ -420,6 +420,10 @@ def merge_close_fields(
         merged["entry_state_summary"] = entry_summary
     elif entry_snapshot:
         merged["entry_state_summary"] = build_entry_state_summary(entry_snapshot)
+    wallet_attr = close_payload.get("wallet_attribution")
+    if isinstance(wallet_attr, dict):
+        merged["wallet_attribution"] = dict(wallet_attr)
+        outcome["wallet_attribution"] = dict(wallet_attr)
     merged["outcome"] = outcome
 
     timing = merged.get("execution_timing")

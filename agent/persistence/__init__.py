@@ -7,6 +7,10 @@ from agent.persistence.db_writes import (
     persist_entry_decision_label_async,
     persist_prediction_audit_async,
     persist_trade_outcome_async,
+    persist_wallet_transactions_batch_async,
+    load_wallet_sync_state_async,
+    update_wallet_sync_state_async,
+    fetch_wallet_transactions_async,
 )
 from agent.persistence.trade_snapshot import (
     build_entry_snapshot,

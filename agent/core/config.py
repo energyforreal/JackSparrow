@@ -1350,6 +1350,34 @@ class Settings(BaseSettings):
         env="ENTRY_DECISIONS_WRITES_ENABLED",
         description="When True, persist entry approve/reject rows to entry_decisions.",
     )
+    wallet_ledger_sync_enabled: bool = Field(
+        default=False,
+        env="WALLET_LEDGER_SYNC_ENABLED",
+        description="When True, sync Delta wallet transactions to PostgreSQL.",
+    )
+    wallet_ledger_sync_interval_seconds: int = Field(
+        default=600,
+        env="WALLET_LEDGER_SYNC_INTERVAL_SECONDS",
+        ge=60,
+        description="Periodic wallet ledger sync interval (seconds).",
+    )
+    wallet_ledger_fill_sync_debounce_seconds: int = Field(
+        default=30,
+        env="WALLET_LEDGER_FILL_SYNC_DEBOUNCE_SECONDS",
+        ge=5,
+        le=300,
+        description="Debounce window for post-fill wallet sync (seconds).",
+    )
+    wallet_ledger_default_transaction_types: str = Field(
+        default="commission,funding",
+        env="WALLET_LEDGER_DEFAULT_TRANSACTION_TYPES",
+        description="Comma-separated Delta wallet transaction_types to sync.",
+    )
+    wallet_attribution_in_learning_enabled: bool = Field(
+        default=False,
+        env="WALLET_ATTRIBUTION_IN_LEARNING_ENABLED",
+        description="When True, use wallet_attribution in post_trade root causes.",
+    )
     trade_decision_events_enabled: bool = Field(
         default=False,
         env="TRADE_DECISION_EVENTS_ENABLED",

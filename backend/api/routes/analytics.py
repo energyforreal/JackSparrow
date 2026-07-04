@@ -197,3 +197,59 @@ async def get_decision_events(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/wallet-ledger")
+async def get_wallet_ledger(
+    transaction_type: Optional[str] = Query(None),
+    asset_symbol: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """Paginated synced wallet transactions from PostgreSQL."""
+    from backend.services.wallet_analytics_service import wallet_analytics_service
+
+    return await wallet_analytics_service.list_wallet_ledger(
+        db,
+        transaction_type=transaction_type,
+        asset_symbol=asset_symbol,
+        from_date=_parse_dt(from_date),
+        to_date=_parse_dt(to_date),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/funding-summary")
+async def get_funding_summary(
+    period: str = Query("week", pattern="^(today|week|month)$"),
+    asset_symbol: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Funding payment aggregates for a time period."""
+    from backend.services.wallet_analytics_service import wallet_analytics_service
+
+    return await wallet_analytics_service.funding_summary(
+        db,
+        period=period,
+        asset_symbol=asset_symbol,
+    )
+
+
+@router.get("/wallet-cost-breakdown")
+async def get_wallet_cost_breakdown(
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Commission, funding, and rebate totals from wallet ledger."""
+    from backend.services.wallet_analytics_service import wallet_analytics_service
+
+    return await wallet_analytics_service.cost_breakdown(
+        db,
+        from_date=_parse_dt(from_date),
+        to_date=_parse_dt(to_date),
+    )

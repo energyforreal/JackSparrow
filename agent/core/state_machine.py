@@ -385,6 +385,66 @@ class AgentStateMachine:
                                 error=str(exc_exc),
                             )
 
+                    if getattr(settings, "wallet_ledger_sync_enabled", False):
+                        try:
+                            from agent.core.execution import execution_module
+                            from agent.core.wallet_attribution import WalletAttributionEngine
+                            from agent.core.wallet_ledger_service import get_wallet_ledger_service
+                            from agent.persistence.db_writes import fetch_wallet_transactions_async
+                            from agent.persistence.trade_snapshot import merge_close_fields
+
+                            duration_sec = 3600
+                            if opened_at and closed_at:
+                                duration_sec = max(
+                                    300,
+                                    int((closed_at - opened_at).total_seconds()) + 120,
+                                )
+                            delta_client = getattr(
+                                execution_module, "delta_client", None
+                            )
+                            if delta_client is not None:
+                                await get_wallet_ledger_service(
+                                    delta_client
+                                ).sync_incremental(
+                                    transaction_types=str(
+                                        getattr(
+                                            settings,
+                                            "wallet_ledger_default_transaction_types",
+                                            "commission,funding",
+                                        )
+                                    ),
+                                    lookback_seconds=duration_sec,
+                                    reason="position_closed",
+                                )
+                            product_id: Optional[int] = None
+                            if delta_client is not None and symbol_str:
+                                try:
+                                    product_id = await delta_client.resolve_product_id(
+                                        symbol_str
+                                    )
+                                except Exception:
+                                    product_id = None
+                            wallet_rows = await fetch_wallet_transactions_async(
+                                settings.database_url,
+                                product_id=product_id,
+                                from_time=opened_at,
+                                to_time=closed_at,
+                            )
+                            attr = WalletAttributionEngine().attribute_for_position(
+                                payload,
+                                wallet_rows,
+                                product_id=product_id,
+                            )
+                            payload["wallet_attribution"] = attr.to_dict()
+                            if isinstance(merged_meta, dict):
+                                merged_meta = merge_close_fields(merged_meta, payload)
+                        except Exception as wallet_exc:
+                            logger.warning(
+                                "wallet_attribution_at_close_failed",
+                                position_id=position_id,
+                                error=str(wallet_exc),
+                            )
+
                     try:
                         from agent.persistence.decision_events import (
                             decision_event_emitter,
