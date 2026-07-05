@@ -1,0 +1,85 @@
+{
+  "phase": "live_verification_v2",
+  "generated_at": "2026-07-05T09:15:00+00:00",
+  "prior_report": "data/investigation/live_verification_2026-07-05.json",
+  "phase_a_implementation": {
+    "status": "COMPLETE",
+    "scope": "forward_only",
+    "changes": [
+      "A2: _enrich_decision_context_v2 persists features, ml_validation, regime on entry/reject snapshots",
+      "A1: UUID position_id at fill in execution.py; propagated via OrderFillEvent to trade_persistence_service",
+      "A3: merge_close_fields preserves decision_context.ml_validation; regime denorm fallback in extract_denorm_from_metadata",
+      "A4: wallet attribution widened lookback when opened_at missing; zero-linked structured warning log",
+      "A5: TRADE_MFE_MAE_AT_CLOSE_ENABLED documented in .env.example; opened_at merged on close",
+      "A6: unit tests in test_trade_snapshot.py, test_position_id_consistency.py, test_wallet_attribution.py"
+    ],
+    "deploy_required": true,
+    "note": "Historical 167-trade cohort unchanged; fixes apply to new fills/closes after image rebuild"
+  },
+  "docker": {
+    "containers": {
+      "jacksparrow-postgres": "healthy",
+      "jacksparrow-redis": "healthy",
+      "jacksparrow-agent": "healthy",
+      "jacksparrow-backend": "healthy",
+      "jacksparrow-frontend": "healthy"
+    }
+  },
+  "phase_b_verification": {
+    "replay_config_shadow_entry_economic_veto_1.0": {
+      "blocked_trades": 167,
+      "kept_trades": 0,
+      "interpretation": "Expected on historical cohort — expected_return NULL in metadata until new closes with Phase A deployed"
+    },
+    "label_entry_decisions_limit_500": {
+      "labeled": 0,
+      "interpretation": "Expected until new rejects carry features.close from A2 enrichment"
+    },
+    "phase_readiness_gate_p1_data_integrity": {
+      "pass": false,
+      "opened_at_pct": 0.0,
+      "wallet_commission_pct": 0.0,
+      "trade_autopsy_pct": 0.0
+    },
+    "shadow_replay_baseline": {
+      "status": "partial",
+      "note": "Container image missing some replay subcommands; run full baseline after docker rebuild with tools bundle"
+    }
+  },
+  "experiment_gates": {
+    "entry_tune_v1": {
+      "pass": false,
+      "blocked_by": ["p1_data_integrity", "v2_reject_labels", "v1_to_v2_snapshot"],
+      "env_overrides_when_ready": {
+        "JACKSPARROW_V43_MIN_EDGE_COST_RATIO": "0.25",
+        "ENTRY_QUALITY_MIN_SCORE": "58",
+        "ENTRY_ECONOMIC_HARD_VETO_ENABLED": "false"
+      }
+    },
+    "exit_tune_v1": {
+      "pass": false,
+      "blocked_by": ["p1_data_integrity", "2b_to_3", "v2_mfe_mae"],
+      "env_overrides_when_ready": {
+        "TRAILING_STOP_ACTIVATION_PROFIT_PCT": "0.004",
+        "TRAILING_STOP_PERCENTAGE": "0.015"
+      },
+      "tle_mode": "log_only_required"
+    },
+    "tle_live_v1": {
+      "pass": false,
+      "blocked_by": ["2b_to_3", "4_to_5", "p2_tle_observe"],
+      "env_overrides_when_ready": {
+        "TRADE_LIFECYCLE_ENABLED": "true",
+        "TRADE_LIFECYCLE_LOG_ONLY": "false"
+      },
+      "note": "Do not set TRADE_LIFECYCLE_LOG_ONLY=false until experiment_gate tle_live_v1 passes"
+    }
+  },
+  "next_steps": [
+    "Rebuild and redeploy agent + backend images to activate Phase A code paths",
+    "Enable TRADE_MFE_MAE_AT_CLOSE_ENABLED=true in live .env after redeploy",
+    "After 1+ new round-trip closes, re-run p1_data_integrity gate and replay counterfactuals",
+    "Run label_entry_decisions after new rejects accumulate features.close",
+    "Use tools/commands/experiment_gate.py before any Phase C–E env tuning"
+  ]
+}

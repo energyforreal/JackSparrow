@@ -350,7 +350,7 @@ def extract_denorm_from_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "config_hash": sys_ctx.get("config_hash"),
         "setup_type": gates.get("setup_type"),
-        "regime": mstate.get("regime"),
+        "regime": mstate.get("regime") or dc.get("regime"),
         "root_cause": assessment.get("root_cause"),
         "entry_quality_score": eq.get("quality_score"),
         "mfe_pct": excursions.get("mfe_pct"),

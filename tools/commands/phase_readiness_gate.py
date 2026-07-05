@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[2]
+for candidate in Path(__file__).resolve().parents:
+    if (candidate / "agent").is_dir() and (candidate / "backend").is_dir():
+        ROOT = candidate
+        break
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

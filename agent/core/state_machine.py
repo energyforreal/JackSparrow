@@ -7,7 +7,7 @@ Event-driven state transitions.
 
 from enum import Enum
 from typing import Optional, Callable, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import asyncio
 import structlog
 
@@ -402,6 +402,11 @@ class AgentStateMachine:
                                     300,
                                     int((closed_at - opened_at).total_seconds()) + 120,
                                 )
+                            elif closed_at is not None:
+                                duration_sec = 3600
+                            wallet_from = opened_at
+                            if wallet_from is None and closed_at is not None:
+                                wallet_from = closed_at - timedelta(seconds=duration_sec)
                             delta_client = getattr(
                                 execution_module, "delta_client", None
                             )
@@ -430,7 +435,7 @@ class AgentStateMachine:
                             wallet_rows = await fetch_wallet_transactions_async(
                                 settings.database_url,
                                 product_id=product_id,
-                                from_time=opened_at,
+                                from_time=wallet_from,
                                 to_time=closed_at,
                             )
                             attr = WalletAttributionEngine().attribute_for_position(
@@ -439,6 +444,21 @@ class AgentStateMachine:
                                 product_id=product_id,
                             )
                             payload["wallet_attribution"] = attr.to_dict()
+                            if not attr.linked_transaction_ids:
+                                from agent.core.wallet_attribution import _collect_fill_uuids
+
+                                logger.warning(
+                                    "wallet_attribution_zero_linked",
+                                    position_id=position_id,
+                                    symbol=symbol_str,
+                                    wallet_row_count=len(wallet_rows),
+                                    fill_uuids=sorted(_collect_fill_uuids(payload)),
+                                    exchange_order_id=payload.get("exchange_order_id"),
+                                    entry_exchange_order_id=payload.get(
+                                        "entry_exchange_order_id"
+                                    ),
+                                    attribution_confidence=attr.attribution_confidence,
+                                )
                             if isinstance(merged_meta, dict):
                                 merged_meta = merge_close_fields(merged_meta, payload)
                         except Exception as wallet_exc:
@@ -446,6 +466,20 @@ class AgentStateMachine:
                                 "wallet_attribution_at_close_failed",
                                 position_id=position_id,
                                 error=str(wallet_exc),
+                            )
+
+                    if isinstance(merged_meta, dict) and merged_meta.get(
+                        "snapshot_kind"
+                    ) != "closed_round_trip":
+                        try:
+                            from agent.persistence.trade_snapshot import merge_close_fields
+
+                            merged_meta = merge_close_fields(merged_meta, payload)
+                        except Exception as merge_exc:
+                            logger.warning(
+                                "trade_outcome_merge_close_failed",
+                                position_id=position_id,
+                                error=str(merge_exc),
                             )
 
                     try:

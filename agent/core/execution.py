@@ -932,6 +932,9 @@ class ExecutionEngine:
             fill_price = result.details.get("average_fill_price") or price
             # SL/TP rebased to fill inside execute_trade when order fills immediately
             pos = self.position_manager.get_position(symbol)
+            position_id = str(
+                (pos.get("position_id") if pos else None) or uuid.uuid4()
+            )
             if pos:
                 if pos.get("stop_loss") is not None:
                     stop_loss = pos.get("stop_loss")
@@ -939,6 +942,7 @@ class ExecutionEngine:
                     take_profit = pos.get("take_profit")
             # Enrich position with metadata for learning and sync RiskManager portfolio
             if pos:
+                pos["position_id"] = position_id
                 pos["model_predictions"] = payload.get("model_predictions")
                 pos["reasoning_chain_id"] = payload.get("reasoning_chain_id")
                 pos["predicted_signal"] = payload.get("side", "")
@@ -992,8 +996,7 @@ class ExecutionEngine:
                     try:
                         from agent.persistence.decision_events import decision_event_emitter
 
-                        pos_id = f"pos_{pos.get('entry_order_id') or result.order_id or ''}"
-                        pos["position_id"] = pos_id
+                        pos_id = str(pos.get("position_id") or position_id)
                         decision_event_emitter.emit_if_changed(
                             position_id=pos_id,
                             symbol=symbol,
@@ -1049,12 +1052,17 @@ class ExecutionEngine:
             trade_id = f"trade_{order_id}_{datetime.now(timezone.utc).timestamp()}"
 
             pos_after = self.position_manager.get_position(symbol)
+            if pos_after and not pos_after.get("position_id"):
+                pos_after["position_id"] = position_id
+            fill_position_id = str(
+                (pos_after or {}).get("position_id") or position_id
+            )
             if pos_after:
                 self._schedule_entry_decision_executed(
                     payload=trade.get("_risk_payload_snapshot")
                     if isinstance(trade.get("_risk_payload_snapshot"), dict)
                     else payload,
-                    position_id=f"pos_{order_id}",
+                    position_id=fill_position_id,
                     entry_snapshot=pos_after.get("entry_decision_snapshot"),
                 )
 
@@ -1077,6 +1085,7 @@ class ExecutionEngine:
                     "exchange_order_id": exchange_order_id,
                     "client_order_id": f"js_{order_id}",
                     "reasoning_chain_id": payload.get("reasoning_chain_id"),
+                    "position_id": fill_position_id,
                 },
             )
             await event_bus.publish(order_fill)
@@ -1099,7 +1108,9 @@ class ExecutionEngine:
                     from agent.core.paper_trade_logger import paper_trade_logger
 
                     pos_audit = self.position_manager.get_position(symbol)
-                    position_id = f"pos_{order_id}"
+                    audit_position_id = str(
+                        (pos_audit or {}).get("position_id") or fill_position_id
+                    )
                     cv = float(
                         (pos_audit or {}).get("contract_value_btc")
                         or getattr(settings, "contract_value_btc", 0.001)
@@ -1426,6 +1437,8 @@ class ExecutionEngine:
                     take_profit=take_profit,
                     position_extras=pex or None,
                 )
+                if not position.get("position_id"):
+                    position["position_id"] = str(uuid.uuid4())
                 if self.risk_manager and getattr(self.risk_manager, "portfolio", None):
                     self.risk_manager.portfolio.record_entry_portfolio_value(symbol)
                 if order_result.get("bracket_sl_tp_active"):

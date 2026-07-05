@@ -181,9 +181,62 @@ def test_build_reject_snapshot():
         event_id="evt-1",
         reject_reason="hold_at_synthesis",
         diagnostics={"raw_confidence": 0.4},
+        market_context={
+            "features": {"close": 90123.5, "atr_14": 1100.0},
+            "ml_validation": {"expected_return": 0.0042, "passed": False},
+            "regime": "trending_bull",
+        },
     )
     assert snap["snapshot_kind"] == "reject"
-    assert snap["decision_context"]["reject_reason"] == "hold_at_synthesis"
+    dc = snap["decision_context"]
+    assert dc["reject_reason"] == "hold_at_synthesis"
+    assert dc["features"]["close"] == 90123.5
+    assert dc["ml_validation"]["expected_return"] == 0.0042
+    assert dc["regime"] == "trending_bull"
+
+
+def test_build_entry_snapshot_includes_ml_validation():
+    snap = build_entry_snapshot(
+        risk_payload={
+            "symbol": "BTCUSD",
+            "side": "long",
+            "market_context": {
+                "features": {"close": 88000.0},
+                "ml_validation": {"expected_return": 0.0031, "min_edge": 0.002},
+                "regime": "neutral",
+                "rule_based_pipeline": {"structural_gates": {"setup_type": "none"}},
+            },
+        }
+    )
+    dc = snap["decision_context"]
+    assert dc["features"]["close"] == 88000.0
+    assert dc["ml_validation"]["expected_return"] == 0.0031
+    assert dc["regime"] == "neutral"
+
+
+def test_merge_close_fields_preserves_ml_validation():
+    entry = build_entry_snapshot(
+        risk_payload={
+            "symbol": "BTCUSD",
+            "side": "long",
+            "market_context": {
+                "ml_validation": {"expected_return": 0.005},
+                "rule_based_pipeline": {"structural_gates": {"setup_type": "none"}},
+            },
+        }
+    )
+    merged = merge_close_fields(
+        entry,
+        {
+            "position_id": "uuid-close-1",
+            "exit_price": 91000.0,
+            "entry_price": 90000.0,
+            "pnl": 10.0,
+            "exit_reason": "take_profit",
+            "timestamp": "2026-06-29T11:00:00+00:00",
+        },
+    )
+    assert merged["decision_context"]["ml_validation"]["expected_return"] == 0.005
 
 
 def test_enforce_snapshot_size_cap_truncates():

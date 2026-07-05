@@ -784,7 +784,8 @@ class AgentEventSubscriber:
                     model_predictions=payload.get("model_predictions"),
                     stop_loss=stop_loss,
                     take_profit=take_profit,
-                    executed_at=timestamp
+                    executed_at=timestamp,
+                    position_id=payload.get("position_id"),
                 )
                 
                 position_id = persistence_result.get("position_id")

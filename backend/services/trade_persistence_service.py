@@ -40,7 +40,8 @@ class TradePersistenceService:
         model_predictions: Optional[Dict[str, Any]] = None,
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
-        executed_at: Optional[datetime] = None
+        executed_at: Optional[datetime] = None,
+        position_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create Trade and Position records in database.
 
@@ -218,9 +219,11 @@ class TradePersistenceService:
                 session.add(trade)
                 
                 # Create Position record
-                position_id = str(uuid.uuid4())
+                resolved_position_id = str(position_id).strip() if position_id else ""
+                if not resolved_position_id:
+                    resolved_position_id = str(uuid.uuid4())
                 position = Position(
-                    position_id=position_id,
+                    position_id=resolved_position_id,
                     symbol=symbol,
                     side=trade_side,
                     quantity=Decimal(str(quantity)),
@@ -239,7 +242,7 @@ class TradePersistenceService:
                 logger.info(
                     "trade_and_position_created",
                     trade_id=trade_id,
-                    position_id=position_id,
+                    position_id=resolved_position_id,
                     symbol=symbol,
                     side=side,
                     quantity=quantity,
@@ -252,7 +255,7 @@ class TradePersistenceService:
                 
                 return {
                     "trade_id": trade_id,
-                    "position_id": position_id,
+                    "position_id": resolved_position_id,
                     "success": True
                 }
                 

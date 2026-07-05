@@ -1,0 +1,154 @@
+{
+  "phase": "live_verification",
+  "generated_at": "2026-07-05T08:25:00+00:00",
+  "docker": {
+    "containers": {
+      "jacksparrow-postgres": "healthy",
+      "jacksparrow-redis": "healthy",
+      "jacksparrow-agent": "healthy",
+      "jacksparrow-backend": "healthy",
+      "jacksparrow-frontend": "healthy"
+    },
+    "backend_health": {
+      "status": "healthy",
+      "health_score": 1.0,
+      "latency_ms": 49.6,
+      "agent_state": "OBSERVING",
+      "delta_circuit_breaker": "CLOSED",
+      "market_data_last_tick": "2026-07-05T07:54:37Z"
+    }
+  },
+  "live_config_verified": {
+    "source": "docker exec jacksparrow-agent printenv",
+    "WALLET_LEDGER_SYNC_ENABLED": "true",
+    "TRADE_LIFECYCLE_ENABLED": "true",
+    "TRADE_LIFECYCLE_LOG_ONLY": "true",
+    "AGENT_POLICY_MODE": "ml_or_thesis",
+    "note": "Contradicts .env.example defaults; live deployment has wallet sync and TLE log-only ON"
+  },
+  "wallet": {
+    "wallet_transactions": 418,
+    "by_type": {"commission": 388, "funding": 30},
+    "last_synced_at": "2026-07-05T07:52:20Z",
+    "last_error": null,
+    "ingestion_status": "ACTIVE",
+    "attribution_status": "BROKEN",
+    "trade_outcomes_with_commission": 2,
+    "trade_outcomes_with_net_wallet": 2,
+    "attributed_values_nonzero": 0,
+    "finding": "Ingestion works (418 rows). Attribution to trade_outcomes nearly absent (2 rows, zero values)."
+  },
+  "cross_system_reconciliation": {
+    "trade_outcomes": 167,
+    "positions_closed": 21,
+    "positions_open": 0,
+    "entry_decisions": 1141,
+    "entry_decisions_rejected": 1052,
+    "entry_decision_labels": 0,
+    "position_id_join_matched": 0,
+    "position_id_scheme_mismatch": "trade_outcomes uses pos_* IDs; positions.position_id uses UUIDs",
+    "orphan_trade_outcomes": 167,
+    "expected_return_in_outcome_metadata": 0,
+    "features_close_in_rejected_entry_decisions": 0,
+    "severity": "HIGH"
+  },
+  "entry_quality_dimensions": {
+    "source": "entry_decisions.metadata.decision_context.entry_quality",
+    "with_dimensions_total": 286,
+    "by_outcome": {
+      "executed": {
+        "n": 5,
+        "avg_score": 62.05,
+        "points": {
+          "structural": 18.38,
+          "ml": 0.56,
+          "economic": 12.75,
+          "regime": 7.0,
+          "position_context": 7.5,
+          "microstructure": 7.0,
+          "trend_stability": 5.1,
+          "signal_freshness": 3.75
+        }
+      },
+      "rejected": {
+        "n": 281,
+        "avg_score": 47.82,
+        "points": {
+          "structural": 5.73,
+          "ml": 0.7,
+          "economic": 12.75,
+          "regime": 5.54,
+          "position_context": 7.5,
+          "microstructure": 7.0,
+          "trend_stability": 4.85,
+          "signal_freshness": 3.75
+        }
+      }
+    },
+    "recent_reject_example_score_46_8": {
+      "structural": 5.6,
+      "ml": 0.7,
+      "economic": 12.75,
+      "regime": 5.5,
+      "position_context": 7.5,
+      "microstructure": 7.0,
+      "trend_stability": 4.0,
+      "signal_freshness": 3.75
+    },
+    "bottleneck": "structural (executed 18.4 vs rejected 5.7 pts) and ml (~0.6 pts both cohorts)"
+  },
+  "performance": {
+    "trade_count": 167,
+    "expectancy_usd": -0.9339,
+    "win_rate": 0.1257,
+    "profit_factor": 0.2427,
+    "exit_reasons": {
+      "stop_loss_hit": 75,
+      "lifecycle_exit": 55,
+      "reconcile_exchange_flat": 18,
+      "take_profit_hit": 8,
+      "signal_reversal": 6,
+      "time_limit": 4,
+      "market_close": 1
+    },
+    "gross_vs_net": {
+      "trades_with_gross_pnl": 80,
+      "positive_gross_negative_net": 45,
+      "avg_gross_usd": 0.1398,
+      "avg_net_usd": -0.5374,
+      "finding": "Edge insufficient after costs; 56% of gross-tracked trades were right directionally but lost net"
+    }
+  },
+  "replay_counterfactuals": {
+    "window": "2026-04-11 to 2026-07-04",
+    "knob": "ENTRY_ECONOMIC_HARD_VETO",
+    "round_trip_pct": 0.00112,
+    "actual_expectancy": -0.9339,
+    "results": [
+      {"multiplier": 1.0, "blocked": 167, "kept": 0, "counterfactual_expectancy": 0.0},
+      {"multiplier": 1.25, "blocked": 167, "kept": 0, "counterfactual_expectancy": 0.0},
+      {"multiplier": 1.5, "blocked": 167, "kept": 0, "counterfactual_expectancy": 0.0}
+    ],
+    "validity_warning": "All trades blocked because expected_return is NULL in 167/167 trade_outcomes metadata. Replay is invalid until decision_context.ml_validation is persisted on close."
+  },
+  "opportunity_cost": {
+    "labels_created": 0,
+    "blocker": "entry_decisions.metadata lacks decision_context.features.close (0/1052 rejects)",
+    "label_script_ran": true,
+    "action_required": "Persist features.close in entry_decision metadata before label_entry_decisions can run"
+  },
+  "corrected_audit_claims": [
+    {"claim": "Wallet sync OFF", "verdict": "FALSE", "evidence": "418 wallet_transactions, sync at 07:52 UTC"},
+    {"claim": "TLE fully disabled", "verdict": "PARTIAL", "evidence": "ENABLED + LOG_ONLY=true; 55 lifecycle_exit closes in trade_outcomes"},
+    {"claim": "Economic veto would help historically", "verdict": "UNPROVEN", "evidence": "expected_return not stored in outcome metadata"},
+    {"claim": "No edge", "verdict": "REFINED", "evidence": "45/80 trades positive gross, negative net"}
+  ],
+  "ranked_defects_verified": [
+    {"id": "V1", "priority": "Critical", "issue": "Attribution pipeline broken despite wallet ingestion", "evidence": "2/167 outcomes attributed, values zero"},
+    {"id": "V2", "priority": "Critical", "issue": "position_id scheme mismatch breaks cross-table joins", "evidence": "0 joins between trade_outcomes and positions"},
+    {"id": "V3", "priority": "High", "issue": "expected_return not persisted on trade_outcomes", "evidence": "0/167 have ml_validation.expected_return"},
+    {"id": "V4", "priority": "High", "issue": "entry_decisions lack features for opportunity labeling", "evidence": "0/1052 rejects have features.close"},
+    {"id": "V5", "priority": "High", "issue": "Structural dimension separates executed vs rejected", "evidence": "18.4 vs 5.7 pts"},
+    {"id": "V6", "priority": "Medium", "issue": "Fee dominance on directional winners", "evidence": "45 positive gross / negative net"}
+  ]
+}

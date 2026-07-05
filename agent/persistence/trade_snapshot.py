@@ -102,6 +102,18 @@ def _enrich_decision_context_v2(
     if tv:
         decision_context["thesis_verdict"] = tv
 
+    features = _pick_features(mc.get("features") if isinstance(mc.get("features"), dict) else {})
+    if features and not decision_context.get("features"):
+        decision_context["features"] = features
+
+    ml_validation = mc.get("ml_validation")
+    if isinstance(ml_validation, dict) and ml_validation:
+        decision_context["ml_validation"] = dict(ml_validation)
+
+    regime = mc.get("regime")
+    if regime is not None and decision_context.get("regime") is None:
+        decision_context["regime"] = regime
+
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -484,6 +496,15 @@ def merge_close_fields(
 ) -> Dict[str, Any]:
     """Merge entry snapshot with close outcome for trade_outcomes.metadata."""
     merged = json.loads(json.dumps(entry_snapshot or {}, default=str))
+    entry_dc = (entry_snapshot or {}).get("decision_context")
+    if isinstance(entry_dc, dict):
+        merged_dc = merged.get("decision_context")
+        if not isinstance(merged_dc, dict):
+            merged_dc = {}
+        for key in ("ml_validation", "features", "regime", "entry_quality"):
+            if entry_dc.get(key) is not None and merged_dc.get(key) is None:
+                merged_dc[key] = entry_dc[key]
+        merged["decision_context"] = merged_dc
     merged["snapshot_kind"] = "closed_round_trip"
     merged["closed_at"] = (
         close_payload.get("timestamp").isoformat()
