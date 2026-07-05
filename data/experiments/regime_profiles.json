@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "status": "deferred",
+  "notes": "Phase 6 — enable THRESHOLD_ADAPTER_REGIME_AWARE only after global baseline validated.",
+  "min_closes_per_regime": 50,
+  "profiles": {
+    "trending": {
+      "TRAILING_STOP_PERCENTAGE": 0.008,
+      "TRAILING_STOP_ACTIVATION_PROFIT_PCT": 0.004
+    },
+    "neutral": {
+      "TRAILING_STOP_PERCENTAGE": 0.015,
+      "TRAILING_STOP_ACTIVATION_PROFIT_PCT": 0.006
+    },
+    "ranging": {
+      "TRAILING_STOP_PERCENTAGE": 0.02,
+      "TRAILING_STOP_ACTIVATION_PROFIT_PCT": 0.008
+    }
+  }
+}

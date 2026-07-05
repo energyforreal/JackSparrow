@@ -370,6 +370,114 @@ def build_entry_state_summary(
     return {k: v for k, v in summary.items() if v is not None}
 
 
+def _side_signed_move_pct(side: str, entry_price: float, exit_price: float) -> Optional[float]:
+    if entry_price <= 0 or exit_price <= 0:
+        return None
+    raw = (exit_price - entry_price) / entry_price
+    if str(side or "").lower() in ("short", "sell"):
+        return -raw
+    return raw
+
+
+def _expected_move_pct_from_snapshot(merged: Dict[str, Any]) -> Optional[float]:
+    dc = merged.get("decision_context") if isinstance(merged.get("decision_context"), dict) else {}
+    ml_val = dc.get("ml_validation") if isinstance(dc.get("ml_validation"), dict) else {}
+    expected = ml_val.get("expected_return")
+    if expected is not None:
+        try:
+            return float(expected)
+        except (TypeError, ValueError):
+            pass
+    rb = dc.get("rule_based_pipeline") if isinstance(dc.get("rule_based_pipeline"), dict) else {}
+    g5 = rb.get("gate5_economic") if isinstance(rb.get("gate5_economic"), dict) else {}
+    for key in ("expected_return", "expected_move_pct", "expected_move"):
+        if g5.get(key) is not None:
+            try:
+                return float(g5[key])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _tle_shadow_from_close(close_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    monitoring = close_payload.get("position_monitoring")
+    if not isinstance(monitoring, list) or not monitoring:
+        return None
+    last = monitoring[-1]
+    if not isinstance(last, dict):
+        return None
+    verdict = last.get("verdict") if isinstance(last.get("verdict"), dict) else last
+    if not isinstance(verdict, dict):
+        return None
+    shadow: Dict[str, Any] = {}
+    for key in (
+        "action",
+        "health_score",
+        "opportunity_score",
+        "exit_reason_detail",
+        "exit_trigger",
+    ):
+        if verdict.get(key) is not None:
+            shadow[key] = verdict.get(key)
+    return shadow or None
+
+
+def _compute_trade_autopsy(
+    merged: Dict[str, Any],
+    close_payload: Dict[str, Any],
+    outcome: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Expected vs actual vs missed move for close analytics."""
+    autopsy: Dict[str, Any] = {}
+    entry_px = close_payload.get("entry_price") or outcome.get("entry_price")
+    exit_px = close_payload.get("exit_price") or outcome.get("exit_price")
+    side = close_payload.get("side") or outcome.get("side") or "long"
+    try:
+        entry_f = float(entry_px)
+        exit_f = float(exit_px)
+    except (TypeError, ValueError):
+        entry_f = exit_f = 0.0
+    actual = _side_signed_move_pct(str(side), entry_f, exit_f)
+    if actual is not None:
+        autopsy["actual_move_pct"] = actual
+    expected = _expected_move_pct_from_snapshot(merged)
+    if expected is not None:
+        autopsy["expected_move_pct"] = expected
+        if actual is not None:
+            autopsy["move_delta_pct"] = actual - expected
+    excursions = outcome.get("excursions") or close_payload.get("excursions")
+    if isinstance(excursions, dict) and actual is not None:
+        mfe = excursions.get("mfe_pct")
+        if mfe is None:
+            mfe = excursions.get("max_favorable_excursion_pct")
+        if mfe is not None:
+            try:
+                mfe_f = float(mfe)
+                autopsy["mfe_pct"] = mfe_f
+                autopsy["missed_move_pct"] = mfe_f - actual
+                if mfe_f > 0:
+                    autopsy["mfe_capture_ratio"] = actual / mfe_f
+            except (TypeError, ValueError):
+                pass
+    autopsy["exit_reason"] = close_payload.get("exit_reason") or outcome.get("exit_reason")
+    lifecycle = close_payload.get("lifecycle_exit")
+    if isinstance(lifecycle, dict):
+        autopsy["missed_move_reason"] = lifecycle.get("exit_reason_detail") or lifecycle.get(
+            "exit_trigger"
+        )
+    tle_shadow = _tle_shadow_from_close(close_payload)
+    if tle_shadow:
+        autopsy["tle_shadow"] = tle_shadow
+        if not autopsy.get("missed_move_reason"):
+            autopsy["missed_move_reason"] = tle_shadow.get("exit_reason_detail")
+    wallet = merged.get("wallet_attribution") or outcome.get("wallet_attribution")
+    if isinstance(wallet, dict):
+        autopsy["commission_usd"] = wallet.get("commission_usd")
+        autopsy["funding_usd"] = wallet.get("funding_usd")
+        autopsy["net_wallet_impact_usd"] = wallet.get("net_wallet_impact_usd")
+    return {k: v for k, v in autopsy.items() if v is not None}
+
+
 def merge_close_fields(
     entry_snapshot: Dict[str, Any],
     close_payload: Dict[str, Any],
@@ -382,6 +490,18 @@ def merge_close_fields(
         if hasattr(close_payload.get("timestamp"), "isoformat")
         else close_payload.get("timestamp")
     )
+    from agent.core.wallet_attribution import parse_utc_datetime
+
+    opened_raw = close_payload.get("entry_time") or close_payload.get("opened_at")
+    opened_at = parse_utc_datetime(opened_raw)
+    if opened_at is None:
+        timing_src = merged.get("execution_timing")
+        if isinstance(timing_src, dict):
+            opened_at = parse_utc_datetime(
+                timing_src.get("position_opened_at") or timing_src.get("exchange_filled_at")
+            )
+    if opened_at is not None:
+        merged["opened_at"] = opened_at.isoformat()
 
     outcome: Dict[str, Any] = {
         "position_id": close_payload.get("position_id"),
@@ -425,6 +545,11 @@ def merge_close_fields(
         merged["wallet_attribution"] = dict(wallet_attr)
         outcome["wallet_attribution"] = dict(wallet_attr)
     merged["outcome"] = outcome
+
+    autopsy = _compute_trade_autopsy(merged, close_payload, outcome)
+    if autopsy:
+        merged["trade_autopsy"] = autopsy
+        outcome["trade_autopsy"] = dict(autopsy)
 
     timing = merged.get("execution_timing")
     if not isinstance(timing, dict):

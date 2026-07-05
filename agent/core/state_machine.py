@@ -219,15 +219,13 @@ class AgentStateMachine:
         model_predictions = payload.get("model_predictions")
         if model_predictions is not None and len(model_predictions) > 0 and self.learning_system and self.model_registry:
             try:
-                entry_time = payload.get("entry_time")
-                exit_time = payload.get("timestamp")
+                from agent.core.wallet_attribution import parse_utc_datetime
+
+                entry_time = payload.get("entry_time") or payload.get("opened_at")
+                exit_time = payload.get("timestamp") or payload.get("closed_at")
                 now = datetime.now(timezone.utc)
-                et = entry_time
-                xt = exit_time
-                if et is not None and getattr(et, "tzinfo", None) is None and hasattr(et, "replace"):
-                    et = et.replace(tzinfo=timezone.utc)
-                if xt is not None and getattr(xt, "tzinfo", None) is None and hasattr(xt, "replace"):
-                    xt = xt.replace(tzinfo=timezone.utc)
+                et = parse_utc_datetime(entry_time)
+                xt = parse_utc_datetime(exit_time)
                 if et is not None and xt is not None:
                     holding_hours = (xt - et).total_seconds() / 3600.0
                 else:
@@ -334,14 +332,19 @@ class AgentStateMachine:
                 record_position_closed(pnl_usd=pnl_usd)
 
                 async def _persist_sql_outcome() -> None:
+                    from agent.core.wallet_attribution import parse_utc_datetime
+
                     raw_closed = payload.get("timestamp")
-                    closed_at = (
-                        raw_closed
-                        if isinstance(raw_closed, datetime)
-                        else datetime.now(timezone.utc)
-                    )
-                    raw_opened = payload.get("entry_time")
-                    opened_at = raw_opened if isinstance(raw_opened, datetime) else None
+                    closed_at = parse_utc_datetime(raw_closed) or datetime.now(timezone.utc)
+                    raw_opened = payload.get("entry_time") or payload.get("opened_at")
+                    opened_at = parse_utc_datetime(raw_opened)
+                    if opened_at is None:
+                        timing = payload.get("execution_timing")
+                        if isinstance(timing, dict):
+                            opened_at = parse_utc_datetime(
+                                timing.get("position_opened_at")
+                                or timing.get("exchange_filled_at")
+                            )
                     entry = float(payload.get("entry_price") or 0)
                     exitp = float(payload.get("exit_price") or 0)
                     qty = float(payload.get("quantity") or 0)

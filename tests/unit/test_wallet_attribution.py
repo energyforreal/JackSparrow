@@ -91,3 +91,57 @@ def test_deposit_never_attributed():
     result = engine.attribute_for_position(close, rows)
     assert result.net_wallet_impact_usd == Decimal("0")
     assert 4 in result.unattributed_transaction_ids
+
+
+def test_commission_by_fill_uuid_high_confidence():
+    engine = WalletAttributionEngine()
+    fill_uuid = "abc-123-fill"
+    close = {
+        "entry_time": "2026-07-04T10:00:00+00:00",
+        "timestamp": "2026-07-04T12:00:00+00:00",
+        "entry_fill_uuid": fill_uuid,
+        "exit_fill_uuid": "other-fill",
+    }
+    rows = [
+        {
+            "exchange_transaction_id": 10,
+            "transaction_type": "commission",
+            "order_id": None,
+            "amount": Decimal("-0.31"),
+            "occurred_at": _dt("2026-07-04T10:01:00Z"),
+            "product_id": 27,
+            "metadata": {
+                "meta_data": {"fill_uuid": fill_uuid},
+            },
+        },
+        {
+            "exchange_transaction_id": 11,
+            "transaction_type": "commission",
+            "order_id": None,
+            "amount": Decimal("-0.31"),
+            "occurred_at": _dt("2026-07-04T12:01:00Z"),
+            "product_id": 27,
+            "metadata": {
+                "meta_data": {"fill_uuid": "other-fill"},
+            },
+        },
+    ]
+    result = engine.attribute_for_position(close, rows, product_id=27)
+    assert result.commission_usd == Decimal("-0.62")
+    assert result.attribution_confidence == "high"
+    assert 10 in result.linked_transaction_ids
+    assert 11 in result.linked_transaction_ids
+
+
+def test_attribute_commission_by_fill_uuid_helper():
+    engine = WalletAttributionEngine()
+    fill_uuid = "fee-row-uuid"
+    rows = [
+        {
+            "transaction_type": "commission",
+            "metadata": {"meta_data": {"fill_uuid": fill_uuid}},
+        }
+    ]
+    row = engine.attribute_commission_by_fill_uuid(fill_uuid, rows)
+    assert row is not None
+    assert row["transaction_type"] == "commission"

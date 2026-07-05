@@ -63,7 +63,7 @@ GATES: Dict[str, Dict[str, Any]] = {
         "min_overall_agreement": 0.80,
         "min_exit_agreement": 0.75,
         "min_opportunity_precision": 0.65,
-        "min_trades": 30,
+        "min_trades": 50,
     },
     "3_to_4": {
         "description": "Phase 3 → 4: live TLE vs baseline",
@@ -108,6 +108,22 @@ GATES: Dict[str, Dict[str, Any]] = {
         "description": "Rejected entry forward labels",
         "min_labeled_rejects": 50,
     },
+    "p1_data_integrity": {
+        "description": "Phase 1 exit: opened_at, wallet attribution, snapshot autopsy",
+        "min_trades": 5,
+        "min_opened_at_pct": 95.0,
+        "min_wallet_commission_pct": 80.0,
+        "min_autopsy_pct": 90.0,
+    },
+    "p2_tle_observe": {
+        "description": "Phase 2 log-only TLE observation cohort",
+        "min_trades": 50,
+        "target_trades": 100,
+        "min_regime_buckets": 2,
+        "min_closes_per_regime": 15,
+        "min_overall_agreement": 0.80,
+        "min_exit_agreement": 0.75,
+    },
 }
 
 
@@ -125,7 +141,13 @@ def _fetch_trades(conn, start: Optional[str], end: Optional[str]) -> List[Dict[s
     where = (" AND " + " AND ".join(clauses)) if clauses else ""
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            f"SELECT pnl, metadata FROM trade_outcomes WHERE 1=1 {where} ORDER BY closed_at",
+            f"""
+            SELECT pnl, metadata, opened_at, closed_at
+            FROM trade_outcomes
+            WHERE 1=1 {where}
+            ORDER BY closed_at DESC
+            LIMIT 500
+            """,
             params,
         )
         return [dict(r) for r in cur.fetchall()]
@@ -383,6 +405,79 @@ def evaluate_gate(gate_id: str, *, start: Optional[str], end: Optional[str]) -> 
                 "value": labeled,
                 "pass": passed,
             }
+        ]
+
+    elif gate_id == "p1_data_integrity":
+        recent = trades[: max(int(spec["min_trades"]), 20)]
+        n = len(recent)
+        opened_ok = sum(1 for t in recent if t.get("opened_at") is not None)
+        opened_pct = opened_ok / n * 100 if n else 0.0
+        wallet_ok = 0
+        autopsy_ok = 0
+        for t in recent:
+            meta = t.get("metadata") if isinstance(t.get("metadata"), dict) else {}
+            wa = meta.get("wallet_attribution") or {}
+            if isinstance(wa, dict) and float(wa.get("commission_usd") or 0) != 0:
+                wallet_ok += 1
+            if isinstance(meta.get("trade_autopsy"), dict):
+                autopsy_ok += 1
+        wallet_pct = wallet_ok / n * 100 if n else 0.0
+        autopsy_pct = autopsy_ok / n * 100 if n else 0.0
+        passed = (
+            n >= int(spec["min_trades"])
+            and opened_pct >= float(spec["min_opened_at_pct"])
+            and wallet_pct >= float(spec["min_wallet_commission_pct"])
+            and autopsy_pct >= float(spec["min_autopsy_pct"])
+        )
+        checks = [
+            {"check": "recent_trade_count", "value": n, "pass": n >= int(spec["min_trades"])},
+            {"check": "opened_at_pct", "value": round(opened_pct, 2), "pass": opened_pct >= 95},
+            {
+                "check": "wallet_commission_pct",
+                "value": round(wallet_pct, 2),
+                "pass": wallet_pct >= float(spec["min_wallet_commission_pct"]),
+            },
+            {
+                "check": "trade_autopsy_pct",
+                "value": round(autopsy_pct, 2),
+                "pass": autopsy_pct >= float(spec["min_autopsy_pct"]),
+            },
+        ]
+
+    elif gate_id == "p2_tle_observe":
+        n = len(trades)
+        regime_counts: Dict[str, int] = {}
+        for t in trades:
+            meta = t.get("metadata") if isinstance(t.get("metadata"), dict) else {}
+            dc = meta.get("decision_context") or {}
+            rb = dc.get("rule_based_pipeline") or {}
+            regime = str((rb.get("market_state") or {}).get("regime") or "unknown")
+            regime_counts[regime] = regime_counts.get(regime, 0) + 1
+        qualified_regimes = [
+            r for r, c in regime_counts.items() if c >= int(spec["min_closes_per_regime"])
+        ]
+        report_path = ROOT / "data" / "experiments" / "tle_agreement_latest.json"
+        oa = ea = 0.0
+        if report_path.is_file():
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            oa = float(report.get("overall_agreement") or 0)
+            ea = float(report.get("exit_agreement_rate") or 0)
+        passed = (
+            n >= int(spec["min_trades"])
+            and len(qualified_regimes) >= int(spec["min_regime_buckets"])
+            and oa >= float(spec["min_overall_agreement"])
+            and ea >= float(spec["min_exit_agreement"])
+        )
+        checks = [
+            {"check": "close_count", "value": n, "pass": n >= int(spec["min_trades"])},
+            {
+                "check": "qualified_regime_buckets",
+                "value": len(qualified_regimes),
+                "pass": len(qualified_regimes) >= int(spec["min_regime_buckets"]),
+            },
+            {"check": "regime_counts", "value": regime_counts, "pass": True},
+            {"check": "overall_agreement", "value": oa, "pass": oa >= 0.80},
+            {"check": "exit_agreement_rate", "value": ea, "pass": ea >= 0.75},
         ]
 
     else:

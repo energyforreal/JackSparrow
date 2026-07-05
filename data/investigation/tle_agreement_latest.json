@@ -1,0 +1,14 @@
+{
+  "evaluated_at": "2026-07-05T06:10:21.456694+00:00",
+  "trade_count": 167,
+  "exit_agreement_rate": 0.0,
+  "hold_agreement_rate": 1.0,
+  "overall_agreement": 0.5,
+  "exit_cycles": 1,
+  "hold_cycles": 54,
+  "opportunity_precision": 0.0,
+  "opportunity_recall": 0.0,
+  "high_opp_exit_cycles": 0,
+  "low_opp_hold_cycles": 0,
+  "pass": false
+}

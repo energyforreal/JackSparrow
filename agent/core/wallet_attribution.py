@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -41,7 +42,8 @@ def _to_decimal(value: Any) -> Decimal:
         return Decimal("0")
 
 
-def _parse_dt(value: Any) -> Optional[datetime]:
+def parse_utc_datetime(value: Any) -> Optional[datetime]:
+    """Parse datetime or ISO-8601 string to timezone-aware UTC."""
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     if isinstance(value, str):
@@ -51,6 +53,42 @@ def _parse_dt(value: Any) -> Optional[datetime]:
         except ValueError:
             return None
     return None
+
+
+_parse_dt = parse_utc_datetime
+
+
+def _extract_fill_uuid_from_wallet_row(row: Dict[str, Any]) -> Optional[str]:
+    """Read fill UUID from synced wallet row metadata (Delta nests under meta_data)."""
+    meta = row.get("metadata")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except json.JSONDecodeError:
+            meta = None
+    if not isinstance(meta, dict):
+        return None
+    inner = meta.get("meta_data") or meta.get("metadata")
+    if isinstance(inner, dict):
+        fill_uuid = inner.get("fill_uuid") or inner.get("fill_id")
+        if fill_uuid:
+            return str(fill_uuid)
+    fill_uuid = meta.get("fill_uuid") or meta.get("fill_id")
+    return str(fill_uuid) if fill_uuid else None
+
+
+def _collect_fill_uuids(close_payload: Dict[str, Any]) -> Set[str]:
+    """Fill UUIDs propagated from execution close payload."""
+    uuids: Set[str] = set()
+    for key in ("entry_fill_uuid", "exit_fill_uuid", "fill_uuid"):
+        raw = close_payload.get(key)
+        if raw:
+            uuids.add(str(raw))
+    for key in ("entry_fill_uuids", "exit_fill_uuids", "fill_uuids"):
+        raw = close_payload.get(key)
+        if isinstance(raw, (list, tuple, set)):
+            uuids.update(str(v) for v in raw if v)
+    return uuids
 
 
 class WalletAttributionEngine:
@@ -80,13 +118,16 @@ class WalletAttributionEngine:
         if closed_at is None:
             closed_at = datetime.now(timezone.utc)
 
-        order_ids = known_order_ids or set()
-        ex_oid = close_payload.get("exchange_order_id")
-        if ex_oid is not None:
-            try:
-                order_ids.add(int(ex_oid))
-            except (TypeError, ValueError):
-                pass
+        order_ids = set(known_order_ids or ())
+        for oid_key in ("exchange_order_id", "entry_exchange_order_id", "exit_exchange_order_id"):
+            ex_oid = close_payload.get(oid_key)
+            if ex_oid is not None:
+                try:
+                    order_ids.add(int(ex_oid))
+                except (TypeError, ValueError):
+                    pass
+
+        fill_uuids = _collect_fill_uuids(close_payload)
 
         high_links = 0
         medium_links = 0
@@ -122,7 +163,12 @@ class WalletAttributionEngine:
             if tx_type == "commission":
                 order_id = row.get("order_id")
                 linked = False
-                if order_id is not None:
+                row_fill_uuid = _extract_fill_uuid_from_wallet_row(row)
+                if row_fill_uuid and row_fill_uuid in fill_uuids:
+                    result.commission_usd += amount
+                    linked = True
+                    high_links += 1
+                elif order_id is not None:
                     try:
                         oid = int(order_id)
                         if oid in order_ids:
@@ -190,4 +236,21 @@ class WalletAttributionEngine:
                     return row
             except (TypeError, ValueError):
                 continue
+        return None
+
+    def attribute_commission_by_fill_uuid(
+        self,
+        fill_uuid: str,
+        wallet_rows: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Return first commission row whose metadata fill_uuid matches."""
+        target = str(fill_uuid or "").strip()
+        if not target:
+            return None
+        for row in wallet_rows:
+            if str(row.get("transaction_type") or "").lower() != "commission":
+                continue
+            row_uuid = _extract_fill_uuid_from_wallet_row(row)
+            if row_uuid and row_uuid == target:
+                return row
         return None

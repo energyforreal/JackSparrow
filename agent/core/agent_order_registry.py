@@ -103,6 +103,7 @@ def record_agent_order_fill(
     client_order_id: Optional[str] = None,
     reduce_only: bool = False,
     reasoning_chain_id: Optional[str] = None,
+    fill_uuid: Optional[str] = None,
 ) -> None:
     """Record a fill from an agent-authorized ``js_`` order."""
     sym = str(symbol or "").strip().upper()
@@ -120,6 +121,7 @@ def record_agent_order_fill(
         "client_order_id": str(client_order_id) if client_order_id else None,
         "reduce_only": bool(reduce_only),
         "reasoning_chain_id": reasoning_chain_id,
+        "fill_uuid": str(fill_uuid) if fill_uuid else None,
         "recorded_at": time.time(),
         "recorded_at_iso": datetime.now(timezone.utc).isoformat(),
     }
@@ -135,6 +137,7 @@ def record_agent_order_fill(
         client_order_id=client_order_id,
         execution_authority=execution_authority,
         reduce_only=reduce_only,
+        fill_uuid=fill_uuid,
     )
 
 

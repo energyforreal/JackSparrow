@@ -1685,7 +1685,10 @@ class MCPOrchestrator:
             policy_verdict, reasoning_chain
         )
         policy_verdict = apply_entry_quality_policy(
-            policy_verdict, entry_quality_result, ml_confirms
+            policy_verdict,
+            entry_quality_result,
+            ml_confirms,
+            ml_validation=ml_validation,
         )
         market_context_for_reasoning["policy_verdict"] = policy_verdict.model_dump(
             mode="json"

@@ -1450,6 +1450,9 @@ class ExecutionEngine:
                         logger.warning("exchange_gateway_register_open_failed", error=str(e), symbol=symbol)
 
                 if is_agent_controlled_authority(execution_authority):
+                    entry_fill_uuid = await self._resolve_fill_uuid_for_order(
+                        symbol, order_result.get("exchange_order_id")
+                    )
                     record_agent_order_fill(
                         symbol=symbol,
                         side=side,
@@ -1461,7 +1464,15 @@ class ExecutionEngine:
                         client_order_id=f"js_{order_id}",
                         reduce_only=False,
                         reasoning_chain_id=trade.get("reasoning_chain_id"),
+                        fill_uuid=entry_fill_uuid,
                     )
+                    open_pos = self.position_manager.get_position(symbol)
+                    if open_pos:
+                        if entry_fill_uuid:
+                            open_pos["entry_fill_uuid"] = entry_fill_uuid
+                        ex_oid = order_result.get("exchange_order_id")
+                        if ex_oid is not None:
+                            open_pos["entry_exchange_order_id"] = ex_oid
                     try:
                         from agent.core.wallet_ledger_service import (
                             get_wallet_ledger_service,
@@ -1715,6 +1726,8 @@ class ExecutionEngine:
                 fx_pnl_inr = notional_usd_entry * (usdinr_exit - usdinr_entry)
 
                 exit_ex = order_result.get("exchange_order_id")
+                exit_fill_uuid = await self._resolve_fill_uuid_for_order(symbol, exit_ex)
+                entry_fill_uuid = position.get("entry_fill_uuid")
                 payload_data: Dict[str, Any] = {
                     "position_id": position_id,
                     "symbol": symbol,
@@ -1732,7 +1745,15 @@ class ExecutionEngine:
                     "exit_reason": exit_reason,
                     "timestamp": datetime.now(timezone.utc),
                     "exchange_order_id": str(exit_ex) if exit_ex is not None else None,
+                    "exit_exchange_order_id": str(exit_ex) if exit_ex is not None else None,
                 }
+                if entry_fill_uuid:
+                    payload_data["entry_fill_uuid"] = str(entry_fill_uuid)
+                if exit_fill_uuid:
+                    payload_data["exit_fill_uuid"] = str(exit_fill_uuid)
+                entry_ex = position.get("entry_exchange_order_id")
+                if entry_ex is not None:
+                    payload_data["entry_exchange_order_id"] = str(entry_ex)
                 if model_predictions is not None:
                     payload_data["model_predictions"] = model_predictions
                 if reasoning_chain_id is not None:
@@ -1824,10 +1845,13 @@ class ExecutionEngine:
                         )
                 if entry_time is not None:
                     try:
+                        from agent.core.wallet_attribution import parse_utc_datetime
+
                         closed_ts = payload_data["timestamp"]
-                        if hasattr(closed_ts, "timestamp") and hasattr(entry_time, "timestamp"):
+                        et_parsed = parse_utc_datetime(entry_time)
+                        if et_parsed is not None and hasattr(closed_ts, "timestamp"):
                             payload_data["duration_seconds"] = (
-                                closed_ts - entry_time
+                                closed_ts - et_parsed
                             ).total_seconds()
                     except Exception as e:
                         logger.warning(
@@ -1884,6 +1908,25 @@ class ExecutionEngine:
                     payload=payload_data,
                 )
                 await event_bus.publish(pos_closed)
+
+                if is_agent_controlled_authority(
+                    position.get("execution_authority", AGENT_DECISION_AUTHORITY)
+                ):
+                    record_agent_order_fill(
+                        symbol=symbol,
+                        side=close_side,
+                        quantity=lots,
+                        fill_price=exit_price,
+                        execution_authority=str(
+                            position.get("execution_authority", AGENT_DECISION_AUTHORITY)
+                        ),
+                        internal_order_id=order_result.get("order_id"),
+                        exchange_order_id=exit_ex,
+                        client_order_id=f"js_{order_result.get('order_id')}",
+                        reduce_only=True,
+                        reasoning_chain_id=reasoning_chain_id,
+                        fill_uuid=exit_fill_uuid,
+                    )
 
                 return ExecutionResult(True, order_id=order_result.get("order_id"))
 
@@ -2937,6 +2980,54 @@ class ExecutionEngine:
         if isinstance(nested, dict):
             return nested
         return payload
+
+    async def _resolve_fill_uuid_for_order(
+        self,
+        symbol: str,
+        exchange_order_id: Optional[Any],
+    ) -> Optional[str]:
+        """Resolve fill UUID from recent exchange fills for an order id."""
+        if self.delta_client is None or exchange_order_id is None:
+            return None
+        try:
+            product_id = await self.delta_client.resolve_product_id(symbol)
+            fills_resp = await self.delta_client.get_fills(
+                product_ids=str(product_id),
+                page_size=25,
+                contract_types="perpetual_futures",
+            )
+        except Exception as exc:
+            logger.debug(
+                "fill_uuid_resolve_skipped",
+                symbol=symbol,
+                exchange_order_id=exchange_order_id,
+                error=str(exc),
+            )
+            return None
+
+        rows = fills_resp.get("result") if isinstance(fills_resp, dict) else None
+        if not isinstance(rows, list):
+            return None
+        try:
+            target_oid = int(exchange_order_id)
+        except (TypeError, ValueError):
+            return None
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                if int(row.get("order_id")) != target_oid:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            fill_id = row.get("id") or row.get("fill_id")
+            meta = row.get("meta_data") or row.get("metadata")
+            if isinstance(meta, dict):
+                fill_id = fill_id or meta.get("fill_uuid") or meta.get("fill_id")
+            if fill_id:
+                return str(fill_id)
+        return None
 
     @staticmethod
     def _extract_filled_quantity(order_obj: Dict[str, Any], requested_qty: float) -> float:

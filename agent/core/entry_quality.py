@@ -378,6 +378,9 @@ def apply_entry_quality_policy(
     policy_verdict: Any,
     entry_quality: Optional[EntryQualityResult],
     ml_confirms: bool,
+    *,
+    ml_validation: Optional[MLValidationSnapshot] = None,
+    direction: Optional[str] = None,
 ) -> Any:
     """Policy consumes advisory quality score — does not duplicate authority."""
     from agent.events.schemas import PolicyVerdict
@@ -385,6 +388,32 @@ def apply_entry_quality_policy(
     if entry_quality is None or not is_entry_signal(str(policy_verdict.signal or "HOLD")):
         return policy_verdict
     reasons = list(policy_verdict.reason_codes or [])
+
+    if bool(getattr(settings, "entry_economic_hard_veto_enabled", False)) and ml_validation is not None:
+        move = abs(float(ml_validation.expected_return or 0.0))
+        min_edge = round_trip_cost_pct() * float(
+            getattr(settings, "entry_economic_min_edge_cost_multiplier", 1.0) or 1.0
+        )
+        if move < min_edge:
+            return PolicyVerdict(
+                signal="HOLD",
+                confidence=policy_verdict.confidence,
+                position_size=0.0,
+                reason_codes=reasons
+                + [
+                    "economic_hard_veto",
+                    f"expected_move={move:.6f}",
+                    f"min_edge={min_edge:.6f}",
+                ],
+                ml_evidence_id=policy_verdict.ml_evidence_id,
+                adopted_ml_candidate=policy_verdict.adopted_ml_candidate,
+                memory_size_scale=policy_verdict.memory_size_scale,
+                conviction=policy_verdict.conviction,
+                size_fraction=0.0,
+                evidence=policy_verdict.evidence,
+                abstention=policy_verdict.abstention,
+            )
+
     min_score = float(getattr(settings, "entry_quality_min_score", 55.0) or 55.0)
     if entry_quality.quality_score < min_score:
         return PolicyVerdict(

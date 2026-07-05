@@ -1,0 +1,2674 @@
+[
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 73198.11198271,
+    "exit_price": 72711.63485901,
+    "pnl": -0.63238687,
+    "close_reason": "signal_reversal",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 486.48,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 73198.11198271,
+    "exit_price": 72728.38687116,
+    "pnl": -0.61565161,
+    "close_reason": "market_close",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 469.73,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 72567.79905814,
+    "exit_price": 73129.83919198,
+    "pnl": -0.70773777,
+    "close_reason": "signal_reversal",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 562.04,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 71305.86947496,
+    "exit_price": 72650.63190143,
+    "pnl": -1.48871893,
+    "close_reason": "signal_reversal",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 1344.76,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 72821.96667015,
+    "exit_price": 74123.07276366,
+    "pnl": -1.44805113,
+    "close_reason": "signal_reversal",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 1301.11,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 73938.00529401,
+    "exit_price": 74637.70118432,
+    "pnl": -0.8482716,
+    "close_reason": "signal_reversal",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 699.7,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 74867.43814429,
+    "exit_price": 74189.2243622,
+    "pnl": -0.82727044,
+    "close_reason": "signal_reversal",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 678.21,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 73999.33581114,
+    "exit_price": 76177.99227669,
+    "pnl": -2.32883379,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 2178.66,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 75128.05997382,
+    "exit_price": 80519.79130136,
+    "pnl": -5.54737918,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 5391.73,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 81246.5362437,
+    "exit_price": 80769.10956905,
+    "pnl": -0.63944232,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 477.43,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 80898.46818665,
+    "exit_price": 80604.36551795,
+    "pnl": -0.4556055,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 294.1,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 80900.68680423,
+    "exit_price": 80178.25480624,
+    "pnl": -0.88351094,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 722.43,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 80982.90247081,
+    "exit_price": 80370.65093695,
+    "pnl": -0.77360509,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 612.25,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 80806.39628273,
+    "exit_price": 80127.14319695,
+    "pnl": -0.84018663,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 679.25,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 80713.65691722,
+    "exit_price": 80081.01608208,
+    "pnl": -0.79343551,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 632.64,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 80631.6,
+    "exit_price": 80400.0,
+    "pnl": -0.3926316,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 231.6,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78371.2,
+    "exit_price": 78156.3,
+    "pnl": -0.3714275,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 214.9,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78097.8,
+    "exit_price": 77946.8,
+    "pnl": -0.3070446,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 151.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78036.7,
+    "exit_price": 77794.7,
+    "pnl": -0.3978314,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 242.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78228.0,
+    "exit_price": 78010.2,
+    "pnl": -0.3740382,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 217.8,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78191.9,
+    "exit_price": 78426.9,
+    "pnl": 0.0783812,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 235.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78486.2,
+    "exit_price": 78261.1,
+    "pnl": -0.3818473,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 225.1,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78330.6,
+    "exit_price": 78457.9,
+    "pnl": -0.0294885,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 127.3,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 79000.0,
+    "exit_price": 78616.6,
+    "pnl": -0.5410166,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 383.4,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 78550.0,
+    "exit_price": 78496.0,
+    "pnl": -0.211046,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 54.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 86986.6,
+    "exit_price": 78586.2,
+    "pnl": -8.5659728,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 8400.4,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 86900.0,
+    "exit_price": 78595.4,
+    "pnl": -8.4700954,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 8304.6,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 75543.8,
+    "exit_price": 75547.5,
+    "pnl": -0.1547913,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 3.7,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 76500.0,
+    "exit_price": 81000.0,
+    "pnl": -4.6575,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 4500.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 76000.0,
+    "exit_price": 79900.0,
+    "pnl": -4.0559,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 3900.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 79970.0,
+    "exit_price": 76471.8,
+    "pnl": -3.6546418,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 3498.2,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 77570.7,
+    "exit_price": 77433.6,
+    "pnl": -0.2921043,
+    "close_reason": "time_limit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 137.1,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 73227.6,
+    "exit_price": 73101.3,
+    "pnl": -0.0200289,
+    "close_reason": "time_limit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 126.3,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 72809.0,
+    "exit_price": 72988.1,
+    "pnl": -0.3248971,
+    "close_reason": "time_limit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 179.1,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 72365.7,
+    "exit_price": 72238.1,
+    "pnl": -0.0170038,
+    "close_reason": "time_limit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 127.6,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 71093.2,
+    "exit_price": 76000.0,
+    "pnl": -0.1421864,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 4906.8,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 67556.2,
+    "exit_price": 76100.0,
+    "pnl": -0.03006216,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 8543.8,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 67123.8,
+    "exit_price": 66712.0,
+    "pnl": 0.8338926,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 411.8,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 66751.9,
+    "exit_price": 66691.5,
+    "pnl": -0.2191302,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 60.4,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 66842.4,
+    "exit_price": 66470.2,
+    "pnl": -1.5165378,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 372.2,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 64353.25,
+    "exit_price": 63509.0,
+    "pnl": 5.731102,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 844.25,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 63789.5,
+    "exit_price": 64301.6,
+    "pnl": -5.1215288,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 512.1,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 64252.4,
+    "exit_price": 63220.1,
+    "pnl": 7.23862,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 1032.3,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 63305.4,
+    "exit_price": 63859.3,
+    "pnl": -5.4485176,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 553.9,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 62879.8,
+    "exit_price": 63271.5,
+    "pnl": -4.1428104,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 391.7,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 62806.2,
+    "exit_price": 62294.5,
+    "pnl": -4.4576049,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 511.7,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 62412.6,
+    "exit_price": 62975.9,
+    "pnl": -4.8208195,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 563.3,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 62967.6,
+    "exit_price": 61986.6,
+    "pnl": 5.9923206,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 981.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 61941.8,
+    "exit_price": 60912.2,
+    "pnl": 6.347222,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 1029.6,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60867.1,
+    "exit_price": 59872.6,
+    "pnl": 6.9900824,
+    "close_reason": "take_profit_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 994.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59828.8,
+    "exit_price": 60349.2,
+    "pnl": -5.124624,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 520.4,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59705.3,
+    "exit_price": 60184.0,
+    "pnl": -4.7887144,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 478.7,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60199.9125,
+    "exit_price": 60420.2,
+    "pnl": -2.7272609,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 220.29,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60844.5,
+    "exit_price": 60564.9,
+    "pnl": -3.2080752,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 279.6,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60513.0,
+    "exit_price": 61000.1,
+    "pnl": -4.8689048,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 487.1,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 61063.7,
+    "exit_price": 60573.7,
+    "pnl": -4.2814618,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 490.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60672.8,
+    "exit_price": 60523.1,
+    "pnl": 0.1995287,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 149.7,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 61638.9,
+    "exit_price": 62069.5,
+    "pnl": 2.1482412,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 430.6,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 62091.5,
+    "exit_price": 62164.7,
+    "pnl": -0.3573934,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 73.2,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 63113.5,
+    "exit_price": 63321.0,
+    "pnl": -2.3375415,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 207.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 63295.0,
+    "exit_price": 62841.5,
+    "pnl": -4.0574555,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 453.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 62982.5,
+    "exit_price": 63857.0,
+    "pnl": 5.2336235,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 874.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 63855.0,
+    "exit_price": 63335.0,
+    "pnl": -4.53033,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 520.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60378.5,
+    "exit_price": 59952.0,
+    "pnl": -3.8278135,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 426.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59954.0,
+    "exit_price": 59969.0,
+    "pnl": -0.944461,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 15.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60457.0,
+    "exit_price": 60439.0,
+    "pnl": -0.972272,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 18.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60431.5,
+    "exit_price": 60460.5,
+    "pnl": -1.049244,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 29.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60284.0,
+    "exit_price": 60764.0,
+    "pnl": -4.207336,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 480.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60539.5,
+    "exit_price": 60123.5,
+    "pnl": 2.067359,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 416.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59674.5,
+    "exit_price": 59155.0,
+    "pnl": -4.4683065,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 519.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59285.5,
+    "exit_price": 59765.5,
+    "pnl": -4.193357,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 480.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59700.0,
+    "exit_price": 59213.0,
+    "pnl": -4.241391,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 487.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59200.5,
+    "exit_price": 59690.5,
+    "pnl": 2.226654,
+    "close_reason": "reconcile_exchange_flat",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 490.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59807.0,
+    "exit_price": 59792.0,
+    "pnl": -0.807594,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 15.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59845.0,
+    "exit_price": 59852.0,
+    "pnl": -0.676182,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 7.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59875.0,
+    "exit_price": 59956.5,
+    "pnl": -0.229989,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 81.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59859.5,
+    "exit_price": 59850.5,
+    "pnl": -0.77226,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 9.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59811.0,
+    "exit_price": 59918.0,
+    "pnl": -0.076374,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 107.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59933.0,
+    "exit_price": 60232.5,
+    "pnl": 1.076007,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 299.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60324.08333333,
+    "exit_price": 60400.5,
+    "pnl": -0.2658475,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 76.42,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60351.5,
+    "exit_price": 60380.5,
+    "pnl": -0.550392,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 29.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60473.0,
+    "exit_price": 60453.0,
+    "pnl": -0.605556,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 20.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60428.5,
+    "exit_price": 60319.5,
+    "pnl": -0.070488,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 109.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60295.0,
+    "exit_price": 60284.5,
+    "pnl": -0.660477,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 10.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60246.0,
+    "exit_price": 60489.0,
+    "pnl": -2.18241,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 243.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60426.5,
+    "exit_price": 60428.0,
+    "pnl": -0.716127,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 1.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60317.0,
+    "exit_price": 60334.0,
+    "pnl": -0.825906,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 17.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60355.5,
+    "exit_price": 60360.5,
+    "pnl": -0.754296,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 5.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60377.0,
+    "exit_price": 60336.5,
+    "pnl": -0.481281,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 40.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60321.0,
+    "exit_price": 60312.5,
+    "pnl": -0.672801,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 8.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60319.0,
+    "exit_price": 60269.5,
+    "pnl": -0.426531,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 49.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60249.0,
+    "exit_price": 60223.0,
+    "pnl": -0.566832,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 26.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60168.0,
+    "exit_price": 60132.0,
+    "pnl": -0.5058,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 36.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60202.0,
+    "exit_price": 60186.5,
+    "pnl": -0.629331,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 15.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60093.5,
+    "exit_price": 60061.5,
+    "pnl": -0.52893,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 32.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 60023.0,
+    "exit_price": 59841.0,
+    "pnl": 0.372816,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 182.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59828.5,
+    "exit_price": 59854.0,
+    "pnl": -0.871095,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 25.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59756.0,
+    "exit_price": 59751.0,
+    "pnl": -0.687042,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 5.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59795.0,
+    "exit_price": 59761.5,
+    "pnl": -0.516339,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 33.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59802.5,
+    "exit_price": 59900.0,
+    "pnl": -1.303215,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 97.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59901.0,
+    "exit_price": 59940.0,
+    "pnl": -0.485046,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 39.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59903.0,
+    "exit_price": 59944.0,
+    "pnl": -0.473082,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 41.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59946.5,
+    "exit_price": 59873.5,
+    "pnl": -1.15692,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 73.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59921.5,
+    "exit_price": 59867.0,
+    "pnl": -1.045731,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 54.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59990.5,
+    "exit_price": 59989.91666667,
+    "pnl": -0.7233825,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 0.58,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59934.0,
+    "exit_price": 59750.0,
+    "pnl": -1.822104,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 184.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59740.91666667,
+    "exit_price": 59688.5,
+    "pnl": -0.4020765,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 52.42,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59641.0,
+    "exit_price": 59673.0,
+    "pnl": -0.907884,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 32.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59579.0,
+    "exit_price": 59588.0,
+    "pnl": -0.769002,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 9.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59533.0,
+    "exit_price": 59540.5,
+    "pnl": -0.669441,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 7.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59530.5,
+    "exit_price": 59456.0,
+    "pnl": -1.160919,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 74.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59495.5,
+    "exit_price": 59463.0,
+    "pnl": -0.518751,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 32.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59030.91666667,
+    "exit_price": 59051.5,
+    "pnl": -0.8319945,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 20.58,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59004.5,
+    "exit_price": 58900.0,
+    "pnl": -0.080427,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 104.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58799.0,
+    "exit_price": 58816.5,
+    "pnl": -0.810693,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 17.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58832.91666667,
+    "exit_price": 58609.5,
+    "pnl": 0.6358455,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 223.42,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58515.0,
+    "exit_price": 58460.0,
+    "pnl": -0.37185,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 55.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58476.5,
+    "exit_price": 58953.0,
+    "pnl": -3.563577,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 476.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58560.0,
+    "exit_price": 58497.5,
+    "pnl": -0.327345,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 62.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58492.25,
+    "exit_price": 58504.5,
+    "pnl": -0.7754805,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 12.25,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58552.0,
+    "exit_price": 58427.0,
+    "pnl": 0.048126,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 125.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58452.0,
+    "exit_price": 58371.5,
+    "pnl": -0.217941,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 80.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58365.41666667,
+    "exit_price": 58326.5,
+    "pnl": -0.4666515,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 38.92,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58318.0,
+    "exit_price": 58369.0,
+    "pnl": -1.006122,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 51.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 58658.58333333,
+    "exit_price": 58653.5,
+    "pnl": -0.7343725,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 5.08,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 58526.5,
+    "exit_price": 58505.5,
+    "pnl": -0.828192,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 21.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58450.5,
+    "exit_price": 58332.5,
+    "pnl": 0.007302,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 118.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58312.5,
+    "exit_price": 58372.66666667,
+    "pnl": -1.061111,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 60.17,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58451.5,
+    "exit_price": 58425.5,
+    "pnl": -0.545262,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 26.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58404.5,
+    "exit_price": 58339.5,
+    "pnl": -0.310464,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 65.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58279.0,
+    "exit_price": 58137.5,
+    "pnl": 0.150501,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 141.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58090.0,
+    "exit_price": 58229.5,
+    "pnl": -1.534917,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 139.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58224.83333333,
+    "exit_price": 58242.0,
+    "pnl": -0.801801,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 17.17,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58204.5,
+    "exit_price": 58205.5,
+    "pnl": -0.70446,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 1.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58263.5,
+    "exit_price": 58831.5,
+    "pnl": -4.11057,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 568.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58780.5,
+    "exit_price": 58800.0,
+    "pnl": -0.6854025,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 19.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 58827.5,
+    "exit_price": 58733.0,
+    "pnl": -1.0603025,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 94.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 58702.0,
+    "exit_price": 58684.8,
+    "pnl": -0.672934,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 17.2,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 58777.0,
+    "exit_price": 59042.0,
+    "pnl": 0.735905,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 265.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 58992.0,
+    "exit_price": 59070.5,
+    "pnl": -0.1978125,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 78.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59061.0,
+    "exit_price": 58998.3,
+    "pnl": -0.9037965,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 62.7,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59006.0,
+    "exit_price": 59027.5,
+    "pnl": -0.4826675,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 21.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 58978.5,
+    "exit_price": 58887.5,
+    "pnl": -1.04433,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 91.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58887.4,
+    "exit_price": 58870.0,
+    "pnl": -0.501787,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 17.4,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 58901.0,
+    "exit_price": 58904.0,
+    "pnl": -0.604025,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 3.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59187.0,
+    "exit_price": 59086.0,
+    "pnl": -0.086365,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 101.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59127.0,
+    "exit_price": 59134.5,
+    "pnl": -0.5538075,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 7.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59199.0,
+    "exit_price": 59271.0,
+    "pnl": -0.23235,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 72.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 59244.5,
+    "exit_price": 59256.5,
+    "pnl": -0.532505,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 12.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60349.5,
+    "exit_price": 60798.5,
+    "pnl": 1.63926,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 449.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60795.5,
+    "exit_price": 60964.0,
+    "pnl": 0.2337025,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 168.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 61034.5,
+    "exit_price": 60643.0,
+    "pnl": -2.5658875,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 391.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60604.0,
+    "exit_price": 60108.5,
+    "pnl": -3.0810625,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 495.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59973.5,
+    "exit_price": 59932.5,
+    "pnl": -0.39453,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 41.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59944.0,
+    "exit_price": 59842.0,
+    "pnl": -0.08893,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 102.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59789.5,
+    "exit_price": 59704.5,
+    "pnl": -0.17247,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 85.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "short",
+    "entry_price": 59751.0,
+    "exit_price": 60266.5,
+    "pnl": -3.1775875,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 515.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60163.5,
+    "exit_price": 60050.0,
+    "pnl": -1.1685675,
+    "close_reason": "lifecycle_exit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 113.5,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60045.0,
+    "exit_price": 60156.5,
+    "pnl": -0.0435075,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 111.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60182.0,
+    "exit_price": 60152.0,
+    "pnl": -0.75167,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 30.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60265.0,
+    "exit_price": 60359.5,
+    "pnl": -0.1306225,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 94.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60360.5,
+    "exit_price": 60379.5,
+    "pnl": -0.5087,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 19.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 60433.5,
+    "exit_price": 60450.5,
+    "pnl": -0.51942,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 17.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 62565.7,
+    "exit_price": 62578.5,
+    "pnl": -0.561721,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 12.8,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 62849.5,
+    "exit_price": 62849.5,
+    "pnl": -0.628495,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 0.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 63212.5,
+    "exit_price": 63235.5,
+    "pnl": -0.51724,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 23.0,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  },
+  {
+    "symbol": "BTCUSD",
+    "side": "long",
+    "entry_price": 63238.5,
+    "exit_price": 63295.0,
+    "pnl": -0.3501675,
+    "close_reason": "stop_loss_hit",
+    "excursions": {
+      "bars_held": null,
+      "mfe_usd": 56.5,
+      "mae_usd": 0.0,
+      "mode": "price_delta_only",
+      "tp_would_hit": null,
+      "sl_would_hit": null
+    }
+  }
+]

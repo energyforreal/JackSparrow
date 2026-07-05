@@ -41,23 +41,107 @@
       "end_date": null,
       "env_overrides": {
         "TRADE_LIFECYCLE_ENABLED": "true",
-        "TRADE_LIFECYCLE_LOG_ONLY": "true"
+        "TRADE_LIFECYCLE_LOG_ONLY": "true",
+        "TRADE_DECISION_EVENTS_ENABLED": "true",
+        "TRADE_MFE_MAE_AT_CLOSE_ENABLED": "true",
+        "WALLET_LEDGER_SYNC_ENABLED": "true"
       },
       "expected_metrics": {
         "overall_agreement_min": 0.8,
         "exit_agreement_min": 0.75,
         "opportunity_precision_min": 0.65,
-        "min_trades": 30
+        "min_trades": 50,
+        "target_trades": 100,
+        "min_regime_buckets": 2,
+        "min_closes_per_regime": 15
       },
       "rollback_conditions": {},
       "significance": {
-        "min_trades": 30,
+        "min_trades": 50,
         "confidence_level": 0.95,
         "method": "agreement_rate"
       },
       "approval_status": "pending",
       "approved_by": null,
-      "notes": "Phase 2 — observation mode before live TLE"
+      "notes": "Phase 2 — log-only TLE; gate p2_tle_observe before Phase 3a"
+    },
+    {
+      "experiment_id": "entry_tune_v1",
+      "hypothesis": "Stricter entry economics improve expectancy without collapsing frequency",
+      "config_hash": null,
+      "start_date": null,
+      "end_date": null,
+      "env_overrides": {
+        "JACKSPARROW_V43_MIN_EDGE_COST_RATIO": "0.25",
+        "ENTRY_QUALITY_MIN_SCORE": "58",
+        "ENTRY_ECONOMIC_HARD_VETO_ENABLED": "false"
+      },
+      "expected_metrics": {
+        "expectancy_min_usd": 0,
+        "profit_factor_min": 1.0,
+        "min_trades": 30
+      },
+      "rollback_conditions": {
+        "expectancy_below": -0.5
+      },
+      "significance": {
+        "min_trades": 30,
+        "method": "shadow_replay_before_deploy"
+      },
+      "approval_status": "pending",
+      "approved_by": null,
+      "notes": "Phase 3a — tune one knob at a time; exits frozen"
+    },
+    {
+      "experiment_id": "exit_tune_v1",
+      "hypothesis": "Trailing activation threshold reduces fee-dominated exits",
+      "config_hash": null,
+      "start_date": null,
+      "end_date": null,
+      "env_overrides": {
+        "TRAILING_STOP_ACTIVATION_PROFIT_PCT": "0.004",
+        "TRAILING_STOP_PERCENTAGE": "0.015"
+      },
+      "expected_metrics": {
+        "fee_dominated_rate_max": 0.35,
+        "expectancy_min_usd": 0,
+        "min_trades": 30
+      },
+      "rollback_conditions": {},
+      "significance": {
+        "min_trades": 30,
+        "method": "shadow_replay_before_deploy"
+      },
+      "approval_status": "pending",
+      "approved_by": null,
+      "notes": "Phase 3b — entries frozen at 3a values; TLE remains log-only"
+    },
+    {
+      "experiment_id": "tle_live_v1",
+      "hypothesis": "Live TLE with layered exits improves expectancy vs log-only baseline",
+      "config_hash": null,
+      "start_date": null,
+      "end_date": null,
+      "env_overrides": {
+        "TRADE_LIFECYCLE_ENABLED": "true",
+        "TRADE_LIFECYCLE_LOG_ONLY": "false",
+        "TRAILING_STOP_ACTIVATION_PROFIT_PCT": "0.004"
+      },
+      "expected_metrics": {
+        "min_trades": 50,
+        "profit_factor_min": 1.0,
+        "expectancy_min_usd": 0
+      },
+      "rollback_conditions": {
+        "profit_factor_below": 0.85
+      },
+      "significance": {
+        "min_trades": 50,
+        "method": "cohort_compare"
+      },
+      "approval_status": "pending",
+      "approved_by": null,
+      "notes": "Phase 5 — requires gates 2b_to_3, 3_to_4, 4_to_5; trailing SL remains layer 5"
     }
   ],
   "portfolio_layer": {
@@ -76,5 +160,13 @@
       "sector_allocation",
       "capital_optimization"
     ]
+  },
+  "phase7_expectation_model": {
+    "status": "deferred",
+    "notes": "Elevate Gate 5 / ENTRY_ECONOMIC_HARD_VETO after Phases 3–5 validate economics as binding constraint.",
+    "env_when_ready": {
+      "ENTRY_ECONOMIC_HARD_VETO_ENABLED": "true",
+      "ENTRY_ECONOMIC_MIN_EDGE_COST_MULTIPLIER": "1.0"
+    }
   }
 }

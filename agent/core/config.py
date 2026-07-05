@@ -2472,6 +2472,20 @@ class Settings(BaseSettings):
         env="ENTRY_QUALITY_LEARNING_SHADOW_MODE",
         description="Log dimension calibration adjustments without applying (PR7).",
     )
+    entry_economic_hard_veto_enabled: bool = Field(
+        default=False,
+        env="ENTRY_ECONOMIC_HARD_VETO_ENABLED",
+        description=(
+            "When True, reject entries when |expected_return| < "
+            "ENTRY_ECONOMIC_MIN_EDGE_COST_MULTIPLIER × round_trip_cost_pct()."
+        ),
+    )
+    entry_economic_min_edge_cost_multiplier: float = Field(
+        default=1.0,
+        env="ENTRY_ECONOMIC_MIN_EDGE_COST_MULTIPLIER",
+        ge=0.0,
+        description="Minimum expected move as multiple of round-trip cost for hard veto.",
+    )
     unified_pipeline_enabled: bool = Field(
         default=False,
         env="UNIFIED_PIPELINE_ENABLED",
