@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -64,6 +65,46 @@ def _extract_order_id(meta: Any) -> Optional[int]:
         return None
 
 
+def _synthetic_exchange_transaction_id(row: Dict[str, Any]) -> int:
+    """Stable bigint id when Delta omits ``id`` (common on India testnet).
+
+    Prefer ``meta_data.fill_uuid`` so commission rows dedupe with fills API ids.
+    """
+    meta = row.get("meta_data")
+    if meta is None:
+        meta = row.get("metadata")
+    fill_uuid = None
+    if isinstance(meta, dict):
+        fill_uuid = meta.get("fill_uuid") or meta.get("fill_id")
+    if fill_uuid:
+        digest = hashlib.sha256(str(fill_uuid).encode("utf-8")).hexdigest()
+        return int(digest[:15], 16)
+
+    key = "|".join(
+        str(part)
+        for part in (
+            row.get("transaction_type"),
+            row.get("created_at"),
+            row.get("amount"),
+            row.get("product_id"),
+            row.get("asset_symbol"),
+        )
+    )
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return int(digest[:15], 16)
+
+
+def _resolve_exchange_transaction_id(row: Dict[str, Any]) -> tuple[int, bool]:
+    """Return (exchange_transaction_id, synthetic)."""
+    tx_id = row.get("id")
+    if tx_id is not None:
+        try:
+            return int(tx_id), False
+        except (TypeError, ValueError):
+            pass
+    return _synthetic_exchange_transaction_id(row), True
+
+
 class DeltaWalletTransactionNormalizer:
     """Convert Delta GET /v2/wallet/transactions rows to canonical records."""
 
@@ -75,13 +116,7 @@ class DeltaWalletTransactionNormalizer:
     ) -> Optional[WalletTransactionRecord]:
         if not isinstance(row, dict):
             return None
-        tx_id = row.get("id")
-        if tx_id is None:
-            return None
-        try:
-            exchange_transaction_id = int(tx_id)
-        except (TypeError, ValueError):
-            return None
+        exchange_transaction_id, synthetic_id = _resolve_exchange_transaction_id(row)
 
         transaction_type = str(row.get("transaction_type") or "").strip().lower()
         if not transaction_type:
@@ -108,6 +143,9 @@ class DeltaWalletTransactionNormalizer:
         if meta is None:
             meta = row.get("metadata")
         order_id = _extract_order_id(meta)
+        raw_payload = dict(row)
+        if synthetic_id:
+            raw_payload["_synthetic_exchange_transaction_id"] = True
 
         return WalletTransactionRecord(
             exchange=exchange,
@@ -119,7 +157,7 @@ class DeltaWalletTransactionNormalizer:
             amount=amount,
             balance_after=_parse_decimal(row.get("balance")),
             occurred_at=occurred_at,
-            raw_payload=dict(row),
+            raw_payload=raw_payload,
         )
 
     @classmethod
