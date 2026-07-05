@@ -103,6 +103,10 @@ When `DECISION_ENGINE_MODE=rule_based`, the hot path skips ML inference and runs
 
 Shadow mode (`DECISION_ENGINE_MODE=ml_legacy` with shadow flags) logs the same pipeline alongside the legacy IC path for comparison. See [Rule-Based Decision Engine](rule-based-decision-engine.md).
 
+**Cognitive layer (DecisionContext v3, shadow by default)**
+
+On every closed bar (when `COGNITION_SHADOW_ENABLED=true`), the orchestrator attaches **`decision_context_v3`** to `market_context`: immutable slices for **expectation** (forward scenarios), **memory** (decayed behavioral history), **scenario** (market phase), **risk intelligence**, and **strategy selector/scorer** output. Live trade signals are unchanged until per-module `COGNITION_*_ENABLED` flags are turned on after replay validation. See [Cognitive Architecture](../reference/cognitive-architecture.md).
+
 **Deprecated settings (IC-only runtime):** `SINGLE_MODEL_MODE_ENABLED`, `CONSOLIDATED_MODEL_METADATA_GLOB`, `SINGLE_MODEL_STRICT_STARTUP`, and `JACKSPARROW_V43_INFERENCE_STACK` are ignored when `IC_MODE=true` (default). Model discovery loads only `metadata_ic.json` under `MODEL_DIR`.
 
 **Strategy-first pipeline (legacy `ml_legacy` default)**

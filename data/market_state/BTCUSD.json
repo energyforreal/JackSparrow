@@ -1,0 +1,121 @@
+{
+  "symbol": "BTCUSD",
+  "bar_index": 42,
+  "trend_strength_delta": 0.0,
+  "failed_breakout_count": 0,
+  "liquidity_drift": 0.0,
+  "regime_history": [],
+  "last_evidence_summary": {},
+  "last_forecast": {
+    "horizons": [
+      {
+        "horizon_minutes": 10,
+        "trend_persistence": 0.75,
+        "breakout_likelihood": 0.5249999999999999,
+        "reversal_risk": 0.25,
+        "volatility_expansion": 0.4,
+        "liquidity_sweep_risk": 0.0
+      },
+      {
+        "horizon_minutes": 30,
+        "trend_persistence": 0.725,
+        "breakout_likelihood": 0.5225,
+        "reversal_risk": 0.275,
+        "volatility_expansion": 0.41000000000000003,
+        "liquidity_sweep_risk": 0.0
+      },
+      {
+        "horizon_minutes": 60,
+        "trend_persistence": 0.72,
+        "breakout_likelihood": 0.5219999999999999,
+        "reversal_risk": 0.28,
+        "volatility_expansion": 0.41200000000000003,
+        "liquidity_sweep_risk": 0.0
+      },
+      {
+        "horizon_minutes": 120,
+        "trend_persistence": 0.72,
+        "breakout_likelihood": 0.5219999999999999,
+        "reversal_risk": 0.28,
+        "volatility_expansion": 0.41200000000000003,
+        "liquidity_sweep_risk": 0.0
+      }
+    ],
+    "dominant_expectation": "trend_continuation",
+    "confidence": 0.725,
+    "delta_from_prior": 0.0,
+    "revision_drivers": [],
+    "reason_codes": [
+      "expectation_dominant=trend_continuation",
+      "expectation_confidence=0.725"
+    ]
+  },
+  "updated_at": "2026-07-05T13:18:45.276086+00:00",
+  "last_expectation": {
+    "horizons": [
+      {
+        "horizon_minutes": 10,
+        "trend_persistence": 0.75,
+        "breakout_likelihood": 0.5249999999999999,
+        "reversal_risk": 0.25,
+        "volatility_expansion": 0.4,
+        "liquidity_sweep_risk": 0.0
+      },
+      {
+        "horizon_minutes": 30,
+        "trend_persistence": 0.725,
+        "breakout_likelihood": 0.5225,
+        "reversal_risk": 0.275,
+        "volatility_expansion": 0.41000000000000003,
+        "liquidity_sweep_risk": 0.0
+      },
+      {
+        "horizon_minutes": 60,
+        "trend_persistence": 0.72,
+        "breakout_likelihood": 0.5219999999999999,
+        "reversal_risk": 0.28,
+        "volatility_expansion": 0.41200000000000003,
+        "liquidity_sweep_risk": 0.0
+      },
+      {
+        "horizon_minutes": 120,
+        "trend_persistence": 0.72,
+        "breakout_likelihood": 0.5219999999999999,
+        "reversal_risk": 0.28,
+        "volatility_expansion": 0.41200000000000003,
+        "liquidity_sweep_risk": 0.0
+      }
+    ],
+    "dominant_expectation": "trend_continuation",
+    "confidence": 0.725,
+    "delta_from_prior": 0.0,
+    "revision_drivers": [],
+    "reason_codes": [
+      "expectation_dominant=trend_continuation",
+      "expectation_confidence=0.725"
+    ]
+  },
+  "memory": {
+    "symbol": "BTCUSD",
+    "bar_index": 42,
+    "failed_breakout_count": 0,
+    "failed_breakout_weighted": 0,
+    "liquidity_sweep_weighted": 0,
+    "rejection_weighted": 0,
+    "range_duration_bars": 0,
+    "trend_duration_bars": 0,
+    "hh_hl_sequence": "neutral",
+    "regime_history": [
+      "trending",
+      "trending"
+    ],
+    "last_false_signal_bars_ago": null,
+    "behavioral_events": [],
+    "behavioral_scores": {
+      "failed_breakout": 0,
+      "liquidity_sweep": 0,
+      "rejection": 0,
+      "false_signal": 0
+    }
+  }
+}

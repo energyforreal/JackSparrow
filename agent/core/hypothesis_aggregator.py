@@ -99,12 +99,16 @@ def evaluate_all_hypotheses(
     regime: str,
     *,
     short_enabled: bool,
+    eligible_profiles: Optional[set] = None,
 ) -> List[HypothesisCandidate]:
     """Evaluate every enabled rule family (no regime allow-list)."""
     from agent.core.agent_thesis_engine import ThesisVerdict
 
     raw_verdicts: List[ThesisVerdict] = engine.collect_all_rule_verdicts(
-        features, regime, short_enabled=short_enabled
+        features,
+        regime,
+        short_enabled=short_enabled,
+        eligible_profiles=eligible_profiles,
     )
     return [_verdict_to_candidate(v, regime=regime) for v in raw_verdicts]
 
@@ -113,15 +117,29 @@ def aggregate_hypotheses(
     candidates: List[HypothesisCandidate],
     environment: Dict[str, float],
     regime: str,
+    *,
+    strategy_scores: Optional[Dict[str, Any]] = None,
 ) -> MarketHypothesisSnapshot:
     """Weighted net direction from competing hypotheses."""
+    from agent.intelligence.cognition.flags import cognition_scorer_enabled
+
     min_margin = float(getattr(settings, "hypothesis_min_margin", 0.03) or 0.03)
     reasons: List[str] = []
+
+    score_map: Dict[str, float] = {}
+    if cognition_scorer_enabled() and isinstance(strategy_scores, dict):
+        for entry in strategy_scores.get("entries") or []:
+            if isinstance(entry, dict):
+                pid = str(entry.get("profile_id") or "")
+                score_map[pid] = float(entry.get("adjusted_confidence") or 0.0)
 
     long_pressure = 0.0
     short_pressure = 0.0
     for c in candidates:
         wconf = float(c.weighted_confidence or (c.confidence * c.regime_weight))
+        if score_map and c.thesis_type in score_map:
+            wconf *= max(0.1, score_map[c.thesis_type])
+            reasons.append(f"hypothesis_scorer_weight={c.thesis_type}")
         c.weighted_confidence = wconf
         if c.direction == "LONG":
             long_pressure += wconf

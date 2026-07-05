@@ -92,6 +92,10 @@ def _enrich_decision_context_v2(
     if isinstance(hyp, dict):
         decision_context["hypothesis_snapshot"] = dict(hyp)
 
+    dc_v3 = mc.get("decision_context_v3")
+    if isinstance(dc_v3, dict) and dc_v3:
+        decision_context["decision_context_v3"] = dict(dc_v3)
+
     pv = _policy_verdict_subset(risk_payload.get("policy_verdict"))
     if pv:
         decision_context["policy_verdict"] = pv

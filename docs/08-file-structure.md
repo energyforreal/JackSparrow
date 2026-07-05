@@ -101,6 +101,15 @@ JackSparrow/
 │   │   ├── signal_audit_md.py          # Append-only `live_audit.md` (ai_signal, gates, paper echo)
 │   │   ├── config.py                   # Agent configuration includes perpetual futures parameters
 │   ├── intelligence/                   # Rule-based decision pipeline (see rule-based-decision-engine.md)
+│   │   ├── cognition/                  # DecisionContext v3 — expectation, memory, scenario, selector/scorer
+│   │   │   ├── decision_context.py     # Immutable DecisionContext + builder
+│   │   │   ├── expectation_engine.py   # Forward scenario beliefs (per horizon)
+│   │   │   ├── memory_engine.py        # Behavioral memory with time decay
+│   │   │   ├── scenario_engine.py      # Market phase classification
+│   │   │   ├── risk_intelligence.py    # Trade environment score
+│   │   │   ├── strategy_selector.py    # Profile eligibility
+│   │   │   ├── strategy_scorer.py      # Confidence adjustments
+│   │   │   └── reasoning_cycle.py      # Acyclic orchestration
 │   │   ├── market_types.py             # MarketStateSnapshot, StructuralGateResult, FSMDecision
 │   │   ├── market_understanding_engine.py
 │   │   ├── market_narrative_engine.py

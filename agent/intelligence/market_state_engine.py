@@ -30,10 +30,12 @@ class MarketStateTrajectory:
     regime_history: List[str] = field(default_factory=list)
     last_evidence_summary: Dict[str, float] = field(default_factory=dict)
     last_forecast: Optional[Dict[str, Any]] = None
+    last_expectation: Optional[Dict[str, Any]] = None
+    memory: Optional[Dict[str, Any]] = None
     updated_at: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out = {
             "symbol": self.symbol,
             "bar_index": self.bar_index,
             "trend_strength_delta": self.trend_strength_delta,
@@ -44,6 +46,11 @@ class MarketStateTrajectory:
             "last_forecast": self.last_forecast,
             "updated_at": self.updated_at,
         }
+        if self.last_expectation is not None:
+            out["last_expectation"] = self.last_expectation
+        if self.memory is not None:
+            out["memory"] = self.memory
+        return out
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "MarketStateTrajectory":
@@ -56,6 +63,8 @@ class MarketStateTrajectory:
             regime_history=list(raw.get("regime_history") or []),
             last_evidence_summary=dict(raw.get("last_evidence_summary") or {}),
             last_forecast=raw.get("last_forecast"),
+            last_expectation=raw.get("last_expectation"),
+            memory=raw.get("memory") if isinstance(raw.get("memory"), dict) else None,
             updated_at=str(raw.get("updated_at") or ""),
         )
 

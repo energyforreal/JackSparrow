@@ -983,6 +983,14 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `STRUCTURAL_GATE_MAX_FAILED_BREAKOUTS` | Narrative veto after N failed breakouts | No | `2` |
 | `STRUCTURAL_GATE_BREAKOUT_REQUIRE_RETEST` | Require retest for breakout setups | No | `true` |
 | `ARCHETYPE_MEMORY_SHADOW` | Archetype similarity hints only (no sizing) | No | `true` |
+| `COGNITION_SHADOW_ENABLED` | Run cognition layer; attach `decision_context_v3` (log only) | No | `true` |
+| `COGNITION_EXPECTATION_ENABLED` | Authoritative expectation engine | No | `false` |
+| `COGNITION_MEMORY_ENABLED` | Authoritative market memory engine | No | `false` |
+| `COGNITION_SCENARIO_ENABLED` | Authoritative scenario phase engine | No | `false` |
+| `COGNITION_RISK_ENABLED` | Authoritative risk intelligence slice | No | `false` |
+| `COGNITION_SELECTOR_ENABLED` | Filter thesis families by strategy selector | No | `false` |
+| `COGNITION_SCORER_ENABLED` | Scorer weights in hypothesis aggregate | No | `false` |
+| `COGNITION_MEMORY_DECAY_HALF_LIFE_BARS` | Memory decay half-life (5m bars) | No | `10` |
 | `TRADE_LIFECYCLE_ENABLED` | Enable Trade Lifecycle Engine post-entry | No | `false` |
 | `TRADE_LIFECYCLE_LOG_ONLY` | Log TLE verdicts without executing (Phase 2 observation) | No | `false` |
 | `TRADE_LIFECYCLE_EV_EXIT_ENABLED` | EV arbiter in exit engine (vs legacy health-only exit) | No | `true` |

@@ -3044,6 +3044,69 @@ class Settings(BaseSettings):
         env="MARKET_UNDERSTANDING_SHADOW_ENABLED",
         description="Run Market Understanding Engine each cycle (shadow or rule_based)",
     )
+    cognition_shadow_enabled: bool = Field(
+        default=True,
+        env="COGNITION_SHADOW_ENABLED",
+        description="Run cognition layer in shadow (log DecisionContext without changing signals)",
+    )
+    cognition_expectation_enabled: bool = Field(
+        default=False,
+        env="COGNITION_EXPECTATION_ENABLED",
+        description="Authoritative expectation engine (default shadow-only)",
+    )
+    cognition_memory_enabled: bool = Field(
+        default=False,
+        env="COGNITION_MEMORY_ENABLED",
+        description="Authoritative market memory engine",
+    )
+    cognition_scenario_enabled: bool = Field(
+        default=False,
+        env="COGNITION_SCENARIO_ENABLED",
+        description="Authoritative scenario phase engine",
+    )
+    cognition_risk_enabled: bool = Field(
+        default=False,
+        env="COGNITION_RISK_ENABLED",
+        description="Authoritative risk intelligence slice",
+    )
+    cognition_selector_enabled: bool = Field(
+        default=False,
+        env="COGNITION_SELECTOR_ENABLED",
+        description="Filter thesis families by strategy selector eligibility",
+    )
+    cognition_scorer_enabled: bool = Field(
+        default=False,
+        env="COGNITION_SCORER_ENABLED",
+        description="Apply strategy scorer confidence adjustments to hypotheses",
+    )
+    cognition_memory_decay_half_life_bars: int = Field(
+        default=10,
+        env="COGNITION_MEMORY_DECAY_HALF_LIFE_BARS",
+        ge=1,
+        le=200,
+        description="Half-life in 5m bars for behavioral memory decay",
+    )
+    cognition_memory_max_events: int = Field(
+        default=50,
+        env="COGNITION_MEMORY_MAX_EVENTS",
+        ge=5,
+        le=500,
+        description="Max behavioral events retained in market memory",
+    )
+    cognition_scorer_agreement_bonus: float = Field(
+        default=0.12,
+        env="COGNITION_SCORER_AGREEMENT_BONUS",
+        ge=0.0,
+        le=0.5,
+        description="Confidence bonus when expectation agrees with profile",
+    )
+    cognition_scorer_disagreement_penalty: float = Field(
+        default=0.18,
+        env="COGNITION_SCORER_DISAGREEMENT_PENALTY",
+        ge=0.0,
+        le=0.5,
+        description="Confidence penalty when expectation disagrees with profile",
+    )
     market_narrative_shadow_enabled: bool = Field(
         default=True,
         env="MARKET_NARRATIVE_SHADOW_ENABLED",

@@ -668,6 +668,14 @@ class MCPOrchestrator:
         )
         market_context["archetype_similarity"] = sim
 
+        new_ev_dicts = [e.to_dict() for e in rb.narrative_events]
+        if new_ev_dicts:
+            market_context["narrative_new_events"] = new_ev_dicts
+
+        from agent.intelligence.cognition.decision_context_builder import attach_decision_context_v3
+
+        attach_decision_context_v3(market_context)
+
         live_entry = policy_verdict.signal in ENTRY_SIGNALS
         log_shadow_comparison(
             symbol=symbol,
@@ -1545,6 +1553,7 @@ class MCPOrchestrator:
                 evidence_bundle,
                 direction=strategy_candidate.signal,
                 market_forecast=market_forecast.to_dict(),
+                decision_context=market_context_for_reasoning.get("decision_context_v3"),
             )
             market_context_for_reasoning["evidence_graph"] = evidence_graph.to_dict()
 
@@ -1678,6 +1687,12 @@ class MCPOrchestrator:
             pos_hint=pos_hint,
             df_feat=mctx.get("df_feat_pre"),
         )
+        if "decision_context_v3" not in market_context_for_reasoning:
+            from agent.intelligence.cognition.decision_context_builder import (
+                attach_decision_context_v3,
+            )
+
+            attach_decision_context_v3(market_context_for_reasoning)
         from agent.core.agent_policy_engine import apply_adjudication_authority
         from agent.core.entry_quality import apply_entry_quality_policy
 

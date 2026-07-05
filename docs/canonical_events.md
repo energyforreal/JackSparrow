@@ -68,6 +68,7 @@ Populated when the rule-based pipeline runs (shadow or `DECISION_ENGINE_MODE=rul
 | `entry_signal` | FSM entry intent (`LONG` / `SHORT` / none). |
 | `thesis_health` | Position thesis health while managing. |
 | `position_lifecycle` | UI lifecycle (`watching`, `entry_ready`, `managing`, `exit_ready`). |
+| `decision_context_v3` | Immutable cognition envelope (expectation, memory, scenario, selector/scorer) when `COGNITION_SHADOW_ENABLED=true`. |
 
 See [Rule-Based Decision Engine](rule-based-decision-engine.md).
 

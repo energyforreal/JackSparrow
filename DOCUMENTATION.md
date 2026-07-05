@@ -34,6 +34,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | — | [Trade lifecycle engine](reference/trade-lifecycle-engine.md) | Position intelligence, exit engine, promotion replay |
 | — | [Trading persistence model](reference/trading-persistence-model.md) | Testnet three-layer model, snapshot schema v1, analytics tables, Docker notes |
 | — | [Trade Intelligence Snapshot v2](reference/trade-intelligence-snapshot-v2.md) | Decision events, causality graph, MFE/MAE, reject labels, shadow rollout |
+| — | [Cognitive architecture](reference/cognitive-architecture.md) | DecisionContext v3, expectation/memory/scenario, strategy selector + scorer, shadow rollout |
 
 ---
 
@@ -65,6 +66,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | No trades / stale UI signal | [Debugging – No trades](docs/13-debugging.md#no-trades-executed), [Logging – `trading_entry_rejected`](docs/12-logging.md#6-trading-handler-events-agenteventshandlerstrading_handlerpy) |
 | Self-awareness flags & telemetry | [Logic & reasoning – Self-awareness](docs/05-logic-reasoning.md#deterministic-self-awareness), [Canonical events](docs/canonical_events.md), `.env.example` |
 | Rule-based FSM rollout / shadow logs | [Rule-based decision engine](docs/rule-based-decision-engine.md), `tools/analyze_agent_logs.py`, [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables) |
+| Cognitive layer (shadow `decision_context_v3`) | [Cognitive architecture](reference/cognitive-architecture.md), [Rule-based decision engine – Cognition](docs/rule-based-decision-engine.md#cognitive-layer-decisioncontext-v3), `pytest tests/unit/cognition/`, `run_scenario_tests.py --cognition` |
 | Entry quality / July replay | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md), `tests/integration/test_july2_telemetry_replay.py`, `tools/commands/monte_carlo_replay.py` |
 | TLE promotion / EV exit replay | [Trade lifecycle engine](reference/trade-lifecycle-engine.md), `tools/commands/run_tle_investigation.py` |
 | Trade snapshot analytics / optimization | [Trading persistence model](reference/trading-persistence-model.md), [Snapshot v2](reference/trade-intelligence-snapshot-v2.md), `tools/commands/trade_analytics.py`, [Backend – Analytics API](docs/06-backend.md#analytics-rest-api) |

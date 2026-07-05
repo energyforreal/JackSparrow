@@ -69,6 +69,7 @@ def build_evidence_graph(
     *,
     direction: Optional[str] = None,
     market_forecast: Optional[Dict[str, Any]] = None,
+    decision_context: Optional[Dict[str, Any]] = None,
 ) -> EvidenceGraph:
     """Build support/contradict graph from an EvidenceBundle."""
     nodes: List[EvidenceNode] = []
@@ -154,6 +155,47 @@ def build_evidence_graph(
                 max(1.0 - liq, 1.0 - struct),
             )
         )
+
+    dc = decision_context if isinstance(decision_context, dict) else {}
+    scenario = dc.get("scenario") if isinstance(dc.get("scenario"), dict) else {}
+    expectation = dc.get("expectation") if isinstance(dc.get("expectation"), dict) else {}
+    if scenario.get("primary"):
+        sid = "scenario_primary"
+        nodes.append(
+            EvidenceNode(
+                node_id=sid,
+                dimension="scenario",
+                score=float(scenario.get("confidence") or 0.5),
+                label=str(scenario.get("primary")),
+                source="cognition",
+            )
+        )
+    if expectation.get("dominant_expectation"):
+        eid = "expectation_dominant"
+        nodes.append(
+            EvidenceNode(
+                node_id=eid,
+                dimension="expectation",
+                score=float(expectation.get("confidence") or 0.5),
+                label=str(expectation.get("dominant_expectation")),
+                source="cognition",
+            )
+        )
+        if scenario.get("primary"):
+            sp = str(scenario.get("primary"))
+            de = str(expectation.get("dominant_expectation"))
+            agree = (
+                (sp in ("markup", "expansion") and de == "trend_continuation")
+                or (sp == "compression" and de == "breakout")
+            )
+            edges.append(
+                EvidenceEdge(
+                    "scenario_primary",
+                    eid,
+                    "supports" if agree else "contradicts",
+                    0.6,
+                )
+            )
 
     summary = dict(bundle.scores)
     return EvidenceGraph(nodes=nodes, edges=edges, summary=summary)

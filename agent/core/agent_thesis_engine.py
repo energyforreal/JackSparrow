@@ -224,10 +224,24 @@ class AgentThesisEngine:
         pos_size = max(0.01, min(0.2, pos_size))
 
         if hypothesis_portfolio_mode():
+            eligible_raw = mc.get("eligible_strategy_profiles")
+            eligible_set: Optional[Set[str]] = None
+            if isinstance(eligible_raw, list) and eligible_raw:
+                eligible_set = {str(x) for x in eligible_raw}
             candidates = evaluate_all_hypotheses(
-                self, features, reg, short_enabled=short_enabled
+                self,
+                features,
+                reg,
+                short_enabled=short_enabled,
+                eligible_profiles=eligible_set,
             )
-            snapshot = aggregate_hypotheses(candidates, environment, reg)
+            strategy_scores = mc.get("strategy_scores")
+            snapshot = aggregate_hypotheses(
+                candidates,
+                environment,
+                reg,
+                strategy_scores=strategy_scores if isinstance(strategy_scores, dict) else None,
+            )
             _last_hypothesis_snapshot = snapshot.to_dict()
             verdict = thesis_verdict_from_snapshot(
                 snapshot, pos_size=pos_size, evidence_contributions=evidence
@@ -251,11 +265,24 @@ class AgentThesisEngine:
         regime: str,
         *,
         short_enabled: bool,
+        eligible_profiles: Optional[Set[str]] = None,
     ) -> List[ThesisVerdict]:
         """Evaluate all enabled rule families (portfolio mode — no regime gate)."""
-        candidates: List[ThesisVerdict] = []
+        from agent.intelligence.cognition.flags import cognition_selector_enabled
 
-        if bool(getattr(settings, "agent_thesis_breakout_enabled", True)):
+        candidates: List[ThesisVerdict] = []
+        filter_profiles = (
+            eligible_profiles
+            if cognition_selector_enabled() and eligible_profiles is not None
+            else None
+        )
+
+        def _allowed(thesis_type: str) -> bool:
+            if filter_profiles is None:
+                return True
+            return thesis_type in filter_profiles
+
+        if _allowed("breakout") and bool(getattr(settings, "agent_thesis_breakout_enabled", True)):
             br = self._eval_breakout_long(features, regime)
             if br is not None:
                 candidates.append(br)
@@ -264,7 +291,9 @@ class AgentThesisEngine:
                 if brs is not None:
                     candidates.append(brs)
 
-        if bool(getattr(settings, "agent_thesis_trend_enabled", True)):
+        if _allowed("trend_continuation") and bool(
+            getattr(settings, "agent_thesis_trend_enabled", True)
+        ):
             tr = self._eval_trend_continuation_long(features, regime)
             if tr is not None:
                 candidates.append(tr)
@@ -273,7 +302,9 @@ class AgentThesisEngine:
                 if trs is not None:
                     candidates.append(trs)
 
-        if bool(getattr(settings, "agent_thesis_mean_reversion_enabled", False)):
+        if _allowed("mean_reversion") and bool(
+            getattr(settings, "agent_thesis_mean_reversion_enabled", False)
+        ):
             mr = self._eval_mean_reversion_long(features)
             if mr is not None:
                 candidates.append(mr)
@@ -282,13 +313,15 @@ class AgentThesisEngine:
                 if mrs is not None:
                     candidates.append(mrs)
 
-        bc = self._eval_basis_crowding(features, short_enabled=short_enabled)
-        if bc is not None:
-            candidates.append(bc)
+        if _allowed("basis_crowding"):
+            bc = self._eval_basis_crowding(features, short_enabled=short_enabled)
+            if bc is not None:
+                candidates.append(bc)
 
-        fc = self._eval_funding_crowding(features, short_enabled=short_enabled)
-        if fc is not None:
-            candidates.append(fc)
+        if _allowed("funding_crowding"):
+            fc = self._eval_funding_crowding(features, short_enabled=short_enabled)
+            if fc is not None:
+                candidates.append(fc)
 
         return candidates
 

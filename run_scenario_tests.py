@@ -37,6 +37,10 @@ def _parse_args() -> argparse.Namespace:
                    help="Save JSON traces to tests/scenarios/traces/")
     p.add_argument("--strict", action="store_true",
                    help="Fail on behavioral expected=* checks (default: Tier 1 pipeline only)")
+    p.add_argument("--cognition", action="store_true",
+                   help="Include cognition layer traces in scenario output")
+    p.add_argument("--what-if", action="store_true",
+                   help="Run counterfactual strategy scoring (requires --cognition)")
     p.add_argument("--model", "-m", help="Path to metadata_v43.json (override default)")
     p.add_argument("--symbol", default="BTCUSD", help="Trading symbol (default: BTCUSD)")
     return p.parse_args()
@@ -75,7 +79,12 @@ async def _main() -> int:
 
     # build runner
     meta = Path(args.model) if args.model else None
-    runner = ScenarioRunner(metadata_path=meta, symbol=args.symbol)
+    runner = ScenarioRunner(
+        metadata_path=meta,
+        symbol=args.symbol,
+        include_cognition=bool(args.cognition),
+    )
+    runner.what_if = bool(args.what_if)
 
     print(f"\nRunning {len(scenarios)} scenario(s) -- symbol={args.symbol}")
     print("    Model: " + str(runner.metadata_path))

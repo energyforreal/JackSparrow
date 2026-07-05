@@ -90,12 +90,62 @@ Root [`.env.example`](../.env.example):
 | `STRUCTURAL_GATE_BREAKOUT_REQUIRE_RETEST` | `true` | Require retest for breakout setups |
 | `ARCHETYPE_MEMORY_SHADOW` | `true` | Log similarity hints only |
 
+### Cognitive layer (DecisionContext v3)
+
+Shadow mode is **on by default** (`COGNITION_SHADOW_ENABLED=true`). The orchestrator attaches `decision_context_v3` to `market_context` each cycle without changing live signals until authoritative flags are enabled.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `COGNITION_SHADOW_ENABLED` | `true` | Run full cognition cycle; log slices + `ReasoningArtifact`s |
+| `COGNITION_EXPECTATION_ENABLED` | `false` | Authoritative expectation engine |
+| `COGNITION_MEMORY_ENABLED` | `false` | Authoritative market memory |
+| `COGNITION_SCENARIO_ENABLED` | `false` | Authoritative scenario phase |
+| `COGNITION_RISK_ENABLED` | `false` | Authoritative risk intelligence slice |
+| `COGNITION_SELECTOR_ENABLED` | `false` | Filter thesis families by strategy selector |
+| `COGNITION_SCORER_ENABLED` | `false` | Apply scorer weights in hypothesis aggregate |
+| `COGNITION_MEMORY_DECAY_HALF_LIFE_BARS` | `10` | Behavioral memory decay half-life (5m bars) |
+
+Acyclic order: **Expectation → Memory → Scenario → Risk → Selector → Scorer → Hypothesis**. Full spec: [Cognitive Architecture](../reference/cognitive-architecture.md).
+
 ### Rollout order (recommended)
 
 1. Deploy with defaults (`ml_legacy`, shadow on) — compare logs
-2. `MARKET_FSM_ENFORCE=true` on testnet
-3. `DECISION_ENGINE_MODE=rule_based`
-4. `ARCHETYPE_MEMORY_SHADOW=false` (optional sizing hints)
+2. Validate cognition shadow: `pytest tests/unit/cognition/` or `python run_scenario_tests.py --cognition`
+3. `MARKET_FSM_ENFORCE=true` on testnet
+4. `DECISION_ENGINE_MODE=rule_based`
+5. Enable `COGNITION_SELECTOR_ENABLED` / `COGNITION_SCORER_ENABLED` after replay sign-off
+6. `ARCHETYPE_MEMORY_SHADOW=false` (optional sizing hints)
+
+---
+
+## Cognitive layer (DecisionContext v3)
+
+Parallel to the structural pipeline, the **cognition package** (`agent/intelligence/cognition/`) assembles an immutable **`DecisionContext`** each bar:
+
+```text
+Understanding → Expectation → Memory → Scenario → Risk Intelligence
+        → Strategy Selector → Strategy Scorer → (Hypothesis / Policy downstream)
+```
+
+| Slice | Module | Writes |
+|-------|--------|--------|
+| `understanding` | Existing market understanding | Present-tense facts |
+| `expectation` | `expectation_engine.py` | Forward scenarios per horizon (10m–2h) |
+| `memory` | `memory_engine.py` | Decayed behavioral history |
+| `scenario` | `scenario_engine.py` | Phase (compression, markup, …) |
+| `risk_intelligence` | `risk_intelligence.py` | `trade_environment_score` |
+| `strategy_selection` | `strategy_selector.py` | Profile eligibility |
+| `strategy_scores` | `strategy_scorer.py` | Confidence + consensus |
+
+Payload on `market_context` / trade snapshots: **`decision_context_v3`** (dict). Signal explainer may include `cognition` block (scenario, expectation horizons, strategy ranking).
+
+### Cognition observability
+
+| Event / field | When |
+|---------------|------|
+| `decision_context_v3_attached` | Shadow attach succeeded (debug) |
+| `decision_context_v3` on entry snapshot | Trade snapshot v2 enrichment |
+| `run_scenario_tests.py --cognition --what-if` | Scenario replay + counterfactual profiles |
 
 ---
 
@@ -135,6 +185,7 @@ Reports: decision cycles, gated-ML-neutral entries, BUY→HOLD flips, shadow blo
 | `entry_signal` | FSM entry intent (actionable when flat + `EntryReady`) |
 | `thesis_health` | `healthy` \| `weakening` \| `broken` |
 | `position_lifecycle` | `watching` \| `entry_ready` \| `managing` \| `exit_ready` |
+| `decision_context_v3` | Cognition slices (shadow when `COGNITION_SHADOW_ENABLED=true`) |
 
 ### Frontend
 
@@ -171,4 +222,6 @@ See [Deployment – Docker Compose](10-deployment.md#docker-compose-deployment).
 
 ```bash
 pytest agent/tests/test_rule_based_pipeline.py agent/tests/test_rule_based_scenarios.py
+pytest tests/unit/cognition/
+python run_scenario_tests.py --cognition
 ```

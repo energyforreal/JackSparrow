@@ -176,7 +176,26 @@ def analyze_post_trade(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     if root == "wrong_trend":
         recommendations.append("tighten_regime_filter")
 
-    return {
+    v3 = dc.get("decision_context_v3") if isinstance(dc.get("decision_context_v3"), dict) else {}
+    cognition_tags: Dict[str, Any] = {}
+    if v3:
+        if isinstance(v3.get("scenario"), dict):
+            cognition_tags["scenario_at_entry"] = v3["scenario"].get("primary")
+        if isinstance(v3.get("expectation"), dict):
+            cognition_tags["expectation_at_entry"] = v3["expectation"].get("dominant_expectation")
+        if isinstance(v3.get("risk_intelligence"), dict):
+            cognition_tags["risk_at_entry"] = v3["risk_intelligence"].get("trade_environment_score")
+        scores = v3.get("strategy_scores")
+        if isinstance(scores, dict):
+            entries = scores.get("entries") or []
+            if entries and isinstance(entries[0], dict):
+                best = max(
+                    entries,
+                    key=lambda e: float(e.get("adjusted_confidence") or 0.0),
+                )
+                cognition_tags["selected_profile"] = best.get("profile_id")
+
+    result = {
         "entry_quality": entry_q,
         "execution_quality": exec_q,
         "exit_quality": exit_q,
@@ -187,3 +206,6 @@ def analyze_post_trade(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "recommendations": recommendations,
         "confidence": 0.75 if root != "unknown" else 0.5,
     }
+    if cognition_tags:
+        result["cognition_tags"] = cognition_tags
+    return result

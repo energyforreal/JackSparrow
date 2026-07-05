@@ -104,9 +104,12 @@ class ScenarioRunner:
         self,
         metadata_path: Optional[Path] = None,
         symbol: str = "BTCUSD",
+        *,
+        include_cognition: bool = False,
     ) -> None:
         self.metadata_path = Path(metadata_path or _DEFAULT_META)
         self.symbol = symbol
+        self.include_cognition = include_cognition
         self._node: Any = None   # RuleBasedIntelligenceNode — loaded on first use
 
     # ── lazy model load ────────────────────────────────────────────────────
@@ -187,6 +190,14 @@ class ScenarioRunner:
             struct_lyr = self._run_market_structure(pred_ctx)
             trace.layers.append(struct_lyr)
             structure = struct_lyr.output.get("_obj")
+
+            if self.include_cognition:
+                cog_lyr = self._run_cognition(
+                    closed_feats,
+                    regime=str(pred_ctx.get("regime", "neutral") or "neutral"),
+                    structure=structure,
+                )
+                trace.layers.append(cog_lyr)
 
             # ── 4. Thesis engine ──────────────────────────────────────────
             regime = str(
@@ -396,6 +407,61 @@ class ScenarioRunner:
             )
         except Exception as exc:
             return LayerTrace(name="market_structure", ok=False, error=f"{type(exc).__name__}: {exc}")
+
+    def _run_cognition(
+        self,
+        closed_feats: Dict[str, Any],
+        *,
+        regime: str,
+        structure: Any = None,
+    ) -> LayerTrace:
+        from agent.intelligence.cognition.decision_context_builder import (
+            build_decision_context_from_market_context,
+        )
+        from agent.intelligence.market_understanding_engine import market_understanding_engine
+
+        try:
+            features_dict = {str(k): float(v) for k, v in closed_feats.items() if v == v}
+            snap, ms_u = self._timed_sync(
+                market_understanding_engine.evaluate,
+                symbol=self.symbol,
+                bar_index=100,
+                features=features_dict,
+                regime=regime,
+                structure=structure,
+            )
+            mc: Dict[str, Any] = {
+                "symbol": self.symbol,
+                "v43_closed_bar_index": 100,
+                "features": features_dict,
+                "regime": regime,
+                "market_state": snap.to_dict(),
+            }
+            ctx, ms = self._timed_sync(
+                build_decision_context_from_market_context,
+                mc,
+                run_cycle=True,
+            )
+            what_if = None
+            if getattr(self, "what_if", False):
+                from agent.testing.cognition_replay import counterfactual_strategy_scores
+
+                what_if = counterfactual_strategy_scores(ctx, features=features_dict)
+            return LayerTrace(
+                name="cognition_cycle",
+                ok=True,
+                duration_ms=ms + ms_u,
+                output={
+                    "schema_version": ctx.meta.schema_version,
+                    "artifact_modules": [a.module_id for a in ctx.artifacts],
+                    "scenario": ctx.scenario.to_dict() if ctx.scenario else None,
+                    "expectation": ctx.expectation.to_dict() if ctx.expectation else None,
+                    "counterfactual": what_if,
+                    "_obj": ctx,
+                },
+            )
+        except Exception as exc:
+            return LayerTrace(name="cognition_cycle", ok=False, error=f"{type(exc).__name__}: {exc}")
 
     def _run_thesis(
         self,

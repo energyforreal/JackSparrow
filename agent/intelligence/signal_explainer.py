@@ -23,6 +23,7 @@ def explain_signal(
     fsm_state: str = "",
     setup_type: str = "none",
     market_state: Optional[Dict[str, Any]] = None,
+    decision_context_v3: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build human-readable signal explanation persisted at entry."""
     cats = gate_categories or {}
@@ -52,7 +53,37 @@ def explain_signal(
 
     conf_pct = round(max(0.0, min(100.0, float(structural_confidence or 0.0) * 100.0)), 1)
 
-    return {
+    cognition: Dict[str, Any] = {}
+    dc = decision_context_v3 if isinstance(decision_context_v3, dict) else {}
+    if dc:
+        if isinstance(dc.get("scenario"), dict):
+            cognition["scenario"] = dc["scenario"].get("primary")
+        if isinstance(dc.get("expectation"), dict):
+            cognition["dominant_expectation"] = dc["expectation"].get("dominant_expectation")
+            horizons = dc["expectation"].get("horizons") or []
+            if horizons:
+                cognition["expectation_horizons"] = [
+                    {
+                        "minutes": h.get("horizon_minutes"),
+                        "trend_persistence": h.get("trend_persistence"),
+                        "breakout_likelihood": h.get("breakout_likelihood"),
+                    }
+                    for h in horizons[:4]
+                    if isinstance(h, dict)
+                ]
+        if isinstance(dc.get("risk_intelligence"), dict):
+            cognition["trade_environment_score"] = dc["risk_intelligence"].get(
+                "trade_environment_score"
+            )
+        if isinstance(dc.get("strategy_scores"), dict):
+            entries = dc["strategy_scores"].get("entries") or []
+            cognition["strategy_ranking"] = [
+                {"profile": e.get("profile_id"), "score": e.get("adjusted_confidence")}
+                for e in entries[:5]
+                if isinstance(e, dict)
+            ]
+
+    out = {
         "signal": str(signal or "HOLD").upper(),
         "confidence_pct": conf_pct,
         "reasons": reasons,
@@ -61,3 +92,6 @@ def explain_signal(
         "fsm_state": str(fsm_state or ""),
         "setup_type": str(setup_type or "none"),
     }
+    if cognition:
+        out["cognition"] = cognition
+    return out
