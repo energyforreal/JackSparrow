@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+import structlog
+
 from agent.intelligence.cognition.decision_context import DecisionContext, DecisionContextBuilder
 from agent.intelligence.cognition.expectation_engine import evaluate_expectation
 from agent.intelligence.cognition.flags import (
@@ -22,6 +24,8 @@ from agent.intelligence.cognition.strategy_scorer import score_strategies
 from agent.intelligence.cognition.strategy_selector import select_strategies
 from agent.intelligence.cognition.types import ExpectationState, MarketMemory, ScenarioState
 from agent.intelligence.market_state_engine import market_state_engine
+
+logger = structlog.get_logger()
 
 
 def _run_module(enabled_flag: bool) -> bool:
@@ -141,5 +145,5 @@ def _persist_cognition(symbol: str, bar_index: int, ctx: DecisionContext) -> Non
         from agent.intelligence.market_state_engine import MarketStateTrajectory
 
         market_state_engine.persist(symbol, MarketStateTrajectory.from_dict(data))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("cognition_persist_failed", symbol=symbol, bar_index=bar_index, error=str(exc))

@@ -191,6 +191,7 @@ class ScenarioRunner:
             trace.layers.append(struct_lyr)
             structure = struct_lyr.output.get("_obj")
 
+            cognition_layer: Optional[LayerTrace] = None
             if self.include_cognition:
                 cog_lyr = self._run_cognition(
                     closed_feats,
@@ -198,6 +199,7 @@ class ScenarioRunner:
                     structure=structure,
                 )
                 trace.layers.append(cog_lyr)
+                cognition_layer = cog_lyr
 
             # ── 4. Thesis engine ──────────────────────────────────────────
             regime = str(
@@ -213,6 +215,7 @@ class ScenarioRunner:
                 portfolio_state,
                 scenario=scenario,
                 structure=structure,
+                cognition_layer=cognition_layer,
             )
             trace.layers.append(thesis_lyr)
             thesis_verdict = thesis_lyr.output.get("_obj")
@@ -472,6 +475,7 @@ class ScenarioRunner:
         *,
         scenario: Optional[Dict[str, Any]] = None,
         structure: Any = None,
+        cognition_layer: Optional[LayerTrace] = None,
     ) -> LayerTrace:
         from agent.core.agent_thesis_engine import agent_thesis_engine
         from agent.core.ml_validator import thesis_verdict_to_strategy_candidate
@@ -492,6 +496,16 @@ class ScenarioRunner:
                 mc["market_structure"] = ms_dict
             elif isinstance((scenario or {}).get("market_structure_overrides"), dict):
                 mc["market_structure"] = dict(scenario["market_structure_overrides"])
+            if cognition_layer is not None and cognition_layer.ok:
+                ctx = cognition_layer.output.get("_obj")
+                if ctx is not None:
+                    mc["decision_context_v3"] = ctx.to_dict()
+                    if ctx.strategy_selection is not None:
+                        eligible = ctx.strategy_selection.eligible_ids()
+                        if eligible:
+                            mc["eligible_strategy_profiles"] = list(eligible)
+                    if ctx.strategy_scores is not None:
+                        mc["strategy_scores"] = ctx.strategy_scores.to_dict()
             mc.update({k: v for k, v in portfolio_state.items() if k != "positions"})
             verdict, ms = self._timed_sync(agent_thesis_engine.evaluate, regime, mc)
             strategy = thesis_verdict_to_strategy_candidate(verdict)

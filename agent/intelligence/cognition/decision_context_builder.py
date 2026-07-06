@@ -146,7 +146,7 @@ def attach_decision_context_v3(market_context: Dict[str, Any]) -> Dict[str, Any]
             eligible = ctx.strategy_selection.eligible_ids()
         if eligible:
             mc["eligible_strategy_profiles"] = list(eligible)
-        logger.debug(
+        logger.info(
             "decision_context_v3_attached",
             symbol=ctx.meta.symbol,
             bar_index=ctx.meta.bar_index,

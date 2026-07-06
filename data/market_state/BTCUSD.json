@@ -50,7 +50,7 @@
       "expectation_confidence=0.725"
     ]
   },
-  "updated_at": "2026-07-05T13:18:45.276086+00:00",
+  "updated_at": "2026-07-06T16:02:01.475049+00:00",
   "last_expectation": {
     "horizons": [
       {
@@ -106,6 +106,10 @@
     "trend_duration_bars": 0,
     "hh_hl_sequence": "neutral",
     "regime_history": [
+      "trending",
+      "trending",
+      "trending",
+      "trending",
       "trending",
       "trending"
     ],

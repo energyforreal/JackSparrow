@@ -70,6 +70,7 @@ class RuleBasedPipeline:
         gate_state: Optional[V43GateState] = None,
         contract_state: Any = None,
         features_history: Optional[List[Dict[str, Any]]] = None,
+        decision_context_v3: Optional[Dict[str, Any]] = None,
     ) -> RuleBasedPipelineResult:
         """Execute full rule-based pipeline for one closed bar."""
         if structure is None:
@@ -142,6 +143,7 @@ class RuleBasedPipeline:
             fsm_state=fsm_decision.fsm_state,
             setup_type=gates.setup_type,
             market_state=snapshot.to_dict(),
+            decision_context_v3=decision_context_v3,
         )
 
         result = RuleBasedPipelineResult(
