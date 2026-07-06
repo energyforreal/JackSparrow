@@ -1505,12 +1505,28 @@ class MCPOrchestrator:
             )
 
         from agent.core.cognition_orchestration import (
+            apply_temporal_authority,
             attach_cognition,
             build_evidence_stack,
+            check_adjudication_parity,
             evaluate_thesis_from_context,
+            log_cognition_thesis_authority_compare,
             populate_rule_based_context,
+            run_post_cognition_adjudication,
         )
+        from agent.intelligence.cognition.flags import cognition_temporal_authority_enabled
         from agent.intelligence.market_understanding_engine import features_history_from_matrix
+
+        provisional_strategy_candidate = thesis_verdict_to_strategy_candidate(thesis_verdict_cached)
+        provisional_adjudication = run_post_cognition_adjudication(
+            thesis_verdict=thesis_verdict_cached,
+            strategy_candidate=provisional_strategy_candidate,
+            ml_validation=ml_validation,
+            structure=structure,
+            market_context=quality_mc,
+            collapse_rate=collapse_rate_val,
+            eps=eps,
+        )
 
         market_context_for_reasoning["has_open_position"] = has_open
         market_context_for_reasoning["v43_contract_state"] = contract_state
@@ -1531,12 +1547,70 @@ class MCPOrchestrator:
         attach_cognition(market_context_for_reasoning)
         thesis_verdict = evaluate_thesis_from_context(regime, market_context_for_reasoning)
         strategy_candidate = thesis_verdict_to_strategy_candidate(thesis_verdict)
-        market_context_for_reasoning["strategy_candidate"] = strategy_candidate.to_dict()
+        authoritative_thesis_verdict = thesis_verdict
+        authoritative_adjudication = run_post_cognition_adjudication(
+            thesis_verdict=thesis_verdict,
+            strategy_candidate=strategy_candidate,
+            ml_validation=ml_validation,
+            structure=structure,
+            market_context=market_context_for_reasoning,
+            collapse_rate=collapse_rate_val,
+            eps=eps,
+        )
+
+        effective_adjudication = (
+            authoritative_adjudication
+            if cognition_temporal_authority_enabled()
+            else provisional_adjudication
+        )
+        trade_score = effective_adjudication.trade_score
+        ml_confirms = effective_adjudication.ml_confirms
+        entry_quality_result = effective_adjudication.entry_quality_result
+        strategy_candidate = effective_adjudication.strategy_candidate
+        thesis_verdict = effective_adjudication.thesis_verdict
+
+        check_adjudication_parity(
+            provisional=provisional_adjudication,
+            authoritative=authoritative_adjudication,
+            provisional_thesis=thesis_verdict_cached,
+            authoritative_thesis=authoritative_thesis_verdict,
+        )
+
+        if cognition_temporal_authority_enabled():
+            for i, line in enumerate(evidence_lines):
+                if line.startswith("thesis="):
+                    evidence_lines[i] = (
+                        f"thesis={strategy_candidate.signal} type={strategy_candidate.thesis_type} "
+                        f"thesis_horizon_bars={strategy_candidate.intended_horizon_bars}"
+                    )
+                elif line.startswith("ml_confirms="):
+                    evidence_lines[i] = (
+                        f"ml_confirms={ml_confirms} gates final_long={final_long} "
+                        f"final_short={final_short}"
+                    )
+                elif line.startswith("trade_score="):
+                    evidence_lines[i] = (
+                        f"trade_score={trade_score.score:.1f} passed={trade_score.passed}"
+                    )
+            v43_decision["strategy_signal"] = strategy_candidate.signal
+            v43_decision["trade_score"] = trade_score.score
+            v43_decision["evidence"] = evidence_lines
+            market_context_for_reasoning["v43_dedicated_decision"] = v43_decision
+
+        apply_temporal_authority(
+            market_context=market_context_for_reasoning,
+            adjudication=effective_adjudication,
+            v43_decision=v43_decision if cognition_temporal_authority_enabled() else None,
+        )
         if market_context_for_reasoning.get("hypothesis_snapshot") is not None:
             mctx["hypothesis_snapshot"] = market_context_for_reasoning["hypothesis_snapshot"]
             env_block = market_context_for_reasoning.get("environment_scores")
             if isinstance(env_block, dict):
                 mctx["environment_scores"] = dict(env_block)
+
+        mctx["_provisional_adjudication"] = provisional_adjudication
+        mctx["_authoritative_adjudication"] = authoritative_adjudication
+        mctx["_authoritative_thesis_verdict"] = authoritative_thesis_verdict
 
         _evidence_stack = build_evidence_stack(
             market_context=market_context_for_reasoning,
@@ -1685,6 +1759,21 @@ class MCPOrchestrator:
         market_context_for_reasoning["policy_verdict"] = policy_verdict.model_dump(
             mode="json"
         )
+
+        _prov_adj = mctx.get("_provisional_adjudication")
+        _auth_adj = mctx.get("_authoritative_adjudication")
+        _auth_tv = mctx.get("_authoritative_thesis_verdict")
+        if _prov_adj is not None and _auth_adj is not None and _auth_tv is not None:
+            log_cognition_thesis_authority_compare(
+                symbol=symbol,
+                bar_index=bar_idx,
+                provisional_thesis=thesis_verdict_cached,
+                authoritative_thesis=_auth_tv,
+                provisional_adjudication=_prov_adj,
+                authoritative_adjudication=_auth_adj,
+                market_context=market_context_for_reasoning,
+                policy_signal=str(policy_verdict.signal or "HOLD"),
+            )
 
         _entry_signals = ENTRY_SIGNALS
         _dominant_type: Optional[str] = None

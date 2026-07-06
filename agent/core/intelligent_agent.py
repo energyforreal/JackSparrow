@@ -174,6 +174,10 @@ class IntelligentAgent:
             trading_mode=self.trading_mode,
             timeframes=self.timeframes,
         )
+
+        from agent.intelligence.cognition.flags import log_cognition_config_effective
+
+        log_cognition_config_effective()
         
         # Log comprehensive configuration for verification
         logger.info(

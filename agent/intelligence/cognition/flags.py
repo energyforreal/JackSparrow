@@ -33,6 +33,29 @@ def cognition_scorer_enabled() -> bool:
     return bool(getattr(settings, "cognition_scorer_enabled", False))
 
 
+def cognition_temporal_authority_enabled() -> bool:
+    """When true, trade_score / ml_confirms / entry_quality use post-cognition thesis."""
+    return bool(getattr(settings, "cognition_temporal_authority_enabled", False))
+
+
+def log_cognition_config_effective() -> None:
+    """Emit effective cognition flags at agent startup for deployment verification."""
+    import structlog
+
+    structlog.get_logger().info(
+        "cognition_config_effective",
+        shadow=cognition_shadow_enabled(),
+        selector=cognition_selector_enabled(),
+        scorer=cognition_scorer_enabled(),
+        expectation=cognition_expectation_enabled(),
+        memory=cognition_memory_enabled(),
+        scenario=cognition_scenario_enabled(),
+        risk=cognition_risk_enabled(),
+        temporal_authority=cognition_temporal_authority_enabled(),
+        cycle=cognition_cycle_enabled(),
+    )
+
+
 def cognition_cycle_enabled() -> bool:
     """Run full cognition cycle (shadow or authoritative per-module flags)."""
     return cognition_shadow_enabled() or any(

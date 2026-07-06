@@ -3079,6 +3079,11 @@ class Settings(BaseSettings):
         env="COGNITION_SCORER_ENABLED",
         description="Apply strategy scorer confidence adjustments to hypotheses",
     )
+    cognition_temporal_authority_enabled: bool = Field(
+        default=False,
+        env="COGNITION_TEMPORAL_AUTHORITY_ENABLED",
+        description="Use post-cognition trade_score, ml_confirms, entry_quality (Stage 4B)",
+    )
     cognition_memory_decay_half_life_bars: int = Field(
         default=10,
         env="COGNITION_MEMORY_DECAY_HALF_LIFE_BARS",
@@ -3447,7 +3452,15 @@ class Settings(BaseSettings):
         if active:
             return active
         return self.parsed_timeframes() or [self.agent_interval]
-    
+
+
+def reload_settings() -> "Settings":
+    """Re-read environment into the global settings singleton (rollout / tests)."""
+    global settings
+    settings = Settings()
+    return settings
+
+
 try:
     settings = Settings()
 except Exception as e:

@@ -103,9 +103,35 @@ Shadow mode is **on by default** (`COGNITION_SHADOW_ENABLED=true`). The orchestr
 | `COGNITION_RISK_ENABLED` | `false` | Authoritative risk intelligence slice |
 | `COGNITION_SELECTOR_ENABLED` | `false` | Filter thesis families by strategy selector |
 | `COGNITION_SCORER_ENABLED` | `false` | Apply scorer weights in hypothesis aggregate |
+| `COGNITION_TEMPORAL_AUTHORITY_ENABLED` | `false` | Stage 4B: post-cognition `trade_score` / `ml_confirms` / `entry_quality` |
 | `COGNITION_MEMORY_DECAY_HALF_LIFE_BARS` | `10` | Behavioral memory decay half-life (5m bars) |
 
 Acyclic order: **Expectation → Memory → Scenario → Risk → Selector → Scorer → Hypothesis**. Full spec: [Cognitive Architecture](../reference/cognitive-architecture.md).
+
+### Cognition authority rollout (v2)
+
+Staged rollout granting cognition **logical** authority (selector/scorer) then **temporal** authority (post-cognition adjudication). Do not enable `COGNITION_TEMPORAL_AUTHORITY_ENABLED` until Stages 1–3 replay reports are signed off.
+
+| Stage | Flags | Validation |
+|-------|-------|------------|
+| Phase 0 | defaults | `pytest tests/unit/cognition/`; baseline JSON |
+| 1 | `COGNITION_SELECTOR_ENABLED=true` | `eligible_strategy_profiles` filters thesis families |
+| 2 | + `COGNITION_SCORER_ENABLED=true` | `hypothesis_scorer_weight` reason codes; monotonicity test |
+| 3 | (same) | `cognition_thesis_authority_compare` dual-path telemetry |
+| 4A | authority off | `run_post_cognition_adjudication` parity (zero consumer deltas) |
+| 4B | `COGNITION_TEMPORAL_AUTHORITY_ENABLED=true` | Consumers use post-cognition outputs |
+| 5 | operational | 48–72h shadow → 7d paper → human live sign-off |
+
+**Replay Summary** (per stage):
+
+```bash
+python tools/cognition_rollout_report.py --stage phase0 --out logs/agent/cognition_rollout/phase0_baseline.json
+python tools/cognition_rollout_report.py --stage stage1 --selector true --baseline logs/agent/cognition_rollout/phase0_baseline.json
+python tools/cognition_rollout_report.py --stage stage2 --selector true --scorer true --baseline logs/agent/cognition_rollout/stage1.json
+python tools/cognition_rollout_report.py --stage stage4b --selector true --scorer true --temporal true --baseline logs/agent/cognition_rollout/phase0_baseline.json
+```
+
+Agent startup logs `cognition_config_effective` with all flag values for deployment verification.
 
 ### Rollout order (recommended)
 
@@ -143,9 +169,28 @@ Payload on `market_context` / trade snapshots: **`decision_context_v3`** (dict).
 
 | Event / field | When |
 |---------------|------|
+| `cognition_config_effective` | Agent startup — effective cognition flags |
 | `decision_context_v3_attached` | Shadow attach succeeded (debug) |
+| `cognition_thesis_authority_compare` | Each cognition bar — provisional vs authoritative dual path |
+| `cognition_adjudication_parity_violation` | WARNING when shadow adjudication diverges with all authority flags off |
 | `decision_context_v3` on entry snapshot | Trade snapshot v2 enrichment |
 | `run_scenario_tests.py --cognition --what-if` | Scenario replay + counterfactual profiles |
+| `tools/cognition_rollout_report.py` | Pinned regression Replay Summary + stage diff |
+
+#### `cognition_thesis_authority_compare` fields
+
+| Field | Description |
+|-------|-------------|
+| `provisional_thesis` | Pre-cognition `thesis_verdict_cached` signal + type |
+| `authoritative_thesis` | Post-`evaluate_thesis_from_context` signal + type |
+| `eligible_profiles` | Strategy selector eligibility |
+| `dominant_hypothesis` | `hypothesis_snapshot.dominant.thesis_type` |
+| `provisional_strategy_candidate` / `authoritative_strategy_candidate` | Direction |
+| `provisional_trade_score` / `authoritative_trade_score` | Legacy vs shadow adjudication |
+| `provisional_ml_confirms` / `authoritative_ml_confirms` | Thesis-aligned ML gates |
+| `policy_signal` | Final `policy_verdict.signal` |
+| `expectation_dominant` / `expectation_confidence` | From `decision_context_v3` |
+| `temporal_authority_enabled` | Whether Stage 4B consumers are active |
 
 ---
 

@@ -990,6 +990,7 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `COGNITION_RISK_ENABLED` | Authoritative risk intelligence slice | No | `false` |
 | `COGNITION_SELECTOR_ENABLED` | Filter thesis families by strategy selector | No | `false` |
 | `COGNITION_SCORER_ENABLED` | Scorer weights in hypothesis aggregate | No | `false` |
+| `COGNITION_TEMPORAL_AUTHORITY_ENABLED` | Post-cognition trade_score / ml_confirms / entry_quality (Stage 4B) | No | `false` |
 | `COGNITION_MEMORY_DECAY_HALF_LIFE_BARS` | Memory decay half-life (5m bars) | No | `10` |
 | `TRADE_LIFECYCLE_ENABLED` | Enable Trade Lifecycle Engine post-entry | No | `false` |
 | `TRADE_LIFECYCLE_LOG_ONLY` | Log TLE verdicts without executing (Phase 2 observation) | No | `false` |

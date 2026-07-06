@@ -59,8 +59,43 @@ Narrative remains append-only under `data/market_narrative/`; it is not a Decisi
 | `COGNITION_RISK_ENABLED` | false | Authoritative risk slice |
 | `COGNITION_SELECTOR_ENABLED` | false | Filter thesis families |
 | `COGNITION_SCORER_ENABLED` | false | Scorer weights in hypothesis aggregate |
+| `COGNITION_TEMPORAL_AUTHORITY_ENABLED` | false | Stage 4B: post-cognition trade_score / ml_confirms / entry_quality |
 
 Live trade signals unchanged until authoritative flags enabled and validated via replay.
+
+## Provisional vs authoritative thesis
+
+Two thesis paths coexist during rollout:
+
+| Path | Source | Used for |
+|------|--------|----------|
+| **Provisional** | `thesis_verdict_cached` (~orchestrator L900) | Market-intel gating, `should_run_full_prediction`, IC divergence diagnostics, `cognition_thesis_authority_compare` replay |
+| **Authoritative** | `evaluate_thesis_from_context` after `attach_cognition` | Hypothesis snapshot, policy inputs, and (after Stage 4B) `trade_score`, `ml_confirms`, `entry_quality` |
+
+After **Stage 4B** (`COGNITION_TEMPORAL_AUTHORITY_ENABLED=true`), execution-facing consumers must use the authoritative path. Provisional thesis remains for diagnostics only — it must not drive execution.
+
+Pipeline order (v43):
+
+```text
+provisional thesis → ML raw gates (final_long/short)
+        ↓
+populate_rule_based → attach_cognition → evaluate_thesis_from_context
+        ↓
+run_post_cognition_adjudication (shadow or effective per flags)
+        ↓
+build_evidence_stack → policy_verdict
+        ↓
+cognition_thesis_authority_compare (telemetry)
+```
+
+## Stage 5 validation ladder
+
+Before live execution authority:
+
+1. **Replay** — `tools/cognition_rollout_report.py` green vs `phase0_baseline.json` at each stage
+2. **Shadow (48–72h)** — Docker logs: zero `cognition_attach_failures`; archive `cognition_thesis_authority_compare`
+3. **Paper trading (7d)** — PnL/risk vs control; entry rate within bounds
+4. **Live sign-off** — Human gate; do not enable temporal authority on live without completing 1–3
 
 ## Memory decay
 

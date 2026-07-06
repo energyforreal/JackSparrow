@@ -96,6 +96,31 @@ def test_v43_handler_cognition_before_policy_evaluate() -> None:
     assert attach_line < policy_line
 
 
+def test_v43_handler_post_adjudication_before_evidence_stack() -> None:
+    body = _handler_body("_process_jacksparrow_v43_prediction")
+    adj_line = _first_line(body, "run_post_cognition_adjudication")
+    graph_line = _first_line(body, "build_evidence_stack")
+    assert adj_line > 0, "run_post_cognition_adjudication missing"
+    assert graph_line > 0
+    assert adj_line < graph_line
+
+
+def test_v43_handler_authority_compare_before_policy() -> None:
+    body = _handler_body("_process_jacksparrow_v43_prediction")
+    compare_line = _first_line(body, "log_cognition_thesis_authority_compare")
+    policy_line = -1
+    for child in ast.walk(body):
+        if isinstance(child, ast.Call):
+            func = child.func
+            if isinstance(func, ast.Attribute) and func.attr == "evaluate":
+                base = func.value
+                if isinstance(base, ast.Name) and base.id == "agent_policy_engine":
+                    policy_line = child.lineno
+    assert compare_line > 0
+    assert policy_line > 0
+    assert compare_line > policy_line
+
+
 @patch("agent.core.cognition_orchestration.cognition_cycle_enabled", return_value=True)
 @patch("agent.core.cognition_orchestration.attach_decision_context_v3")
 @patch("agent.core.agent_thesis_engine.hypothesis_portfolio_mode", return_value=True)
