@@ -46,9 +46,15 @@ def compute_sl_tp_levels(
     tp_pct = float(getattr(settings, "take_profit_percentage", 0.02) or 0.02)
 
     regime_sl_tp_multipliers = {
-        "crisis": (1.5, 1.2),
+        "crisis": (
+            float(getattr(settings, "crisis_sl_multiplier", 1.2) or 1.2),
+            1.2,
+        ),
         "trending": (0.9, 1.3),
-        "ranging": (0.85, 0.85),
+        "ranging": (
+            float(getattr(settings, "ranging_sl_multiplier", 0.75) or 0.75),
+            0.85,
+        ),
         "neutral": (1.0, 1.0),
     }
     sl_mult, tp_mult = regime_sl_tp_multipliers.get(

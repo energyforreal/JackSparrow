@@ -1,0 +1,1949 @@
+[
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-01 06:40:50.750427+00:00",
+    "pnl": -0.0200289,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-01 09:08:16.271896+00:00",
+    "pnl": -0.3248971,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-01 12:36:19.448851+00:00",
+    "pnl": -0.0170038,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-02 16:29:29.018861+00:00",
+    "pnl": -0.1421864,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-02 17:54:25.978237+00:00",
+    "pnl": -0.03006216,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-03 14:26:08.905470+00:00",
+    "pnl": 0.8338926,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-03 14:29:15.690054+00:00",
+    "pnl": -0.2191302,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-03 15:16:57.969983+00:00",
+    "pnl": -1.5165378,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-04 07:20:36.016535+00:00",
+    "pnl": 5.731102,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-04 15:07:49.967266+00:00",
+    "pnl": -5.1215288,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-04 17:18:58.350530+00:00",
+    "pnl": 7.23862,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-04 18:29:23.140646+00:00",
+    "pnl": -5.4485176,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-05 04:54:48.758804+00:00",
+    "pnl": -4.1428104,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-05 08:56:29.128421+00:00",
+    "pnl": -4.4576049,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-05 09:13:58.246151+00:00",
+    "pnl": -4.8208195,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-05 11:59:14.095669+00:00",
+    "pnl": 5.9923206,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-05 13:56:52.101193+00:00",
+    "pnl": 6.347222,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-05 16:11:25.305479+00:00",
+    "pnl": 6.9900824,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-05 16:12:55.147588+00:00",
+    "pnl": -5.124624,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-06 04:53:13.735089+00:00",
+    "pnl": -4.7887144,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-06 05:22:15.439402+00:00",
+    "pnl": -2.7272609,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-06 10:19:09.169733+00:00",
+    "pnl": -3.2080752,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-06 12:08:08.682751+00:00",
+    "pnl": -4.8689048,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-06 15:04:50.681848+00:00",
+    "pnl": -4.2814618,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-06 18:31:51.693329+00:00",
+    "pnl": 0.1995287,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-07 07:19:26.753219+00:00",
+    "pnl": 2.1482412,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-07 07:43:26.059784+00:00",
+    "pnl": -0.3573934,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-08 07:49:17.421371+00:00",
+    "pnl": -2.3375415,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-08 12:05:04.430158+00:00",
+    "pnl": -4.0574555,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-08 14:33:48.614765+00:00",
+    "pnl": 5.2336235,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-08 17:03:29.975426+00:00",
+    "pnl": -4.53033,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-26 17:38:34.211809+00:00",
+    "pnl": -3.8278135,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-27 02:08:16.504192+00:00",
+    "pnl": -0.944461,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-27 08:23:13.103196+00:00",
+    "pnl": -0.972272,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-27 10:21:26.193940+00:00",
+    "pnl": -1.049244,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-27 15:10:59.806411+00:00",
+    "pnl": -4.207336,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-28 04:04:10.952566+00:00",
+    "pnl": 2.067359,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-28 22:21:18.571223+00:00",
+    "pnl": -4.4683065,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-28 23:40:46.326705+00:00",
+    "pnl": -4.193357,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 00:23:17.369152+00:00",
+    "pnl": -4.241391,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 02:49:32.058159+00:00",
+    "pnl": 2.226654,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 16:40:28.059705+00:00",
+    "pnl": -0.807594,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "healthy",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 16:45:22.152333+00:00",
+    "pnl": -0.676182,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "broken",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 16:50:22.552764+00:00",
+    "pnl": -0.229989,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "broken",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 16:55:24.787288+00:00",
+    "pnl": -0.77226,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 17:00:57.188730+00:00",
+    "pnl": -0.076374,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 17:05:28.925573+00:00",
+    "pnl": 1.076007,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 17:59:10.892538+00:00",
+    "pnl": -0.2658475,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 18:06:27.541388+00:00",
+    "pnl": -0.550392,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 18:19:16.777169+00:00",
+    "pnl": -0.605556,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 19:20:16.245261+00:00",
+    "pnl": -0.070488,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 21:01:13.547943+00:00",
+    "pnl": -0.660477,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "healthy",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 22:20:43.170925+00:00",
+    "pnl": -2.18241,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 22:30:45.185125+00:00",
+    "pnl": -0.716127,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 22:40:48.151205+00:00",
+    "pnl": -0.825906,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 22:51:21.846150+00:00",
+    "pnl": -0.754296,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 23:00:53.572069+00:00",
+    "pnl": -0.481281,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "broken",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 23:10:58.931167+00:00",
+    "pnl": -0.672801,
+    "entry": {
+      "conviction": null,
+      "regime": "ranging",
+      "fsm_thesis_health": "broken",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 23:20:33.615871+00:00",
+    "pnl": -0.426531,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "broken",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-29 23:25:06.146261+00:00",
+    "pnl": -0.566832,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "broken",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 00:10:34.251294+00:00",
+    "pnl": -0.5058,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "healthy",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 00:15:33.093860+00:00",
+    "pnl": -0.629331,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 00:25:39.587254+00:00",
+    "pnl": -0.52893,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 00:30:10.746761+00:00",
+    "pnl": 0.372816,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 00:35:13.977257+00:00",
+    "pnl": -0.871095,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 00:40:15.858135+00:00",
+    "pnl": -0.687042,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 02:15:06.172770+00:00",
+    "pnl": -0.516339,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "healthy",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 02:25:10.638013+00:00",
+    "pnl": -1.303215,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 02:30:13.680474+00:00",
+    "pnl": -0.485046,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 02:35:16.562389+00:00",
+    "pnl": -0.473082,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 03:10:34.075669+00:00",
+    "pnl": -1.15692,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 03:15:36.663868+00:00",
+    "pnl": -1.045731,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "broken",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 03:20:09.541377+00:00",
+    "pnl": -0.7233825,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 03:35:15.743140+00:00",
+    "pnl": -1.822104,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "broken",
+      "signal": "long"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 03:45:20.889662+00:00",
+    "pnl": -0.4020765,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 03:50:23.459112+00:00",
+    "pnl": -0.907884,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 04:00:29.578765+00:00",
+    "pnl": -0.769002,
+    "entry": {
+      "conviction": null,
+      "regime": "neutral",
+      "fsm_thesis_health": "weakening",
+      "signal": "short"
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 07:05:28.742197+00:00",
+    "pnl": -0.669441,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "healthy",
+      "stop_loss_at_entry": 59056.7,
+      "take_profit_at_entry": 60485.6,
+      "structural_confidence": 0.75
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 07:40:44.579727+00:00",
+    "pnl": -1.160919,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 07:50:49.738746+00:00",
+    "pnl": -0.518751,
+    "entry": {
+      "regime": "ranging",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "broken",
+      "stop_loss_at_entry": 59971.4,
+      "take_profit_at_entry": 58543.7,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 12:10:54.634487+00:00",
+    "pnl": -0.8319945,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.7951031170908984,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59503.2,
+      "take_profit_at_entry": 58086.3,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 12:27:49.350094+00:00",
+    "pnl": -0.080427,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.8,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59476.6,
+      "take_profit_at_entry": 58060.4,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 12:36:13.351835+00:00",
+    "pnl": -0.810693,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.8,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59269.4,
+      "take_profit_at_entry": 57858.2,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 13:08:13.550058+00:00",
+    "pnl": 0.6358455,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.8,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59303.6,
+      "take_profit_at_entry": 57891.6,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 13:15:18.096846+00:00",
+    "pnl": -0.37185,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 14:01:58.578589+00:00",
+    "pnl": -3.563577,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 14:58:29.689952+00:00",
+    "pnl": -0.327345,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.8,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59028.6,
+      "take_profit_at_entry": 57622.7,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 15:00:48.740301+00:00",
+    "pnl": -0.7754805,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.7910167388417803,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58960.4,
+      "take_profit_at_entry": 57556.0,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 15:13:07.910559+00:00",
+    "pnl": 0.048126,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.7836844348834413,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59020.4,
+      "take_profit_at_entry": 57615.2,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 15:20:03.084023+00:00",
+    "pnl": -0.217941,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.8,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58919.7,
+      "take_profit_at_entry": 57516.7,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 15:40:13.039031+00:00",
+    "pnl": -0.4666515,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.8,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58832.5,
+      "take_profit_at_entry": 57431.2,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-06-30 16:34:37.260864+00:00",
+    "pnl": -1.006122,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.8,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58784.6,
+      "take_profit_at_entry": 57384.8,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 00:15:16.905409+00:00",
+    "pnl": -0.7343725,
+    "entry": {
+      "regime": "ranging",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "healthy",
+      "stop_loss_at_entry": 58189.3,
+      "take_profit_at_entry": 59597.1,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 00:20:20.144090+00:00",
+    "pnl": -0.828192,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58058.2,
+      "take_profit_at_entry": 59463.1,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 00:25:52.751837+00:00",
+    "pnl": 0.007302,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 00:30:24.854927+00:00",
+    "pnl": -1.061111,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58779.0,
+      "take_profit_at_entry": 57379.5,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 00:35:27.532564+00:00",
+    "pnl": -0.545262,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58919.0,
+      "take_profit_at_entry": 57516.4,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 01:05:15.979466+00:00",
+    "pnl": -0.310464,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58871.9,
+      "take_profit_at_entry": 57469.8,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 01:10:50.712761+00:00",
+    "pnl": 0.150501,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "broken",
+      "stop_loss_at_entry": 58745.0,
+      "take_profit_at_entry": 57346.9,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 01:15:19.504911+00:00",
+    "pnl": -1.534917,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58554.9,
+      "take_profit_at_entry": 57160.2,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 01:20:21.300520+00:00",
+    "pnl": -0.801801,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.6959126898204894,
+      "entry_lots": 6,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58690.7,
+      "take_profit_at_entry": 57293.0,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 01:25:23.827509+00:00",
+    "pnl": -0.70446,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 01:39:15.425398+00:00",
+    "pnl": -4.11057,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 01:40:52.093947+00:00",
+    "pnl": -0.6854025,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 02:05:12.667171+00:00",
+    "pnl": -1.0603025,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 02:10:15.326315+00:00",
+    "pnl": -0.672934,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58232.4,
+      "take_profit_at_entry": 59641.2,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 02:50:04.649544+00:00",
+    "pnl": 0.735905,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58306.8,
+      "take_profit_at_entry": 59717.4,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 02:55:36.941467+00:00",
+    "pnl": -0.1978125,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58520.1,
+      "take_profit_at_entry": 59935.8,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 03:05:07.180631+00:00",
+    "pnl": -0.9037965,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58588.5,
+      "take_profit_at_entry": 60006.0,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 03:10:19.589799+00:00",
+    "pnl": -0.4826675,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58534.0,
+      "take_profit_at_entry": 59950.0,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 03:20:25.187908+00:00",
+    "pnl": -1.04433,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58506.7,
+      "take_profit_at_entry": 59922.1,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 03:25:32.779351+00:00",
+    "pnl": -0.501787,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59358.5,
+      "take_profit_at_entry": 57945.2,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 03:35:08.987387+00:00",
+    "pnl": -0.604025,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59372.1,
+      "take_profit_at_entry": 57958.8,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 04:05:30.771425+00:00",
+    "pnl": -0.086365,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59660.5,
+      "take_profit_at_entry": 58240.0,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 04:20:14.673186+00:00",
+    "pnl": -0.5538075,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58654.0,
+      "take_profit_at_entry": 60072.9,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 05:09:46.200707+00:00",
+    "pnl": -0.23235,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "healthy",
+      "stop_loss_at_entry": 58725.6,
+      "take_profit_at_entry": 60145.8,
+      "structural_confidence": 0.75
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 05:21:08.915171+00:00",
+    "pnl": -0.532505,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 58770.4,
+      "take_profit_at_entry": 60192.7,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 22:00:42.121816+00:00",
+    "pnl": 1.63926,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 22:22:14.029726+00:00",
+    "pnl": 0.2337025,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.8,
+      "entry_lots": 5,
+      "fsm_thesis_health": "healthy",
+      "stop_loss_at_entry": 60309.2,
+      "take_profit_at_entry": 61768.1,
+      "structural_confidence": 0.75
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 22:30:04.897048+00:00",
+    "pnl": -2.5658875,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-01 23:35:25.207532+00:00",
+    "pnl": -3.0810625,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 00:11:18.636077+00:00",
+    "pnl": -0.39453,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "healthy",
+      "stop_loss_at_entry": 60453.3,
+      "take_profit_at_entry": 59013.9,
+      "structural_confidence": 0.75
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 00:24:26.071095+00:00",
+    "pnl": -0.08893,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 60423.5,
+      "take_profit_at_entry": 58984.9,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 00:48:43.650085+00:00",
+    "pnl": -0.17247,
+    "entry": {
+      "regime": "neutral",
+      "signal": "short",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "healthy",
+      "stop_loss_at_entry": 60267.8,
+      "take_profit_at_entry": 58832.9,
+      "structural_confidence": 0.75
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 01:41:47.183151+00:00",
+    "pnl": -3.1775875,
+    "entry": {
+      "conviction": null,
+      "regime": null,
+      "fsm_thesis_health": null,
+      "signal": null
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 02:10:13.897903+00:00",
+    "pnl": -1.1685675,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "healthy",
+      "stop_loss_at_entry": 59682.2,
+      "take_profit_at_entry": 61126.2,
+      "structural_confidence": 0.75
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 02:16:37.060545+00:00",
+    "pnl": -0.0435075,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59564.8,
+      "take_profit_at_entry": 61005.5,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 02:30:25.157073+00:00",
+    "pnl": -0.75167,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59700.6,
+      "take_profit_at_entry": 61144.9,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 02:50:15.315612+00:00",
+    "pnl": -0.1306225,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59782.9,
+      "take_profit_at_entry": 61229.2,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 02:55:50.303979+00:00",
+    "pnl": -0.5087,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59877.6,
+      "take_profit_at_entry": 61326.3,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-02 03:30:18.633754+00:00",
+    "pnl": -0.51942,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.4675,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 59950.1,
+      "take_profit_at_entry": 61400.4,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-04 14:08:41.060848+00:00",
+    "pnl": -0.561721,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.7904,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 62065.2,
+      "take_profit_at_entry": 63566.8,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-04 17:05:29.415604+00:00",
+    "pnl": -0.628495,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.7049978250776902,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 62346.7,
+      "take_profit_at_entry": 63855.1,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-04 18:16:58.357852+00:00",
+    "pnl": -0.51724,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.7658600625050282,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 62706.9,
+      "take_profit_at_entry": 64223.8,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-04 20:07:07.865436+00:00",
+    "pnl": -0.3501675,
+    "entry": {
+      "regime": "neutral",
+      "signal": "long",
+      "confidence": 0.7767179456371456,
+      "entry_lots": 5,
+      "fsm_thesis_health": "weakening",
+      "stop_loss_at_entry": 62732.6,
+      "take_profit_at_entry": 64250.3,
+      "structural_confidence": 0.55
+    },
+    "flags": [],
+    "first_verdicts": []
+  },
+  {
+    "symbol": "BTCUSD",
+    "closed_at": "2026-07-07 02:24:41.602955+00:00",
+    "pnl": -1.477235,
+    "entry": {},
+    "flags": [],
+    "first_verdicts": []
+  }
+]

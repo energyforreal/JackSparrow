@@ -1,0 +1,12 @@
+{
+  "scanned_at": "2026-07-07T11:47:19.697970+00:00",
+  "audit_log": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_audit\\live_audit.md",
+  "verdict_count": 931,
+  "action_counts": {
+    "HOLD": 696,
+    "EXIT": 87,
+    "TIGHTEN_SL": 148
+  },
+  "avg_health": 67.08,
+  "avg_opportunity": 67.91
+}

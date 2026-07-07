@@ -7,7 +7,7 @@ produces a :class:`PolicyVerdict` that may adopt, veto, or fuse ML with rule-bas
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import structlog
 
@@ -37,6 +37,9 @@ from agent.core.signal_vocabulary import (
 from feature_store.jacksparrow_v43_horizon import resolve_training_forward_bars
 
 logger = structlog.get_logger()
+
+PositionPolicyAction = Literal["HOLD", "TIGHTEN", "EXTEND_TP", "EXIT"]
+
 
 _ENTRY_SIGNALS = ENTRY_SIGNALS
 _POLICY_MODES = frozenset(
@@ -957,6 +960,58 @@ class AgentPolicyEngine:
         elif memory_scale != 1.0:
             verdict = verdict.model_copy(update={"memory_size_scale": memory_scale})
         return verdict
+
+    def evaluate_position(
+        self,
+        *,
+        position: Dict[str, Any],
+        market_context: Dict[str, Any],
+        lifecycle_verdict: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Advisory post-entry policy (does not block entry thesis path).
+
+        Returns action hint for logging and future unified arbiter integration.
+        """
+        action: PositionPolicyAction = "HOLD"
+        reason_codes: List[str] = ["position_policy_advisory"]
+        conviction = 0.5
+
+        lv = lifecycle_verdict or {}
+        tle_action = str(lv.get("action") or market_context.get("last_lifecycle_verdict") or "")
+        if tle_action in ("EXIT", "TIGHTEN_SL", "MODIFY_TP", "HOLD"):
+            mapping = {
+                "EXIT": "EXIT",
+                "TIGHTEN_SL": "TIGHTEN",
+                "MODIFY_TP": "EXTEND_TP",
+                "HOLD": "HOLD",
+            }
+            action = mapping.get(tle_action, "HOLD")  # type: ignore[assignment]
+            reason_codes.append(f"tle_action_{tle_action.lower()}")
+
+        pv = market_context.get("policy_verdict")
+        if isinstance(pv, dict) and pv.get("conviction") is not None:
+            try:
+                conviction = float(pv["conviction"])
+            except (TypeError, ValueError):
+                pass
+
+        health = lv.get("health_score")
+        if health is not None:
+            try:
+                h = float(health)
+                if h < 40.0 and action == "HOLD":
+                    action = "EXIT"
+                    reason_codes.append("position_health_critical")
+            except (TypeError, ValueError):
+                pass
+
+        return {
+            "action": action,
+            "conviction": conviction,
+            "reason_codes": reason_codes,
+            "symbol": position.get("symbol"),
+        }
 
 
 def _memory_size_scale_from_reasoning(

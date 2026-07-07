@@ -216,6 +216,9 @@ class PositionManager:
                         pass
         # Ensure contract_value wins over extras keys if both present
         position["contract_value_btc"] = contract_value_btc
+        if position.get("entry_time") is not None:
+            et = position["entry_time"]
+            position["opened_at"] = et.isoformat() if hasattr(et, "isoformat") else str(et)
 
         self.positions[symbol] = position
 
@@ -411,6 +414,7 @@ class ExecutionEngine:
         self._inflight_lock = asyncio.Lock()
         self._inflight_symbols: set[str] = set()
         self._last_ws_sltp_check_ts: Dict[str, float] = {}
+        self._last_tick_flip_tighten_ts: Dict[str, float] = {}
         self._partial_fill_tasks: Dict[str, asyncio.Task] = {}
 
     async def initialize(
@@ -1775,8 +1779,17 @@ class ExecutionEngine:
                     payload_data["predicted_signal"] = predicted_signal
                 if entry_time is not None:
                     payload_data["entry_time"] = entry_time
+                    if hasattr(entry_time, "isoformat"):
+                        payload_data["opened_at"] = entry_time.isoformat()
+                    else:
+                        payload_data["opened_at"] = entry_time
                 elif position.get("entry_time") is not None:
                     payload_data["entry_time"] = position.get("entry_time")
+                    oa = position.get("opened_at") or position.get("entry_time")
+                    if oa is not None:
+                        payload_data["opened_at"] = (
+                            oa.isoformat() if hasattr(oa, "isoformat") else oa
+                        )
                     logger.warning(
                         "position_close_entry_time_recovered_from_position",
                         symbol=symbol,
@@ -2951,7 +2964,58 @@ class ExecutionEngine:
     async def update_position_price_and_check(self, symbol: str, price: float) -> None:
         """Update position price and run SL/TP check (for WebSocket-driven path)."""
         self.position_manager.update_position(symbol, price)
+        await self._maybe_tick_flip_manage(symbol, price)
         await self.manage_position(symbol)
+
+    async def _maybe_tick_flip_manage(self, symbol: str, price: float) -> None:
+        """Sub-candle flip-risk tighten or emergency exit between TLE candle cycles."""
+        if not bool(getattr(settings, "tick_flip_tighten_enabled", False)):
+            return
+        if bool(getattr(settings, "trade_lifecycle_log_only", False)):
+            return
+
+        position = self.position_manager.get_position(symbol)
+        if not position or position.get("status") != "open":
+            return
+
+        now = time.time()
+        cooldown = float(getattr(settings, "tick_flip_tighten_cooldown_seconds", 30.0) or 30.0)
+        if now - self._last_tick_flip_tighten_ts.get(symbol, 0.0) < cooldown:
+            return
+
+        feats = position.get("cached_features")
+        if not isinstance(feats, dict):
+            feats = position.get("features")
+        market_data_service = getattr(self, "market_data_service", None)
+        if (not isinstance(feats, dict) or not feats) and market_data_service is not None:
+            cached = market_data_service.get_cached_features(symbol)
+            if isinstance(cached, dict) and cached:
+                feats = cached
+                position["cached_features"] = dict(cached)
+        if not isinstance(feats, dict):
+            return
+
+        from agent.core.market_flip_detector import detect_market_flip_risk
+
+        side = str(position.get("side") or "long").lower()
+        pos_side = "long" if side in ("long", "buy") else "short"
+        snap = detect_market_flip_risk(feats, pos_side, symbol, settings=settings)
+        threshold = float(getattr(settings, "tick_flip_tighten_threshold", 0.70) or 0.70)
+        if snap.score < threshold:
+            return
+
+        self._last_tick_flip_tighten_ts[symbol] = now
+
+        if bool(getattr(settings, "tick_flip_emergency_exit_enabled", False)):
+            await self.close_position(symbol, exit_reason="tick_flip_emergency")
+            return
+
+        from agent.core.trade_lifecycle_engine import _propose_tighten_stop
+
+        live_mc = {"features": feats, "symbol": symbol}
+        proposed = _propose_tighten_stop(position, snap.score, live_mc)
+        if proposed is not None:
+            await self.apply_lifecycle_tighten(symbol, proposed)
 
     async def _validate_trade(self, trade: Dict[str, Any]) -> Dict[str, Any]:
         """Validate trade parameters."""

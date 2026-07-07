@@ -71,7 +71,8 @@ def evaluate_position_quality(
     opposite, opp_reason = _opposite_signal_inputs(live_mc, pos_side)
 
     health, inv_reasons, health_breakdown = _compute_health_score(
-        continuation, conviction_delta, flip_score, live_mc, opposite
+        continuation, conviction_delta, flip_score, live_mc, opposite,
+        position_side=pos_side,
     )
     opportunity, opp_reasons = _compute_opportunity_score(
         continuation, conviction_delta, live_mc

@@ -718,6 +718,7 @@ class IntelligentAgent:
                                     symbol
                                 )
                                 if cached_features:
+                                    position["cached_features"] = dict(cached_features)
                                     fresh_atr = cached_features.get("atr_14")
                                     fresh_regime = cached_features.get("regime")
                                     if fresh_atr is not None:

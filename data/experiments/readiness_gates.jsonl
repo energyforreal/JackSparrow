@@ -1,0 +1,1 @@
+{"gate_id": "p1_data_integrity", "pass": false, "error": "no_db", "description": "Phase 1 exit: opened_at, wallet attribution, snapshot autopsy", "min_trades": 5, "min_opened_at_pct": 95.0, "min_wallet_commission_pct": 80.0, "min_autopsy_pct": 90.0}

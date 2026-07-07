@@ -1649,6 +1649,19 @@ class TradingEventHandler:
         )
 
         try:
+            from agent.core.agent_policy_engine import agent_policy_engine
+
+            pos_policy = agent_policy_engine.evaluate_position(
+                position=open_pos,
+                market_context=live_mc,
+                lifecycle_verdict=verdict.to_dict(),
+            )
+            open_pos["last_position_policy"] = pos_policy
+            logger.debug("position_policy_verdict", symbol=symbol, **pos_policy)
+        except Exception as pol_exc:
+            logger.debug("position_policy_eval_failed", error=str(pol_exc))
+
+        try:
             from agent.core.signal_audit_md import append_trade_lifecycle_verdict
 
             append_trade_lifecycle_verdict(

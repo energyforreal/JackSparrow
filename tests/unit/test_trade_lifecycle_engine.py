@@ -78,7 +78,13 @@ def mock_settings(monkeypatch):
     s.jacksparrow_v43_short_execution_enabled = False
     s.trade_lifecycle_ev_exit_enabled = True
     s.trade_lifecycle_fee_aware_hold_enabled = True
-    s.exit_engine_min_stay_ev_delta = 0.0
+    s.exit_engine_min_stay_ev_delta = 0.002
+    s.trade_lifecycle_min_hold_bars = 0
+    s.trade_lifecycle_health_exit_requires_critical = True
+    s.trade_lifecycle_conviction_penalty_soften_alignment = 0.70
+    s.trade_lifecycle_health_low_hold_opportunity_min = 60.0
+    s.trade_lifecycle_breakeven_profit_pct = 0.004
+    s.position_forecast_adapter_enabled = True
     s.stop_loss_percentage = 0.01
     s.take_profit_percentage = 0.02
     s.use_atr_scaled_sl_tp = True
@@ -117,14 +123,26 @@ def test_lifecycle_exit_broken_thesis(mock_settings) -> None:
 
 def test_lifecycle_exit_health_only(mock_settings) -> None:
     mock_settings.trade_lifecycle_ev_exit_enabled = False
+    mock_settings.trade_lifecycle_health_exit_requires_critical = False
     mc = _live_mc(
         policy_verdict={"conviction": 0.2, "signal": "HOLD"},
         features={"adx_14": 10.0, "rsi_14": 35.0, "ema_9": 95.0, "ema_21": 100.0, "atr_14": 2.0},
     )
-    verdict = evaluate_lifecycle(_position(), _snapshot(), mc)
+    pos = _position(lifecycle_monitoring=[{}, {}])
+    verdict = evaluate_lifecycle(pos, _snapshot(), mc)
     assert verdict.action == "EXIT"
     assert verdict.exit_trigger == "health_threshold"
     assert verdict.exit_reason_detail == "health_below_exit_threshold"
+
+
+def test_lifecycle_soft_health_prefers_tighten(mock_settings) -> None:
+    """Soft invalidation without critical codes should tighten before exiting."""
+    mc = _live_mc(
+        policy_verdict={"conviction": 0.55, "signal": "HOLD"},
+        features={"adx_14": 17.0, "rsi_14": 48.0, "ema_9": 101.0, "ema_21": 100.0, "atr_14": 2.0},
+    )
+    verdict = evaluate_lifecycle(_position(current_price=101.5), _snapshot(), mc)
+    assert verdict.action in ("TIGHTEN_SL", "HOLD")
 
 
 def test_lifecycle_exit_health_and_fsm(mock_settings) -> None:

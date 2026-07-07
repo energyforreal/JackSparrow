@@ -19,6 +19,69 @@ from agent.core.market_flip_detector import (
 )
 from agent.core.signal_vocabulary import is_long_signal, is_short_signal, normalize_signal
 
+_CRITICAL_INVALIDATION_CODES = frozenset({
+    "ema_death_cross",
+    "ema_golden_cross",
+    "fsm_thesis_broken",
+    "narrative_exhaustion",
+})
+
+_SCENARIO_CRISIS_PHASES = frozenset({
+    "markdown",
+    "trend_exhaustion",
+    "liquidity_grab",
+})
+
+
+def _bars_held(position: Dict[str, Any]) -> int:
+    """Approximate decision cycles since entry from lifecycle monitoring records."""
+    mon = position.get("lifecycle_monitoring")
+    if isinstance(mon, list):
+        return len(mon)
+    return 0
+
+
+def _has_critical_invalidation(continuation: ContinuationResult) -> bool:
+    codes = set(continuation.invalidation_codes)
+    return bool(codes & _CRITICAL_INVALIDATION_CODES)
+
+
+def _scenario_health_adjustment(
+    live_mc: Dict[str, Any],
+    position_side: str,
+) -> Tuple[float, List[str]]:
+    """Penalties from cognition scenario phase shifts."""
+    penalties: List[str] = []
+    score_delta = 0.0
+    dc = live_mc.get("decision_context_v3")
+    if not isinstance(dc, dict):
+        return 0.0, penalties
+    scenario = dc.get("scenario")
+    if not isinstance(scenario, dict):
+        return 0.0, penalties
+    revision = str(scenario.get("revision_reason") or "")
+    primary = str(scenario.get("primary") or "").lower()
+    if not revision.startswith("phase_shift_"):
+        return 0.0, penalties
+
+    penalties.append(revision)
+    if "to_crisis" in revision or primary in _SCENARIO_CRISIS_PHASES:
+        score_delta -= 25.0
+        penalties.append("scenario_crisis_phase")
+    elif "trending_to_ranging" in revision or "markup_to_range" in revision:
+        if position_side == "long":
+            score_delta -= 15.0
+            penalties.append("scenario_trend_to_range_long")
+    elif "trending_to_ranging" in revision or "markdown_to_range" in revision:
+        if position_side == "short":
+            score_delta -= 15.0
+            penalties.append("scenario_trend_to_range_short")
+    elif "to_range" in revision or primary == "range":
+        score_delta -= 8.0
+
+    return score_delta, penalties
+
+
 LifecycleAction = Literal["HOLD", "TIGHTEN_SL", "MODIFY_TP", "EXIT"]
 TpDirection = Literal["extend", "reduce"]
 ExitTrigger = Literal[
@@ -171,6 +234,8 @@ def _compute_health_score(
     flip_score: float,
     live_mc: Dict[str, Any],
     opposite: bool,
+    *,
+    position_side: str = "long",
 ) -> Tuple[float, List[str], Dict[str, Any]]:
     """0-100 risk score (higher = healthier) with component breakdown."""
     alignment_base = 100.0 * continuation.alignment
@@ -181,10 +246,19 @@ def _compute_health_score(
     exit_delta = float(
         getattr(settings, "trade_lifecycle_conviction_exit_delta", -0.25) or -0.25
     )
+    soften_align = float(
+        getattr(settings, "trade_lifecycle_conviction_penalty_soften_alignment", 0.70)
+        or 0.70
+    )
     if conviction_delta <= exit_delta:
         reasons.append(f"conviction_drop:{conviction_delta:.3f}")
-        penalties["conviction_drop"] = -25.0
-        score -= 25.0
+        conv_penalty = -25.0
+        if continuation.alignment >= soften_align:
+            conv_penalty = -12.0
+            penalties["conviction_drop_softened"] = conv_penalty
+        else:
+            penalties["conviction_drop"] = conv_penalty
+        score += conv_penalty
 
     flip_exit = float(getattr(settings, "trade_lifecycle_flip_exit_score", 0.70) or 0.70)
     if flip_score >= flip_exit:
@@ -194,6 +268,12 @@ def _compute_health_score(
     elif flip_score >= flip_exit * 0.75:
         penalties["flip_risk_elevated"] = -10.0
         score -= 10.0
+
+    scenario_delta, scenario_reasons = _scenario_health_adjustment(live_mc, position_side)
+    if scenario_delta != 0.0:
+        reasons.extend(scenario_reasons)
+        penalties["scenario_phase_shift"] = scenario_delta
+        score += scenario_delta
 
     fsm = (live_mc.get("rule_based_pipeline") or {}).get("fsm_decision")
     if isinstance(fsm, dict):
@@ -309,6 +389,27 @@ def _propose_tighten_stop(
         current_sl_f = float(current_sl) if current_sl is not None else None
     except (TypeError, ValueError):
         current_sl_f = None
+
+    be_pct = float(getattr(settings, "trade_lifecycle_breakeven_profit_pct", 0.0) or 0.0)
+    if be_pct > 0:
+        if side == "long" and current > entry:
+            profit_pct = (current - entry) / entry
+            if profit_pct >= be_pct:
+                from agent.core.v43_signal_gates import round_trip_cost_pct
+
+                rtc = round_trip_cost_pct()
+                be_stop = entry * (1.0 + rtc)
+                if current_sl_f is None or be_stop > current_sl_f:
+                    return be_stop
+        elif side == "short" and current < entry:
+            profit_pct = (entry - current) / entry
+            if profit_pct >= be_pct:
+                from agent.core.v43_signal_gates import round_trip_cost_pct
+
+                rtc = round_trip_cost_pct()
+                be_stop = entry * (1.0 - rtc)
+                if current_sl_f is None or be_stop < current_sl_f:
+                    return be_stop
 
     feats = live_mc.get("features")
     if isinstance(feats, dict) and flip_score > 0:
@@ -475,10 +576,76 @@ def evaluate_lifecycle(
     continuation = position_quality.continuation
     opposite = position_quality.opposite
     opp_reason = position_quality.opposite_reason
-    inv_reasons = position_quality.invalidation_reasons
-    opp_reasons = position_quality.opportunity_reasons
+    inv_reasons = list(position_quality.invalidation_reasons)
+    opp_reasons = list(position_quality.opportunity_reasons)
     health_breakdown = position_quality.health_breakdown
     flip_score = position_quality.flip_score
+
+    from agent.core.position_forecast_adapter import evaluate_forecast_adjustment
+
+    forecast_adj = evaluate_forecast_adjustment(position, entry_snapshot, live_mc)
+    if forecast_adj.reason_codes:
+        opp_reasons.extend(forecast_adj.reason_codes)
+    if forecast_adj.hint == "extend_tp" and opportunity < 85.0:
+        opportunity = min(100.0, opportunity + 10.0)
+        opp_reasons.append("forecast_extend_boost")
+    elif forecast_adj.hint == "reduce_tp":
+        opportunity = max(0.0, opportunity - 8.0)
+        opp_reasons.append("forecast_reduce_penalty")
+    elif forecast_adj.hint == "tighten":
+        health = max(0.0, health - 5.0)
+        inv_reasons.append("forecast_tighten_hint")
+    elif forecast_adj.hint == "exit_candidate" and forecast_adj.expectation_confidence >= 0.6:
+        health = max(0.0, health - 12.0)
+        inv_reasons.append("forecast_exit_candidate")
+
+    position_quality.health_score = health
+    position_quality.opportunity_score = opportunity
+    position_quality.invalidation_reasons = inv_reasons
+    position_quality.opportunity_reasons = opp_reasons
+
+    try:
+        from agent.intelligence.evidence_graph_diff import graph_diff_from_snapshots
+
+        gdiff = graph_diff_from_snapshots(entry_snapshot, live_mc)
+        for code in gdiff.get("invalidation_codes") or []:
+            if code not in inv_reasons:
+                inv_reasons.append(code)
+        g_align = float(gdiff.get("alignment") or 1.0)
+        if g_align < 0.5:
+            health = max(0.0, health - 10.0)
+            inv_reasons.append("evidence_graph_low_alignment")
+        position_quality.health_score = health
+        position_quality.invalidation_reasons = inv_reasons
+    except Exception:
+        pass
+
+    try:
+        from agent.core.position_scale import evaluate_scale_out
+
+        position["last_scale_out_hint"] = evaluate_scale_out(
+            position,
+            health_score=health,
+            opportunity_score=opportunity,
+        ).to_dict()
+    except Exception:
+        pass
+
+    trade_score_raw = live_mc.get("trade_score")
+    if isinstance(trade_score_raw, dict):
+        try:
+            ts_val = float(
+                trade_score_raw.get("total_score")
+                or trade_score_raw.get("quality_score")
+                or 0
+            )
+            if ts_val > 0 and ts_val < 40.0 and health > 45.0:
+                health = max(0.0, health - 5.0)
+                inv_reasons.append("trade_score_entry_penalty_while_open")
+                position_quality.health_score = health
+                position_quality.invalidation_reasons = inv_reasons
+        except (TypeError, ValueError):
+            pass
 
     hold_min = float(getattr(settings, "trade_lifecycle_health_hold_min", 70.0) or 70.0)
     tighten_min = float(getattr(settings, "trade_lifecycle_health_tighten_min", 50.0) or 50.0)

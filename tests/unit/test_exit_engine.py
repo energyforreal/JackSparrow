@@ -37,6 +37,21 @@ def test_fee_aware_hold_july2_pattern() -> None:
         "side": "long",
         "entry_price": 60000.0,
         "current_price": 60100.0,
+        "lifecycle_monitoring": [{}, {}],
+    }
+    quality = _quality(health=48.0, opportunity=65.0)
+    decision = decide_exit(position, quality)
+    assert decision.should_exit is False
+    assert decision.fee_aware_hold is True
+
+
+def test_fee_aware_hold_high_opportunity() -> None:
+    """health=48, opportunity=82 should HOLD under EV arbiter."""
+    position = {
+        "side": "long",
+        "entry_price": 60000.0,
+        "current_price": 60100.0,
+        "lifecycle_monitoring": [{}, {}],
     }
     quality = _quality(health=48.0, opportunity=82.0)
     decision = decide_exit(position, quality)

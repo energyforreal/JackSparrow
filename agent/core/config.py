@@ -1755,6 +1755,65 @@ class Settings(BaseSettings):
         ge=0.0,
         description="Minimum relative TP change before MODIFY_TP executes.",
     )
+    trade_lifecycle_min_hold_bars: int = Field(
+        default=2,
+        env="TRADE_LIFECYCLE_MIN_HOLD_BARS",
+        ge=0,
+        description="Minimum TLE monitoring cycles before non-hard lifecycle EXIT.",
+    )
+    trade_lifecycle_health_exit_requires_critical: bool = Field(
+        default=True,
+        env="TRADE_LIFECYCLE_HEALTH_EXIT_REQUIRES_CRITICAL",
+        description="Require critical invalidation for health-only EXIT (not opposite/FSM).",
+    )
+    trade_lifecycle_conviction_penalty_soften_alignment: float = Field(
+        default=0.70,
+        env="TRADE_LIFECYCLE_CONVICTION_PENALTY_SOFTEN_ALIGNMENT",
+        ge=0.0,
+        le=1.0,
+        description="When continuation alignment >= this, halve conviction-drop health penalty.",
+    )
+    trade_lifecycle_health_low_hold_opportunity_min: float = Field(
+        default=60.0,
+        env="TRADE_LIFECYCLE_HEALTH_LOW_HOLD_OPPORTUNITY_MIN",
+        ge=0.0,
+        le=100.0,
+        description="Hold when health below exit_max but opportunity above this and thesis valid.",
+    )
+    trade_lifecycle_breakeven_profit_pct: float = Field(
+        default=0.004,
+        env="TRADE_LIFECYCLE_BREAKEVEN_PROFIT_PCT",
+        ge=0.0,
+        description="Move SL to break-even after this unrealized profit fraction (0=disabled).",
+    )
+    tick_flip_tighten_enabled: bool = Field(
+        default=False,
+        env="TICK_FLIP_TIGHTEN_ENABLED",
+        description="Run flip-risk tighten on WebSocket ticks between candles.",
+    )
+    tick_flip_tighten_threshold: float = Field(
+        default=0.70,
+        env="TICK_FLIP_TIGHTEN_THRESHOLD",
+        ge=0.0,
+        le=1.0,
+        description="Flip score at or above which tick path may tighten SL.",
+    )
+    tick_flip_emergency_exit_enabled: bool = Field(
+        default=False,
+        env="TICK_FLIP_EMERGENCY_EXIT_ENABLED",
+        description="Close position on tick when flip score exceeds threshold (aggressive).",
+    )
+    tick_flip_tighten_cooldown_seconds: float = Field(
+        default=30.0,
+        env="TICK_FLIP_TIGHTEN_COOLDOWN_SECONDS",
+        ge=0.0,
+        description="Minimum seconds between tick-driven SL tightens per symbol.",
+    )
+    position_forecast_adapter_enabled: bool = Field(
+        default=True,
+        env="POSITION_FORECAST_ADAPTER_ENABLED",
+        description="Apply cognition expectation hints in Trade Lifecycle Engine.",
+    )
     entry_limit_order_enabled: bool = Field(
         default=False,
         env="ENTRY_LIMIT_ORDER_ENABLED",
@@ -2041,7 +2100,7 @@ class Settings(BaseSettings):
         description="Take-profit distance lower bound: atr_14 * this factor (when ATR scaling on)",
     )
     trailing_stop_activation_profit_pct: float = Field(
-        default=0.0,
+        default=0.004,
         env="TRAILING_STOP_ACTIVATION_PROFIT_PCT",
         description=(
             "Only ratchet trailing stop after unrealized profit exceeds this fraction (0 = always trail when in profit)"
@@ -2502,9 +2561,23 @@ class Settings(BaseSettings):
         description="Hold positions when exit would lock in fee-dominated loss.",
     )
     exit_engine_min_stay_ev_delta: float = Field(
-        default=0.0,
+        default=0.002,
         env="EXIT_ENGINE_MIN_STAY_EV_DELTA",
         description="Minimum EV delta required to prefer exit over hold.",
+    )
+    ranging_sl_multiplier: float = Field(
+        default=0.75,
+        env="RANGING_SL_MULTIPLIER",
+        ge=0.5,
+        le=1.5,
+        description="SL distance multiplier override for ranging/neutral regime.",
+    )
+    crisis_sl_multiplier: float = Field(
+        default=1.2,
+        env="CRISIS_SL_MULTIPLIER",
+        ge=0.5,
+        le=2.0,
+        description="SL distance multiplier override for crisis regime (tighter than legacy 1.5).",
     )
     agent_thesis_breakout_bb_pos_max: float = Field(
         default=0.85,
