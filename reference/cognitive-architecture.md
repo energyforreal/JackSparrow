@@ -50,18 +50,18 @@ Narrative remains append-only under `data/market_narrative/`; it is not a Decisi
 
 ## Shadow rollout
 
-| Flag | Default | Effect |
-|------|---------|--------|
-| `COGNITION_SHADOW_ENABLED` | true | Run full cognition cycle; log only |
-| `COGNITION_EXPECTATION_ENABLED` | false | Authoritative expectation |
-| `COGNITION_MEMORY_ENABLED` | false | Authoritative memory |
-| `COGNITION_SCENARIO_ENABLED` | false | Authoritative scenario |
-| `COGNITION_RISK_ENABLED` | false | Authoritative risk slice |
-| `COGNITION_SELECTOR_ENABLED` | false | Filter thesis families |
-| `COGNITION_SCORER_ENABLED` | false | Scorer weights in hypothesis aggregate |
-| `COGNITION_TEMPORAL_AUTHORITY_ENABLED` | false | Stage 4B: post-cognition trade_score / ml_confirms / entry_quality |
+| Flag | Default | Testnet (2026-07-06) | Effect |
+|------|---------|----------------------|--------|
+| `COGNITION_SHADOW_ENABLED` | true | **true** | Run full cognition cycle; log only |
+| `COGNITION_EXPECTATION_ENABLED` | false | false | Authoritative expectation |
+| `COGNITION_MEMORY_ENABLED` | false | false | Authoritative memory |
+| `COGNITION_SCENARIO_ENABLED` | false | false | Authoritative scenario |
+| `COGNITION_RISK_ENABLED` | false | false | Authoritative risk slice |
+| `COGNITION_SELECTOR_ENABLED` | false | **true** (Stage 1) | Filter thesis families |
+| `COGNITION_SCORER_ENABLED` | false | **true** (Stage 2) | Scorer weights in hypothesis aggregate |
+| `COGNITION_TEMPORAL_AUTHORITY_ENABLED` | false | false (Stage 4B pending) | Post-cognition trade_score / ml_confirms / entry_quality |
 
-Live trade signals unchanged until authoritative flags enabled and validated via replay.
+Logical authority (selector + scorer) is **live on India testnet Docker**. Temporal authority remains off until Stage 5 shadow completes. See [Rule-Based Decision Engine – Cognition rollout](../docs/rule-based-decision-engine.md#cognition-authority-rollout-v2).
 
 ## Provisional vs authoritative thesis
 
@@ -90,12 +90,14 @@ cognition_thesis_authority_compare (telemetry)
 
 ## Stage 5 validation ladder
 
-Before live execution authority:
+Before enabling **Stage 4B** (`COGNITION_TEMPORAL_AUTHORITY_ENABLED=true`) or live execution authority:
 
 1. **Replay** — `tools/cognition_rollout_report.py` green vs `phase0_baseline.json` at each stage
-2. **Shadow (48–72h)** — Docker logs: zero `cognition_attach_failures`; archive `cognition_thesis_authority_compare`
+2. **Shadow (48–72h)** — Docker logs: zero attach failures; archive `cognition_thesis_authority_compare`
 3. **Paper trading (7d)** — PnL/risk vs control; entry rate within bounds
-4. **Live sign-off** — Human gate; do not enable temporal authority on live without completing 1–3
+4. **Live sign-off** — Human gate; enable temporal authority only after completing 1–3
+
+**Current position (2026-07-06):** Stages 1–2 deployed on testnet; Step 2 (shadow observation) in progress. Stage 4B must not be enabled until shadow + paper gates pass.
 
 ## Memory decay
 
@@ -106,6 +108,7 @@ Selector uses weighted sums, not raw counts.
 
 - **Calibration**: expectation vs outcome at T+N
 - **What-if**: evaluate all strategy profiles per bar (`agent/testing/cognition_replay.py`)
+- **Rollout regression**: pinned scenarios + stage diffs (`tools/cognition_rollout_report.py`); artifacts under `logs/agent/cognition_rollout/`
 
 ## Extension
 
@@ -113,13 +116,22 @@ New strategies register in `strategy_profiles.py` only; no orchestrator changes 
 
 ## Docker
 
-Application code is baked into images. After pulling cognition changes:
+Application code is baked into images. After cognition rollout changes:
 
 ```bash
-docker compose build agent backend frontend
-docker compose up -d --force-recreate
+docker compose build agent
+docker compose up -d --force-recreate agent
 ```
 
-Validate shadow attach: `docker compose logs agent 2>&1 | grep decision_context_v3_attached`
+Flag-only changes (no code): `docker compose up -d --force-recreate agent` is sufficient — agent loads `.env.example` then root `.env`.
 
-See [Deployment – Docker Compose](../docs/10-deployment.md#docker-compose-deployment).
+Verify deployment:
+
+```bash
+docker compose logs agent 2>&1 | grep cognition_config_effective
+# Expect: shadow=true selector=true scorer=true temporal_authority=false
+
+docker compose logs agent 2>&1 | grep cognition_thesis_authority_compare | tail -3
+```
+
+See [Deployment – Cognition authority rollout](../docs/10-deployment.md#cognition-authority-rollout-testnet) and [Rule-Based Decision Engine](../docs/rule-based-decision-engine.md#cognition-authority-rollout-v2).

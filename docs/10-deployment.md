@@ -1082,6 +1082,56 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `FIXED_LOT_SIZE` | Integer lots when fixed sizing path is active | No | `1` |
 | `MAX_LOTS_PER_ORDER` | Upper cap on `price_to_lots` output | No | `100` |
 
+### Cognition authority rollout (testnet)
+
+Staged grant of cognition **logical** then **temporal** authority. Full checklist: [Rule-Based Decision Engine – Cognition rollout](../rule-based-decision-engine.md#cognition-authority-rollout-v2).
+
+#### Current status (2026-07-06)
+
+| Item | Value |
+|------|-------|
+| Environment | India testnet Docker (`jacksparrow-agent`) |
+| `COGNITION_SELECTOR_ENABLED` | `true` (Stage 1 live) |
+| `COGNITION_SCORER_ENABLED` | `true` (Stage 2 live) |
+| `COGNITION_TEMPORAL_AUTHORITY_ENABLED` | `false` (Stage 4B — blocked until Stage 5 shadow) |
+| Replay artifacts | `logs/agent/cognition_rollout/*.json` |
+| Next gate | 48–72h shadow observation; archive `cognition_thesis_authority_compare` |
+
+Set flags in **root `.env`** (overrides `.env.example`). Example block:
+
+```env
+COGNITION_SHADOW_ENABLED=true
+COGNITION_SELECTOR_ENABLED=true
+COGNITION_SCORER_ENABLED=true
+COGNITION_TEMPORAL_AUTHORITY_ENABLED=false
+```
+
+**Redeploy agent** after flag changes:
+
+```bash
+docker compose up -d --force-recreate agent
+```
+
+**Verify** startup and per-bar telemetry:
+
+```bash
+docker compose logs agent 2>&1 | grep cognition_config_effective
+docker compose logs agent 2>&1 | grep cognition_thesis_authority_compare | tail -5
+```
+
+**Advance to Stage 4B** only after shadow + paper trading sign-off:
+
+```env
+COGNITION_TEMPORAL_AUTHORITY_ENABLED=true
+```
+
+Then redeploy agent and run:
+
+```bash
+python tools/cognition_rollout_report.py --stage stage4b --selector true --scorer true --temporal true \
+  --baseline logs/agent/cognition_rollout/phase0_baseline.json
+```
+
 ### Frontend Environment Variables
 
 | Variable | Description | Required | Default |

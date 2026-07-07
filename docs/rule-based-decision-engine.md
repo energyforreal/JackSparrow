@@ -110,7 +110,7 @@ Acyclic order: **Expectation → Memory → Scenario → Risk → Selector → S
 
 ### Cognition authority rollout (v2)
 
-Staged rollout granting cognition **logical** authority (selector/scorer) then **temporal** authority (post-cognition adjudication). Do not enable `COGNITION_TEMPORAL_AUTHORITY_ENABLED` until Stages 1–3 replay reports are signed off.
+Staged rollout granting cognition **logical** authority (selector/scorer) then **temporal** authority (post-cognition adjudication). Do not enable `COGNITION_TEMPORAL_AUTHORITY_ENABLED` until Stages 1–3 replay reports are signed off and the Stage 5 shadow ladder completes.
 
 | Stage | Flags | Validation |
 |-------|-------|------------|
@@ -122,14 +122,45 @@ Staged rollout granting cognition **logical** authority (selector/scorer) then *
 | 4B | `COGNITION_TEMPORAL_AUTHORITY_ENABLED=true` | Consumers use post-cognition outputs |
 | 5 | operational | 48–72h shadow → 7d paper → human live sign-off |
 
+#### Current testnet status (2026-07-06)
+
+| Stage | Status | Notes |
+|-------|--------|-------|
+| Phase 0 | Complete | `logs/agent/cognition_rollout/phase0_baseline.json` |
+| 1 — Selector | **Live** | `COGNITION_SELECTOR_ENABLED=true` in root `.env` |
+| 2 — Scorer | **Live** | `COGNITION_SCORER_ENABLED=true` in root `.env` |
+| 3 — Telemetry | **Live** | `cognition_thesis_authority_compare` on each closed bar |
+| 4A — Parity | Verified (replay) | Zero signal/policy deltas vs Phase 0 |
+| 4B — Temporal | **Not enabled** | `COGNITION_TEMPORAL_AUTHORITY_ENABLED=false` |
+| 5 — Shadow ladder | **In progress** | 48–72h Docker observation before Stage 4B |
+
+Active overrides in root `.env` (secrets file; not committed):
+
+```env
+COGNITION_SHADOW_ENABLED=true
+COGNITION_SELECTOR_ENABLED=true
+COGNITION_SCORER_ENABLED=true
+COGNITION_TEMPORAL_AUTHORITY_ENABLED=false
+```
+
+Redeploy after flag changes:
+
+```bash
+docker compose up -d --force-recreate agent
+docker compose logs agent 2>&1 | grep cognition_config_effective
+```
+
 **Replay Summary** (per stage):
 
 ```bash
 python tools/cognition_rollout_report.py --stage phase0 --out logs/agent/cognition_rollout/phase0_baseline.json
-python tools/cognition_rollout_report.py --stage stage1 --selector true --baseline logs/agent/cognition_rollout/phase0_baseline.json
-python tools/cognition_rollout_report.py --stage stage2 --selector true --scorer true --baseline logs/agent/cognition_rollout/stage1.json
+python tools/cognition_rollout_report.py --stage stage1 --selector true --baseline logs/agent/cognition_rollout/phase0_baseline.json --out logs/agent/cognition_rollout/stage1_docker.json
+python tools/cognition_rollout_report.py --stage stage2 --selector true --scorer true --baseline logs/agent/cognition_rollout/stage1_docker.json --out logs/agent/cognition_rollout/stage2_docker.json
+python tools/cognition_rollout_report.py --stage stage4a --selector false --scorer false --baseline logs/agent/cognition_rollout/phase0_baseline.json
 python tools/cognition_rollout_report.py --stage stage4b --selector true --scorer true --temporal true --baseline logs/agent/cognition_rollout/phase0_baseline.json
 ```
+
+Pinned regression dataset: seven built-in scenarios in `agent/testing/cognition_rollout.py` (`REGRESSION_SCENARIOS`).
 
 Agent startup logs `cognition_config_effective` with all flag values for deployment verification.
 
@@ -137,10 +168,11 @@ Agent startup logs `cognition_config_effective` with all flag values for deploym
 
 1. Deploy with defaults (`ml_legacy`, shadow on) — compare logs
 2. Validate cognition shadow: `pytest tests/unit/cognition/` or `python run_scenario_tests.py --cognition`
-3. `MARKET_FSM_ENFORCE=true` on testnet
-4. `DECISION_ENGINE_MODE=rule_based`
-5. Enable `COGNITION_SELECTOR_ENABLED` / `COGNITION_SCORER_ENABLED` after replay sign-off
-6. `ARCHETYPE_MEMORY_SHADOW=false` (optional sizing hints)
+3. Enable `COGNITION_SELECTOR_ENABLED` then `COGNITION_SCORER_ENABLED` one stage at a time; run `tools/cognition_rollout_report.py` after each
+4. Complete Stage 5 shadow ladder (48–72h) before `COGNITION_TEMPORAL_AUTHORITY_ENABLED=true`
+5. `MARKET_FSM_ENFORCE=true` on testnet (optional bridge)
+6. `DECISION_ENGINE_MODE=rule_based` (full cutover)
+7. `ARCHETYPE_MEMORY_SHADOW=false` (optional sizing hints)
 
 ---
 
@@ -191,6 +223,26 @@ Payload on `market_context` / trade snapshots: **`decision_context_v3`** (dict).
 | `policy_signal` | Final `policy_verdict.signal` |
 | `expectation_dominant` / `expectation_confidence` | From `decision_context_v3` |
 | `temporal_authority_enabled` | Whether Stage 4B consumers are active |
+
+#### Stage 5 shadow monitoring (Docker)
+
+While Stages 1–2 are live and Stage 4B is off, archive dual-path telemetry and watch for attach failures:
+
+```bash
+# Effective flags at startup
+docker compose logs agent 2>&1 | grep cognition_config_effective
+
+# Per-bar provisional vs authoritative compare (each closed 5m bar)
+docker compose logs agent 2>&1 | grep cognition_thesis_authority_compare
+
+# Selector eligibility + scorer weights (when hypotheses compete)
+docker compose logs agent 2>&1 | grep -E "eligible_strategy_profiles|hypothesis_scorer_weight"
+
+# Must stay at zero
+docker compose logs agent 2>&1 | grep cognition_attach_fail
+```
+
+Pass criteria before enabling Stage 4B: zero attach failures; decision stability within agreed bounds; human review of archived compare events.
 
 ---
 

@@ -2,7 +2,6 @@
 
 import os
 import sys
-import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -14,15 +13,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-
-# Force-load local `agent` package in case another installed package shadows it.
-agent_init = ROOT / "agent" / "__init__.py"
-agent_spec = importlib.util.spec_from_file_location("agent", agent_init)
-if agent_spec and agent_spec.loader:
-    agent_module = importlib.util.module_from_spec(agent_spec)
-    agent_module.__path__ = [str(ROOT / "agent")]
-    sys.modules["agent"] = agent_module
-    agent_spec.loader.exec_module(agent_module)
 
 # Ensure settings can initialize in test environments.
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test_db")
@@ -106,8 +96,8 @@ async def test_process_prediction_request_preserves_model_context():
 
     df_stub = pd.DataFrame(
         {
-            "close": [1.0, 2.0, 3.0],
-            "timestamp": pd.date_range("2024-01-01", periods=3, freq="5min", tz="UTC"),
+            "close": [float(i) for i in range(1, 41)],
+            "timestamp": pd.date_range("2024-01-01", periods=40, freq="5min", tz="UTC"),
         }
     )
     contract_snap = ContractStateSnapshot(
@@ -121,10 +111,21 @@ async def test_process_prediction_request_preserves_model_context():
         impact_size=10000.0,
         price_band_pct=2.5,
     )
+    closed_feats_pre = {"ret_1": 0.001, "atr_pct": 0.01, "ema_9": 39.5}
+    df_feat_pre = pd.DataFrame(
+        {
+            "ret_1": [0.0005, 0.001],
+            "atr_pct": [0.0095, 0.01],
+            "ema_9": [38.5, 39.5],
+        }
+    )
     with patch(
         "agent.core.v43_market_frames.fetch_v43_market_frames",
         new_callable=AsyncMock,
         return_value=(df_stub, df_stub, df_stub, df_stub, pd.DataFrame(), pd.DataFrame()),
+    ), patch(
+        "agent.data.incremental_feature_engine.incremental_feature_engine.update_from_frames",
+        return_value=(closed_feats_pre, df_feat_pre),
     ), patch(
         "agent.core.v43_contract_state.get_contract_state",
         new_callable=AsyncMock,

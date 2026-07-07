@@ -105,7 +105,7 @@ Shadow mode (`DECISION_ENGINE_MODE=ml_legacy` with shadow flags) logs the same p
 
 **Cognitive layer (DecisionContext v3, shadow by default)**
 
-On every closed bar (when `COGNITION_SHADOW_ENABLED=true`), the orchestrator attaches **`decision_context_v3`** to `market_context`: immutable slices for **expectation** (forward scenarios), **memory** (decayed behavioral history), **scenario** (market phase), **risk intelligence**, and **strategy selector/scorer** output. Live trade signals are unchanged until per-module `COGNITION_*_ENABLED` flags are turned on after replay validation. See [Cognitive Architecture](../reference/cognitive-architecture.md).
+On every closed bar (when `COGNITION_SHADOW_ENABLED=true`), the orchestrator attaches **`decision_context_v3`** to `market_context`: immutable slices for **expectation** (forward scenarios), **memory** (decayed behavioral history), **scenario** (market phase), **risk intelligence**, and **strategy selector/scorer** output. **Logical authority** (`COGNITION_SELECTOR_ENABLED`, `COGNITION_SCORER_ENABLED`) is live on testnet as of 2026-07-06; **temporal authority** (Stage 4B) remains off until the shadow validation ladder completes. See [Cognitive Architecture](../reference/cognitive-architecture.md) and [Cognition rollout](rule-based-decision-engine.md#cognition-authority-rollout-v2).
 
 **Deprecated settings (IC-only runtime):** `SINGLE_MODEL_MODE_ENABLED`, `CONSOLIDATED_MODEL_METADATA_GLOB`, `SINGLE_MODEL_STRICT_STARTUP`, and `JACKSPARROW_V43_INFERENCE_STACK` are ignored when `IC_MODE=true` (default). Model discovery loads only `metadata_ic.json` under `MODEL_DIR`.
 
