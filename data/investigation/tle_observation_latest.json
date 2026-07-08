@@ -1,12 +1,12 @@
 {
-  "scanned_at": "2026-07-07T11:47:19.697970+00:00",
+  "scanned_at": "2026-07-08T07:00:14.877673+00:00",
   "audit_log": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_audit\\live_audit.md",
-  "verdict_count": 931,
+  "verdict_count": 1260,
   "action_counts": {
-    "HOLD": 696,
-    "EXIT": 87,
-    "TIGHTEN_SL": 148
+    "HOLD": 875,
+    "EXIT": 113,
+    "TIGHTEN_SL": 272
   },
-  "avg_health": 67.08,
-  "avg_opportunity": 67.91
+  "avg_health": 61.86,
+  "avg_opportunity": 67.55
 }

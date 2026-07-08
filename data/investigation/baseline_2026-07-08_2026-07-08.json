@@ -1,0 +1,31 @@
+{
+  "captured_at": "2026-07-08T07:00:22.784307+00:00",
+  "window": {
+    "start": "2026-07-08",
+    "end": "2026-07-08"
+  },
+  "data_gaps": [
+    "audit log not found: /app/logs/signal_audit/live_audit.md"
+  ],
+  "trades": {
+    "count": 1,
+    "wins": 0,
+    "win_rate_pct": 0.0,
+    "total_pnl_usd": -2.7566,
+    "avg_pnl_usd": -2.7566,
+    "fee_dominated_count": 0,
+    "avg_fees_usd": 0.1339
+  },
+  "by_close_reason": [
+    {
+      "close_reason": "stop_loss_hit",
+      "count": 1,
+      "total_pnl": -2.7566
+    }
+  ],
+  "exit_triggers_audit_heuristic": {},
+  "mfe_mae": {
+    "status": "partial_price_delta_only",
+    "note": "Full MFE/MAE via replay_trade_excursions.py"
+  }
+}

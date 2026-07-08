@@ -1,0 +1,28 @@
+{
+  "exported_at": "2026-07-08T07:07:12.923869+00:00",
+  "window": {
+    "start": "2026-06-03",
+    "end": "2026-06-06"
+  },
+  "product_id": 84,
+  "fill_count": 0,
+  "fills": {
+    "meta": {
+      "after": null,
+      "limit": 100,
+      "before": null
+    },
+    "success": true,
+    "result": []
+  },
+  "wallet_transactions": {
+    "meta": {
+      "after": null,
+      "limit": 100,
+      "before": null,
+      "total_count": 0
+    },
+    "success": true,
+    "result": []
+  }
+}

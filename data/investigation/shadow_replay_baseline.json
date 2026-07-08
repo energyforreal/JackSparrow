@@ -1,31 +1,31 @@
 {
   "phase": "1b_shadow_replay_baseline",
-  "generated_at": "2026-07-05T06:10:21.529584+00:00",
+  "generated_at": "2026-07-08T07:03:42.069975+00:00",
   "window": {
     "start": "2026-04-11",
-    "end": "2026-07-04",
-    "total_trades_in_db": 167
+    "end": "2026-07-08",
+    "total_trades_in_db": 174
   },
   "actual_cohort": {
-    "trade_count": 167,
-    "expectancy_usd": -0.9339,
-    "profit_factor": 0.2427,
+    "trade_count": 174,
+    "expectancy_usd": -0.9941,
+    "profit_factor": 0.2242,
     "fee_dominated_count": 45,
-    "fee_dominated_rate": 0.2695,
-    "win_rate": 0.1257,
+    "fee_dominated_rate": 0.2586,
+    "win_rate": 0.1207,
     "avg_win_usd": 2.3803,
-    "avg_loss_usd": 1.4106
+    "avg_loss_usd": 1.4573
   },
   "per_regime": {
     "unknown": {
-      "trade_count": 87,
-      "expectancy_usd": -1.2986,
-      "profit_factor": 0.2926
+      "trade_count": 93,
+      "expectancy_usd": -1.3781,
+      "profit_factor": 0.2672
     },
     "neutral": {
-      "trade_count": 77,
-      "expectancy_usd": -0.5333,
-      "profit_factor": 0.0734
+      "trade_count": 78,
+      "expectancy_usd": -0.5499,
+      "profit_factor": 0.0705
     },
     "ranging": {
       "trade_count": 3,
@@ -34,17 +34,17 @@
     }
   },
   "artifacts": {
-    "replay_exit_policies": "/tmp/investigation/replay_exit_2026-04-11_2026-07-04.json",
-    "replay_trade_excursions": "/tmp/investigation/replay_excursions_2026-04-11_2026-07-04.json",
-    "tle_agreement": "/tmp/investigation/tle_agreement_latest.json"
+    "replay_exit_policies": "/app/data/investigation/replay_exit_2026-04-11_2026-07-08.json",
+    "replay_trade_excursions": "/app/data/investigation/replay_excursions_2026-04-11_2026-07-08.json",
+    "tle_agreement": "/app/data/experiments/tle_agreement_latest.json"
   },
   "rule": "No Phase 3 .env change without matching improvement on this window.",
   "replay_exit_policies_summary": {
     "window": {
       "start": "2026-04-11",
-      "end": "2026-07-04"
+      "end": "2026-07-08"
     },
-    "trade_count": 167,
+    "trade_count": 174,
     "policies": [
       {
         "bracket": {
@@ -2049,6 +2049,91 @@
           "policy": "tle_log_only",
           "pnl": -0.3501675,
           "note": "no_exit_signal"
+        }
+      },
+      {
+        "bracket": {
+          "policy": "bracket_actual",
+          "pnl": -1.477235,
+          "exit_reason": "stop_loss_hit"
+        },
+        "tle_log_only": {
+          "policy": "tle_log_only",
+          "would_exit_at_bar": null,
+          "health_score": 15.0,
+          "pnl_actual": -1.477235
+        }
+      },
+      {
+        "bracket": {
+          "policy": "bracket_actual",
+          "pnl": -3.16357,
+          "exit_reason": "stop_loss_hit"
+        },
+        "tle_log_only": {
+          "policy": "tle_log_only",
+          "pnl": -3.16357,
+          "note": "no_monitoring"
+        }
+      },
+      {
+        "bracket": {
+          "policy": "bracket_actual",
+          "pnl": -1.821458,
+          "exit_reason": "stop_loss_hit"
+        },
+        "tle_log_only": {
+          "policy": "tle_log_only",
+          "pnl": -1.821458,
+          "note": "no_exit_signal"
+        }
+      },
+      {
+        "bracket": {
+          "policy": "bracket_actual",
+          "pnl": -2.567134,
+          "exit_reason": "stop_loss_hit"
+        },
+        "tle_log_only": {
+          "policy": "tle_log_only",
+          "pnl": -2.567134,
+          "note": "no_exit_signal"
+        }
+      },
+      {
+        "bracket": {
+          "policy": "bracket_actual",
+          "pnl": -2.612532,
+          "exit_reason": "stop_loss_hit"
+        },
+        "tle_log_only": {
+          "policy": "tle_log_only",
+          "pnl": -2.612532,
+          "note": "no_monitoring"
+        }
+      },
+      {
+        "bracket": {
+          "policy": "bracket_actual",
+          "pnl": -2.612532,
+          "exit_reason": "stop_loss_hit"
+        },
+        "tle_log_only": {
+          "policy": "tle_log_only",
+          "pnl": -2.612532,
+          "note": "no_monitoring"
+        }
+      },
+      {
+        "bracket": {
+          "policy": "bracket_actual",
+          "pnl": -2.75655,
+          "exit_reason": "stop_loss_hit"
+        },
+        "tle_log_only": {
+          "policy": "tle_log_only",
+          "pnl": -2.75655,
+          "note": "no_monitoring"
         }
       }
     ]
@@ -4725,16 +4810,128 @@
         "tp_would_hit": null,
         "sl_would_hit": null
       }
+    },
+    {
+      "symbol": "BTCUSD",
+      "side": "long",
+      "entry_price": 63807.5,
+      "exit_price": 63639.5,
+      "pnl": -1.477235,
+      "close_reason": "stop_loss_hit",
+      "excursions": {
+        "bars_held": null,
+        "mfe_usd": 0.0,
+        "mae_usd": 168.0,
+        "mode": "price_delta_only",
+        "tp_would_hit": null,
+        "sl_would_hit": null
+      }
+    },
+    {
+      "symbol": "BTCUSD",
+      "side": "short",
+      "entry_price": 63104.0,
+      "exit_price": 63610.0,
+      "pnl": -3.16357,
+      "close_reason": "stop_loss_hit",
+      "excursions": {
+        "bars_held": null,
+        "mfe_usd": 0.0,
+        "mae_usd": 506.0,
+        "mode": "price_delta_only",
+        "tp_would_hit": null,
+        "sl_would_hit": null
+      }
+    },
+    {
+      "symbol": "BTCUSD",
+      "side": "short",
+      "entry_price": 63268.0,
+      "exit_price": 63596.5,
+      "pnl": -1.821458,
+      "close_reason": "stop_loss_hit",
+      "excursions": {
+        "bars_held": null,
+        "mfe_usd": 0.0,
+        "mae_usd": 328.5,
+        "mode": "price_delta_only",
+        "tp_would_hit": null,
+        "sl_would_hit": null
+      }
+    },
+    {
+      "symbol": "BTCUSD",
+      "side": "long",
+      "entry_price": 63899.0,
+      "exit_price": 63384.5,
+      "pnl": -2.567134,
+      "close_reason": "stop_loss_hit",
+      "excursions": {
+        "bars_held": null,
+        "mfe_usd": 0.0,
+        "mae_usd": 514.5,
+        "mode": "price_delta_only",
+        "tp_would_hit": null,
+        "sl_would_hit": null
+      }
+    },
+    {
+      "symbol": "BTCUSD",
+      "side": "long",
+      "entry_price": 63829.5,
+      "exit_price": 63303.5,
+      "pnl": -2.612532,
+      "close_reason": "stop_loss_hit",
+      "excursions": {
+        "bars_held": null,
+        "mfe_usd": 0.0,
+        "mae_usd": 526.0,
+        "mode": "price_delta_only",
+        "tp_would_hit": null,
+        "sl_would_hit": null
+      }
+    },
+    {
+      "symbol": "BTCUSD",
+      "side": "long",
+      "entry_price": 63829.5,
+      "exit_price": 63303.5,
+      "pnl": -2.612532,
+      "close_reason": "stop_loss_hit",
+      "excursions": {
+        "bars_held": null,
+        "mfe_usd": 0.0,
+        "mae_usd": 526.0,
+        "mode": "price_delta_only",
+        "tp_would_hit": null,
+        "sl_would_hit": null
+      }
+    },
+    {
+      "symbol": "BTCUSD",
+      "side": "long",
+      "entry_price": 63600.0,
+      "exit_price": 63037.5,
+      "pnl": -2.75655,
+      "close_reason": "stop_loss_hit",
+      "excursions": {
+        "bars_held": null,
+        "mfe_usd": 0.0,
+        "mae_usd": 562.5,
+        "mode": "price_delta_only",
+        "tp_would_hit": null,
+        "sl_would_hit": null
+      }
     }
   ],
   "tle_agreement_summary": {
-    "evaluated_at": "2026-07-05T06:10:21.456694+00:00",
-    "trade_count": 167,
+    "evaluated_at": "2026-07-08T07:03:42.035429+00:00",
+    "trade_count": 174,
     "exit_agreement_rate": 0.0,
-    "hold_agreement_rate": 1.0,
-    "overall_agreement": 0.5,
-    "exit_cycles": 1,
-    "hold_cycles": 54,
+    "hold_agreement_rate": 0.8052,
+    "overall_agreement": 0.4026,
+    "exit_cycles": 2,
+    "hold_cycles": 77,
     "opportunity_precision": 0.0,
     "opportunity_recall": 0.0,
     "high_opp_exit_cycles": 0,

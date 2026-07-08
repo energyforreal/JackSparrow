@@ -99,6 +99,10 @@ services:
     build:
       context: .
       dockerfile: agent/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-}
+        VERSION: ${VERSION:-latest}
+        COMMIT_SHA: ${GIT_COMMIT:-unknown}
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,6 +141,8 @@ services:
       QDRANT_URL: ${QDRANT_URL:-}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       AGENT_VECTOR_STORE_BACKEND: ${AGENT_VECTOR_STORE_BACKEND:-memory}
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      BUILD_ID: ${GIT_COMMIT:-unknown}
     volumes:
       - ./agent/model_storage:/app/agent/model_storage
       - ./logs/agent:/logs
@@ -169,6 +175,10 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-}
+        VERSION: ${VERSION:-latest}
+        COMMIT_SHA: ${GIT_COMMIT:-unknown}
     depends_on:
       postgres:
         condition: service_healthy
@@ -208,6 +218,8 @@ services:
       CORS_INTERNAL_ORIGINS: ${CORS_INTERNAL_ORIGINS:-http://frontend:3000}
       QDRANT_URL: ${QDRANT_URL:-}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+      BUILD_ID: ${GIT_COMMIT:-unknown}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

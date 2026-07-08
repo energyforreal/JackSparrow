@@ -33,6 +33,10 @@ RUN pip install --upgrade pip && \
 # Stage 2: Runtime
 FROM python:3.11.9-slim AS runtime
 
+ARG COMMIT_SHA=unknown
+ARG BUILD_DATE
+ARG VERSION=latest
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
@@ -40,7 +44,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MODEL_DIR=/app/agent/model_storage \
     MODEL_PATH= \
     AGENT_SYMBOL=BTCUSD \
-    AGENT_INTERVAL=15m
+    AGENT_INTERVAL=15m \
+    GIT_COMMIT=${COMMIT_SHA} \
+    BUILD_ID=${COMMIT_SHA}
 
 WORKDIR /app
 

@@ -165,10 +165,25 @@ class IntelligentAgent:
             },
         })
 
+        import os
+
+        git_commit = os.environ.get("GIT_COMMIT") or os.environ.get("BUILD_ID") or "unknown"
+        logger.info(
+            "system.startup",
+            service="agent",
+            session_id=self.session_id,
+            environment=settings.environment,
+            git_commit=git_commit,
+            agent_mode=self.start_mode,
+            symbol=self.default_symbol,
+            trading_mode=self.trading_mode,
+            timeframes=self.timeframes,
+        )
         logger.info(
             "agent_startup",
             service="agent",
             environment=settings.environment,
+            git_commit=git_commit,
             agent_mode=self.start_mode,
             symbol=self.default_symbol,
             trading_mode=self.trading_mode,

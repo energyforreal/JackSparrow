@@ -29,11 +29,17 @@ RUN pip install --upgrade pip && \
 # Stage 2: Runtime
 FROM python:3.11.9-slim AS runtime
 
+ARG COMMIT_SHA=unknown
+ARG BUILD_DATE
+ARG VERSION=latest
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PATH="/home/backend/.local/bin:${PATH}" \
-    BACKEND_PORT=8000
+    BACKEND_PORT=8000 \
+    GIT_COMMIT=${COMMIT_SHA} \
+    BUILD_ID=${COMMIT_SHA}
 
 WORKDIR /app
 

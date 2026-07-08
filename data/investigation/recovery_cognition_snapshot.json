@@ -1,0 +1,13 @@
+{
+  "captured_at": "2026-07-08T06:49:03+00:00",
+  "phase": "recovery_cognition_freeze",
+  "note": "Cognition selector/scorer remain enabled; temporal authority and further stages frozen per recovery plan.",
+  "flags": {
+    "COGNITION_SELECTOR_ENABLED": true,
+    "COGNITION_SCORER_ENABLED": true,
+    "COGNITION_TEMPORAL_AUTHORITY_ENABLED": false,
+    "COGNITION_SHADOW_ENABLED": true,
+    "COGNITION_EXPECTATION_ENABLED": false
+  },
+  "frozen_until": "tle_live_v1 and entry_tune_v1 gates pass"
+}

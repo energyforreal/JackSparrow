@@ -1,0 +1,17 @@
+{
+  "verified_at": "2026-07-08T07:02:00+00:00",
+  "phase": "phase_a_data_integrity",
+  "deployed": true,
+  "TRADE_MFE_MAE_AT_CLOSE_ENABLED": true,
+  "p1_data_integrity_gate": {
+    "pass": false,
+    "opened_at_pct": 35.0,
+    "note": "Improved vs 0% pre-Phase-A; needs more post-deploy round-trips for 95% target"
+  },
+  "recent_post_deploy": {
+    "opened_at_populated": 5,
+    "entry_metadata_populated": 0,
+    "blocker": "decision_context.entry still null on recent closes — monitor next round-trip after agent rebuild"
+  },
+  "next_action": "Wait for 1+ new trade close after 2026-07-08T06:49Z redeploy, then re-run recovery_phase_a_verify.py"
+}

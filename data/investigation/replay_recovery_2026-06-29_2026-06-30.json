@@ -1,0 +1,645 @@
+{
+  "window": {
+    "start": "2026-06-29",
+    "end": "2026-06-30"
+  },
+  "trade_count": 53,
+  "policies": [
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -4.241391,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -4.241391,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": 2.226654,
+        "exit_reason": "reconcile_exchange_flat"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": 2.226654,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.807594,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.807594,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.676182,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.676182,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.229989,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.229989,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.77226,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.77226,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.076374,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.076374,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": 1.076007,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": 1.076007,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.2658475,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.2658475,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.550392,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.550392,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.605556,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.605556,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.070488,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.070488,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.660477,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.660477,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -2.18241,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -2.18241,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.716127,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.716127,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.825906,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.825906,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.754296,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.754296,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.481281,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.481281,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.672801,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.672801,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.426531,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.426531,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.566832,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.566832,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.5058,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.5058,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.629331,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.629331,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.52893,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.52893,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": 0.372816,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": 0.372816,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.871095,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.871095,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.687042,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.687042,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.516339,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.516339,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -1.303215,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -1.303215,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.485046,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.485046,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.473082,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.473082,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -1.15692,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -1.15692,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -1.045731,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -1.045731,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.7233825,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.7233825,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -1.822104,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -1.822104,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.4020765,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.4020765,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.907884,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.907884,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.769002,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.769002,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.669441,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.669441,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -1.160919,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -1.160919,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.518751,
+        "exit_reason": "lifecycle_exit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.518751,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.8319945,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.8319945,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.080427,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.080427,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.810693,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.810693,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": 0.6358455,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": 0.6358455,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.37185,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.37185,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -3.563577,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -3.563577,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.327345,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.327345,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.7754805,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.7754805,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": 0.048126,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": 0.048126,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.217941,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.217941,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -0.4666515,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -0.4666515,
+        "note": "no_monitoring"
+      }
+    },
+    {
+      "bracket": {
+        "policy": "bracket_actual",
+        "pnl": -1.006122,
+        "exit_reason": "stop_loss_hit"
+      },
+      "tle_log_only": {
+        "policy": "tle_log_only",
+        "pnl": -1.006122,
+        "note": "no_monitoring"
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-07-08T06:49:03.016817+00:00",
+  "reason": "performance_degradation",
+  "immediate_actions": [
+    "Set TRADE_LIFECYCLE_LOG_ONLY=true in .env",
+    "Restart jacksparrow-agent container",
+    "Verify trade_lifecycle_verdict actions stop executing (log only)"
+  ],
+  "verification": [
+    "python tools/commands/tle_observation_monitor.py",
+    "python tools/commands/experiment_gate.py --experiment tle_live_v1"
+  ],
+  "note": "Mechanical SL/TP/trailing in manage_position remains active after rollback."
+}
