@@ -1068,8 +1068,14 @@ class TradingEventHandler:
                         )
                         return
 
-            # ADX ranging market filter: also run on v43 when entry structural quality is low
-            if not minimal_entry and (not v43_exec_enabled or structural_quality_low):
+            # ADX chop filter: reject weak-trend (low ADX) entries. v43 path skipped this
+            # unless structural quality was low — V15_ADX_REGIME_FILTER_ENABLED forces it on.
+            v15_adx_filter = bool(
+                getattr(settings, "v15_adx_regime_filter_enabled", False)
+            )
+            if not minimal_entry and (
+                not v43_exec_enabled or structural_quality_low or v15_adx_filter
+            ):
                 adx = features.get("adx_14")
                 adx_floor = float(
                     getattr(settings, "adx_ranging_threshold", DEFAULT_ADX_RANGING_THRESHOLD)
@@ -1086,6 +1092,21 @@ class TradingEventHandler:
                         **diagnostics_base,
                     )
                     return
+                if v15_adx_filter and adx is not None:
+                    adx_max = float(
+                        getattr(settings, "v15_adx_ranging_max", 25.0) or 25.0
+                    )
+                    if float(adx) > adx_max and signal in ("LONG", "SHORT"):
+                        self._log_entry_rejected(
+                            "v15_adx_trending_filter",
+                            symbol=symbol,
+                            signal=signal,
+                            event_id=event.event_id,
+                            adx=adx,
+                            adx_max=adx_max,
+                            **diagnostics_base,
+                        )
+                        return
 
             # EMA200 regime filter for trend conformity
             if not minimal_entry and getattr(settings, "enforce_ema200_trend_filter", False):

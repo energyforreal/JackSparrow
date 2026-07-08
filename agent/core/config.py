@@ -422,11 +422,12 @@ class Settings(BaseSettings):
         description="v15: only enter when ADX <= this (ranging regime).",
     )
     v15_adx_regime_filter_enabled: bool = Field(
-        default=False,
+        default=True,
         env="V15_ADX_REGIME_FILTER_ENABLED",
         description=(
-            "When True, v15 entry gate requires ADX <= v15_adx_ranging_max. "
-            "When False, ADX is ignored for v15 entry (allows trend regimes)."
+            "When True, apply ADX entry filters on v43 path: reject chop (ADX below "
+            "adx_ranging_threshold) and strong trends (ADX above v15_adx_ranging_max). "
+            "When False, v43 entries may skip chop filter when structural quality is high."
         ),
     )
     htf_cache_ttl_seconds: int = Field(
@@ -1121,13 +1122,12 @@ class Settings(BaseSettings):
         description="Gate 3: max entries per UTC day.",
     )
     jacksparrow_v43_min_edge_cost_ratio: float = Field(
-        default=0.2,
+        default=0.75,
         env="JACKSPARROW_V43_MIN_EDGE_COST_RATIO",
         ge=0.0,
         description=(
             "Gate 5: min multiple of round-trip cost vs expected-return edge. "
-            "Default 0.2 matches v43 regressor scale (~1e-4 predictions); raise toward "
-            "0.5–1.25 after measuring reject rates (docs/v43_trade_execution_runbook.md)."
+            "0.75+ recommended for live profitability; 0.2 was throughput-recovery default."
         ),
     )
     jacksparrow_v43_block_trending_entries: bool = Field(

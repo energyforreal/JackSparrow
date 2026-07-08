@@ -52,13 +52,37 @@ def _expectation_from_context(live_mc: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def _direction_bias_from_context(mc: Dict[str, Any]) -> str:
+    """Read the present-tense directional lean (LONG/SHORT/HOLD) from a decision_context_v3 dict."""
+    dc = mc.get("decision_context_v3")
+    if isinstance(dc, dict):
+        understanding = dc.get("understanding")
+        if isinstance(understanding, dict):
+            bias = understanding.get("direction_bias")
+            if isinstance(bias, str) and bias:
+                return bias.upper()
+    return ""
+
+
 def _entry_expectation(entry_snapshot: Dict[str, Any]) -> Dict[str, Any]:
     dc = entry_snapshot.get("decision_context")
+    if not isinstance(dc, dict):
+        return {}
+    # Real entry snapshots nest expectation under decision_context["decision_context_v3"]
+    # (see agent/persistence/trade_snapshot.py: decision_context["decision_context_v3"] = dict(dc_v3)).
+    exp = _expectation_from_context(dc)
+    if exp:
+        return exp
+    # Legacy/flat fallback for any producer that writes expectation at the top level.
+    flat = dc.get("expectation") or dc.get("last_expectation")
+    return flat if isinstance(flat, dict) else {}
+
+
+def _entry_direction_bias(entry_snapshot: Dict[str, Any]) -> str:
+    dc = entry_snapshot.get("decision_context")
     if isinstance(dc, dict):
-        exp = dc.get("expectation") or dc.get("last_expectation")
-        if isinstance(exp, dict):
-            return exp
-    return {}
+        return _direction_bias_from_context(dc)
+    return ""
 
 
 def _position_side(position: Dict[str, Any]) -> str:
@@ -66,11 +90,46 @@ def _position_side(position: Dict[str, Any]) -> str:
     return "long" if side in ("long", "buy") else "short"
 
 
-def _aligned_with_position(dominant: str, pos_side: str) -> bool:
+# Labels that are already directional in themselves (legacy/explicit producers).
+_LONG_LABELS = ("bullish", "long", "up", "rise", "markup")
+_SHORT_LABELS = ("bearish", "short", "down", "fall", "markdown")
+
+# Real expectation-engine labels (expectation_engine.py) describe a *type* of move,
+# not a *direction* — trend_continuation/breakout persist whatever direction is already
+# prevailing; reversal works against it; vol_expansion has no directional meaning at all.
+_CONTINUATION_LABELS = ("trend_continuation", "breakout")
+_REVERSAL_LABELS = ("reversal",)
+
+
+def _aligned_with_position(
+    dominant: str, pos_side: str, direction_bias: str = ""
+) -> Optional[bool]:
+    """
+    Whether the dominant expectation favors the side the position is already on.
+
+    Returns True/False when the forecast has a clear directional read, or None when
+    the read is directionally ambiguous (e.g. vol_expansion, or no direction_bias
+    available) — callers should treat None as "unknown", not as "misaligned".
+    """
     d = dominant.lower()
-    if pos_side == "long":
-        return d in ("bullish", "long", "up", "rise", "markup")
-    return d in ("bearish", "short", "down", "fall", "markdown")
+    if d in _LONG_LABELS:
+        return pos_side == "long"
+    if d in _SHORT_LABELS:
+        return pos_side == "short"
+
+    bias = str(direction_bias or "").upper()
+    if bias not in ("LONG", "SHORT"):
+        return None
+
+    if d in _CONTINUATION_LABELS:
+        favors = bias
+    elif d in _REVERSAL_LABELS:
+        favors = "SHORT" if bias == "LONG" else "LONG"
+    else:
+        # vol_expansion / neutral / unrecognized — no directional signal to extract.
+        return None
+
+    return favors == pos_side.upper()
 
 
 def evaluate_forecast_adjustment(
@@ -104,14 +163,19 @@ def evaluate_forecast_adjustment(
     entry_conf = _f(entry_exp.get("confidence") or entry_exp.get("expectation_confidence"), conf)
     conf_delta = conf - entry_conf
 
+    live_bias = _direction_bias_from_context(live_mc)
+    entry_bias = _entry_direction_bias(entry_snapshot) or live_bias
+
     reasons: List[str] = []
-    aligned = _aligned_with_position(dominant, pos_side)
-    entry_aligned = _aligned_with_position(entry_dom, pos_side) if entry_dom else aligned
+    aligned = _aligned_with_position(dominant, pos_side, live_bias)
+    entry_aligned = (
+        _aligned_with_position(entry_dom, pos_side, entry_bias) if entry_dom else None
+    )
 
     if dominant and entry_dom and dominant != entry_dom:
         reasons.append(f"forecast_shift:{entry_dom}->{dominant}")
 
-    if not aligned and conf >= 0.55:
+    if aligned is False and conf >= 0.55:
         return ForecastAdjustment(
             hint="exit_candidate",
             confidence_delta=conf_delta,
@@ -120,7 +184,7 @@ def evaluate_forecast_adjustment(
             expectation_confidence=conf,
         )
 
-    if aligned and conf_delta >= 0.08 and conf >= 0.6:
+    if aligned is True and conf_delta >= 0.08 and conf >= 0.6:
         return ForecastAdjustment(
             hint="extend_tp",
             confidence_delta=conf_delta,
@@ -129,7 +193,7 @@ def evaluate_forecast_adjustment(
             expectation_confidence=conf,
         )
 
-    if entry_aligned and not aligned and conf_delta <= -0.08:
+    if entry_aligned is True and aligned is False and conf_delta <= -0.08:
         return ForecastAdjustment(
             hint="reduce_tp",
             confidence_delta=conf_delta,
