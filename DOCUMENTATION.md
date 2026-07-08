@@ -30,8 +30,8 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | 16 | [v43 trade execution runbook](docs/v43_trade_execution_runbook.md) | v43 **signal gate** tuning (IC + archived ML), metrics, rollback, log analysis |
 | — | [Rule-based decision engine](docs/rule-based-decision-engine.md) | FSM + structural gates, shadow rollout, `DECISION_ENGINE_MODE`, UI payloads |
 | — | [Canonical events](docs/canonical_events.md) | Event-bus wiring and `DECISION_READY` payload fields |
-| — | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md) | Quality-first entry scoring, single policy authority, Gate 5 economics, TLE EV exits, learning loop |
-| — | [Trade lifecycle engine](reference/trade-lifecycle-engine.md) | Position intelligence, exit engine, promotion replay |
+| — | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md) | Quality-first entry scoring, Gate 5 economics (`MIN_EDGE_COST_RATIO=0.75`), ADX chop filter on v43, TLE + forecast adapter, learning loop |
+| — | [Trade lifecycle engine](reference/trade-lifecycle-engine.md) | Position intelligence, expectation forecast adapter, exit engine, promotion replay |
 | — | [Trading persistence model](reference/trading-persistence-model.md) | Testnet three-layer model, snapshot schema v1, analytics tables, Docker notes |
 | — | [Trade Intelligence Snapshot v2](reference/trade-intelligence-snapshot-v2.md) | Decision events, causality graph, MFE/MAE, reject labels, shadow rollout |
 | — | [Cognitive architecture](reference/cognitive-architecture.md) | DecisionContext v3, expectation/memory/scenario, strategy selector + scorer, shadow rollout |

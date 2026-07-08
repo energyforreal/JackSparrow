@@ -1111,7 +1111,7 @@ Phased testnet rollout without architectural rewrite:
 
 - **TradeAnalysisEngine** — unified facade over market/signal/position/replay/calibration modules
 - **Market validation + signal explainability** — wired in `rule_based_pipeline`; persisted in entry snapshots
-- **TLE observation** — `TRADE_LIFECYCLE_LOG_ONLY` + `position_monitoring[]` / `market_structure_timeline[]`
+- **TLE live** — `TRADE_LIFECYCLE_ENABLED=true`, `TRADE_LIFECYCLE_LOG_ONLY=false`; position forecast adapter maps cognition expectation with `direction_bias`; `position_monitoring[]` / `market_structure_timeline[]` on close
 - **Post-trade assessment** — four-dimension quality + root cause on close
 - **Phase readiness gates** — `tools/commands/phase_readiness_gate.py`
 - **Experiment registry** — `data/experiments/registry.json`; portfolio layer explicitly deferred

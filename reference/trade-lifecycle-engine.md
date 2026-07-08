@@ -13,12 +13,14 @@ Pre-entry path runs full intelligence → conviction → decision. Without TLE, 
 
 ```text
 Open position → PositionIntelligence.evaluate()
+  → position_forecast_adapter.evaluate_forecast_adjustment()
   → ExitEngine.decide() → LifecycleVerdict → trading_handler
 ```
 
 | Module | Role |
 |--------|------|
 | `agent/core/position_intelligence.py` | **TradeHealth** (0–100) and **TradeOpportunity** (0–100) from continuation, conviction, FSM, regime |
+| `agent/core/position_forecast_adapter.py` | Cognition expectation vs entry snapshot; hints (`exit_candidate`, `extend_tp`, …) using `direction_bias` |
 | `agent/core/exit_engine.py` | **EV arbiter** — stay vs exit; fee-aware hold when unrealized PnL &lt; round-trip cost |
 | `agent/core/trade_lifecycle_engine.py` | Backward-compat wrapper; tighten/extend TP invariants |
 | `agent/core/continuation_thesis.py` | Entry snapshot vs live `market_context` alignment |
@@ -88,8 +90,9 @@ Throttle: `TRADE_LIFECYCLE_TP_MODIFY_MIN_INTERVAL_SECONDS`, `TRADE_LIFECYCLE_TP_
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `TRADE_LIFECYCLE_ENABLED` | `false` | Master switch |
+| `TRADE_LIFECYCLE_ENABLED` | `false` in code; `true` in `.env.example` | Master switch |
 | `TRADE_LIFECYCLE_LOG_ONLY` | `false` | Evaluate/log without executing |
+| `POSITION_FORECAST_ADAPTER_ENABLED` | `true` | Cognition expectation hints into health scoring |
 | `TRADE_LIFECYCLE_EV_EXIT_ENABLED` | `true` | EV arbiter vs health-only exit |
 | `TRADE_LIFECYCLE_FEE_AWARE_HOLD_ENABLED` | `true` | Hold when exit locks in fee-dominated loss |
 | `EXIT_ENGINE_MIN_STAY_EV_DELTA` | `0` | Minimum EV delta to prefer exit |
@@ -109,6 +112,14 @@ Persisted at fill and updated each verdict:
 - `last_lifecycle_verdict`, `last_health_score`, `last_opportunity_score`
 - `last_tp_modify_at`
 
+## Position forecast adapter
+
+`agent/core/position_forecast_adapter.py` compares live `decision_context_v3.expectation` to the entry snapshot (nested under `decision_context["decision_context_v3"]` at fill time).
+
+Expectation-engine labels (`trend_continuation`, `breakout`, `reversal`, `vol_expansion`) are **directionless**; alignment requires `understanding.direction_bias`. Ambiguous reads return `None` and must not be treated as misaligned (avoids false `exit_candidate` on `vol_expansion`).
+
+Legacy directional labels (`bullish`/`bearish`) remain supported. Unit tests: `tests/unit/test_position_forecast_adapter.py`.
+
 ## Observation mode (Phase 2)
 
 Set `TRADE_LIFECYCLE_LOG_ONLY=true` with `TRADE_LIFECYCLE_ENABLED=true` to evaluate and log verdicts **without** executing `EXIT` / `TIGHTEN_SL` / `MODIFY_TP`. Bracket SL/TP remains the live exit path.
@@ -119,7 +130,7 @@ Per-cycle records append to `lifecycle_monitoring[]` on the open position and me
 
 ## Promotion gate (Phase 2b → 3)
 
-Before enabling live TLE (`TRADE_LIFECYCLE_LOG_ONLY=false`), run multi-regime replay on June/July telemetry:
+Before enabling live TLE (`TRADE_LIFECYCLE_LOG_ONLY=false`), confirm the **position forecast adapter** reads nested entry expectations and maps expectation-engine vocabulary with `direction_bias` (Jul 2026 fix). Then run multi-regime replay on June/July telemetry:
 
 ```bash
 python tools/commands/tle_agreement_score.py --start YYYY-MM-DD --end YYYY-MM-DD

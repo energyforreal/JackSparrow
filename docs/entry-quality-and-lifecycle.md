@@ -71,6 +71,17 @@ High `v43_collapse_rate` reduces ML weight in entry quality and conviction (`com
 
 Thesis breakout rules use `bb_pos` extension checks ([`agent_thesis_engine.py`](../agent/core/agent_thesis_engine.py)); no hard ADX ceiling. Config: `AGENT_THESIS_BREAKOUT_BB_POS_MAX`, `AGENT_THESIS_BREAKOUT_BB_POS_SHORT_MIN`.
 
+### ADX chop filter (v43 path)
+
+When `V15_ADX_REGIME_FILTER_ENABLED=true` (code default **on** since Jul 2026), [`trading_handler.py`](../agent/events/handlers/trading_handler.py) applies ADX filters on the v43 entry path (previously skipped when structural quality was high):
+
+| Reject reason | Condition |
+|---------------|-----------|
+| `adx_ranging_filter` | `adx_14` below `ADX_RANGING_THRESHOLD` (weak trend / chop) |
+| `v15_adx_trending_filter` | `adx_14` above `V15_ADX_RANGING_MAX` (strong trend; v15 ranging-only profile) |
+
+Set `V15_ADX_REGIME_FILTER_ENABLED=false` to restore the legacy v43 bypass when structural quality ≥ 0.5.
+
 ---
 
 ## Post-entry pipeline (TLE)
@@ -79,18 +90,33 @@ When `TRADE_LIFECYCLE_ENABLED=true`:
 
 ```text
 Open position → PositionIntelligence.evaluate()
+  → position_forecast_adapter (cognition expectation vs entry snapshot)
   → ExitEngine.decide() → LifecycleVerdict → trading_handler
 ```
 
 | Module | Role |
 |--------|------|
 | [`position_intelligence.py`](../agent/core/position_intelligence.py) | Health, opportunity, continuation alignment |
+| [`position_forecast_adapter.py`](../agent/core/position_forecast_adapter.py) | Maps live `decision_context_v3.expectation` to lifecycle hints (`exit_candidate`, `extend_tp`, `reduce_tp`, `tighten`) |
 | [`exit_engine.py`](../agent/core/exit_engine.py) | EV arbiter: stay vs exit, fee-aware hold |
 | [`trade_lifecycle_engine.py`](../agent/core/trade_lifecycle_engine.py) | Backward-compat wrapper; tighten/extend TP logic |
 
+### Position forecast adapter
+
+[`evaluate_forecast_adjustment()`](../agent/core/position_forecast_adapter.py) compares live cognition expectation to the entry snapshot:
+
+- **Entry expectation path**: `decision_context["decision_context_v3"]["expectation"]` (as persisted by [`trade_snapshot.py`](../agent/persistence/trade_snapshot.py)); flat `decision_context["expectation"]` is a legacy fallback.
+- **Directionless labels**: `expectation_engine` emits `trend_continuation`, `breakout`, `reversal`, `vol_expansion` — not `bullish`/`bearish`. Alignment combines the dominant label with `understanding.direction_bias` (`LONG`/`SHORT`):
+  - `trend_continuation` / `breakout` → favors current `direction_bias`
+  - `reversal` → favors the opposite of `direction_bias`
+  - `vol_expansion` / `neutral` / missing bias → **unknown** (`None`); must not force `exit_candidate`
+- **Legacy vocabulary**: explicit directional labels (`bullish`, `bearish`, etc.) still work for backward compatibility.
+
+Misaligned forecasts with confidence ≥ 0.55 feed health-score penalties in TLE; aligned confidence upgrades can trigger `extend_tp` hints.
+
 **EV exit** (`TRADE_LIFECYCLE_EV_EXIT_ENABLED=true`, default): avoids health-only exits when opportunity is high and continuation is valid (fee-aware hold when unrealized PnL &lt; round-trip cost). Opposite signal and `fsm_thesis_broken` remain hard exits.
 
-**Promotion**: Run multi-regime replay before live enable — see [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md#promotion-gate-phase-2b--3).
+**Promotion**: Run multi-regime replay before first live enable — see [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md#promotion-gate-phase-2b--3). After the forecast-adapter fix (Jul 2026), `exit_agreement_rate` should move off 0.0 when `TRADE_LIFECYCLE_LOG_ONLY=false`.
 
 ---
 
@@ -115,6 +141,13 @@ On `POSITION_CLOSED`, `post_trade_analyzer` → `apply_dimension_calibration_fee
 | `ENTRY_QUALITY_LEARNING_SHADOW_MODE` | `true` | Log calibration without applying |
 | `TRADE_LIFECYCLE_EV_EXIT_ENABLED` | `true` | EV arbiter vs legacy health-only exit |
 | `TRADE_LIFECYCLE_FEE_AWARE_HOLD_ENABLED` | `true` | Hold when exit locks in fee-dominated loss |
+| `TRADE_LIFECYCLE_ENABLED` | `false` in code; `true` in `.env.example` | Master TLE switch |
+| `TRADE_LIFECYCLE_LOG_ONLY` | `false` | When `true`, evaluate/log without executing lifecycle actions |
+| `POSITION_FORECAST_ADAPTER_ENABLED` | `true` | Cognition expectation hints into TLE health scoring |
+| `JACKSPARROW_V43_MIN_EDGE_COST_RATIO` | `0.75` | Gate 5: min edge vs round-trip cost (was `0.2` throughput-recovery default) |
+| `V15_ADX_REGIME_FILTER_ENABLED` | `true` | ADX chop/trend filters on v43 entries |
+| `ADX_RANGING_THRESHOLD` | `15` | Reject when `adx_14` below this (chop) |
+| `V15_ADX_RANGING_MAX` | `25` | Reject when `adx_14` above this (strong trend) |
 | `EXIT_ENGINE_MIN_STAY_EV_DELTA` | `0` | Minimum EV delta to prefer exit |
 | `UNIFIED_PIPELINE_ENABLED` | `false` | Deferred PR6: `single_decision_engine` consolidation |
 | `AGENT_THESIS_BREAKOUT_BB_POS_MAX` | `0.85` | Long breakout extension veto |
@@ -130,6 +163,7 @@ On `POSITION_CLOSED`, `post_trade_analyzer` → `apply_dimension_calibration_fee
 |-------|---------|
 | `tests/unit/test_entry_quality.py` | Dimension scoring, collapse trust |
 | `tests/unit/test_exit_engine.py` | EV arbiter, fee-aware hold |
+| `tests/unit/test_position_forecast_adapter.py` | Expectation vocabulary + nested entry snapshot alignment |
 | `tests/fixtures/july2_telemetry/` | Frozen bad-entry cycles |
 | `tests/integration/test_july2_telemetry_replay.py` | Policy blocks flat-hypothesis ML |
 | `tools/commands/monte_carlo_replay.py` | Randomized slippage/fee expectancy |

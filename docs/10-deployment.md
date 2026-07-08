@@ -536,6 +536,21 @@ docker compose build frontend --no-cache
 docker compose up -d frontend
 ```
 
+**Agent + backend only** (typical after Python changes under `agent/`):
+
+```bash
+docker compose build --pull agent backend
+docker compose up -d --force-recreate agent backend
+```
+
+Verify P0 profitability env inside the agent container after redeploy:
+
+```bash
+docker exec jacksparrow-agent printenv TRADE_LIFECYCLE_LOG_ONLY JACKSPARROW_V43_MIN_EDGE_COST_RATIO V15_ADX_REGIME_FILTER_ENABLED
+```
+
+Expected live values (Jul 2026 defaults): `false`, `0.75`, `true`.
+
 **Full stack rebuild (all images)** — use when agent, backend, or frontend code changed:
 
 ```bash
@@ -992,8 +1007,9 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `COGNITION_SCORER_ENABLED` | Scorer weights in hypothesis aggregate | No | `false` |
 | `COGNITION_TEMPORAL_AUTHORITY_ENABLED` | Post-cognition trade_score / ml_confirms / entry_quality (Stage 4B) | No | `false` |
 | `COGNITION_MEMORY_DECAY_HALF_LIFE_BARS` | Memory decay half-life (5m bars) | No | `10` |
-| `TRADE_LIFECYCLE_ENABLED` | Enable Trade Lifecycle Engine post-entry | No | `false` |
+| `TRADE_LIFECYCLE_ENABLED` | Enable Trade Lifecycle Engine post-entry | No | `false` in code; `true` in `.env.example` |
 | `TRADE_LIFECYCLE_LOG_ONLY` | Log TLE verdicts without executing (Phase 2 observation) | No | `false` |
+| `POSITION_FORECAST_ADAPTER_ENABLED` | Map cognition expectation to TLE lifecycle hints | No | `true` |
 | `TRADE_LIFECYCLE_EV_EXIT_ENABLED` | EV arbiter in exit engine (vs legacy health-only exit) | No | `true` |
 | `TRADE_LIFECYCLE_FEE_AWARE_HOLD_ENABLED` | Hold when exit would lock in fee-dominated loss | No | `true` |
 | `EXIT_ENGINE_MIN_STAY_EV_DELTA` | Minimum EV delta to prefer exit over hold | No | `0` |
@@ -1027,6 +1043,10 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `MTF_DECISION_ENGINE_ENABLED` | Legacy MTF synthesis in reasoning Step 5 | No | `false` |
 | `JACKSPARROW_V43_ARTIFACT_BASENAME` | *(Archived v43 only)* Optional pickle basename inside a v43 bundle | No | *(unused on NO-ML)* |
 | `JACKSPARROW_V43_SHORT_EXECUTION_ENABLED` | When `true`, allow symmetric **SELL** entries when strong negative edge passes v43 gates | No | `false` |
+| `JACKSPARROW_V43_MIN_EDGE_COST_RATIO` | Gate 5: min expected edge vs round-trip cost multiple | No | `0.75` |
+| `V15_ADX_REGIME_FILTER_ENABLED` | ADX chop/trend filters on v43 entry path | No | `true` |
+| `ADX_RANGING_THRESHOLD` | Reject entries when `adx_14` below this (chop) | No | `15` |
+| `V15_ADX_RANGING_MAX` | Reject entries when `adx_14` above this (strong trend) | No | `25` |
 | `ADAPTIVE_RETRAIN_ENABLED` | When `true`, agent runs periodic KS drift + optional warm-start retrain (v15 parquet path) | No | `false` |
 | `ADAPTIVE_RETRAIN_CHECK_INTERVAL_SECONDS` | Seconds between adaptive evaluations | No | `3600` |
 | `ADAPTIVE_RETRAIN_COOLDOWN_HOURS` | Minimum hours between successful retrains per TF | No | `12` |

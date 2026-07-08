@@ -551,7 +551,7 @@ Favorable risk/reward ratio with low risk factors
 
 **If already in position**:
 
-- With **`TRADE_LIFECYCLE_ENABLED=true`**, each `DecisionReadyEvent` runs the [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md): **Position Intelligence** → **Exit Engine** (EV arbiter) → `HOLD`, `TIGHTEN_SL`, `MODIFY_TP`, or `EXIT` before any legacy signal-reversal path. Fee-aware hold avoids exits that lock in sub-fee profits when opportunity and continuation remain valid.
+- With **`TRADE_LIFECYCLE_ENABLED=true`**, each `DecisionReadyEvent` runs the [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md): **Position Intelligence** → **position forecast adapter** (expectation vs entry snapshot, using `direction_bias` for directionless labels) → **Exit Engine** (EV arbiter) → `HOLD`, `TIGHTEN_SL`, `MODIFY_TP`, or `EXIT` before any legacy signal-reversal path. Fee-aware hold avoids exits that lock in sub-fee profits when opportunity and continuation remain valid.
 - Between candles, `manage_position` still enforces mechanical SL/TP/trailing as a hard backstop.
 - Without TLE, position monitoring is primarily price-driven via `MarketTickEvent` / `manage_position` against static SL/TP.
 - Exit closes position and emits `PositionClosedEvent`; state machine transitions back to OBSERVING.
