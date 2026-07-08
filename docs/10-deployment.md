@@ -551,6 +551,60 @@ docker exec jacksparrow-agent printenv TRADE_LIFECYCLE_LOG_ONLY JACKSPARROW_V43_
 
 Expected live values (Jul 2026 defaults): `false`, `0.75`, `true`.
 
+Recovery / observe-only values (Jul 2026 forensic rollback): `true`, `0.75`, `true`.
+
+### Deployment fingerprint and recovery verification
+
+Agent and backend images now accept build metadata via Docker build args and expose it at
+runtime through `GIT_COMMIT` / `BUILD_ID`. This allows post-deploy verification to confirm
+that the running containers match the repository state used for the build.
+
+Recommended deploy flow:
+
+```bash
+$env:GIT_COMMIT = (git rev-parse HEAD)
+$env:BUILD_DATE = (Get-Date -Format o)
+docker compose build --pull agent backend
+docker compose up -d --force-recreate agent backend
+python tools/commands/recovery_deploy_verify.py
+```
+
+The verification command writes `logs/deployments/YYYY-MM-DD.json` with:
+
+- repo commit SHA
+- agent runtime env snapshot
+- deployment env hash
+- `docker compose ps` output
+- recovery checks (`TRADE_LIFECYCLE_LOG_ONLY`, `GIT_COMMIT`, cognition temporal authority)
+
+### TLE recovery rollback
+
+If lifecycle exits degrade live performance, use the rollback helper:
+
+```bash
+python tools/commands/tle_promotion_rollback.py
+```
+
+Then ensure root `.env` contains:
+
+- `TRADE_LIFECYCLE_ENABLED=true`
+- `TRADE_LIFECYCLE_LOG_ONLY=true`
+- `TRADE_LIFECYCLE_MIN_HOLD_BARS=2`
+- `TRADE_LIFECYCLE_HEALTH_EXIT_REQUIRES_CRITICAL=true`
+- `EXIT_ENGINE_MIN_STAY_EV_DELTA=0.002`
+- `TRADE_LIFECYCLE_HEALTH_LOW_HOLD_OPPORTUNITY_MIN=60`
+
+After rebuild, capture the recovery baseline:
+
+```bash
+docker compose run --rm --no-deps -v "${PWD}/tools:/app/tools" -v "${PWD}/data:/app/data" agent \
+  python /app/tools/commands/recovery_baseline_capture.py
+python tools/commands/tle_observation_monitor.py --out data/investigation/tle_observation_latest.json
+```
+
+Do not set `TRADE_LIFECYCLE_LOG_ONLY=false` again until
+`python tools/commands/experiment_gate.py --experiment tle_live_v1` passes.
+
 **Full stack rebuild (all images)** — use when agent, backend, or frontend code changed:
 
 ```bash

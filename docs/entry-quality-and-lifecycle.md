@@ -118,6 +118,13 @@ Misaligned forecasts with confidence ≥ 0.55 feed health-score penalties in TLE
 
 **Promotion**: Run multi-regime replay before first live enable — see [Trade Lifecycle Engine](../reference/trade-lifecycle-engine.md#promotion-gate-phase-2b--3). After the forecast-adapter fix (Jul 2026), `exit_agreement_rate` should move off 0.0 when `TRADE_LIFECYCLE_LOG_ONLY=false`.
 
+**Recovery note (2026-07-08)**: the live stack was rolled back to observe-only TLE after
+forensic review showed ungated lifecycle exits degrading performance. Keep
+`TRADE_LIFECYCLE_LOG_ONLY=true` until both:
+
+- `python tools/commands/experiment_gate.py --experiment tle_live_v1` passes
+- `data/investigation/recovery_phase_a_status.json` confirms post-deploy data integrity has recovered
+
 ---
 
 ## Post-trade learning (optional)
@@ -142,13 +149,16 @@ On `POSITION_CLOSED`, `post_trade_analyzer` → `apply_dimension_calibration_fee
 | `TRADE_LIFECYCLE_EV_EXIT_ENABLED` | `true` | EV arbiter vs legacy health-only exit |
 | `TRADE_LIFECYCLE_FEE_AWARE_HOLD_ENABLED` | `true` | Hold when exit locks in fee-dominated loss |
 | `TRADE_LIFECYCLE_ENABLED` | `false` in code; `true` in `.env.example` | Master TLE switch |
-| `TRADE_LIFECYCLE_LOG_ONLY` | `false` | When `true`, evaluate/log without executing lifecycle actions |
+| `TRADE_LIFECYCLE_LOG_ONLY` | `false` (recovery override: `true`) | When `true`, evaluate/log without executing lifecycle actions |
 | `POSITION_FORECAST_ADAPTER_ENABLED` | `true` | Cognition expectation hints into TLE health scoring |
 | `JACKSPARROW_V43_MIN_EDGE_COST_RATIO` | `0.75` | Gate 5: min edge vs round-trip cost (was `0.2` throughput-recovery default) |
 | `V15_ADX_REGIME_FILTER_ENABLED` | `true` | ADX chop/trend filters on v43 entries |
 | `ADX_RANGING_THRESHOLD` | `15` | Reject when `adx_14` below this (chop) |
 | `V15_ADX_RANGING_MAX` | `25` | Reject when `adx_14` above this (strong trend) |
-| `EXIT_ENGINE_MIN_STAY_EV_DELTA` | `0` | Minimum EV delta to prefer exit |
+| `EXIT_ENGINE_MIN_STAY_EV_DELTA` | `0` (recovery override: `0.002`) | Minimum EV delta to prefer exit |
+| `TRADE_LIFECYCLE_MIN_HOLD_BARS` | `0` in code; recovery override `2` | Minimum hold bars before lifecycle exit can act |
+| `TRADE_LIFECYCLE_HEALTH_EXIT_REQUIRES_CRITICAL` | `false` in code; recovery override `true` | Restrict health exits to critical cases only |
+| `TRADE_LIFECYCLE_HEALTH_LOW_HOLD_OPPORTUNITY_MIN` | strategy-dependent | Hold threshold used during observe-only recovery |
 | `UNIFIED_PIPELINE_ENABLED` | `false` | Deferred PR6: `single_decision_engine` consolidation |
 | `AGENT_THESIS_BREAKOUT_BB_POS_MAX` | `0.85` | Long breakout extension veto |
 | `AGENT_THESIS_BREAKOUT_BB_POS_SHORT_MIN` | `0.15` | Short breakout extension veto |

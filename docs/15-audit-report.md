@@ -422,3 +422,18 @@ Audit-driven fixes applied across agent execution, sizing, data loaders, and sig
 
 See [Logic & Reasoning](05-logic-reasoning.md) and [Deployment](10-deployment.md) for env variables.
 
+## Recovery actions applied (2026-07-08)
+
+Post-audit recovery steps were applied to stabilize the live v0.4.6.x stack while keeping
+further promotions gate-controlled:
+
+| Area | Applied recovery |
+|------|------------------|
+| TLE | Root `.env` rolled back to `TRADE_LIFECYCLE_LOG_ONLY=true` with conservative hold/health thresholds |
+| Data integrity | `TRADE_MFE_MAE_AT_CLOSE_ENABLED=true`; post-deploy verification scripts added for recent trade snapshot coverage |
+| Deployment forensics | Docker build/runtime now exports `GIT_COMMIT` / `BUILD_ID`; agent emits `system.startup` with commit SHA |
+| Verification | `tools/commands/recovery_deploy_verify.py`, `recovery_baseline_capture.py`, and `recovery_phase_a_verify.py` persist investigation artifacts |
+| Promotion guardrails | Re-promotion remains blocked until `tle_live_v1`, `entry_tune_v1`, and `exit_tune_v1` pass |
+
+Artifacts are written under `data/investigation/` and `logs/deployments/` for follow-up audits.
+

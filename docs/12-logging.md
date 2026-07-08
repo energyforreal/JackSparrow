@@ -289,6 +289,9 @@ Use the info and error samples when constructing log ingestion tests or validati
 
 1. **Deployment Pipelines**  
    Pipeline scripts should push deployment logs to `logs/deployments/YYYY-MM-DD.log`.
+   Recovery verification may also persist structured JSON snapshots to
+   `logs/deployments/YYYY-MM-DD.json` via
+   `python tools/commands/recovery_deploy_verify.py`.
 
 2. **Scheduled Jobs**  
    Each job execution logs start and completion events with job ID.
@@ -322,6 +325,18 @@ Use the info and error samples when constructing log ingestion tests or validati
 }
 ```
 
+For agent/containerized deploys, include the build fingerprint exported by Docker:
+
+```json
+{
+  "message": "system.startup",
+  "service": "agent",
+  "session_id": "sess_01HV...",
+  "git_commit": "da5afe75cc83b2ce125c482c43add0fae944727c",
+  "environment": "production"
+}
+```
+
 5. **Update health checks** to include logging status (last startup event, writable directories).
 
 ---
@@ -350,6 +365,7 @@ Use the info and error samples when constructing log ingestion tests or validati
 2. **Alerting**  
    - `ERROR` rate > threshold → PagerDuty / Slack alert.
    - Missing startup log within deployment window → deployment failure alert.
+   - Missing `git_commit` on `system.startup` after Docker rebuild → deployment verification failure.
 3. **Dashboards**  
    Provide visualizations for error trends, slow requests, degraded states.
 4. **Tracing**  
