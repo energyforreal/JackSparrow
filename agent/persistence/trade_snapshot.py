@@ -119,6 +119,94 @@ def _enrich_decision_context_v2(
         decision_context["regime"] = regime
 
 
+def _thesis_type_from_context(mc: Dict[str, Any], pv: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Extract thesis_type from thesis verdict or policy reason codes."""
+    tv = mc.get("thesis_verdict")
+    if isinstance(tv, dict) and tv.get("thesis_type"):
+        return str(tv.get("thesis_type"))
+    if pv:
+        for code in pv.get("reason_codes") or []:
+            s = str(code)
+            if s.startswith("thesis_type="):
+                return s.replace("thesis_type=", "", 1)
+    hyp = mc.get("hypothesis_snapshot")
+    if isinstance(hyp, dict):
+        dom = hyp.get("dominant")
+        if isinstance(dom, dict) and dom.get("thesis_type"):
+            return str(dom.get("thesis_type"))
+    return None
+
+
+def _resolve_entry_price(mc: Dict[str, Any], features: Dict[str, Any]) -> Optional[float]:
+    """Best-effort decision price for reject labeling and replay."""
+    for source in (
+        mc.get("current_price"),
+        features.get("close"),
+        features.get("price"),
+    ):
+        if source is None:
+            continue
+        try:
+            px = float(source)
+            if px > 0:
+                return px
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _enrich_reject_forensics(
+    decision_context: Dict[str, Any],
+    *,
+    diagnostics: Optional[Dict[str, Any]] = None,
+    market_context: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Attach forensics fields required for entry_decision labeling and replay."""
+    diag = diagnostics if isinstance(diagnostics, dict) else {}
+    mc = market_context if isinstance(market_context, dict) else {}
+    if not mc and isinstance(diag.get("market_context"), dict):
+        mc = diag["market_context"]
+
+    features = decision_context.get("features")
+    if not isinstance(features, dict):
+        features = {}
+    raw_feats = mc.get("features") if isinstance(mc.get("features"), dict) else {}
+    for key in ("close", "atr_14", "adx_14"):
+        if features.get(key) is None and raw_feats.get(key) is not None:
+            features[key] = raw_feats[key]
+
+    entry_px = _resolve_entry_price(mc, features)
+    if entry_px is not None:
+        decision_context["current_price"] = entry_px
+        if features.get("close") is None:
+            features["close"] = entry_px
+    if features:
+        decision_context["features"] = features
+
+    pv = decision_context.get("policy_verdict")
+    if not isinstance(pv, dict):
+        pv = _policy_verdict_subset(diag.get("policy_verdict") or mc.get("policy_verdict"))
+        if pv:
+            decision_context["policy_verdict"] = pv
+
+    for key in ("trade_score", "v43_closed_bar_index", "correlation_id"):
+        val = diag.get(key)
+        if val is None:
+            val = mc.get(key)
+        if val is not None and decision_context.get(key) is None:
+            decision_context[key] = val
+
+    ml_val = decision_context.get("ml_validation")
+    if not isinstance(ml_val, dict) or not ml_val:
+        ml_raw = mc.get("ml_validation")
+        if isinstance(ml_raw, dict) and ml_raw:
+            decision_context["ml_validation"] = dict(ml_raw)
+
+    thesis_type = _thesis_type_from_context(mc, pv if isinstance(pv, dict) else None)
+    if thesis_type and decision_context.get("thesis_type") is None:
+        decision_context["thesis_type"] = thesis_type
+
+
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -689,8 +777,14 @@ def build_reject_snapshot(
             if k not in ("symbol", "signal", "event_id", "reason")
         }
     dc = snap.get("decision_context")
-    if isinstance(dc, dict) and isinstance(mc, dict):
-        _enrich_decision_context_v2(dc, risk_payload={}, market_context=mc)
+    if isinstance(dc, dict):
+        mc_eff = mc if isinstance(mc, dict) else {}
+        if not mc_eff and isinstance(diagnostics, dict):
+            nested = diagnostics.get("market_context")
+            if isinstance(nested, dict):
+                mc_eff = nested
+        _enrich_decision_context_v2(dc, risk_payload={}, market_context=mc_eff)
+        _enrich_reject_forensics(dc, diagnostics=diagnostics, market_context=mc_eff)
     return enforce_snapshot_size_cap(snap)
 
 

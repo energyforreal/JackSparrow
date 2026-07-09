@@ -1,0 +1,21 @@
+﻿=== JackSparrow Agent Log Analysis ===
+Total lines: 280141
+Parsed JSON events: 31257
+Decision cycles: 299
+
+Policy signals:
+  HOLD: 283
+  SHORT: 14
+  LONG: 2
+
+Gated ML neutral entries: 0
+Risk approved: 0
+Fills: 0
+Execution failed after risk: 0
+BUY->HOLD flips (<10m): 1
+hold_same_bar skips: 0
+
+Rule-based shadow (if enabled):
+  Shadow cycles: 640
+  Would block live entry: 357
+  FSM disagrees with live: 37

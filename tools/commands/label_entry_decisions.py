@@ -57,6 +57,20 @@ def _fetch_unlabeled_rejects(conn, limit: int) -> List[Dict[str, Any]]:
         return [dict(r) for r in cur.fetchall()]
 
 
+def reference_price_from_metadata(meta: Dict[str, Any]) -> Optional[float]:
+    """Resolve entry reference price from enriched reject snapshot metadata."""
+    dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
+    features = dc.get("features") if isinstance(dc.get("features"), dict) else {}
+    ref_price = features.get("close") or dc.get("current_price")
+    if ref_price is None:
+        return None
+    try:
+        px = float(ref_price)
+    except (TypeError, ValueError):
+        return None
+    return px if px > 0 else None
+
+
 async def _label_one(
     row: Dict[str, Any],
     *,
@@ -75,16 +89,8 @@ async def _label_one(
     meta = row.get("metadata") or {}
     if isinstance(meta, str):
         meta = json.loads(meta)
-    dc = meta.get("decision_context") if isinstance(meta.get("decision_context"), dict) else {}
-    features = dc.get("features") if isinstance(dc.get("features"), dict) else {}
-    ref_price = features.get("close")
-    if ref_price is None:
-        return None
-    try:
-        entry_price = float(ref_price)
-    except (TypeError, ValueError):
-        return None
-    if entry_price <= 0:
+    entry_price = reference_price_from_metadata(meta)
+    if entry_price is None:
         return None
 
     start_ts = int(ts.timestamp())

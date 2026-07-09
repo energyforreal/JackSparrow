@@ -436,19 +436,60 @@ def _thesis_blocks_gated_ml_adoption(
         "thesis_atr_too_low",
         "non_operational",
     })
+    if codes & _HARD_BLOCK_CODES:
+        return True
     if not aggregate_active:
         from agent.core.hypothesis_reason_codes import FLAT_HYPOTHESIS_CODES
 
-        _HARD_BLOCK_CODES = _HARD_BLOCK_CODES | FLAT_HYPOTHESIS_CODES
-    if codes & _HARD_BLOCK_CODES:
-        return True
-    if snap is not None and not aggregate_active:
-        snap_codes = {str(r) for r in (snap.reason_codes or [])}
-        from agent.core.hypothesis_reason_codes import FLAT_HYPOTHESIS_CODES
-
-        if snap_codes & FLAT_HYPOTHESIS_CODES:
+        snap_codes = (
+            {str(r) for r in (snap.reason_codes or [])}
+            if snap is not None
+            else set()
+        )
+        flat_hit = (codes | snap_codes) & FLAT_HYPOTHESIS_CODES
+        if flat_hit:
+            if _flat_hypothesis_gated_ml_override_allowed(thesis, mc, flat_hit):
+                return False
             return True
     return False
+
+
+def _flat_hypothesis_gated_ml_override_allowed(
+    thesis: ThesisVerdict,
+    market_context: Dict[str, Any],
+    snap_codes: set,
+) -> bool:
+    """Phase 3A.2 narrow override: gated ML on flat hypothesis with strict guards."""
+    if not bool(getattr(settings, "agent_policy_allow_gated_ml_on_flat_hypothesis", False)):
+        return False
+    from agent.core.hypothesis_reason_codes import FLAT_HYPOTHESIS_CODES
+
+    if not (snap_codes & FLAT_HYPOTHESIS_CODES):
+        return False
+    if thesis.thesis_type in ("crisis_veto",):
+        return False
+    thesis_codes = {str(r) for r in (thesis.reason_codes or [])}
+    if thesis_codes & frozenset({"thesis_open_position", "thesis_atr_too_low"}):
+        return False
+    if any("veto" in c for c in thesis_codes):
+        return False
+
+    ml_val = market_context.get("ml_validation")
+    if not isinstance(ml_val, dict):
+        return False
+    gated = bool(ml_val.get("final_long")) or bool(ml_val.get("final_short"))
+    if not gated:
+        return False
+
+    trade_score = market_context.get("trade_score")
+    if trade_score is None:
+        return False
+    try:
+        score = float(trade_score)
+    except (TypeError, ValueError):
+        return False
+    min_score = float(getattr(settings, "agent_trade_score_min", 0.0) or 0.0)
+    return score >= min_score
 
 
 ADJUDICATION_BLOCK_VERDICTS = frozenset({"ml_reject", "conflict", "score_reject"})

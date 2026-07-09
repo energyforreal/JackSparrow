@@ -1,0 +1,8 @@
+﻿docker : Warning: Using a password with '-a' or '-u' option on the command line interface may not be safe.
+At line:1 char:1
++ docker exec jacksparrow-redis redis-cli -a jacksparrow GET gate_state ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Warning: Using ...ay not be safe.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+{"last_entry_bar_index": 5944923, "last_signal_bar_index": 5944923, "trade_timestamps_utc": [], "trades_by_date": {"2026-07-04": 5, "2026-07-06": 1, "2026-07-07": 5, "2026-07-08": 1}, "counters": {"signals_raw": 2316, "rejected_pos_open": 719, "rejected_debounce": 0, "rejected_freq_cap": 0, "rejected_regime": 0, "rejected_edge": 0, "trades_executed": 12}, "current_regime": "neutral", "regime_bar_age": 164, "recent_collapse_samples": [0.9947757945145842, 0.9947780678851175, 0.994780339277947, 0.9947826086956522, 0.9947848761408083, 0.9947871416159861, 0.9947894051237516, 0.9947916666666666, 0.9947939262472885, 0.99479618386817, 0.9947984395318595, 0.9948006932409013, 0.9948029449978346, 0.9948051948051948, 0.9948074426655128, 0.9948096885813149, 0.9948119325551232, 0.9948141745894555, 0.994816414686825, 0.9948186528497409], "near_threshold_epsilon_bump": 0.02, "epsilon_bumped_at": "2026-07-09T04:15:48.680399+00:00"}

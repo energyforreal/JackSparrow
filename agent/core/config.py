@@ -430,6 +430,14 @@ class Settings(BaseSettings):
             "When False, v43 entries may skip chop filter when structural quality is high."
         ),
     )
+    v15_adx_thesis_aware_enabled: bool = Field(
+        default=False,
+        env="V15_ADX_THESIS_AWARE_ENABLED",
+        description=(
+            "When True, skip high-ADX cap for breakout/trend_continuation thesis types; "
+            "keep strict cap for mean_reversion and flat/unknown."
+        ),
+    )
     htf_cache_ttl_seconds: int = Field(
         default=840,
         env="HTF_CACHE_TTL_SECONDS",
@@ -2604,6 +2612,15 @@ class Settings(BaseSettings):
         description=(
             "In ml_and_thesis mode, adopt gated ML entries (final_long/final_short) when thesis "
             "is HOLD and not in crisis/veto/conflict. Enables perp shorts without a parallel thesis rule."
+        ),
+    )
+    agent_policy_allow_gated_ml_on_flat_hypothesis: bool = Field(
+        default=False,
+        env="AGENT_POLICY_ALLOW_GATED_ML_ON_FLAT_HYPOTHESIS",
+        description=(
+            "Phase 3A.2: when True, allow gated ML adoption despite flat hypothesis "
+            "(hypothesis_no_rule_fired) if v43 final_long/final_short and trade_score "
+            "meets AGENT_TRADE_SCORE_MIN. Never bypasses crisis/veto/open-position blocks."
         ),
     )
     gate_profile: str = Field(

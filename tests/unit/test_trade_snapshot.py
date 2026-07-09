@@ -180,19 +180,42 @@ def test_build_reject_snapshot():
         signal="LONG",
         event_id="evt-1",
         reject_reason="hold_at_synthesis",
-        diagnostics={"raw_confidence": 0.4},
+        diagnostics={
+            "raw_confidence": 0.4,
+            "trade_score": 47.5,
+            "correlation_id": "corr-1",
+            "policy_verdict": {
+                "signal": "HOLD",
+                "confidence": 0.3,
+                "reason_codes": ["thesis_type=flat", "hypothesis_no_rule_fired"],
+            },
+        },
         market_context={
-            "features": {"close": 90123.5, "atr_14": 1100.0},
-            "ml_validation": {"expected_return": 0.0042, "passed": False},
+            "current_price": 90123.5,
+            "features": {"atr_14": 1100.0, "adx_14": 22.0},
+            "ml_validation": {
+                "expected_return": 0.0042,
+                "passed": False,
+                "final_short": True,
+            },
             "regime": "trending_bull",
+            "v43_closed_bar_index": 12345,
         },
     )
     assert snap["snapshot_kind"] == "reject"
     dc = snap["decision_context"]
     assert dc["reject_reason"] == "hold_at_synthesis"
     assert dc["features"]["close"] == 90123.5
+    assert dc["features"]["atr_14"] == 1100.0
+    assert dc["features"]["adx_14"] == 22.0
+    assert dc["current_price"] == 90123.5
     assert dc["ml_validation"]["expected_return"] == 0.0042
+    assert dc["ml_validation"]["final_short"] is True
     assert dc["regime"] == "trending_bull"
+    assert dc["trade_score"] == 47.5
+    assert dc["v43_closed_bar_index"] == 12345
+    assert dc["correlation_id"] == "corr-1"
+    assert dc["thesis_type"] == "flat"
 
 
 def test_build_entry_snapshot_includes_ml_validation():

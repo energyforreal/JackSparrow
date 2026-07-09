@@ -1,0 +1,22 @@
+{
+  "investigation": "trading_decision_forensics_2026-07-09",
+  "config_changes_deferred": true,
+  "dominant_blocker": "hold_at_synthesis",
+  "dominant_hold_cause": "hypothesis_no_rule_fired",
+  "secondary_blocker": "v15_adx_trending_filter",
+  "success_criteria": {
+    "dominant_blocker_identified": true,
+    "opportunity_cost_quantified": true,
+    "counters_reconciled": true,
+    "no_infrastructure_regressions": true
+  },
+  "recommendations": [
+    "Policy: hypothesis_no_rule_fired blocks gated ML adoption by design; evaluate whether cognition selector / hypothesis margin thresholds are over-filtering before lowering trade score floors.",
+    "ADX: v15_adx_trending_filter rejected 16 actionable signals in 48h; 62.5% would have been profitable over 12 bars (avg +0.017%). Consider thesis-aware ADX (allow high ADX for breakout/trend_continuation) in a follow-up change plan.",
+    "Metadata: entry_decisions rows lack price in metadata — label_entry_decisions.py labeled 0 rows. Fix reject snapshot persistence before DB-based false-negative pipeline.",
+    "Execution: risk_approved_count=0 and fill_count=0 in 48h window — conservatism is pre-execution, not an execution bug.",
+    "Counters: Postgres 21 EXECUTED vs v43/Redis 12 — gap of 9 explained by pre-v43 or non-v43-bar fills."
+  ],
+  "proceed_to_fix_phase": true,
+  "note": "Investigation only; no .env or handler changes applied."
+}

@@ -48,6 +48,45 @@ DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS = 10
 DEFAULT_MIN_RISK_REWARD_RATIO = 1.2
 DEFAULT_ADX_RANGING_THRESHOLD = 20.0
 
+_TREND_THESIS_TYPES = frozenset({"breakout", "trend_continuation"})
+_MEAN_REVERSION_THESIS = "mean_reversion"
+
+
+def _entry_thesis_type(
+    market_context: Dict[str, Any],
+    payload: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Resolve thesis type for entry gates from market context or policy verdict."""
+    mc = market_context if isinstance(market_context, dict) else {}
+    tv = mc.get("thesis_verdict")
+    if isinstance(tv, dict) and tv.get("thesis_type"):
+        return str(tv.get("thesis_type"))
+    hyp = mc.get("hypothesis_snapshot")
+    if isinstance(hyp, dict):
+        dom = hyp.get("dominant")
+        if isinstance(dom, dict) and dom.get("thesis_type"):
+            return str(dom.get("thesis_type"))
+    pl = payload if isinstance(payload, dict) else {}
+    pv = pl.get("policy_verdict")
+    if isinstance(pv, dict):
+        for code in pv.get("reason_codes") or []:
+            s = str(code)
+            if s.startswith("thesis_type="):
+                return s.replace("thesis_type=", "", 1)
+    return None
+
+
+def _adx_high_cap_applies(thesis_type: Optional[str]) -> bool:
+    """Whether v15 high-ADX cap should reject the entry for this thesis type."""
+    if not bool(getattr(settings, "v15_adx_thesis_aware_enabled", False)):
+        return True
+    tt = str(thesis_type or "flat").lower()
+    if tt in _TREND_THESIS_TYPES:
+        return False
+    if tt == _MEAN_REVERSION_THESIS:
+        return True
+    return True
+
 
 def _tf_bar_seconds(tf: str) -> int:
     """Bar duration in seconds from timeframe string (e.g. 5m, 15m, 1h)."""
@@ -414,6 +453,10 @@ class TradingEventHandler:
             diagnostics_base: Dict[str, Any] = {
                 "hour_bucket_utc": hour_bucket_utc,
                 "market_context": mc,
+                "policy_verdict": payload.get("policy_verdict"),
+                "trade_score": payload.get("trade_score")
+                or (mc.get("trade_score") if isinstance(mc, dict) else None),
+                "correlation_id": getattr(event, "correlation_id", None),
                 **entry_proba_summary,
                 **self._reasoning_pipeline_diagnostics(
                     reasoning_chain if isinstance(reasoning_chain, dict) else {}
@@ -1096,7 +1139,12 @@ class TradingEventHandler:
                     adx_max = float(
                         getattr(settings, "v15_adx_ranging_max", 25.0) or 25.0
                     )
-                    if float(adx) > adx_max and signal in ("LONG", "SHORT"):
+                    thesis_type = _entry_thesis_type(mc, payload)
+                    if (
+                        float(adx) > adx_max
+                        and signal in ("LONG", "SHORT")
+                        and _adx_high_cap_applies(thesis_type)
+                    ):
                         self._log_entry_rejected(
                             "v15_adx_trending_filter",
                             symbol=symbol,
@@ -1104,6 +1152,7 @@ class TradingEventHandler:
                             event_id=event.event_id,
                             adx=adx,
                             adx_max=adx_max,
+                            thesis_type=thesis_type,
                             **diagnostics_base,
                         )
                         return

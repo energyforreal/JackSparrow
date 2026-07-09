@@ -1,0 +1,7 @@
+﻿--- Risk approval reconciliation ---
+trading_handler_risk_approved_published: 0
+execution_order_fill_published (matched ids): 0
+trading_execution_rejected (correlation_id): 0
+execution_failed (correlation_id): 0
+
+All logged approvals have a recorded outcome (fill, rejection, or failure).

@@ -1,0 +1,27 @@
+{
+  "exported_at": "2026-07-09T04:35:00+00:00",
+  "postgres": {
+    "trades_executed_count": 21,
+    "last_trade_at": "2026-06-04T04:50:31.2389+00:00",
+    "entry_decisions_reject_reasons": {
+      "hold_at_synthesis": 2600,
+      "risk_rejected": 89,
+      "v15_adx_trending_filter": 16
+    }
+  },
+  "redis_gate_state": {
+    "signals_raw": 2316,
+    "trades_executed": 12,
+    "rejected_pos_open": 719,
+    "collapse_rate_approx": 0.9948,
+    "trades_by_date": {
+      "2026-07-04": 5,
+      "2026-07-06": 1,
+      "2026-07-07": 5,
+      "2026-07-08": 1
+    }
+  },
+  "redis_gate_state_file": "data/investigation/redis_gate_state_BTCUSD.txt",
+  "agent_log_file": "data/investigation/agent_forensics_2026-07-09.log",
+  "agent_log_bytes": 28924992
+}

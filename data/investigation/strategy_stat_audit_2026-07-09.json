@@ -1,0 +1,61 @@
+{
+  "phase": "4_statistical_audit",
+  "generated_at": "2026-07-09T04:31:18.491340+00:00",
+  "window": {
+    "start": "2026-06-01",
+    "end": "2026-07-09"
+  },
+  "expectancy_primary": {
+    "trade_count": 142,
+    "expectancy_usd": -0.8547,
+    "profit_factor": 0.2914,
+    "win_rate": 0.1408,
+    "avg_win_usd": 2.4954,
+    "avg_loss_usd": 1.4039
+  },
+  "rejection_breakdown": {
+    "entry_decisions_top": [
+      {
+        "reason": "hold_at_synthesis",
+        "count": 2600,
+        "pct": 96.12
+      },
+      {
+        "reason": "risk_rejected",
+        "count": 89,
+        "pct": 3.29
+      },
+      {
+        "reason": "v15_adx_trending_filter",
+        "count": 16,
+        "pct": 0.59
+      }
+    ],
+    "structural_gate_categories": {}
+  },
+  "slippage_study": {
+    "entry_slippage": {
+      "count": 5,
+      "mean_bps": -0.07,
+      "p95_bps": 1.11
+    },
+    "exit_slippage": {
+      "count": 7,
+      "mean_bps": -0.09,
+      "p95_bps": 2.2
+    },
+    "entry_slippage_by_regime": {
+      "neutral": {
+        "count": 5,
+        "mean_bps": -0.07,
+        "p95_bps": 1.11
+      }
+    }
+  },
+  "accepted_vs_rejected_features": {
+    "accepted_atr_14_mean": null,
+    "rejected_atr_14_mean": null,
+    "accepted_sample": 0,
+    "rejected_sample": 0
+  }
+}

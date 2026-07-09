@@ -1,0 +1,705 @@
+{
+  "generated_at": "2026-07-09T05:57:22.928168+00:00",
+  "source_log": "data\\investigation\\agent_forensics_2026-07-09.log",
+  "hold_at_synthesis_total": 283,
+  "bucket_histogram": [
+    {
+      "bucket": "B4",
+      "count": 283,
+      "pct": 100.0
+    }
+  ],
+  "shadow_analysis": {
+    "agrees_hold": 283,
+    "would_block_live_entry": 0,
+    "disagrees_with_live": 0,
+    "agrees_hold_pct": 100.0
+  },
+  "b4_v43_gates_passed_hold": 283,
+  "gate_decision": {
+    "decision": "proceed_3a2",
+    "rationale": "B4 share 100.0% exceeds 30% gate \u2014 policy semantics review justified.",
+    "thresholds": {
+      "b4_proceed_pct": 30.0,
+      "b1_b2_defer_pct": 50.0,
+      "a_skip_pct": 70.0
+    },
+    "observed_pct": {
+      "B1": 0.0,
+      "B2": 0.0,
+      "B3": 0.0,
+      "B4": 100.0,
+      "A": 0.0,
+      "B1_B2_combined": 0.0
+    }
+  },
+  "samples": [
+    {
+      "event_id": "9ad89079-fae9-4157-9cda-092e4f516e66",
+      "timestamp": "2026-07-08T06:49:08.888376Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "b651a340-36b3-49ed-9a6f-548592849152",
+      "timestamp": "2026-07-08T06:50:39.498508Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "bfa8f135-de63-4786-8bfa-eec233977500",
+      "timestamp": "2026-07-08T06:50:50.216670Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "149a2d22-b4ea-4fc5-b1ab-8c1d82c315ad",
+      "timestamp": "2026-07-08T06:55:51.559779Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "2857669b-3ed3-451d-8068-e858482fd928",
+      "timestamp": "2026-07-08T06:56:50.393439Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "65526cbc-1a92-4e72-a482-4c82598a4235",
+      "timestamp": "2026-07-08T07:01:01.589755Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "a15b7ced-bc44-4ba3-a690-e463e78c71cc",
+      "timestamp": "2026-07-08T07:05:58.005215Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "8df24994-0966-44c9-857e-d6e65eb6ff56",
+      "timestamp": "2026-07-08T07:06:07.673713Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "8fbd1ab2-670f-40a6-84c4-f4a96e6849b4",
+      "timestamp": "2026-07-08T07:10:15.065075Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "43409c81-b1ab-4293-8f9f-f1763dc27f3d",
+      "timestamp": "2026-07-08T07:11:00.985987Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "a75bda18-7d00-4d43-adfc-b857e1acd101",
+      "timestamp": "2026-07-08T07:11:59.921474Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "43a0b0ec-60b8-4485-95a3-4bc453c325e0",
+      "timestamp": "2026-07-08T07:14:45.399405Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "f777fb2b-e6a3-4b3b-aa32-63a578459d67",
+      "timestamp": "2026-07-08T07:15:31.537150Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "2289f5fa-0350-4ae1-869f-c7aa52c0ea2b",
+      "timestamp": "2026-07-08T07:16:55.720038Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "79a16a78-49c4-4eb2-88a0-3fde266efc0b",
+      "timestamp": "2026-07-08T07:20:33.714966Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "c79766d6-3e3f-41cd-883a-1a58a1154082",
+      "timestamp": "2026-07-08T07:25:22.848168Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "663da763-1b68-4728-b740-78b5454283a4",
+      "timestamp": "2026-07-08T07:25:36.525317Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "e0acb880-5686-4984-abb6-6cf1541026ae",
+      "timestamp": "2026-07-08T07:30:10.576878Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "968a85c2-c5ba-43c5-bc3a-87e6c861bbf2",
+      "timestamp": "2026-07-08T07:31:49.519762Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "db18c7ff-02d8-4a64-87f3-fc38450606e0",
+      "timestamp": "2026-07-08T07:35:16.890025Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "aac2a84f-13fc-4f53-a3f2-237c3f03abb5",
+      "timestamp": "2026-07-08T07:39:01.828416Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "b21fdee0-2a0e-4a54-8a16-16009ab1a290",
+      "timestamp": "2026-07-08T07:40:18.148411Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "adf5da60-61d8-47b9-8607-f36c9633112a",
+      "timestamp": "2026-07-08T07:43:27.002940Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "6c823674-25fb-4a81-9677-951cfc459875",
+      "timestamp": "2026-07-08T07:44:29.672083Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "740cda6a-feda-4d12-a057-8feb7685e266",
+      "timestamp": "2026-07-08T07:45:25.096610Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout",
+        "trend_continuation"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "e2d844f8-cc7c-4bc2-b8fb-1c60f4371b6d",
+      "timestamp": "2026-07-08T07:45:32.916212Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout",
+        "trend_continuation"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "36616888-46f8-46e4-93da-2357518cd712",
+      "timestamp": "2026-07-08T07:46:24.353087Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout",
+        "trend_continuation"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "c647dfbd-2f03-4076-94ca-0b5e8cbd3f47",
+      "timestamp": "2026-07-08T07:50:25.486993Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout",
+        "trend_continuation"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "d3eb145b-886a-4148-828c-74dd084f6d62",
+      "timestamp": "2026-07-08T07:54:09.747091Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout",
+        "trend_continuation"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    },
+    {
+      "event_id": "3c910103-6c6e-4803-8758-4034e47298e0",
+      "timestamp": "2026-07-08T07:55:28.661964Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout",
+        "trend_continuation"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral"
+      ]
+    }
+  ],
+  "bucket_definitions": {
+    "B1": "hypothesis_no_rule_fired + zero candidates / empty eligible_profiles",
+    "B2": "candidates exist but total pressure <= 1e-9",
+    "B3": "hypothesis_margin_below_min",
+    "B4": "v43 gates_passed_* but policy HOLD with flat hypothesis",
+    "A": "rule_based shadow agrees with live HOLD"
+  }
+}

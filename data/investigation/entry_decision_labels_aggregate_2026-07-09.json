@@ -1,0 +1,11 @@
+{
+  "generated_at": "2026-07-09T04:35:00+00:00",
+  "label_entry_decisions_result": {
+    "labeled_count": 0,
+    "unlabeled_rejected_count": 2705,
+    "reason": "entry_decisions.metadata lacks decision_context.features.close; label_entry_decisions.py cannot compute forward returns from DB rows."
+  },
+  "sql_aggregate_by_reject_reason": [],
+  "alternative_source": "opportunity_replay_2026-07-09.json",
+  "note": "Use forensics_opportunity_replay.py for log-sourced non-HOLD rejects until reject snapshot persistence includes entry price."
+}

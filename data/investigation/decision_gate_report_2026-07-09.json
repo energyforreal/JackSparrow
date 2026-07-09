@@ -1,0 +1,12 @@
+{
+  "baseline_ref": "data/investigation/strategy_stat_audit_2026-07-09.json",
+  "classification_ref": "data/investigation/forensics_decision_gate_2026-07-09.json",
+  "baseline_summary": null,
+  "trigger_summary": null,
+  "dominant_trigger_50pct": null,
+  "recommendations": [
+    "Insufficient data for automated recommendation; collect post-fix exits."
+  ],
+  "config_changes_deferred": true,
+  "note": "No .env changes applied automatically; review recommendations before tuning."
+}
