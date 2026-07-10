@@ -285,7 +285,8 @@ def build_evidence_bundle(
         ml_confirms=ml_confirms,
     )
     norm_score = _clamp01(float(ts.score) / 100.0, 0.5)
-    scores["legacy_trade_score_norm"] = norm_score
+    if bool(getattr(settings, "evidence_legacy_trade_score_in_bundle", True)):
+        scores["legacy_trade_score_norm"] = norm_score
 
     regime_dist = market_forecast_from_context(mc, ml_validation).regime_distribution
 

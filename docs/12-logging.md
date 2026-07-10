@@ -632,6 +632,30 @@ Join structlog events to PostgreSQL analytics rows on **`reasoning_chain_id`**:
 
 CLI: `python tools/commands/trade_analytics.py timing-summary` reads `risk_to_fill_ms` from closed snapshots.
 
+### Decision telemetry v3 (signal recovery)
+
+Append-only NDJSON at `{LOGS_ROOT}/signal_recovery/decision_telemetry.ndjson` (configurable via `SIGNAL_RECOVERY_TELEMETRY_SUBPATH`). Written by [`agent/core/signal_recovery_telemetry.py`](../agent/core/signal_recovery_telemetry.py) on each v43 decision cycle and handler outcome.
+
+| Block | Fields |
+|-------|--------|
+| `latent` | `epsilon_proxy`, `kappa_ml`, `kappa_thesis`, `q_composite`, `A_composite` |
+| `gates` | `g1_raw_long/short`, `g2_pass` … `g5_pass`, `gate_reject` |
+| `scores` | `trade_score`, `conviction`, `size_fraction`, `policy_confidence` |
+| `signals` | `thesis`, `ml_gated`, `policy`, `handler_rejected` |
+| `constraints` | `liquidity_ok`, `has_open_position`, `portfolio_heat`, `conviction_floor_pass` |
+| `terminal_cause` | Single bucket: `g1` \| `g2` \| `g5` \| `policy` \| `quality` \| `conviction` \| `handler` \| `risk` \| `executed` |
+| `policy_snapshot` | Frozen π₀ thresholds for calibration labels |
+| `extra` | `expected_return_is_synthetic`, `latent_shadow` (when `LATENT_SHADOW_MODE=true`) |
+
+Analysis CLIs:
+
+- `python tools/commands/decision_attribution.py attribution --hours 168`
+- `python tools/commands/metric_ablation.py`
+- `python tools/commands/shadow_eval.py`
+- `python scripts/signal_recovery/run.py baseline` (includes gate funnel via Phase 2)
+
+Feature flags: `LATENT_SHADOW_MODE`, `LATENT_POLICY_ENABLED` (evidence-gated), `CONVICTION_SCALES_PORTFOLIO_MARGIN`, `EVIDENCE_LEGACY_TRADE_SCORE_IN_BUNDLE`. See [`docs/decision-engine-quantitative-spec.md`](decision-engine-quantitative-spec.md).
+
 ---
 
 ## References

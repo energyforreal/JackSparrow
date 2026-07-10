@@ -1877,6 +1877,17 @@ class MCPOrchestrator:
             from agent.core.conviction import confluence_score_to_size_multiplier
 
             legacy_mult = confluence_score_to_size_multiplier(float(trade_score.score))
+            eff_margin = float(policy_verdict.position_size or pos_hint)
+            base_frac = float(getattr(settings, "entry_portfolio_margin_fraction", 0.60) or 0.60)
+            size_frac = float(
+                getattr(conviction_result, "size_fraction", 0.0)
+                or policy_verdict.position_size
+                or 1.0
+            )
+            if bool(getattr(settings, "conviction_scales_portfolio_margin", False)):
+                effective_frac = base_frac * max(0.05, min(1.0, size_frac))
+            else:
+                effective_frac = base_frac
             logger.info(
                 "evidence_shadow_dual_pipeline",
                 symbol=symbol,
@@ -1884,6 +1895,8 @@ class MCPOrchestrator:
                 legacy_size_multiplier=legacy_mult,
                 evidence_conviction=conviction_result.conviction,
                 evidence_size_fraction=conviction_result.size_fraction,
+                policy_position_size=eff_margin,
+                effective_frac=round(effective_frac, 4),
             )
 
         portfolio_guard = evaluate_portfolio_guard(
@@ -2058,10 +2071,116 @@ class MCPOrchestrator:
             v43_cnt_trades_executed=_gc.trades_executed,
         )
         try:
+            from agent.core.decision_telemetry import (
+                build_gate_telemetry,
+                build_latent_telemetry,
+                classify_terminal_cause,
+                frozen_policy_snapshot,
+            )
             from agent.core.signal_recovery_telemetry import (
                 check_over_gating_regression,
                 record_decision_cycle,
             )
+
+            hyp_snap = market_context_for_reasoning.get("hypothesis_snapshot")
+            hyp_margin_val: Optional[float] = None
+            hyp_dom: Optional[str] = None
+            agg_conf: Optional[float] = None
+            if isinstance(hyp_snap, dict):
+                try:
+                    hyp_margin_val = float(hyp_snap.get("hypothesis_margin") or 0.0)
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    agg_conf = float(hyp_snap.get("aggregate_confidence") or 0.0)
+                except (TypeError, ValueError):
+                    pass
+                dom = hyp_snap.get("dominant")
+                if isinstance(dom, dict):
+                    hyp_dom = str(dom.get("id") or dom.get("thesis_type") or "")
+
+            ic_align = float(pctx.get("ic_alignment_score") or mh_evidence.alignment_score or 0.0)
+            g5_pass = bool(gate5_economic.get("pass")) if isinstance(gate5_economic, dict) else None
+            gates_block = build_gate_telemetry(
+                raw_long=bool(raw_long),
+                raw_short=bool(raw_short),
+                final_long=bool(final_long),
+                final_short=bool(final_short),
+                gate_reject=gate_reject,
+                g5_pass=g5_pass,
+            )
+            latent_block = build_latent_telemetry(
+                expected_return=float(proba),
+                threshold=float(thr),
+                model_confidence=float(ml_conf),
+                thesis_confidence=float(strategy_candidate.confidence or 0.0),
+                trade_score=float(trade_score.score),
+                hypothesis_margin=hyp_margin_val,
+                mtf_alignment=ic_align,
+            )
+            port_heat = float(market_context_for_reasoning.get("portfolio_heat") or 0.0)
+            conv_floor_pass = not bool(
+                getattr(conviction_result, "below_entry_floor", False)
+            )
+            terminal = classify_terminal_cause(
+                policy_signal=str(policy_verdict.signal),
+                gate_reject=gate_reject,
+                final_long=bool(final_long),
+                final_short=bool(final_short),
+                raw_long=bool(raw_long),
+                raw_short=bool(raw_short),
+                entry_quality_passed=bool(entry_quality_result.passed),
+                conviction_below_floor=bool(
+                    getattr(conviction_result, "below_entry_floor", False)
+                ),
+            )
+            er_synthetic = bool(pctx.get("expected_return_is_synthetic"))
+
+            extra_block: Dict[str, Any] = {
+                "final_long": final_long,
+                "final_short": final_short,
+                "reject": reject_tail,
+                "expected_return_is_synthetic": er_synthetic,
+            }
+            if bool(getattr(settings, "latent_shadow_mode", False)):
+                from agent.core.latent_scoring import compute_latent_score
+
+                latent_result = compute_latent_score(
+                    expected_return=float(proba),
+                    threshold=float(thr),
+                    kappa=float(ml_conf),
+                    trade_score=float(trade_score.score),
+                    agreement=float(latent_block.get("A_composite") or 0.0),
+                    policy_signal=str(policy_verdict.signal),
+                )
+                extra_block["latent_shadow"] = latent_result.to_dict()
+                logger.info(
+                    "latent_shadow_cycle",
+                    symbol=symbol,
+                    policy_signal=str(policy_verdict.signal),
+                    shadow_signal=latent_result.shadow_signal,
+                    score_s=latent_result.score_s,
+                )
+            elif bool(getattr(settings, "latent_policy_enabled", False)):
+                from agent.core.latent_scoring import compute_latent_score
+
+                latent_result = compute_latent_score(
+                    expected_return=float(proba),
+                    threshold=float(thr),
+                    kappa=float(ml_conf),
+                    trade_score=float(trade_score.score),
+                    agreement=float(latent_block.get("A_composite") or 0.0),
+                    policy_signal=str(policy_verdict.signal),
+                )
+                extra_block["latent_policy_advisory"] = latent_result.to_dict()
+                if latent_result.shadow_signal != str(policy_verdict.signal):
+                    logger.info(
+                        "latent_policy_advisory_disagreement",
+                        symbol=symbol,
+                        policy_signal=str(policy_verdict.signal),
+                        latent_signal=latent_result.shadow_signal,
+                        score_s=latent_result.score_s,
+                    )
 
             record_decision_cycle(
                 symbol=symbol,
@@ -2070,6 +2189,9 @@ class MCPOrchestrator:
                 expected_return=float(proba),
                 trade_score=float(trade_score.score),
                 thesis_signal=str(strategy_candidate.signal),
+                hypothesis_dominant=hyp_dom,
+                aggregate_confidence=agg_conf,
+                hypothesis_margin=hyp_margin_val,
                 policy_reason_codes=list(policy_verdict.reason_codes),
                 v43_collapse_rate=float(_gc.collapse_rate()),
                 proba=float(proba),
@@ -2078,11 +2200,33 @@ class MCPOrchestrator:
                     getattr(settings, "jacksparrow_v43_inference_stack", "meta_calibrator")
                 ),
                 event="v43_prediction_complete",
-                extra={
-                    "final_long": final_long,
-                    "final_short": final_short,
-                    "reject": reject_tail,
+                bar_index=int(bar_idx),
+                latent=latent_block,
+                gates=gates_block,
+                scores={
+                    "trade_score": float(trade_score.score),
+                    "conviction": float(
+                        getattr(conviction_result, "conviction", 0.0) or 0.0
+                    ),
+                    "size_fraction": float(
+                        getattr(conviction_result, "size_fraction", 0.0) or 0.0
+                    ),
+                    "policy_confidence": float(policy_verdict.confidence or 0.0),
                 },
+                signals={
+                    "thesis": str(strategy_candidate.signal),
+                    "ml_gated": ml_sig,
+                    "policy": str(policy_verdict.signal),
+                },
+                constraints={
+                    "liquidity_ok": bool(structure.liquidity_ok),
+                    "has_open_position": bool(has_open),
+                    "portfolio_heat": port_heat,
+                    "conviction_floor_pass": conv_floor_pass,
+                },
+                terminal_cause=terminal,
+                policy_snapshot=frozen_policy_snapshot(),
+                extra=extra_block,
             )
             check_over_gating_regression()
         except Exception:

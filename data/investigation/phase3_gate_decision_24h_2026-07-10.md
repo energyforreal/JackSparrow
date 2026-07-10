@@ -1,7 +1,7 @@
 # Phase 3A.1 Gate Decision
 
-Generated: 2026-07-09T07:25:39.637038+00:00
-Source log: `data\investigation\agent_post_deploy_2026-07-09.log`
+Generated: 2026-07-10T03:54:53.366162+00:00
+Source log: `data\investigation\agent_24h_2026-07-10.log`
 
 ## Bucket histogram
 

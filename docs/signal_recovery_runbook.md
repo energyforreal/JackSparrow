@@ -2,6 +2,8 @@
 
 Operational steps for the runtime signal recovery plan. Reports are written under `logs/signal_recovery/` (or `LOGS_ROOT/signal_recovery/`).
 
+**Quantitative spec:** [decision-engine-quantitative-spec.md](decision-engine-quantitative-spec.md) — latent variables, telemetry v3 schema, attribution/replay/calibration tooling.
+
 ## Phase 1 — Runtime stabilization
 
 1. **Delta IP whitelist (manual):** Add outbound IP `115.96.12.44` to your Delta Exchange API key allowlist.

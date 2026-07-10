@@ -230,6 +230,55 @@ class TradingEventHandler:
             event_id=event_id,
             context=context,
         )
+        try:
+            from agent.core.signal_recovery_telemetry import record_handler_outcome
+
+            record_handler_outcome(
+                symbol=str(symbol or ""),
+                policy_signal=str(signal or "HOLD"),
+                handler_reject_reason=reason,
+                executed=False,
+                effective_margin_fraction=context.get("effective_margin_fraction"),
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _effective_entry_margin_fraction(
+        base_fraction: float,
+        payload: Dict[str, Any],
+        mc: Optional[Dict[str, Any]] = None,
+    ) -> float:
+        """Scale portfolio margin fraction by policy conviction when enabled."""
+        frac = max(0.01, min(1.0, float(base_fraction)))
+        if not bool(getattr(settings, "conviction_scales_portfolio_margin", False)):
+            return frac
+        scale = 1.0
+        pv = payload.get("policy_verdict")
+        if not isinstance(pv, dict) and isinstance(mc, dict):
+            pv = mc.get("policy_verdict")
+        if isinstance(pv, dict):
+            sf = pv.get("size_fraction")
+            if sf is not None:
+                try:
+                    scale = max(0.05, min(1.0, float(sf)))
+                except (TypeError, ValueError):
+                    scale = 1.0
+            else:
+                ps = pv.get("position_size")
+                if ps is not None:
+                    try:
+                        scale = max(0.05, min(1.0, float(ps)))
+                    except (TypeError, ValueError):
+                        pass
+        else:
+            ps = payload.get("position_size")
+            if ps is not None:
+                try:
+                    scale = max(0.05, min(1.0, float(ps)))
+                except (TypeError, ValueError):
+                    pass
+        return max(0.01, min(1.0, frac * scale))
 
     def _schedule_entry_decision_persist(
         self,
@@ -821,6 +870,12 @@ class TradingEventHandler:
                     ),
                 ),
             )
+            entry_portfolio_frac = self._effective_entry_margin_fraction(
+                entry_portfolio_frac,
+                payload if isinstance(payload, dict) else {},
+                mc if isinstance(mc, dict) else {},
+            )
+            diagnostics_base["effective_entry_margin_fraction"] = entry_portfolio_frac
             leverage = max(1, int(getattr(settings, "isolated_margin_leverage", 5) or 5))
             settings_max_lots = int(getattr(settings, "max_lots_per_order", 100) or 100)
             if getattr(settings, "portfolio_fraction_lot_sizing", True):
@@ -1454,6 +1509,18 @@ class TradingEventHandler:
                 event_id=event.event_id,
                 **diagnostics_base,
             )
+            try:
+                from agent.core.signal_recovery_telemetry import record_handler_outcome
+
+                record_handler_outcome(
+                    symbol=symbol,
+                    policy_signal=signal,
+                    executed=True,
+                    effective_margin_fraction=entry_portfolio_frac,
+                    entry_lots=int(entry_lots),
+                )
+            except Exception:
+                pass
             try:
                 from agent.core.signal_audit_md import append_risk_approved
 

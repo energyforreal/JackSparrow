@@ -115,6 +115,7 @@ class ForensicsReport:
     v43_prediction_complete: int = 0
     v43_policy_signals: Counter = field(default_factory=Counter)
     v43_reject_tags: Counter = field(default_factory=Counter)
+    terminal_cause_v3: Counter = field(default_factory=Counter)
     latest_v43_counters: Dict[str, Any] = field(default_factory=dict)
     decisions_emitted: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     confidence_cascades: List[Dict[str, Any]] = field(default_factory=list)
@@ -202,6 +203,38 @@ def analyze_log_content(content: str) -> ForensicsReport:
     return report
 
 
+def analyze_telemetry_ndjson(content: str) -> Dict[str, Any]:
+    """Aggregate v3 terminal_cause histogram from decision_telemetry.ndjson."""
+    terminal: Counter = Counter()
+    gate_layers: Counter = Counter()
+    rows = 0
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line[0] != "{":
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rows += 1
+        tc = str(row.get("terminal_cause") or "unknown")
+        terminal[tc] += 1
+        gates = row.get("gates")
+        if isinstance(gates, dict) and gates.get("gate_reject"):
+            gate_layers[str(gates["gate_reject"])] += 1
+    return {
+        "telemetry_rows": rows,
+        "terminal_cause_histogram": dict(terminal.most_common()),
+        "gate_reject_tags": dict(gate_layers.most_common(20)),
+    }
+
+
+def merge_telemetry_into_report(report: ForensicsReport, telemetry_stats: Dict[str, Any]) -> None:
+    """Merge NDJSON v3 stats into forensics report counters."""
+    for cause, count in (telemetry_stats.get("terminal_cause_histogram") or {}).items():
+        report.terminal_cause_v3[cause] += int(count)
+
+
 def _pct(counter: Counter, key: str) -> float:
     total = sum(counter.values()) or 1
     return round(counter.get(key, 0) / total * 100.0, 2)
@@ -272,6 +305,7 @@ def build_output(
             "risk_approved_count": report.risk_approved_count,
             "fill_count": report.fill_count,
         },
+        "v3_terminal_cause": dict(report.terminal_cause_v3),
         "confidence_cascades_non_hold": report.confidence_cascades[-50:],
         "counter_reconciliation": counter_reconcile,
         "semantic_notes": {
@@ -359,10 +393,22 @@ def main() -> int:
         type=Path,
         default=ROOT / "data" / "investigation" / "redis_gate_state_BTCUSD.txt",
     )
+    parser.add_argument(
+        "--telemetry",
+        type=Path,
+        default=None,
+        help="Optional decision_telemetry.ndjson for v3 terminal_cause histogram",
+    )
     args = parser.parse_args()
 
     content = args.log_file.read_text(encoding="utf-8", errors="replace")
     report = analyze_log_content(content)
+    telemetry_stats: Optional[Dict[str, Any]] = None
+    if args.telemetry and args.telemetry.is_file():
+        telemetry_stats = analyze_telemetry_ndjson(
+            args.telemetry.read_text(encoding="utf-8", errors="replace")
+        )
+        merge_telemetry_into_report(report, telemetry_stats)
     output = build_output(
         report,
         baseline=_load_json_file(args.baseline),

@@ -360,7 +360,6 @@ def evaluate_entry_quality(
     quality_score = round(composite * 100.0, 2)
 
     min_score = float(getattr(settings, "entry_quality_min_score", 55.0) or 55.0)
-    min_score = min(min_score, float(getattr(settings, "agent_trade_score_min", 55.0) or 55.0))
     passed = quality_score >= min_score and direction != "FLAT"
     if not passed and direction != "FLAT":
         reasons.append(f"quality_below_min={quality_score:.1f}<{min_score:.1f}")
@@ -415,12 +414,17 @@ def apply_entry_quality_policy(
             )
 
     min_score = float(getattr(settings, "entry_quality_min_score", 55.0) or 55.0)
-    if entry_quality.quality_score < min_score:
+    if not entry_quality.passed:
         return PolicyVerdict(
             signal="HOLD",
             confidence=policy_verdict.confidence,
             position_size=0.0,
-            reason_codes=reasons + ["quality_below_floor", f"quality_score={entry_quality.quality_score:.1f}"],
+            reason_codes=reasons
+            + [
+                "quality_below_floor",
+                f"quality_score={entry_quality.quality_score:.1f}",
+                f"min_score={min_score:.1f}",
+            ],
             ml_evidence_id=policy_verdict.ml_evidence_id,
             adopted_ml_candidate=policy_verdict.adopted_ml_candidate,
             memory_size_scale=policy_verdict.memory_size_scale,

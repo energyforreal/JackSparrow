@@ -1,0 +1,132 @@
+{
+  "generated_at": "2026-07-10T03:54:57.228094+00:00",
+  "parsed_events": 459944,
+  "handler_reject_histogram": [
+    {
+      "reason": "hold_at_synthesis",
+      "count": 4,
+      "pct": 80.0
+    },
+    {
+      "reason": "v15_adx_trending_filter",
+      "count": 1,
+      "pct": 20.0
+    }
+  ],
+  "handler_reject_by_signal": {
+    "LONG": 1,
+    "HOLD": 4
+  },
+  "hold_at_synthesis": {
+    "total": 4,
+    "primary_causes": [
+      {
+        "cause": "hypothesis_no_rule_fired",
+        "count": 4,
+        "pct": 100.0
+      }
+    ],
+    "top_policy_reason_codes": [
+      {
+        "code": "hypothesis_no_rule_fired",
+        "count": 12
+      },
+      {
+        "code": "regime=neutral",
+        "count": 12
+      },
+      {
+        "code": "fusion_mode=ml_or_thesis",
+        "count": 8
+      },
+      {
+        "code": "thesis_type=flat",
+        "count": 8
+      },
+      {
+        "code": "fusion_ml_or_thesis_blocked",
+        "count": 8
+      },
+      {
+        "code": "thesis_blocks_ml_adoption",
+        "count": 8
+      },
+      {
+        "code": "hypothesis_margin=0.000",
+        "count": 8
+      },
+      {
+        "code": "aggregate_confidence=0.000",
+        "count": 8
+      },
+      {
+        "code": "portfolio_guard_skipped",
+        "count": 4
+      }
+    ]
+  },
+  "v43_prediction": {
+    "cycles": 6,
+    "policy_signals": {
+      "LONG": 2,
+      "HOLD": 4
+    },
+    "reject_tags": {
+      "gates_passed_long": 2,
+      "gates_passed_short": 4
+    },
+    "latest_counters": {
+      "signals_raw": 2699,
+      "trades_executed": 12,
+      "rejected_pos_open": 719,
+      "collapse_rate": 0.9955539088551315,
+      "timestamp": "2026-07-10T03:40:16.211230Z"
+    }
+  },
+  "execution_path": {
+    "risk_approved_count": 0,
+    "fill_count": 0
+  },
+  "confidence_cascades_non_hold": [
+    {
+      "event_id": "928e0087-11cb-4c0b-b3a5-87dc485ecb12",
+      "timestamp": "2026-07-10T03:20:15.942447Z",
+      "symbol": "BTCUSD",
+      "signal": "LONG",
+      "reject_reason": "v15_adx_trending_filter",
+      "trade_score": 62.69,
+      "v43_proba": null,
+      "policy_signal": "LONG",
+      "policy_confidence": 0.8,
+      "thesis_type": "breakout",
+      "raw_ai_signal_confidence": 0.8,
+      "calibrated_confidence": 0.7904,
+      "reasoning_final_confidence": 0.4811659828229442,
+      "adx_14": 45.019167502816394,
+      "policy_reason_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=breakout",
+        "hypothesis_long_pressure=0.800",
+        "hypothesis_short_pressure=0.000",
+        "hypothesis_margin=1.000",
+        "hypothesis_dominant=breakout_long",
+        "thesis_breakout_long",
+        "adx_14=45.02"
+      ]
+    }
+  ],
+  "counter_reconciliation": {
+    "postgres_trades_executed": 21,
+    "postgres_last_trade_at": "2026-06-04T04:50:31.2389+00:00",
+    "redis_trades_executed": 12,
+    "redis_signals_raw": 2316,
+    "log_latest_v43_trades_executed": 12,
+    "log_latest_collapse_rate": 0.9955539088551315,
+    "gap_db_minus_v43": 9,
+    "interpretation": "v43 counter increments only on fills with v43_closed_bar_index; Postgres trades table counts all EXECUTED rows regardless of v43 path."
+  },
+  "semantic_notes": {
+    "thesis_type_flat_vs_regime_neutral": "thesis_type=flat is a ThesisVerdict label; regime=neutral is market classification. AGENT_POLICY_ADOPT_GATED_ML_WHEN_THESIS_NEUTRAL does not apply when hypothesis_no_rule_fired is present.",
+    "hold_at_synthesis": "Handler label when policy already emitted HOLD before entry gates."
+  }
+}

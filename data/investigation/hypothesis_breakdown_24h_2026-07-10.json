@@ -1,0 +1,125 @@
+{
+  "generated_at": "2026-07-10T03:54:53.366162+00:00",
+  "source_log": "data\\investigation\\agent_24h_2026-07-10.log",
+  "hold_at_synthesis_total": 4,
+  "bucket_histogram": [
+    {
+      "bucket": "B4",
+      "count": 4,
+      "pct": 100.0
+    }
+  ],
+  "shadow_analysis": {
+    "agrees_hold": 4,
+    "would_block_live_entry": 0,
+    "disagrees_with_live": 0,
+    "agrees_hold_pct": 100.0
+  },
+  "b4_v43_gates_passed_hold": 4,
+  "gate_decision": {
+    "decision": "proceed_3a2",
+    "rationale": "B4 share 100.0% exceeds 30% gate \u2014 policy semantics review justified.",
+    "thresholds": {
+      "b4_proceed_pct": 30.0,
+      "b1_b2_defer_pct": 50.0,
+      "a_skip_pct": 70.0
+    },
+    "observed_pct": {
+      "B1": 0.0,
+      "B2": 0.0,
+      "B3": 0.0,
+      "B4": 100.0,
+      "A": 0.0,
+      "B1_B2_combined": 0.0
+    }
+  },
+  "samples": [
+    {
+      "event_id": "5e87eaf2-3796-4121-ba3c-9fcacf28dba8",
+      "timestamp": "2026-07-10T03:25:23.874413Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "1527e9fe-45e9-4fbe-8e9e-841da63b333d",
+      "timestamp": "2026-07-10T03:30:44.626255Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "bbd74f0d-a012-4169-a830-c433068ce04d",
+      "timestamp": "2026-07-10T03:35:12.104385Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "29e5cae5-58d5-4e4f-b828-5484fa550690",
+      "timestamp": "2026-07-10T03:40:17.927009Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    }
+  ],
+  "bucket_definitions": {
+    "B1": "hypothesis_no_rule_fired + zero candidates / empty eligible_profiles",
+    "B2": "candidates exist but total pressure <= 1e-9",
+    "B3": "hypothesis_margin_below_min",
+    "B4": "v43 gates_passed_* but policy HOLD with flat hypothesis",
+    "A": "rule_based shadow agrees with live HOLD"
+  }
+}

@@ -1167,6 +1167,7 @@ This architecture enables better scalability, testability, and maintainability b
 - [Features Documentation](04-features.md) - What the system does
 - [Logic & Reasoning Documentation](05-logic-reasoning.md) - How decisions are made
 - [Entry Quality and Lifecycle](entry-quality-and-lifecycle.md) - Advisory scoring, policy authority, EV exits
+- [Decision Engine Quantitative Spec](decision-engine-quantitative-spec.md) - Latent variables, constraints vs quality, validation roadmap
 - [Backend Documentation](06-backend.md) - API implementation
 - [Frontend Documentation](07-frontend.md) - UI implementation
 - [Deployment Documentation](10-deployment.md) - Setup and deployment

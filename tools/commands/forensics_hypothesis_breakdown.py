@@ -264,6 +264,20 @@ def build_output(report: HypothesisBreakdown, *, log_file: Path) -> Dict[str, An
         for k, v in sorted(report.buckets.items(), key=lambda x: -x[1])
     ]
     gate = evaluate_gate(report)
+
+    # Map hypothesis buckets to v3 terminal_cause taxonomy (spec alignment).
+    bucket_to_terminal = {
+        "B1": "policy",
+        "B2": "policy",
+        "B3": "g1",
+        "B4": "policy",
+        "A": "policy",
+    }
+    terminal_alignment = {
+        bucket: bucket_to_terminal.get(bucket, "policy")
+        for bucket in report.buckets
+    }
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_log": str(log_file),
@@ -277,6 +291,7 @@ def build_output(report: HypothesisBreakdown, *, log_file: Path) -> Dict[str, An
         },
         "b4_v43_gates_passed_hold": report.b4_v43_gates_passed,
         "gate_decision": gate,
+        "terminal_cause_alignment": terminal_alignment,
         "samples": report.samples,
         "bucket_definitions": {
             "B1": "hypothesis_no_rule_fired + zero candidates / empty eligible_profiles",

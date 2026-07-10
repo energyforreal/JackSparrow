@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-07-09T07:45:17.465227+00:00",
+  "parsed_events": 0,
+  "handler_reject_histogram": [],
+  "handler_reject_by_signal": {},
+  "hold_at_synthesis": {
+    "total": 0,
+    "primary_causes": [],
+    "top_policy_reason_codes": []
+  },
+  "v43_prediction": {
+    "cycles": 0,
+    "policy_signals": {},
+    "reject_tags": {},
+    "latest_counters": {}
+  },
+  "execution_path": {
+    "risk_approved_count": 0,
+    "fill_count": 0
+  },
+  "confidence_cascades_non_hold": [],
+  "counter_reconciliation": {
+    "postgres_trades_executed": 21,
+    "postgres_last_trade_at": "2026-06-04T04:50:31.2389+00:00",
+    "redis_trades_executed": 12,
+    "redis_signals_raw": 2316,
+    "log_latest_v43_trades_executed": null,
+    "log_latest_collapse_rate": null,
+    "gap_db_minus_v43": 9,
+    "interpretation": "v43 counter increments only on fills with v43_closed_bar_index; Postgres trades table counts all EXECUTED rows regardless of v43 path."
+  },
+  "semantic_notes": {
+    "thesis_type_flat_vs_regime_neutral": "thesis_type=flat is a ThesisVerdict label; regime=neutral is market classification. AGENT_POLICY_ADOPT_GATED_ML_WHEN_THESIS_NEUTRAL does not apply when hypothesis_no_rule_fired is present.",
+    "hold_at_synthesis": "Handler label when policy already emitted HOLD before entry gates."
+  }
+}

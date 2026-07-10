@@ -1505,6 +1505,14 @@ class Settings(BaseSettings):
         env="PORTFOLIO_FRACTION_LOT_SIZING",
         description="When true, size entry lots from entry_portfolio_margin_fraction (overrides fixed/v43/notional)",
     )
+    conviction_scales_portfolio_margin: bool = Field(
+        default=False,
+        env="CONVICTION_SCALES_PORTFOLIO_MARGIN",
+        description=(
+            "When true, multiply entry_portfolio_margin_fraction by policy size_fraction "
+            "or position_size from DECISION_READY payload."
+        ),
+    )
 
     # Order execution limits
     slippage_bps: float = Field(5.0, env="SLIPPAGE_BPS")
@@ -2673,6 +2681,24 @@ class Settings(BaseSettings):
         default=True,
         env="EVIDENCE_SHADOW_DUAL_PIPELINE",
         description="Log legacy vs evidence conviction in parallel during rollout.",
+    )
+    latent_shadow_mode: bool = Field(
+        default=False,
+        env="LATENT_SHADOW_MODE",
+        description="Compute latent S score and shadow_signal for telemetry; policy unchanged.",
+    )
+    latent_policy_enabled: bool = Field(
+        default=False,
+        env="LATENT_POLICY_ENABLED",
+        description=(
+            "Evidence-gated: when True (after ablation+shadow gates), attach latent score "
+            "advisory to telemetry. Does not override PolicyVerdict until explicitly promoted."
+        ),
+    )
+    evidence_legacy_trade_score_in_bundle: bool = Field(
+        default=True,
+        env="EVIDENCE_LEGACY_TRADE_SCORE_IN_BUNDLE",
+        description="Include legacy_trade_score_norm in evidence bundle (disable after ablation).",
     )
     agent_thesis_soft_evidence_mode: bool = Field(
         default=True,

@@ -31,6 +31,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | — | [Rule-based decision engine](docs/rule-based-decision-engine.md) | FSM + structural gates, shadow rollout, `DECISION_ENGINE_MODE`, UI payloads |
 | — | [Canonical events](docs/canonical_events.md) | Event-bus wiring and `DECISION_READY` payload fields |
 | — | [Entry quality and lifecycle](docs/entry-quality-and-lifecycle.md) | Quality-first entry scoring, Gate 5 economics (`MIN_EDGE_COST_RATIO=0.75`), ADX chop filter on v43, TLE + forecast adapter, learning loop |
+| — | [Decision engine quantitative spec](docs/decision-engine-quantitative-spec.md) | Latent variables (ε, κ, q, A), metric DAG, telemetry v3, calibration/ablation/shadow validation |
 | — | [Trade lifecycle engine](reference/trade-lifecycle-engine.md) | Position intelligence, expectation forecast adapter, exit engine, promotion replay |
 | — | [Trading persistence model](reference/trading-persistence-model.md) | Testnet three-layer model, snapshot schema v1, analytics tables, Docker notes |
 | — | [Trade Intelligence Snapshot v2](reference/trade-intelligence-snapshot-v2.md) | Decision events, causality graph, MFE/MAE, reject labels, shadow rollout |
