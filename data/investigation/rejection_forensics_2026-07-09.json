@@ -1,83 +1,78 @@
 {
-  "generated_at": "2026-07-11T12:31:37.758321+00:00",
-  "parsed_events": 5385,
+  "generated_at": "2026-07-11T16:30:15.177629+00:00",
+  "parsed_events": 357,
   "handler_reject_histogram": [
     {
       "reason": "hold_at_synthesis",
-      "count": 27,
+      "count": 1,
       "pct": 100.0
     }
   ],
   "handler_reject_by_signal": {
-    "HOLD": 27
+    "HOLD": 1
   },
   "hold_at_synthesis": {
-    "total": 27,
+    "total": 1,
     "primary_causes": [
       {
         "cause": "hypothesis_no_rule_fired",
-        "count": 27,
+        "count": 1,
         "pct": 100.0
       }
     ],
     "top_policy_reason_codes": [
       {
         "code": "hypothesis_no_rule_fired",
-        "count": 81
+        "count": 3
       },
       {
         "code": "regime=neutral",
-        "count": 60
+        "count": 3
       },
       {
         "code": "fusion_mode=ml_or_thesis",
-        "count": 54
+        "count": 2
       },
       {
         "code": "thesis_type=flat",
-        "count": 54
+        "count": 2
       },
       {
         "code": "fusion_ml_or_thesis_blocked",
-        "count": 54
+        "count": 2
       },
       {
         "code": "thesis_blocks_ml_adoption",
-        "count": 54
+        "count": 2
       },
       {
         "code": "hypothesis_margin=0.000",
-        "count": 54
+        "count": 2
       },
       {
         "code": "aggregate_confidence=0.000",
-        "count": 54
+        "count": 2
       },
       {
         "code": "portfolio_guard_skipped",
-        "count": 27
-      },
-      {
-        "code": "regime=ranging",
-        "count": 21
+        "count": 1
       }
     ]
   },
   "v43_prediction": {
-    "cycles": 27,
+    "cycles": 1,
     "policy_signals": {
-      "HOLD": 27
+      "HOLD": 1
     },
     "reject_tags": {
-      "gates_passed_short": 10,
-      "gates_passed_long": 17
+      "gates_passed_short": 1
     },
     "latest_counters": {
-      "signals_raw": 3105,
+      "signals_raw": 3177,
       "trades_executed": 12,
       "rejected_pos_open": 719,
-      "collapse_rate": 0.996135265700483,
-      "timestamp": "2026-07-11T12:30:13.470467Z"
+      "collapse_rate": 0.996222851746931,
+      "timestamp": "2026-07-11T16:25:48.619787Z"
     }
   },
   "execution_path": {
@@ -92,7 +87,7 @@
     "redis_trades_executed": 12,
     "redis_signals_raw": 2316,
     "log_latest_v43_trades_executed": 12,
-    "log_latest_collapse_rate": 0.996135265700483,
+    "log_latest_collapse_rate": 0.996222851746931,
     "gap_db_minus_v43": 9,
     "interpretation": "v43 counter increments only on fills with v43_closed_bar_index; Postgres trades table counts all EXECUTED rows regardless of v43 path."
   },

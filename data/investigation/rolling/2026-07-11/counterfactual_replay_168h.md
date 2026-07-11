@@ -1,35 +1,36 @@
 # Counterfactual Replay Report
 
-Generated: 2026-07-11T12:29:04.716269+00:00
+Generated: 2026-07-11T16:32:17.044562+00:00
 Window hours: 168.0
-Candidates labeled: 2084
+Candidates labeled: 2094
 
 ## Scenario table
 
 | Scenario | Trades | Win % | PF | EV % | Max DD % | Exposure | Avg hold |
 |----------|--------|-------|-----|------|----------|----------|----------|
-| current | 191 | 12.04 | 0.044 | -0.1873 | 1.7883 | 9.55 | 2.0 |
+| current | 198 | 11.62 | 0.042 | -0.19 | 1.8808 | 9.9 | 2.0 |
 | ml_adopt_flat | 0 | None | None | 0.0 | 0.0 | 0.0 | None |
 | ml_adopt_flat_score50 | 0 | None | None | 0.0 | 0.0 | 0.0 | None |
-| ml_only | 2084 | 3.17 | 0.019 | -0.201 | 21.0164 | 104.2 | 2.0 |
-| no_adx | 195 | 11.79 | 0.043 | -0.1877 | 1.8302 | 9.75 | 2.0 |
-| no_thesis_veto | 2084 | 3.17 | 0.019 | -0.201 | 21.0164 | 104.2 | 2.0 |
+| ml_only | 2094 | 3.15 | 0.016 | -0.2015 | 21.0927 | 104.7 | 2.0 |
+| no_adx | 203 | 11.33 | 0.041 | -0.1904 | 1.9329 | 10.15 | 2.0 |
+| no_thesis_veto | 2094 | 3.15 | 0.016 | -0.2015 | 21.0927 | 104.7 | 2.0 |
+| neutral_mild_trend | 0 | None | None | 0.0 | 0.0 | 0.0 | None |
 
 ## Directional stability
 
-- **sample_count**: 2084
-- **flip_rate**: 0.061
-- **mean_run_length**: 16.28
+- **sample_count**: 2094
+- **flip_rate**: 0.0597
+- **mean_run_length**: 16.62
 - **max_run_length**: 118
-- **direction_counts**: {'LONG': 1105, 'SHORT': 979}
-- **directional_entropy**: 0.9974
+- **direction_counts**: {'LONG': 1097, 'SHORT': 997}
+- **directional_entropy**: 0.9984
 
 | Transition | Count |
 |------------|------:|
-| LONG->LONG | 1041 |
-| LONG->SHORT | 64 |
-| SHORT->LONG | 63 |
-| SHORT->SHORT | 915 |
+| LONG->LONG | 1034 |
+| LONG->SHORT | 63 |
+| SHORT->LONG | 62 |
+| SHORT->SHORT | 934 |
 
 ## Promotion gates
 
@@ -38,13 +39,13 @@ Candidates labeled: 2084
 - G2_net_ev: FAIL (value=0.0, threshold=> 0)
 - G3_max_dd: PASS (value=0.0, threshold=<= 5.0%)
 - G4_regime: FAIL (value=False, threshold=positive EV in non-ranging bucket)
-- G5_stability: PASS (value=0.061, threshold=<= 0.5)
+- G5_stability: PASS (value=0.0597, threshold=<= 0.5)
 
 ## Threshold sensitivity
 
 | Min score | Trades | Win % | EV % |
 |-----------|--------|-------|------|
-| 45 | 1889 | 2.28 | -0.2023 |
+| 45 | 1891 | 2.27 | -0.2026 |
 | 50 | 0 | None | 0.0 |
 | 55 | 0 | None | 0.0 |
 | 60 | 0 | None | 0.0 |

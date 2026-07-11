@@ -7,7 +7,7 @@ import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
@@ -15,6 +15,45 @@ logger = structlog.get_logger()
 
 _lock = threading.Lock()
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Mirrors CORE_THESIS_FEATURES in scripts/signal_recovery/decision_evidence.py.
+# Duplicated (not imported) because that module lives under scripts/, which is
+# not copied into the agent Docker image (see agent/Dockerfile COPY list) —
+# keep both tuples in sync if the thesis engine's core feature set changes.
+CORE_THESIS_FEATURES: Tuple[str, ...] = (
+    "adx_14",
+    "di_spread",
+    "vol_regime",
+    "hurst_60",
+    "h_trend",
+    "h1_trend",
+    "rsi_14",
+    "bb_pos",
+)
+
+
+def extract_core_thesis_features(features: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    """Pull the CORE_THESIS_FEATURES subset out of a raw features dict.
+
+    Written into telemetry rows as extra["features"] so the offline evidence
+    assembler (decision_evidence.py) can classify a row as telemetry_embedded
+    (medium confidence) without needing a raw agent-log join. This is the
+    Phase 6 hardening tracked in
+    data/investigation/decision_observability_program_2026-07-11.md.
+    """
+    out: Dict[str, float] = {}
+    if not isinstance(features, dict):
+        return out
+    lower = {str(k).lower(): v for k, v in features.items()}
+    for key in CORE_THESIS_FEATURES:
+        v = lower.get(key)
+        if v is None:
+            continue
+        try:
+            out[key] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _logs_root() -> Path:
@@ -96,8 +135,16 @@ def record_decision_cycle(
     constraints: Optional[Dict[str, Any]] = None,
     terminal_cause: Optional[str] = None,
     policy_snapshot: Optional[Dict[str, Any]] = None,
+    core_features: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Write one JSON line for baseline / promotion / attribution scripts."""
+    """Write one JSON line for baseline / promotion / attribution scripts.
+
+    core_features: raw features dict (e.g. mcp_orchestrator's features_dict /
+    market_context["features"]) — the CORE_THESIS_FEATURES subset is extracted
+    and stored at extra["features"] so decision_evidence.py can source
+    telemetry_embedded provenance for every row, not just rows covered by a
+    raw agent-log export.
+    """
     if not _enabled():
         return
     row: Dict[str, Any] = {
@@ -147,6 +194,17 @@ def record_decision_cycle(
         row["policy_snapshot"] = dict(policy_snapshot)
     if extra:
         row["extra"] = dict(extra)
+    if core_features:
+        feats = extract_core_thesis_features(core_features)
+        if feats:
+            row.setdefault("extra", {})
+            existing_features = row["extra"].get("features")
+            if isinstance(existing_features, dict):
+                merged = dict(existing_features)
+                merged.update(feats)
+                row["extra"]["features"] = merged
+            else:
+                row["extra"]["features"] = feats
     _append_row(row)
 
 

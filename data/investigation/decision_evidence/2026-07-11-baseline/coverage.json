@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-07-11T16:34:29.801303+00:00",
-  "total_records": 1,
-  "total_b4": 1,
-  "high_confidence": 1,
+  "generated_at": "2026-07-11T16:36:14.382949+00:00",
+  "total_records": 27,
+  "total_b4": 26,
+  "high_confidence": 26,
   "telemetry_only": 0,
   "default_missing_excluded": 0,
   "high_confidence_fraction_pct": 100.0,
   "sweep_gate_min": 100,
   "sweep_gate": "FAIL",
-  "log_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\data\\investigation\\agent_exp_shadow_2026-07-11.log",
+  "log_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\data\\investigation\\agent_baseline_2026-07-11.log",
   "telemetry_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_recovery\\decision_telemetry.ndjson"
 }

@@ -1,17 +1,17 @@
 {
-  "generated_at": "2026-07-11T12:31:04.004352+00:00",
+  "generated_at": "2026-07-11T16:34:23.649050+00:00",
   "archive_dir": "D:\\ATTRAL\\Projects\\Trading Agent 2\\data\\investigation\\rolling\\2026-07-11",
   "baseline_commit": "0503847",
   "baseline_policy": "hold_baseline_policy",
   "windows": {
     "168h": {
       "current": {
-        "trades": 191,
-        "win_pct": 12.04,
-        "profit_factor": 0.044,
-        "ev_pct": -0.1873,
-        "max_dd_pct": 1.7883,
-        "exposure": 9.55,
+        "trades": 198,
+        "win_pct": 11.62,
+        "profit_factor": 0.042,
+        "ev_pct": -0.19,
+        "max_dd_pct": 1.8808,
+        "exposure": 9.9,
         "avg_hold_bars": 2.0
       },
       "ml_adopt_flat": {
@@ -33,41 +33,50 @@
         "avg_hold_bars": null
       },
       "ml_only": {
-        "trades": 2084,
-        "win_pct": 3.17,
-        "profit_factor": 0.019,
-        "ev_pct": -0.201,
-        "max_dd_pct": 21.0164,
-        "exposure": 104.2,
+        "trades": 2094,
+        "win_pct": 3.15,
+        "profit_factor": 0.016,
+        "ev_pct": -0.2015,
+        "max_dd_pct": 21.0927,
+        "exposure": 104.7,
         "avg_hold_bars": 2.0
       },
       "no_adx": {
-        "trades": 195,
-        "win_pct": 11.79,
-        "profit_factor": 0.043,
-        "ev_pct": -0.1877,
-        "max_dd_pct": 1.8302,
-        "exposure": 9.75,
+        "trades": 203,
+        "win_pct": 11.33,
+        "profit_factor": 0.041,
+        "ev_pct": -0.1904,
+        "max_dd_pct": 1.9329,
+        "exposure": 10.15,
         "avg_hold_bars": 2.0
       },
       "no_thesis_veto": {
-        "trades": 2084,
-        "win_pct": 3.17,
-        "profit_factor": 0.019,
-        "ev_pct": -0.201,
-        "max_dd_pct": 21.0164,
-        "exposure": 104.2,
+        "trades": 2094,
+        "win_pct": 3.15,
+        "profit_factor": 0.016,
+        "ev_pct": -0.2015,
+        "max_dd_pct": 21.0927,
+        "exposure": 104.7,
         "avg_hold_bars": 2.0
+      },
+      "neutral_mild_trend": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
       }
     },
     "720h": {
       "current": {
-        "trades": 374,
-        "win_pct": 7.22,
-        "profit_factor": 0.024,
-        "ev_pct": -0.2,
-        "max_dd_pct": 3.7397,
-        "exposure": 18.7,
+        "trades": 383,
+        "win_pct": 7.05,
+        "profit_factor": 0.023,
+        "ev_pct": -0.2009,
+        "max_dd_pct": 3.8477,
+        "exposure": 19.15,
         "avg_hold_bars": 2.0
       },
       "ml_adopt_flat": {
@@ -89,31 +98,40 @@
         "avg_hold_bars": 2.0
       },
       "ml_only": {
-        "trades": 2299,
+        "trades": 2363,
         "win_pct": 3.0,
-        "profit_factor": 0.014,
-        "ev_pct": -0.2027,
-        "max_dd_pct": 23.3025,
-        "exposure": 114.95,
+        "profit_factor": 0.017,
+        "ev_pct": -0.2018,
+        "max_dd_pct": 23.9182,
+        "exposure": 118.15,
         "avg_hold_bars": 2.0
       },
       "no_adx": {
-        "trades": 378,
-        "win_pct": 7.14,
-        "profit_factor": 0.024,
-        "ev_pct": -0.2001,
-        "max_dd_pct": 3.7816,
-        "exposure": 18.9,
+        "trades": 388,
+        "win_pct": 6.96,
+        "profit_factor": 0.023,
+        "ev_pct": -0.201,
+        "max_dd_pct": 3.8999,
+        "exposure": 19.4,
         "avg_hold_bars": 2.0
       },
       "no_thesis_veto": {
-        "trades": 2299,
+        "trades": 2363,
         "win_pct": 3.0,
-        "profit_factor": 0.014,
-        "ev_pct": -0.2027,
-        "max_dd_pct": 23.3025,
-        "exposure": 114.95,
+        "profit_factor": 0.017,
+        "ev_pct": -0.2018,
+        "max_dd_pct": 23.9182,
+        "exposure": 118.15,
         "avg_hold_bars": 2.0
+      },
+      "neutral_mild_trend": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
       }
     }
   },
@@ -142,7 +160,7 @@
         },
         "G5_stability": {
           "pass": true,
-          "value": 0.061,
+          "value": 0.0597,
           "threshold": "<= 0.5"
         }
       },
@@ -174,7 +192,7 @@
         },
         "G5_stability": {
           "pass": true,
-          "value": 0.0701,
+          "value": 0.069,
           "threshold": "<= 0.5"
         }
       },

@@ -2227,6 +2227,7 @@ class MCPOrchestrator:
                 terminal_cause=terminal,
                 policy_snapshot=frozen_policy_snapshot(),
                 extra=extra_block,
+                core_features=features_dict,
             )
             check_over_gating_regression()
         except Exception:
@@ -3483,6 +3484,7 @@ class MCPOrchestrator:
                         policy_reason_codes=list(verdict.reason_codes),
                         event="decision_ready_emitted",
                         extra=_hyp_extra,
+                        core_features=(mctx or {}).get("features"),
                     )
                 except Exception:
                     pass

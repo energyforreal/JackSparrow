@@ -1,18 +1,16 @@
 {
-  "generated_at": "2026-07-11T13:37:13.701421+00:00",
-  "b4_total": 26,
-  "high_confidence": 26,
+  "generated_at": "2026-07-11T16:34:47.004904+00:00",
+  "b4_total": 1,
+  "high_confidence": 1,
   "hurst_histogram": {
-    "0": 26
+    "0": 1
   },
-  "hurst_zero_count": 26,
+  "hurst_zero_count": 1,
   "hurst_zero_pct": 100.0,
-  "adx_below_25_count": 13,
-  "adx_below_25_pct": 50.0,
-  "vol_below_11_count": 14,
-  "vol_below_11_pct": 53.85,
-  "co_occurrence": {
-    "hurst_low+adx_low": 13
-  },
+  "adx_below_25_count": 0,
+  "adx_below_25_pct": 0.0,
+  "vol_below_11_count": 0,
+  "vol_below_11_pct": 0.0,
+  "co_occurrence": {},
   "interpretation": "hurst_60=0.0 is a computed clip value, not missing-data default (fillna=0.5 in pipeline)."
 }

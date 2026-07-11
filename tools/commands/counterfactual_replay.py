@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import json
 import math
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,7 @@ SCENARIOS = (
     "ml_only",
     "no_adx",
     "no_thesis_veto",
+    "neutral_mild_trend",
 )
 
 ENTRY_SIGNALS = frozenset({"LONG", "SHORT", "BUY", "SELL", "STRONG_BUY", "STRONG_SELL"})
@@ -102,6 +104,57 @@ def _ml_gate_passed(row: Dict[str, Any]) -> bool:
     return _ml_direction(row) is not None
 
 
+# Reason codes are emitted as "key=value" (see agent_thesis_engine.py, e.g.
+# f"adx_14={adx:.2f}"). Mirrors the parser in
+# scripts/signal_recovery/decision_evidence.py._parse_code_features.
+_CODE_VALUE_RE = re.compile(r"^([a-z0-9_]+)=(-?\d+(?:\.\d+)?)$", re.I)
+
+
+def _core_features_from_row(row: Dict[str, Any]) -> Dict[str, float]:
+    """Best-effort feature extraction: extra.features (Phase 6 telemetry
+    hardening, see agent/core/signal_recovery_telemetry.py) first, reason-code
+    key=value pairs as fallback for rows recorded before that hardening shipped.
+    """
+    out: Dict[str, float] = {}
+    feats = _nested(row, "extra", "features")
+    if isinstance(feats, dict):
+        for k, v in feats.items():
+            try:
+                out[str(k).lower()] = float(v)
+            except (TypeError, ValueError):
+                continue
+    codes = row.get("policy_reason_codes") or []
+    if isinstance(codes, list):
+        for c in codes:
+            m = _CODE_VALUE_RE.match(str(c).strip())
+            if not m:
+                continue
+            key = m.group(1).lower()
+            if key in out:
+                continue  # extra.features (if present) takes precedence
+            try:
+                out[key] = float(m.group(2))
+            except ValueError:
+                continue
+    return out
+
+
+def _neutral_mild_trend_fires(
+    row: Dict[str, Any], regime: str, *, adx_max: float = 22.0
+) -> bool:
+    """Replay of agent_thesis_engine._eval_neutral_mild_trend_long (LONG only,
+    prototype rule gated by AGENT_THESIS_NEUTRAL_MILD_TREND_ENABLED=false).
+    Requires adx_14, h1_trend, h_trend to all be observed — rows without full
+    core-feature coverage are excluded, not defaulted.
+    """
+    if regime != "neutral":
+        return False
+    feats = _core_features_from_row(row)
+    if not all(k in feats for k in ("adx_14", "h1_trend", "h_trend")):
+        return False
+    return feats["adx_14"] <= adx_max and feats["h1_trend"] > 0 and feats["h_trend"] > 0
+
+
 def _trade_score(row: Dict[str, Any]) -> float:
     v = row.get("trade_score")
     if v is None:
@@ -132,6 +185,7 @@ def extract_candidates(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     handler = h
                     break
         ml_dir = _ml_direction(r)
+        regime = _regime_bucket(r)
         out.append(
             {
                 "ts": r.get("ts"),
@@ -141,11 +195,12 @@ def extract_candidates(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "trade_score": _trade_score(r),
                 "thesis_signal": r.get("thesis_signal"),
                 "flat_thesis": _is_flat_thesis(r),
-                "regime": _regime_bucket(r),
+                "regime": regime,
                 "handler_reject": (
                     handler.get("handler_reject_reason") if handler else None
                 ),
                 "expected_return": r.get("expected_return") or r.get("proba"),
+                "neutral_mild_trend_fires": _neutral_mild_trend_fires(r, regime),
                 "raw_row": r,
             }
         )
@@ -471,6 +526,20 @@ def _scenario_included(name: str, c: Dict[str, Any]) -> bool:
 
     if name == "no_thesis_veto":
         return ml in ("LONG", "SHORT")
+
+    if name == "neutral_mild_trend":
+        # Prototype rule is LONG-only (agent_thesis_engine._eval_neutral_mild_trend_long).
+        if not c.get("neutral_mild_trend_fires") or ml != "LONG":
+            return False
+        # Isolate the incremental candidate set the rule would newly enter —
+        # exclude rows the current policy already entered, to avoid double
+        # counting against the `current` scenario.
+        if policy in ENTRY_SIGNALS and handler not in (
+            "hold_at_synthesis",
+            "v15_adx_trending_filter",
+        ):
+            return False
+        return True
 
     return False
 

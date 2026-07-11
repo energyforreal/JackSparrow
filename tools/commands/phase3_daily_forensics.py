@@ -61,12 +61,13 @@ def main() -> int:
     rc = 0
 
     if not args.skip_docker:
+        since_window = "168h" if args.weekly else "24h"
         export_cmd = [
             "docker",
             "logs",
             args.docker_container,
             "--since",
-            "24h",
+            since_window,
         ]
         print(f">>> docker logs ... > {log_out}")
         with log_out.open("w", encoding="utf-8", errors="replace") as fh:
