@@ -1603,6 +1603,7 @@ class DeltaExchangeWebSocketClient:
         self._reconnect_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._message_task: Optional[asyncio.Task] = None
+        self._recv_lock = asyncio.Lock()
         self.max_reconnect_attempts = max_reconnect_attempts
         self.reconnect_delay = reconnect_delay
         self.heartbeat_interval = heartbeat_interval
@@ -1642,6 +1643,17 @@ class DeltaExchangeWebSocketClient:
             },
         }
 
+    async def _await_background_tasks(self) -> None:
+        """Wait for reader/heartbeat tasks to finish after cancellation."""
+        tasks = [
+            t
+            for t in (self._heartbeat_task, self._message_task)
+            if t is not None and not t.done()
+        ]
+        if not tasks:
+            return
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     async def connect(self) -> None:
         """Establish WebSocket connection and send Delta key-auth message."""
         self._manual_disconnect = False
@@ -1651,6 +1663,7 @@ class DeltaExchangeWebSocketClient:
         for task in [self._heartbeat_task, self._message_task]:
             if task and not task.done():
                 task.cancel()
+        await self._await_background_tasks()
         self._heartbeat_task = None
         self._message_task = None
 
@@ -1712,12 +1725,12 @@ class DeltaExchangeWebSocketClient:
                 )
                 await asyncio.sleep(1)
 
-        # Use a slightly more tolerant ping configuration to reduce spurious
-        # keepalive timeouts while still detecting real disconnects.
+        # Library ping uses recv() internally; our _message_loop is the sole reader.
+        # Application heartbeat sends JSON ping via _heartbeat_loop instead.
         self.websocket = await websockets.connect(
             url,
-            ping_interval=30.0,  # Send ping every 30 seconds
-            ping_timeout=30.0,   # Allow up to 30 seconds for pong
+            ping_interval=None,
+            ping_timeout=None,
             close_timeout=5.0,
         )
 
@@ -1727,6 +1740,7 @@ class DeltaExchangeWebSocketClient:
         for task in [self._heartbeat_task, self._message_task]:
             if task and not task.done():
                 task.cancel()
+        await self._await_background_tasks()
         self._heartbeat_task = None
         self._message_task = None
         if self.websocket:
@@ -2000,11 +2014,11 @@ class DeltaExchangeWebSocketClient:
         try:
             while self.connected and self.websocket:
                 try:
-                    # Receive message with timeout
-                    message_raw = await asyncio.wait_for(
-                        self.websocket.recv(),
-                        timeout=60.0
-                    )
+                    async with self._recv_lock:
+                        message_raw = await asyncio.wait_for(
+                            self.websocket.recv(),
+                            timeout=60.0,
+                        )
 
                     # Parse JSON message
                     message = json.loads(message_raw)

@@ -33,6 +33,12 @@
    ```
    Filter candidates where `policy_signal != shadow_signal` from telemetry `extra.latent_shadow`.
 
+5. Daily rolling validation (7d + 30d, archived by date):
+   ```powershell
+   python tools/commands/rolling_validation.py --economic
+   ```
+   Outputs: `data/investigation/rolling/YYYY-MM-DD/dashboard.md`
+
 ## G6 pass criteria
 
 - Shadow-only entries (policy HOLD, shadow entry) have non-negative realized net EV over 48h window
