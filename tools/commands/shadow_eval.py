@@ -101,12 +101,12 @@ def main() -> int:
     parser.add_argument(
         "--telemetry",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "decision_telemetry.ndjson",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "decision_telemetry.ndjson",
     )
     parser.add_argument(
         "--out",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "shadow_eval_report.json",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "shadow_eval_report.json",
     )
     args = parser.parse_args()
 

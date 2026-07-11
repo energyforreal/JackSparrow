@@ -74,15 +74,72 @@ def _spearman(xs: Sequence[float], ys: Sequence[float]) -> Optional[float]:
     return _pearson(_rank(list(xs[:n])), _rank(list(ys[:n])))
 
 
+def _parse_ts_row(row: Dict[str, Any]) -> Optional[datetime]:
+    for key in ("ts", "timestamp"):
+        v = row.get(key)
+        if v is None:
+            continue
+        try:
+            return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+    return None
+
+
+def _handler_outcomes_by_time(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [r for r in rows if r.get("event") == "handler_outcome"]
+
+
+def _match_handler_outcome(
+    cycle_ts: datetime,
+    handlers: List[Dict[str, Any]],
+    *,
+    max_delta_sec: float = 30.0,
+) -> Optional[Dict[str, Any]]:
+    best: Optional[Dict[str, Any]] = None
+    best_delta = max_delta_sec
+    for h in handlers:
+        h_ts = _parse_ts_row(h)
+        if h_ts is None:
+            continue
+        delta = (h_ts - cycle_ts).total_seconds()
+        if 0 <= delta < best_delta:
+            best_delta = delta
+            best = h
+    return best
+
+
+def _ml_gate_passed(row: Dict[str, Any]) -> bool:
+    gates = row.get("gates") if isinstance(row.get("gates"), dict) else {}
+    if gates.get("g5_pass") or gates.get("g1_raw_long") or gates.get("g1_raw_short"):
+        return True
+    reject = _nested(row, "extra", "reject") or row.get("reject")
+    if reject in ("gates_passed_long", "gates_passed_short"):
+        return True
+    fl = row.get("final_long")
+    fs = row.get("final_short")
+    if fl is None:
+        fl = _nested(row, "extra", "final_long")
+    if fs is None:
+        fs = _nested(row, "extra", "final_short")
+    return bool(fl or fs)
+
+
 def gate_funnel(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     """Survival rates per gate layer from v3 telemetry."""
-    cycles = [r for r in rows if r.get("event") in ("decision_cycle", None, "")]
+    all_rows = list(rows)
+    cycles = [r for r in all_rows if r.get("event") == "v43_prediction_complete"]
     if not cycles:
-        cycles = list(rows)
+        cycles = [r for r in all_rows if r.get("event") in ("decision_cycle", None, "")]
+    if not cycles:
+        cycles = all_rows
 
+    handlers = _handler_outcomes_by_time(all_rows)
     n = len(cycles) or 1
     g1 = g2 = g3 = g4 = g5 = executed = 0
     terminal = Counter()
+    handler_rejects = Counter()
+    policy_signals = Counter()
 
     for r in cycles:
         gates = r.get("gates") if isinstance(r.get("gates"), dict) else {}
@@ -97,6 +154,12 @@ def gate_funnel(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
                 g4 += 1
             if gates.get("g5_pass"):
                 g5 += 1
+        elif _ml_gate_passed(r):
+            g1 += 1
+            g2 += 1
+            g3 += 1
+            g4 += 1
+            g5 += 1
         else:
             fl = _nested(r, "extra", "final_long")
             fs = _nested(r, "extra", "final_short")
@@ -106,20 +169,30 @@ def gate_funnel(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
                 g1 += 1
             if fl or fs:
                 g5 += 1
-                if g2 == 0:
-                    g2 = g3 = g4 = g1
-                else:
-                    g2 += 1
-                    g3 += 1
-                    g4 += 1
+                g2 += 1
+                g3 += 1
+                g4 += 1
 
-        tc = str(r.get("terminal_cause") or "unknown")
+        policy_signals[str(r.get("signal") or "HOLD")] += 1
+        cycle_ts = _parse_ts_row(r)
+        handler = _match_handler_outcome(cycle_ts, handlers) if cycle_ts else None
+        if handler:
+            hr = str(handler.get("handler_reject_reason") or "executed")
+            handler_rejects[hr] += 1
+            if handler.get("signals", {}).get("executed"):
+                tc = "executed"
+            else:
+                tc = str(handler.get("terminal_cause") or "handler")
+        else:
+            tc = str(r.get("terminal_cause") or "unknown")
         terminal[tc] += 1
         if tc == "executed":
             executed += 1
 
     return {
         "sample_count": len(cycles),
+        "policy_signal_histogram": dict(policy_signals.most_common()),
+        "handler_reject_histogram": dict(handler_rejects.most_common()),
         "gate_survival": {
             "g1_raw_signal_rate": round(g1 / n, 4),
             "g2_pass_rate": round(g2 / n, 4),
@@ -240,12 +313,12 @@ def main() -> int:
     p_attr.add_argument(
         "--telemetry",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "decision_telemetry.ndjson",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "decision_telemetry.ndjson",
     )
     p_attr.add_argument(
         "--out",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "attribution_report.json",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "attribution_report.json",
     )
 
     p_corr = sub.add_parser("correlation", help="Metric correlation matrix")
@@ -253,7 +326,7 @@ def main() -> int:
     p_corr.add_argument(
         "--telemetry",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "decision_telemetry.ndjson",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "decision_telemetry.ndjson",
     )
 
     p_lat = sub.add_parser("latent-buckets", help="Rejection by regime bucket")
@@ -261,7 +334,7 @@ def main() -> int:
     p_lat.add_argument(
         "--telemetry",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "decision_telemetry.ndjson",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "decision_telemetry.ndjson",
     )
 
     args = parser.parse_args()

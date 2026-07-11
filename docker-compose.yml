@@ -143,6 +143,8 @@ services:
       AGENT_VECTOR_STORE_BACKEND: ${AGENT_VECTOR_STORE_BACKEND:-memory}
       GIT_COMMIT: ${GIT_COMMIT:-unknown}
       BUILD_ID: ${GIT_COMMIT:-unknown}
+      LATENT_SHADOW_MODE: ${LATENT_SHADOW_MODE:-true}
+      AGENT_POLICY_ALLOW_GATED_ML_ON_FLAT_HYPOTHESIS: ${AGENT_POLICY_ALLOW_GATED_ML_ON_FLAT_HYPOTHESIS:-false}
     volumes:
       - ./agent/model_storage:/app/agent/model_storage
       - ./logs/agent:/logs

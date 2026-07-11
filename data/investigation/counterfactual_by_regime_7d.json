@@ -1,0 +1,174 @@
+{
+  "generated_at": "2026-07-11T07:53:41.380789+00:00",
+  "window": "7d",
+  "by_regime": {
+    "neutral": {
+      "current": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat_score50": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_only": {
+        "trades": 1728,
+        "win_pct": 2.37,
+        "profit_factor": 0.013,
+        "ev_pct": -0.2035,
+        "max_dd_pct": 17.5854,
+        "exposure": 86.4,
+        "avg_hold_bars": 2.0
+      },
+      "no_adx": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "no_thesis_veto": {
+        "trades": 1728,
+        "win_pct": 2.37,
+        "profit_factor": 0.013,
+        "ev_pct": -0.2035,
+        "max_dd_pct": 17.5854,
+        "exposure": 86.4,
+        "avg_hold_bars": 2.0
+      }
+    },
+    "ranging": {
+      "current": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat_score50": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_only": {
+        "trades": 137,
+        "win_pct": 1.46,
+        "profit_factor": 0.054,
+        "ev_pct": -0.1907,
+        "max_dd_pct": 1.3816,
+        "exposure": 6.85,
+        "avg_hold_bars": 1.99
+      },
+      "no_adx": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "no_thesis_veto": {
+        "trades": 137,
+        "win_pct": 1.46,
+        "profit_factor": 0.054,
+        "ev_pct": -0.1907,
+        "max_dd_pct": 1.3816,
+        "exposure": 6.85,
+        "avg_hold_bars": 1.99
+      }
+    },
+    "unknown": {
+      "current": {
+        "trades": 191,
+        "win_pct": 12.04,
+        "profit_factor": 0.044,
+        "ev_pct": -0.1873,
+        "max_dd_pct": 1.7883,
+        "exposure": 9.55,
+        "avg_hold_bars": 2.0
+      },
+      "ml_adopt_flat": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat_score50": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_only": {
+        "trades": 195,
+        "win_pct": 11.79,
+        "profit_factor": 0.043,
+        "ev_pct": -0.1877,
+        "max_dd_pct": 1.8302,
+        "exposure": 9.75,
+        "avg_hold_bars": 2.0
+      },
+      "no_adx": {
+        "trades": 195,
+        "win_pct": 11.79,
+        "profit_factor": 0.043,
+        "ev_pct": -0.1877,
+        "max_dd_pct": 1.8302,
+        "exposure": 9.75,
+        "avg_hold_bars": 2.0
+      },
+      "no_thesis_veto": {
+        "trades": 195,
+        "win_pct": 11.79,
+        "profit_factor": 0.043,
+        "ev_pct": -0.1877,
+        "max_dd_pct": 1.8302,
+        "exposure": 9.75,
+        "avg_hold_bars": 2.0
+      }
+    }
+  }
+}

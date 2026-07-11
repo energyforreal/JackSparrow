@@ -1,0 +1,17 @@
+{
+  "sample_count": 2060,
+  "flip_rate": 0.0602,
+  "mean_run_length": 16.48,
+  "max_run_length": 118,
+  "direction_counts": {
+    "SHORT": 957,
+    "LONG": 1103
+  },
+  "transition_matrix": {
+    "SHORT->SHORT": 894,
+    "SHORT->LONG": 62,
+    "LONG->LONG": 1041,
+    "LONG->SHORT": 62
+  },
+  "directional_entropy": 0.9964
+}

@@ -29,12 +29,15 @@ METRICS = (
 )
 
 
-def _rows_from_telemetry(path: Path) -> List[Dict[str, Any]]:
+def _rows_from_telemetry(path: Path, *, label_mode: str = "executed") -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for r in load_telemetry(path):
         latent = r.get("latent") if isinstance(r.get("latent"), dict) else {}
         scores = r.get("scores") if isinstance(r.get("scores"), dict) else {}
-        y = 1 if str(r.get("terminal_cause")) == "executed" else 0
+        if label_mode == "executed":
+            y = 1 if str(r.get("terminal_cause")) == "executed" else 0
+        else:
+            y = 0
         row = {
             "epsilon_proxy": latent.get("epsilon_proxy"),
             "kappa_raw": scores.get("conviction") or r.get("confidence"),
@@ -44,6 +47,35 @@ def _rows_from_telemetry(path: Path) -> List[Dict[str, Any]]:
             "conviction": scores.get("conviction") or r.get("confidence"),
             "hypothesis_margin": r.get("hypothesis_margin"),
             "y": y,
+        }
+        if all(row.get(m) is not None for m in METRICS[:4]):
+            out.append(row)
+    return out
+
+
+def _rows_from_replay_json(path: Path) -> List[Dict[str, Any]]:
+    """Build ablation rows from counterfactual replay labeled candidates."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    candidates = data.get("candidates") or []
+    out: List[Dict[str, Any]] = []
+    for c in candidates:
+        if c.get("label_error"):
+            continue
+        raw = c.get("raw_row") if isinstance(c.get("raw_row"), dict) else {}
+        latent = raw.get("latent") if isinstance(raw.get("latent"), dict) else {}
+        scores = raw.get("scores") if isinstance(raw.get("scores"), dict) else {}
+        net = c.get("net_return_pct")
+        if net is None:
+            continue
+        row = {
+            "epsilon_proxy": latent.get("epsilon_proxy"),
+            "kappa_raw": scores.get("conviction") or raw.get("confidence"),
+            "q": latent.get("q_composite"),
+            "A": latent.get("A_composite"),
+            "trade_score": c.get("trade_score") or raw.get("trade_score"),
+            "conviction": scores.get("conviction") or raw.get("confidence"),
+            "hypothesis_margin": raw.get("hypothesis_margin"),
+            "y": 1 if float(net) > 0 else 0,
         }
         if all(row.get(m) is not None for m in METRICS[:4]):
             out.append(row)
@@ -223,17 +255,32 @@ def main() -> int:
     parser.add_argument(
         "--out-json",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "ablation_report.json",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "ablation_report.json",
     )
     parser.add_argument(
         "--out-md",
         type=Path,
-        default=ROOT / "logs" / "signal_recovery" / "ablation_report.md",
+        default=ROOT / "logs" / "agent" / "signal_recovery" / "ablation_report.md",
+    )
+    parser.add_argument(
+        "--label",
+        choices=("executed", "forward_return"),
+        default="executed",
+        help="Label source: executed terminal_cause or forward_return from replay JSON",
+    )
+    parser.add_argument(
+        "--replay-json",
+        type=Path,
+        default=None,
+        help="counterfactual_replay JSON for forward_return labels",
     )
     args = parser.parse_args()
 
     raw_rows = load_telemetry(args.telemetry)
-    stat_rows = _rows_from_telemetry(args.telemetry)
+    if args.label == "forward_return" and args.replay_json:
+        stat_rows = _rows_from_replay_json(args.replay_json)
+    else:
+        stat_rows = _rows_from_telemetry(args.telemetry, label_mode=args.label)
     if len(stat_rows) < 20:
         print(f"Warning: only {len(stat_rows)} rows for LOO; results may be noisy", file=sys.stderr)
 

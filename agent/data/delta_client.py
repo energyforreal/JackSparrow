@@ -1646,6 +1646,14 @@ class DeltaExchangeWebSocketClient:
         """Establish WebSocket connection and send Delta key-auth message."""
         self._manual_disconnect = False
         self._ws_authenticated = False
+
+        # Cancel stale background tasks before starting new loops (reconnect safety).
+        for task in [self._heartbeat_task, self._message_task]:
+            if task and not task.done():
+                task.cancel()
+        self._heartbeat_task = None
+        self._message_task = None
+
         try:
             if not self._credentials_valid:
                 logger.warning(
@@ -1712,6 +1720,22 @@ class DeltaExchangeWebSocketClient:
             ping_timeout=30.0,   # Allow up to 30 seconds for pong
             close_timeout=5.0,
         )
+
+    async def _teardown_connection(self) -> None:
+        """Cancel reader/heartbeat tasks and close socket without full manual disconnect."""
+        self.connected = False
+        for task in [self._heartbeat_task, self._message_task]:
+            if task and not task.done():
+                task.cancel()
+        self._heartbeat_task = None
+        self._message_task = None
+        if self.websocket:
+            try:
+                await self.websocket.close()
+            except Exception as e:
+                logger.warning("delta_websocket_close_error", error=str(e))
+            finally:
+                self.websocket = None
 
     async def disconnect(self) -> None:
         """Close WebSocket connection and cleanup tasks."""
@@ -2262,6 +2286,10 @@ class DeltaExchangeWebSocketClient:
                 )
 
                 await asyncio.sleep(self.reconnect_delay * (2 ** attempt))  # Exponential backoff
+
+                # Tear down old socket/tasks before opening a new connection.
+                if self.websocket or self.connected:
+                    await self._teardown_connection()
 
                 await self.connect()
                 logger.info("delta_websocket_reconnected")
