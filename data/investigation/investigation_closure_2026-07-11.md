@@ -69,9 +69,9 @@ Every future policy change requires **all** of:
 
 This document. Policy engine frozen at `hold_baseline_policy`.
 
-### Phase 2 — WebSocket reliability
+### Phase 2 — WebSocket reliability ✅
 
-Fix `agent/data/delta_client.py` concurrent `recv()` issue.
+Fix deployed and accepted — [`ws_acceptance_2026-07-11.md`](ws_acceptance_2026-07-11.md).
 
 Acceptance criteria:
 
@@ -80,15 +80,11 @@ Acceptance criteria:
 - No increase in REST fallback frequency
 - No regression in telemetry generation
 
-### Phase 3 — Continuous validation pipeline
+### Phase 3 — Continuous validation pipeline ✅
 
-Run daily via `tools/commands/rolling_validation.py`:
+Daily via [`tools/commands/phase3_daily_forensics.py`](../../tools/commands/phase3_daily_forensics.py) or [`scripts/daily_validation.ps1`](../../scripts/daily_validation.ps1).
 
-```
-Collect telemetry → 7d/30d replay → regime report → compare baseline → archive
-```
-
-Outputs: `data/investigation/rolling/YYYY-MM-DD/`
+First archive: [`rolling/2026-07-11/`](rolling/2026-07-11/)
 
 ### Phase 4 — Signal quality program
 
@@ -118,7 +114,31 @@ win rate, regime mix, confidence calibration.
 
 ## Next actions
 
-1. Redeploy agent after WebSocket fix
-2. Schedule daily `rolling_validation.py` (Task Scheduler / cron)
-3. Continue `LATENT_SHADOW_MODE=true` for 48h–1 week minimum
-4. Re-open policy discussion only when Phase 3–4 evidence contradicts baseline
+1. ~~Redeploy agent after WebSocket fix~~ Done 2026-07-11 — see [`ws_acceptance_2026-07-11.md`](ws_acceptance_2026-07-11.md)
+2. ~~Schedule daily validation~~ `scripts/daily_validation.ps1` (weekly: `-Weekly`)
+3. ~~Complete G6 after 48h~~ **Closed 2026-07-11** — see [`promotion_gate_evaluation_g6_2026-07-11.md`](promotion_gate_evaluation_g6_2026-07-11.md)
+4. ~~Open Thesis Intelligence Program~~ [`thesis_intelligence_program_2026-07-13.md`](thesis_intelligence_program_2026-07-13.md)
+
+### G6 final status (2026-07-11)
+
+| Metric | Value |
+|--------|------:|
+| 48h agreement rate | 95.87% |
+| Shadow-only entries | 0 |
+| G6 gate | PASS (vacuous) |
+| Policy promotion | Not justified |
+
+Investigation **retired**. Active program: **Thesis Intelligence**.
+
+## Artifacts (2026-07-11 run)
+
+- [`rolling/2026-07-11/`](rolling/2026-07-11/) — first rolling validation
+- [`thesis_interpretation_2026-07-11.md`](thesis_interpretation_2026-07-11.md)
+- [`weekly_review_2026-07-11.md`](weekly_review_2026-07-11.md)
+- [`calibration_2026-07-11.md`](calibration_2026-07-11.md)
+- [`ablation_report_2026-07-11.md`](ablation_report_2026-07-11.md)
+- [`thesis_intelligence_program_2026-07-13.md`](thesis_intelligence_program_2026-07-13.md)
+- [`thesis_rule_miss_2026-07-11.md`](thesis_rule_miss_2026-07-11.md)
+- [`dqi_2026-07-11.json`](dqi_2026-07-11.json)
+- [`shadow_eval_report_48h.json`](shadow_eval_report_48h.json)
+- [`counterfactual_replay_post_redeploy_48h.json`](counterfactual_replay_post_redeploy_48h.json)

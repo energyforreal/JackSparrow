@@ -19,6 +19,8 @@ from tools.commands.counterfactual_replay import (  # noqa: E402
     _render_markdown,
     run_replay,
 )
+from tools.commands.decision_quality_index import compute_dqi  # noqa: E402
+from scripts.signal_recovery.log_parser import filter_since, load_telemetry  # noqa: E402
 
 BASELINE_COMMIT = "0503847"
 BASELINE_POLICY = "hold_baseline_policy"
@@ -131,6 +133,20 @@ async def run_rolling(
         reports[label] = report
 
     dashboard = _render_dashboard(stamp=stamp, reports=reports)
+    try:
+        rows = filter_since(load_telemetry(telemetry_path), max(windows))
+        dqi = compute_dqi(replay_report=reports.get(f"{int(max(windows))}h"), telemetry_rows=rows)
+        dashboard += (
+            f"\n\n## Decision Quality Index\n\n"
+            f"Composite DQI: **{dqi.get('composite_dqi')}** "
+            f"(weight coverage {dqi.get('weight_coverage')})\n"
+        )
+        (archive / f"dqi_{stamp}.json").write_text(
+            json.dumps(dqi, indent=2), encoding="utf-8"
+        )
+    except Exception as exc:
+        dashboard += f"\n\n## Decision Quality Index\n\nDQI unavailable: {exc}\n"
+
     dash_path = archive / "dashboard.md"
     dash_path.write_text(dashboard, encoding="utf-8")
 

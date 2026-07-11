@@ -37,7 +37,11 @@
    ```powershell
    python tools/commands/rolling_validation.py --economic
    ```
-   Outputs: `data/investigation/rolling/YYYY-MM-DD/dashboard.md`
+   Or full daily bundle (docker logs + forensics + rolling):
+   ```powershell
+   python tools/commands/phase3_daily_forensics.py --workstream shadow
+   ```
+   Windows Task Scheduler: `scripts/daily_validation.ps1`
 
 ## G6 pass criteria
 

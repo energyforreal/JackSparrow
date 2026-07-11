@@ -19,7 +19,11 @@ def _run(cmd: list[str]) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workstream", required=True, help="e.g. 3a1, 3a2, 3b")
+    parser.add_argument(
+        "--workstream",
+        default="shadow",
+        help="Label for log export (e.g. 3a1, 3a2, shadow)",
+    )
     parser.add_argument(
         "--log-out",
         type=Path,
@@ -31,6 +35,21 @@ def main() -> int:
         default="jacksparrow-agent",
         help="Agent container name for docker logs export",
     )
+    parser.add_argument(
+        "--skip-rolling",
+        action="store_true",
+        help="Skip 7d/30d rolling validation replay",
+    )
+    parser.add_argument(
+        "--skip-docker",
+        action="store_true",
+        help="Skip docker log export (use when log-out already exists)",
+    )
+    parser.add_argument(
+        "--weekly",
+        action="store_true",
+        help="Run weekly bundle: rolling validation + DQI + thesis miss analysis",
+    )
     args = parser.parse_args()
 
     date_tag = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -39,19 +58,24 @@ def main() -> int:
     )
     log_out.parent.mkdir(parents=True, exist_ok=True)
 
-    export_cmd = [
-        "docker",
-        "logs",
-        args.docker_container,
-        "--since",
-        "24h",
-    ]
-    print(f">>> docker logs ... > {log_out}")
-    with log_out.open("w", encoding="utf-8", errors="replace") as fh:
-        proc = subprocess.run(export_cmd, cwd=str(ROOT), stdout=fh, stderr=subprocess.STDOUT)
-    if proc.returncode != 0:
-        print(f"docker logs export failed: {proc.returncode}", file=sys.stderr)
-        return proc.returncode
+    rc = 0
+
+    if not args.skip_docker:
+        export_cmd = [
+            "docker",
+            "logs",
+            args.docker_container,
+            "--since",
+            "24h",
+        ]
+        print(f">>> docker logs ... > {log_out}")
+        with log_out.open("w", encoding="utf-8", errors="replace") as fh:
+            proc = subprocess.run(
+                export_cmd, cwd=str(ROOT), stdout=fh, stderr=subprocess.STDOUT
+            )
+        if proc.returncode != 0:
+            print(f"docker logs export failed: {proc.returncode}", file=sys.stderr)
+            rc = proc.returncode
 
     inv = ROOT / "data" / "investigation"
     steps = [
@@ -65,7 +89,17 @@ def main() -> int:
         ],
         [sys.executable, "tools/commands/reconcile_risk_approvals.py", str(log_out)],
     ]
-    rc = 0
+    if not args.skip_rolling or args.weekly:
+        steps.append(
+            [sys.executable, "tools/commands/rolling_validation.py", "--economic"]
+        )
+    if args.weekly:
+        steps.extend(
+            [
+                [sys.executable, "tools/commands/thesis_rule_miss_analysis.py", "--hours", "168"],
+                [sys.executable, "tools/commands/decision_quality_index.py", "--hours", "168"],
+            ]
+        )
     for cmd in steps:
         rc = _run(cmd) or rc
     print(f"\nDaily forensics complete for workstream {args.workstream}")

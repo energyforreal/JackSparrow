@@ -71,6 +71,18 @@ class ThesisVerdict:
     evidence_contributions: Dict[str, float] = field(default_factory=dict)
 
 
+@dataclass
+class RuleMissDiagnostic:
+    """Nearest-threshold miss for one thesis rule family."""
+
+    rule: str
+    direction: str
+    blocker: str
+    value: float
+    threshold: float
+    gap: float
+
+
 def get_last_thesis_snapshot() -> Dict[str, Any]:
     """Last thesis evaluation (for health / dashboard)."""
     return dict(_last_thesis_snapshot)
@@ -322,6 +334,13 @@ class AgentThesisEngine:
             fc = self._eval_funding_crowding(features, short_enabled=short_enabled)
             if fc is not None:
                 candidates.append(fc)
+
+        if _allowed("trend_continuation") and bool(
+            getattr(settings, "agent_thesis_neutral_mild_trend_enabled", False)
+        ):
+            nm = self._eval_neutral_mild_trend_long(features, regime)
+            if nm is not None:
+                candidates.append(nm)
 
         return candidates
 
@@ -648,6 +667,35 @@ class AgentThesisEngine:
             thesis_type="funding_crowding",
         )
 
+    def _eval_neutral_mild_trend_long(
+        self, features: Dict[str, Any], regime: str
+    ) -> Optional[ThesisVerdict]:
+        """Research prototype: mild positive drift in neutral when breakout ADX gate fails."""
+        if _normalize_regime(regime) != "neutral":
+            return None
+        adx = _feat(features, "adx_14")
+        adx_max = float(
+            getattr(settings, "agent_thesis_neutral_mild_trend_adx_max", 22.0) or 22.0
+        )
+        h1 = _feat(features, "h1_trend")
+        h = _feat(features, "h_trend")
+        if adx > adx_max or h1 <= 0 or h <= 0:
+            return None
+        conf = min(0.72, 0.55 + 0.1 * min(h1 * 100, 1.0))
+        return ThesisVerdict(
+            signal="LONG",
+            confidence=conf,
+            position_size=0.0,
+            reason_codes=[
+                "thesis_neutral_mild_trend_long",
+                f"adx_14={adx:.2f}",
+                f"h1_trend={h1:.4f}",
+                f"h_trend={h:.4f}",
+                f"regime={regime}",
+            ],
+            thesis_type="trend_continuation",
+        )
+
     def _eval_breakout_long(
         self, features: Dict[str, Any], regime: str
     ) -> Optional[ThesisVerdict]:
@@ -832,6 +880,154 @@ class AgentThesisEngine:
             ],
             thesis_type="mean_reversion",
         )
+
+    def diagnose_rule_miss(
+        self,
+        features: Dict[str, Any],
+        regime: str,
+        *,
+        short_enabled: bool = True,
+    ) -> List[RuleMissDiagnostic]:
+        """Return threshold gaps for rules that did not fire (research / DQI tooling)."""
+        reg = _normalize_regime(regime)
+        allowed = _allowed_rules_for_regime(reg)
+        diagnostics: List[RuleMissDiagnostic] = []
+
+        def _add(rule: str, direction: str, blocker: str, value: float, threshold: float) -> None:
+            gap = threshold - value
+            if gap > 0:
+                diagnostics.append(
+                    RuleMissDiagnostic(
+                        rule=rule,
+                        direction=direction,
+                        blocker=blocker,
+                        value=value,
+                        threshold=threshold,
+                        gap=gap,
+                    )
+                )
+
+        if "breakout" in allowed:
+            adx = _feat(features, "adx_14")
+            di = _feat(features, "di_spread")
+            vol_reg = _feat(features, "vol_regime", 1.0)
+            h_trend = _feat(features, "h_trend")
+            bb = _feat(features, "bb_pos", 0.5)
+            adx_min = float(getattr(settings, "agent_thesis_breakout_adx_min", 25.0) or 25.0)
+            di_min = float(getattr(settings, "agent_thesis_breakout_di_min", 5.0) or 5.0)
+            vol_min = float(
+                getattr(settings, "agent_thesis_breakout_vol_regime_min", 1.1) or 1.1
+            )
+            bb_max = float(getattr(settings, "agent_thesis_breakout_bb_pos_max", 0.85) or 0.85)
+            _add("breakout", "LONG", "adx_14", adx, adx_min)
+            _add("breakout", "LONG", "di_spread", di, di_min)
+            _add("breakout", "LONG", "vol_regime", vol_reg, vol_min)
+            if h_trend <= 0:
+                _add("breakout", "LONG", "h_trend", h_trend, 0.001)
+            if bb > bb_max:
+                diagnostics.append(
+                    RuleMissDiagnostic(
+                        rule="breakout",
+                        direction="LONG",
+                        blocker="bb_pos_max",
+                        value=bb,
+                        threshold=bb_max,
+                        gap=bb - bb_max,
+                    )
+                )
+
+        if "trend_continuation" in allowed:
+            h1 = _feat(features, "h1_trend")
+            h = _feat(features, "h_trend")
+            rsi = _feat(features, "rsi_14", 50.0)
+            hurst = _feat(features, "hurst_60", 0.5)
+            rsi_lo = float(getattr(settings, "agent_thesis_trend_rsi_lo", 40.0) or 40.0)
+            rsi_hi = float(getattr(settings, "agent_thesis_trend_rsi_hi", 65.0) or 65.0)
+            hurst_min = float(getattr(settings, "agent_thesis_trend_hurst_min", 0.52) or 0.52)
+            _add("trend_continuation", "LONG", "h1_trend", h1, 0.001)
+            _add("trend_continuation", "LONG", "h_trend", h, 0.001)
+            if rsi < rsi_lo:
+                _add("trend_continuation", "LONG", "rsi_14_lo", rsi, rsi_lo)
+            if rsi > rsi_hi:
+                diagnostics.append(
+                    RuleMissDiagnostic(
+                        rule="trend_continuation",
+                        direction="LONG",
+                        blocker="rsi_14_hi",
+                        value=rsi,
+                        threshold=rsi_hi,
+                        gap=rsi - rsi_hi,
+                    )
+                )
+            _add("trend_continuation", "LONG", "hurst_60", hurst, hurst_min)
+
+        if "mean_reversion" in allowed:
+            rsi = _feat(features, "rsi_14", 50.0)
+            bb = _feat(features, "bb_pos", 0.5)
+            rsi_max = float(getattr(settings, "agent_thesis_mr_rsi_long_max", 32.0) or 32.0)
+            bb_max = float(getattr(settings, "agent_thesis_mr_bb_pos_long_max", 0.15) or 0.15)
+            if rsi > rsi_max:
+                diagnostics.append(
+                    RuleMissDiagnostic(
+                        rule="mean_reversion",
+                        direction="LONG",
+                        blocker="rsi_14_hi",
+                        value=rsi,
+                        threshold=rsi_max,
+                        gap=rsi - rsi_max,
+                    )
+                )
+            if bb > bb_max:
+                diagnostics.append(
+                    RuleMissDiagnostic(
+                        rule="mean_reversion",
+                        direction="LONG",
+                        blocker="bb_pos_hi",
+                        value=bb,
+                        threshold=bb_max,
+                        gap=bb - bb_max,
+                    )
+                )
+
+        if short_enabled and "breakout" in allowed:
+            adx = _feat(features, "adx_14")
+            di = _feat(features, "di_spread")
+            vol_reg = _feat(features, "vol_regime", 1.0)
+            h_trend = _feat(features, "h_trend")
+            adx_min = float(getattr(settings, "agent_thesis_breakout_adx_min", 25.0) or 25.0)
+            di_min = float(getattr(settings, "agent_thesis_breakout_di_min", 5.0) or 5.0)
+            vol_min = float(
+                getattr(settings, "agent_thesis_breakout_vol_regime_min", 1.1) or 1.1
+            )
+            _add("breakout", "SHORT", "adx_14", adx, adx_min)
+            _add("breakout", "SHORT", "di_spread", abs(di), di_min)
+            _add("breakout", "SHORT", "vol_regime", vol_reg, vol_min)
+            if h_trend >= 0:
+                diagnostics.append(
+                    RuleMissDiagnostic(
+                        rule="breakout",
+                        direction="SHORT",
+                        blocker="h_trend",
+                        value=h_trend,
+                        threshold=-0.001,
+                        gap=h_trend + 0.001,
+                    )
+                )
+
+        return diagnostics
+
+    def nearest_rule_miss(
+        self,
+        features: Dict[str, Any],
+        regime: str,
+        *,
+        short_enabled: bool = True,
+    ) -> Optional[RuleMissDiagnostic]:
+        """Smallest positive gap among rule miss diagnostics."""
+        misses = self.diagnose_rule_miss(features, regime, short_enabled=short_enabled)
+        if not misses:
+            return None
+        return min(misses, key=lambda m: m.gap)
 
 
 def _store_snapshot(regime: str, allowed: Set[str], verdict: ThesisVerdict) -> None:

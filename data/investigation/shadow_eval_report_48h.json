@@ -1,0 +1,319 @@
+{
+  "generated_at": "2026-07-11T12:52:49.016106+00:00",
+  "window_hours": 48.0,
+  "sample_count": 1549,
+  "agreement_rate": 0.9587,
+  "disagreement_rate": 0.0413,
+  "production_pnl_proxy": 0.041118,
+  "shadow_pnl_proxy": 0.0,
+  "shadow_beats_production": false,
+  "policy_signal_histogram": {
+    "HOLD": 1485,
+    "LONG": 64
+  },
+  "shadow_signal_histogram": {
+    "HOLD": 1549
+  },
+  "sample_disagreements": [
+    {
+      "ts": "2026-07-09T18:25:50.488564+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:25:51.517371+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:28:36.246675+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:40:53.749029+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:40:54.717175+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:43:32.281089+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:45:26.765804+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:45:28.365518+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:50:57.558681+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:50:58.803476+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:51:15.539207+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-09T18:53:16.410283+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T01:20:12.776506+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T01:20:13.678455+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T01:20:33.826102+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T01:24:22.303980+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:25:25.765571+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:25:26.659773+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:30:13.700757+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:30:14.451850+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:30:27.018827+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:31:49.562568+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:33:44.896964+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:35:10.824730+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:35:12.091533+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:35:28.134994+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:38:06.229427+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:40:30.429559+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:40:31.451131+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:41:57.559054+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:46:02.530539+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:46:03.443423+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:47:43.384890+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:49:48.660110+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:50:03.478542+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:50:04.274930+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:55:05.428110+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T02:55:06.270799+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:01:07.120953+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:01:08.010124+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:04:48.372730+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:05:38.523028+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:05:39.472906+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:10:10.219402+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:10:11.058348+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:10:29.040620+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:12:24.767407+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:15:12.003363+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:15:12.840377+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    },
+    {
+      "ts": "2026-07-10T03:20:13.362865+00:00",
+      "policy": "LONG",
+      "shadow": "HOLD",
+      "score_s": null
+    }
+  ]
+}

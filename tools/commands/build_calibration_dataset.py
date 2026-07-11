@@ -32,9 +32,18 @@ def _signed_return_label(
 
 
 def build_rows(telemetry_path: Path) -> List[Dict[str, Any]]:
+    return build_rows_from_telemetry(load_telemetry(telemetry_path))
+
+
+def build_rows_from_telemetry(
+    telemetry_rows: List[Dict[str, Any]],
+    *,
+    replay_labels: Optional[Dict[str, int]] = None,
+) -> List[Dict[str, Any]]:
+    """Build calibration rows; optional replay_labels maps ts -> 0/1."""
     rows: List[Dict[str, Any]] = []
-    for r in load_telemetry(telemetry_path):
-        if r.get("event") not in (None, "decision_cycle", "decision_cycle_v3"):
+    for r in telemetry_rows:
+        if r.get("event") not in (None, "decision_cycle", "decision_cycle_v3", "v43_prediction_complete"):
             continue
         latent = r.get("latent") if isinstance(r.get("latent"), dict) else {}
         scores = r.get("scores") if isinstance(r.get("scores"), dict) else {}
@@ -54,7 +63,13 @@ def build_rows(telemetry_path: Path) -> List[Dict[str, Any]]:
             (r.get("policy_snapshot") or {}).get("round_trip_cost")
             or FROZEN_PI0["round_trip_cost"]
         )
-        y = _signed_return_label(float(er), cost_rt=cost)
+        ts_key = str(r.get("ts") or "")
+        if replay_labels and ts_key in replay_labels:
+            y = int(replay_labels[ts_key])
+            label_source = "replay_forward_return"
+        else:
+            y = _signed_return_label(float(er), cost_rt=cost)
+            label_source = "signed_return_proxy"
         rows.append(
             {
                 "ts": r.get("ts"),
@@ -71,12 +86,32 @@ def build_rows(telemetry_path: Path) -> List[Dict[str, Any]]:
                 "A": latent.get("A_composite"),
                 "y": y,
                 "alt_label": y,
+                "label_source": label_source,
                 "regime": str(regime),
                 "thesis_type": str(thesis),
                 "policy_snapshot": r.get("policy_snapshot") or FROZEN_PI0,
             }
         )
     return rows
+
+
+def _labels_from_replay_json(replay_path: Path) -> Dict[str, int]:
+    """Map telemetry ts -> win label from counterfactual replay candidates."""
+    data = json.loads(replay_path.read_text(encoding="utf-8"))
+    labels: Dict[str, int] = {}
+    for cand in data.get("candidates") or []:
+        ts = cand.get("ts")
+        if ts is None:
+            continue
+        ret = cand.get("realized_return_pct")
+        if ret is None:
+            continue
+        cost = float(
+            (cand.get("policy_snapshot") or {}).get("round_trip_cost")
+            or FROZEN_PI0["round_trip_cost"]
+        )
+        labels[str(ts)] = 1 if float(ret) > cost else 0
+    return labels
 
 
 def main() -> int:
@@ -91,14 +126,28 @@ def main() -> int:
         type=Path,
         default=ROOT / "logs" / "signal_recovery" / "calibration_dataset.json",
     )
+    parser.add_argument(
+        "--replay-json",
+        type=Path,
+        default=None,
+        help="Use forward-return labels from counterfactual replay candidates",
+    )
     args = parser.parse_args()
 
-    rows = build_rows(args.telemetry)
+    replay_labels = _labels_from_replay_json(args.replay_json) if args.replay_json else None
+    rows = build_rows_from_telemetry(
+        load_telemetry(args.telemetry),
+        replay_labels=replay_labels,
+    )
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "frozen_pi0": FROZEN_PI0,
         "round_trip_cost_pct": round_trip_cost_pct(),
-        "label_spec": "y = 1[signed_return_proxy > round_trip_cost]",
+        "label_spec": (
+            "y = 1[replay_forward_return > round_trip_cost]"
+            if replay_labels
+            else "y = 1[signed_return_proxy > round_trip_cost]"
+        ),
         "sample_count": len(rows),
         "rows": rows,
     }

@@ -1,0 +1,5659 @@
+{
+  "generated_at": "2026-07-11T12:31:53.843162+00:00",
+  "window_hours": 4.0,
+  "telemetry_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_recovery\\decision_telemetry.ndjson",
+  "candidate_count": 49,
+  "labeled_count": 49,
+  "label_errors": 0,
+  "horizon_bars": 2,
+  "economic": true,
+  "directional_stability": {
+    "sample_count": 49,
+    "flip_rate": 0.1042,
+    "mean_run_length": 8.17,
+    "max_run_length": 18,
+    "direction_counts": {
+      "LONG": 26,
+      "SHORT": 23
+    },
+    "transition_matrix": {
+      "LONG->LONG": 23,
+      "LONG->SHORT": 3,
+      "SHORT->SHORT": 20,
+      "SHORT->LONG": 2
+    },
+    "directional_entropy": 0.9973
+  },
+  "scenario_table": {
+    "current": {
+      "trades": 0,
+      "win_pct": null,
+      "profit_factor": null,
+      "ev_pct": 0.0,
+      "max_dd_pct": 0.0,
+      "exposure": 0.0,
+      "avg_hold_bars": null
+    },
+    "ml_adopt_flat": {
+      "trades": 0,
+      "win_pct": null,
+      "profit_factor": null,
+      "ev_pct": 0.0,
+      "max_dd_pct": 0.0,
+      "exposure": 0.0,
+      "avg_hold_bars": null
+    },
+    "ml_adopt_flat_score50": {
+      "trades": 0,
+      "win_pct": null,
+      "profit_factor": null,
+      "ev_pct": 0.0,
+      "max_dd_pct": 0.0,
+      "exposure": 0.0,
+      "avg_hold_bars": null
+    },
+    "ml_only": {
+      "trades": 49,
+      "win_pct": 2.04,
+      "profit_factor": 0.16,
+      "ev_pct": -0.1607,
+      "max_dd_pct": 0.4688,
+      "exposure": 2.45,
+      "avg_hold_bars": 1.98
+    },
+    "no_adx": {
+      "trades": 0,
+      "win_pct": null,
+      "profit_factor": null,
+      "ev_pct": 0.0,
+      "max_dd_pct": 0.0,
+      "exposure": 0.0,
+      "avg_hold_bars": null
+    },
+    "no_thesis_veto": {
+      "trades": 49,
+      "win_pct": 2.04,
+      "profit_factor": 0.16,
+      "ev_pct": -0.1607,
+      "max_dd_pct": 0.4688,
+      "exposure": 2.45,
+      "avg_hold_bars": 1.98
+    }
+  },
+  "by_regime": {
+    "neutral": {
+      "current": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat_score50": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_only": {
+        "trades": 42,
+        "win_pct": 2.38,
+        "profit_factor": 0.187,
+        "ev_pct": -0.1549,
+        "max_dd_pct": 0.4002,
+        "exposure": 2.1,
+        "avg_hold_bars": 1.98
+      },
+      "no_adx": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "no_thesis_veto": {
+        "trades": 42,
+        "win_pct": 2.38,
+        "profit_factor": 0.187,
+        "ev_pct": -0.1549,
+        "max_dd_pct": 0.4002,
+        "exposure": 2.1,
+        "avg_hold_bars": 1.98
+      }
+    },
+    "ranging": {
+      "current": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat_score50": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_only": {
+        "trades": 7,
+        "win_pct": 0.0,
+        "profit_factor": 0.0,
+        "ev_pct": -0.1959,
+        "max_dd_pct": 0.0686,
+        "exposure": 0.35,
+        "avg_hold_bars": 2.0
+      },
+      "no_adx": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "no_thesis_veto": {
+        "trades": 7,
+        "win_pct": 0.0,
+        "profit_factor": 0.0,
+        "ev_pct": -0.1959,
+        "max_dd_pct": 0.0686,
+        "exposure": 0.35,
+        "avg_hold_bars": 2.0
+      }
+    }
+  },
+  "threshold_sensitivity": [
+    {
+      "entry_quality_min": 45,
+      "trades": 49,
+      "win_pct": 2.04,
+      "profit_factor": 0.16,
+      "ev_pct": -0.1607,
+      "max_dd_pct": 0.4688,
+      "exposure": 2.45,
+      "avg_hold_bars": 1.98
+    },
+    {
+      "entry_quality_min": 50,
+      "trades": 0,
+      "win_pct": null,
+      "profit_factor": null,
+      "ev_pct": 0.0,
+      "max_dd_pct": 0.0,
+      "exposure": 0.0,
+      "avg_hold_bars": null
+    },
+    {
+      "entry_quality_min": 55,
+      "trades": 0,
+      "win_pct": null,
+      "profit_factor": null,
+      "ev_pct": 0.0,
+      "max_dd_pct": 0.0,
+      "exposure": 0.0,
+      "avg_hold_bars": null
+    },
+    {
+      "entry_quality_min": 60,
+      "trades": 0,
+      "win_pct": null,
+      "profit_factor": null,
+      "ev_pct": 0.0,
+      "max_dd_pct": 0.0,
+      "exposure": 0.0,
+      "avg_hold_bars": null
+    }
+  ],
+  "promotion_gates": {
+    "gates": {
+      "G1_sample_size": {
+        "pass": false,
+        "value": 0,
+        "threshold": 30
+      },
+      "G2_net_ev": {
+        "pass": false,
+        "value": 0.0,
+        "threshold": "> 0"
+      },
+      "G3_max_dd": {
+        "pass": true,
+        "value": 0.0,
+        "threshold": "<= 5.0%"
+      },
+      "G4_regime": {
+        "pass": false,
+        "value": false,
+        "threshold": "positive EV in non-ranging bucket"
+      },
+      "G5_stability": {
+        "pass": true,
+        "value": 0.1042,
+        "threshold": "<= 0.5"
+      }
+    },
+    "all_pass": false,
+    "recommendation": "hold_baseline_policy",
+    "note": "G6 (OOS shadow) evaluated separately"
+  },
+  "candidates": [
+    {
+      "ts": "2026-07-11T08:35:34.797226+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T08:35:34.797226+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945862,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960745829244357,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64214.9,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0649,
+      "net_return_pct": -0.1351,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0967,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T08:40:39.090337+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T08:40:39.090337+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945863,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960758665794637,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64227.4,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0195,
+      "net_return_pct": -0.2194,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0413,
+      "forward_mae_pct": 0.0419,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T08:45:11.074493+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T08:45:11.074493+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945864,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960771493952272,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64240.0,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0196,
+      "net_return_pct": -0.2195,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0,
+      "forward_mae_pct": 0.0615,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T08:50:13.787731+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T08:50:13.787731+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945865,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.996078431372549,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64243.6,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0056,
+      "net_return_pct": -0.2055,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.01,
+      "forward_mae_pct": 0.0279,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T08:55:17.141855+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T08:55:17.141855+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945866,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960797125122509,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64227.5,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0251,
+      "net_return_pct": -0.1749,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.035,
+      "forward_mae_pct": 0.0167,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:00:22.758668+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:00:22.758668+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945867,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960809928151535,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64183.8,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0681,
+      "net_return_pct": -0.1319,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0899,
+      "forward_mae_pct": 0.0003,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:05:25.114219+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:05:25.114219+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945868,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960822722820764,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64208.4,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0383,
+      "net_return_pct": -0.2382,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0346,
+      "forward_mae_pct": 0.0386,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:10:25.611831+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:10:25.611831+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945869,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960835509138382,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64231.5,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.036,
+      "net_return_pct": -0.2359,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0003,
+      "forward_mae_pct": 0.0665,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:15:33.642087+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:15:33.642087+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945870,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960848287112561,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64245.5,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0218,
+      "net_return_pct": -0.1782,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0676,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:21:11.670228+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:21:11.670228+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945871,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960861056751468,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64201.1,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0692,
+      "net_return_pct": -0.2693,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0185,
+      "forward_mae_pct": 0.1073,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:25:09.947487+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:25:09.947487+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945872,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960873818063254,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64248.6,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0739,
+      "net_return_pct": -0.126,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0925,
+      "forward_mae_pct": 0.0333,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:30:12.978238+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:30:12.978238+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945873,
+        "expected_return": 0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960886571056062,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.06262467224422744,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64170.1,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.1223,
+      "net_return_pct": -0.0777,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.1321,
+      "forward_mae_pct": 0.0003,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:35:13.547733+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:35:13.547733+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945874,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960899315738025,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64146.1,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0374,
+      "net_return_pct": -0.2375,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0092,
+      "forward_mae_pct": 0.1604,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:40:15.524159+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:40:15.524159+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945875,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960912052117263,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64128.7,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0271,
+      "net_return_pct": -0.2272,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0003,
+      "forward_mae_pct": 0.0646,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:44:30.408754+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:44:30.408754+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945875,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960924780201889,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64128.7,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0271,
+      "net_return_pct": -0.2272,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0003,
+      "forward_mae_pct": 0.0646,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:45:17.131378+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:45:17.131378+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945876,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.99609375,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64137.9,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0143,
+      "net_return_pct": -0.1857,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0147,
+      "forward_mae_pct": 0.0267,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:50:19.605752+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:50:19.605752+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945877,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960950211519688,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64139.9,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0031,
+      "net_return_pct": -0.1969,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0178,
+      "forward_mae_pct": 0.0332,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T09:56:03.875420+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T09:56:03.875420+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945878,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.996096291476903,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64145.4,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0086,
+      "net_return_pct": -0.1915,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0217,
+      "forward_mae_pct": 0.0246,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:00:39.501057+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:00:39.501057+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945879,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960975609756098,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64179.3,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0528,
+      "net_return_pct": -0.1472,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0731,
+      "forward_mae_pct": 0.0058,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:05:17.020592+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:05:17.020592+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945880,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9960988296488946,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64121.4,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0903,
+      "net_return_pct": -0.2904,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0,
+      "forward_mae_pct": 0.0961,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:10:36.813383+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:10:36.813383+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945881,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961000974975626,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64151.3,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0466,
+      "net_return_pct": -0.1534,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0466,
+      "forward_mae_pct": 0.0436,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:15:39.237858+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:15:39.237858+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945882,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961013645224172,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64160.4,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0142,
+      "net_return_pct": -0.1859,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0608,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:20:34.087895+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:20:34.087895+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945883,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961026307242611,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64141.6,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0293,
+      "net_return_pct": -0.2294,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0214,
+      "forward_mae_pct": 0.0293,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:25:38.391416+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:25:38.391416+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945884,
+        "expected_return": -0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961038961038962,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.0012923091857762784,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64115.2,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0412,
+      "net_return_pct": -0.2413,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0069,
+      "forward_mae_pct": 0.0649,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:30:38.993929+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:30:38.993929+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945885,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961051606621227,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64118.2,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0047,
+      "net_return_pct": -0.1954,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0115,
+      "forward_mae_pct": 0.0652,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:35:40.923302+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:35:40.923302+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945886,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961064243997404,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64161.9,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0681,
+      "net_return_pct": -0.1319,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0728,
+      "forward_mae_pct": 0.0048,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:40:15.697824+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:40:15.697824+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945887,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961076873175478,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64160.9,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0016,
+      "net_return_pct": -0.2016,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0666,
+      "forward_mae_pct": 0.0083,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:45:16.481332+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:45:16.481332+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945888,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961089494163424,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64168.8,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0123,
+      "net_return_pct": -0.1877,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0232,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:50:21.709534+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:50:21.709534+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945889,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961102106969206,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64164.6,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0065,
+      "net_return_pct": -0.2066,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0229,
+      "forward_mae_pct": 0.0217,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T10:55:52.161667+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T10:55:52.161667+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945890,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961114711600778,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64175.0,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0162,
+      "net_return_pct": -0.1838,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0391,
+      "forward_mae_pct": 0.0274,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:00:19.327988+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "ranging",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:00:19.327988+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945891,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=ranging",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961127308066083,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64191.9,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0263,
+      "net_return_pct": -0.2263,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0011,
+      "forward_mae_pct": 0.0637,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:05:33.182092+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "ranging",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:05:33.182092+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945892,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=ranging",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961139896373057,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64153.7,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0595,
+      "net_return_pct": -0.1405,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0639,
+      "forward_mae_pct": 0.0059,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:10:32.649205+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:10:32.649205+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945893,
+        "expected_return": 0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961152476529621,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.06262467224422744,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64144.4,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0145,
+      "net_return_pct": -0.1855,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0784,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:15:05.135888+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:15:05.135888+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945894,
+        "expected_return": 0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.996116504854369,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.06262467224422744,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64156.8,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0193,
+      "net_return_pct": -0.2193,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0196,
+      "forward_mae_pct": 0.0193,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:20:16.626380+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "ranging",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:20:16.626380+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945895,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=ranging",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961177612423164,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64147.7,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0142,
+      "net_return_pct": -0.1858,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0173,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:25:20.934384+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "ranging",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:25:20.934384+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945896,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=ranging",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961190168175937,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64157.4,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0151,
+      "net_return_pct": -0.2151,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0578,
+      "forward_mae_pct": 0.0151,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:30:23.504076+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "ranging",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:30:23.504076+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945897,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=ranging",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961202715809894,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64164.0,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0103,
+      "net_return_pct": -0.2102,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0475,
+      "forward_mae_pct": 0.0179,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:35:26.349728+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "ranging",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:35:26.349728+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945898,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=ranging",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961215255332903,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64180.7,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.026,
+      "net_return_pct": -0.2259,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0019,
+      "forward_mae_pct": 0.0363,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:40:30.407455+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "ranging",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:40:30.407455+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945899,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=ranging",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961227786752828,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64159.9,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0324,
+      "net_return_pct": -0.1676,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0343,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:45:34.091294+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:45:34.091294+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945900,
+        "expected_return": 0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961240310077519,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.06262467224422744,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64176.1,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0252,
+      "net_return_pct": -0.2252,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0093,
+      "forward_mae_pct": 0.0252,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:50:07.270206+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:50:07.270206+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945901,
+        "expected_return": 0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.996125282531482,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.06262467224422744,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64185.7,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.015,
+      "net_return_pct": -0.2149,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0223,
+      "forward_mae_pct": 0.036,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T11:55:11.074008+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T11:55:11.074008+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945902,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961265332472563,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.6031900170164493,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64191.7,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0093,
+      "net_return_pct": -0.2093,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0129,
+      "forward_mae_pct": 0.0882,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T12:00:15.582328+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T12:00:15.582328+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945903,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961277831558567,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64196.9,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0081,
+      "net_return_pct": -0.208,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0173,
+      "forward_mae_pct": 0.0963,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T12:05:19.804675+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T12:05:19.804675+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945904,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961290322580645,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64151.4,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0709,
+      "net_return_pct": -0.1291,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0968,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T12:10:24.151290+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T12:10:24.151290+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945905,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961302805546598,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64143.1,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0129,
+      "net_return_pct": -0.187,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.1098,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T12:15:26.617072+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.9,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T12:15:26.617072+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945906,
+        "expected_return": 0.015,
+        "trade_score": 47.9,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961315280464217,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.479,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.9,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.479,
+            "agreement": 0.5,
+            "score_s": 0.06328527005271084,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64152.2,
+      "outcome": "time_exit",
+      "gross_return_pct": -0.0142,
+      "net_return_pct": -0.2141,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0168,
+      "forward_mae_pct": 0.0142,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T12:20:30.314431+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "LONG",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": 0.015,
+      "raw_row": {
+        "ts": "2026-07-11T12:20:30.314431+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945907,
+        "expected_return": 0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961327747341283,
+        "proba": 0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": 0.009999999999999998,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": true,
+          "g1_raw_short": false,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "LONG",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": true,
+          "final_short": false,
+          "reject": "gates_passed_long",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": 0.009999999999999998,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.06262467224422744,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64139.2,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0203,
+      "net_return_pct": -0.1797,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0371,
+      "forward_mae_pct": 0.0,
+      "bars_held": 2,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T12:25:16.824789+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T12:25:16.824789+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945908,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.9961340206185567,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": 64139.2,
+      "outcome": "time_exit",
+      "gross_return_pct": 0.0,
+      "net_return_pct": -0.2001,
+      "would_have_won_net": false,
+      "forward_mfe_pct": 0.0,
+      "forward_mae_pct": 0.0192,
+      "bars_held": 1,
+      "label_source": "candles"
+    },
+    {
+      "ts": "2026-07-11T12:30:13.480892+00:00",
+      "symbol": "BTCUSD",
+      "ml_direction": "SHORT",
+      "policy_signal": "HOLD",
+      "trade_score": 47.4,
+      "thesis_signal": "HOLD",
+      "flat_thesis": true,
+      "regime": "neutral",
+      "handler_reject": "hold_at_synthesis",
+      "expected_return": -0.015,
+      "raw_row": {
+        "ts": "2026-07-11T12:30:13.480892+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "confidence": 0.3,
+        "bar_index": 5945909,
+        "expected_return": -0.015,
+        "trade_score": 47.4,
+        "thesis_signal": "HOLD",
+        "aggregate_confidence": 0.0,
+        "hypothesis_margin": 0.0,
+        "policy_reason_codes": [
+          "fusion_mode=ml_or_thesis",
+          "thesis_type=flat",
+          "hypothesis_no_rule_fired",
+          "regime=neutral",
+          "fusion_ml_or_thesis_blocked",
+          "thesis_blocks_ml_adoption",
+          "hypothesis_margin=0.000",
+          "aggregate_confidence=0.000",
+          "portfolio_guard_skipped"
+        ],
+        "v43_collapse_rate": 0.996135265700483,
+        "proba": -0.015,
+        "threshold": 0.005,
+        "inference_stack": "meta_calibrator",
+        "latent": {
+          "epsilon_proxy": -0.02,
+          "kappa_ml": 0.3,
+          "kappa_thesis": 0.0,
+          "q_composite": 0.474,
+          "A_composite": 0.5
+        },
+        "gates": {
+          "g1_raw_long": false,
+          "g1_raw_short": true,
+          "g2_pass": true,
+          "g3_pass": true,
+          "g4_pass": true,
+          "g5_pass": true,
+          "gate_reject": null
+        },
+        "scores": {
+          "trade_score": 47.4,
+          "conviction": 0.5578128190584232,
+          "size_fraction": 0.0,
+          "policy_confidence": 0.3
+        },
+        "signals": {
+          "thesis": "HOLD",
+          "ml_gated": "SHORT",
+          "policy": "HOLD"
+        },
+        "constraints": {
+          "liquidity_ok": true,
+          "has_open_position": false,
+          "portfolio_heat": 0.0,
+          "conviction_floor_pass": true
+        },
+        "terminal_cause": "policy",
+        "policy_snapshot": {
+          "horizon_bars": 2,
+          "gate5_ratio": 0.75,
+          "entry_quality_min": 55.0,
+          "conviction_entry_floor": 0.35,
+          "hypothesis_min_margin": 0.03,
+          "stop_loss_pct": 0.008,
+          "take_profit_pct": 0.01,
+          "trade_lifecycle_enabled": true,
+          "round_trip_cost": 0.0026,
+          "policy_mode": "ml_or_thesis"
+        },
+        "extra": {
+          "final_long": false,
+          "final_short": true,
+          "reject": "gates_passed_short",
+          "expected_return_is_synthetic": true,
+          "latent_shadow": {
+            "epsilon_proxy": -0.02,
+            "kappa": 0.3,
+            "q": 0.474,
+            "agreement": 0.5,
+            "score_s": 0.0012788195283047097,
+            "shadow_signal": "HOLD",
+            "shadow_direction": null
+          }
+        }
+      },
+      "entry_price": null,
+      "forward_return_pct": 1.5,
+      "net_return_pct": 1.5,
+      "would_have_won_net": true,
+      "label_source": "expected_return_fallback"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "generated_at": "2026-07-11T12:32:30.784411+00:00",
+  "telemetry_rows": 5,
+  "statistical": {
+    "baseline_auc": 0.2645,
+    "baseline_brier": 0.012739,
+    "loo_results": [
+      {
+        "removed_metric": "epsilon_proxy",
+        "delta_auc": 0.0,
+        "delta_brier": 0.0,
+        "max_abs_corr": 0.2242,
+        "redundant_candidate": false,
+        "recommendation": "keep"
+      },
+      {
+        "removed_metric": "kappa_raw",
+        "delta_auc": 0.0,
+        "delta_brier": 0.0,
+        "max_abs_corr": 1.0,
+        "redundant_candidate": true,
+        "recommendation": "remove"
+      },
+      {
+        "removed_metric": "q",
+        "delta_auc": 0.0,
+        "delta_brier": 0.0,
+        "max_abs_corr": 1.0,
+        "redundant_candidate": true,
+        "recommendation": "remove"
+      },
+      {
+        "removed_metric": "A",
+        "delta_auc": 0.0,
+        "delta_brier": 0.0,
+        "max_abs_corr": 0.9622,
+        "redundant_candidate": true,
+        "recommendation": "remove"
+      },
+      {
+        "removed_metric": "trade_score",
+        "delta_auc": -0.190323,
+        "delta_brier": -0.00028,
+        "max_abs_corr": 1.0,
+        "redundant_candidate": false,
+        "recommendation": "keep"
+      },
+      {
+        "removed_metric": "conviction",
+        "delta_auc": 0.0,
+        "delta_brier": 0.0,
+        "max_abs_corr": 1.0,
+        "redundant_candidate": true,
+        "recommendation": "remove"
+      },
+      {
+        "removed_metric": "hypothesis_margin",
+        "delta_auc": 0.0,
+        "delta_brier": 0.0,
+        "max_abs_corr": 0.9622,
+        "redundant_candidate": true,
+        "recommendation": "remove"
+      }
+    ]
+  },
+  "policy_modules": {
+    "conviction_floor": {
+      "blocked_count": 0,
+      "blocked_rate": 0.0,
+      "note": "Observed terminal_cause=conviction in telemetry"
+    },
+    "entry_quality_veto": {
+      "blocked_count": 0,
+      "blocked_rate": 0.0,
+      "note": "Observed terminal_cause=quality in telemetry"
+    },
+    "gate5": {
+      "blocked_count": 0,
+      "blocked_rate": 0.0,
+      "note": "Observed terminal_cause=g5 in telemetry"
+    },
+    "trade_score_hard_veto": {
+      "blocked_count": 0,
+      "blocked_rate": 0.0,
+      "note": "Observed terminal_cause=policy in telemetry"
+    }
+  }
+}

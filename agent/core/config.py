@@ -2919,6 +2919,18 @@ class Settings(BaseSettings):
         default=0.52,
         env="AGENT_THESIS_TREND_HURST_MIN",
     )
+    agent_thesis_neutral_mild_trend_enabled: bool = Field(
+        default=False,
+        env="AGENT_THESIS_NEUTRAL_MILD_TREND_ENABLED",
+        description=(
+            "Research prototype: fire low-ADX trend thesis in neutral regime "
+            "(disabled in production; requires governance validation)"
+        ),
+    )
+    agent_thesis_neutral_mild_trend_adx_max: float = Field(
+        default=22.0,
+        env="AGENT_THESIS_NEUTRAL_MILD_TREND_ADX_MAX",
+    )
     agent_thesis_trend_short_rsi_lo: float = Field(
         default=35.0,
         env="AGENT_THESIS_TREND_SHORT_RSI_LO",

@@ -1,0 +1,186 @@
+{
+  "generated_at": "2026-07-11T12:31:04.004352+00:00",
+  "archive_dir": "D:\\ATTRAL\\Projects\\Trading Agent 2\\data\\investigation\\rolling\\2026-07-11",
+  "baseline_commit": "0503847",
+  "baseline_policy": "hold_baseline_policy",
+  "windows": {
+    "168h": {
+      "current": {
+        "trades": 191,
+        "win_pct": 12.04,
+        "profit_factor": 0.044,
+        "ev_pct": -0.1873,
+        "max_dd_pct": 1.7883,
+        "exposure": 9.55,
+        "avg_hold_bars": 2.0
+      },
+      "ml_adopt_flat": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_adopt_flat_score50": {
+        "trades": 0,
+        "win_pct": null,
+        "profit_factor": null,
+        "ev_pct": 0.0,
+        "max_dd_pct": 0.0,
+        "exposure": 0.0,
+        "avg_hold_bars": null
+      },
+      "ml_only": {
+        "trades": 2084,
+        "win_pct": 3.17,
+        "profit_factor": 0.019,
+        "ev_pct": -0.201,
+        "max_dd_pct": 21.0164,
+        "exposure": 104.2,
+        "avg_hold_bars": 2.0
+      },
+      "no_adx": {
+        "trades": 195,
+        "win_pct": 11.79,
+        "profit_factor": 0.043,
+        "ev_pct": -0.1877,
+        "max_dd_pct": 1.8302,
+        "exposure": 9.75,
+        "avg_hold_bars": 2.0
+      },
+      "no_thesis_veto": {
+        "trades": 2084,
+        "win_pct": 3.17,
+        "profit_factor": 0.019,
+        "ev_pct": -0.201,
+        "max_dd_pct": 21.0164,
+        "exposure": 104.2,
+        "avg_hold_bars": 2.0
+      }
+    },
+    "720h": {
+      "current": {
+        "trades": 374,
+        "win_pct": 7.22,
+        "profit_factor": 0.024,
+        "ev_pct": -0.2,
+        "max_dd_pct": 3.7397,
+        "exposure": 18.7,
+        "avg_hold_bars": 2.0
+      },
+      "ml_adopt_flat": {
+        "trades": 167,
+        "win_pct": 2.4,
+        "profit_factor": 0.005,
+        "ev_pct": -0.2099,
+        "max_dd_pct": 1.7527,
+        "exposure": 8.35,
+        "avg_hold_bars": 2.0
+      },
+      "ml_adopt_flat_score50": {
+        "trades": 167,
+        "win_pct": 2.4,
+        "profit_factor": 0.005,
+        "ev_pct": -0.2099,
+        "max_dd_pct": 1.7527,
+        "exposure": 8.35,
+        "avg_hold_bars": 2.0
+      },
+      "ml_only": {
+        "trades": 2299,
+        "win_pct": 3.0,
+        "profit_factor": 0.014,
+        "ev_pct": -0.2027,
+        "max_dd_pct": 23.3025,
+        "exposure": 114.95,
+        "avg_hold_bars": 2.0
+      },
+      "no_adx": {
+        "trades": 378,
+        "win_pct": 7.14,
+        "profit_factor": 0.024,
+        "ev_pct": -0.2001,
+        "max_dd_pct": 3.7816,
+        "exposure": 18.9,
+        "avg_hold_bars": 2.0
+      },
+      "no_thesis_veto": {
+        "trades": 2299,
+        "win_pct": 3.0,
+        "profit_factor": 0.014,
+        "ev_pct": -0.2027,
+        "max_dd_pct": 23.3025,
+        "exposure": 114.95,
+        "avg_hold_bars": 2.0
+      }
+    }
+  },
+  "promotion": {
+    "168h": {
+      "gates": {
+        "G1_sample_size": {
+          "pass": false,
+          "value": 0,
+          "threshold": 30
+        },
+        "G2_net_ev": {
+          "pass": false,
+          "value": 0.0,
+          "threshold": "> 0"
+        },
+        "G3_max_dd": {
+          "pass": true,
+          "value": 0.0,
+          "threshold": "<= 5.0%"
+        },
+        "G4_regime": {
+          "pass": false,
+          "value": false,
+          "threshold": "positive EV in non-ranging bucket"
+        },
+        "G5_stability": {
+          "pass": true,
+          "value": 0.061,
+          "threshold": "<= 0.5"
+        }
+      },
+      "all_pass": false,
+      "recommendation": "hold_baseline_policy",
+      "note": "G6 (OOS shadow) evaluated separately"
+    },
+    "720h": {
+      "gates": {
+        "G1_sample_size": {
+          "pass": true,
+          "value": 167,
+          "threshold": 30
+        },
+        "G2_net_ev": {
+          "pass": false,
+          "value": -0.2099,
+          "threshold": "> 0"
+        },
+        "G3_max_dd": {
+          "pass": true,
+          "value": 1.7527,
+          "threshold": "<= 5.0%"
+        },
+        "G4_regime": {
+          "pass": false,
+          "value": false,
+          "threshold": "positive EV in non-ranging bucket"
+        },
+        "G5_stability": {
+          "pass": true,
+          "value": 0.0701,
+          "threshold": "<= 0.5"
+        }
+      },
+      "all_pass": false,
+      "recommendation": "hold_baseline_policy",
+      "note": "G6 (OOS shadow) evaluated separately"
+    }
+  }
+}

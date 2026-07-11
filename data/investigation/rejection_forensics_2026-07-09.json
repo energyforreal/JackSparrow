@@ -1,739 +1,98 @@
 {
-  "generated_at": "2026-07-09T04:30:32.690000+00:00",
-  "parsed_events": 34723,
+  "generated_at": "2026-07-11T12:31:37.758321+00:00",
+  "parsed_events": 5385,
   "handler_reject_histogram": [
     {
       "reason": "hold_at_synthesis",
-      "count": 283,
-      "pct": 94.65
-    },
-    {
-      "reason": "v15_adx_trending_filter",
-      "count": 16,
-      "pct": 5.35
+      "count": 27,
+      "pct": 100.0
     }
   ],
   "handler_reject_by_signal": {
-    "HOLD": 283,
-    "LONG": 2,
-    "SHORT": 14
+    "HOLD": 27
   },
   "hold_at_synthesis": {
-    "total": 283,
+    "total": 27,
     "primary_causes": [
       {
         "cause": "hypothesis_no_rule_fired",
-        "count": 283,
+        "count": 27,
         "pct": 100.0
       }
     ],
     "top_policy_reason_codes": [
       {
         "code": "hypothesis_no_rule_fired",
-        "count": 566
+        "count": 81
       },
       {
         "code": "regime=neutral",
-        "count": 548
+        "count": 60
       },
       {
         "code": "fusion_mode=ml_or_thesis",
-        "count": 283
+        "count": 54
       },
       {
         "code": "thesis_type=flat",
-        "count": 283
+        "count": 54
       },
       {
         "code": "fusion_ml_or_thesis_blocked",
-        "count": 283
+        "count": 54
       },
       {
         "code": "thesis_blocks_ml_adoption",
-        "count": 283
+        "count": 54
       },
       {
         "code": "hypothesis_margin=0.000",
-        "count": 283
+        "count": 54
       },
       {
         "code": "aggregate_confidence=0.000",
-        "count": 283
+        "count": 54
+      },
+      {
+        "code": "portfolio_guard_skipped",
+        "count": 27
       },
       {
         "code": "regime=ranging",
-        "count": 18
+        "count": 21
       }
     ]
   },
   "v43_prediction": {
-    "cycles": 320,
+    "cycles": 27,
     "policy_signals": {
-      "HOLD": 283,
-      "LONG": 6,
-      "SHORT": 31
+      "HOLD": 27
     },
     "reject_tags": {
-      "gates_passed_short": 163,
-      "gates_passed_long": 157
+      "gates_passed_short": 10,
+      "gates_passed_long": 17
     },
     "latest_counters": {
-      "signals_raw": 2316,
+      "signals_raw": 3105,
       "trades_executed": 12,
       "rejected_pos_open": 719,
-      "collapse_rate": 0.9948186528497409,
-      "timestamp": "2026-07-09T04:15:49.084278Z"
+      "collapse_rate": 0.996135265700483,
+      "timestamp": "2026-07-11T12:30:13.470467Z"
     }
   },
   "execution_path": {
     "risk_approved_count": 0,
     "fill_count": 0
   },
-  "confidence_cascades_non_hold": [
-    {
-      "event_id": "1792591b-df81-4a93-b0a1-f5956fe73a3d",
-      "timestamp": "2026-07-09T01:25:16.449584Z",
-      "symbol": "BTCUSD",
-      "signal": "LONG",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 60.15,
-        "passed": true,
-        "components": {
-          "structural": 87.8,
-          "ml": 2.72,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7280100862425696,
-      "calibrated_confidence": 0.7192739652076587,
-      "reasoning_final_confidence": 0.4747787409292352,
-      "adx_14": 35.47401287364334,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "6e3d8852-7ab0-4804-acc0-4d91d62633cd",
-      "timestamp": "2026-07-09T01:30:17.716671Z",
-      "symbol": "BTCUSD",
-      "signal": "LONG",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 60.46,
-        "passed": true,
-        "components": {
-          "structural": 89.33,
-          "ml": 2.74,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7432876454760704,
-      "calibrated_confidence": 0.7343681937303576,
-      "reasoning_final_confidence": 0.4755574670173131,
-      "adx_14": 34.92811700987919,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "10e344ef-0991-4bfa-8439-9d75c94b4ae6",
-      "timestamp": "2026-07-09T01:50:22.622407Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 58.81,
-        "passed": true,
-        "components": {
-          "structural": 81.19,
-          "ml": 2.62,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.6619019821206565,
-      "calibrated_confidence": 0.6539591583352087,
-      "reasoning_final_confidence": 0.4714152546221661,
-      "adx_14": 28.61009510669884,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "daccfe0a-07bb-4e98-917d-f6198b0f6756",
-      "timestamp": "2026-07-09T02:05:57.070357Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 60.4,
-        "passed": true,
-        "components": {
-          "structural": 89.03,
-          "ml": 2.74,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.740311606505522,
-      "calibrated_confidence": 0.7314278672274557,
-      "reasoning_final_confidence": 0.47540672806415085,
-      "adx_14": 36.76136095038611,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "631b0eca-b136-4875-9d2c-ef0209993799",
-      "timestamp": "2026-07-09T02:10:27.735404Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 60.67,
-        "passed": true,
-        "components": {
-          "structural": 90.35,
-          "ml": 2.76,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7535031596497694,
-      "calibrated_confidence": 0.7444611217339722,
-      "reasoning_final_confidence": 0.4760851205422177,
-      "adx_14": 35.79278075798568,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "d40a5e6d-291d-4d75-ac7c-9f7cc1c659e0",
-      "timestamp": "2026-07-09T02:15:29.049240Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 60.33,
-        "passed": true,
-        "components": {
-          "structural": 88.68,
-          "ml": 2.73,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.736779616464727,
-      "calibrated_confidence": 0.7279382610671503,
-      "reasoning_final_confidence": 0.4752308767355219,
-      "adx_14": 33.677961646472696,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "681b28dd-60c0-4230-97bf-22f6c181d0c6",
-      "timestamp": "2026-07-09T02:21:00.226992Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 59.73,
-        "passed": true,
-        "components": {
-          "structural": 85.7,
-          "ml": 2.69,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7070303138229624,
-      "calibrated_confidence": 0.6985459500570869,
-      "reasoning_final_confidence": 0.4737240559982854,
-      "adx_14": 30.703031382296246,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "40e6cdff-81b9-4f0d-a813-ea63ac30a0bf",
-      "timestamp": "2026-07-09T02:26:01.671519Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 59.2,
-        "passed": true,
-        "components": {
-          "structural": 83.12,
-          "ml": 2.65,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.6812475848667384,
-      "calibrated_confidence": 0.6730726138483375,
-      "reasoning_final_confidence": 0.47239374070322127,
-      "adx_14": 28.12475848667384,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "643d4651-242e-44dc-a12e-c7b231ba2b6e",
-      "timestamp": "2026-07-09T02:31:03.910008Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 58.6,
-        "passed": true,
-        "components": {
-          "structural": 82.63,
-          "ml": 2.64,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 46.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.6762937924506721,
-      "calibrated_confidence": 0.668178266941264,
-      "reasoning_final_confidence": 0.4708885268101241,
-      "adx_14": 27.789307574142146,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "7f6a6287-f344-42fa-9963-75cda0f4b838",
-      "timestamp": "2026-07-09T02:35:25.028578Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 58.85,
-        "passed": true,
-        "components": {
-          "structural": 81.4,
-          "ml": 2.62,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.663962600900661,
-      "calibrated_confidence": 0.655995049689853,
-      "reasoning_final_confidence": 0.4715155955791048,
-      "adx_14": 29.33018074856163,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "7192074b-0148-4a6c-a07e-bc53ff1cb2b7",
-      "timestamp": "2026-07-09T02:41:07.063676Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 59.58,
-        "passed": true,
-        "components": {
-          "structural": 84.98,
-          "ml": 2.67,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.6998426028041338,
-      "calibrated_confidence": 0.6914444915704842,
-      "reasoning_final_confidence": 0.4733474841251603,
-      "adx_14": 31.787619790670497,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "0a8fd786-0a1d-4391-a8b3-51f3f9100f0a",
-      "timestamp": "2026-07-09T02:45:07.314427Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 59.6,
-        "passed": true,
-        "components": {
-          "structural": 85.08,
-          "ml": 2.68,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 59.5,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_micro_vol_spike",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7007842106250024,
-      "calibrated_confidence": 0.6923748000975024,
-      "reasoning_final_confidence": 0.4733976906272741,
-      "adx_14": 32.89597908721731,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "68bd54be-371e-498a-a3de-cd8325f3fa21",
-      "timestamp": "2026-07-09T02:55:14.301390Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 61.88,
-        "passed": true,
-        "components": {
-          "structural": 91.11,
-          "ml": 2.77,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 70.0,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7611213062695376,
-      "calibrated_confidence": 0.7519878505943031,
-      "reasoning_final_confidence": 0.4791274459469038,
-      "adx_14": 37.81888330025078,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "1eaa520e-f826-47c4-8540-054da519c848",
-      "timestamp": "2026-07-09T03:00:30.281845Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 62.2,
-        "passed": true,
-        "components": {
-          "structural": 92.73,
-          "ml": 2.79,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 70.0,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7773175408060943,
-      "calibrated_confidence": 0.7679897303164211,
-      "reasoning_final_confidence": 0.4799326080423835,
-      "adx_14": 39.86164555868589,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "f241383c-a95d-41d0-bc9a-ca6e08c8b147",
-      "timestamp": "2026-07-09T03:05:23.224747Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 62.18,
-        "passed": true,
-        "components": {
-          "structural": 92.61,
-          "ml": 2.79,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 70.0,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7761050572744415,
-      "calibrated_confidence": 0.7667917965871481,
-      "reasoning_final_confidence": 0.4798822783014861,
-      "adx_14": 42.02003564705466,
-      "policy_reason_codes": []
-    },
-    {
-      "event_id": "07d8fafa-0b4a-4729-9da7-b1bdb4d1b3b0",
-      "timestamp": "2026-07-09T03:10:22.351885Z",
-      "symbol": "BTCUSD",
-      "signal": "SHORT",
-      "reject_reason": "v15_adx_trending_filter",
-      "trade_score": {
-        "score": 62.51,
-        "passed": true,
-        "components": {
-          "structural": 94.22,
-          "ml": 2.81,
-          "economic": 85.0,
-          "regime": 70.0,
-          "position_context": 75.0,
-          "microstructure": 70.0,
-          "trend_stability": 51.0,
-          "signal_freshness": 75.0
-        },
-        "reason_codes": [
-          "quality_structural_thesis",
-          "quality_structural_ml_aligned",
-          "quality_ml_trust=0.050",
-          "quality_ml_gated",
-          "quality_economic_gate5_pass",
-          "quality_position_clear",
-          "quality_freshness_unknown"
-        ]
-      },
-      "v43_proba": null,
-      "policy_signal": null,
-      "policy_confidence": null,
-      "thesis_type": null,
-      "raw_ai_signal_confidence": 0.7922285095408806,
-      "calibrated_confidence": 0.7827217674263901,
-      "reasoning_final_confidence": 0.4807128402505949,
-      "adx_14": 44.44025943377765,
-      "policy_reason_codes": []
-    }
-  ],
+  "v3_terminal_cause": {},
+  "confidence_cascades_non_hold": [],
   "counter_reconciliation": {
     "postgres_trades_executed": 21,
     "postgres_last_trade_at": "2026-06-04T04:50:31.2389+00:00",
     "redis_trades_executed": 12,
     "redis_signals_raw": 2316,
     "log_latest_v43_trades_executed": 12,
-    "log_latest_collapse_rate": 0.9948186528497409,
+    "log_latest_collapse_rate": 0.996135265700483,
     "gap_db_minus_v43": 9,
     "interpretation": "v43 counter increments only on fills with v43_closed_bar_index; Postgres trades table counts all EXECUTED rows regardless of v43 path."
   },
