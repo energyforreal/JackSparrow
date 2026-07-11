@@ -94,10 +94,45 @@ def main() -> int:
             [sys.executable, "tools/commands/rolling_validation.py", "--economic"]
         )
     if args.weekly:
+        evidence_dir = inv / "decision_evidence" / date_tag
         steps.extend(
             [
-                [sys.executable, "tools/commands/thesis_rule_miss_analysis.py", "--hours", "168"],
-                [sys.executable, "tools/commands/decision_quality_index.py", "--hours", "168"],
+                [
+                    sys.executable,
+                    "tools/commands/assemble_decision_evidence.py",
+                    "--hours",
+                    "168",
+                    "--log",
+                    str(log_out),
+                    "--out-dir",
+                    str(evidence_dir),
+                ],
+                [
+                    sys.executable,
+                    "tools/commands/thesis_rule_miss_analysis.py",
+                    "--hours",
+                    "168",
+                    "--log",
+                    str(log_out),
+                    "--evidence-json",
+                    str(evidence_dir / "enriched.ndjson"),
+                ],
+                [
+                    sys.executable,
+                    "tools/commands/thesis_feature_distribution.py",
+                    "--evidence-json",
+                    str(evidence_dir / "enriched.ndjson"),
+                ],
+                [
+                    sys.executable,
+                    "tools/commands/decision_quality_index.py",
+                    "--hours",
+                    "168",
+                    "--coverage-json",
+                    str(evidence_dir / "coverage.json"),
+                    "--thesis-miss-json",
+                    str(inv / f"thesis_rule_miss_{date_tag}.json"),
+                ],
             ]
         )
     for cmd in steps:

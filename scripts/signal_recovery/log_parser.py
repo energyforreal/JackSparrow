@@ -105,7 +105,17 @@ def merge_decision_sources(
     agent_log_path: Path,
     hours: float,
 ) -> List[Dict[str, Any]]:
-    """Prefer dedicated telemetry; fall back to agent.log parsing."""
+    """Prefer telemetry; when log exists return enriched record dicts."""
+    if agent_log_path.is_file():
+        from scripts.signal_recovery.decision_evidence import enrich_from_sources
+
+        records = enrich_from_sources(
+            telemetry_path=telemetry_path,
+            log_path=agent_log_path,
+            hours=hours,
+        )
+        if records:
+            return [r.to_dict() for r in records]
     rows = load_telemetry(telemetry_path)
     if not rows:
         rows = load_agent_log_decisions(agent_log_path)

@@ -1,280 +1,424 @@
 {
   "window_hours": 168.0,
-  "telemetry_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_recovery\\decision_telemetry.ndjson",
-  "generated_at": "2026-07-11T12:55:10.156179+00:00",
-  "b4_total": 1573,
+  "phase_a_records": 27,
+  "generated_at": "2026-07-11T13:37:19.787515+00:00",
+  "phase": "B_threshold_diagnostics",
+  "high_confidence_only": true,
+  "b4_total": 26,
+  "b4_analyzed": 26,
+  "coverage": {
+    "generated_at": "2026-07-11T13:37:19.784182+00:00",
+    "total_records": 27,
+    "total_b4": 26,
+    "high_confidence": 26,
+    "telemetry_only": 0,
+    "default_missing_excluded": 0,
+    "high_confidence_fraction_pct": 100.0,
+    "sweep_gate_min": 100,
+    "sweep_gate": "FAIL"
+  },
   "nearest_rule": {
-    "breakout:LONG": 1489,
-    "mean_reversion:LONG": 84
+    "trend_continuation:LONG": 19,
+    "mean_reversion:LONG": 7
   },
   "nearest_blocker": {
-    "breakout:h_trend": 1489,
-    "mean_reversion:bb_pos_hi": 84
+    "trend_continuation:h_trend": 19,
+    "mean_reversion:bb_pos_hi": 7
   },
-  "blocker_totals": {
-    "breakout:adx_14": 2978,
-    "breakout:di_spread": 2978,
-    "breakout:vol_regime": 2978,
-    "breakout:h_trend": 2978,
-    "trend_continuation:h1_trend": 1489,
-    "trend_continuation:h_trend": 1489,
-    "trend_continuation:hurst_60": 1489,
-    "mean_reversion:rsi_14_hi": 84,
-    "mean_reversion:bb_pos_hi": 84
-  },
+  "blocker_coverage": [
+    {
+      "blocker": "breakout:vol_regime",
+      "miss_count": 20,
+      "miss_pct_of_analyzed": 76.92,
+      "coverage_observed": "20/26"
+    },
+    {
+      "blocker": "trend_continuation:h_trend",
+      "miss_count": 19,
+      "miss_pct_of_analyzed": 73.08,
+      "coverage_observed": "19/26"
+    },
+    {
+      "blocker": "trend_continuation:hurst_60",
+      "miss_count": 19,
+      "miss_pct_of_analyzed": 73.08,
+      "coverage_observed": "19/26"
+    },
+    {
+      "blocker": "breakout:h_trend",
+      "miss_count": 19,
+      "miss_pct_of_analyzed": 73.08,
+      "coverage_observed": "19/26"
+    },
+    {
+      "blocker": "breakout:di_spread",
+      "miss_count": 16,
+      "miss_pct_of_analyzed": 61.54,
+      "coverage_observed": "16/26"
+    },
+    {
+      "blocker": "breakout:adx_14",
+      "miss_count": 12,
+      "miss_pct_of_analyzed": 46.15,
+      "coverage_observed": "12/26"
+    },
+    {
+      "blocker": "mean_reversion:rsi_14_hi",
+      "miss_count": 7,
+      "miss_pct_of_analyzed": 26.92,
+      "coverage_observed": "7/26"
+    },
+    {
+      "blocker": "mean_reversion:bb_pos_hi",
+      "miss_count": 7,
+      "miss_pct_of_analyzed": 26.92,
+      "coverage_observed": "7/26"
+    },
+    {
+      "blocker": "trend_continuation:rsi_14_lo",
+      "miss_count": 6,
+      "miss_pct_of_analyzed": 23.08,
+      "coverage_observed": "6/26"
+    },
+    {
+      "blocker": "breakout:bb_pos_max",
+      "miss_count": 2,
+      "miss_pct_of_analyzed": 7.69,
+      "coverage_observed": "2/26"
+    },
+    {
+      "blocker": "trend_continuation:rsi_14_hi",
+      "miss_count": 1,
+      "miss_pct_of_analyzed": 3.85,
+      "coverage_observed": "1/26"
+    }
+  ],
   "by_regime": {
     "neutral": {
-      "b4_count": 1489,
+      "b4_count": 19,
       "nearest_rule": {
-        "breakout:LONG": 1489
+        "trend_continuation:LONG": 19
       },
       "nearest_blocker": {
-        "breakout:h_trend": 1489
-      },
-      "blocker_totals": {
-        "breakout:adx_14": 2978,
-        "breakout:di_spread": 2978,
-        "breakout:vol_regime": 2978,
-        "breakout:h_trend": 2978,
-        "trend_continuation:h1_trend": 1489,
-        "trend_continuation:h_trend": 1489,
-        "trend_continuation:hurst_60": 1489
+        "trend_continuation:h_trend": 19
       },
       "samples": [
         {
-          "ts": "2026-07-04T12:55:15.164898+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T10:20:40.608009Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:00:16.869980+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T10:25:51.123070Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:05:18.583456+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T10:30:41.078271Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:10:19.301939+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T10:35:42.307188Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:15:21.144700+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T10:40:17.065901Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:19:35.239577+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T10:45:18.434985Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:20:22.641287+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T10:50:23.080436Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:25:27.130645+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T11:10:36.052539Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:30:34.981019+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T11:15:09.557852Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0004,
+          "value": 0.0006,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-04T13:30:51.821552+00:00",
-          "nearest_rule": "breakout:LONG",
+          "ts": "2026-07-11T11:45:35.844611Z",
+          "nearest_rule": "trend_continuation:LONG",
           "nearest_blocker": "h_trend",
-          "gap": 0.001,
-          "value": 0.0,
+          "gap": 0.0005,
+          "value": 0.0005,
           "threshold": 0.001,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         }
       ]
     },
     "ranging": {
-      "b4_count": 84,
+      "b4_count": 7,
       "nearest_rule": {
-        "mean_reversion:LONG": 84
+        "mean_reversion:LONG": 7
       },
       "nearest_blocker": {
-        "mean_reversion:bb_pos_hi": 84
-      },
-      "blocker_totals": {
-        "mean_reversion:rsi_14_hi": 84,
-        "mean_reversion:bb_pos_hi": 84
+        "mean_reversion:bb_pos_hi": 7
       },
       "samples": [
         {
-          "ts": "2026-07-05T04:20:28.467774+00:00",
+          "ts": "2026-07-11T11:00:20.732664Z",
           "nearest_rule": "mean_reversion:LONG",
           "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
+          "gap": 0.3821,
+          "value": 0.5321,
           "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-05T04:21:23.459903+00:00",
+          "ts": "2026-07-11T11:05:42.983740Z",
           "nearest_rule": "mean_reversion:LONG",
           "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
+          "gap": 0.3791,
+          "value": 0.5291,
           "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-05T06:45:34.010030+00:00",
+          "ts": "2026-07-11T11:20:18.063481Z",
           "nearest_rule": "mean_reversion:LONG",
           "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
+          "gap": 0.3748,
+          "value": 0.5248,
           "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-05T06:50:34.801576+00:00",
+          "ts": "2026-07-11T11:25:24.365339Z",
           "nearest_rule": "mean_reversion:LONG",
           "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
+          "gap": 0.2781,
+          "value": 0.4281,
           "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-05T06:55:37.741934+00:00",
+          "ts": "2026-07-11T11:30:25.217423Z",
           "nearest_rule": "mean_reversion:LONG",
           "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
+          "gap": 0.4219,
+          "value": 0.5719,
           "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-05T07:00:39.408339+00:00",
+          "ts": "2026-07-11T11:35:28.112179Z",
           "nearest_rule": "mean_reversion:LONG",
           "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
+          "gap": 0.2985,
+          "value": 0.4485,
           "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         },
         {
-          "ts": "2026-07-05T07:05:43.518508+00:00",
+          "ts": "2026-07-11T11:40:32.635355Z",
           "nearest_rule": "mean_reversion:LONG",
           "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
+          "gap": 0.4084,
+          "value": 0.5584,
           "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
-        },
-        {
-          "ts": "2026-07-05T07:10:45.900822+00:00",
-          "nearest_rule": "mean_reversion:LONG",
-          "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
-          "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
-        },
-        {
-          "ts": "2026-07-05T07:15:22.531387+00:00",
-          "nearest_rule": "mean_reversion:LONG",
-          "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
-          "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
-        },
-        {
-          "ts": "2026-07-05T07:15:47.133623+00:00",
-          "nearest_rule": "mean_reversion:LONG",
-          "nearest_blocker": "bb_pos_hi",
-          "gap": 0.35,
-          "value": 0.5,
-          "threshold": 0.15,
-          "adx_14": null,
-          "h_trend": null,
-          "h1_trend": null
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
         }
       ]
     }

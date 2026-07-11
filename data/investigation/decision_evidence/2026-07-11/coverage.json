@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-07-11T13:37:06.202075+00:00",
+  "total_records": 27,
+  "total_b4": 26,
+  "high_confidence": 26,
+  "telemetry_only": 0,
+  "default_missing_excluded": 0,
+  "high_confidence_fraction_pct": 100.0,
+  "sweep_gate_min": 100,
+  "sweep_gate": "FAIL",
+  "log_path": "data\\investigation\\agent_baseline_2026-07-11.log",
+  "telemetry_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_recovery\\decision_telemetry.ndjson"
+}

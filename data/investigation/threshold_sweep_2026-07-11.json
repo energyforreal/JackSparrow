@@ -1,0 +1,134 @@
+{
+  "generated_at": "2026-07-11T13:37:47.811990+00:00",
+  "status": "completed",
+  "coverage": {
+    "generated_at": "2026-07-11T13:37:47.807443+00:00",
+    "total_records": 27,
+    "total_b4": 26,
+    "high_confidence": 26,
+    "telemetry_only": 0,
+    "default_missing_excluded": 0,
+    "high_confidence_fraction_pct": 100.0,
+    "sweep_gate_min": 100,
+    "sweep_gate": "FAIL"
+  },
+  "binding_blockers_high_confidence": {
+    "h_trend": 19,
+    "bb_pos_hi": 7
+  },
+  "grid": [
+    {
+      "agent_thesis_breakout_adx_min": 25.0,
+      "agent_thesis_breakout_vol_regime_min": 1.1,
+      "analyzed": 26,
+      "breakout_long_fires": 0,
+      "fire_rate_pct": 0.0
+    },
+    {
+      "agent_thesis_breakout_adx_min": 25.0,
+      "agent_thesis_breakout_vol_regime_min": 0.9,
+      "analyzed": 26,
+      "breakout_long_fires": 1,
+      "fire_rate_pct": 3.85
+    },
+    {
+      "agent_thesis_breakout_adx_min": 25.0,
+      "agent_thesis_breakout_vol_regime_min": 0.8,
+      "analyzed": 26,
+      "breakout_long_fires": 2,
+      "fire_rate_pct": 7.69
+    },
+    {
+      "agent_thesis_breakout_adx_min": 25.0,
+      "agent_thesis_breakout_vol_regime_min": 0.7,
+      "analyzed": 26,
+      "breakout_long_fires": 3,
+      "fire_rate_pct": 11.54
+    },
+    {
+      "agent_thesis_breakout_adx_min": 22.0,
+      "agent_thesis_breakout_vol_regime_min": 1.1,
+      "analyzed": 26,
+      "breakout_long_fires": 0,
+      "fire_rate_pct": 0.0
+    },
+    {
+      "agent_thesis_breakout_adx_min": 22.0,
+      "agent_thesis_breakout_vol_regime_min": 0.9,
+      "analyzed": 26,
+      "breakout_long_fires": 2,
+      "fire_rate_pct": 7.69
+    },
+    {
+      "agent_thesis_breakout_adx_min": 22.0,
+      "agent_thesis_breakout_vol_regime_min": 0.8,
+      "analyzed": 26,
+      "breakout_long_fires": 3,
+      "fire_rate_pct": 11.54
+    },
+    {
+      "agent_thesis_breakout_adx_min": 22.0,
+      "agent_thesis_breakout_vol_regime_min": 0.7,
+      "analyzed": 26,
+      "breakout_long_fires": 4,
+      "fire_rate_pct": 15.38
+    },
+    {
+      "agent_thesis_breakout_adx_min": 20.0,
+      "agent_thesis_breakout_vol_regime_min": 1.1,
+      "analyzed": 26,
+      "breakout_long_fires": 0,
+      "fire_rate_pct": 0.0
+    },
+    {
+      "agent_thesis_breakout_adx_min": 20.0,
+      "agent_thesis_breakout_vol_regime_min": 0.9,
+      "analyzed": 26,
+      "breakout_long_fires": 3,
+      "fire_rate_pct": 11.54
+    },
+    {
+      "agent_thesis_breakout_adx_min": 20.0,
+      "agent_thesis_breakout_vol_regime_min": 0.8,
+      "analyzed": 26,
+      "breakout_long_fires": 4,
+      "fire_rate_pct": 15.38
+    },
+    {
+      "agent_thesis_breakout_adx_min": 20.0,
+      "agent_thesis_breakout_vol_regime_min": 0.7,
+      "analyzed": 26,
+      "breakout_long_fires": 5,
+      "fire_rate_pct": 19.23
+    },
+    {
+      "agent_thesis_breakout_adx_min": 18.0,
+      "agent_thesis_breakout_vol_regime_min": 1.1,
+      "analyzed": 26,
+      "breakout_long_fires": 2,
+      "fire_rate_pct": 7.69
+    },
+    {
+      "agent_thesis_breakout_adx_min": 18.0,
+      "agent_thesis_breakout_vol_regime_min": 0.9,
+      "analyzed": 26,
+      "breakout_long_fires": 5,
+      "fire_rate_pct": 19.23
+    },
+    {
+      "agent_thesis_breakout_adx_min": 18.0,
+      "agent_thesis_breakout_vol_regime_min": 0.8,
+      "analyzed": 26,
+      "breakout_long_fires": 6,
+      "fire_rate_pct": 23.08
+    },
+    {
+      "agent_thesis_breakout_adx_min": 18.0,
+      "agent_thesis_breakout_vol_regime_min": 0.7,
+      "analyzed": 26,
+      "breakout_long_fires": 7,
+      "fire_rate_pct": 26.92
+    }
+  ],
+  "note": "Counts hypothetical breakout_long fires on enriched B4 features. Full EV validation requires counterfactual replay extension \u2014 not production change."
+}

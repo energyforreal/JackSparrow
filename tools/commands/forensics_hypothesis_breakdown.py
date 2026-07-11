@@ -7,7 +7,6 @@ import argparse
 import json
 import re
 import sys
-from bisect import bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,29 +17,22 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.commands.forensics_rejection_breakdown import (  # noqa: E402
-    _iter_json_objects,
-    _reason_codes_from_context,
+from scripts.signal_recovery.decision_evidence import (  # noqa: E402
+    classify_hold_bucket,
+    hypothesis_snapshot,
+    iter_json_objects,
+    nearest_before,
+    parse_ts_float,
+    reason_codes_from_context,
 )
 
 
 def _parse_ts(raw: Any) -> Optional[float]:
-    if raw is None:
-        return None
-    try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+    return parse_ts_float(raw)
 
 
 def _hypothesis_snapshot(obj: Dict[str, Any]) -> Dict[str, Any]:
-    mc = obj.get("market_context") if isinstance(obj.get("market_context"), dict) else {}
-    hyp = mc.get("hypothesis_snapshot") if isinstance(mc.get("hypothesis_snapshot"), dict) else {}
-    if hyp:
-        return hyp
-    dc = obj.get("decision_context") if isinstance(obj.get("decision_context"), dict) else {}
-    hyp2 = dc.get("hypothesis_snapshot") if isinstance(dc.get("hypothesis_snapshot"), dict) else {}
-    return hyp2 or {}
+    return hypothesis_snapshot(obj)
 
 
 def _nearest_before(
@@ -50,14 +42,11 @@ def _nearest_before(
     *,
     max_delta_sec: float = 15.0,
 ) -> Optional[Dict[str, Any]]:
-    if not ts_index:
-        return None
-    pos = bisect_right(ts_index, target_ts) - 1
-    if pos < 0:
-        return None
-    if target_ts - ts_index[pos] > max_delta_sec:
-        return None
-    return rows[pos]
+    return nearest_before(ts_index, rows, target_ts, max_delta_sec=max_delta_sec)
+
+
+def _reason_codes_from_context(ctx: Dict[str, Any]) -> List[str]:
+    return reason_codes_from_context(ctx)
 
 
 @dataclass
@@ -128,7 +117,7 @@ def analyze_log_content(content: str) -> HypothesisBreakdown:
 
     holds: List[Dict[str, Any]] = []
 
-    for obj in _iter_json_objects(content):
+    for obj in iter_json_objects(content):
         event = str(obj.get("event") or obj.get("message") or "")
         ts = _parse_ts(obj.get("timestamp"))
 

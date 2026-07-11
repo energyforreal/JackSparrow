@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.commands.thesis_rule_miss_analysis import analyze_b4_misses  # noqa: E402
+from scripts.signal_recovery.decision_evidence import provenance_report  # noqa: E402
 from scripts.signal_recovery.log_parser import filter_since, load_telemetry  # noqa: E402
 
 BASELINE_COMMIT = "0503847"
@@ -78,6 +78,13 @@ def _score_regime_stability(flip_rate: Optional[float]) -> Dict[str, Any]:
     return {"score": round(score, 2), "raw": flip_rate, "status": "ok"}
 
 
+def _score_measurement_coverage(frac: Optional[float]) -> Dict[str, Any]:
+    if frac is None:
+        return {"score": None, "raw": None, "status": "missing", "blended": False}
+    score = _clamp(float(frac) * 100.0)
+    return {"score": round(score, 2), "raw": frac, "status": "ok", "blended": False}
+
+
 def _score_calibration(ece: Optional[float], n: int) -> Dict[str, Any]:
     if n < MIN_CALIBRATION_SAMPLES or ece is None:
         return {
@@ -114,6 +121,7 @@ def compute_dqi(
     stability_report: Optional[Dict[str, Any]] = None,
     calibration_report: Optional[Dict[str, Any]] = None,
     thesis_miss_report: Optional[Dict[str, Any]] = None,
+    coverage_report: Optional[Dict[str, Any]] = None,
     telemetry_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     components: Dict[str, Dict[str, Any]] = {}
@@ -131,10 +139,13 @@ def compute_dqi(
     )
 
     miss = thesis_miss_report
-    if miss is None and telemetry_rows is not None:
-        miss = analyze_b4_misses(telemetry_rows)
+    cov = coverage_report or (miss or {}).get("coverage") or {}
+    b4 = int(cov.get("total_b4") or (miss or {}).get("b4_total") or 0)
+    hi = int(cov.get("high_confidence") or (miss or {}).get("b4_analyzed") or 0)
+    hi_frac = (hi / b4) if b4 > 0 else None
+    components["measurement_coverage"] = _score_measurement_coverage(hi_frac)
+
     ml_pass = 0
-    b4 = int((miss or {}).get("b4_total") or 0)
     if telemetry_rows:
         for r in telemetry_rows:
             reject = str(r.get("reject") or "")
@@ -176,8 +187,13 @@ def compute_dqi(
         "components": components,
         "inputs": {
             "b4_total": b4,
+            "high_confidence": hi,
             "ml_pass_cycles": ml_pass,
             "b4_rate": round(b4_rate, 4) if b4_rate is not None else None,
+            "sweep_gate": cov.get("sweep_gate"),
+        },
+        "appendix": {
+            "measurement_coverage": components.get("measurement_coverage"),
         },
     }
 
@@ -200,6 +216,16 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         lines.append(
             f"| {key} | {weight:.0%} | {comp.get('score')} | {comp.get('status')} |"
         )
+    appendix = (report.get("appendix") or {}).get("measurement_coverage") or {}
+    lines.extend(
+        [
+            "",
+            "## Appendix (not blended)",
+            "",
+            f"| measurement_coverage | — | {appendix.get('score')} | {appendix.get('status')} |",
+            f"| sweep_gate | — | — | {report.get('inputs', {}).get('sweep_gate')} |",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -211,6 +237,7 @@ def main() -> int:
     parser.add_argument("--stability-json", type=Path, default=None)
     parser.add_argument("--calibration-json", type=Path, default=None)
     parser.add_argument("--thesis-miss-json", type=Path, default=None)
+    parser.add_argument("--coverage-json", type=Path, default=None)
     parser.add_argument(
         "--telemetry",
         type=Path,
@@ -240,6 +267,12 @@ def main() -> int:
         default_cal = ROOT / "data" / "investigation" / f"calibration_replay_{date_tag}.json"
         calibration = _load_json(default_cal)
     thesis_miss = _load_json(args.thesis_miss_json)
+    coverage = _load_json(args.coverage_json)
+    if coverage is None:
+        default_cov = (
+            ROOT / "data" / "investigation" / "decision_evidence" / date_tag / "coverage.json"
+        )
+        coverage = _load_json(default_cov)
 
     report = compute_dqi(
         shadow_report=shadow,
@@ -247,6 +280,7 @@ def main() -> int:
         stability_report=stability,
         calibration_report=calibration,
         thesis_miss_report=thesis_miss,
+        coverage_report=coverage,
         telemetry_rows=rows,
     )
     out_json.parent.mkdir(parents=True, exist_ok=True)
