@@ -31,6 +31,9 @@ CORE_THESIS_FEATURES: Tuple[str, ...] = (
     "bb_pos",
 )
 
+# Research dual-write (optional). Not part of high-confidence sweep gate.
+RESEARCH_THESIS_FEATURES: Tuple[str, ...] = ("hurst_60_v2",)
+
 
 def extract_core_thesis_features(features: Optional[Dict[str, Any]]) -> Dict[str, float]:
     """Pull the CORE_THESIS_FEATURES subset out of a raw features dict.
@@ -40,12 +43,15 @@ def extract_core_thesis_features(features: Optional[Dict[str, Any]]) -> Dict[str
     (medium confidence) without needing a raw agent-log join. This is the
     Phase 6 hardening tracked in
     data/investigation/decision_observability_program_2026-07-11.md.
+
+    Also embeds RESEARCH_THESIS_FEATURES (e.g. hurst_60_v2) when present —
+    these do not affect the high-confidence gate.
     """
     out: Dict[str, float] = {}
     if not isinstance(features, dict):
         return out
     lower = {str(k).lower(): v for k, v in features.items()}
-    for key in CORE_THESIS_FEATURES:
+    for key in (*CORE_THESIS_FEATURES, *RESEARCH_THESIS_FEATURES):
         v = lower.get(key)
         if v is None:
             continue

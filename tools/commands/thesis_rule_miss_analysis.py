@@ -31,6 +31,14 @@ import re
 _CODE_VALUE_RE = re.compile(r"^([a-z0-9_]+)=(-?\d+(?:\.\d+)?)$", re.I)
 
 
+def _ml_direction_from_reject(reject: Optional[str]) -> str:
+    """Map handler/gate reject tag to the ML side that passed gates."""
+    tag = str(reject or "").lower()
+    if "gates_passed_short" in tag or tag.endswith("_short"):
+        return "SHORT"
+    return "LONG"
+
+
 def _parse_code_features(codes: List[str]) -> Dict[str, float]:
     out: Dict[str, float] = {}
     for raw in codes:
@@ -184,12 +192,18 @@ def analyze_b4_misses_enriched(
         features = feature_dict_for_engine(rec)
         if not features:
             continue
+        ml_dir = _ml_direction_from_reject(rec.reject)
+        # Diagnose both sides for coverage, but rank nearest only on the ML side
+        # so SHORT h_trend sign-gaps do not swamp LONG thesis research.
         misses = eng.diagnose_rule_miss(features, regime, short_enabled=True)
-        nearest = eng.nearest_rule_miss(features, regime, short_enabled=True)
+        side_misses = [m for m in misses if str(m.direction).upper() == ml_dir]
+        nearest = (
+            min(side_misses, key=lambda m: m.gap) if side_misses else None
+        )
         bucket = by_regime[regime]
         bucket["b4_count"] += 1
 
-        for miss in misses:
+        for miss in side_misses:
             key = f"{miss.rule}:{miss.blocker}"
             global_blocker_observed[key] += 1
             blocker_feature_hits[miss.blocker] += 1
@@ -206,6 +220,7 @@ def analyze_b4_misses_enriched(
                 bucket["samples"].append(
                     {
                         "ts": rec.ts,
+                        "ml_direction": ml_dir,
                         "nearest_rule": rule_key,
                         "nearest_blocker": nearest.blocker,
                         "gap": round(nearest.gap, 4),

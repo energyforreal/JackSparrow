@@ -137,6 +137,14 @@ def _feat(features: Dict[str, Any], key: str, default: float = 0.0) -> float:
         return default
 
 
+def _thesis_hurst(features: Dict[str, Any]) -> tuple[float, str]:
+    """Hurst value + feature key for thesis gates (legacy or research v2)."""
+    if bool(getattr(settings, "agent_thesis_use_hurst_v2", False)):
+        if features.get("hurst_60_v2") is not None:
+            return _feat(features, "hurst_60_v2", 0.5), "hurst_60_v2"
+    return _feat(features, "hurst_60", 0.5), "hurst_60"
+
+
 def _normalize_regime(regime: Optional[str]) -> str:
     r = str(regime or "neutral").strip().lower()
     if r in _REGIME_ALLOWED_RULES:
@@ -740,7 +748,7 @@ class AgentThesisEngine:
         h1 = _feat(features, "h1_trend")
         h = _feat(features, "h_trend")
         rsi = _feat(features, "rsi_14", 50.0)
-        hurst = _feat(features, "hurst_60", 0.5)
+        hurst, hurst_key = _thesis_hurst(features)
         rsi_lo = float(getattr(settings, "agent_thesis_trend_rsi_lo", 40.0) or 40.0)
         rsi_hi = float(getattr(settings, "agent_thesis_trend_rsi_hi", 65.0) or 65.0)
         hurst_min = float(getattr(settings, "agent_thesis_trend_hurst_min", 0.52) or 0.52)
@@ -758,7 +766,7 @@ class AgentThesisEngine:
                 f"h1_trend={h1:.4f}",
                 f"h_trend={h:.4f}",
                 f"rsi_14={rsi:.2f}",
-                f"hurst_60={hurst:.3f}",
+                f"{hurst_key}={hurst:.3f}",
                 f"regime={regime}",
             ],
             thesis_type="trend_continuation",
@@ -828,7 +836,7 @@ class AgentThesisEngine:
         h1 = _feat(features, "h1_trend")
         h = _feat(features, "h_trend")
         rsi = _feat(features, "rsi_14", 50.0)
-        hurst = _feat(features, "hurst_60", 0.5)
+        hurst, _hurst_key = _thesis_hurst(features)
         rsi_short_lo = float(
             getattr(settings, "agent_thesis_trend_short_rsi_lo", 35.0) or 35.0
         )
@@ -893,6 +901,11 @@ class AgentThesisEngine:
         allowed = _allowed_rules_for_regime(reg)
         diagnostics: List[RuleMissDiagnostic] = []
 
+        # Live trend/breakout gates use sign checks (h > 0 / h < 0), not a 0.001
+        # magnitude floor. Using 0.001 here previously ranked tiny positive drifts as
+        # "nearest misses" and hid larger blockers (e.g. hurst_60).
+        _sign_eps = 1e-12
+
         def _add(rule: str, direction: str, blocker: str, value: float, threshold: float) -> None:
             gap = threshold - value
             if gap > 0:
@@ -923,7 +936,7 @@ class AgentThesisEngine:
             _add("breakout", "LONG", "di_spread", di, di_min)
             _add("breakout", "LONG", "vol_regime", vol_reg, vol_min)
             if h_trend <= 0:
-                _add("breakout", "LONG", "h_trend", h_trend, 0.001)
+                _add("breakout", "LONG", "h_trend", h_trend, _sign_eps)
             if bb > bb_max:
                 diagnostics.append(
                     RuleMissDiagnostic(
@@ -940,12 +953,15 @@ class AgentThesisEngine:
             h1 = _feat(features, "h1_trend")
             h = _feat(features, "h_trend")
             rsi = _feat(features, "rsi_14", 50.0)
-            hurst = _feat(features, "hurst_60", 0.5)
+            hurst, hurst_key = _thesis_hurst(features)
             rsi_lo = float(getattr(settings, "agent_thesis_trend_rsi_lo", 40.0) or 40.0)
             rsi_hi = float(getattr(settings, "agent_thesis_trend_rsi_hi", 65.0) or 65.0)
             hurst_min = float(getattr(settings, "agent_thesis_trend_hurst_min", 0.52) or 0.52)
-            _add("trend_continuation", "LONG", "h1_trend", h1, 0.001)
-            _add("trend_continuation", "LONG", "h_trend", h, 0.001)
+            # Match live _eval_trend_continuation_long: require h1 > 0 and h > 0.
+            if h1 <= 0:
+                _add("trend_continuation", "LONG", "h1_trend", h1, _sign_eps)
+            if h <= 0:
+                _add("trend_continuation", "LONG", "h_trend", h, _sign_eps)
             if rsi < rsi_lo:
                 _add("trend_continuation", "LONG", "rsi_14_lo", rsi, rsi_lo)
             if rsi > rsi_hi:
@@ -959,7 +975,7 @@ class AgentThesisEngine:
                         gap=rsi - rsi_hi,
                     )
                 )
-            _add("trend_continuation", "LONG", "hurst_60", hurst, hurst_min)
+            _add("trend_continuation", "LONG", hurst_key, hurst, hurst_min)
 
         if "mean_reversion" in allowed:
             rsi = _feat(features, "rsi_14", 50.0)
@@ -1009,8 +1025,8 @@ class AgentThesisEngine:
                         direction="SHORT",
                         blocker="h_trend",
                         value=h_trend,
-                        threshold=-0.001,
-                        gap=h_trend + 0.001,
+                        threshold=-_sign_eps,
+                        gap=h_trend + _sign_eps,
                     )
                 )
 
@@ -1022,9 +1038,17 @@ class AgentThesisEngine:
         regime: str,
         *,
         short_enabled: bool = True,
+        directions: Optional[List[str]] = None,
     ) -> Optional[RuleMissDiagnostic]:
-        """Smallest positive gap among rule miss diagnostics."""
+        """Smallest positive gap among rule miss diagnostics.
+
+        directions: optional filter (e.g. ``["LONG"]``) so SHORT sign-gap noise
+        does not dominate nearest-miss when analyzing ML-long B4 holds.
+        """
         misses = self.diagnose_rule_miss(features, regime, short_enabled=short_enabled)
+        if directions is not None:
+            allowed = {str(d).upper() for d in directions}
+            misses = [m for m in misses if str(m.direction).upper() in allowed]
         if not misses:
             return None
         return min(misses, key=lambda m: m.gap)

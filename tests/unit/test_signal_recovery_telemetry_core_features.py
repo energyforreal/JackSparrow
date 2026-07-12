@@ -14,6 +14,7 @@ import pytest
 
 from agent.core.signal_recovery_telemetry import (
     CORE_THESIS_FEATURES,
+    RESEARCH_THESIS_FEATURES,
     extract_core_thesis_features,
     record_decision_cycle,
 )
@@ -66,6 +67,17 @@ def test_extract_core_thesis_features_is_case_insensitive() -> None:
     out = extract_core_thesis_features({"ADX_14": 25.0, "H_Trend": 0.01})
     assert out["adx_14"] == 25.0
     assert out["h_trend"] == 0.01
+
+
+def test_extract_embeds_research_hurst_v2_without_gate_contract() -> None:
+    assert RESEARCH_THESIS_FEATURES == ("hurst_60_v2",)
+    out = extract_core_thesis_features(
+        {"adx_14": 20.0, "hurst_60": 0.0, "hurst_60_v2": 0.55}
+    )
+    assert out["hurst_60"] == 0.0
+    assert out["hurst_60_v2"] == 0.55
+    # Core contract unchanged — v2 is additive research only
+    assert "hurst_60_v2" not in CORE_THESIS_FEATURES
 
 
 def test_record_decision_cycle_embeds_core_features(tmp_path, monkeypatch) -> None:

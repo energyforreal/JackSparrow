@@ -1,0 +1,295 @@
+{
+  "window_hours": 168.0,
+  "phase_a_records": 138,
+  "generated_at": "2026-07-12T03:23:13.594151+00:00",
+  "phase": "B_threshold_diagnostics",
+  "high_confidence_only": true,
+  "b4_total": 137,
+  "b4_analyzed": 137,
+  "coverage": {
+    "generated_at": "2026-07-12T03:23:13.589251+00:00",
+    "total_records": 138,
+    "total_b4": 137,
+    "high_confidence": 137,
+    "telemetry_only": 0,
+    "default_missing_excluded": 0,
+    "high_confidence_fraction_pct": 100.0,
+    "sweep_gate_min": 100,
+    "sweep_gate": "PASS"
+  },
+  "nearest_rule": {
+    "breakout:LONG": 66,
+    "breakout:SHORT": 57,
+    "trend_continuation:LONG": 3
+  },
+  "nearest_blocker": {
+    "breakout:h_trend": 83,
+    "breakout:vol_regime": 35,
+    "breakout:bb_pos_max": 5,
+    "trend_continuation:hurst_60": 3
+  },
+  "blocker_coverage": [
+    {
+      "blocker": "breakout:vol_regime",
+      "miss_count": 91,
+      "miss_pct_of_analyzed": 66.42,
+      "coverage_observed": "91/137"
+    },
+    {
+      "blocker": "breakout:h_trend",
+      "miss_count": 83,
+      "miss_pct_of_analyzed": 60.58,
+      "coverage_observed": "83/137"
+    },
+    {
+      "blocker": "trend_continuation:hurst_60",
+      "miss_count": 69,
+      "miss_pct_of_analyzed": 50.36,
+      "coverage_observed": "69/137"
+    },
+    {
+      "blocker": "trend_continuation:rsi_14_hi",
+      "miss_count": 32,
+      "miss_pct_of_analyzed": 23.36,
+      "coverage_observed": "32/137"
+    },
+    {
+      "blocker": "breakout:adx_14",
+      "miss_count": 27,
+      "miss_pct_of_analyzed": 19.71,
+      "coverage_observed": "27/137"
+    },
+    {
+      "blocker": "trend_continuation:h_trend",
+      "miss_count": 26,
+      "miss_pct_of_analyzed": 18.98,
+      "coverage_observed": "26/137"
+    },
+    {
+      "blocker": "breakout:bb_pos_max",
+      "miss_count": 23,
+      "miss_pct_of_analyzed": 16.79,
+      "coverage_observed": "23/137"
+    },
+    {
+      "blocker": "breakout:di_spread",
+      "miss_count": 21,
+      "miss_pct_of_analyzed": 15.33,
+      "coverage_observed": "21/137"
+    }
+  ],
+  "by_regime": {
+    "neutral": {
+      "b4_count": 134,
+      "nearest_rule": {
+        "breakout:LONG": 66,
+        "breakout:SHORT": 57,
+        "trend_continuation:LONG": 3
+      },
+      "nearest_blocker": {
+        "breakout:h_trend": 83,
+        "breakout:vol_regime": 35,
+        "breakout:bb_pos_max": 5,
+        "trend_continuation:hurst_60": 3
+      },
+      "samples": [
+        {
+          "ts": "2026-07-11T16:46:05.268847Z",
+          "ml_direction": "SHORT",
+          "nearest_rule": "breakout:SHORT",
+          "nearest_blocker": "h_trend",
+          "gap": 0.0006,
+          "value": 0.0006,
+          "threshold": -0.0,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T16:51:04.803684Z",
+          "ml_direction": "SHORT",
+          "nearest_rule": "breakout:SHORT",
+          "nearest_blocker": "h_trend",
+          "gap": 0.0005,
+          "value": 0.0005,
+          "threshold": -0.0,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T16:55:35.631356Z",
+          "ml_direction": "SHORT",
+          "nearest_rule": "breakout:SHORT",
+          "nearest_blocker": "h_trend",
+          "gap": 0.0005,
+          "value": 0.0005,
+          "threshold": -0.0,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T17:05:49.561736Z",
+          "ml_direction": "LONG",
+          "nearest_rule": "trend_continuation:LONG",
+          "nearest_blocker": "hurst_60",
+          "gap": 0.52,
+          "value": 0.0,
+          "threshold": 0.52,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T17:10:43.789525Z",
+          "ml_direction": "LONG",
+          "nearest_rule": "trend_continuation:LONG",
+          "nearest_blocker": "hurst_60",
+          "gap": 0.52,
+          "value": 0.0,
+          "threshold": 0.52,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T17:15:45.948976Z",
+          "ml_direction": "LONG",
+          "nearest_rule": "trend_continuation:LONG",
+          "nearest_blocker": "hurst_60",
+          "gap": 0.52,
+          "value": 0.0,
+          "threshold": 0.52,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T17:20:48.374406Z",
+          "ml_direction": "LONG",
+          "nearest_rule": "breakout:LONG",
+          "nearest_blocker": "bb_pos_max",
+          "gap": 0.0012,
+          "value": 0.8512,
+          "threshold": 0.85,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T17:25:49.300648Z",
+          "ml_direction": "LONG",
+          "nearest_rule": "breakout:LONG",
+          "nearest_blocker": "vol_regime",
+          "gap": 0.1058,
+          "value": 0.9942,
+          "threshold": 1.1,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T17:28:18.931022Z",
+          "ml_direction": "LONG",
+          "nearest_rule": "breakout:LONG",
+          "nearest_blocker": "vol_regime",
+          "gap": 0.1058,
+          "value": 0.9942,
+          "threshold": 1.1,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        },
+        {
+          "ts": "2026-07-11T17:30:51.197953Z",
+          "ml_direction": "LONG",
+          "nearest_rule": "breakout:LONG",
+          "nearest_blocker": "vol_regime",
+          "gap": 0.0158,
+          "value": 1.0842,
+          "threshold": 1.1,
+          "provenance": {
+            "adx_14": "log_market_context",
+            "di_spread": "log_market_context",
+            "vol_regime": "log_market_context",
+            "hurst_60": "log_market_context",
+            "h_trend": "log_market_context",
+            "h1_trend": "log_market_context",
+            "rsi_14": "log_market_context",
+            "bb_pos": "log_market_context"
+          }
+        }
+      ]
+    },
+    "ranging": {
+      "b4_count": 3,
+      "nearest_rule": {},
+      "nearest_blocker": {},
+      "samples": []
+    }
+  }
+}

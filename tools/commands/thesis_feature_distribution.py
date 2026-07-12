@@ -80,7 +80,9 @@ def analyze_distributions(records: List[Any]) -> Dict[str, Any]:
         "vol_below_11_pct": round(vol_below_11 / max(n, 1) * 100.0, 2),
         "co_occurrence": dict(co_occur),
         "interpretation": (
-            "hurst_60=0.0 is a computed clip value, not missing-data default (fillna=0.5 in pipeline)."
+            "hurst_60=0.0 is the clip floor of the variance-ratio estimator in "
+            "_hurst_fast (RW maps ≈0, not classic Hurst 0.5); fillna(0.5) is warmup-only. "
+            "See data/investigation/hurst_scale_diagnosis_2026-07-12.md."
         ),
     }
 

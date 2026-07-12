@@ -27,6 +27,7 @@ from feature_store.jacksparrow_v43_mcp_row import (
     _empty_h1_series,
     _empty_hf_series,
     _hurst_fast,
+    _hurst_variance_ratio_v2,
     _ohlc,
     _resample_ohlc,
     _rsi,
@@ -140,6 +141,7 @@ def build_v43_feature_matrix(
 
     kauf_er_20 = _efficiency_ratio(c, 20)
     hurst_60 = _hurst_fast(c, 60)
+    hurst_60_v2 = _hurst_variance_ratio_v2(c, 60)
 
     _obv_raw = (np.sign(c.diff()) * v).fillna(0).cumsum()
     _obv_roll_std = _obv_raw.rolling(100, min_periods=20).std().clip(lower=EPS)
@@ -334,7 +336,18 @@ def build_v43_feature_matrix(
     if for_training:
         _ = for_training  # reserved for notebook parity
 
+    # Dual-write research Hurst (classic scale) on inference/agent path only —
+    # never part of V43_CANONICAL_FEATURES / ML contract.
+    research_extra: list[str] = []
+    if not for_training:
+        out["hurst_60_v2"] = (
+            hurst_60_v2.replace([np.inf, -np.inf], np.nan).fillna(0.5).clip(0.0, 1.0).values
+        )
+        research_extra = ["hurst_60_v2"]
+
     # Restrict to known v43 names + timestamp/regime (model may expect only feature cols in transform)
     extra = [c for c in ("timestamp", "regime_label") if c in out.columns]
-    feat_keep = [c for c in out.columns if c in V43_MCP_FEATURE_NAMES or c in extra]
+    feat_keep = [
+        c for c in out.columns if c in V43_MCP_FEATURE_NAMES or c in extra or c in research_extra
+    ]
     return out[feat_keep].copy()

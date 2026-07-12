@@ -2919,6 +2919,15 @@ class Settings(BaseSettings):
         default=0.52,
         env="AGENT_THESIS_TREND_HURST_MIN",
     )
+    agent_thesis_use_hurst_v2: bool = Field(
+        default=False,
+        env="AGENT_THESIS_USE_HURST_V2",
+        description=(
+            "Research: when True, trend-continuation thesis gates read hurst_60_v2 "
+            "(classic Hurst scale) instead of legacy hurst_60. Default false — "
+            "requires governance validation; see hurst_scale_diagnosis_2026-07-12.md."
+        ),
+    )
     agent_thesis_neutral_mild_trend_enabled: bool = Field(
         default=False,
         env="AGENT_THESIS_NEUTRAL_MILD_TREND_ENABLED",

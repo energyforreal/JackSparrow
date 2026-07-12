@@ -83,10 +83,36 @@ def _adx_df(df: pd.DataFrame, period: int = 14):
 
 
 def _hurst_fast(close: pd.Series, window: int = 60) -> pd.Series:
+    """Legacy variance-ratio score (frozen train/serve semantics).
+
+    Uses ``rolling(4).mean()`` coarse-graining and
+    ``H = 0.5 + 0.5 * log(var4/var1) / log(4)``. For iid / random-walk
+    returns this maps to ~0 (then ``clip``), not classic Hurst ~0.5.
+    See ``data/investigation/hurst_scale_diagnosis_2026-07-12.md``.
+    """
     log_ret = np.log(close / close.shift(1))
     var1 = log_ret.rolling(window, min_periods=max(2, window // 2)).var()
     var4 = log_ret.rolling(4, min_periods=2).mean().rolling(window, min_periods=max(2, window // 2)).var()
     h = 0.5 + 0.5 * np.log((var4 + 1e-12) / (var1 + 1e-12)) / np.log(4)
+    return h.clip(0.0, 1.0).fillna(0.5)
+
+
+def _hurst_variance_ratio_v2(close: pd.Series, window: int = 60) -> pd.Series:
+    """Research Hurst-scale variance ratio (``hurst_60_v2``).
+
+    Uses sum aggregation of 4-bar log returns and
+    ``H = 0.5 * log(Var(sum_4) / Var(r_1)) / log(4)``, which yields ~0.5
+    for random walk (classic scale). Not used by ML contract or thesis
+    unless ``AGENT_THESIS_USE_HURST_V2=true``.
+    """
+    log_ret = np.log(close / close.shift(1))
+    min_periods = max(2, window // 2)
+    var1 = log_ret.rolling(window, min_periods=min_periods).var()
+    # Sum of 4 consecutive log returns ≈ log return over 4 bars.
+    agg4 = log_ret.rolling(4, min_periods=2).sum()
+    var4 = agg4.rolling(window, min_periods=min_periods).var()
+    # Var(sum_n) / Var(r) ∝ n^{2H} ⇒ H = 0.5 * log(ratio) / log(n)
+    h = 0.5 * np.log((var4 + 1e-12) / (var1 + 1e-12)) / np.log(4)
     return h.clip(0.0, 1.0).fillna(0.5)
 
 
@@ -218,6 +244,7 @@ def build_v43_last_row(
 
     kauf_er_20 = _efficiency_ratio(c, 20)
     hurst_60 = _hurst_fast(c, 60)
+    hurst_60_v2 = _hurst_variance_ratio_v2(c, 60)
 
     _obv_raw = (np.sign(c.diff()) * v).fillna(0).cumsum()
     _obv_roll_std = _obv_raw.rolling(100, min_periods=20).std().clip(lower=EPS)
@@ -338,6 +365,7 @@ def build_v43_last_row(
         "hour_sin": hour_sin if "timestamp" in d.columns else 0.0,
         "hour_cos": hour_cos if "timestamp" in d.columns else 0.0,
         "hurst_60": _last(hurst_60),
+        "hurst_60_v2": _last(hurst_60_v2),
         "trend_mom": _last(trend_mom),
         "trend_conf": _last(trend_conf),
         "funding_zscore": fz,
