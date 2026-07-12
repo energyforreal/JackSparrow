@@ -17,11 +17,16 @@ try:
     import websockets
     from websockets.client import WebSocketClientProtocol
     from websockets.exceptions import ConnectionClosed, WebSocketException
+    try:
+        from websockets.exceptions import ConnectionClosedOK
+    except ImportError:  # pragma: no cover - older websockets
+        ConnectionClosedOK = type("ConnectionClosedOK", (ConnectionClosed,), {})  # type: ignore
 except Exception:
     websockets = None  # type: ignore
     WebSocketClientProtocol = object  # type: ignore
     ConnectionClosed = Exception  # type: ignore
     WebSocketException = Exception  # type: ignore
+    ConnectionClosedOK = Exception  # type: ignore
 
 from backend.core.redis import enqueue_command, get_response
 from backend.core.config import settings
@@ -249,7 +254,6 @@ class AgentService:
                     )
         
         except ConnectionClosed:
-            self._websocket_connected = False
             logger.info(
                 "agent_service_websocket_disconnected",
                 service="backend"
@@ -259,6 +263,8 @@ class AgentService:
                 if not future.done():
                     future.set_exception(Exception("WebSocket disconnected"))
                 self._pending_responses.pop(request_id, None)
+            # Null the socket so reconnect monitor does not treat it as healthy.
+            await self._teardown_websocket()
             await self._schedule_reconnect()
         except Exception as e:
             log_error_with_context(
@@ -267,7 +273,7 @@ class AgentService:
                 component="agent_service",
                 url=self.websocket_url
             )
-            self._websocket_connected = False
+            await self._teardown_websocket()
             await self._schedule_reconnect()
     
     async def _send_command(
@@ -412,12 +418,23 @@ class AgentService:
                     # Fall through to Redis fallback
             
             except Exception as e:
-                logger.error(
+                # Send failed before/while waiting — drop pending future and
+                # tear down so reconnect monitor is not stuck on a zombie socket.
+                pending = self._pending_responses.pop(request_id, None)
+                if pending is not None and not pending.done():
+                    pending.cancel()
+                err_text = str(e)
+                clean_close = isinstance(e, ConnectionClosedOK) or "1000" in err_text
+                log_fn = logger.warning if clean_close else logger.error
+                log_fn(
                     "outbound_agent_command_ws_send_exception",
-                    error=str(e),
+                    error=err_text,
                     command=command,
+                    clean_close=clean_close,
                     message="Outbound WebSocket send failed; may fall back to Redis",
                 )
+                await self._teardown_websocket()
+                await self._schedule_reconnect()
 
         if (
             outbound_ws_active
@@ -874,7 +891,8 @@ class AgentService:
                 logger.debug("HEARTBEAT: WebSocket not connected, skipping heartbeat")
         except Exception as e:
             logger.error("HEARTBEAT FAIL — triggering reconnect: %s", e)
-            self._websocket_connected = False
+            await self._teardown_websocket()
+            await self._schedule_reconnect()
 
 
 # Global agent service instance

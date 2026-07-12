@@ -1,0 +1,242 @@
+{
+  "generated_at": "2026-07-12T07:40:22.036721+00:00",
+  "parsed_events": 7984,
+  "handler_reject_histogram": [
+    {
+      "reason": "hold_at_synthesis",
+      "count": 46,
+      "pct": 90.2
+    },
+    {
+      "reason": "v15_adx_trending_filter",
+      "count": 5,
+      "pct": 9.8
+    }
+  ],
+  "handler_reject_by_signal": {
+    "HOLD": 46,
+    "SHORT": 5
+  },
+  "hold_at_synthesis": {
+    "total": 46,
+    "primary_causes": [
+      {
+        "cause": "hypothesis_no_rule_fired",
+        "count": 46,
+        "pct": 100.0
+      }
+    ],
+    "top_policy_reason_codes": [
+      {
+        "code": "hypothesis_no_rule_fired",
+        "count": 138
+      },
+      {
+        "code": "regime=neutral",
+        "count": 138
+      },
+      {
+        "code": "fusion_mode=ml_or_thesis",
+        "count": 92
+      },
+      {
+        "code": "thesis_type=flat",
+        "count": 92
+      },
+      {
+        "code": "fusion_ml_or_thesis_blocked",
+        "count": 92
+      },
+      {
+        "code": "thesis_blocks_ml_adoption",
+        "count": 92
+      },
+      {
+        "code": "hypothesis_margin=0.000",
+        "count": 92
+      },
+      {
+        "code": "aggregate_confidence=0.000",
+        "count": 92
+      },
+      {
+        "code": "portfolio_guard_skipped",
+        "count": 46
+      }
+    ]
+  },
+  "v43_prediction": {
+    "cycles": 53,
+    "policy_signals": {
+      "HOLD": 46,
+      "SHORT": 7
+    },
+    "reject_tags": {
+      "gates_passed_long": 11,
+      "gates_passed_short": 42
+    },
+    "latest_counters": {
+      "signals_raw": 3448,
+      "trades_executed": 12,
+      "rejected_pos_open": 719,
+      "collapse_rate": 0.9965197215777262,
+      "timestamp": "2026-07-12T07:05:04.258295Z"
+    }
+  },
+  "execution_path": {
+    "risk_approved_count": 0,
+    "fill_count": 0
+  },
+  "v3_terminal_cause": {
+    "unknown": 24742,
+    "policy": 624,
+    "handler": 602,
+    "risk": 6
+  },
+  "confidence_cascades_non_hold": [
+    {
+      "event_id": "ad366548-ab14-4c70-bf55-fd9172c7b8f6",
+      "timestamp": "2026-07-12T06:40:59.711123Z",
+      "symbol": "BTCUSD",
+      "signal": "SHORT",
+      "reject_reason": "v15_adx_trending_filter",
+      "trade_score": 61.07,
+      "v43_proba": null,
+      "policy_signal": "SHORT",
+      "policy_confidence": 0.7755446791088705,
+      "thesis_type": "breakout",
+      "raw_ai_signal_confidence": 0.7755446791088705,
+      "calibrated_confidence": 0.766238142959564,
+      "reasoning_final_confidence": 0.4770904640125153,
+      "adx_14": 53.999994414599634,
+      "policy_reason_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=breakout",
+        "hypothesis_long_pressure=0.000",
+        "hypothesis_short_pressure=0.776",
+        "hypothesis_margin=1.000",
+        "hypothesis_dominant=breakout_short",
+        "thesis_breakout_short",
+        "adx_14=54.00"
+      ]
+    },
+    {
+      "event_id": "5e19df71-d218-434c-86b4-98f5df1a9e4d",
+      "timestamp": "2026-07-12T06:45:31.915944Z",
+      "symbol": "BTCUSD",
+      "signal": "SHORT",
+      "reject_reason": "v15_adx_trending_filter",
+      "trade_score": 61.53,
+      "v43_proba": null,
+      "policy_signal": "SHORT",
+      "policy_confidence": 0.7983078629005392,
+      "thesis_type": "breakout",
+      "raw_ai_signal_confidence": 0.7983078629005392,
+      "calibrated_confidence": 0.7887281685457328,
+      "reasoning_final_confidence": 0.47824707778473013,
+      "adx_14": 52.2676954247626,
+      "policy_reason_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=breakout",
+        "hypothesis_long_pressure=0.000",
+        "hypothesis_short_pressure=0.798",
+        "hypothesis_margin=1.000",
+        "hypothesis_dominant=breakout_short",
+        "thesis_breakout_short",
+        "adx_14=52.27"
+      ]
+    },
+    {
+      "event_id": "b5e9c2e0-70e1-4fee-9f1f-69fa79f7d74f",
+      "timestamp": "2026-07-12T06:51:02.390826Z",
+      "symbol": "BTCUSD",
+      "signal": "SHORT",
+      "reject_reason": "v15_adx_trending_filter",
+      "trade_score": 61.57,
+      "v43_proba": null,
+      "policy_signal": "SHORT",
+      "policy_confidence": 0.8,
+      "thesis_type": "breakout",
+      "raw_ai_signal_confidence": 0.8,
+      "calibrated_confidence": 0.7904,
+      "reasoning_final_confidence": 0.4783476765951237,
+      "adx_14": 48.447909562257735,
+      "policy_reason_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=breakout",
+        "hypothesis_long_pressure=0.000",
+        "hypothesis_short_pressure=0.800",
+        "hypothesis_margin=1.000",
+        "hypothesis_dominant=breakout_short",
+        "thesis_breakout_short",
+        "adx_14=48.45"
+      ]
+    },
+    {
+      "event_id": "e2554bce-e9aa-4817-bd11-751e36b290ff",
+      "timestamp": "2026-07-12T06:56:03.542799Z",
+      "symbol": "BTCUSD",
+      "signal": "SHORT",
+      "reject_reason": "v15_adx_trending_filter",
+      "trade_score": 61.57,
+      "v43_proba": null,
+      "policy_signal": "SHORT",
+      "policy_confidence": 0.8,
+      "thesis_type": "breakout",
+      "raw_ai_signal_confidence": 0.8,
+      "calibrated_confidence": 0.7904,
+      "reasoning_final_confidence": 0.4783476765951237,
+      "adx_14": 47.11949011709376,
+      "policy_reason_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=breakout",
+        "hypothesis_long_pressure=0.000",
+        "hypothesis_short_pressure=0.800",
+        "hypothesis_margin=1.000",
+        "hypothesis_dominant=breakout_short",
+        "thesis_breakout_short",
+        "adx_14=47.12"
+      ]
+    },
+    {
+      "event_id": "00029716-4df9-4a7d-a57a-85d7852351ce",
+      "timestamp": "2026-07-12T07:01:05.511370Z",
+      "symbol": "BTCUSD",
+      "signal": "SHORT",
+      "reject_reason": "v15_adx_trending_filter",
+      "trade_score": 61.57,
+      "v43_proba": null,
+      "policy_signal": "SHORT",
+      "policy_confidence": 0.8,
+      "thesis_type": "breakout",
+      "raw_ai_signal_confidence": 0.8,
+      "calibrated_confidence": 0.7904,
+      "reasoning_final_confidence": 0.4783476765951237,
+      "adx_14": 45.96819326461185,
+      "policy_reason_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=breakout",
+        "hypothesis_long_pressure=0.000",
+        "hypothesis_short_pressure=0.800",
+        "hypothesis_margin=1.000",
+        "hypothesis_dominant=breakout_short",
+        "thesis_breakout_short",
+        "adx_14=45.97"
+      ]
+    }
+  ],
+  "counter_reconciliation": {
+    "postgres_trades_executed": 21,
+    "postgres_last_trade_at": "2026-06-04T04:50:31.2389+00:00",
+    "redis_trades_executed": null,
+    "redis_signals_raw": null,
+    "log_latest_v43_trades_executed": 12,
+    "log_latest_collapse_rate": 0.9965197215777262,
+    "gap_db_minus_v43": 9,
+    "interpretation": "v43 counter increments only on fills with v43_closed_bar_index; Postgres trades table counts all EXECUTED rows regardless of v43 path."
+  },
+  "semantic_notes": {
+    "thesis_type_flat_vs_regime_neutral": "thesis_type=flat is a ThesisVerdict label; regime=neutral is market classification. AGENT_POLICY_ADOPT_GATED_ML_WHEN_THESIS_NEUTRAL does not apply when hypothesis_no_rule_fired is present.",
+    "hold_at_synthesis": "Handler label when policy already emitted HOLD before entry gates."
+  }
+}

@@ -42,3 +42,9 @@
 - `tests/unit/test_hurst_fast_scale.py` — RW→~0 legacy; RW→~0.5 v2
 - `tests/unit/test_thesis_rule_miss.py::test_thesis_hurst_v2_flag_reads_v2_feature`
 - `tests/unit/test_signal_recovery_telemetry_core_features.py` — research embed
+
+## Validation update (2026-07-12T07:41Z)
+
+- Telemetry dual-write confirmed (121 rows)
+- Offline counterfactual: `hurst_v2_vol_counterfactual_2026-07-12.json` / `hurst_v2_vol_counterfactual_2026-07-12.md`
+- Production flag still **false**; no vol_regime promotion

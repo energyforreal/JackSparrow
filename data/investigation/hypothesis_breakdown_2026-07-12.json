@@ -1,21 +1,21 @@
 {
-  "generated_at": "2026-07-12T06:00:15.005110+00:00",
-  "source_log": "D:\\ATTRAL\\Projects\\Trading Agent 2\\data\\investigation\\agent_exp_shadow_2026-07-12.log",
-  "hold_at_synthesis_total": 33,
+  "generated_at": "2026-07-12T07:40:23.528540+00:00",
+  "source_log": "data\\investigation\\agent_exp_rejectmix_2026-07-12.log",
+  "hold_at_synthesis_total": 46,
   "bucket_histogram": [
     {
       "bucket": "B4",
-      "count": 33,
+      "count": 46,
       "pct": 100.0
     }
   ],
   "shadow_analysis": {
-    "agrees_hold": 33,
+    "agrees_hold": 46,
     "would_block_live_entry": 0,
     "disagrees_with_live": 0,
     "agrees_hold_pct": 100.0
   },
-  "b4_v43_gates_passed_hold": 33,
+  "b4_v43_gates_passed_hold": 46,
   "gate_decision": {
     "decision": "proceed_3a2",
     "rationale": "B4 share 100.0% exceeds 30% gate \u2014 policy semantics review justified.",
