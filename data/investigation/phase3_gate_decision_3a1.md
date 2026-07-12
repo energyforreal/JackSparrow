@@ -1,20 +1,19 @@
 # Phase 3A.1 Gate Decision
 
-Generated: 2026-07-12T10:33:33.976979+00:00
-Source log: `data\investigation\deselectivity\2026-07-12\agent_exp_hurst_v2_2026-07-12.log`
+Generated: 2026-07-12T18:04:27.979356+00:00
+Source log: `D:\ATTRAL\Projects\Trading Agent 2\data\investigation\agent_exp_hurst_v2_2026-07-12.log`
 
 ## Bucket histogram
 
 | Bucket | Count | % |
 |--------|------:|--:|
-| B4 | 47 | 100.0% |
 
 ## Gate outcome
 
-**Decision:** `proceed_3a2`
+**Decision:** `review_mixed`
 
-B4 share 100.0% exceeds 30% gate — policy semantics review justified.
+No single gate threshold met; manual review of bucket mix recommended.
 
 ## Next step
 
-Proceed to 3A.2: enable `AGENT_POLICY_ALLOW_GATED_ML_ON_FLAT_HYPOTHESIS` on isolated testnet (48–72h).
+Manual review — mixed bucket distribution; see samples in JSON artifact.

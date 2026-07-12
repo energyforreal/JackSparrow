@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-07-12T18:07:01.752732+00:00",
+  "n_v43_prediction_complete": 0,
+  "window_hours_approx": null,
+  "thesis_fires": 0,
+  "thesis_fires_per_24h": null,
+  "thesis_by_type": {},
+  "thesis_by_side": {},
+  "quality_below_floor": 0,
+  "gate5_fail": 0,
+  "hold_after_thesis_fire": 0,
+  "risk_veto_like": 0,
+  "dual_write_eligible": 0,
+  "dual_write_both_hurst": 0,
+  "dual_write_rate_pct": 0.0,
+  "quality_score_mean": null,
+  "promote_fire_gate": {
+    "need_ge_5_per_24h_or_2x_baseline": true,
+    "fires_per_24h": null,
+    "status": "FAIL_OR_INSUFFICIENT"
+  },
+  "telemetry_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_recovery\\decision_telemetry.ndjson",
+  "since": "2026-07-12T18:06:30+00:00",
+  "hours": null
+}

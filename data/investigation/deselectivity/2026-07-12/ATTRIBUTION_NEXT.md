@@ -1,5 +1,7 @@
 # Attribution + next experiment (updated post funnel day1)
 
+> **Frequency experiment overlay (2026-07-12T18:04Z+):** Live flags diverged from Phase A freeze for a staged fill-rate test. Analyze Phase A only with `--since 2026-07-12T10:21:37+00:00` through `2026-07-12T18:04:07+00:00`. Post–Stage 3 window: `--since 2026-07-12T18:06:53+00:00`. See [`FREQ_EXPERIMENT.md`](FREQ_EXPERIMENT.md), `scorecard_freq_stageN.md`.
+
 **As-of:** 2026-07-12 T+3h Phase A ([`scorecard_day1.md`](scorecard_day1.md), [`funnel_post_a.json`](funnel_post_a.json))  
 **Prior day0 tree:** superseded for post-A slice only.
 
