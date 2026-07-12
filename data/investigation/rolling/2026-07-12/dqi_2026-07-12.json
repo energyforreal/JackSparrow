@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-07-12T06:04:33.089637+00:00",
+  "baseline_commit": "0503847",
+  "composite_dqi": 61.95,
+  "weight_coverage": 0.55,
+  "components": {
+    "thesis_ml_agreement": {
+      "score": null,
+      "raw": null,
+      "status": "missing"
+    },
+    "replay_ev": {
+      "score": 29.61,
+      "raw": -0.2039,
+      "status": "ok"
+    },
+    "shadow_disagreement_ev": {
+      "score": null,
+      "raw": null,
+      "status": "missing"
+    },
+    "measurement_coverage": {
+      "score": null,
+      "raw": null,
+      "status": "missing",
+      "blended": false
+    },
+    "no_rule_fired_rate": {
+      "score": 100.0,
+      "raw": 0.0,
+      "status": "ok"
+    },
+    "regime_stability": {
+      "score": 66.7,
+      "raw": 0.0666,
+      "status": "ok"
+    },
+    "calibration": {
+      "score": null,
+      "raw": {
+        "ece": null,
+        "n": 0
+      },
+      "status": "insufficient_data"
+    }
+  },
+  "inputs": {
+    "b4_total": 0,
+    "high_confidence": 0,
+    "ml_pass_cycles": 1985,
+    "b4_rate": 0.0,
+    "sweep_gate": null
+  },
+  "appendix": {
+    "measurement_coverage": {
+      "score": null,
+      "raw": null,
+      "status": "missing",
+      "blended": false
+    }
+  }
+}

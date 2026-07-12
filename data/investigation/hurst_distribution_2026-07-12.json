@@ -1,19 +1,17 @@
 {
-  "generated_at": "2026-07-12T02:34:19.569617+00:00",
-  "b4_total": 137,
-  "high_confidence": 137,
+  "generated_at": "2026-07-12T06:04:44.817877+00:00",
+  "b4_total": 33,
+  "high_confidence": 33,
   "hurst_histogram": {
-    "0": 132,
-    "0-0.3": 5
+    "0": 15,
+    "0-0.3": 18
   },
-  "hurst_zero_count": 132,
-  "hurst_zero_pct": 96.35,
-  "adx_below_25_count": 30,
-  "adx_below_25_pct": 21.9,
-  "vol_below_11_count": 94,
-  "vol_below_11_pct": 68.61,
-  "co_occurrence": {
-    "hurst_low+adx_low": 30
-  },
-  "interpretation": "hurst_60=0.0 is a computed clip value, not missing-data default (fillna=0.5 in pipeline)."
+  "hurst_zero_count": 15,
+  "hurst_zero_pct": 45.45,
+  "adx_below_25_count": 0,
+  "adx_below_25_pct": 0.0,
+  "vol_below_11_count": 33,
+  "vol_below_11_pct": 100.0,
+  "co_occurrence": {},
+  "interpretation": "hurst_60=0.0 is the clip floor of the variance-ratio estimator in _hurst_fast (RW maps \u22480, not classic Hurst 0.5); fillna(0.5) is warmup-only. See data/investigation/hurst_scale_diagnosis_2026-07-12.md."
 }

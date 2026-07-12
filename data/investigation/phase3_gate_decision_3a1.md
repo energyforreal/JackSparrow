@@ -1,13 +1,13 @@
 # Phase 3A.1 Gate Decision
 
-Generated: 2026-07-11T16:30:16.839701+00:00
-Source log: `D:\ATTRAL\Projects\Trading Agent 2\data\investigation\agent_exp_shadow_2026-07-11.log`
+Generated: 2026-07-12T06:00:15.011892+00:00
+Source log: `D:\ATTRAL\Projects\Trading Agent 2\data\investigation\agent_exp_shadow_2026-07-12.log`
 
 ## Bucket histogram
 
 | Bucket | Count | % |
 |--------|------:|--:|
-| B4 | 1 | 100.0% |
+| B4 | 33 | 100.0% |
 
 ## Gate outcome
 

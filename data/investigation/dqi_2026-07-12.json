@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-07-12T06:04:46.067242+00:00",
+  "baseline_commit": "0503847",
+  "composite_dqi": 64.44,
+  "weight_coverage": 0.9,
+  "components": {
+    "thesis_ml_agreement": {
+      "score": 95.87,
+      "raw": 0.9587,
+      "status": "ok"
+    },
+    "replay_ev": {
+      "score": 30.89,
+      "raw": -0.1911,
+      "status": "ok"
+    },
+    "shadow_disagreement_ev": {
+      "score": 29.44,
+      "raw": {
+        "shadow_pnl_proxy": 0.0,
+        "production_pnl_proxy": 0.041118,
+        "delta": -0.041118
+      },
+      "status": "ok"
+    },
+    "measurement_coverage": {
+      "score": 100.0,
+      "raw": 1.0,
+      "status": "ok",
+      "blended": false
+    },
+    "no_rule_fired_rate": {
+      "score": 97.81,
+      "raw": 0.021883289124668436,
+      "status": "ok"
+    },
+    "regime_stability": {
+      "score": 71.25,
+      "raw": 0.0575,
+      "status": "ok"
+    },
+    "calibration": {
+      "score": null,
+      "raw": {
+        "ece": null,
+        "n": 0
+      },
+      "status": "insufficient_data"
+    }
+  },
+  "inputs": {
+    "b4_total": 33,
+    "high_confidence": 33,
+    "ml_pass_cycles": 1508,
+    "b4_rate": 0.0219,
+    "sweep_gate": "FAIL"
+  },
+  "appendix": {
+    "measurement_coverage": {
+      "score": 100.0,
+      "raw": 1.0,
+      "status": "ok",
+      "blended": false
+    }
+  }
+}
