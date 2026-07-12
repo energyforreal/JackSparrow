@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-07-12T06:04:33.089637+00:00",
+  "generated_at": "2026-07-12T10:33:50.096630+00:00",
   "baseline_commit": "0503847",
-  "composite_dqi": 61.95,
+  "composite_dqi": 62.11,
   "weight_coverage": 0.55,
   "components": {
     "thesis_ml_agreement": {
@@ -10,8 +10,8 @@
       "status": "missing"
     },
     "replay_ev": {
-      "score": 29.61,
-      "raw": -0.2039,
+      "score": 29.96,
+      "raw": -0.2004,
       "status": "ok"
     },
     "shadow_disagreement_ev": {

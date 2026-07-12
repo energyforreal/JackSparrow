@@ -1,0 +1,38 @@
+{
+  "adx_reject_n": 5,
+  "adx_reject_buckets": {
+    "45-55": 5
+  },
+  "adx_reject_mean": 49.560656556665116,
+  "flat_hold_count": 47,
+  "flat_hold_feature_summary": {
+    "adx": {
+      "n": 47,
+      "mean": 38.5161,
+      "median": 38.2623,
+      "min": 19.20210472761918,
+      "max": 55.40187559873181
+    },
+    "atr": {
+      "n": 0
+    },
+    "vol": {
+      "n": 47,
+      "mean": 0.8562,
+      "median": 0.8611,
+      "min": 0.6176005294688958,
+      "max": 1.2450384958371026
+    },
+    "funding": {
+      "n": 0
+    },
+    "spread": {
+      "n": 47,
+      "mean": 0.1514,
+      "median": 0.1563,
+      "min": 0.07787720815991037,
+      "max": 0.46944579886207033
+    }
+  },
+  "note": "Executed-trade comparison limited: no recent fills in window; selection bias is Flat+HOLD feature dist only."
+}

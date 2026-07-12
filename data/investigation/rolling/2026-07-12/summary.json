@@ -1,18 +1,18 @@
 {
-  "generated_at": "2026-07-12T06:04:33.094656+00:00",
+  "generated_at": "2026-07-12T10:33:50.102500+00:00",
   "archive_dir": "D:\\ATTRAL\\Projects\\Trading Agent 2\\data\\investigation\\rolling\\2026-07-12",
   "baseline_commit": "0503847",
   "baseline_policy": "hold_baseline_policy",
   "windows": {
     "168h": {
       "current": {
-        "trades": 201,
-        "win_pct": 11.44,
-        "profit_factor": 0.041,
-        "ev_pct": -0.1911,
-        "max_dd_pct": 1.9203,
-        "exposure": 10.05,
-        "avg_hold_bars": 2.0
+        "trades": 192,
+        "win_pct": 11.98,
+        "profit_factor": 0.043,
+        "ev_pct": -0.1906,
+        "max_dd_pct": 1.8302,
+        "exposure": 9.6,
+        "avg_hold_bars": 2.01
       },
       "ml_adopt_flat": {
         "trades": 0,
@@ -33,30 +33,30 @@
         "avg_hold_bars": null
       },
       "ml_only": {
-        "trades": 2107,
-        "win_pct": 3.13,
-        "profit_factor": 0.019,
-        "ev_pct": -0.2015,
-        "max_dd_pct": 21.3074,
-        "exposure": 105.35,
+        "trades": 2102,
+        "win_pct": 3.09,
+        "profit_factor": 0.015,
+        "ev_pct": -0.202,
+        "max_dd_pct": 21.2286,
+        "exposure": 105.1,
         "avg_hold_bars": 2.0
       },
       "no_adx": {
-        "trades": 220,
-        "win_pct": 10.45,
-        "profit_factor": 0.037,
-        "ev_pct": -0.1917,
-        "max_dd_pct": 2.109,
-        "exposure": 11.0,
+        "trades": 219,
+        "win_pct": 10.5,
+        "profit_factor": 0.038,
+        "ev_pct": -0.1914,
+        "max_dd_pct": 2.0953,
+        "exposure": 10.95,
         "avg_hold_bars": 2.0
       },
       "no_thesis_veto": {
-        "trades": 2107,
-        "win_pct": 3.13,
-        "profit_factor": 0.019,
-        "ev_pct": -0.2015,
-        "max_dd_pct": 21.3074,
-        "exposure": 105.35,
+        "trades": 2102,
+        "win_pct": 3.09,
+        "profit_factor": 0.015,
+        "ev_pct": -0.202,
+        "max_dd_pct": 21.2286,
+        "exposure": 105.1,
         "avg_hold_bars": 2.0
       },
       "neutral_mild_trend": {
@@ -71,12 +71,12 @@
     },
     "720h": {
       "current": {
-        "trades": 273,
-        "win_pct": 7.69,
-        "profit_factor": 0.027,
-        "ev_pct": -0.2039,
-        "max_dd_pct": 2.7829,
-        "exposure": 13.65,
+        "trades": 395,
+        "win_pct": 6.84,
+        "profit_factor": 0.023,
+        "ev_pct": -0.2004,
+        "max_dd_pct": 3.9577,
+        "exposure": 19.75,
         "avg_hold_bars": 2.0
       },
       "ml_adopt_flat": {
@@ -98,40 +98,40 @@
         "avg_hold_bars": 2.0
       },
       "ml_only": {
-        "trades": 1206,
-        "win_pct": 2.99,
-        "profit_factor": 0.016,
-        "ev_pct": -0.2123,
-        "max_dd_pct": 12.7996,
-        "exposure": 60.3,
+        "trades": 2657,
+        "win_pct": 2.67,
+        "profit_factor": 0.014,
+        "ev_pct": -0.2022,
+        "max_dd_pct": 26.8955,
+        "exposure": 132.85,
         "avg_hold_bars": 2.0
       },
       "no_adx": {
-        "trades": 273,
-        "win_pct": 7.69,
-        "profit_factor": 0.027,
-        "ev_pct": -0.2039,
-        "max_dd_pct": 2.7829,
-        "exposure": 13.65,
+        "trades": 422,
+        "win_pct": 6.4,
+        "profit_factor": 0.021,
+        "ev_pct": -0.2001,
+        "max_dd_pct": 4.2228,
+        "exposure": 21.1,
         "avg_hold_bars": 2.0
       },
       "no_thesis_veto": {
-        "trades": 1206,
-        "win_pct": 2.99,
-        "profit_factor": 0.016,
-        "ev_pct": -0.2123,
-        "max_dd_pct": 12.7996,
-        "exposure": 60.3,
+        "trades": 2657,
+        "win_pct": 2.67,
+        "profit_factor": 0.014,
+        "ev_pct": -0.2022,
+        "max_dd_pct": 26.8955,
+        "exposure": 132.85,
         "avg_hold_bars": 2.0
       },
       "neutral_mild_trend": {
-        "trades": 0,
-        "win_pct": null,
-        "profit_factor": null,
-        "ev_pct": 0.0,
-        "max_dd_pct": 0.0,
-        "exposure": 0.0,
-        "avg_hold_bars": null
+        "trades": 5,
+        "win_pct": 0.0,
+        "profit_factor": 0.0,
+        "ev_pct": -0.2311,
+        "max_dd_pct": 0.0578,
+        "exposure": 0.25,
+        "avg_hold_bars": 2.0
       }
     }
   },
@@ -160,7 +160,7 @@
         },
         "G5_stability": {
           "pass": true,
-          "value": 0.0575,
+          "value": 0.0581,
           "threshold": "<= 0.5"
         }
       },

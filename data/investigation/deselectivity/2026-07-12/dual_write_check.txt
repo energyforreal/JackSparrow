@@ -1,0 +1,2 @@
+telemetry_rows_with_hurst60=267
+dual_write=213

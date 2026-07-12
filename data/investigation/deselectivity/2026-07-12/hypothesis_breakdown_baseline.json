@@ -1,21 +1,21 @@
 {
-  "generated_at": "2026-07-12T10:33:29.580590+00:00",
-  "source_log": "data\\investigation\\deselectivity\\2026-07-12\\agent_exp_hurst_v2_2026-07-12.log",
-  "hold_at_synthesis_total": 47,
+  "generated_at": "2026-07-12T10:20:52.074406+00:00",
+  "source_log": "data\\investigation\\deselectivity\\2026-07-12\\baseline_agent.log",
+  "hold_at_synthesis_total": 92,
   "bucket_histogram": [
     {
       "bucket": "B4",
-      "count": 47,
+      "count": 92,
       "pct": 100.0
     }
   ],
   "shadow_analysis": {
-    "agrees_hold": 46,
-    "would_block_live_entry": 1,
-    "disagrees_with_live": 1,
-    "agrees_hold_pct": 97.87
+    "agrees_hold": 92,
+    "would_block_live_entry": 0,
+    "disagrees_with_live": 0,
+    "agrees_hold_pct": 100.0
   },
-  "b4_v43_gates_passed_hold": 47,
+  "b4_v43_gates_passed_hold": 92,
   "gate_decision": {
     "decision": "proceed_3a2",
     "rationale": "B4 share 100.0% exceeds 30% gate \u2014 policy semantics review justified.",

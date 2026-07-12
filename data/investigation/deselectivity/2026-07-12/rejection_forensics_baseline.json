@@ -1,138 +1,86 @@
 {
-  "generated_at": "2026-07-12T10:33:28.305963+00:00",
-  "parsed_events": 8138,
+  "generated_at": "2026-07-12T10:20:48.339694+00:00",
+  "parsed_events": 13897,
   "handler_reject_histogram": [
     {
       "reason": "hold_at_synthesis",
-      "count": 47,
-      "pct": 90.38
+      "count": 92,
+      "pct": 93.88
     },
     {
       "reason": "v15_adx_trending_filter",
-      "count": 5,
-      "pct": 9.62
+      "count": 6,
+      "pct": 6.12
     }
   ],
   "handler_reject_by_signal": {
-    "HOLD": 47,
-    "SHORT": 5
+    "HOLD": 92,
+    "SHORT": 6
   },
   "hold_at_synthesis": {
-    "total": 47,
+    "total": 92,
     "primary_causes": [
       {
         "cause": "hypothesis_no_rule_fired",
-        "count": 47,
+        "count": 92,
         "pct": 100.0
       }
     ],
     "top_policy_reason_codes": [
       {
         "code": "hypothesis_no_rule_fired",
-        "count": 139
+        "count": 276
       },
       {
         "code": "regime=neutral",
-        "count": 139
+        "count": 276
       },
       {
         "code": "fusion_mode=ml_or_thesis",
-        "count": 94
-      },
-      {
-        "code": "hypothesis_margin=0.000",
-        "count": 94
-      },
-      {
-        "code": "aggregate_confidence=0.000",
-        "count": 94
+        "count": 184
       },
       {
         "code": "thesis_type=flat",
-        "count": 92
+        "count": 184
       },
       {
         "code": "fusion_ml_or_thesis_blocked",
-        "count": 92
+        "count": 184
       },
       {
         "code": "thesis_blocks_ml_adoption",
-        "count": 92
+        "count": 184
+      },
+      {
+        "code": "hypothesis_margin=0.000",
+        "count": 184
+      },
+      {
+        "code": "aggregate_confidence=0.000",
+        "count": 184
       },
       {
         "code": "portfolio_guard_skipped",
-        "count": 47
-      },
-      {
-        "code": "thesis_type=trend_continuation",
-        "count": 2
-      },
-      {
-        "code": "hypothesis_long_pressure=0.000",
-        "count": 2
-      },
-      {
-        "code": "hypothesis_short_pressure=0.553",
-        "count": 2
-      },
-      {
-        "code": "hypothesis_margin=1.000",
-        "count": 2
-      },
-      {
-        "code": "hypothesis_dominant=trend_continuation_short",
-        "count": 2
-      },
-      {
-        "code": "thesis_trend_continuation_short",
-        "count": 2
-      },
-      {
-        "code": "h1_trend=-0.0010",
-        "count": 2
-      },
-      {
-        "code": "agent_thesis_entry",
-        "count": 2
-      },
-      {
-        "code": "fusion_ml_or_thesis_thesis",
-        "count": 2
-      },
-      {
-        "code": "agent_thesis_origin",
-        "count": 2
-      },
-      {
-        "code": "quality_below_floor",
-        "count": 2
-      },
-      {
-        "code": "quality_score=47.0",
-        "count": 2
-      },
-      {
-        "code": "min_score=55.0",
-        "count": 2
+        "count": 92
       }
     ]
   },
   "v43_prediction": {
-    "cycles": 54,
+    "cycles": 100,
     "policy_signals": {
-      "HOLD": 47,
-      "SHORT": 7
+      "HOLD": 92,
+      "SHORT": 8
     },
     "reject_tags": {
-      "gates_passed_long": 11,
-      "gates_passed_short": 43
+      "gates_passed_long": 38,
+      "gates_passed_short": 62
     },
     "latest_counters": {
-      "signals_raw": 3506,
+      "signals_raw": 3504,
       "trades_executed": 12,
       "rejected_pos_open": 719,
-      "collapse_rate": 0.9965772960638904,
-      "timestamp": "2026-07-12T10:26:01.583778Z"
+      "collapse_rate": 0.9965753424657534,
+      "timestamp": "2026-07-12T10:20:12.003538Z"
     }
   },
   "execution_path": {
@@ -270,6 +218,32 @@
         "thesis_breakout_short",
         "adx_14=45.97"
       ]
+    },
+    {
+      "event_id": "660e681e-5e71-417e-aa6c-1dff26c99f69",
+      "timestamp": "2026-07-12T09:35:22.930025Z",
+      "symbol": "BTCUSD",
+      "signal": "SHORT",
+      "reject_reason": "v15_adx_trending_filter",
+      "trade_score": 61.57,
+      "v43_proba": null,
+      "policy_signal": "SHORT",
+      "policy_confidence": 0.8,
+      "thesis_type": "breakout",
+      "raw_ai_signal_confidence": 0.8,
+      "calibrated_confidence": 0.7904,
+      "reasoning_final_confidence": 0.4783476765951237,
+      "adx_14": 41.790364495361544,
+      "policy_reason_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=breakout",
+        "hypothesis_long_pressure=0.000",
+        "hypothesis_short_pressure=0.800",
+        "hypothesis_margin=1.000",
+        "hypothesis_dominant=breakout_short",
+        "thesis_breakout_short",
+        "adx_14=41.79"
+      ]
     }
   ],
   "counter_reconciliation": {
@@ -278,7 +252,7 @@
     "redis_trades_executed": null,
     "redis_signals_raw": null,
     "log_latest_v43_trades_executed": 12,
-    "log_latest_collapse_rate": 0.9965772960638904,
+    "log_latest_collapse_rate": 0.9965753424657534,
     "gap_db_minus_v43": 9,
     "interpretation": "v43 counter increments only on fills with v43_closed_bar_index; Postgres trades table counts all EXECUTED rows regardless of v43 path."
   },
