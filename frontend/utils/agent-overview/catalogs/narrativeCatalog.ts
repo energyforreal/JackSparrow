@@ -1,5 +1,6 @@
 import type { Signal } from '@/types'
 import type { ReadinessLabel } from '../types'
+import { isShortSideSignal, resolveDirectionalEdge } from '@/utils/signalConfidence'
 
 export function synthesizeNarrative(signal: Signal, readinessLabel: ReadinessLabel): string {
   const parts: string[] = []
@@ -21,10 +22,19 @@ export function synthesizeNarrative(signal: Signal, readinessLabel: ReadinessLab
     parts.push('Liquidity is constrained.')
   }
 
-  if (signal.economic_edge != null && signal.threshold != null) {
+  const er = signal.expected_return
+  const thr = signal.threshold
+  if (er != null && thr != null && Number.isFinite(Number(er)) && Number.isFinite(Number(thr))) {
+    const edge = resolveDirectionalEdge(Number(er), Number(thr), isShortSideSignal(signal))
+    if (edge > 0) {
+      parts.push('Expected return exceeds execution threshold.')
+    } else {
+      parts.push('Expected return has not cleared the execution threshold.')
+    }
+  } else if (signal.economic_edge != null && signal.threshold != null) {
     const edge = Number(signal.economic_edge)
-    const thr = Number(signal.threshold)
-    if (Number.isFinite(edge) && Number.isFinite(thr)) {
+    const thrN = Number(signal.threshold)
+    if (Number.isFinite(edge) && Number.isFinite(thrN)) {
       if (edge > 0) {
         parts.push('Expected return exceeds execution threshold.')
       } else {

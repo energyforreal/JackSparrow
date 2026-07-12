@@ -15,8 +15,11 @@ export const DecisionGatesSection = memo(function DecisionGatesSection({
     <section className="min-h-[48px] space-y-2" aria-label="Decision gates">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Decision Gates</h3>
-        <span className="text-[10px] text-muted-foreground">Can I trade?</span>
+        <span className="text-[10px] text-muted-foreground">Structural categories</span>
       </div>
+      <p className="text-[10px] text-muted-foreground">
+        Market-structure checks — not thesis rules (flat thesis can still leave trend/breakout red).
+      </p>
       {gates.setupType && gates.setupType !== 'none' && (
         <p className="text-xs text-muted-foreground capitalize">Setup: {gates.setupType.replace(/_/g, ' ')}</p>
       )}

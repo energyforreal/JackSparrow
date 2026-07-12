@@ -1,9 +1,9 @@
 /** Structural gate category labels and block reason copy. */
 
 export const GATE_CATEGORY_LABELS: Record<string, string> = {
-  trend: 'Trend',
+  trend: 'Structural trend',
   structure: 'Structure',
-  breakout: 'Breakout',
+  breakout: 'Structural breakout',
   liquidity: 'Liquidity',
   volatility: 'Volatility',
   risk: 'Risk',

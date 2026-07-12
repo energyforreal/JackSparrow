@@ -43,4 +43,20 @@ describe('resolveEvidence', () => {
     expect(gate5?.status).toBe('against')
     expect(structural?.status).toBe('support')
   })
+
+  it('uses short-aware edge so STRONG SHORT is not always below threshold', () => {
+    const view = resolveEvidence({
+      signal: {
+        signal: 'SHORT',
+        expected_return: -0.015,
+        threshold: 0.005,
+        economic_edge: -0.02,
+      } as never,
+      agentState: 'MONITORING',
+    })
+    const economics = view.rows.find((r) => r.key === 'economics')
+    expect(economics?.status).toBe('support')
+    expect(economics?.label).toContain('exceeds')
+    expect(economics?.detail).toContain('(short)')
+  })
 })

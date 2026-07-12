@@ -2,6 +2,8 @@ import { describe, expect, it } from '@jest/globals'
 
 import {
   isHoldNonActionableDisplay,
+  isShortSideSignal,
+  resolveDirectionalEdge,
   resolveDisplayConfidence,
   resolveEconomicEdgeBarPercent,
   resolveHeroMetrics,
@@ -162,6 +164,28 @@ describe('resolveHeroMetrics', () => {
     expect(h?.entryMarginPercent).toBeCloseTo(25, 5)
     expect(h?.tradeScore?.score).toBe(80)
     expect(h?.reasoningRawPercent).toBeCloseTo(60, 5)
+  })
+
+  it('computes Gate5-aligned short edge from expected_return (not long er-thr)', () => {
+    const h = resolveHeroMetrics({
+      signal: 'SHORT',
+      confidence: 0.3,
+      expected_return: -0.015,
+      threshold: 0.005,
+      // Misleading long-style edge must not win when ER/thr are present
+      economic_edge: -0.02,
+    })
+    // short: -(-0.015) - 0.005 = 0.010
+    expect(h?.economicEdge).toBeCloseTo(0.01, 5)
+  })
+})
+
+describe('resolveDirectionalEdge', () => {
+  it('matches Gate5 long and short formulas', () => {
+    expect(resolveDirectionalEdge(0.015, 0.005, false)).toBeCloseTo(0.01, 5)
+    expect(resolveDirectionalEdge(-0.015, 0.005, true)).toBeCloseTo(0.01, 5)
+    expect(isShortSideSignal({ signal: 'STRONG SHORT' })).toBe(true)
+    expect(isShortSideSignal({ signal: 'HOLD', thesis_signal: 'SHORT' })).toBe(true)
   })
 })
 

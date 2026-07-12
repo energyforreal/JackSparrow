@@ -91,6 +91,7 @@ type ConfidenceCarrier = {
   expected_return?: number | null
   is_actionable_entry?: boolean | null
   signal?: string | null
+  thesis_signal?: string | null
   agent_introspection?: {
     trade_score?: number | null
     trade_score_pass?: boolean | null
@@ -135,6 +136,30 @@ export interface SignalEntryMetrics {
   /** Policy minus reasoning (percentage points), when both are defined. */
   policyReasoningDelta?: number
   holdDim: boolean
+}
+
+/** True when the active signal / thesis is short-side (SELL / SHORT). */
+export function isShortSideSignal(
+  signal: { signal?: string | null; thesis_signal?: string | null } | null | undefined
+): boolean {
+  if (!signal) return false
+  for (const raw of [signal.signal, signal.thesis_signal]) {
+    const s = String(raw || '').toUpperCase()
+    if (s.includes('SHORT') || s === 'SELL') return true
+  }
+  return false
+}
+
+/**
+ * Directional edge vs threshold, matching agent Gate5:
+ * long:  er - thr ; short: -er - thr.
+ */
+export function resolveDirectionalEdge(
+  expectedReturn: number,
+  threshold: number,
+  isShort: boolean
+): number {
+  return isShort ? -expectedReturn - threshold : expectedReturn - threshold
 }
 
 /**
@@ -213,21 +238,24 @@ function parseTradeScoreRaw(
 }
 
 function resolveEconomicEdgeValue(signal: ConfidenceCarrier): number | undefined {
-  if (signal.economic_edge != null && Number.isFinite(Number(signal.economic_edge))) {
-    return Number(signal.economic_edge)
-  }
+  const isShort = isShortSideSignal(signal)
   const er = signal.expected_return
   const thr = signal.threshold
+  // Prefer ER/threshold with Gate5-aligned short math over a precomputed economic_edge
+  // (backend/UI historically used long-only er - thr, which paints shorts as always negative).
   if (er != null && thr != null && Number.isFinite(Number(er)) && Number.isFinite(Number(thr))) {
-    return Number(er) - Number(thr)
+    return resolveDirectionalEdge(Number(er), Number(thr), isShort)
   }
   const ml = signal.market_context_excerpt?.ml_validation
   if (ml?.expected_return != null && ml?.threshold != null) {
-    try {
-      return Number(ml.expected_return) - Number(ml.threshold)
-    } catch {
-      return undefined
-    }
+    const mlThr =
+      isShort && ml.short_threshold != null && Number.isFinite(Number(ml.short_threshold))
+        ? Number(ml.short_threshold)
+        : Number(ml.threshold)
+    return resolveDirectionalEdge(Number(ml.expected_return), mlThr, isShort)
+  }
+  if (signal.economic_edge != null && Number.isFinite(Number(signal.economic_edge))) {
+    return Number(signal.economic_edge)
   }
   return undefined
 }

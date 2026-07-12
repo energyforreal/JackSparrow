@@ -1,4 +1,9 @@
-import { resolveDecisionReasoning, resolveTradeScore } from '@/utils/signalConfidence'
+import {
+  isShortSideSignal,
+  resolveDecisionReasoning,
+  resolveDirectionalEdge,
+  resolveTradeScore,
+} from '@/utils/signalConfidence'
 import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { resolveReasonCopy } from './catalogs/reasonCatalog'
 import type { AgentOverviewInput, EvidenceRowView, EvidenceView } from './types'
@@ -31,7 +36,8 @@ export function resolveEvidence(input: AgentOverviewInput): EvidenceView {
   const er = signal.expected_return
   const thr = signal.threshold
   if (er != null && thr != null && Number.isFinite(Number(er)) && Number.isFinite(Number(thr))) {
-    const edge = Number(er) - Number(thr)
+    const isShort = isShortSideSignal(signal)
+    const edge = resolveDirectionalEdge(Number(er), Number(thr), isShort)
     rows.push({
       key: 'economics',
       label:
@@ -39,7 +45,7 @@ export function resolveEvidence(input: AgentOverviewInput): EvidenceView {
           ? 'Expected return exceeds threshold'
           : 'Expected return below threshold',
       status: edge > 0 ? 'support' : 'against',
-      detail: `Δ ${edge >= 0 ? '+' : ''}${edge.toFixed(5)}`,
+      detail: `Δ ${edge >= 0 ? '+' : ''}${edge.toFixed(5)}${isShort ? ' (short)' : ''}`,
     })
   } else if (signal.economic_edge != null) {
     const edge = Number(signal.economic_edge)

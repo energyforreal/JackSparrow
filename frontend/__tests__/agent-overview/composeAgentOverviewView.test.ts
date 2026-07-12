@@ -55,7 +55,7 @@ describe('composeAgentOverviewView', () => {
     const gateLabels = new Set(view.gates.rows.map((r) => r.label))
     const evidenceHasMl = view.evidence.rows.some((r) => r.key === 'ml' || r.label.includes('ML'))
     expect(gateLabels.has('Liquidity')).toBe(true)
-    expect(gateLabels.has('Trend')).toBe(true)
+    expect(gateLabels.has('Structural trend')).toBe(true)
     expect(view.evidence.rows.length).toBeGreaterThan(0)
   })
 })
