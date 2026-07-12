@@ -54,13 +54,16 @@ def main() -> int:
             candidates = sorted(inv.glob("agent_baseline_*.log"), reverse=True)
         log_path = candidates[0] if candidates else None
 
-    if log_path is None or not log_path.is_file():
-        print("No agent log found; pass --log", file=sys.stderr)
+    if log_path is not None and not log_path.is_file():
+        print(f"Log path not found: {log_path}", file=sys.stderr)
+        return 1
+    if (log_path is None or not Path(log_path).is_file()) and not args.telemetry.is_file():
+        print("Need --log and/or --telemetry with Phase-6 embedded features", file=sys.stderr)
         return 1
 
     records = enrich_from_sources(
         telemetry_path=args.telemetry,
-        log_path=log_path,
+        log_path=log_path if log_path and Path(log_path).is_file() else None,
         hours=args.hours,
     )
     coverage = provenance_report(records)

@@ -16,10 +16,13 @@ docker compose exec agent python -c "from agent.core.config import settings; pri
 ## Daily monitor
 
 ```powershell
-python tools/commands/phase3_daily_forensics.py --workstream hurst_v2
+python tools/commands/phase3_daily_forensics.py --workstream hurst_v2 --skip-rolling
+# Funnel auto-runs for hurst_* workstreams; or:
+python tools/commands/phase_a_funnel_from_telemetry.py --since 2026-07-12T10:21:37+00:00 `
+  --out data/investigation/deselectivity/2026-07-12/funnel_post_a
 ```
 
-Compare to `SCORECARD_BASELINE.md`. Pause if G1 / risk veto / conditional handler quality shift materially.
+Compare to `SCORECARD_BASELINE.md`. Write `scorecard_dayN.md` with **layered funnel** (thesis fires / quality_below / Gate5 / HOLD-after-fire). Pause if G1 / risk veto / conditional handler quality shift materially.
 
 ## After window
 

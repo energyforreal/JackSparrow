@@ -138,6 +138,22 @@ def main() -> int:
         )
     for cmd in steps:
         rc = _run(cmd) or rc
+
+    # Phase A layered funnel (thesis → quality → Gate5) for hurst_v2 workstreams.
+    if "hurst" in str(args.workstream).lower():
+        funnel_dir = inv / "deselectivity" / date_tag
+        funnel_dir.mkdir(parents=True, exist_ok=True)
+        funnel_out = funnel_dir / f"funnel_{args.workstream}_{date_tag}"
+        funnel_cmd = [
+            sys.executable,
+            "tools/commands/phase_a_funnel_from_telemetry.py",
+            "--hours",
+            "24",
+            "--out",
+            str(funnel_out),
+        ]
+        rc = _run(funnel_cmd) or rc
+
     print(f"\nDaily forensics complete for workstream {args.workstream}")
     return rc
 

@@ -7,7 +7,8 @@
 | Source | ADX cohort n | Avg net return % | Net EV positive | Blocked |
 |--------|-------------:|-----------------:|:---------------:|:-------:|
 | `economic_replay_2026-07-09.json` | 16 | -0.2504 | no | yes |
-| `economic_replay_adx_2026-07-12.json` (today’s reject mix) | 5 | -0.2257 | no | yes |
+| `economic_replay_adx_2026-07-12.json` (day reject mix) | 5 | -0.2257 | no | yes |
+| `economic_replay_adx_2026-07-12_post_n100.json` (merged logs post evidence fix) | 10 | -0.2257 | no | yes |
 
 Gate criteria from [`phase3_design_decisions.md`](phase3_design_decisions.md):
 

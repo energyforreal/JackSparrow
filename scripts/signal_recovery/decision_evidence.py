@@ -445,6 +445,98 @@ def enrich_log_objects(objects: List[Dict[str, Any]]) -> List[EnrichedDecisionRe
     return records
 
 
+def _telemetry_embedded_features(row: Dict[str, Any]) -> Dict[str, float]:
+    extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
+    raw = extra.get("features") or row.get("features")
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for k, v in raw.items():
+        fv = _float_or_none(v)
+        if fv is not None:
+            out[str(k).lower()] = fv
+    return out
+
+
+def _telemetry_gates_passed_reject(row: Dict[str, Any]) -> Optional[str]:
+    """Map telemetry gate blob / reject tag to gates_passed_* for B4 classification."""
+    explicit = str(row.get("reject") or "")
+    if explicit in ("gates_passed_long", "gates_passed_short"):
+        return explicit
+    gates = row.get("gates") if isinstance(row.get("gates"), dict) else {}
+    if not gates:
+        return None
+    if gates.get("gate_reject"):
+        return None
+    g2_ok = all(bool(gates.get(k)) for k in ("g2_pass", "g3_pass", "g4_pass", "g5_pass"))
+    if not g2_ok:
+        return None
+    if gates.get("g1_raw_long"):
+        return "gates_passed_long"
+    if gates.get("g1_raw_short"):
+        return "gates_passed_short"
+    return None
+
+
+def telemetry_row_is_b4_candidate(row: Dict[str, Any]) -> bool:
+    """True when a Phase-6 telemetry row is a B4-equivalent hold without requiring agent logs."""
+    if str(row.get("event") or "") != "v43_prediction_complete":
+        return False
+    codes = [str(c) for c in (row.get("policy_reason_codes") or [])]
+    if "hypothesis_no_rule_fired" not in codes and "thesis_no_rule_fired" not in codes:
+        return False
+    signal = str(row.get("signal") or row.get("thesis_signal") or "HOLD").upper()
+    if signal != "HOLD":
+        return False
+    if _telemetry_gates_passed_reject(row) is None:
+        return False
+    feats = _telemetry_embedded_features(row)
+    return all(k in feats for k in CORE_THESIS_FEATURES)
+
+
+def record_from_telemetry_row(row: Dict[str, Any]) -> EnrichedDecisionRecord:
+    """Build an enriched B4 record from an embedded-feature telemetry row."""
+    codes = [str(c) for c in (row.get("policy_reason_codes") or [])]
+    reject = _telemetry_gates_passed_reject(row)
+    features = build_feature_observations(
+        log_features=None,
+        telemetry_row=row,
+        reason_codes=codes,
+    )
+    extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
+    event_id = row.get("event_id") or extra.get("event_id")
+    return EnrichedDecisionRecord(
+        event_id=str(event_id) if event_id else None,
+        ts=str(row.get("ts") or row.get("timestamp") or ""),
+        symbol=str(row.get("symbol") or "BTCUSD"),
+        bucket="B4",
+        regime=_regime_from_codes(codes),
+        eligible_profiles=[],
+        policy_reason_codes=codes,
+        reject=reject,
+        trade_score=_float_or_none(row.get("trade_score")),
+        features=features,
+        hypothesis_snapshot={},
+        shadow=None,
+        provenance_summary=_provenance_summary(features),
+    )
+
+
+def _covered_by_log(
+    tel_ts: float,
+    tel_symbol: str,
+    *,
+    log_keys: List[Tuple[float, str]],
+    max_delta_sec: float = 15.0,
+) -> bool:
+    for log_ts, log_symbol in log_keys:
+        if log_symbol != tel_symbol:
+            continue
+        if abs(tel_ts - log_ts) <= max_delta_sec:
+            return True
+    return False
+
+
 def enrich_from_sources(
     *,
     telemetry_path: Path,
@@ -452,47 +544,54 @@ def enrich_from_sources(
     log_content: Optional[str] = None,
     hours: float = 168.0,
 ) -> List[EnrichedDecisionRecord]:
-    """Join agent log holds with telemetry for provenance enrichment."""
+    """Join agent log holds with telemetry; also emit telemetry-primary B4 rows.
+
+    Log-derived rows remain primary when present. Telemetry-primary B4 candidates
+    (Phase 6 ``extra.features`` + ``hypothesis_no_rule_fired`` + gates passed) are
+    appended when not already covered by a log hold within 15s — so evidence N no
+    longer collapses when only a day-scoped log rotation is available.
+    """
     if log_content is None and log_path and log_path.is_file():
         log_content = log_path.read_text(encoding="utf-8", errors="replace")
-    if not log_content:
-        return []
-
-    records = parse_agent_log(log_content)
-    if hours > 0:
-        cutoff = datetime.now(timezone.utc).timestamp() - hours * 3600.0
-        records = [r for r in records if (parse_ts_float(r.ts) or 0) >= cutoff]
 
     tel_rows = filter_since(load_telemetry(telemetry_path), hours) if telemetry_path.is_file() else []
     ts_rows, ts_index, by_event = _index_telemetry(tel_rows)
 
-    hold_features: Dict[str, Dict[str, Any]] = {}
-    for obj in iter_json_objects(log_content):
-        if str(obj.get("event") or "") != "trading_entry_rejected":
-            continue
-        mc = obj.get("market_context") if isinstance(obj.get("market_context"), dict) else {}
-        feats = mc.get("features") if isinstance(mc.get("features"), dict) else {}
-        key = str(obj.get("event_id") or obj.get("timestamp") or "")
-        if key:
-            hold_features[key] = feats
-
     enriched: List[EnrichedDecisionRecord] = []
-    for rec in records:
-        hold_stub = {"event_id": rec.event_id, "timestamp": rec.ts}
-        tel = _match_telemetry(hold_stub, ts_rows=ts_rows, ts_index=ts_index, by_event=by_event)
-        key = str(rec.event_id or rec.ts)
-        log_feats = hold_features.get(key) or {
-            k: v.value
-            for k, v in rec.features.items()
-            if v.observed and v.source == "log_market_context"
-        }
-        features = build_feature_observations(
-            log_features=log_feats or None,
-            telemetry_row=tel,
-            reason_codes=rec.policy_reason_codes,
-        )
-        enriched.append(
-            EnrichedDecisionRecord(
+    log_keys: List[Tuple[float, str]] = []
+    seen_event_ids: set[str] = set()
+
+    if log_content:
+        records = parse_agent_log(log_content)
+        if hours > 0:
+            cutoff = datetime.now(timezone.utc).timestamp() - hours * 3600.0
+            records = [r for r in records if (parse_ts_float(r.ts) or 0) >= cutoff]
+
+        hold_features: Dict[str, Dict[str, Any]] = {}
+        for obj in iter_json_objects(log_content):
+            if str(obj.get("event") or "") != "trading_entry_rejected":
+                continue
+            mc = obj.get("market_context") if isinstance(obj.get("market_context"), dict) else {}
+            feats = mc.get("features") if isinstance(mc.get("features"), dict) else {}
+            key = str(obj.get("event_id") or obj.get("timestamp") or "")
+            if key:
+                hold_features[key] = feats
+
+        for rec in records:
+            hold_stub = {"event_id": rec.event_id, "timestamp": rec.ts}
+            tel = _match_telemetry(hold_stub, ts_rows=ts_rows, ts_index=ts_index, by_event=by_event)
+            key = str(rec.event_id or rec.ts)
+            log_feats = hold_features.get(key) or {
+                k: v.value
+                for k, v in rec.features.items()
+                if v.observed and v.source == "log_market_context"
+            }
+            features = build_feature_observations(
+                log_features=log_feats or None,
+                telemetry_row=tel,
+                reason_codes=rec.policy_reason_codes,
+            )
+            out = EnrichedDecisionRecord(
                 event_id=rec.event_id,
                 ts=rec.ts,
                 symbol=rec.symbol,
@@ -507,7 +606,29 @@ def enrich_from_sources(
                 shadow=rec.shadow,
                 provenance_summary=_provenance_summary(features),
             )
-        )
+            enriched.append(out)
+            ts_f = parse_ts_float(out.ts)
+            if ts_f is not None:
+                log_keys.append((ts_f, out.symbol.upper()))
+            if out.event_id:
+                seen_event_ids.add(str(out.event_id))
+
+    for row in tel_rows:
+        if not telemetry_row_is_b4_candidate(row):
+            continue
+        tel_rec = record_from_telemetry_row(row)
+        if tel_rec.event_id and str(tel_rec.event_id) in seen_event_ids:
+            continue
+        tel_ts = parse_ts_float(tel_rec.ts)
+        if tel_ts is None:
+            continue
+        if _covered_by_log(tel_ts, tel_rec.symbol.upper(), log_keys=log_keys):
+            continue
+        enriched.append(tel_rec)
+        if tel_rec.event_id:
+            seen_event_ids.add(str(tel_rec.event_id))
+
+    enriched.sort(key=lambda r: parse_ts_float(r.ts) or 0.0)
     return enriched
 
 
@@ -527,24 +648,26 @@ def load_enriched_ndjson(path: Path) -> List[EnrichedDecisionRecord]:
     return records
 
 
+def _is_telemetry_primary(record: EnrichedDecisionRecord) -> bool:
+    has_log = any(
+        obs.source == "log_market_context" and obs.observed for obs in record.features.values()
+    )
+    has_tel = any(
+        obs.source == "telemetry_embedded" and obs.observed for obs in record.features.values()
+    )
+    return has_tel and not has_log
+
+
 def provenance_report(records: List[EnrichedDecisionRecord]) -> Dict[str, Any]:
     b4 = [r for r in records if r.bucket == "B4"]
     hi = filter_high_confidence(b4)
     tel_only = 0
     default_missing = 0
     for r in b4:
+        if _is_telemetry_primary(r):
+            tel_only += 1
         if is_high_confidence_record(r):
             continue
-        has_log = any(
-            obs.source == "log_market_context" and obs.observed
-            for obs in r.features.values()
-        )
-        has_tel = any(
-            obs.source == "telemetry_embedded" and obs.observed
-            for obs in r.features.values()
-        )
-        if has_tel and not has_log:
-            tel_only += 1
         if all(not obs.observed for obs in r.features.values()):
             default_missing += 1
         elif not is_high_confidence_record(r):

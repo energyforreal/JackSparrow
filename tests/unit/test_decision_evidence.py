@@ -1,5 +1,7 @@
 """Tests for decision evidence enrichment and provenance."""
 
+import json
+
 from scripts.signal_recovery.decision_evidence import (
     CORE_THESIS_FEATURES,
     build_feature_observations,
@@ -108,3 +110,91 @@ def test_enrich_log_objects_minimal() -> None:
 
 def test_parse_ts_float() -> None:
     assert parse_ts_float("2026-07-11T13:00:00+00:00") is not None
+
+
+def test_telemetry_primary_b4_candidate() -> None:
+    from scripts.signal_recovery.decision_evidence import (
+        enrich_from_sources,
+        record_from_telemetry_row,
+        telemetry_row_is_b4_candidate,
+    )
+
+    feats = {k: float(i) for i, k in enumerate(CORE_THESIS_FEATURES)}
+    row = {
+        "ts": "2026-07-12T12:00:00+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "trade_score": 46.0,
+        "policy_reason_codes": ["hypothesis_no_rule_fired", "regime=neutral"],
+        "gates": {
+            "g1_raw_long": False,
+            "g1_raw_short": True,
+            "g2_pass": True,
+            "g3_pass": True,
+            "g4_pass": True,
+            "g5_pass": True,
+            "gate_reject": None,
+        },
+        "extra": {"features": feats},
+    }
+    assert telemetry_row_is_b4_candidate(row)
+    rec = record_from_telemetry_row(row)
+    assert rec.bucket == "B4"
+    assert rec.reject == "gates_passed_short"
+    assert is_high_confidence_record(rec)
+
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        tel = Path(td) / "tel.ndjson"
+        tel.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        out = enrich_from_sources(telemetry_path=tel, log_path=None, hours=0)
+        assert len(out) == 1
+        assert out[0].bucket == "B4"
+        assert is_high_confidence_record(out[0])
+
+
+def test_telemetry_primary_dedupes_against_log() -> None:
+    import tempfile
+    from pathlib import Path
+
+    from scripts.signal_recovery.decision_evidence import enrich_from_sources
+
+    feats = {k: 1.0 for k in CORE_THESIS_FEATURES}
+    ts = "2026-07-12T12:00:05+00:00"
+    tel_row = {
+        "ts": "2026-07-12T12:00:00+00:00",
+        "event": "v43_prediction_complete",
+        "symbol": "BTCUSD",
+        "signal": "HOLD",
+        "policy_reason_codes": ["hypothesis_no_rule_fired", "regime=neutral"],
+        "gates": {
+            "g1_raw_short": True,
+            "g2_pass": True,
+            "g3_pass": True,
+            "g4_pass": True,
+            "g5_pass": True,
+            "gate_reject": None,
+        },
+        "extra": {"features": feats},
+    }
+    log_line = (
+        '{"event":"mcp_orchestrator_v43_prediction_complete","timestamp":"2026-07-12T12:00:00+00:00",'
+        '"reject":"gates_passed_short","policy_signal":"HOLD"}'
+        '{"event":"trading_entry_rejected","reason":"hold_at_synthesis","timestamp":"'
+        + ts
+        + '","event_id":"log1","symbol":"BTCUSD","market_context":{"features":'
+        + json.dumps(feats)
+        + ',"hypothesis_snapshot":{"reason_codes":["hypothesis_no_rule_fired"],"hypotheses":[],'
+        '"long_pressure":0,"short_pressure":0},"policy_verdict":{"reason_codes":["hypothesis_no_rule_fired"]}}}'
+    )
+    with tempfile.TemporaryDirectory() as td:
+        tel = Path(td) / "tel.ndjson"
+        log = Path(td) / "agent.log"
+        tel.write_text(json.dumps(tel_row) + "\n", encoding="utf-8")
+        log.write_text(log_line, encoding="utf-8")
+        out = enrich_from_sources(telemetry_path=tel, log_path=log, hours=0)
+        assert len(out) == 1
+        assert out[0].event_id == "log1"

@@ -1,0 +1,68 @@
+{
+  "generated_at": "2026-07-12T12:50:15.419332+00:00",
+  "n_candles": 18144,
+  "warmup": 400,
+  "horizon_bars": 12,
+  "window": null,
+  "step": 1,
+  "n_eval": 17732,
+  "hurst_distribution": {
+    "hurst_60": {
+      "n": 17732,
+      "mean": 0.017944,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 1.0,
+      "ge_0_52": 18,
+      "eq_0": 12411
+    },
+    "hurst_60_v2": {
+      "n": 17732,
+      "mean": 0.420639,
+      "median": 0.44144,
+      "min": 0.0,
+      "max": 1.0,
+      "ge_0_52": 4175,
+      "eq_0": 689
+    }
+  },
+  "legacy": {
+    "n_eval": 17732,
+    "n_fires": 1615,
+    "n_long": 727,
+    "n_short": 888,
+    "fire_rate_pct": 9.108,
+    "ev_long_pct": 0.1535,
+    "ev_short_pct": -0.015,
+    "ev_combined_pct": 0.0608,
+    "n_long_labeled": 727,
+    "n_short_labeled": 888,
+    "regime_fire_counts": {
+      "neutral": 1257,
+      "crisis": 358
+    }
+  },
+  "hurst_v2": {
+    "n_eval": 17732,
+    "n_fires": 2548,
+    "n_long": 1074,
+    "n_short": 1474,
+    "fire_rate_pct": 14.37,
+    "ev_long_pct": 0.0853,
+    "ev_short_pct": -0.0183,
+    "ev_combined_pct": 0.0254,
+    "n_long_labeled": 1074,
+    "n_short_labeled": 1474,
+    "regime_fire_counts": {
+      "neutral": 2129,
+      "crisis": 381,
+      "ranging": 38
+    }
+  },
+  "production_flags_unchanged": true,
+  "disclaimer": "Directional read only \u2014 no slippage/funding/walk-forward. Does not clear promotion gate alone.",
+  "symbol": "BTCUSD",
+  "days_requested": 60,
+  "elapsed_sec": 29.89,
+  "source": "delta_fetch"
+}

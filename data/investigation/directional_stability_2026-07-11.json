@@ -1,17 +1,17 @@
 {
-  "sample_count": 2098,
-  "flip_rate": 0.0596,
-  "mean_run_length": 16.65,
+  "sample_count": 2100,
+  "flip_rate": 0.0567,
+  "mean_run_length": 17.5,
   "max_run_length": 118,
   "direction_counts": {
-    "LONG": 1097,
-    "SHORT": 1001
+    "LONG": 1106,
+    "SHORT": 994
   },
   "transition_matrix": {
-    "LONG->SHORT": 63,
-    "SHORT->SHORT": 938,
-    "SHORT->LONG": 62,
-    "LONG->LONG": 1034
+    "LONG->LONG": 1046,
+    "LONG->SHORT": 60,
+    "SHORT->SHORT": 934,
+    "SHORT->LONG": 59
   },
-  "directional_entropy": 0.9985
+  "directional_entropy": 0.9979
 }

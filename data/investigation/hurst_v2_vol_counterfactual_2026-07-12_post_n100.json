@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-07-12T12:52:38.189868+00:00",
+  "telemetry_path": "D:\\ATTRAL\\Projects\\Trading Agent 2\\logs\\agent\\signal_recovery\\decision_telemetry.ndjson",
+  "telemetry_dual_write_rows": 283,
+  "hurst_60_stats": {
+    "n": 283,
+    "mean": 0.05258,
+    "median": 0.053658,
+    "min": 0.0,
+    "max": 0.1389727591187475,
+    "ge_0_52": 0
+  },
+  "hurst_60_v2_stats": {
+    "n": 283,
+    "mean": 0.547407,
+    "median": 0.553655,
+    "min": 0.42402739119626137,
+    "max": 0.6389699660974811,
+    "ge_0_52": 223
+  },
+  "trend_fires": {
+    "legacy": {
+      "long": 0,
+      "short": 0
+    },
+    "v2_flag_on": {
+      "long": 0,
+      "short": 62
+    }
+  },
+  "breakout_vol_counterfactual": [
+    {
+      "agent_thesis_breakout_vol_regime_min": 1.1,
+      "breakout_long_fires": 0,
+      "analyzed": 283,
+      "fire_rate_pct": 0.0
+    },
+    {
+      "agent_thesis_breakout_vol_regime_min": 0.9,
+      "breakout_long_fires": 0,
+      "analyzed": 283,
+      "fire_rate_pct": 0.0
+    },
+    {
+      "agent_thesis_breakout_vol_regime_min": 0.8,
+      "breakout_long_fires": 0,
+      "analyzed": 283,
+      "fire_rate_pct": 0.0
+    }
+  ],
+  "production_flags_unchanged": {
+    "AGENT_THESIS_USE_HURST_V2": false,
+    "AGENT_THESIS_BREAKOUT_VOL_REGIME_MIN": 1.1,
+    "AGENT_THESIS_TREND_HURST_MIN": 0.52,
+    "AGENT_THESIS_NEUTRAL_MILD_TREND_ENABLED": false
+  },
+  "note": "Offline only. Dual-write confirmed in telemetry. Do not enable AGENT_THESIS_USE_HURST_V2 or lower vol floor in production without 7d/30d replay + EV gates."
+}

@@ -3,6 +3,14 @@ import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { resolveReasonCopy } from './catalogs/reasonCatalog'
 import type { AgentOverviewInput, EvidenceRowView, EvidenceView } from './types'
 
+/** Reason-code tokens that indicate adverse / blocking evidence. */
+const AGAINST_TOKENS = ['penalty', 'below', 'fail', 'reject', 'blocked', 'insufficient'] as const
+
+export function evidenceReasonStatus(code: string): EvidenceRowView['status'] {
+  const lower = String(code).toLowerCase()
+  return AGAINST_TOKENS.some((t) => lower.includes(t)) ? 'against' : 'support'
+}
+
 export function resolveEvidence(input: AgentOverviewInput): EvidenceView {
   const { signal, modelConsensus } = input
   const rows: EvidenceRowView[] = []
@@ -15,7 +23,7 @@ export function resolveEvidence(input: AgentOverviewInput): EvidenceView {
       rows.push({
         key: `reason_${code}`,
         label: resolveReasonCopy(code),
-        status: code.includes('penalty') || code.includes('below') ? 'against' : 'support',
+        status: evidenceReasonStatus(code),
       })
     }
   }
