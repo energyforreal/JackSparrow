@@ -1,0 +1,700 @@
+{
+  "generated_at": "2026-07-13T06:00:11.437594+00:00",
+  "source_log": "D:\\ATTRAL\\Projects\\Trading Agent 2\\data\\investigation\\agent_exp_shadow_2026-07-13.log",
+  "hold_at_synthesis_total": 50,
+  "bucket_histogram": [
+    {
+      "bucket": "B4",
+      "count": 50,
+      "pct": 100.0
+    }
+  ],
+  "shadow_analysis": {
+    "agrees_hold": 50,
+    "would_block_live_entry": 0,
+    "disagrees_with_live": 0,
+    "agrees_hold_pct": 100.0
+  },
+  "b4_v43_gates_passed_hold": 50,
+  "gate_decision": {
+    "decision": "proceed_3a2",
+    "rationale": "B4 share 100.0% exceeds 30% gate \u2014 policy semantics review justified.",
+    "thresholds": {
+      "b4_proceed_pct": 30.0,
+      "b1_b2_defer_pct": 50.0,
+      "a_skip_pct": 70.0
+    },
+    "observed_pct": {
+      "B1": 0.0,
+      "B2": 0.0,
+      "B3": 0.0,
+      "B4": 100.0,
+      "A": 0.0,
+      "B1_B2_combined": 0.0
+    }
+  },
+  "terminal_cause_alignment": {
+    "B4": "policy"
+  },
+  "samples": [
+    {
+      "event_id": "3d7a24fe-be92-427a-948d-084051012a1c",
+      "timestamp": "2026-07-13T03:55:35.292281Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "ea71de8a-f8ff-4b3f-8f7b-e3eff42c7fa4",
+      "timestamp": "2026-07-13T04:00:37.083680Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "ddf28927-33bb-4605-a592-5510c6ed6255",
+      "timestamp": "2026-07-13T04:04:52.464601Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "c09ffc37-0f81-4d2b-84d3-0e766e1a827c",
+      "timestamp": "2026-07-13T04:05:37.859548Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "c6fd11ef-9e22-465b-bb12-9442230d14cc",
+      "timestamp": "2026-07-13T04:07:52.669153Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "5b9e0bc5-eb8d-4fe6-8f96-b578e81416a1",
+      "timestamp": "2026-07-13T04:10:08.686674Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "cfb416af-f7cd-4f36-bb36-3adbc0427296",
+      "timestamp": "2026-07-13T04:13:18.883990Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "b93ae238-7c97-4d0d-b517-7f9dd9dcfa44",
+      "timestamp": "2026-07-13T04:14:46.131781Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_short",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "23fc6c99-2982-4140-99e5-468421564eca",
+      "timestamp": "2026-07-13T04:15:10.394094Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "2f5b60cf-ac66-413e-bb4d-e00d410230a7",
+      "timestamp": "2026-07-13T04:16:53.932996Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "528db98f-884d-4fa5-9702-95f248cfa5f9",
+      "timestamp": "2026-07-13T04:20:42.656606Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "c7ca54a3-21f5-4c71-94cc-6f239448b98d",
+      "timestamp": "2026-07-13T04:25:49.340101Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "7b9da60b-0417-4b4f-a366-6b5d742b5bce",
+      "timestamp": "2026-07-13T04:30:46.956581Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "c6025404-1782-4e6d-9236-75ab886db907",
+      "timestamp": "2026-07-13T04:33:06.570207Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "d2b9917d-efd6-4901-af1b-df40952babef",
+      "timestamp": "2026-07-13T04:34:05.536492Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "761c0d17-f530-4155-ba7f-4afe24100096",
+      "timestamp": "2026-07-13T04:35:48.858211Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "2b1124f1-641a-49de-8906-909829bba4ae",
+      "timestamp": "2026-07-13T04:37:10.022922Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "03066986-d0da-4faf-bd46-caff587ee00b",
+      "timestamp": "2026-07-13T04:38:35.440453Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "b8b157bf-7c8c-4cfc-98ce-1541228a2596",
+      "timestamp": "2026-07-13T04:40:50.404815Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "04c2d749-b06e-44bc-9d57-99f289fae106",
+      "timestamp": "2026-07-13T04:45:51.296684Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "ad650bad-a282-4f4e-8c8e-75ca57f1c5ec",
+      "timestamp": "2026-07-13T04:50:59.808291Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "b5e73e0e-f564-4b38-8ab9-561df2006cc6",
+      "timestamp": "2026-07-13T04:51:00.045648Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "12b00e04-f745-4d4c-a359-6d146afc2c36",
+      "timestamp": "2026-07-13T04:55:54.683957Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "76e443db-1696-43fa-b56e-722c2818c41a",
+      "timestamp": "2026-07-13T04:57:30.747198Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "f0aa6d21-b37c-4c6d-91b1-30b17c87d00b",
+      "timestamp": "2026-07-13T05:00:17.559725Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "9a714070-c744-4d80-ba9b-3f6acabbe5b3",
+      "timestamp": "2026-07-13T05:00:57.037217Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "c0cc776b-3088-4ef4-a839-4c601ac1c3c2",
+      "timestamp": "2026-07-13T05:02:10.870094Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "breakout"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "3be3562c-5af2-4201-ba59-c088c8d4fe19",
+      "timestamp": "2026-07-13T05:05:47.540529Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "8678039a-8ffc-4d8e-8432-d0cd76578e0d",
+      "timestamp": "2026-07-13T05:05:58.842285Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    },
+    {
+      "event_id": "54275952-c073-4e1b-ba09-93ffb186eae9",
+      "timestamp": "2026-07-13T05:10:47.616777Z",
+      "bucket": "B4",
+      "v43_reject": "gates_passed_long",
+      "v43_policy_signal": "HOLD",
+      "eligible_profiles": [
+        "basis_crowding"
+      ],
+      "hypothesis_count": 0,
+      "long_pressure": 0.0,
+      "short_pressure": 0.0,
+      "shadow_rule_based": "HOLD",
+      "top_codes": [
+        "fusion_mode=ml_or_thesis",
+        "thesis_type=flat",
+        "hypothesis_no_rule_fired",
+        "regime=neutral",
+        "fusion_ml_or_thesis_blocked",
+        "thesis_blocks_ml_adoption"
+      ]
+    }
+  ],
+  "bucket_definitions": {
+    "B1": "hypothesis_no_rule_fired + zero candidates / empty eligible_profiles",
+    "B2": "candidates exist but total pressure <= 1e-9",
+    "B3": "hypothesis_margin_below_min",
+    "B4": "v43 gates_passed_* but policy HOLD with flat hypothesis",
+    "A": "rule_based shadow agrees with live HOLD"
+  }
+}
