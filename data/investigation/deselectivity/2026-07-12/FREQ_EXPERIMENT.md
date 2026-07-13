@@ -86,6 +86,10 @@ AGENT_POLICY_ALLOW_GATED_ML_ON_FLAT_HYPOTHESIS=true
 AGENT_THESIS_USE_HURST_V2=true
 ```
 
+## KILLED 2026-07-13
+
+Baseline restored. See [`FREQ_EXPERIMENT_KILL.md`](FREQ_EXPERIMENT_KILL.md) — Stage 1 ADX OFF was causal; Stages 2–3 not causal for the loss fills.
+
 ## Rollback procedure (kill → restore baseline)
 
 1. Restore rollback block in `.env` (see “Rollback values” above).
