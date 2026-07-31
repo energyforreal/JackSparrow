@@ -1,9 +1,10 @@
-"""Unit tests for IC model discovery."""
+"""Unit tests for transformer model discovery."""
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,11 +16,15 @@ os.environ.setdefault("DELTA_EXCHANGE_API_SECRET", "test-secret")
 os.environ.setdefault("MODEL_DIR", "./test_models")
 os.environ.setdefault("MODEL_PATH", "")
 
-from agent.intelligence.ic_node import IC_MODEL_FAMILY, RuleBasedIntelligenceNode
 from agent.models.model_discovery import ModelDiscovery
 from agent.models.mcp_model_registry import MCPModelRegistry
-from feature_store.jacksparrow_v43_contract import V43_CANONICAL_FEATURES, V43_COMPATIBLE_FEATURE_VERSION
-from feature_store.jacksparrow_v43_multihead import V43_HORIZON_KEY_TO_BARS, V43_HORIZON_KEYS
+from agent.models.transformer_node import TransformerModelNode
+from feature_store.transformer_btcusd_15m.contract import (
+    TRANSFORMER_FEATURE_CONFIG_FILENAME,
+    TRANSFORMER_METADATA_FILENAME,
+    TRANSFORMER_MODEL_FAMILY,
+    TRANSFORMER_ONNX_FILENAME,
+)
 
 
 @pytest.fixture
@@ -32,43 +37,33 @@ def model_registry() -> MCPModelRegistry:
     return MCPModelRegistry()
 
 
-def _write_ic_meta(model_dir: Path, name: str = "test_ic") -> Path:
-    thr = 0.005
-    horizons = {
-        key: {
-            "forward_bars": V43_HORIZON_KEY_TO_BARS[key],
-            "horizon_minutes": V43_HORIZON_KEY_TO_BARS[key] * 5,
-            "horizon_key": key,
-            "validation_metrics": {"dynamic_threshold": thr, "short_threshold": thr},
-        }
-        for key in V43_HORIZON_KEYS
-    }
-    meta = model_dir / "metadata_ic.json"
+def _write_transformer_bundle(model_dir: Path, name: str = "test_transformer") -> Path:
+    src = Path("agent/model_storage/JackSparrow_Transformer_BTCUSD")
+    meta = model_dir / TRANSFORMER_METADATA_FILENAME
     meta.write_text(
         json.dumps(
             {
                 "model_name": name,
-                "version": "ic_v1",
-                "model_family": IC_MODEL_FAMILY,
-                "compatible_feature_version": V43_COMPATIBLE_FEATURE_VERSION,
-                "features": list(V43_CANONICAL_FEATURES),
-                "primary_execution_horizon_bars": 2,
-                "horizons": horizons,
+                "version": "transformer_v1",
+                "model_family": TRANSFORMER_MODEL_FAMILY,
+                "default_threshold": 0.005,
             }
         ),
         encoding="utf-8",
     )
+    shutil.copy2(src / TRANSFORMER_ONNX_FILENAME, model_dir / TRANSFORMER_ONNX_FILENAME)
+    shutil.copy2(src / TRANSFORMER_FEATURE_CONFIG_FILENAME, model_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME)
     return meta
 
 
 @pytest.mark.asyncio
-async def test_discover_ic_registers_when_auto_register(
+async def test_discover_transformer_registers_when_auto_register(
     temp_model_dir: Path, model_registry: MCPModelRegistry
 ) -> None:
-    _write_ic_meta(temp_model_dir)
-    mock_node = MagicMock(spec=RuleBasedIntelligenceNode)
-    mock_node.model_name = "test_ic"
-    mock_node.model_type = "rule_based_intelligence"
+    _write_transformer_bundle(temp_model_dir)
+    mock_node = MagicMock(spec=TransformerModelNode)
+    mock_node.model_name = "test_transformer"
+    mock_node.model_type = "transformer"
     mock_node.initialize = AsyncMock()
 
     with patch("agent.models.model_discovery.settings") as mock_settings:
@@ -77,18 +72,18 @@ async def test_discover_ic_registers_when_auto_register(
         mock_settings.model_auto_register = True
 
         with patch.object(
-            RuleBasedIntelligenceNode, "from_metadata_path", return_value=mock_node
+            TransformerModelNode, "from_metadata_path", return_value=mock_node
         ):
             discovery = ModelDiscovery(model_registry)
             discovered = await discovery.discover_models()
 
-    assert discovered == ["test_ic"]
+    assert discovered == ["test_transformer"]
     mock_node.initialize.assert_awaited_once()
-    assert model_registry.get_model("test_ic") is mock_node
+    assert model_registry.get_model("test_transformer") is mock_node
 
 
 @pytest.mark.asyncio
-async def test_discover_empty_when_metadata_ic_missing(
+async def test_discover_empty_when_metadata_missing(
     temp_model_dir: Path, model_registry: MCPModelRegistry
 ) -> None:
     with patch("agent.models.model_discovery.settings") as mock_settings:

@@ -50,7 +50,6 @@ from agent.core.agent_order_registry import (
     record_agent_order_intent,
     record_decision_execution,
 )
-from agent.core.ml_signal_guard import validate_ml_entry_signal
 
 logger = structlog.get_logger()
 
@@ -739,37 +738,20 @@ class ExecutionEngine:
                 trade["reasoning_chain_id"] = eff_reasoning_chain_id
 
             if not payload.get("ml_signal_validated"):
-                model_preds = payload.get("model_predictions") or []
-                ml_ok, ml_reason = validate_ml_entry_signal(
-                    signal=side_raw,
-                    side=side_raw,
-                    model_predictions=model_preds,
-                    market_context=payload.get("market_context")
-                    if isinstance(payload.get("market_context"), dict)
-                    else {},
-                    ml_evidence_snapshot=payload.get("ml_evidence_snapshot")
-                    if isinstance(payload.get("ml_evidence_snapshot"), dict)
-                    else None,
-                    policy_verdict=payload.get("policy_verdict")
-                    if isinstance(payload.get("policy_verdict"), dict)
-                    else None,
+                min_conf = float(
+                    getattr(settings, "transformer_min_confidence", None)
+                    or getattr(settings, "min_confidence_threshold", 0.52)
+                    or 0.52
                 )
-                if not ml_ok:
+                conf = float(payload.get("confidence") or 0.0)
+                if conf < min_conf:
                     logger.warning(
-                        "execution_risk_approved_ml_signal_rejected",
+                        "execution_risk_approved_low_confidence_rejected",
                         symbol=symbol,
                         side=side_raw,
-                        reason=ml_reason,
+                        confidence=conf,
+                        threshold=min_conf,
                         event_id=event.event_id,
-                    )
-                    logger.warning(
-                        "trading_execution_rejected",
-                        correlation_id=event.event_id,
-                        symbol=symbol,
-                        side=side_raw,
-                        stage="ml_signal_guard",
-                        reason=ml_reason,
-                        trading_mode=str(getattr(settings, "trading_mode", "testnet")),
                     )
                     return
             trade["ml_signal_validated"] = True

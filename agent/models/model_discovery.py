@@ -1,27 +1,32 @@
 """
-Model discovery: rule-based Intelligence Component (IC) bundle only.
+Model discovery: transformer ONNX bundle only.
 """
 
 import structlog
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from agent.core.config import settings
-from agent.intelligence.ic_node import IC_METADATA_FILENAME, RuleBasedIntelligenceNode
 from agent.models.mcp_model_registry import MCPModelRegistry
+from agent.models.transformer_node import TransformerModelNode
+from feature_store.transformer_btcusd_15m.contract import (
+    TRANSFORMER_FEATURE_CONFIG_FILENAME,
+    TRANSFORMER_METADATA_FILENAME,
+    TRANSFORMER_ONNX_FILENAME,
+)
 
 logger = structlog.get_logger()
 
 
-def _resolve_ic_metadata_path(model_dir: Path) -> Optional[Path]:
-    candidate = model_dir / IC_METADATA_FILENAME
+def _resolve_transformer_metadata_path(model_dir: Path) -> Path | None:
+    candidate = model_dir / TRANSFORMER_METADATA_FILENAME
     if candidate.is_file():
         return candidate
     return None
 
 
 class ModelDiscovery:
-    """Discovers the rule-based IC bundle from MODEL_DIR."""
+    """Discovers transformer bundle from MODEL_DIR."""
 
     def __init__(self, registry: MCPModelRegistry):
         self.registry = registry
@@ -40,14 +45,13 @@ class ModelDiscovery:
             model_dir=str(self.model_dir),
             model_path=self.model_path,
             auto_register=self.auto_register,
-            ic_mode=True,
         )
 
         if self.model_path:
             logger.warning(
                 "model_discovery_model_path_ignored",
                 model_path=self.model_path,
-                message="MODEL_PATH is ignored; use MODEL_DIR pointing at the IC bundle.",
+                message="MODEL_PATH is ignored; use MODEL_DIR pointing at a model bundle.",
             )
 
         if not self.model_dir.is_dir():
@@ -63,13 +67,13 @@ class ModelDiscovery:
             )
             return discovered_models
 
-        ic_meta = _resolve_ic_metadata_path(self.model_dir)
-        if not ic_meta:
+        transformer_meta = _resolve_transformer_metadata_path(self.model_dir)
+        if not transformer_meta:
             msg = (
-                f"No {IC_METADATA_FILENAME} under {self.model_dir}; "
-                "point MODEL_DIR at agent/model_storage/JackSparrow_IC_BTCUSD"
+                f"No {TRANSFORMER_METADATA_FILENAME} found in {self.model_dir}. "
+                "Train in Colab and copy ONNX exports into the bundle."
             )
-            logger.error("model_discovery_ic_metadata_missing", message=msg)
+            logger.error("model_discovery_transformer_missing", message=msg)
             failed_models.append(str(self.model_dir))
             failed_reasons.append(msg)
             self.registry.record_discovery_summary(
@@ -80,26 +84,49 @@ class ModelDiscovery:
             )
             return discovered_models
 
+        onnx_path = self.model_dir / TRANSFORMER_ONNX_FILENAME
+        cfg_path = self.model_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME
+        for artifact_path, label in (
+            (onnx_path, TRANSFORMER_ONNX_FILENAME),
+            (cfg_path, TRANSFORMER_FEATURE_CONFIG_FILENAME),
+        ):
+            if not artifact_path.is_file():
+                msg = f"Missing {label} in {self.model_dir}"
+                logger.error("model_discovery_artifact_missing", artifact=label, message=msg)
+                failed_models.append(str(artifact_path))
+                failed_reasons.append(msg)
+                self.registry.record_discovery_summary(
+                    discovered_models,
+                    failed_models,
+                    failed_reasons,
+                    discovery_attempted=discovery_attempted,
+                )
+                return discovered_models
+
         try:
-            node = RuleBasedIntelligenceNode.from_metadata_path(ic_meta)
+            node = TransformerModelNode.from_metadata_path(transformer_meta)
             await node.initialize()
-            self._register_node(node, discovered_models)
-            logger.info(
-                "model_discovered_ic",
-                model_name=node.model_name,
-                model_path=str(ic_meta),
-                model_type=node.model_type,
-            )
+            if self.auto_register:
+                self.registry.register_model(node)
+                discovered_models.append(node.model_name)
+                logger.info(
+                    "model_discovered_transformer",
+                    model_name=node.model_name,
+                    metadata=str(transformer_meta),
+                )
+            else:
+                self.registry.add_pending_model(node)
+                discovered_models.append(f"pending:{node.model_name}")
         except Exception as exc:
-            failed_models.append(str(ic_meta))
-            failed_reasons.append(f"{ic_meta.name}: {type(exc).__name__}: {exc}")
+            msg = f"Transformer bundle load failed: {exc}"
             logger.error(
-                "model_discovery_ic_failed",
-                model_path=str(ic_meta),
+                "model_discovery_transformer_failed",
+                metadata=str(transformer_meta),
                 error=str(exc),
-                error_type=type(exc).__name__,
                 exc_info=True,
             )
+            failed_models.append(str(transformer_meta))
+            failed_reasons.append(msg)
 
         self.registry.record_discovery_summary(
             discovered_models,
@@ -108,20 +135,3 @@ class ModelDiscovery:
             discovery_attempted=discovery_attempted,
         )
         return discovered_models
-
-    def _register_node(
-        self,
-        model_node: RuleBasedIntelligenceNode,
-        discovered_models: List[str],
-    ) -> None:
-        discovered_models.append(model_node.model_name)
-        if self.auto_register:
-            self.registry.register_model(model_node)
-        else:
-            self.registry.add_pending_model(model_node)
-            logger.info(
-                "model_discovery_pending_model",
-                model_name=model_node.model_name,
-                model_type=model_node.model_type,
-                reason="model_auto_register disabled",
-            )

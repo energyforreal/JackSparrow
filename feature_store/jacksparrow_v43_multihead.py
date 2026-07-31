@@ -555,7 +555,7 @@ def format_export_gate_summary(
 
 def head_thresholds(meta: Mapping[str, Any], horizon_key: str) -> Tuple[float, float]:
     family = str(meta.get("model_family") or "").strip()
-    if family == "jacksparrow_ic_rule_based":
+    if family in ("jacksparrow_ic_rule_based", "jacksparrow_transformer_btcusd_15m"):
         horizons = meta.get("horizons")
         block = horizons.get(horizon_key, {}) if isinstance(horizons, dict) else {}
         vm = (

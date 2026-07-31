@@ -154,21 +154,18 @@ def test_validate_v43_metadata_rejects_feature_order_mismatch() -> None:
         validate_v43_metadata_compatibility({"features": feats})
 
 
-def test_ic_node_rejects_bad_metadata(tmp_path) -> None:
-    from agent.intelligence.ic_node import RuleBasedIntelligenceNode
+def test_transformer_node_rejects_bad_metadata(tmp_path) -> None:
+    from agent.models.transformer_node import TransformerModelNode
 
     bad = {
         "model_name": "x",
-        "version": "ic_v1",
-        "model_family": "jacksparrow_ic_rule_based",
-        "features": list(V43_CANONICAL_FEATURES),
-        "compatible_feature_version": "nope",
-        "horizons": {"scalp_10m": {"forward_bars": 2, "validation_metrics": {"dynamic_threshold": 0.005}}},
+        "version": "transformer_v1",
+        "model_family": "wrong_family",
     }
-    p = tmp_path / "metadata_ic.json"
+    p = tmp_path / "metadata_transformer.json"
     p.write_text(json.dumps(bad), encoding="utf-8")
-    with pytest.raises(ValueError, match="incompatible"):
-        RuleBasedIntelligenceNode.from_metadata_path(p)
+    with pytest.raises(ValueError, match="model_family"):
+        TransformerModelNode.from_metadata_path(p)
 
 
 def test_audit_v43_metadata_warns_zero_short_candidates() -> None:

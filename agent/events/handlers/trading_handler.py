@@ -25,13 +25,8 @@ from agent.core.futures_utils import (
 from agent.core.sl_tp import compute_stop_take_prices
 from agent.core.product_specs import get_contract_specs
 from agent.core.decision_timestamp import decision_payload_age_seconds
-from agent.core.learning_system import LearningSystem
 from agent.core.signal_filter import EntrySignalFilter
 from agent.core.redis_config import get_cache
-from agent.learning.dynamic_thresholds import (
-    get_effective_min_confidence_threshold,
-    resolve_metadata_recommended_threshold,
-)
 
 logger = structlog.get_logger()
 
@@ -56,19 +51,11 @@ class TradingEventHandler:
     """Handler that bridges DecisionReadyEvent to RiskApprovedEvent."""
 
     def __init__(self, risk_manager, delta_client=None, execution_module=None, learning_system=None):
-        """Initialize trading event handler.
-
-        Args:
-            risk_manager: RiskManager instance for trade validation
-            delta_client: DeltaExchangeClient for fetching live market prices (required for paper trading)
-            execution_module: ExecutionEngine instance for position checks and signal-reversal exit
-            learning_system: Shared LearningSystem instance (optional; creates one if omitted)
-        """
+        """Initialize trading event handler."""
         self.risk_manager = risk_manager
         self.context_manager = context_manager
         self.delta_client = delta_client
         self.execution_module = execution_module
-        self.learning_system = learning_system or LearningSystem()
         # Deduplicate: last (symbol, side) -> timestamp of last RiskApproved published
         self._last_risk_approved: Dict[str, float] = {}
         self._entry_signal_filter = EntrySignalFilter(
@@ -308,9 +295,6 @@ class TradingEventHandler:
                 ),
             }
             raw_confidence = confidence
-            confidence = await self.learning_system.calibrate_runtime_confidence(
-                confidence, model_predictions
-            )
             diagnostics_base["raw_confidence"] = raw_confidence
             diagnostics_base["calibrated_confidence"] = confidence
 
@@ -479,14 +463,12 @@ class TradingEventHandler:
                     float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52) * 0.85,
                 )
             else:
-                # Check confidence threshold (Redis learning layer may nudge within bounds)
-                eff_min_conf = await get_effective_min_confidence_threshold(
-                    learning_system=self.learning_system,
+                eff_min_conf = float(
+                    getattr(settings, "transformer_min_confidence", None)
+                    or getattr(settings, "min_confidence_threshold", 0.52)
+                    or 0.52
                 )
-                rec_threshold = resolve_metadata_recommended_threshold(
-                    signal=signal,
-                    model_predictions=model_predictions,
-                )
+                rec_threshold = None
                 # Optional temporary validation mode for paper-trading pipeline checks.
                 if bool(getattr(settings, "paper_trade_validation_mode", False)):
                     eff_min_conf = float(
@@ -1101,23 +1083,19 @@ class TradingEventHandler:
             if not isinstance(market_context, dict):
                 market_context = {}
 
-            from agent.core.ml_signal_guard import validate_ml_entry_signal
-
-            ml_ok, ml_reason = validate_ml_entry_signal(
-                signal=signal,
-                side=side,
-                model_predictions=model_predictions,
-                market_context=market_context,
-                ml_evidence_snapshot=payload.get("ml_evidence_snapshot"),
-                policy_verdict=payload.get("policy_verdict"),
+            eff_min_conf = float(
+                getattr(settings, "transformer_min_confidence", None)
+                or getattr(settings, "min_confidence_threshold", 0.52)
+                or 0.52
             )
-            if not ml_ok:
+            if float(confidence or 0.0) < eff_min_conf:
                 self._log_entry_rejected(
-                    "ml_signal_not_valid",
+                    "low_confidence_reject",
                     symbol=symbol,
                     signal=signal,
                     event_id=event.event_id,
-                    ml_reject_reason=ml_reason,
+                    confidence=confidence,
+                    threshold=eff_min_conf,
                     **diagnostics_base,
                 )
                 return

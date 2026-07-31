@@ -63,7 +63,6 @@ logger = structlog.get_logger()
 from agent.core.state_machine import AgentState, AgentStateMachine
 from agent.core.context_manager import ContextManager, context_manager
 from agent.core.mcp_orchestrator import MCPOrchestrator, mcp_orchestrator
-from agent.core.learning_system import LearningSystem
 from agent.core.execution import execution_module
 from agent.core.position_restore import restore_open_positions_from_db
 from agent.core.redis_config import get_redis
@@ -77,8 +76,6 @@ from agent.events.schemas import EventType
 from agent.events.handlers import (
     market_data_handler,
     feature_handler,
-    model_handler,
-    reasoning_handler
 )
 
 
@@ -116,10 +113,9 @@ class IntelligentAgent:
         self.context_manager = context_manager
         self.mcp_orchestrator = mcp_orchestrator
         self.model_registry = None  # Set after MCP orchestrator initializes
-        self.learning_system = LearningSystem()
         self.state_machine = AgentStateMachine(
             context_manager=context_manager,
-            learning_system=self.learning_system,
+            learning_system=None,
             model_registry=None,
         )
         self.risk_manager = RiskManager(config=settings)
@@ -245,9 +241,6 @@ class IntelligentAgent:
         # Model discovery and initialization is handled by MCP orchestrator
         self.model_registry = self.mcp_orchestrator.model_registry
         self.state_machine.model_registry = self.model_registry
-        self.mcp_orchestrator.learning_system = self.learning_system
-        if self.mcp_orchestrator.reasoning_engine is not None:
-            self.mcp_orchestrator.reasoning_engine.learning_system = self.learning_system
         
         # Initialize all components with event handlers
         await self.state_machine.initialize()
@@ -354,7 +347,6 @@ class IntelligentAgent:
                 service="agent",
                 error=str(exc),
             )
-        await self.learning_system.initialize()
         await self.market_data_service.initialize()
 
         # Register Redis fallback: when Redis is unavailable, trigger pipeline directly
@@ -363,45 +355,9 @@ class IntelligentAgent:
 
         self.market_data_service.set_pipeline_direct_trigger(_direct_pipeline_trigger)
         
-        # Initialize model weights from performance metrics if available
-        try:
-            if self.model_registry.models:
-                model_names = list(self.model_registry.models.keys())
-                # Create base weights dict with equal weights for all models
-                base_weights = {name: 1.0 for name in model_names}
-                performance_weights = await self.learning_system.get_updated_model_weights(base_weights)
-                if performance_weights:
-                    self.model_registry.update_weights_from_performance(performance_weights)
-                    logger.info(
-                        "agent_model_weights_initialized",
-                        service="agent",
-                        model_count=len(model_names),
-                        weights=performance_weights,
-                        message="Model weights initialized from performance metrics"
-                    )
-                else:
-                    # No performance data available, use default equal weights
-                    logger.info(
-                        "agent_model_weights_using_defaults",
-                        service="agent",
-                        model_count=len(model_names),
-                        message="No performance data available, using default equal weights for all models"
-                    )
-        except Exception as e:
-            logger.warning(
-                "agent_model_weights_init_failed",
-                service="agent",
-                error=str(e),
-                error_type=type(e).__name__,
-                message="Model weights initialization failed, will use default equal weights",
-                exc_info=True
-            )
-        
         # Register event handlers
         await market_data_handler.register_handlers()
         await feature_handler.register_handlers()
-        await model_handler.register_handlers()
-        await reasoning_handler.register_handlers()
         # Trading handler bridges DecisionReadyEvent -> RiskApprovedEvent for paper trading
         from agent.events.handlers.trading_handler import TradingEventHandler
         from agent.core.execution import execution_module as exec_module
@@ -409,7 +365,6 @@ class IntelligentAgent:
             risk_manager=self.risk_manager,
             delta_client=self.delta_client,
             execution_module=exec_module,
-            learning_system=self.learning_system,
         )
         await trading_handler.register_handlers()
         
@@ -1480,10 +1435,8 @@ class IntelligentAgent:
         # Add overall status
         detailed_health["overall_status"] = health.get("overall_status", "unknown")
 
-        from agent.core.agent_thesis_engine import get_last_thesis_snapshot
-
-        thesis_snap = get_last_thesis_snapshot()
-        policy_mode = str(getattr(settings, "agent_policy_mode", "ic") or "ic")
+        thesis_snap = {}
+        policy_mode = "transformer"
         latency_ms = round((time.perf_counter() - status_started) * 1000.0, 2)
 
         return {

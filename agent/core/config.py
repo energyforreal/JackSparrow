@@ -136,17 +136,32 @@ class Settings(BaseSettings):
         description="Path to production model file"
     )
     model_dir: str = Field(
-        default="./agent/model_storage/JackSparrow_IC_BTCUSD",
+        default="./agent/model_storage/JackSparrow_Transformer_BTCUSD",
         env="MODEL_DIR",
-        description=(
-            "Intelligence Component bundle directory (metadata_ic.json). "
-            "Legacy v43 ML bundles are no longer loaded."
-        ),
+        description="Transformer ONNX bundle directory (metadata_transformer.json).",
     )
-    ic_mode: bool = Field(
+    transformer_signal_threshold: Optional[float] = Field(
+        default=None,
+        env="TRANSFORMER_SIGNAL_THRESHOLD",
+        description="Override default_threshold from bundle metadata for signal mapping.",
+    )
+    transformer_strong_edge_multiplier: float = Field(
+        default=1.5,
+        env="TRANSFORMER_STRONG_EDGE_MULTIPLIER",
+        ge=1.0,
+        description="Edge multiplier for STRONG_BUY/STRONG_SELL vs plain BUY/SELL.",
+    )
+    transformer_extreme_regime_veto: bool = Field(
         default=True,
-        env="IC_MODE",
-        description="Use rule-based Intelligence Component instead of ML model artifacts.",
+        env="TRANSFORMER_EXTREME_REGIME_VETO",
+        description="Force HOLD when transformer vol regime is EXTREME.",
+    )
+    transformer_min_confidence: float = Field(
+        default=0.55,
+        env="TRANSFORMER_MIN_CONFIDENCE",
+        ge=0.0,
+        le=1.0,
+        description="Minimum model confidence before emitting entry signals.",
     )
     ic_micro_momentum_enabled: bool = Field(
         default=True,

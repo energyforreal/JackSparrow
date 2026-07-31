@@ -26,7 +26,7 @@ from agent.events.schemas import (
     DecisionReadyEvent,
     EventType,
 )
-from agent.core.learning_system import TradeOutcome
+from agent.core.trade_outcome import TradeOutcome
 
 logger = structlog.get_logger()
 

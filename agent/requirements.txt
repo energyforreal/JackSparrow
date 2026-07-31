@@ -1,6 +1,9 @@
 # IC / vector memory (NO-ML branch — xgboost/lightgbm not used at runtime)
 scikit-learn==1.6.1
 
+# Transformer inference (ONNX export from Colab)
+onnxruntime>=1.17.0
+
 # Data Processing
 numpy==1.26.4
 pandas==2.1.3

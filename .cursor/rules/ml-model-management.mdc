@@ -1,38 +1,37 @@
 ---
-description: Intelligence Component (IC) bundle and MCP protocol standards
+description: Transformer ONNX bundle and MCP protocol standards
 globs:
   - "agent/models/**/*.py"
-  - "agent/intelligence/**/*.py"
+  - "feature_store/transformer_btcusd_15m/**/*.py"
   - "agent/model_storage/**/*"
 alwaysApply: false
 ---
 
-# Intelligence Component (IC) Standards
+# Transformer Model Standards
 
 ## Model File Organization
 
-- **Default runtime bundle**: `agent/model_storage/JackSparrow_IC_BTCUSD/` — `metadata_ic.json` only (no pickle artifacts).
-- **`MODEL_DIR`** / **`AGENT_MODEL_DIR`**: Must point at the IC bundle directory.
-- **`IC_MODE`**: Default `true`; discovery loads `RuleBasedIntelligenceNode` only.
-- **Feature contract**: Same canonical feature list as v43 (`feature_store/jacksparrow_v43_contract.py`); matrix built by `jacksparrow_v43_build_matrix.py`.
+- **Default runtime bundle**: `agent/model_storage/JackSparrow_Transformer_BTCUSD/`
+- Required artifacts: `metadata_transformer.json`, `btcusd_15m_transformer.onnx`, `feature_config.json`
+- **`MODEL_DIR`** / **`AGENT_MODEL_DIR`**: Must point at the transformer bundle directory.
+- **Feature contract**: `feature_store/transformer_btcusd_15m/` (train/serve parity with Colab).
 
 ## Environment Variables
 
-- **`MODEL_FORMAT`**: `jacksparrow_ic` (health/API label).
-- **`WEBSOCKET_URL`**: `wss://socket-ind.testnet.deltaex.org` for India testnet (not the REST CDN host).
-- **`AGENT_POLICY_MODE`**: `ml_or_thesis` or `thesis_only` recommended.
-- **`REQUIRE_ML_SIGNAL_FOR_ORDERS`**: `false` when IC drives the pipeline.
-- **`REQUIRE_V43_GATES_FOR_ENTRY`**: `false` or ensure IC populates `final_long`/`final_short`.
-- **Docker**: `docker-compose.yml` agent service sets `WEBSOCKET_URL` and `MODEL_DIR` defaults when unset.
+- **`TRANSFORMER_MIN_CONFIDENCE`**: Minimum confidence for entry signals (default `0.55`).
+- **`TRANSFORMER_STRONG_EDGE_MULTIPLIER`**: Edge multiplier for STRONG_BUY/SELL (default `1.5`).
+- **`TRANSFORMER_EXTREME_REGIME_VETO`**: Force HOLD when vol regime is EXTREME (default `true`).
+- **Docker**: `docker-compose.yml` agent service sets `MODEL_DIR` to transformer bundle by default.
 
 ## Model Implementation
 
-All intelligence nodes implement `MCPModelNode`:
+`TransformerModelNode` implements `MCPModelNode`:
 
-- `predict()` must emit `context["multi_horizon_heads"]` for orchestrator compatibility.
-- Predictions normalized to -1.0 to +1.0; include confidence and reasoning.
+- Loads ONNX via `onnxruntime`
+- `predict()` emits transformer context consumed by `agent/core/transformer_decision.py`
 
 ## Tests
 
-- `pytest tests/unit/test_intelligence_ic_node.py`
-- `pytest tests/unit/trading_agent_tests/test_model_discovery.py`
+- `pytest tests/unit/test_transformer_btcusd_15m.py`
+- `pytest tests/unit/test_transformer_decision.py`
+- `pytest tests/unit/test_transformer_model_discovery.py`
