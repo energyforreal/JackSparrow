@@ -140,6 +140,107 @@ async def _fetch_oi_df(
         return pd.DataFrame()
 
 
+async def fetch_mtf_market_frames(
+    delta_client: Any,
+    symbol: str,
+) -> Tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
+    """Load 5m/15m/30m/1h/2h OHLCV, funding, OI, and MARK candles.
+
+    Returns:
+        Tuple ``(df5m, df15m, df30m, df1h, df2h, df_funding, df_oi, df_mark)``.
+    """
+    n5 = int(getattr(settings, "jacksparrow_v43_candles_5m", 600) or 600)
+    n15 = int(getattr(settings, "jacksparrow_v43_candles_15m", 400) or 400)
+    n30 = int(getattr(settings, "transformer_candles_30m", 300) or 300)
+    n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 300) or 300)
+    n2h = int(getattr(settings, "transformer_candles_2h", 200) or 200)
+    n_oi = int(getattr(settings, "jacksparrow_v43_candles_oi", 300) or 300)
+    mark_symbol = f"MARK:{symbol}"
+
+    (
+        df5m,
+        df15m,
+        df30m,
+        df1h,
+        df2h,
+        df_funding,
+        df_oi,
+        df_mark,
+    ) = await asyncio.gather(
+        _fetch_ohlcv_df(delta_client, symbol, "5m", 300, n5),
+        _fetch_ohlcv_df(delta_client, symbol, "15m", 900, n15),
+        _fetch_ohlcv_df(delta_client, symbol, "30m", 1800, n30),
+        _fetch_ohlcv_df(delta_client, symbol, "1h", 3600, n1h),
+        _fetch_ohlcv_df(delta_client, symbol, "2h", 7200, n2h),
+        _fetch_funding_series(delta_client, symbol, n1h),
+        _fetch_oi_df(delta_client, symbol, n_oi),
+        _fetch_ohlcv_df(delta_client, mark_symbol, "5m", 300, n5),
+    )
+
+    if df_funding.empty and not df_oi.empty and "predicted_funding_rate" in df_oi.columns:
+        df_funding = (
+            df_oi[["timestamp", "predicted_funding_rate"]]
+            .rename(columns={"predicted_funding_rate": "funding_rate"})
+            .copy()
+        )
+        logger.info(
+            "v43_funding_from_oi_predicted_rate",
+            symbol=symbol,
+            rows=len(df_funding),
+        )
+    elif df_funding.empty and not df1h.empty:
+        logger.warning(
+            "v43_funding_zero_fill_fallback",
+            symbol=symbol,
+            message="Using 0.0 funding_rate — FUNDING fetch and OI predicted_funding_rate unavailable",
+        )
+        df_funding = pd.DataFrame(
+            {
+                "timestamp": df1h["timestamp"].values,
+                "funding_rate": 0.0,
+            }
+        )
+
+    strict = bool(getattr(settings, "strict_candle_validation_enabled", True))
+    min_rows_cfg = int(getattr(settings, "strict_candle_validation_min_rows", 50) or 50)
+    if strict:
+        for df, res in (
+            (df5m, "5m"),
+            (df15m, "15m"),
+            (df30m, "30m"),
+            (df1h, "1h"),
+            (df2h, "2h"),
+        ):
+            if len(df) < 2:
+                continue
+            need = min(min_rows_cfg, len(df))
+            try:
+                validate_candles(
+                    df,
+                    res,
+                    min_rows=max(2, need),
+                    allow_last_irregular=True,
+                )
+            except ValueError as e:
+                logger.warning(
+                    "v43_candle_validation_failed",
+                    resolution=res,
+                    rows=len(df),
+                    error=str(e),
+                )
+
+    return df5m, df15m, df30m, df1h, df2h, df_funding, df_oi, df_mark
+
+
 async def fetch_v43_market_frames(
     delta_client: Any,
     symbol: str,

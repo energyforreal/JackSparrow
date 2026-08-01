@@ -1,4 +1,4 @@
-"""ONNX transformer MCP model node for BTCUSD 15m bundle."""
+"""ONNX transformer MCP model node for per-TF BTCUSD bundles."""
 
 from __future__ import annotations
 
@@ -13,23 +13,24 @@ import pandas as pd
 import structlog
 
 from agent.core.config import settings
+from agent.core.mtf_decision_policy import resolution_to_ctx_key, resolution_to_tf_key
 from agent.core.v43_market_frames import closed_5m_bar_index
 from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
 from agent.models.transformer_context_builder import build_transformer_prediction_context
-from feature_store.transformer_btcusd_15m.contract import (
+from feature_store.transformer_btcusd.contract import (
     FEATURE_COLS,
+    RESOLUTION_MINUTES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
-    TRANSFORMER_MODEL_FAMILY,
-    TRANSFORMER_ONNX_FILENAME,
+    onnx_filename_for_resolution,
 )
-from feature_store.transformer_btcusd_15m.features import (
+from feature_store.transformer_btcusd.features import (
     build_feature_matrix,
     latest_closed_feature_row,
     prepare_raw_frame,
     validate_feature_columns,
 )
-from feature_store.transformer_btcusd_15m.inference import (
+from feature_store.transformer_btcusd.inference import (
     build_inference_window,
     parse_regime_prediction,
     resolve_feature_config,
@@ -37,6 +38,8 @@ from feature_store.transformer_btcusd_15m.inference import (
 )
 
 logger = structlog.get_logger()
+
+_LEGACY_MODEL_FAMILY = "jacksparrow_transformer_btcusd_15m"
 
 
 def _ctx_dataframe(ctx: Dict[str, Any], primary_key: str, fallback_key: str) -> Optional[pd.DataFrame]:
@@ -49,8 +52,15 @@ def _ctx_dataframe(ctx: Dict[str, Any], primary_key: str, fallback_key: str) -> 
     return None
 
 
+def _is_transformer_family(family: str) -> bool:
+    fam = str(family or "").strip()
+    if fam == _LEGACY_MODEL_FAMILY:
+        return True
+    return fam.startswith("jacksparrow_transformer_btcusd_")
+
+
 class TransformerModelNode(MCPModelNode):
-    """Loads Colab-exported ONNX transformer and emits v43 multi-head context."""
+    """Loads Colab-exported per-TF ONNX transformer and emits prediction context."""
 
     def __init__(
         self,
@@ -68,6 +78,11 @@ class TransformerModelNode(MCPModelNode):
             bundle_metadata.get("model_name") or "jacksparrow_transformer_BTCUSD"
         )
         self._model_version = str(bundle_metadata.get("version") or "transformer_v1")
+        self._resolution = str(bundle_metadata.get("resolution") or "15m").lower()
+        self._resolution_minutes = int(
+            bundle_metadata.get("resolution_minutes")
+            or RESOLUTION_MINUTES.get(self._resolution, 15)
+        )
         self._session: Any = None
         self._initialized = False
         self._health = "unknown"
@@ -87,6 +102,14 @@ class TransformerModelNode(MCPModelNode):
         return "transformer"
 
     @property
+    def resolution(self) -> str:
+        return self._resolution
+
+    @property
+    def tf_key(self) -> str:
+        return resolution_to_tf_key(self._resolution)
+
+    @property
     def _bundle_metadata(self) -> Dict[str, Any]:
         return self._bundle_meta
 
@@ -96,8 +119,6 @@ class TransformerModelNode(MCPModelNode):
         return int(
             cfg.get("path_label_horizon_bars")
             or self._bundle_meta.get("path_label_horizon_bars")
-            or cfg.get("label_horizon_bars")
-            or self._bundle_meta.get("label_horizon_bars")
             or 8
         )
 
@@ -107,20 +128,23 @@ class TransformerModelNode(MCPModelNode):
         if not isinstance(raw, dict):
             raise ValueError(f"Transformer metadata must be a JSON object: {meta_path}")
         family = str(raw.get("model_family") or "").strip()
-        if family != TRANSFORMER_MODEL_FAMILY:
+        if not _is_transformer_family(family):
             raise ValueError(
                 f"{TRANSFORMER_METADATA_FILENAME} model_family must be "
-                f"{TRANSFORMER_MODEL_FAMILY!r}, got {family!r}"
+                f"jacksparrow_transformer_btcusd_<resolution>, got {family!r}"
             )
 
         bundle_dir = meta_path.parent
         feature_config = resolve_feature_config(bundle_dir)
-        onnx_name = str(raw.get("onnx_filename") or TRANSFORMER_ONNX_FILENAME)
+        resolution = str(raw.get("resolution") or "15m")
+        onnx_name = str(
+            raw.get("onnx_filename") or onnx_filename_for_resolution(resolution)
+        )
         onnx_path = bundle_dir / onnx_name
         if not onnx_path.is_file():
             raise FileNotFoundError(
                 f"ONNX artifact not found: {onnx_path}. "
-                "Copy btcusd_15m_transformer.onnx from Colab into the model bundle."
+                f"Copy {onnx_name} from Colab into the model bundle."
             )
         return cls(meta_path, raw, feature_config, onnx_path)
 
@@ -142,6 +166,7 @@ class TransformerModelNode(MCPModelNode):
         logger.info(
             "transformer_node_initialized",
             model_name=self._model_name,
+            resolution=self._resolution,
             metadata=str(self._metadata_path),
             onnx=str(self._onnx_path),
             window_len=self._feature_config.get("window_len"),
@@ -154,6 +179,7 @@ class TransformerModelNode(MCPModelNode):
             "call_count": self._call_count,
             "error_count": self._error_count,
             "onnx_path": str(self._onnx_path),
+            "resolution": self._resolution,
         }
 
     def get_model_info(self) -> Dict[str, Any]:
@@ -161,12 +187,13 @@ class TransformerModelNode(MCPModelNode):
             "model_name": self._model_name,
             "version": self._model_version,
             "model_type": self.model_type,
+            "resolution": self._resolution,
             "features_required": list(self._feature_config.get("feature_cols") or FEATURE_COLS),
             "feature_list": list(self._feature_config.get("feature_cols") or FEATURE_COLS),
-            "description": "BTCUSD 15m transformer ONNX (Colab-trained market encoder)",
+            "description": f"BTCUSD {self._resolution} transformer ONNX (Colab-trained)",
             "metadata_path": str(self._metadata_path),
             "onnx_path": str(self._onnx_path),
-            "model_family": TRANSFORMER_MODEL_FAMILY,
+            "model_family": str(self._bundle_meta.get("model_family") or ""),
             "window_len": self._feature_config.get("window_len"),
         }
 
@@ -180,29 +207,48 @@ class TransformerModelNode(MCPModelNode):
         except Exception as exc:
             self._error_count += 1
             self._health = "degraded"
-            logger.error("transformer_predict_failed", error=str(exc), exc_info=True)
+            logger.error(
+                "transformer_predict_failed",
+                model_name=self._model_name,
+                resolution=self._resolution,
+                error=str(exc),
+                exc_info=True,
+            )
             raise
+
+    def _resolve_ohlcv_frame(self, ctx: Dict[str, Any]) -> pd.DataFrame:
+        ctx_key = resolution_to_ctx_key(self._resolution)
+        fallback = f"df{self._resolution}"
+        df = _ctx_dataframe(ctx, ctx_key, fallback)
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            raise ValueError(
+                f"Transformer {self._resolution} predict requires {ctx_key} "
+                "as non-empty pd.DataFrame"
+            )
+        return df
 
     def _sync_predict_impl(self, ctx: Dict[str, Any]) -> MCPModelPrediction:
         t0 = time.perf_counter()
         if self._session is None:
             raise RuntimeError("TransformerModelNode not initialized")
 
-        df15 = _ctx_dataframe(ctx, "v43_df15m", "df15m")
-        if not isinstance(df15, pd.DataFrame) or df15.empty:
-            raise ValueError("Transformer predict requires v43_df15m as non-empty pd.DataFrame")
-
+        df_ohlcv = self._resolve_ohlcv_frame(ctx)
         df_fund = _ctx_dataframe(ctx, "v43_df_funding", "df_funding")
         df_oi = _ctx_dataframe(ctx, "v43_df_oi", "df_oi")
         df5 = _ctx_dataframe(ctx, "v43_df5m", "df5m")
 
-        raw = prepare_raw_frame(df15, funding_df=df_fund, oi_df=df_oi)
+        raw = prepare_raw_frame(df_ohlcv, funding_df=df_fund, oi_df=df_oi)
         atr_period = int(
             (self._feature_config.get("config") or {}).get("atr_period")
             or self._bundle_meta.get("atr_period")
             or 14
         )
-        feat_df = build_feature_matrix(raw, atr_period=atr_period, dropna=True)
+        feat_df = build_feature_matrix(
+            raw,
+            resolution_minutes=self._resolution_minutes,
+            atr_period=atr_period,
+            dropna=True,
+        )
         validate_feature_columns(feat_df)
 
         feature_cols = list(self._feature_config.get("feature_cols") or FEATURE_COLS)
@@ -210,10 +256,7 @@ class TransformerModelNode(MCPModelNode):
         values = feat_df[feature_cols].values.astype(np.float32)
         window = build_inference_window(values, window_len=window_len, feature_cols=feature_cols)
 
-        continuous_z, regime_logits = self._session.run(
-            None,
-            {"window": window},
-        )
+        continuous_z, regime_logits = self._session.run(None, {"window": window})
         continuous_preds = unstandardize_continuous(
             continuous_z[0],
             self._feature_config["label_mean"],
@@ -228,15 +271,6 @@ class TransformerModelNode(MCPModelNode):
         }
         _, vol_regime, regime_probs = parse_regime_prediction(regime_logits[0], regime_names)
 
-        short_enabled = bool(
-            getattr(settings, "jacksparrow_v43_short_execution_enabled", False)
-        )
-        label_horizon_bars = int(
-            (self._feature_config.get("config") or {}).get("path_label_horizon_bars")
-            or self._bundle_meta.get("path_label_horizon_bars")
-            or (self._feature_config.get("config") or {}).get("label_horizon_bars")
-            or self.training_forward_bars
-        )
         bar_hint = 0
         if isinstance(df5, pd.DataFrame) and not df5.empty:
             bar_hint = int(closed_5m_bar_index(df5))
@@ -254,23 +288,18 @@ class TransformerModelNode(MCPModelNode):
             vol_regime=vol_regime,
             regime_probs=regime_probs,
             bar_index_hint=bar_hint,
-            short_enabled=short_enabled,
-            label_horizon_bars=label_horizon_bars,
-            resolution_minutes=15,
+            resolution_minutes=self._resolution_minutes,
         )
         out_ctx["closed_bar_features"] = closed_feats
+        out_ctx["tf_key"] = self.tf_key
 
         ms = (time.perf_counter() - t0) * 1000.0
         er = float(out_ctx.get("expected_return", 0.0))
         thr = float(out_ctx.get("threshold", 0.005))
         regime = str(out_ctx.get("regime", "neutral"))
-        scalp_ret = continuous_preds.get(
-            "future_return_scalp_10m",
-            continuous_preds.get("future_return", 0.0),
-        )
         reasoning = (
-            f"Transformer 15m regime={regime} vol={vol_regime} "
-            f"er={er:.5f} thr={thr:.5f} scalp_return={float(scalp_ret):.5f}"
+            f"Transformer {self._resolution} regime={regime} vol={vol_regime} "
+            f"er={er:.5f} thr={thr:.5f}"
         )
 
         return MCPModelPrediction(

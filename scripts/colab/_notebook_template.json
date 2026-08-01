@@ -4,11 +4,11 @@
    "cell_type": "markdown",
    "metadata": {},
    "source": [
-    "# BTCUSD 15m Transformer Training\n",
+    "# BTCUSD RESOLUTION_PLACEHOLDER Transformer Training\n",
     "\n",
     "Trains one independent per-TF transformer. Shared modules: `feature_store/transformer_btcusd/`.\n",
     "\n",
-    "Exports: `metadata_transformer.json`, `btcusd_15m_transformer.onnx`, `feature_config.json`"
+    "Exports: `metadata_transformer.json`, `btcusd_RESOLUTION_PLACEHOLDER_transformer.onnx`, `feature_config.json`"
    ]
   },
   {
@@ -51,7 +51,7 @@
     "from pathlib import Path\n",
     "from scripts.colab.train_transformer_resolution import run_training\n",
     "\n",
-    "resolution = \"15m\"\n",
+    "resolution = \"RESOLUTION_PLACEHOLDER\"\n",
     "export_dir = Path(\"/content/export\")  # Path(\"export\") for local\n",
     "epochs = None  # e.g. 5 for smoke test\n",
     "history_days = None\n",

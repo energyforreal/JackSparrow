@@ -1,22 +1,40 @@
 # Colab notebook helpers (non-production)
 
-These files support optional Google Colab workflows for feature engineering and Delta API access.
-They are **not** imported by the agent runtime except via shared `feature_store/transformer_btcusd_15m/`.
+Per-TF transformer training for BTCUSD. Each timeframe is trained **independently**;
+the agent integrates outputs at decision time via `mtf_decision_policy`.
 
-## BTCUSD 15m Transformer
+## Shared modules
 
-Train/serve parity modules live in `feature_store/transformer_btcusd_15m/`.
-Training loop helpers live in `scripts/colab/transformer_training.py`.
+- Feature contract: `feature_store/transformer_btcusd/`
+- Training loop: `scripts/colab/transformer_training.py`
+- CLI runner: `scripts/colab/train_transformer_resolution.py`
 
-1. Open `scripts/colab/transformer_btcusd_15m_train.ipynb` in Google Colab (or Jupyter locally), run all cells, and set `export_dir` as needed (default `/content/export`).
-2. Optional: set `epochs=5` in the config cell for a quick smoke run; set `refresh_data=True` to refetch from Delta API.
-3. Copy exports into `agent/model_storage/JackSparrow_Transformer_BTCUSD/`:
-   - `btcusd_15m_transformer.onnx`
-   - `feature_config.json`
-4. Point the agent at the bundle:
-   ```env
-   MODEL_DIR=./agent/model_storage/JackSparrow_Transformer_BTCUSD
-   TRANSFORMER_MIN_CONFIDENCE=0.55
-   ```
+## Notebooks (one per TF)
 
-For local development, use the main packages under `agent/` and `feature_store/`.
+| Notebook | Resolution |
+|----------|------------|
+| `transformer_btcusd_5m_train.ipynb` | 5m |
+| `transformer_btcusd_15m_train.ipynb` | 15m |
+| `transformer_btcusd_30m_train.ipynb` | 30m |
+| `transformer_btcusd_1h_train.ipynb` | 1h |
+| `transformer_btcusd_2h_train.ipynb` | 2h |
+
+Each notebook sets `resolution = "..."` and calls `run_training()` from
+`train_transformer_resolution.py`.
+
+## Export
+
+Copy exports into `agent/model_storage/JackSparrow_Transformer_BTCUSD_{tf}/`:
+- `metadata_transformer.json` (auto-generated)
+- `btcusd_{tf}_transformer.onnx`
+- `feature_config.json`
+
+## Agent config
+
+```env
+MODEL_DIR=./agent/model_storage
+TRANSFORMER_EXECUTION_TFS=15m,30m
+TRANSFORMER_BIAS_TFS=1h,2h
+TRANSFORMER_TIMING_TF=5m
+TRANSFORMER_MIN_TF_ALIGNMENT=3
+```

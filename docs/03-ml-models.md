@@ -2,7 +2,7 @@
 
 ## Overview
 
-On branch **Transformers**, JackSparrow loads a single **ONNX Transformer** bundle for runtime inference. `ModelDiscovery` registers `TransformerModelNode`; the MCP orchestrator calls `evaluate_transformer_prediction` in `agent/core/transformer_decision.py` to produce `DECISION_READY` events.
+On branch **Transformers**, JackSparrow loads **per-timeframe ONNX Transformer bundles** (5m, 15m, 30m, 1h, 2h). `ModelDiscovery` registers one `TransformerModelNode` per bundle; the MCP orchestrator runs all models and applies `evaluate_mtf_policy` in `agent/core/mtf_decision_policy.py` via `evaluate_transformer_prediction` in `agent/core/transformer_decision.py` to produce `DECISION_READY` events.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -25,20 +25,24 @@ On branch **Transformers**, JackSparrow loads a single **ONNX Transformer** bund
 
 ## Runtime discovery (Transformer ONNX)
 
-Point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_Transformer_BTCUSD/`**. Required artifacts:
+Point **`MODEL_DIR`** at **`agent/model_storage/`** (parent directory). Each per-TF bundle lives in a subdirectory:
+
+`JackSparrow_Transformer_BTCUSD_{5m,15m,30m,1h,2h}/`
+
+Required artifacts per bundle:
 
 | File | Purpose |
 |------|---------|
-| `metadata_transformer.json` | Bundle manifest (horizons, thresholds, ONNX filename) |
-| `btcusd_15m_transformer.onnx` | ONNX model (loaded via `onnxruntime`) |
+| `metadata_transformer.json` | Bundle manifest (resolution, thresholds, ONNX filename) |
+| `btcusd_{tf}_transformer.onnx` | ONNX model (loaded via `onnxruntime`) |
 | `feature_config.json` | Feature names and train/serve parity config |
 
 `ModelDiscovery.discover_models()` in [`agent/models/model_discovery.py`](../agent/models/model_discovery.py):
 
-1. Resolves `metadata_transformer.json` under `MODEL_DIR`
-2. Verifies ONNX and `feature_config.json` exist
-3. Instantiates `TransformerModelNode.from_metadata_path()`
-4. Registers the node when `MODEL_AUTO_REGISTER=true`
+1. Scans `MODEL_DIR` for subdirs matching `JackSparrow_Transformer_BTCUSD_*`
+2. Verifies ONNX and `feature_config.json` exist per bundle
+3. Instantiates `TransformerModelNode.from_metadata_path()` for each
+4. Registers all nodes when `MODEL_AUTO_REGISTER=true`
 5. Logs **`model_discovered_transformer`** on success
 
 **`MODEL_PATH` is ignored** — use `MODEL_DIR` only.
@@ -48,37 +52,34 @@ Point **`MODEL_DIR`** at **`agent/model_storage/JackSparrow_Transformer_BTCUSD/`
 ## Bundle layout
 
 ```
-agent/model_storage/JackSparrow_Transformer_BTCUSD/
-├── metadata_transformer.json
-├── btcusd_15m_transformer.onnx
-├── feature_config.json
-└── README.md
+agent/model_storage/
+├── JackSparrow_Transformer_BTCUSD_5m/
+├── JackSparrow_Transformer_BTCUSD_15m/
+├── JackSparrow_Transformer_BTCUSD_30m/
+├── JackSparrow_Transformer_BTCUSD_1h/
+└── JackSparrow_Transformer_BTCUSD_2h/
 ```
 
-Default in [`agent/core/config.py`](../agent/core/config.py) and [`.env.example`](../.env.example):
+Each subdirectory contains `metadata_transformer.json`, `btcusd_{tf}_transformer.onnx`, and `feature_config.json`.
+
+Default in [`agent/core/config.py`](../agent/core/config.py):
 
 ```bash
-MODEL_DIR=./agent/model_storage/JackSparrow_Transformer_BTCUSD
-```
-
-Docker Compose (`docker-compose.yml`) sets:
-
-```yaml
-MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage/JackSparrow_Transformer_BTCUSD}
+MODEL_DIR=./agent/model_storage
 ```
 
 ---
 
 ## Feature contract
 
-Train/serve parity lives in [`feature_store/transformer_btcusd_15m/`](../feature_store/transformer_btcusd_15m/):
+Train/serve parity lives in [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/):
 
-- `contract.py` — metadata/onnx/feature_config filenames
-- `features.py`, `htf_features.py` — runtime feature matrix
-- `inference.py` — ONNX input assembly
+- `contract.py` — per-TF resolutions, single `future_return` label
+- `features.py`, `derivatives.py` — native TF feature matrix
+- `inference.py` — ONNX input assembly + metadata export
 - `labels.py` — training label helpers (Colab)
 
-The feature server and `TransformerModelNode.predict()` use the same contract as the Colab notebook.
+Each `TransformerModelNode` builds features on its native TF grid only.
 
 ---
 
@@ -86,7 +87,11 @@ The feature server and `TransformerModelNode.predict()` use the same contract as
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_DIR` | `./agent/model_storage/JackSparrow_Transformer_BTCUSD` | Transformer bundle directory |
+| `MODEL_DIR` | `./agent/model_storage` | Parent directory for per-TF bundles |
+| `TRANSFORMER_EXECUTION_TFS` | `15m,30m` | Execution anchor TFs for MTF policy |
+| `TRANSFORMER_BIAS_TFS` | `1h,2h` | Bias/veto TFs |
+| `TRANSFORMER_TIMING_TF` | `5m` | Timing modifier TF |
+| `TRANSFORMER_MIN_TF_ALIGNMENT` | `3` | Min aligned TFs for STRONG signals |
 | `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Minimum confidence for entry signals |
 | `TRANSFORMER_STRONG_EDGE_MULTIPLIER` | `1.5` | Edge multiplier for STRONG_BUY/SELL |
 | `TRANSFORMER_EXTREME_REGIME_VETO` | `true` | Force HOLD when vol regime is EXTREME |
@@ -101,15 +106,25 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 
 ## Training and export
 
-1. Train in Colab: [`scripts/colab/transformer_btcusd_15m_train.ipynb`](../scripts/colab/transformer_btcusd_15m_train.ipynb)
-2. Download `btcusd_15m_transformer.onnx` and `feature_config.json` into the bundle directory
-3. `metadata_transformer.json` is committed as the manifest; update horizons/thresholds after retrain if needed
-4. Optional local export helper: [`scripts/export_minimal_transformer_bundle.py`](../scripts/export_minimal_transformer_bundle.py)
+Train each TF **independently** (no cross-TF fusion):
+
+| Notebook | Resolution |
+|----------|------------|
+| `scripts/colab/transformer_btcusd_5m_train.ipynb` | 5m |
+| `scripts/colab/transformer_btcusd_15m_train.ipynb` | 15m |
+| `scripts/colab/transformer_btcusd_30m_train.ipynb` | 30m |
+| `scripts/colab/transformer_btcusd_1h_train.ipynb` | 1h |
+| `scripts/colab/transformer_btcusd_2h_train.ipynb` | 2h |
+
+Or via CLI: `python scripts/colab/train_transformer_resolution.py --resolution 15m --export-dir export/15m`
+
+Exports auto-generate `metadata_transformer.json`, `btcusd_{tf}_transformer.onnx`, and `feature_config.json`.
 
 **Tests before deploy:**
 
 ```bash
-pytest tests/unit/test_transformer_btcusd_15m.py \
+pytest tests/unit/test_transformer_btcusd_per_tf.py \
+       tests/unit/test_mtf_decision_policy.py \
        tests/unit/test_transformer_decision.py \
        tests/unit/test_transformer_model_discovery.py -q
 ```
@@ -131,10 +146,10 @@ Runtime-critical modules:
 
 Decision flow:
 
-1. `CANDLE_CLOSED` / price trigger → feature request
-2. Feature server builds transformer feature matrix
-3. `TransformerModelNode.predict()` runs ONNX inference
-4. `evaluate_transformer_prediction()` maps output to BUY/SELL/HOLD + confidence
+1. `CANDLE_CLOSED` / price trigger → fetch 5m/15m/30m/1h/2h frames
+2. Each `TransformerModelNode.predict()` runs ONNX on its native TF
+3. `evaluate_mtf_policy()` applies layered rules (bias → execution → alignment → timing → veto)
+4. `evaluate_transformer_prediction()` emits BUY/SELL/HOLD + confidence
 5. `DECISION_READY` → trading handler → risk → execution
 
 See [Logic & reasoning](05-logic-reasoning.md) and [Architecture](01-architecture.md).

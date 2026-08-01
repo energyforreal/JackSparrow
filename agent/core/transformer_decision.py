@@ -1,4 +1,4 @@
-"""Slim transformer-only decision path for MCP orchestrator."""
+"""Slim transformer-only decision path for MCP orchestrator (per-TF ensemble)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional
 import structlog
 
 from agent.core.config import settings
-from agent.core.v43_market_frames import closed_5m_bar_index, fetch_v43_market_frames
+from agent.core.mtf_decision_policy import (
+    evaluate_mtf_policy,
+    interpret_tf_prediction,
+    resolution_to_tf_key,
+)
+from agent.core.v43_market_frames import closed_5m_bar_index, fetch_mtf_market_frames
 from agent.data.feature_server import FeatureQuality, MCPFeature, MCPFeatureResponse
 from agent.events.schemas import PolicyVerdict
 from agent.models.mcp_model_registry import (
@@ -18,21 +23,11 @@ from agent.models.mcp_model_registry import (
     NoHealthyModelPredictionsError,
     NoModelsRegisteredError,
 )
-from agent.models.transformer_context_builder import map_prediction_to_signal
+from agent.models.transformer_context_builder import build_mtf_aggregation_context
 
 logger = structlog.get_logger()
 
 _ENTRY_SIGNALS = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
-
-
-def _resolve_threshold(bundle_metadata: Dict[str, Any]) -> float:
-    override = getattr(settings, "transformer_signal_threshold", None)
-    if override is not None:
-        try:
-            return float(override)
-        except (TypeError, ValueError):
-            pass
-    return float(bundle_metadata.get("default_threshold") or 0.005)
 
 
 def _default_position_size(confidence: float) -> float:
@@ -57,7 +52,7 @@ def _build_reasoning_chain(
 ) -> Dict[str, Any]:
     chain_id = str(uuid.uuid4())
     conclusion = (
-        f"Transformer: {signal} "
+        f"MTF Transformer: {signal} "
         f"(future_return={future_return:.5f}, thr={threshold:.5f}, "
         f"vol_regime={vol_regime}, regime={regime})"
     )
@@ -69,7 +64,7 @@ def _build_reasoning_chain(
         "steps": [
             {
                 "step_number": 1,
-                "step_name": "transformer_inference",
+                "step_name": "mtf_transformer_inference",
                 "description": conclusion,
                 "evidence": [
                     f"symbol={symbol}",
@@ -100,6 +95,24 @@ def _serialize_prediction(pred: Any) -> Dict[str, Any]:
     }
 
 
+def _stance_to_dict(stance: Any) -> Dict[str, Any]:
+    return {
+        "tf_key": stance.tf_key,
+        "resolution": stance.resolution,
+        "local_signal": stance.local_signal,
+        "direction": stance.direction,
+        "future_return": stance.future_return,
+        "threshold": stance.threshold,
+        "vol_regime": stance.vol_regime,
+        "regime": stance.regime,
+        "confidence": stance.confidence,
+        "quality": stance.quality,
+        "risk": stance.risk,
+        "reason_codes": list(stance.reason_codes),
+        "model_name": stance.model_name,
+    }
+
+
 async def evaluate_transformer_prediction(
     *,
     symbol: str,
@@ -109,7 +122,7 @@ async def evaluate_transformer_prediction(
     t0: float,
     serialize_prediction: Any,
 ) -> Dict[str, Any]:
-    """Run transformer inference and map to a trading decision."""
+    """Run per-TF transformer inference and apply MTF decision policy."""
     import time
 
     import pandas as pd
@@ -123,7 +136,7 @@ async def evaluate_transformer_prediction(
     if not delta_client:
         raise RuntimeError("delta_client not set; cannot fetch market frames")
 
-    df5, df15, df1h, df_fund, df_oi, df_mark = await fetch_v43_market_frames(
+    df5, df15, df30, df1h, df2h, df_fund, df_oi, df_mark = await fetch_mtf_market_frames(
         delta_client, symbol
     )
     if df5.empty or len(df5) < 2:
@@ -141,7 +154,9 @@ async def evaluate_transformer_prediction(
         **(context or {}),
         "v43_df5m": df5,
         "v43_df15m": df15,
+        "v43_df30m": df30,
         "v43_df1h": df1h,
+        "v43_df2h": df2h,
         "v43_df_funding": df_fund,
         "v43_df_oi": df_oi,
         "v43_df_mark": df_mark,
@@ -162,41 +177,46 @@ async def evaluate_transformer_prediction(
         require_explanation=False,
     )
     model_response = await model_registry.get_predictions(model_request)
-    pred0 = model_response.predictions[0]
-    pctx = pred0.context if isinstance(pred0.context, dict) else {}
 
-    continuous = pctx.get("transformer_continuous_preds") or {}
-    future_return = float(
-        continuous.get("future_return_scalp_10m")
-        or continuous.get("future_return")
-        or pctx.get("expected_return", 0.0)
-        or 0.0
-    )
-    vol_regime = str(pctx.get("transformer_vol_regime") or "NORMAL")
-    regime = str(pctx.get("regime") or "neutral")
-    confidence = float(pred0.confidence or pctx.get("entry_confidence", 0.0) or 0.0)
+    stances: Dict[str, Any] = {}
+    per_tf_contexts: Dict[str, Dict[str, Any]] = {}
+    for pred in model_response.predictions:
+        pctx = pred.context if isinstance(pred.context, dict) else {}
+        tf_key = str(pctx.get("tf_key") or "")
+        if not tf_key:
+            node = model_registry.get_model(pred.model_name)
+            if node is not None and hasattr(node, "resolution"):
+                tf_key = resolution_to_tf_key(getattr(node, "resolution"))
+            else:
+                tf_key = f"tf_unknown_{pred.model_name}"
+        bundle_metadata: Dict[str, Any] = {}
+        node = model_registry.get_model(pred.model_name)
+        if node is not None and hasattr(node, "_bundle_metadata"):
+            raw_meta = getattr(node, "_bundle_metadata")
+            if isinstance(raw_meta, dict):
+                bundle_metadata = raw_meta
+        stance = interpret_tf_prediction(
+            tf_key=tf_key,
+            prediction_context=pctx,
+            bundle_metadata=bundle_metadata,
+            model_name=pred.model_name,
+        )
+        stances[tf_key] = stance
+        per_tf_contexts[tf_key] = pctx
 
-    bundle_metadata: Dict[str, Any] = {}
-    node = model_registry.get_model(pred0.model_name)
-    if node is not None and hasattr(node, "_bundle_metadata"):
-        raw_meta = getattr(node, "_bundle_metadata")
-        if isinstance(raw_meta, dict):
-            bundle_metadata = raw_meta
+    policy = evaluate_mtf_policy(stances)
 
-    threshold = _resolve_threshold(bundle_metadata)
-    signal, confidence, reason_codes = map_prediction_to_signal(
-        future_return=future_return,
-        threshold=threshold,
-        vol_regime=vol_regime,
-        confidence=confidence,
-        strong_edge_multiplier=float(
-            getattr(settings, "transformer_strong_edge_multiplier", 1.5) or 1.5
-        ),
-        extreme_regime_veto=bool(
-            getattr(settings, "transformer_extreme_regime_veto", True)
-        ),
-        min_confidence=float(getattr(settings, "transformer_min_confidence", 0.55) or 0.55),
-    )
+    signal = policy.signal
+    confidence = float(policy.confidence)
+    reason_codes = list(policy.reason_codes)
+    future_return = float(policy.primary_future_return)
+    threshold = float(policy.primary_threshold)
+    regime = str(policy.primary_regime)
+    vol_regime = "NORMAL"
+    for stance in stances.values():
+        if stance.tf_key in ("tf_15m", "tf_30m"):
+            vol_regime = stance.vol_regime
+            break
 
     if mctx.get("market_health_hold"):
         signal = "HOLD"
@@ -210,15 +230,29 @@ async def evaluate_transformer_prediction(
         serialize_prediction(p) for p in model_response.predictions
     ]
 
+    mtf_context = build_mtf_aggregation_context(
+        per_tf_contexts=per_tf_contexts,
+        policy_result={
+            "signal": signal,
+            "reason_codes": reason_codes,
+            "cross_tf_summary": policy.cross_tf_summary,
+        },
+    )
+
     market_context: Dict[str, Any] = {
         **mctx,
-        "format": "jacksparrow_transformer_btcusd_15m",
+        **mtf_context,
+        "format": "jacksparrow_transformer_btcusd_mtf",
         "expected_return": future_return,
         "threshold": threshold,
         "regime": regime,
         "transformer_vol_regime": vol_regime,
         "transformer_signal": signal,
         "transformer_reason_codes": reason_codes,
+        "multi_tf_predictions": {
+            k: _stance_to_dict(v) for k, v in policy.multi_tf_stances.items()
+        },
+        "cross_tf_summary": policy.cross_tf_summary,
         "closed_bar_index": bar_idx,
         "model_predictions": model_predictions_payload,
     }
@@ -264,7 +298,12 @@ async def evaluate_transformer_prediction(
         reason_codes=list(policy_verdict.reason_codes or reason_codes),
     )
 
-    closed_feats = pctx.get("closed_bar_features") or {}
+    closed_feats: Dict[str, float] = {}
+    for pctx in per_tf_contexts.values():
+        for k, v in (pctx.get("closed_bar_features") or {}).items():
+            if isinstance(v, (int, float)):
+                closed_feats[f"{pctx.get('resolution', 'tf')}_{k}"] = float(v)
+
     ts = datetime.now(timezone.utc)
     feat_list = [
         MCPFeature(
@@ -273,7 +312,7 @@ async def evaluate_transformer_prediction(
             value=float(v),
             timestamp=ts,
             quality=FeatureQuality.HIGH,
-            metadata={"transformer": True},
+            metadata={"transformer": True, "mtf": True},
             computation_time_ms=0.0,
         )
         for k, v in sorted(closed_feats.items())
@@ -282,7 +321,7 @@ async def evaluate_transformer_prediction(
     if not feat_list:
         feat_list = [
             MCPFeature(
-                name="transformer_placeholder",
+                name="transformer_mtf_placeholder",
                 version="1.0.0",
                 value=0.0,
                 timestamp=ts,
@@ -342,6 +381,7 @@ async def evaluate_transformer_prediction(
         threshold=threshold,
         vol_regime=vol_regime,
         reason_codes=list(policy_verdict.reason_codes or []),
+        tf_count=len(stances),
     )
     return result
 

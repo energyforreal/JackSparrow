@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from feature_store.transformer_btcusd_15m.contract import CONTINUOUS_LABEL_COLS, FEATURE_COLS
+from feature_store.transformer_btcusd.contract import CONTINUOUS_LABEL_COLS, FEATURE_COLS
 from scripts.colab.transformer_training import (
     build_windows,
     fit_label_stats,

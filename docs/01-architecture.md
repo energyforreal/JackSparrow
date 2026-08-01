@@ -72,9 +72,10 @@ The Data Layer is responsible for:
 The Intelligence Layer contains the "brain" of the trading agent:
 
 **Signal Generation Engine (Transformer ONNX — default)**
-- **`TransformerModelNode`** (`agent/models/transformer_node.py`) — loads `btcusd_15m_transformer.onnx` via `onnxruntime`
-- Feature contract: [`feature_store/transformer_btcusd_15m/`](../feature_store/transformer_btcusd_15m/)
-- Discovery via **`metadata_transformer.json`** in **`MODEL_DIR`** (default: `JackSparrow_Transformer_BTCUSD/`)
+- **`TransformerModelNode`** (`agent/models/transformer_node.py`) — loads per-TF `btcusd_{tf}_transformer.onnx` via `onnxruntime`
+- Feature contract: [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/)
+- Discovery via **`metadata_transformer.json`** in **`MODEL_DIR/JackSparrow_Transformer_BTCUSD_{tf}/`**
+- MTF policy: [`agent/core/mtf_decision_policy.py`](../agent/core/mtf_decision_policy.py)
 - See [ML models – Runtime discovery](03-ml-models.md#runtime-discovery-transformer-onnx)
 
 **Decision Engine (Transformer decision path)**
@@ -95,10 +96,10 @@ Trade *intent* on the event bus is issued as **`DECISION_READY`** after transfor
 **Transformer pipeline (default)**
 
 1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
-2. **Feature build** — `feature_store/transformer_btcusd_15m` matrix aligned with Colab training.
-3. **ONNX inference** — `TransformerModelNode.predict()` → future return, vol regime, horizon scores.
-4. **Decision** — `evaluate_transformer_prediction` applies `TRANSFORMER_MIN_CONFIDENCE`, `TRANSFORMER_EXTREME_REGIME_VETO`, and threshold from metadata.
-5. **Risk & execution** — trading handler + risk manager before Delta testnet order placement.
+2. **Feature build** — each `TransformerModelNode` builds its native TF matrix from `feature_store/transformer_btcusd`
+3. **ONNX inference** — five independent models (5m, 15m, 30m, 1h, 2h) via `TransformerModelNode.predict()`
+4. **Decision** — `mtf_decision_policy` + `evaluate_transformer_prediction` apply cross-TF rules and confidence gates
+5. **Risk & execution** — trading handler + risk manager before Delta testnet order placement
 
 **Vector Memory Store**
 - Stores decision contexts as embeddings (canonical `FEATURE_LIST` + market-context factors)
@@ -337,7 +338,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 ### Intelligence Layer Components
 
 #### MCP Model Registry
-- **Responsibility**: Register `TransformerModelNode` discovered from **`MODEL_DIR`** (default: `JackSparrow_Transformer_BTCUSD/metadata_transformer.json`)
+- **Responsibility**: Register per-TF `TransformerModelNode` instances discovered from **`MODEL_DIR`** subdirs (`JackSparrow_Transformer_BTCUSD_{tf}/metadata_transformer.json`)
 - **Protocol**: MCP Model Protocol
 - **Dependencies**: Model discovery, feature server, performance tracker
 - **Output**: Model predictions packaged as MCP evidence for policy + reasoning (archived v43 XGBoost / MSO paths documented in [ML models](03-ml-models.md))

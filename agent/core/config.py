@@ -136,9 +136,9 @@ class Settings(BaseSettings):
         description="Path to production model file"
     )
     model_dir: str = Field(
-        default="./agent/model_storage/JackSparrow_Transformer_BTCUSD",
+        default="./agent/model_storage",
         env="MODEL_DIR",
-        description="Transformer ONNX bundle directory (metadata_transformer.json).",
+        description="Directory containing per-TF transformer bundles (JackSparrow_Transformer_BTCUSD_*).",
     )
     transformer_signal_threshold: Optional[float] = Field(
         default=None,
@@ -162,6 +162,38 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Minimum model confidence before emitting entry signals.",
+    )
+    transformer_execution_tfs: str = Field(
+        default="15m,30m",
+        env="TRANSFORMER_EXECUTION_TFS",
+        description="Comma-separated execution timeframes for MTF policy.",
+    )
+    transformer_bias_tfs: str = Field(
+        default="1h,2h",
+        env="TRANSFORMER_BIAS_TFS",
+        description="Comma-separated bias/veto timeframes for MTF policy.",
+    )
+    transformer_timing_tf: str = Field(
+        default="5m",
+        env="TRANSFORMER_TIMING_TF",
+        description="Timing modifier timeframe for MTF policy.",
+    )
+    transformer_min_tf_alignment: int = Field(
+        default=3,
+        env="TRANSFORMER_MIN_TF_ALIGNMENT",
+        ge=1,
+        le=5,
+        description="Minimum aligned TFs required for STRONG signals.",
+    )
+    transformer_extreme_veto_tfs: str = Field(
+        default="1h,2h",
+        env="TRANSFORMER_EXTREME_VETO_TFS",
+        description="TFs where EXTREME vol regime forces HOLD.",
+    )
+    transformer_primary_execution_tf: str = Field(
+        default="15m",
+        env="TRANSFORMER_PRIMARY_EXECUTION_TF",
+        description="Primary execution anchor TF for cross_tf_summary.",
     )
     ic_micro_momentum_enabled: bool = Field(
         default=True,
@@ -926,6 +958,18 @@ class Settings(BaseSettings):
         env="JACKSPARROW_V43_CANDLES_1H",
         ge=48,
         description="Number of 1h candles for v43 (OHLCV + funding alignment).",
+    )
+    transformer_candles_30m: int = Field(
+        default=300,
+        env="TRANSFORMER_CANDLES_30M",
+        ge=50,
+        description="Number of 30m candles for per-TF transformer inference.",
+    )
+    transformer_candles_2h: int = Field(
+        default=200,
+        env="TRANSFORMER_CANDLES_2H",
+        ge=48,
+        description="Number of 2h candles for per-TF transformer inference.",
     )
     jacksparrow_v43_candles_oi: int = Field(
         default=300,

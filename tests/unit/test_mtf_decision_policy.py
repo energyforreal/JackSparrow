@@ -1,0 +1,100 @@
+"""Tests for MTF transformer decision policy."""
+
+from __future__ import annotations
+
+from agent.core.mtf_decision_policy import (
+    TfLocalStance,
+    evaluate_mtf_policy,
+    interpret_tf_prediction,
+)
+
+
+def _stance(
+    tf_key: str,
+    resolution: str,
+    *,
+    local_signal: str = "HOLD",
+    direction: str = "neutral",
+    future_return: float = 0.0,
+    vol_regime: str = "NORMAL",
+    confidence: float = 0.7,
+) -> TfLocalStance:
+    return TfLocalStance(
+        tf_key=tf_key,
+        resolution=resolution,
+        local_signal=local_signal,
+        direction=direction,
+        future_return=future_return,
+        threshold=0.005,
+        vol_regime=vol_regime,
+        regime="neutral",
+        confidence=confidence,
+        quality="medium",
+        risk="normal",
+        trend_strength=1.0,
+        mfe=0.01,
+        mae=0.005,
+        future_volatility=0.003,
+    )
+
+
+def test_bias_veto_blocks_buy_when_1h_2h_bearish() -> None:
+    stances = {
+        "tf_5m": _stance("tf_5m", "5m", local_signal="BUY", direction="bullish", future_return=0.01),
+        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", future_return=0.01),
+        "tf_30m": _stance("tf_30m", "30m", local_signal="HOLD", direction="neutral"),
+        "tf_1h": _stance("tf_1h", "1h", local_signal="SELL", direction="bearish", future_return=-0.01),
+        "tf_2h": _stance("tf_2h", "2h", local_signal="SELL", direction="bearish", future_return=-0.01),
+    }
+    result = evaluate_mtf_policy(stances)
+    assert result.signal == "HOLD"
+    assert "mtf_bias_veto" in result.reason_codes
+
+
+def test_execution_from_15m_produces_buy() -> None:
+    stances = {
+        "tf_5m": _stance("tf_5m", "5m", local_signal="BUY", direction="bullish", future_return=0.008),
+        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", future_return=0.01),
+        "tf_30m": _stance("tf_30m", "30m", local_signal="BUY", direction="bullish", future_return=0.009),
+        "tf_1h": _stance("tf_1h", "1h", local_signal="BUY", direction="bullish", future_return=0.007),
+        "tf_2h": _stance("tf_2h", "2h", local_signal="BUY", direction="bullish", future_return=0.006),
+    }
+    result = evaluate_mtf_policy(stances, min_tf_alignment=3)
+    assert result.signal in ("BUY", "STRONG_BUY")
+    assert "mtf_15m_execution_bullish" in result.reason_codes
+
+
+def test_extreme_veto_on_1h_forces_hold() -> None:
+    stances = {
+        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", future_return=0.01),
+        "tf_1h": _stance("tf_1h", "1h", vol_regime="EXTREME"),
+        "tf_2h": _stance("tf_2h", "2h"),
+    }
+    result = evaluate_mtf_policy(stances)
+    assert result.signal == "HOLD"
+    assert any("extreme_veto" in c for c in result.reason_codes)
+
+
+def test_interpret_tf_prediction_from_context() -> None:
+    ctx = {
+        "transformer_continuous_preds": {
+            "future_return": 0.01,
+            "future_volatility": 0.003,
+            "mae": 0.005,
+            "mfe": 0.02,
+            "trend_strength": 1.5,
+        },
+        "transformer_vol_regime": "NORMAL",
+        "entry_confidence": 0.72,
+        "expected_return": 0.01,
+        "regime": "trending",
+    }
+    stance = interpret_tf_prediction(
+        tf_key="tf_15m",
+        prediction_context=ctx,
+        bundle_metadata={"default_threshold": 0.005},
+        model_name="test_15m",
+    )
+    assert stance.tf_key == "tf_15m"
+    assert stance.local_signal in ("BUY", "STRONG_BUY")
+    assert stance.direction == "bullish"

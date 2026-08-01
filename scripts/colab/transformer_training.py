@@ -1,4 +1,4 @@
-"""Training loop and model definitions for BTCUSD 15m transformer Colab workflow."""
+"""Training loop and model definitions for per-TF BTCUSD transformer Colab workflow."""
 
 from __future__ import annotations
 
@@ -13,14 +13,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from feature_store.transformer_btcusd_15m.contract import (
+from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
-    HORIZON_RETURN_COLS,
+    RETURN_COL,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
-    TRANSFORMER_ONNX_FILENAME,
+    TRANSFORMER_METADATA_FILENAME,
+    onnx_filename_for_resolution,
 )
-from feature_store.transformer_btcusd_15m.inference import (
+from feature_store.transformer_btcusd.inference import (
     feature_config_from_training_export,
+    metadata_from_training_export,
     zscore_window,
 )
 
@@ -207,18 +209,19 @@ def compute_multitask_loss(
     mb: torch.Tensor,
     rb: torch.Tensor,
     log_vars: nn.Parameter,
+    *,
+    n_continuous: int,
 ) -> torch.Tensor:
     """Uncertainty-weighted multi-task loss over continuous heads + regime CE."""
-    n_cont = len(CONTINUOUS_LABEL_COLS)
     losses: List[torch.Tensor] = []
-    for j in range(n_cont):
+    for j in range(n_continuous):
         diff = (continuous_pred[:, j] - yb_z[:, j]) ** 2
         masked = (diff * mb[:, j]).sum() / (mb[:, j].sum() + 1e-6)
         precision = torch.exp(-log_vars[j])
         losses.append(precision * masked + log_vars[j])
     ce = nn.functional.cross_entropy(regime_logits, rb)
-    precision = torch.exp(-log_vars[n_cont])
-    losses.append(precision * ce + log_vars[n_cont])
+    precision = torch.exp(-log_vars[n_continuous])
+    losses.append(precision * ce + log_vars[n_continuous])
     return sum(losses)
 
 
@@ -240,11 +243,11 @@ def train_transformer(
     config: Dict[str, Any],
     *,
     device: torch.device,
+    n_continuous: int | None = None,
 ) -> TrainingResult:
     """Train with AdamW, optional LR scheduler, and early stopping."""
-    log_vars = nn.Parameter(
-        torch.zeros(len(CONTINUOUS_LABEL_COLS) + 1, device=device)
-    )
+    n_cont = n_continuous or len(CONTINUOUS_LABEL_COLS)
+    log_vars = nn.Parameter(torch.zeros(n_cont + 1, device=device))
     params = list(model.parameters()) + [log_vars]
     optimizer = torch.optim.AdamW(
         params,
@@ -277,7 +280,9 @@ def train_transformer(
             )
             optimizer.zero_grad()
             cont, reg = model(xb)
-            loss = compute_multitask_loss(cont, reg, yb_z, mb, rb, log_vars)
+            loss = compute_multitask_loss(
+                cont, reg, yb_z, mb, rb, log_vars, n_continuous=n_cont
+            )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, 1.0)
             optimizer.step()
@@ -295,7 +300,9 @@ def train_transformer(
                 )
                 cont, reg = model(xb)
                 val_loss += float(
-                    compute_multitask_loss(cont, reg, yb_z, mb, rb, log_vars).item()
+                    compute_multitask_loss(
+                        cont, reg, yb_z, mb, rb, log_vars, n_continuous=n_cont
+                    ).item()
                 )
         val_loss /= max(len(val_loader), 1)
         train_loss /= max(len(train_loader), 1)
@@ -402,17 +409,15 @@ def print_target_metrics(metrics: Sequence[TargetMetrics], title: str = "") -> N
         print(f"  {m.name:28s}  MAE={m.mae:.5f}  corr={m.corr:+.3f}  n={m.n}")
 
 
-def print_return_horizon_metrics(metrics: Sequence[TargetMetrics]) -> None:
-    """Highlight per-horizon return correlation (primary signal quality check)."""
+def print_return_metrics(metrics: Sequence[TargetMetrics]) -> None:
+    """Highlight future_return correlation (primary signal quality check)."""
     by_name = {m.name: m for m in metrics}
-    print("Return horizon correlations:")
-    for col in HORIZON_RETURN_COLS:
-        m = by_name.get(col)
-        if m is None:
-            print(f"  {col:28s}  (no valid samples)")
-            continue
-        print(f"  {col:28s}  corr={m.corr:+.3f}  MAE={m.mae:.5f}  n={m.n}")
-    # TODO: export quality gates — block ONNX copy when primary return corr below floor.
+    m = by_name.get(RETURN_COL)
+    if m is None:
+        print(f"  {RETURN_COL:28s}  (no valid samples)")
+        return
+    print(f"Primary return correlation:")
+    print(f"  {m.name:28s}  corr={m.corr:+.3f}  MAE={m.mae:.5f}  n={m.n}")
 
 
 def evaluate_regime_head(
@@ -434,6 +439,22 @@ def evaluate_regime_head(
     return np.array(pred_list), np.array(true_list)
 
 
+def check_export_quality_gate(
+    metrics: Sequence[TargetMetrics],
+    min_return_corr: float,
+) -> None:
+    """Raise if future_return test correlation is below export floor."""
+    by_name = {m.name: m for m in metrics}
+    m = by_name.get(RETURN_COL)
+    if m is None:
+        raise RuntimeError(f"Export blocked: no valid {RETURN_COL} test samples")
+    if m.corr < min_return_corr:
+        raise RuntimeError(
+            f"Export blocked: {RETURN_COL} test corr {m.corr:.4f} "
+            f"< floor {min_return_corr:.4f}"
+        )
+
+
 def export_transformer_bundle(
     model: MarketTransformer,
     export_dir: Path,
@@ -446,12 +467,21 @@ def export_transformer_bundle(
     label_std: np.ndarray,
     q_edges: np.ndarray,
     config: Dict[str, Any],
+    test_metrics: Sequence[TargetMetrics] | None = None,
     verify: bool = True,
-) -> Tuple[Path, Path]:
-    """Export ONNX + feature_config.json with optional numerical verification."""
+    enforce_quality_gate: bool = True,
+) -> Tuple[Path, Path, Path]:
+    """Export ONNX + feature_config.json + metadata_transformer.json."""
+    resolution = str(config.get("resolution") or "15m")
+    min_corr = float(config.get("min_export_return_corr") or 0.02)
+    if enforce_quality_gate and test_metrics is not None:
+        check_export_quality_gate(test_metrics, min_corr)
+
     export_dir.mkdir(parents=True, exist_ok=True)
-    onnx_path = export_dir / TRANSFORMER_ONNX_FILENAME
+    onnx_name = onnx_filename_for_resolution(resolution)
+    onnx_path = export_dir / onnx_name
     cfg_path = export_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME
+    meta_path = export_dir / TRANSFORMER_METADATA_FILENAME
 
     dummy = torch.randn(1, window_len, n_features, device=device)
     torch.onnx.export(
@@ -494,6 +524,10 @@ def export_transformer_bundle(
         print(f"ONNX verify regime_logits max diff: {diff_reg:.2e}")
         print(f"ONNX output shapes: {onnx_cont.shape}, {onnx_reg.shape}")
 
+    metrics_dict = {}
+    if test_metrics:
+        metrics_dict = {m.name: {"mae": m.mae, "corr": m.corr, "n": m.n} for m in test_metrics}
+
     feature_config = feature_config_from_training_export(
         feature_cols=feature_cols,
         window_len=window_len,
@@ -503,4 +537,14 @@ def export_transformer_bundle(
         config=config,
     )
     cfg_path.write_text(json.dumps(feature_config, indent=2), encoding="utf-8")
-    return onnx_path, cfg_path
+
+    metadata = metadata_from_training_export(
+        resolution=resolution,
+        label_mean=label_mean,
+        label_std=label_std,
+        config=config,
+        test_metrics=metrics_dict,
+    )
+    meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    return onnx_path, cfg_path, meta_path
