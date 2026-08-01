@@ -18,9 +18,13 @@ agent/model_storage/
 
 ## Training
 
-Train each TF separately in Colab:
+Train all TFs in Colab via `scripts/colab/transformer_btcusd_all_tf_train.ipynb`, or via CLI:
 
 ```bash
+# All TFs (exports to export/JackSparrow_Transformer_BTCUSD_{tf}/)
+python scripts/colab/train_transformer_resolution.py --all --export-dir export --continue-on-error
+
+# Single TF
 python scripts/colab/train_transformer_resolution.py --resolution 15m --export-dir export/15m
 ```
 

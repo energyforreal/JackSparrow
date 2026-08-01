@@ -106,17 +106,19 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 
 ## Training and export
 
-Train each TF **independently** (no cross-TF fusion):
+Train each TF **independently** (no cross-TF fusion). Use the unified Colab notebook:
 
-| Notebook | Resolution |
-|----------|------------|
-| `scripts/colab/transformer_btcusd_5m_train.ipynb` | 5m |
-| `scripts/colab/transformer_btcusd_15m_train.ipynb` | 15m |
-| `scripts/colab/transformer_btcusd_30m_train.ipynb` | 30m |
-| `scripts/colab/transformer_btcusd_1h_train.ipynb` | 1h |
-| `scripts/colab/transformer_btcusd_2h_train.ipynb` | 2h |
+- `scripts/colab/transformer_btcusd_all_tf_train.ipynb` — trains 5m, 15m, 30m, 1h, 2h sequentially
 
-Or via CLI: `python scripts/colab/train_transformer_resolution.py --resolution 15m --export-dir export/15m`
+Or via CLI:
+
+```bash
+# All TFs
+python scripts/colab/train_transformer_resolution.py --all --export-dir export --continue-on-error
+
+# Single TF
+python scripts/colab/train_transformer_resolution.py --resolution 15m --export-dir export/15m
+```
 
 Exports auto-generate `metadata_transformer.json`, `btcusd_{tf}_transformer.onnx`, and `feature_config.json`.
 

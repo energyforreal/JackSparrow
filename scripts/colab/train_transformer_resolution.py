@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any, Sequence
 
 import pandas as pd
 import torch
@@ -14,6 +15,7 @@ from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     FEATURE_COLS,
     SUPPORTED_RESOLUTIONS,
+    bundle_dir_name,
     default_training_config,
 )
 from feature_store.transformer_btcusd.features import add_features
@@ -199,16 +201,93 @@ def run_training(
     print(f"Exported {meta_path}")
 
 
+def run_all_training(
+    *,
+    resolutions: Sequence[str] | None = None,
+    export_dir: Path,
+    epochs: int | None = None,
+    history_days: int | None = None,
+    refresh_data: bool = False,
+    enforce_quality_gate: bool = True,
+    continue_on_error: bool = False,
+) -> list[dict[str, Any]]:
+    """Train and export all requested per-TF transformer bundles."""
+    tfs = list(resolutions or SUPPORTED_RESOLUTIONS)
+    results: list[dict[str, Any]] = []
+
+    for resolution in tfs:
+        res = resolution.strip().lower()
+        tf_export_dir = export_dir / bundle_dir_name(res)
+        raw_cache_path = Path(f"btcusd_{res}_raw.parquet")
+        print(f"\n{'=' * 60}\nTraining {res} -> {tf_export_dir}\n{'=' * 60}")
+
+        try:
+            run_training(
+                resolution=res,
+                export_dir=tf_export_dir,
+                epochs=epochs,
+                history_days=history_days,
+                raw_cache_path=raw_cache_path,
+                refresh_data=refresh_data,
+                enforce_quality_gate=enforce_quality_gate,
+            )
+            results.append(
+                {
+                    "resolution": res,
+                    "status": "ok",
+                    "export_dir": str(tf_export_dir),
+                    "error": None,
+                }
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "resolution": res,
+                    "status": "failed",
+                    "export_dir": str(tf_export_dir),
+                    "error": str(exc),
+                }
+            )
+            if not continue_on_error:
+                raise
+
+    return results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train per-TF BTCUSD transformer")
-    parser.add_argument("--resolution", required=True, choices=list(SUPPORTED_RESOLUTIONS))
+    parser.add_argument("--resolution", choices=list(SUPPORTED_RESOLUTIONS), default=None)
+    parser.add_argument("--all", action="store_true", help="Train all supported resolutions")
     parser.add_argument("--export-dir", type=Path, default=Path("export"))
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--history-days", type=int, default=None)
     parser.add_argument("--raw-cache", type=Path, default=None)
     parser.add_argument("--refresh-data", action="store_true")
     parser.add_argument("--skip-quality-gate", action="store_true")
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="When using --all, continue training remaining TFs after a failure",
+    )
     args = parser.parse_args()
+
+    if args.all and args.resolution:
+        parser.error("Use either --resolution or --all, not both")
+    if not args.all and not args.resolution:
+        parser.error("Specify --resolution <tf> or --all")
+
+    enforce_quality_gate = not args.skip_quality_gate
+    if args.all:
+        run_all_training(
+            export_dir=args.export_dir,
+            epochs=args.epochs,
+            history_days=args.history_days,
+            refresh_data=args.refresh_data,
+            enforce_quality_gate=enforce_quality_gate,
+            continue_on_error=args.continue_on_error,
+        )
+        return
+
     run_training(
         resolution=args.resolution,
         export_dir=args.export_dir,
@@ -216,7 +295,7 @@ def main() -> None:
         history_days=args.history_days,
         raw_cache_path=args.raw_cache,
         refresh_data=args.refresh_data,
-        enforce_quality_gate=not args.skip_quality_gate,
+        enforce_quality_gate=enforce_quality_gate,
     )
 
 

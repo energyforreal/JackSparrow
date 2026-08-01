@@ -9,22 +9,31 @@ the agent integrates outputs at decision time via `mtf_decision_policy`.
 - Training loop: `scripts/colab/transformer_training.py`
 - CLI runner: `scripts/colab/train_transformer_resolution.py`
 
-## Notebooks (one per TF)
+## Notebook
 
-| Notebook | Resolution |
-|----------|------------|
-| `transformer_btcusd_5m_train.ipynb` | 5m |
-| `transformer_btcusd_15m_train.ipynb` | 15m |
-| `transformer_btcusd_30m_train.ipynb` | 30m |
-| `transformer_btcusd_1h_train.ipynb` | 1h |
-| `transformer_btcusd_2h_train.ipynb` | 2h |
+`transformer_btcusd_all_tf_train.ipynb` trains all supported resolutions (5m, 15m, 30m, 1h, 2h)
+sequentially via `run_all_training()` from `train_transformer_resolution.py`.
 
-Each notebook sets `resolution = "..."` and calls `run_training()` from
-`train_transformer_resolution.py`.
+Set `resolutions` in the config cell to train a subset, e.g. `["15m", "1h"]`.
+
+## CLI
+
+Single TF:
+
+```bash
+python scripts/colab/train_transformer_resolution.py --resolution 15m --export-dir export/15m
+```
+
+All TFs:
+
+```bash
+python scripts/colab/train_transformer_resolution.py --all --export-dir export --continue-on-error
+```
 
 ## Export
 
-Copy exports into `agent/model_storage/JackSparrow_Transformer_BTCUSD_{tf}/`:
+Each TF exports to `export/JackSparrow_Transformer_BTCUSD_{tf}/`. Copy into
+`agent/model_storage/JackSparrow_Transformer_BTCUSD_{tf}/`:
 - `metadata_transformer.json` (auto-generated)
 - `btcusd_{tf}_transformer.onnx`
 - `feature_config.json`
