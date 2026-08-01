@@ -21,8 +21,8 @@ alwaysApply: false
 |-----|---------|
 | 01 | Architecture, startup, communication |
 | 02 | MCP protocols |
-| 03 | IC / `MODEL_DIR`, `metadata_ic.json`, archived v43, Docker + WSS |
-| 04–05 | Features, reasoning, HOLD/MTF |
+| 03 | Transformer ONNX / `MODEL_DIR`, `metadata_transformer.json`, Colab export |
+| 04–05 | Features, transformer decision path, self-awareness |
 | 06–07 | Backend API, WebSocket, frontend |
 | 08–09 | Layout, UI/UX |
 | 10–11 | Deploy, Docker, build, tests |

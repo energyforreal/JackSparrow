@@ -2,9 +2,32 @@
 
 ## Overview
 
-This document describes **JackSparrow's** reasoning engine, decision-making process, and learning algorithms. The agent uses a structured 6-step reasoning chain to make decisions, not simple rule-based logic.
+This document describes **JackSparrow's** decision-making process on the **Transformers** branch. Runtime uses a single ONNX transformer model: `evaluate_transformer_prediction` in `agent/core/transformer_decision.py` maps inference output to trade signals before `DECISION_READY` is published.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
+
+---
+
+## Transformer decision path (current runtime)
+
+1. **Trigger** — `CANDLE_CLOSED` or price fluctuation exceeds `PRICE_FLUCTUATION_THRESHOLD_PCT`
+2. **Features** — `feature_store/transformer_btcusd_15m` builds the inference matrix
+3. **Inference** — `TransformerModelNode.predict()` runs ONNX model
+4. **Decision** — `evaluate_transformer_prediction()` applies:
+   - `TRANSFORMER_SIGNAL_THRESHOLD` or metadata `default_threshold`
+   - `TRANSFORMER_MIN_CONFIDENCE` for entry signals
+   - `TRANSFORMER_EXTREME_REGIME_VETO` (HOLD when vol regime is EXTREME)
+   - `TRANSFORMER_STRONG_EDGE_MULTIPLIER` for STRONG_BUY/SELL
+5. **Output** — `PolicyVerdict` + reasoning chain payload → `DECISION_READY`
+6. **Gates** — Trading handler + risk manager before Delta testnet execution
+
+**Implementation**: [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py), orchestrated by [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py).
+
+---
+
+## Overview (historical context)
+
+The agent **thinks**, not just reacts. Earlier branches used a 6-step reasoning chain and multi-model consensus; the Transformers branch consolidates inference into the transformer decision path above while retaining vector memory and deterministic self-awareness.
 
 ---
 
@@ -35,16 +58,13 @@ The agent **thinks**, not just reacts. It follows a structured reasoning process
 4. Learns from outcomes and adapts behavior
 5. Explains decisions in human-understandable terms
 
-### MCP Reasoning Engine
+### MCP decision integration
 
-The reasoning engine is implemented as part of the MCP (Model Context Protocol) layer, specifically using the **MCP Reasoning Protocol**. This ensures standardized reasoning chains with full traceability and integration with features and models.
+Decision logic is implemented in the MCP layer via **`transformer_decision.evaluate_transformer_prediction`**, integrated with:
 
-**Implementation**: `agent/core/reasoning_engine.py` implements the MCP Reasoning Engine.
-
-**Integration**: The reasoning engine integrates with:
-- **MCP Feature Server** - For feature requests via MCP Feature Protocol
-- **MCP Model Registry** - For model predictions via MCP Model Protocol
-- **Vector Memory Store** - For historical context retrieval
+- **MCP Feature Server** — transformer feature matrix via MCP Feature Protocol
+- **MCP Model Registry** — `TransformerModelNode` ONNX inference
+- **Vector Memory Store** — optional historical context on `DECISION_READY`
 
 For detailed MCP Reasoning Protocol documentation, see [MCP Layer Documentation - Reasoning Protocol](02-mcp-layer.md#mcp-reasoning-protocol).
 
@@ -196,6 +216,8 @@ The AgentContext is used throughout the reasoning process to make context-aware 
 ---
 
 ## 6-Step Reasoning Chain
+
+> **Archived:** The Transformers branch uses `transformer_decision.evaluate_transformer_prediction` instead of the 6-step chain below. Retained for historical reference only.
 
 ## Perpetual Futures Reasoning Integration
 

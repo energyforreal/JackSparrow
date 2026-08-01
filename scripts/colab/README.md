@@ -16,7 +16,7 @@ Training loop helpers live in `scripts/colab/transformer_training.py`.
 4. Point the agent at the bundle:
    ```env
    MODEL_DIR=./agent/model_storage/JackSparrow_Transformer_BTCUSD
-   IC_MODE=false
+   TRANSFORMER_MIN_CONFIDENCE=0.55
    ```
 
 For local development, use the main packages under `agent/` and `feature_store/`.

@@ -1,3 +1,5 @@
+> **Archived — Transformers branch; not current runtime.**
+
 # AI Trading Agent - Complete Rebuild Specification
 ## Master Prompt for Cursor.ai
 

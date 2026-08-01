@@ -243,10 +243,10 @@ class MCPModelResponse(BaseModel):
        require_explanation=True
    )
    ```
-2. The registry fans out the request to all active models (`xgboost`, `lstm`, `transformer`).
-3. Each model node returns an `MCPModelPrediction` with SHAP explanations.
-4. The registry aggregates the results, computes consensus, and emits an `MCPModelResponse`.
-5. The response is forwarded to the reasoning engine and persisted in the decision memory store.
+2. The registry routes the request to the registered **`TransformerModelNode`** (single ONNX model on the Transformers branch).
+3. The model node returns an `MCPModelPrediction` with signal context (future return, vol regime, horizon scores).
+4. `evaluate_transformer_prediction` in `transformer_decision.py` maps the prediction to BUY/SELL/HOLD and confidence.
+5. The orchestrator emits `DECISION_READY` and optionally persists context in the memory store.
 
 Use this five-step flow as the canonical reference when adding new model types or debugging inference latency.
 

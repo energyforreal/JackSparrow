@@ -2,7 +2,7 @@
 
 ## Overview
 
-**JackSparrow** is a comprehensive AI-powered trading agent designed for paper trading on Delta Exchange India. This document outlines all features and capabilities of the system.
+**JackSparrow** is a comprehensive AI-powered trading agent for **Delta Exchange India testnet**. This document outlines all features and capabilities of the system.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -406,9 +406,9 @@ The example illustrates how raw market context, historical success rate, and mod
 
 ---
 
-### 8. Paper Trading Execution
+### 8. Delta Testnet Execution
 
-**Description**: Safe paper trading on Delta Exchange India without real money risk.
+**Description**: Real orders on Delta Exchange India testnet (not local paper simulation).
 
 **Execution Features**:
 
@@ -429,7 +429,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Trailing stop (ratchet stop loss on favorable price moves using `trailing_stop_percentage`)
 - Time-based exit: positions held longer than `max_position_hold_hours` are force-closed
 - Signal-reversal exit: when the new signal contradicts the open position, position is closed before any new entry
-- Slippage and spread: paper fill uses correct direction (buy pays more, sell receives less) and optional `half_spread_pct`; stale ticker (e.g. >5s) raises and blocks fill
+- Slippage and spread: testnet fill uses correct direction; stale ticker blocks fill when configured
 
 **Trade Logging**:
 - Complete trade history

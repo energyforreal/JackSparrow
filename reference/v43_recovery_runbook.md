@@ -1,3 +1,5 @@
+> **Archived — Transformers branch; not current runtime.**
+
 # JackSparrow v43 Recovery Runbook
 
 Operational steps for the v43 recovery plan (runtime config → training cost parity → inference A/B → policy re-enable).

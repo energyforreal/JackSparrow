@@ -914,57 +914,25 @@ pydantic==2.5.0
 
 ### Model Storage Location
 
-JackSparrow stores intelligence bundles under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (**`AGENT_MODEL_DIR`** in Docker). **Current discovery (NO-ML)** loads **`metadata_ic.json`** and registers **`RuleBasedIntelligenceNode`**. The checked-in default is **`agent/model_storage/JackSparrow_IC_BTCUSD/`**. Archived v43 pickle folders may remain on disk; **`MODEL_FORMAT` defaults to `jacksparrow_ic`** in health payloads.
+JackSparrow stores the transformer ONNX bundle under **`agent/model_storage/`**, referenced by **`MODEL_DIR`** (**`AGENT_MODEL_DIR`** in Docker). **Current discovery** loads **`metadata_transformer.json`** and registers **`TransformerModelNode`**. The checked-in default is **`agent/model_storage/JackSparrow_Transformer_BTCUSD/`**.
 
-**Typical layouts**:
-
-- **IC (Compose default)**: **`JackSparrow_IC_BTCUSD/`** — **`metadata_ic.json`** only; logic in **`agent/intelligence/`**.
-- **v43 regression (archived)**: **`JackSparrow_v43_models_BTCUSD/`** — **`metadata_v43.json`** + **`model_artifact_v43*.pkl`** — not loaded by current discovery.
-- **Historical v5 / v4 ensemble** (entry + exit joblibs per timeframe), e.g. `jacksparrow_v5_BTCUSD_2026-03-19/` — **`V4EnsembleNode`** in forks only.
-- **Historical v15 pipeline** (single `pipeline_{tf}_v14.pkl` per TF), e.g. `jacksparrow_v15_BTCUSD_2026-04-05/{5m,15m}/` — retained for parquet **adaptive retrain**, not paired with today's v43 **`ModelDiscovery`**.
-
-Example IC tree (production):
+**Typical layout (production)**:
 
 ```
-agent/model_storage/JackSparrow_IC_BTCUSD/
-└── metadata_ic.json               # horizon thresholds + feature contract reference
+agent/model_storage/JackSparrow_Transformer_BTCUSD/
+├── metadata_transformer.json
+├── btcusd_15m_transformer.onnx
+├── feature_config.json
+└── README.md
 ```
 
-Example archived v43 tree:
+Feature contract: **`feature_store/transformer_btcusd_15m/`**. Training: **`scripts/colab/transformer_btcusd_15m_train.ipynb`**.
 
-```
-agent/model_storage/JackSparrow_v43_models_BTCUSD/
-├── metadata_v43.json
-├── model_artifact_v43.pkl
-└── ...
-```
-
-See [ML models — Runtime discovery](03-ml-models.md#runtime-discovery-no-ml-intelligence-component).
-
-Example legacy v5 tree:
-
-```
-agent/model_storage/jacksparrow_v5_BTCUSD_2026-03-19/
-├── metadata_BTCUSD_15m.json
-├── entry_model_BTCUSD_15m.joblib
-├── exit_model_BTCUSD_15m.joblib
-└── ...
-```
-
-Example v15 tree:
-
-```
-agent/model_storage/jacksparrow_v15_BTCUSD_2026-04-05/
-├── 5m/metadata_BTCUSD_5m.json
-├── 5m/pipeline_5m_v14.pkl
-├── 15m/metadata_BTCUSD_15m.json
-└── 15m/pipeline_15m_v14.pkl
-```
+See [ML models — Runtime discovery](03-ml-models.md#runtime-discovery-transformer-onnx).
 
 ### Model Discovery
 
-- **`agent/models/model_discovery.py`** resolves **`MODEL_DIR/metadata_ic.json`** when **`IC_MODE=true`** and registers **`RuleBasedIntelligenceNode`**. **`MODEL_PATH` is ignored.**
-- Legacy recursive scans for **`metadata_BTCUSD_*.json`** apply only when running an older checkout or patched discovery—see **[ML Models](03-ml-models.md#historical-multi-node-flow-forks-only)**.
+- **`agent/models/model_discovery.py`** resolves **`MODEL_DIR/metadata_transformer.json`** and registers **`TransformerModelNode`**. **`MODEL_PATH` is ignored.**
 
 For detailed model management documentation, see [ML Models Documentation](03-ml-models.md).
 

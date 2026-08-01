@@ -1,3 +1,5 @@
+> **Archived — Transformers branch; not current runtime.**
+
 # v43 State Head — Phase 5 Roadmap (staged)
 
 Items below are intentionally **not** required for the first state-head training run.

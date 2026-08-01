@@ -1,3 +1,5 @@
+> **Archived — Transformers branch; not current runtime.**
+
 # Feature computation entrypoints (train / live / MCP)
 
 Single source of truth for **generic** JackSparrow feature names used by legacy pipelines is [`feature_store/unified_feature_engine.py`](../feature_store/unified_feature_engine.py) (`UnifiedFeatureEngine`). Perpetual swap columns are derived only via `compute_perpetual_features` from [`feature_store/perpetual_features.py`](../feature_store/perpetual_features.py), which is **imported only** by `UnifiedFeatureEngine` (grep the repo to confirm).

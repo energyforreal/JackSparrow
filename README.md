@@ -10,10 +10,10 @@
 
 JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 
-1. **Autonomously analyzes** market data using ML models (as **supporting evidence**, not sole authority)
-2. **Decides under agent policy** — ML consensus and gates inform an explicit policy verdict before any `DECISION_READY` trade intent
-3. **Executes trades** only after risk validation and execution gates
-4. **Learns and adapts** from trading outcomes
+1. **Autonomously analyzes** market data using an ONNX Transformer model
+2. **Decides** via `evaluate_transformer_prediction` before any `DECISION_READY` trade intent
+3. **Executes trades** only after risk validation and execution gates on Delta testnet
+4. **Tracks outcomes** with deterministic self-awareness (introspection / reflection)
 5. **Communicates status** clearly through integrated interfaces
 
 ## Key Requirements
@@ -22,7 +22,7 @@ JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 - **INR portfolio defaults**: `INITIAL_BALANCE=20000` (displayed as `₹20,000`)
 - **Currency split**: BTCUSD market prices render in `USD ($)` while portfolio/PnL render in `INR (₹)`
 - **Entry confidence gate**: trades execute only when confidence is `>= 70%` (`MIN_CONFIDENCE_THRESHOLD=0.70`)
-- **v43 execution tuning**: see [docs/v43_trade_execution_runbook.md](docs/v43_trade_execution_runbook.md) (gate 5 ratio, debounce, shorts, trending trial, log analysis)
+- **Transformer tuning**: see [ML models](docs/03-ml-models.md) (`TRANSFORMER_MIN_CONFIDENCE`, `TRANSFORMER_EXTREME_REGIME_VETO`)
 - **Delta BTCUSD lot semantics**: `MIN_LOT_SIZE=1` lot with `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC)
 - **Runtime execution controls**: fixed `1` lot entries, isolated margin assumption `5x`, INR margin sufficiency checks
 - **Real-time price monitoring** with instant BTCUSD price updates in frontend
@@ -35,7 +35,7 @@ JackSparrow is a functional AI-powered trading agent (not just a bot) that:
 ## Technology Stack
 
 - **Backend**: FastAPI, Python 3.11+, PostgreSQL with TimescaleDB, Redis
-- **AI/ML**: XGBoost, LightGBM, TensorFlow (LSTM/Transformer), SHAP
+- **AI/ML**: ONNX Transformer (onnxruntime), feature contract in `feature_store/transformer_btcusd_15m/`
 - **Frontend**: Next.js 14+, TypeScript, Tailwind CSS
 - **Vector Storage**: Qdrant or Pinecone
 - **Monitoring**: Prometheus + Grafana, Structured logging
@@ -81,7 +81,7 @@ python tools/commands/start_parallel.py
 The `start_parallel.py` script performs a comprehensive 4-step startup sequence:
 
 1. **Environment Loading**: Loads and validates environment configuration
-2. **Paper Trading Validation**: Verifies safe paper trading mode (blocks live trading)
+2. **Testnet validation**: Enforces Delta India testnet; rejects legacy `PAPER_TRADING_MODE` and `delta_paper_sim`
 3. **Redis Availability**: Ensures Redis service is available and starts it if needed
 4. **Configuration Validation**: Runs environment variable and prerequisite validation
 5. **Optional Model Validation**: Validates ML model files if `VALIDATE_MODELS_ON_STARTUP=true`
@@ -136,7 +136,7 @@ All 24/7 services now run via Docker images orchestrated with Compose.
 2. Prepare persistent host paths before the first deployment:
 
    ```bash
-   mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_IC_BTCUSD
+   mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_Transformer_BTCUSD
    ```
 
 3. Build and start the stack:
@@ -146,7 +146,7 @@ All 24/7 services now run via Docker images orchestrated with Compose.
    docker compose up -d --force-recreate
    ```
 
-   Optional Qdrant (vector store profile — not required for default IC mode):
+   Optional Qdrant (vector store profile):
 
    ```bash
    docker compose --profile full up -d --force-recreate
@@ -169,19 +169,17 @@ All 24/7 services now run via Docker images orchestrated with Compose.
 
 The stack provisions TimescaleDB/PostgreSQL, Redis, the AI agent (feature HTTP on **`:8002`** and command WebSocket on **`:8003`** inside the Docker network), FastAPI backend (`8000` on the host), and Next.js frontend (`3000` on the host). Named volumes keep Postgres and Redis durable; bind mounts keep **`./agent/model_storage`** and **`./logs/*`** on the host. Application source is **baked into images** in production — rebuild after code changes. Agent ports are **not** published on the host unless you use **`docker-compose.dev.yml`**.
 
-## Intelligence Component (NO-ML default)
+## Transformer ONNX (default runtime)
 
-Inference uses the **rule-based Intelligence Component (IC)** — no pickle load at runtime:
+Inference uses a single **ONNX Transformer** bundle:
 
-- **`MODEL_DIR`** → **`agent/model_storage/JackSparrow_IC_BTCUSD/`** (must contain **`metadata_ic.json`** only).
-- **`IC_MODE=true`**, **`AGENT_POLICY_MODE=ml_or_thesis`**, **`REQUIRE_ML_SIGNAL_FOR_ORDERS=false`** (see [.env.example](.env.example)).
-- Features: same v43 contract (`feature_store/jacksparrow_v43_contract.py`), built by **`jacksparrow_v43_build_matrix.py`**, scored by **`agent/intelligence/`** modules.
+- **`MODEL_DIR`** → **`agent/model_storage/JackSparrow_Transformer_BTCUSD/`** (`metadata_transformer.json`, ONNX, `feature_config.json`).
+- **`TRANSFORMER_MIN_CONFIDENCE`**, **`TRANSFORMER_EXTREME_REGIME_VETO`** (see [.env.example](.env.example)).
+- Features: `feature_store/transformer_btcusd_15m/` (train/serve parity with Colab).
 
-Docker Compose defaults **`MODEL_DIR`** from **`AGENT_MODEL_DIR`** to **`/app/agent/model_storage/JackSparrow_IC_BTCUSD`** and sets **`WEBSOCKET_URL`** to **`wss://socket-ind.testnet.deltaex.org`** when unset.
+Docker Compose defaults **`MODEL_DIR`** from **`AGENT_MODEL_DIR`** to **`/app/agent/model_storage/JackSparrow_Transformer_BTCUSD`** and sets **`WEBSOCKET_URL`** to **`wss://socket-ind.testnet.deltaex.org`** when unset.
 
-Archived **v43 XGBoost** bundles and training notebooks are documented under **[ML models – archived v43](docs/03-ml-models.md#archived-jacksparrow-v43-xgboost--mso-v50)**. Historical **v15** / **v5** artefacts may remain for parity tests and optional **v15 parquet adaptive retrain** only.
-
-See [ML Models Documentation](docs/03-ml-models.md) for discovery, Docker bundle layout, and troubleshooting.
+See [ML Models Documentation](docs/03-ml-models.md) for discovery, Colab training, Docker layout, and troubleshooting.
 
 ## Testing
 
@@ -269,7 +267,7 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for the complete index.
 JackSparrow/
 ├── backend/          # FastAPI backend API
 ├── agent/            # AI agent core with MCP layer
-│   └── model_storage/ # Trained bundles (e.g. jacksparrow_v5_*); see docs/03-ml-models.md
+│   └── model_storage/ # Transformer ONNX bundle; see docs/03-ml-models.md
 ├── frontend/         # Next.js frontend dashboard
 ├── tests/            # Test suite
 ├── scripts/          # Utility scripts

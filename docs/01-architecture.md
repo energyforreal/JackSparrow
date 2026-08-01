@@ -43,7 +43,7 @@ The Data Layer is responsible for:
 
 **Market Data Service**
 - Continuously monitors real-time BTCUSD ticker prices (every 0.5 seconds)
-- Emits PriceFluctuationEvent when price changes exceed threshold (≥0.5%)
+- Emits PriceFluctuationEvent when price changes exceed threshold (default **0.10%** via `PRICE_FLUCTUATION_THRESHOLD_PCT`; configurable in `.env`)
 - Retrieves historical OHLCV data for analysis
 - Implements circuit breakers for API failures
 - Caches frequently accessed data
@@ -71,17 +71,16 @@ The Data Layer is responsible for:
 
 The Intelligence Layer contains the "brain" of the trading agent:
 
-**Signal Generation Engine (Intelligence Component — default)**
-- **`RuleBasedIntelligenceNode`** (`agent/intelligence/`) — rule-based regime, direction, MTF, setup quality, uncertainty (no pickle inference on branch **NO-ML**)
-- v43 feature matrix + **`v43_signal_gates`** at runtime; outputs **`multi_horizon_heads`** for MCP orchestrator compatibility
-- Discovery via **`metadata_ic.json`** in **`MODEL_DIR`** when **`IC_MODE=true`**
-- Legacy multi-model ML ensembles (XGBoost, LightGBM, LSTM, etc.) are **archived** — see [ML models](03-ml-models.md#runtime-discovery-no-ml-intelligence-component)
+**Signal Generation Engine (Transformer ONNX — default)**
+- **`TransformerModelNode`** (`agent/models/transformer_node.py`) — loads `btcusd_15m_transformer.onnx` via `onnxruntime`
+- Feature contract: [`feature_store/transformer_btcusd_15m/`](../feature_store/transformer_btcusd_15m/)
+- Discovery via **`metadata_transformer.json`** in **`MODEL_DIR`** (default: `JackSparrow_Transformer_BTCUSD/`)
+- See [ML models – Runtime discovery](03-ml-models.md#runtime-discovery-transformer-onnx)
 
-**Decision Engine (MCP Reasoning Engine)**
-- 6-step structured reasoning chain
-- Multi-model consensus calculation
-- Context-aware decision making
-- Risk-adjusted position sizing
+**Decision Engine (Transformer decision path)**
+- **`evaluate_transformer_prediction`** in `agent/core/transformer_decision.py`
+- Maps ONNX output → signal (BUY/SELL/HOLD), confidence, reasoning chain payload
+- Emits **`DECISION_READY`** via MCP orchestrator (`source=transformer_decision`)
 
 **Risk Manager**
 - Circuit breakers for portfolio protection
@@ -89,30 +88,17 @@ The Intelligence Layer contains the "brain" of the trading agent:
 - Volatility-adjusted stop losses
 - Portfolio heat monitoring
 
-**Decision authority (agent-first)**
+**Decision authority**
 
-Trade *intent* on the event bus is issued only after the **Agent Policy** stage (`AgentPolicyEngine` in code): ML outputs are packaged as **evidence** (`EVIDENCE_READY` / `MLEvidenceSnapshot`), then the policy layer emits **`DECISION_READY`** with `policy_authority=agent_policy` and auditable `policy_reason_codes`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation; in `TRADING_MODE=live`, a non-empty `manual_trade_audit_reason` is required unless disabled via settings.
+Trade *intent* on the event bus is issued as **`DECISION_READY`** after transformer inference and `evaluate_transformer_prediction`. The **Trading handler** and **Risk manager** remain mandatory gates before `RISK_APPROVED` and execution. Manual `execute_trade` commands must pass the same risk validation.
 
-**Strategy-first pipeline (NO-ML / IC default)**
-
-Default fusion mode is `AGENT_POLICY_MODE=ml_or_thesis` with `IC_MODE=true`: the **RuleBasedIntelligenceNode** produces the same `MLValidationSnapshot` shape as legacy v43 (no pickle load).
+**Transformer pipeline (default)**
 
 1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
-2. **Intelligence validation** — `RuleBasedIntelligenceNode` produces `MLValidationSnapshot` (thresholds, `confirms_long` / `confirms_short`, gates).
-3. **Market structure** — `classify_market_structure()` (trending / ranging / low-vol / crisis) from closed-bar features.
-4. **Agent thesis** — `AgentThesisEngine` proposes breakout / trend / mean-reversion candidates (deterministic rules).
-5. **Trade score** — `score_trade_setup()` confluence gate (`AGENT_TRADE_SCORE_MIN`, default 70).
-6. **Policy** — `AgentPolicyEngine` fuses thesis + ML (`ml_and_thesis` requires agreement).
-7. **Reasoning** — includes **Trade Adjudication** step; primary `decision.signal` comes from `PolicyVerdict`, not reasoning text alone.
-8. **Execution guard** — `ml_signal_guard` requires healthy ML predictions + policy reason `agent_thesis_confirms_ml` when `REQUIRE_STRATEGY_ML_AGREEMENT=true`.
-
-Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_ML_SIGNAL_FOR_ORDERS=false`.
-
-**Learning Module**
-- Performance tracking per model
-- Dynamic model weight adjustment
-- Strategy parameter adaptation
-- Confidence calibration
+2. **Feature build** — `feature_store/transformer_btcusd_15m` matrix aligned with Colab training.
+3. **ONNX inference** — `TransformerModelNode.predict()` → future return, vol regime, horizon scores.
+4. **Decision** — `evaluate_transformer_prediction` applies `TRANSFORMER_MIN_CONFIDENCE`, `TRANSFORMER_EXTREME_REGIME_VETO`, and threshold from metadata.
+5. **Risk & execution** — trading handler + risk manager before Delta testnet order placement.
 
 **Vector Memory Store**
 - Stores decision contexts as embeddings (canonical `FEATURE_LIST` + market-context factors)
@@ -121,11 +107,11 @@ Thesis-only operation: set `AGENT_POLICY_MODE=thesis_only` and `REQUIRE_ML_SIGNA
 
 **Deterministic self-awareness (no LLM)**
 
-Read-only and advisory telemetry layered on the existing strategy-first pipeline. Trade authority is unchanged (`ML/gates → thesis → policy → risk → execution`).
+Read-only and advisory telemetry layered on the transformer pipeline. Trade authority is unchanged (`transformer → risk → execution`).
 
 | Phase | Module | Behavior |
 |-------|--------|----------|
-| Introspection | `agent/core/agent_introspection.py` | Builds `agent_introspection` on each `DECISION_READY` (policy mode, ML/thesis, trade score, v43 regime/gate, portfolio guard excerpt, memory stats). |
+| Introspection | `agent/core/agent_introspection.py` | Builds `agent_introspection` on each `DECISION_READY` (signal, confidence, vol regime, portfolio guard excerpt, memory stats). |
 | Memory loop | `agent/memory/vector_store.py` + `mcp_orchestrator._store_decision_context` | Stores `memory_context_id` + `decision_event_id`; updates outcome on close via `agent_self_awareness_hooks`. |
 | Reflection | `agent/core/agent_reflection_engine.py` | Advisory `reflection_snapshot` on `POSITION_CLOSED` (direction vs PnL, calibration bucket, quality score). Does **not** mutate policy. |
 
@@ -195,25 +181,21 @@ MCP Orchestrator
 │
 ├── MCP Model Orchestrator
 │   └── Model Registry (MCP Model Protocol)
-│       ├── XGBoost Node
-│       ├── LSTM Node
-│       ├── Transformer Node
-│       └── Other Model Nodes
+│       └── TransformerModelNode (ONNX)
 │
-└── MCP Reasoning Orchestrator
-    └── Reasoning Engine (MCP Reasoning Protocol)
+└── Transformer Decision
+    └── transformer_decision.evaluate_transformer_prediction
         ├── Uses Feature Server
         ├── Uses Model Registry
-        └── Uses Memory Store
+        └── Uses Memory Store (optional context)
 ```
 
-**Orchestration Flow (strategy-first v43)**:
-1. Request arrives at MCP Orchestrator
-2. Model Orchestrator runs v43 inference → ML validation snapshot
-3. Market structure + Agent thesis evaluate closed-bar features
-4. v43 execution gates + trade score + policy fusion (`ml_and_thesis`)
-5. Reasoning Orchestrator generates chain (including trade adjudication)
-6. `PolicyVerdict` drives `DECISION_READY`; risk manager and trading handler veto before execution
+**Orchestration Flow (Transformers branch)**:
+1. Request arrives at MCP Orchestrator (candle close or price fluctuation)
+2. Feature server builds transformer feature matrix
+3. `TransformerModelNode` runs ONNX inference
+4. `evaluate_transformer_prediction` produces signal + `PolicyVerdict`
+5. `DECISION_READY` published; risk manager and trading handler gate before execution
 
 For detailed orchestration documentation, see [MCP Layer Documentation - Orchestration](02-mcp-layer.md#mcp-orchestration).
 
@@ -311,7 +293,7 @@ For detailed Model Protocol documentation, see [MCP Layer Documentation - Model 
 - Decision context preservation
 - Integration with Feature and Model Protocols
 
-**Implementation**: `agent/core/reasoning_engine.py`
+**Implementation**: `agent/core/transformer_decision.py` (slim decision path); MCP orchestrator in `agent/core/mcp_orchestrator.py`
 
 **Example Structure**:
 ```python
@@ -355,7 +337,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 ### Intelligence Layer Components
 
 #### MCP Model Registry
-- **Responsibility**: Register intelligence nodes discovered from **`MODEL_DIR`** (default: **`RuleBasedIntelligenceNode`** via **`metadata_ic.json`**)
+- **Responsibility**: Register `TransformerModelNode` discovered from **`MODEL_DIR`** (default: `JackSparrow_Transformer_BTCUSD/metadata_transformer.json`)
 - **Protocol**: MCP Model Protocol
 - **Dependencies**: Model discovery, feature server, performance tracker
 - **Output**: Model predictions packaged as MCP evidence for policy + reasoning (archived v43 XGBoost / MSO paths documented in [ML models](03-ml-models.md))
@@ -635,7 +617,7 @@ The system employs a comprehensive 4-step startup sequence managed by `start_par
 
 #### Step 2: Delta Testnet Validation
 - **Safety feature**: Validates `TRADING_MODE=testnet`, `DELTA_ENV=india_testnet`, and testnet REST/WebSocket URLs
-- **Protection logic**: Rejects `PAPER_TRADING_MODE`, `EXCHANGE_BACKEND=delta_paper_sim`, and production Delta hosts
+- **Protection logic**: Rejects legacy `PAPER_TRADING_MODE`, `EXCHANGE_BACKEND=delta_paper_sim`, and production Delta hosts; requires Delta India **testnet** configuration
 - **Safety indicators**: Displays testnet status in the monitoring dashboard
 
 #### Step 3: Configuration Validation
@@ -709,7 +691,7 @@ The system employs a comprehensive 4-step startup sequence managed by `start_par
 - **Environment Validation**: Blocks startup with live trading configuration
 - **Configuration Verification**: Multiple checkpoints for trading mode safety
 - **Clear Warnings**: Unambiguous messages about live trading risks
-- **Forced Paper Mode**: Defaults to safe paper trading operation
+- **Testnet-only mode**: Startup validator enforces Delta India testnet; legacy paper-sim flags fail fast
 
 #### Process Lifecycle Management
 - **Graceful Startup**: Parallel service initialization with dependency checking
@@ -824,7 +806,7 @@ The startup and configuration validation system implements comprehensive error h
 #### Startup Validation Errors
 
 **Paper Trading Validation Failures**:
-- **Detection**: Invalid `PAPER_TRADING_MODE` or `TRADING_MODE` environment variables
+- **Detection**: Invalid `PAPER_TRADING_MODE` or `TRADING_MODE=paper` (removed); use `TRADING_MODE=testnet`
 - **Response**: Immediate startup termination with clear warnings
 - **Recovery**: User must correct environment configuration and restart
 - **Safety**: Prevents accidental live trading execution
@@ -858,7 +840,7 @@ The startup and configuration validation system implements comprehensive error h
 #### Configuration Error Recovery
 
 **Validation Error Categories**:
-- **Critical**: Block startup (paper trading mode, missing credentials)
+- **Critical**: Block startup (invalid trading mode, missing testnet credentials)
 - **Warning**: Allow startup with reduced functionality (optional services)
 - **Informational**: Log issues but continue operation (performance optimizations)
 
@@ -872,10 +854,9 @@ The startup and configuration validation system implements comprehensive error h
       "code": "LIVE_TRADING_DETECTED",
       "message": "Live trading mode detected - startup blocked for safety",
       "details": {
-        "PAPER_TRADING_MODE": "false",
         "TRADING_MODE": "live"
       },
-      "guidance": "Set PAPER_TRADING_MODE=true or TRADING_MODE=paper"
+      "guidance": "Use TRADING_MODE=testnet with Delta India testnet API keys; do not set PAPER_TRADING_MODE"
     },
     "timestamp": "2025-01-12T10:30:00Z"
   }
@@ -968,7 +949,7 @@ The startup and configuration validation system implements comprehensive error h
 8. Database → Store trade record
 ```
 
-**SL/TP pricing (entry):** `agent/core/sl_tp.py` (`compute_stop_take_prices`) is the single implementation for optional ATR scaling (`USE_ATR_SCALED_SL_TP`, `ATR_SL_DISTANCE_MULT`, `ATR_TP_DISTANCE_MULT`), fixed percentages, and **tick-size rounding** (`round_to_tick`). `RiskApprovedEvent` may include `atr_14` (from features) so execution can recompute matching levels if SL/TP are omitted. **`parse_risk_approved_side`** normalizes payload side (`BUY`/`SELL`, strip/whitespace). In **paper trading**, `execute_trade` **rebases** absolute SL/TP by `fill_price − planned_price` before opening the position so `manage_position` compares levels to the simulated fill.
+**SL/TP pricing (entry):** `agent/core/sl_tp.py` (`compute_stop_take_prices`) is the single implementation for optional ATR scaling (`USE_ATR_SCALED_SL_TP`, `ATR_SL_DISTANCE_MULT`, `ATR_TP_DISTANCE_MULT`), fixed percentages, and **tick-size rounding** (`round_to_tick`). `RiskApprovedEvent` may include `atr_14` (from features) so execution can recompute matching levels if SL/TP are omitted. **`parse_risk_approved_side`** normalizes payload side (`BUY`/`SELL`, strip/whitespace).
 
 **Exit Flow (implemented):**
 - **Dual path**: (1) **Timer-based**: Position monitor loop (`IntelligentAgent._position_monitor_loop`) runs at `position_monitor_interval_seconds` (e.g. 15s) when no positions, or `min_monitor_interval_seconds` (e.g. 2s) when positions are open. (2) **WebSocket-driven** (when `websocket_sl_tp_enabled`): MarketDataService WebSocket ticker triggers `ExecutionEngine.update_position_price_and_check(symbol, price)` per symbol with a 200ms throttle.

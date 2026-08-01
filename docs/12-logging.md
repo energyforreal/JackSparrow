@@ -480,7 +480,7 @@ These structlog events support dashboards and the reconciliation script above:
 |-------|-------|--------|
 | `v43_gate5_rejected` | INFO | Gate 5 failed: TP-scaled `edge_pct` × `tp` (`lhs`) below `ratio` × round-trip cost (`rhs`). Fields: `side` (`long` / `short`), `proba`, `thr`, `edge_pct`, `tp`, `ratio`, `rtc`, `lhs`, `rhs`. |
 
-Roll up counts with [`scripts/analyze_v43_gate_rejects.py`](../scripts/analyze_v43_gate_rejects.py) and [v43 trade execution runbook](v43_trade_execution_runbook.md) (Phase 5).
+Roll up counts with structured logs and [Debugging – No trades](13-debugging.md#no-trades-executed).
 
 ### 6. Trading handler events (`agent/events/handlers/trading_handler.py`)
 
@@ -506,7 +506,8 @@ Successful publishes log **`trading_handler_risk_approved_published`** with `ent
 
 | Event | Meaning |
 |-------|---------|
-| `mcp_orchestrator_single_model_loaded` | Only one ML model registered; fusion/adjudication may emit HOLD more often (`AGENT_POLICY_MODE` logged). |
+| `model_discovered_transformer` | Transformer ONNX bundle registered at startup. |
+| `mcp_orchestrator_single_model_loaded` | Single transformer model registered (expected on Transformers branch). |
 | `position_reconcile_fetch_failed` | Exchange position fetch failed; includes `circuit_breaker_open` and `recovery_hint` when Delta circuit breaker is OPEN. |
 
 ## Testing the Logging System

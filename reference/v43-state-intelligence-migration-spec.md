@@ -1,3 +1,5 @@
+> **Archived — Transformers branch; not current runtime.**
+
 # v43 State Intelligence Migration Spec
 
 ## Purpose

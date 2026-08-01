@@ -200,13 +200,13 @@ jq 'select(.level == "ERROR")' logs/backend/2025-11-13.log
 1. **Validate before start**: `python scripts/validate-env.py` and `python tools/commands/validate-prerequisites.py` (see [Deployment](10-deployment.md#validation-and-monitoring-commands)).
 2. **Health**: `python tools/commands/health_check.py` or `validate-health.py` once services are up.
 3. **Unicode / encoding on Windows**: if scripts print Unicode to a legacy console, set UTF-8 mode (`chcp 65001`) or run from Windows Terminal; prefer structured logs in `logs/` over console-only traces.
-4. **Model load failures**: check `MODEL_DIR`, metadata paths, and `xgboost` version vs training; see [ML Models Troubleshooting](03-ml-models.md#troubleshooting).
+4. **Model load failures**: check `MODEL_DIR` for `metadata_transformer.json`, ONNX, and `feature_config.json`; see [ML Models Troubleshooting](03-ml-models.md#troubleshooting).
 5. **Docker**: `docker compose ps`, `docker compose logs -f <service>`. After code changes, **rebuild images** (production compose does not bind-mount `./agent` or `./feature_store`): `docker compose build --pull && docker compose up -d --force-recreate`. Check `GET /api/v1/health` for `services.market_data` (stale if no ticks >30s) and `services.execution_latency` (**unknown** only when Redis key is missing; **up** with idle note when no fills yet). **Analysis tab**: Signal Rationale gate reject should appear on `signal.v43_gate_reject` or via Agent Diagnostics introspection. Dev hot reload: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build` ([Deployment](10-deployment.md)).
 6. **Event deduplication**: duplicate agent events on Redis + WS use `processed_event:{event_id}`—if the UI “misses” an event, confirm it was not deduped as a duplicate ID.
 
 ### No trades executed
 
-1. **Agent audit trail**: `logs/agent/signal_audit/live_audit.md` (or Docker: `docker logs jacksparrow-agent | findstr trading_entry_rejected`). Dominant **`hold_at_synthesis`** means policy/adjudication emitted **HOLD**—expected when thesis and ML do not align; check `AGENT_POLICY_MODE`, trade score, and model count (`GET http://agent:8002/api/v1/models` from backend network).
+1. **Agent audit trail**: `logs/agent/signal_audit/live_audit.md` (or Docker: `docker logs jacksparrow-agent | findstr trading_entry_rejected`). Dominant **`hold_at_synthesis`** means transformer decision emitted **HOLD**—check `TRANSFORMER_MIN_CONFIDENCE`, `TRANSFORMER_EXTREME_REGIME_VETO`, and `MIN_CONFIDENCE_THRESHOLD`.
 2. **`risk_rejected` + circuit breaker**: Delta API was unavailable during position reconcile. Confirm `GET /api/v1/health` → `services.delta_exchange.details.circuit_breaker.state` is **CLOSED** and API keys / testnet reachability are valid.
 3. **`stale_signal_reject` with `age_seconds` ≈ 19800** (IST hosts): historical Windows naive-datetime bug; fixed in `agent/core/decision_timestamp.py`. Verify in container: `decision_payload_timestamp_epoch_seconds(datetime.utcnow())` age should be ~0s.
 4. **No `trade_executed` in logs** while SELL signals appear in audit: entry never reached `RiskApprovedEvent` or execution—trace `reason` on the matching `event_id` in `live_audit.md`.
@@ -216,6 +216,28 @@ jq 'select(.level == "ERROR")' logs/backend/2025-11-13.log
 1. **Blank signal after reload**: normal until first WS `data_update` / `signal`; should hydrate via **`GET /api/v1/signal/latest`** and WS connect replay (≤300s). Rebuild **backend** + **frontend** after code changes.
 2. **Old “Decision time”**: partial WS merges without `timestamp` previously kept stale values; `mergeSignalPayload` now stamps merge time when `timestamp` is omitted (see [Frontend](07-frontend.md#unified-dashboard-state-usetradingdata)).
 3. **Export session logs**: `docker logs jacksparrow-agent --tail 3000 > logs/docker-logs/raw-agent-session.txt`
+
+### Signal recovery CLI
+
+Operational signal recovery reports are written under `logs/signal_recovery/` (or `LOGS_ROOT/signal_recovery/`).
+
+```bash
+# Phase 1 — pipeline health
+python scripts/signal_recovery/run.py phase1
+
+# Baseline telemetry (24h)
+python scripts/signal_recovery/run.py baseline --hours 24
+
+# Drift check
+python scripts/signal_recovery/run.py drift
+
+# Promotion gate comparison
+python scripts/signal_recovery/run.py promotion \
+  --baseline logs/signal_recovery/baseline_kpis.json \
+  --candidate logs/signal_recovery/baseline_kpis.json
+```
+
+Keep `AGENT_START_MODE=MONITORING` until signal quality improves; do not lower `MIN_CONFIDENCE_THRESHOLD` without a baseline comparison.
 
 ---
 

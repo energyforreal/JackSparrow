@@ -1,3 +1,5 @@
+> **Archived — Transformers branch; not current runtime.**
+
 # JackSparrow — Combined Architecture Review & Critical Fixes Report
 
 ## Scope of Review

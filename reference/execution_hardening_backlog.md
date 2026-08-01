@@ -1,3 +1,5 @@
+> **Archived — Transformers branch; not current runtime.**
+
 # Execution hardening backlog (`agent/core/execution.py`)
 
 This backlog tracks gaps called out in the architecture report against the current [`agent/core/execution.py`](../agent/core/execution.py) implementation. Items are ordered roughly by live-trading severity.

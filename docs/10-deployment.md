@@ -321,7 +321,7 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
 > **Agent Risk Controls**  
 > Beyond the core limits (`MAX_POSITION_SIZE`, `MAX_PORTFOLIO_HEAT`, `STOP_LOSS_PERCENTAGE`, `TAKE_PROFIT_PERCENTAGE`), the template exposes additional safeguards such as `MAX_DAILY_LOSS`, `MAX_DRAWDOWN`, `MAX_CONSECUTIVE_LOSSES`, and `MIN_TIME_BETWEEN_TRADES`, plus trading defaults like `INITIAL_BALANCE`, `TRADING_MODE`, `MIN_CONFIDENCE_THRESHOLD`, `UPDATE_INTERVAL`, and `TIMEFRAMES`. Current defaults are `INITIAL_BALANCE=20000`, `MIN_CONFIDENCE_THRESHOLD=0.70`, `MIN_LOT_SIZE=1`, and `CONTRACT_VALUE_BTC=0.001` (1 lot = 0.001 BTC on Delta BTCUSD perpetual). **SL/TP defaults** in `.env.example` are `STOP_LOSS_PERCENTAGE=0.008` (0.8%) and `TAKE_PROFIT_PERCENTAGE=0.016` (1.6%) for BTCUSD 15m volatility. **Market data recovery:** `MARKET_DATA_STALE_REST_POLL_SECONDS=30`, `AGENT_NO_CANDLE_RESTART_MINUTES=8` (runtime floor is `2 × primary_interval + 2` minutes, e.g. 12 min when primary is 5m). On cold start, the agent may log a few transient `ConnectionRefusedError` retries when connecting outbound WebSocket to the backend — backend starts after agent; retries plus Redis event delivery handle this. **API:** `ENABLE_DEPRECATED_REST_TRADING=false` disables legacy REST predict/execute (410 Gone).
 >
-> **Entry lot sizing** (`agent/core/config.py`): `PORTFOLIO_FRACTION_LOT_SIZING=true`, `ENTRY_PORTFOLIO_MARGIN_FRACTION=0.60`, `MAX_POSITION_SIZE=0.60`. **Lots scale with portfolio equity** at fixed `ISOLATED_MARGIN_LEVERAGE` (default **5**); the agent does not raise leverage as balance grows. Set `ISOLATED_MARGIN_LEVERAGE` to match Delta UI; keep `SYNC_EXCHANGE_ORDER_LEVERAGE=false` unless you explicitly want API leverage sync. Sizing uses **total equity** INR; cash reserve floor applies. `USDINR_FALLBACK_RATE=86.0`; `MAX_SIGNAL_AGE_SECONDS=90`. **NO-ML:** `AGENT_POLICY_MODE=thesis_only`. Details: [Logic & reasoning – Entry lot sizing](05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction).
+> **Entry lot sizing** (`agent/core/config.py`): `PORTFOLIO_FRACTION_LOT_SIZING=true`, `ENTRY_PORTFOLIO_MARGIN_FRACTION=0.60`, `MAX_POSITION_SIZE=0.60`. Details: [Logic & reasoning – Entry lot sizing](05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction).
 
 > **Delta testnet trading (required)**  
 > Runtime places **real orders on Delta Exchange India testnet**; local paper simulation is removed.
@@ -422,7 +422,7 @@ Docker deployment detail is in this document under [Docker Compose Deployment](#
 
 **1. Prepare persistent assets:**
 ```bash
-mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_IC_BTCUSD
+mkdir -p logs/backend logs/agent logs/frontend agent/model_storage/JackSparrow_Transformer_BTCUSD
 ```
 
 **2. Create environment file:**
@@ -519,7 +519,7 @@ All application containers load the root `.env` via `env_file: - .env` and then 
 - Runtime places **real orders on Delta testnet** (`EXCHANGE_BACKEND=delta_live`); local paper simulation is removed.
 - Compose defaults `DELTA_EXCHANGE_BASE_URL` to `https://cdn-ind.testnet.deltaex.org` when unset.
 - Compose defaults agent `WEBSOCKET_URL` to `wss://socket-ind.testnet.deltaex.org` when unset (socket endpoint, not the REST CDN host).
-- Compose defaults `MODEL_DIR` / `IC_MODE` for the IC bundle (`JackSparrow_IC_BTCUSD`) — see `docker-compose.yml` agent `environment:` block.
+- Compose defaults `MODEL_DIR` for the transformer bundle (`JackSparrow_Transformer_BTCUSD`) — see `docker-compose.yml` agent `environment:` block.
 - Removed: `PAPER_TRADING_MODE`, `RESET_PAPER_STATE_ON_STARTUP`, and `EXCHANGE_BACKEND=delta_paper_sim`.
 
 ### Frontend URLs (Docker vs Local)
@@ -939,13 +939,16 @@ NEXT_PUBLIC_WS_URL=wss://api.yourdomain.com/ws
 | `DELTA_EXCHANGE_BASE_URL` | Delta Exchange API base URL | Yes | https://api.india.delta.exchange |
 | `QDRANT_URL` | Qdrant vector database URL | No | http://localhost:6333 |
 | `QDRANT_API_KEY` | Qdrant API key | No | - |
-| `IC_MODE` | When `true`, load **RuleBasedIntelligenceNode** from **`metadata_ic.json`** (NO-ML default) | No | `true` |
-| `MODEL_DIR` | Directory for IC bundle — must contain **`metadata_ic.json`** | No | `./agent/model_storage/JackSparrow_IC_BTCUSD` (local); Docker: **`/app/agent/model_storage/JackSparrow_IC_BTCUSD`** via `AGENT_MODEL_DIR` |
+| `MODEL_DIR` | Directory for transformer bundle — must contain **`metadata_transformer.json`**, ONNX, `feature_config.json` | No | `./agent/model_storage/JackSparrow_Transformer_BTCUSD` (local); Docker: **`/app/agent/model_storage/JackSparrow_Transformer_BTCUSD`** via `AGENT_MODEL_DIR` |
+| `TRANSFORMER_MIN_CONFIDENCE` | Minimum confidence for transformer entry signals | No | `0.55` |
+| `TRANSFORMER_STRONG_EDGE_MULTIPLIER` | Edge multiplier for STRONG_BUY/SELL | No | `1.5` |
+| `TRANSFORMER_EXTREME_REGIME_VETO` | Force HOLD when vol regime is EXTREME | No | `true` |
+| `TRANSFORMER_SIGNAL_THRESHOLD` | Optional override of metadata `default_threshold` | No | *(from metadata)* |
 | `AGENT_MODEL_DIR` | Docker-only override for in-container `MODEL_DIR` | No | See `docker-compose.yml` agent service |
 | `MODEL_FORMAT` | Integration label for health payloads | No | `jacksparrow_ic` |
 | `AGENT_POLICY_MODE` | Policy fusion mode (`ml_or_thesis`, `thesis_only`, etc.) | No | `ml_or_thesis` |
 | `REQUIRE_ML_SIGNAL_FOR_ORDERS` | When `false`, IC/thesis path is not blocked by legacy ML-only guards | No | `false` |
-| `JACKSPARROW_V43_ARTIFACT_BASENAME` | *(Archived v43 only)* Optional pickle basename inside a v43 bundle | No | *(unused on NO-ML)* |
+| `JACKSPARROW_V43_ARTIFACT_BASENAME` | *(Archived — unused on Transformers branch)* | No | — |
 | `JACKSPARROW_V43_SHORT_EXECUTION_ENABLED` | When `true`, allow symmetric **SELL** entries when strong negative edge passes v43 gates | No | `false` |
 | `ADAPTIVE_RETRAIN_ENABLED` | When `true`, agent runs periodic KS drift + optional warm-start retrain (v15 parquet path) | No | `false` |
 | `ADAPTIVE_RETRAIN_CHECK_INTERVAL_SECONDS` | Seconds between adaptive evaluations | No | `3600` |
@@ -1513,7 +1516,7 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 **Problem**: Models fail to load
 
 **Solutions**:
-1. Verify **`metadata_ic.json`** exists under **`MODEL_DIR`** (see [ML models – Docker](03-ml-models.md#ml-models-in-docker)); scan logs for **`model_discovered_ic`**. **`MODEL_PATH` is ignored**.
+1. Verify **`metadata_transformer.json`**, ONNX, and **`feature_config.json`** exist under **`MODEL_DIR`**; scan logs for **`model_discovered_transformer`**. **`MODEL_PATH` is ignored**.
 2. Check model file permissions
 3. Verify model format compatibility
 4. Check available memory
@@ -1539,10 +1542,10 @@ Review [Logging Documentation](12-logging.md) for detailed log inspection workfl
 **Problem**: Startup blocked with "PAPER TRADING (Safe)" or live trading warnings
 
 **Solutions**:
-1. Check `PAPER_TRADING_MODE` and `TRADING_MODE` environment variables
-2. Set `PAPER_TRADING_MODE=true` or `TRADING_MODE=paper` for safe operation
-3. Remove or comment out live trading configuration
-4. Verify `.env` file has correct paper trading settings
+1. Check `TRADING_MODE` and Delta testnet environment variables
+2. Use `TRADING_MODE=testnet` with Delta India testnet API keys; do **not** set `PAPER_TRADING_MODE` or `EXCHANGE_BACKEND=delta_paper_sim`
+3. Remove or comment out production Delta host configuration
+4. Verify `.env` file has correct testnet settings
 
 ---
 

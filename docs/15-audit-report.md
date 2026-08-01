@@ -335,7 +335,7 @@ When filing new gaps, reference the numbered doc that should change and verify a
 
 To compare baseline vs tuned confidence without promoting blindly:
 
-1. Run two comparable windows (e.g. 12–24h paper trading) with only confidence/threshold changes between them.
+1. Run two comparable windows (e.g. 12–24h testnet trading) with only confidence/threshold changes between them.
 2. Capture agent logs and DB tables `prediction_audit`, `trade_outcomes` (when migrations are applied).
 
 Example aggregation:

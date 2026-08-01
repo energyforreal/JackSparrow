@@ -355,9 +355,10 @@ cp .env.example .env
 These variables can be added to the root `.env` file if you need to customize agent behavior:
 
 ```bash
-# Model Configuration — Intelligence Component (metadata_ic.json only)
-IC_MODE=true
-MODEL_DIR=./agent/model_storage/JackSparrow_IC_BTCUSD
+# Model Configuration — Transformer ONNX bundle
+MODEL_DIR=./agent/model_storage/JackSparrow_Transformer_BTCUSD
+TRANSFORMER_MIN_CONFIDENCE=0.55
+TRANSFORMER_EXTREME_REGIME_VETO=true
 AGENT_POLICY_MODE=ml_or_thesis
 REQUIRE_ML_SIGNAL_FOR_ORDERS=false
 MODEL_DISCOVERY_ENABLED=true
@@ -823,7 +824,7 @@ python scripts/validate_model_files.py
 python scripts/validate_models_before_deployment.py
 
 # IC unit tests (NO-ML default)
-pytest tests/unit/test_intelligence_ic_node.py tests/unit/test_intelligence_ic_signals.py tests/unit/trading_agent_tests/test_model_discovery.py -q
+pytest tests/unit/test_transformer_btcusd_15m.py tests/unit/test_transformer_decision.py tests/unit/test_transformer_model_discovery.py tests/unit/trading_agent_tests/test_model_discovery.py -q
 
 # Archived v43 smoke (pickle bundles only)
 # python scripts/smoke_test_v43.py
@@ -834,11 +835,10 @@ python scripts/smoke_test_v15.py
 
 See [ML Models Documentation](03-ml-models.md#model-training) for detailed training guide.
 
-**Pre-deploy parity checklist (NO-ML / IC)**:
-1. **`MODEL_DIR`** must contain **`metadata_ic.json`** (default: **`JackSparrow_IC_BTCUSD/`**).
-2. Run `pytest tests/unit/test_intelligence_ic_node.py tests/unit/test_intelligence_ic_signals.py tests/unit/trading_agent_tests/test_model_discovery.py -q`.
-3. Run `pytest tests/unit/test_jacksparrow_v43_contract.py tests/unit/test_jacksparrow_v43_mcp_row.py -q` to lock the feature contract used by the IC matrix builder.
-4. After `docker compose up`, confirm health shows **`model_format`: `jacksparrow_ic`** and agent logs show **`model_discovered_ic`**.
+**Pre-deploy parity checklist (Transformer ONNX)**:
+1. **`MODEL_DIR`** must contain **`metadata_transformer.json`**, ONNX, and **`feature_config.json`** (default: **`JackSparrow_Transformer_BTCUSD/`**).
+2. Run `pytest tests/unit/test_transformer_btcusd_15m.py tests/unit/test_transformer_decision.py tests/unit/test_transformer_model_discovery.py tests/unit/trading_agent_tests/test_model_discovery.py -q`.
+3. After `docker compose up`, confirm agent logs show **`model_discovered_transformer`**.
 
 **Historical v5 / expanded bundles** (when validating archived exports): confirm `metadata_*` includes `features` / `features_required` matching **`feature_store/feature_registry.py`** **`EXPANDED_FEATURE_LIST`** order and count where applicable; run `pytest tests/unit/test_feature_parity.py -q`.
 
