@@ -926,7 +926,7 @@ agent/model_storage/JackSparrow_Transformer_BTCUSD/
 └── README.md
 ```
 
-Feature contract: **`feature_store/transformer_btcusd_15m/`**. Training: **`scripts/colab/transformer_btcusd_15m_train.ipynb`**.
+Feature contract: **`feature_store/transformer_btcusd/`**. Training: **`scripts/colab/transformer_btcusd_all_tf_train_standalone.ipynb`** (or CLI `scripts/colab/train_transformer_resolution.py`).
 
 See [ML models — Runtime discovery](03-ml-models.md#runtime-discovery-transformer-onnx).
 

@@ -108,7 +108,7 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 
 Train each TF **independently** (no cross-TF fusion). Use the unified Colab notebook:
 
-- `scripts/colab/transformer_btcusd_all_tf_train.ipynb` — trains 5m, 15m, 30m, 1h, 2h sequentially
+- `scripts/colab/transformer_btcusd_all_tf_train_standalone.ipynb` — trains 5m, 15m, 30m, 1h, 2h sequentially
 
 Or via CLI:
 

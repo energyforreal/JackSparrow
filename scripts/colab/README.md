@@ -11,8 +11,15 @@ the agent integrates outputs at decision time via `mtf_decision_policy`.
 
 ## Notebook
 
-`transformer_btcusd_all_tf_train.ipynb` trains all supported resolutions (5m, 15m, 30m, 1h, 2h)
-sequentially via `run_all_training()` from `train_transformer_resolution.py`.
+Upload **`transformer_btcusd_all_tf_train_standalone.ipynb`** to Google Colab (single file,
+no GitHub or repo upload). Bootstrap cells write training modules to `/content/colab_bundle/`
+at runtime.
+
+Regenerate after changing training source:
+
+```bash
+python scripts/colab/build_standalone_notebook.py
+```
 
 Set `resolutions` in the config cell to train a subset, e.g. `["15m", "1h"]`.
 

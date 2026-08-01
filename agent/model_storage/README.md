@@ -18,7 +18,7 @@ agent/model_storage/
 
 ## Training
 
-Train all TFs in Colab via `scripts/colab/transformer_btcusd_all_tf_train.ipynb`, or via CLI:
+Train all TFs in Colab via `scripts/colab/transformer_btcusd_all_tf_train_standalone.ipynb`, or via CLI:
 
 ```bash
 # All TFs (exports to export/JackSparrow_Transformer_BTCUSD_{tf}/)
