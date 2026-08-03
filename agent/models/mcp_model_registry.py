@@ -140,6 +140,26 @@ class MCPModelRegistry:
                     out.append(name)
         return out if out else []
 
+    def uses_transformer_internal_features(self) -> bool:
+        """True when all registered models compute features internally (transformer ONNX path)."""
+        if not self.models:
+            return False
+        return all(
+            getattr(model, "model_type", None) == "transformer"
+            for model in self.models.values()
+        )
+
+    def get_mcp_servable_feature_names(self) -> List[str]:
+        """Return feature names the MCP feature server can compute for the active registry.
+
+        Transformer models build their own 28-column matrices at inference time via
+        ``feature_store/transformer_btcusd/``; they must not be routed through the
+        canonical UnifiedFeatureEngine. Returns an empty list in that case.
+        """
+        if self.uses_transformer_internal_features():
+            return []
+        return self.get_required_feature_names()
+
     def unregister_model(self, model_name: str):
         """Unregister model node."""
         if model_name in self.models:

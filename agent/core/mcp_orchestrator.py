@@ -37,6 +37,7 @@ from agent.events.schemas import (
     PolicyVerdict,
 )
 from agent.core.config import settings
+from feature_store.feature_registry import get_feature_list
 from agent.core.agent_introspection import build_introspection_snapshot
 from agent.core.log_context import (
     EVENT_MODEL_PREDICTION,
@@ -46,6 +47,39 @@ from agent.core.log_context import (
 from feature_store.feature_registry import get_feature_list
 
 logger = structlog.get_logger()
+
+
+def _build_transformer_dry_run_context(symbol: str) -> Dict[str, Any]:
+    """Synthetic MTF OHLCV context for transformer dry-run validation."""
+    import pandas as pd
+
+    from feature_store.transformer_btcusd.contract import SUPPORTED_RESOLUTIONS
+
+    freq_map = {
+        "5m": "5min",
+        "15m": "15min",
+        "30m": "30min",
+        "1h": "1h",
+        "2h": "2h",
+    }
+
+    def _ohlcv_df(n: int, freq: str) -> pd.DataFrame:
+        idx = pd.date_range("2024-01-01", periods=n, freq=freq, tz="UTC")
+        return pd.DataFrame(
+            {
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.5,
+                "volume": 1000.0,
+            },
+            index=idx,
+        )
+
+    ctx: Dict[str, Any] = {"dry_run": True, "symbol": symbol}
+    for res in SUPPORTED_RESOLUTIONS:
+        ctx[f"v43_df{res}"] = _ohlcv_df(200, freq_map.get(res, "5min"))
+    return ctx
 
 _last_position_reconcile_ts: float = 0.0
 _POSITION_RECONCILE_STALE_SECONDS: float = 30.0
@@ -383,7 +417,7 @@ class MCPOrchestrator:
             logger.error("mcp_orchestrator_shutdown_failed", error=str(e), exc_info=True)
 
     async def validate_models_dry_run(self) -> bool:
-        """Run a minimal inference pass to verify the v43 bundle loads correctly."""
+        """Run a minimal inference pass to verify registered models load correctly."""
         import math
 
         if not self.model_registry or not self.model_registry.models:
@@ -391,12 +425,19 @@ class MCPOrchestrator:
         try:
             from agent.models.mcp_model_node import MCPModelRequest
 
-            names = self._required_feature_names_cache or get_feature_list()
-            feats = [0.0] * max(1, len(names))
+            symbol = getattr(settings, "trading_symbol", "BTCUSD")
+            if self.model_registry.uses_transformer_internal_features():
+                context = _build_transformer_dry_run_context(symbol)
+                feats: List[float] = []
+            else:
+                names = self._required_feature_names_cache or get_feature_list()
+                feats = [0.0] * max(1, len(names))
+                context = {"dry_run": True, "symbol": symbol}
+
             req = MCPModelRequest(
                 request_id="dry_run_validation",
                 features=feats,
-                context={"dry_run": True, "symbol": getattr(settings, "trading_symbol", "BTCUSD")},
+                context=context,
             )
             resp = await self.model_registry.get_predictions(req)
             preds = getattr(resp, "predictions", None) or []
@@ -456,7 +497,12 @@ class MCPOrchestrator:
         context: Dict[str, Any],
         _t0: float,
     ) -> Dict[str, Any]:
-        """Transformer-only path: frames -> ONNX -> threshold -> decision."""
+        """Transformer path: MTF frames -> per-TF ONNX -> MTF policy -> decision.
+
+        Feature engineering for transformer models happens inside
+        ``TransformerModelNode`` via ``feature_store/transformer_btcusd/``, not
+        through the MCP feature server.
+        """
         from agent.core.transformer_decision import evaluate_transformer_prediction
 
         context = _merge_prediction_context_with_agent_state(symbol, context)
@@ -477,10 +523,13 @@ class MCPOrchestrator:
         """
         Process a complete prediction request through all MCP components.
 
-        This is the main entry point for AI predictions, coordinating:
-        1. Feature computation via MCP Feature Server
-        2. Model inference via MCP Model Registry
-        3. Reasoning synthesis via MCP Reasoning Engine
+        For transformer deployments this coordinates:
+        1. Multi-timeframe market frame fetch (OHLCV + funding/OI)
+        2. Per-TF ONNX inference via MCP Model Registry (internal feature build)
+        3. MTF decision policy synthesis
+
+        The MCP Feature Server is not used on the transformer prediction path;
+        features are computed inside each ``TransformerModelNode``.
 
         Args:
             symbol: Trading symbol (e.g., "BTCUSD")

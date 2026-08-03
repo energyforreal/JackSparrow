@@ -1598,6 +1598,10 @@ class IntelligentAgent:
         last_decision_time = None
         last_candle_time = None
         last_stream_restart_attempt = 0.0
+        last_fx_refresh_at = 0.0
+        fx_refresh_interval = float(
+            getattr(settings, "usdinr_refresh_interval_seconds", 300) or 300
+        )
         last_staleness_trigger_at: datetime | None = None
         consecutive_stale_with_positions = 0
         start_mode_warned = False
@@ -1888,19 +1892,15 @@ class IntelligentAgent:
                                 time_since_last_decision_seconds=time_since_last_decision,
                                 staleness_threshold_seconds=stale_seconds,
                                 message=(
-                                    "No decisions generated recently; emitting "
-                                    "FeatureRequestEvent for fresh feature+model pipeline"
+                                    "No decisions generated recently; triggering "
+                                    "fresh feature+model pipeline"
                                 ),
                             )
                             last_staleness_trigger_at = datetime.now(timezone.utc)
                             from agent.events.handlers.market_data_handler import (
                                 MarketDataEventHandler,
                             )
-                            from agent.events.schemas import FeatureRequestEvent
 
-                            runtime_feature_names = (
-                                MarketDataEventHandler._get_runtime_feature_names()
-                            )
                             cached_price = None
                             if self.market_data_service:
                                 cached_price = (
@@ -1908,23 +1908,17 @@ class IntelligentAgent:
                                         self.default_symbol
                                     )
                                 )
-                            feature_request = FeatureRequestEvent(
+                            await MarketDataEventHandler.emit_decision_pipeline_trigger(
+                                symbol=self.default_symbol,
+                                current_price=cached_price,
+                                trigger="staleness_watchdog",
                                 source="intelligent_agent",
-                                payload={
-                                    "symbol": self.default_symbol,
-                                    "current_price": cached_price,
-                                    "feature_names": runtime_feature_names,
-                                    "timestamp": datetime.now(timezone.utc),
-                                    "version": "latest",
-                                    "context": {
-                                        "symbol": self.default_symbol,
-                                        "trigger": "staleness_watchdog",
-                                        "requested_at": datetime.now(timezone.utc),
-                                        "interval": self.primary_interval,
-                                    },
+                                timestamp=datetime.now(timezone.utc),
+                                extra_context={
+                                    "requested_at": datetime.now(timezone.utc),
+                                    "interval": self.primary_interval,
                                 },
                             )
-                            await event_bus.publish(feature_request)
                     except Exception as trigger_error:
                         logger.warning(
                             "agent_stale_signal_refresh_failed",

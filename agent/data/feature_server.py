@@ -109,6 +109,33 @@ class MCPFeatureServer:
             payload = event.payload
             symbol = payload.get("symbol")
             feature_names = payload.get("feature_names", [])
+
+            # Transformer models compute features internally; skip canonical engine.
+            try:
+                from agent.core.mcp_orchestrator import mcp_orchestrator
+                from feature_store.transformer_btcusd.contract import FEATURE_COLS
+
+                registry = (
+                    mcp_orchestrator.model_registry
+                    if mcp_orchestrator
+                    else None
+                )
+                if registry and registry.uses_transformer_internal_features():
+                    requested = {str(n) for n in feature_names if n}
+                    transformer_cols = set(FEATURE_COLS)
+                    if not requested or requested.issubset(transformer_cols):
+                        logger.info(
+                            "feature_server_transformer_features_delegated",
+                            symbol=symbol,
+                            feature_count=len(feature_names),
+                            message=(
+                                "Transformer registry active; features are built "
+                                "inside TransformerModelNode at inference time"
+                            ),
+                        )
+                        return
+            except Exception:
+                pass
             
             computation_key = f"{symbol}:{','.join(sorted(feature_names))}"
             async with self._computing_lock:
@@ -365,7 +392,7 @@ class MCPFeatureServer:
         if not candles:
             raise ValueError("No market data available")
         interval = str(market_data.get("interval") or "1h")
-        rm = FeatureServer._interval_to_resolution_minutes(interval)
+        rm = self._interval_to_resolution_minutes(interval)
 
         # Use feature engineering service
         return await self.feature_engineering.compute_feature(

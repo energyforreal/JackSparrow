@@ -4,7 +4,8 @@ Market data event handler.
 Handles market data events and triggers feature computation.
 """
 
-from typing import Dict, Any
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 import structlog
 
 from agent.events.schemas import (
@@ -12,6 +13,7 @@ from agent.events.schemas import (
     CandleClosedEvent,
     PriceFluctuationEvent,
     FeatureRequestEvent,
+    ModelPredictionRequestEvent,
     EventType
 )
 from agent.events.event_bus import event_bus
@@ -30,25 +32,101 @@ class MarketDataEventHandler:
         self.context_manager = context_manager
 
     @staticmethod
-    def _get_runtime_feature_names() -> list[str]:
-        """
-        Resolve feature names for real-time pipeline requests.
-
-        Prefer model-required features from the initialized orchestrator (v4 metadata
-        order). Fall back to canonical feature list only if model requirements are
-        unavailable (for example, early startup before model discovery completes).
-        """
+    def _get_model_registry():
         try:
             from agent.core.mcp_orchestrator import mcp_orchestrator
 
             if mcp_orchestrator and mcp_orchestrator.model_registry:
-                required = mcp_orchestrator.model_registry.get_required_feature_names()
-                if required:
-                    return list(required)
+                return mcp_orchestrator.model_registry
         except Exception:
-            # Fall through to canonical list.
             pass
+        return None
+
+    @staticmethod
+    def _get_runtime_feature_names() -> list[str]:
+        """
+        Resolve feature names for MCP feature-server pipeline requests.
+
+        Transformer models compute features internally at inference time; when
+        the registry is transformer-only this returns [] and callers should route
+        directly to model prediction instead.
+        """
+        registry = MarketDataEventHandler._get_model_registry()
+        if registry:
+            servable = registry.get_mcp_servable_feature_names()
+            if servable:
+                return list(servable)
+            if registry.uses_transformer_internal_features():
+                return []
         return get_feature_list()
+
+    @staticmethod
+    async def emit_decision_pipeline_trigger(
+        *,
+        symbol: str,
+        current_price: Any,
+        trigger: str,
+        correlation_id: Optional[str] = None,
+        source: str = "market_data_handler",
+        timestamp: Optional[datetime] = None,
+        extra_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Emit the correct event to start the decision pipeline for the active registry.
+
+        Transformer-only registries skip MCP feature server and publish
+        ModelPredictionRequestEvent directly. Other registries use FeatureRequestEvent.
+        """
+        registry = MarketDataEventHandler._get_model_registry()
+        ts = timestamp or datetime.now(timezone.utc)
+        ctx: Dict[str, Any] = {"trigger": trigger, "symbol": symbol}
+        if extra_context:
+            ctx.update(extra_context)
+
+        if registry and registry.uses_transformer_internal_features():
+            model_request = ModelPredictionRequestEvent(
+                source=source,
+                correlation_id=correlation_id,
+                payload={
+                    "symbol": symbol,
+                    "features": {},
+                    "context": {
+                        **ctx,
+                        "current_price": current_price,
+                    },
+                    "require_explanation": True,
+                },
+            )
+            await event_bus.publish(model_request)
+            logger.debug(
+                "decision_pipeline_transformer_direct",
+                symbol=symbol,
+                trigger=trigger,
+                model_request_id=model_request.event_id,
+            )
+            return model_request.event_id
+
+        runtime_feature_names = MarketDataEventHandler._get_runtime_feature_names()
+        feature_request = FeatureRequestEvent(
+            source=source,
+            correlation_id=correlation_id,
+            payload={
+                "symbol": symbol,
+                "current_price": current_price,
+                "feature_names": runtime_feature_names,
+                "timestamp": ts,
+                "version": "latest",
+                "context": ctx,
+            },
+        )
+        await event_bus.publish(feature_request)
+        logger.debug(
+            "decision_pipeline_feature_request",
+            symbol=symbol,
+            trigger=trigger,
+            feature_count=len(runtime_feature_names),
+            feature_request_id=feature_request.event_id,
+        )
+        return feature_request.event_id
     
     async def handle_market_tick(self, event: MarketTickEvent):
         """Handle market tick event.
@@ -118,37 +196,27 @@ class MarketDataEventHandler:
                 }
             })
             
-            # Trigger feature computation using model-required feature names first.
-            runtime_feature_names = self._get_runtime_feature_names()
-            feature_request = FeatureRequestEvent(
-                source="market_data_handler",
+            pipeline_id = await self.emit_decision_pipeline_trigger(
+                symbol=symbol,
+                current_price=payload.get("close"),
+                trigger="candle_closed",
                 correlation_id=event.event_id,
-                payload={
-                    "symbol": symbol,
-                    "current_price": payload.get("close"),
-                    "feature_names": runtime_feature_names,
-                    "timestamp": payload.get("timestamp"),
-                    "version": "latest",
-                    "context": {
-                        "trigger": "candle_closed",
-                        "interval": interval,
-                        "active_timeframes": settings.resolved_agent_timeframes(),
-                    },
-                }
+                timestamp=payload.get("timestamp"),
+                extra_context={
+                    "interval": interval,
+                    "active_timeframes": settings.resolved_agent_timeframes(),
+                },
             )
-            
-            await event_bus.publish(feature_request)
 
             logger.info(
                 "candle_closed_handled",
                 symbol=symbol,
                 interval=interval,
-                feature_count=len(runtime_feature_names),
                 candle_timestamp=payload.get("timestamp"),
                 close_price=payload.get("close"),
-                message="Candle closed - triggering decision generation pipeline (features -> models -> reasoning -> decision)",
+                message="Candle closed - triggering decision generation pipeline",
                 event_id=event.event_id,
-                feature_request_id=feature_request.event_id
+                pipeline_event_id=pipeline_id,
             )
             
         except Exception as e:
@@ -193,36 +261,26 @@ class MarketDataEventHandler:
                 }
             })
 
-            # Trigger feature computation using model-required feature names first.
-            runtime_feature_names = self._get_runtime_feature_names()
-            feature_request = FeatureRequestEvent(
-                source="market_data_handler",
+            pipeline_id = await self.emit_decision_pipeline_trigger(
+                symbol=symbol,
+                current_price=payload.get("price"),
+                trigger="price_fluctuation",
                 correlation_id=event.event_id,
-                payload={
-                    "symbol": symbol,
-                    "current_price": payload.get("price"),
-                    "feature_names": runtime_feature_names,
-                    "timestamp": payload.get("timestamp"),
-                    "version": "latest",
-                    "context": {
-                        "trigger": "price_fluctuation",
-                        "active_timeframes": settings.resolved_agent_timeframes(),
-                    },
-                }
+                timestamp=payload.get("timestamp"),
+                extra_context={
+                    "active_timeframes": settings.resolved_agent_timeframes(),
+                },
             )
-
-            await event_bus.publish(feature_request)
 
             logger.info(
                 "price_fluctuation_handled",
                 symbol=symbol,
                 change_pct=f"{change_pct:.2f}%",
                 threshold_pct=f"{threshold_pct:.2f}%",
-                feature_count=len(runtime_feature_names),
                 price=payload.get("price"),
-                message="Major price fluctuation detected - triggering ML pipeline (features -> models -> reasoning -> decision)",
+                message="Major price fluctuation detected - triggering ML pipeline",
                 event_id=event.event_id,
-                feature_request_id=feature_request.event_id
+                pipeline_event_id=pipeline_id,
             )
 
         except Exception as e:
@@ -244,4 +302,3 @@ class MarketDataEventHandler:
 
 # Global handler instance
 market_data_handler = MarketDataEventHandler()
-
