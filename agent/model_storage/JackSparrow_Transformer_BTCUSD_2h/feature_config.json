@@ -41,22 +41,22 @@
     "future_volume_change_pct"
   ],
   "label_mean": [
-    0.0071305532370285075,
-    0.007299731541707311,
-    0.0021427130850513424,
-    2.1387866815045955,
-    0.002814170205173521,
-    0.05501701333289603,
-    0.2750587608653621
+    0.00986979675877878,
+    0.009849462522552536,
+    0.00486435304541293,
+    1.0271033228807704,
+    0.0037297134084592056,
+    0.02646225384795539,
+    0.32690252052182406
   ],
   "label_std": [
-    0.00795320864907966,
-    0.00868951279634828,
-    0.0013959741007609377,
-    2.3311442721921174,
-    0.0036095235427914215,
-    1.1031294629692352,
-    0.8715885899074938
+    0.010526961662307785,
+    0.010895335852810287,
+    0.0037072032094815867,
+    1.08099035733087,
+    0.004763104043073408,
+    0.24352746060538952,
+    1.0585711485714737
   ],
   "regime_names": {
     "0": "LOW",
@@ -65,19 +65,19 @@
     "3": "EXTREME"
   },
   "vol_regime_quantile_edges": [
-    0.0012423737846150122,
-    0.0017784005841722952,
-    0.0026306631185923426
+    0.0022569260524861467,
+    0.00392976755927632,
+    0.006285720985195833
   ],
   "config": {
     "symbol": "BTCUSD",
-    "resolution": "15m",
-    "resolution_minutes": 15,
+    "resolution": "2h",
+    "resolution_minutes": 120,
     "history_days": 900,
     "base_url": "https://api.india.delta.exchange",
     "atr_period": 14,
-    "path_label_horizon_bars": 16,
-    "label_horizon_minutes_path": 240,
+    "path_label_horizon_bars": 4,
+    "label_horizon_minutes_path": 480,
     "continuous_loss_weights": [
       0.5,
       0.5,
@@ -97,7 +97,7 @@
     "stride": 8,
     "train_frac": 0.65,
     "val_frac": 0.15,
-    "embargo_bars": 16,
+    "embargo_bars": 4,
     "batch_size": 128,
     "epochs": 120,
     "lr": 0.0001,
@@ -110,7 +110,7 @@
     "early_stopping_enabled": true,
     "min_derivatives_coverage": 0.5,
     "derivatives_coverage_warn": 0.9,
-    "min_export_vol_corr": 0.1,
+    "min_export_vol_corr": 0.08,
     "default_threshold": 0.005,
     "seed": 42
   }

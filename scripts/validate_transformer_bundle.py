@@ -16,6 +16,7 @@ from feature_store.transformer_btcusd.contract import (
     FEATURE_CONTRACT_VERSION,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
+    scale_period,
 )
 from feature_store.transformer_btcusd.features import (
     assemble_raw_frame,
@@ -50,8 +51,9 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
     import numpy as np
     import pandas as pd
 
-    n = max(400, window_len + 200)
-    ts = pd.date_range("2024-01-01", periods=n, freq="15min", tz="UTC")
+    warmup_bars = scale_period(96, resolution_minutes) + window_len + 50
+    n = max(800, warmup_bars)
+    ts = pd.date_range("2024-01-01", periods=n, freq=f"{resolution_minutes}min", tz="UTC")
     close = 50000 + np.cumsum(np.random.default_rng(0).normal(0, 20, n))
     ohlcv = pd.DataFrame(
         {

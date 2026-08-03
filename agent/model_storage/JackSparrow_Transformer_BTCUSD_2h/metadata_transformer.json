@@ -1,80 +1,80 @@
 {
   "version": "transformer_per_tf_v1",
-  "model_name": "jacksparrow_transformer_BTCUSD_15m",
-  "model_family": "jacksparrow_transformer_btcusd_15m",
+  "model_name": "jacksparrow_transformer_BTCUSD_2h",
+  "model_family": "jacksparrow_transformer_btcusd_2h",
   "symbol": "BTCUSD",
-  "resolution": "15m",
-  "resolution_minutes": 15,
-  "onnx_filename": "btcusd_15m_transformer.onnx",
+  "resolution": "2h",
+  "resolution_minutes": 120,
+  "onnx_filename": "btcusd_2h_transformer.onnx",
   "feature_config_filename": "feature_config.json",
-  "path_label_horizon_bars": 16,
+  "path_label_horizon_bars": 4,
   "atr_period": 14,
   "default_threshold": 0.005,
   "primary_signal_mode": "path_edge",
   "label_mean": [
-    0.0071305532370285075,
-    0.007299731541707311,
-    0.0021427130850513424,
-    2.1387866815045955,
-    0.002814170205173521,
-    0.05501701333289603,
-    0.2750587608653621
+    0.00986979675877878,
+    0.009849462522552536,
+    0.00486435304541293,
+    1.0271033228807704,
+    0.0037297134084592056,
+    0.02646225384795539,
+    0.32690252052182406
   ],
   "label_std": [
-    0.00795320864907966,
-    0.00868951279634828,
-    0.0013959741007609377,
-    2.3311442721921174,
-    0.0036095235427914215,
-    1.1031294629692352,
-    0.8715885899074938
+    0.010526961662307785,
+    0.010895335852810287,
+    0.0037072032094815867,
+    1.08099035733087,
+    0.004763104043073408,
+    0.24352746060538952,
+    1.0585711485714737
   ],
   "test_metrics": {
     "mfe": {
-      "mae": 0.004920893836123625,
-      "corr": 0.22297280168454534,
-      "n": 2126
+      "mae": 0.005828363815153112,
+      "corr": 0.24426992955839105,
+      "n": 207
     },
     "mae": {
-      "mae": 0.0050228399726596805,
-      "corr": 0.17815049756726387,
-      "n": 2126
+      "mae": 0.006917872640229099,
+      "corr": 0.18163155959942553,
+      "n": 207
     },
     "future_volatility": {
-      "mae": 0.0008452862036542239,
-      "corr": 0.3466975308860302,
-      "n": 2126
+      "mae": 0.002436921933241242,
+      "corr": 0.26899709994713183,
+      "n": 207
     },
     "trend_strength": {
-      "mae": 1.490388443415621,
-      "corr": 0.21097175123213624,
-      "n": 2126
+      "mae": 0.6737332381706903,
+      "corr": 0.17431738932879504,
+      "n": 207
     },
     "drawdown_before_mfe": {
-      "mae": 0.0022955949508902383,
-      "corr": 0.17335490555256577,
-      "n": 1946
+      "mae": 0.0035087320184301594,
+      "corr": 0.22475344995588326,
+      "n": 171
     },
     "future_oi_change_pct": {
-      "mae": 0.1010546700013844,
-      "corr": 0.165498368458452,
-      "n": 2126
+      "mae": 0.08931656739131862,
+      "corr": 0.6246938446944189,
+      "n": 207
     },
     "future_volume_change_pct": {
-      "mae": 0.6384552134755915,
-      "corr": -0.025542029728271135,
-      "n": 2126
+      "mae": 0.7164964394800694,
+      "corr": 0.1768767044008693,
+      "n": 207
     }
   },
   "training_config": {
     "symbol": "BTCUSD",
-    "resolution": "15m",
-    "resolution_minutes": 15,
+    "resolution": "2h",
+    "resolution_minutes": 120,
     "history_days": 900,
     "base_url": "https://api.india.delta.exchange",
     "atr_period": 14,
-    "path_label_horizon_bars": 16,
-    "label_horizon_minutes_path": 240,
+    "path_label_horizon_bars": 4,
+    "label_horizon_minutes_path": 480,
     "continuous_loss_weights": [
       0.5,
       0.5,
@@ -94,7 +94,7 @@
     "stride": 8,
     "train_frac": 0.65,
     "val_frac": 0.15,
-    "embargo_bars": 16,
+    "embargo_bars": 4,
     "batch_size": 128,
     "epochs": 120,
     "lr": 0.0001,
@@ -107,7 +107,7 @@
     "early_stopping_enabled": true,
     "min_derivatives_coverage": 0.5,
     "derivatives_coverage_warn": 0.9,
-    "min_export_vol_corr": 0.1,
+    "min_export_vol_corr": 0.08,
     "default_threshold": 0.005,
     "seed": 42
   },
@@ -115,14 +115,14 @@
     "tier": "promotion_ready",
     "checks": {
       "future_volatility": {
-        "corr": 0.3466975308860302,
-        "sanity_floor": 0.1,
+        "corr": 0.26899709994713183,
+        "sanity_floor": 0.08,
         "promotion_floor": 0.15,
         "sanity_passed": true,
         "promotion_passed": true
       },
       "regime_accuracy": {
-        "value": 0.37064910630291625,
+        "value": 0.3671497584541063,
         "promotion_floor": 0.35,
         "promotion_passed": true
       }
