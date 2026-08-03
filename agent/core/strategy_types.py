@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class MLValidationSnapshot:
-    """ML probabilistic validation state (v43 expected_return vs thresholds)."""
+    """ML probabilistic validation state (path_edge vs thresholds)."""
 
-    expected_return: float
+    path_edge: float
     threshold: float
     short_threshold: float
     regime: str
@@ -31,7 +31,7 @@ class MLValidationSnapshot:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "expected_return": self.expected_return,
+            "path_edge": self.path_edge,
             "threshold": self.threshold,
             "short_threshold": self.short_threshold,
             "regime": self.regime,

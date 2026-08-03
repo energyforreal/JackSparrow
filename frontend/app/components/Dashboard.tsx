@@ -309,8 +309,8 @@ export function Dashboard() {
                   signal?.final_confidence ?? signal?.display_confidence ?? signal?.confidence
                 }
                 isLoading={isLoading}
-                v43ExpectedReturn={
-                  signal?.expected_return != null ? Number(signal.expected_return) : undefined
+                v43PathEdge={
+                  signal?.path_edge != null ? Number(signal.path_edge) : undefined
                 }
                 v43Threshold={
                   signal?.threshold != null ? Number(signal.threshold) : undefined

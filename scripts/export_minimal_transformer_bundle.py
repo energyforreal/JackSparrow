@@ -83,13 +83,11 @@ def main() -> None:
     ).dropna().reset_index(drop=True)
     feat_df = compute_market_labels(
         feat_df,
-        return_horizon_bars=config["return_horizon_bars"],
         path_label_horizon_bars=config["path_label_horizon_bars"],
         mae_floor_atr_mult=config["mae_floor_atr_mult"],
     )
     feat_df = trim_label_tail(
         feat_df,
-        return_horizon_bars=config["return_horizon_bars"],
         path_label_horizon_bars=config["path_label_horizon_bars"],
     )
 

@@ -17,7 +17,7 @@ def test_score_passes_with_thesis_and_ml() -> None:
         confidence=0.8,
     )
     ml = MLValidationSnapshot(
-        expected_return=0.02,
+        path_edge=0.02,
         threshold=0.01,
         short_threshold=0.01,
         regime="trending",
@@ -50,7 +50,7 @@ def test_score_skips_ml_points_without_gated_final() -> None:
         confidence=0.8,
     )
     ml = MLValidationSnapshot(
-        expected_return=0.02,
+        path_edge=0.02,
         threshold=0.01,
         short_threshold=0.01,
         regime="trending",
@@ -82,7 +82,7 @@ def test_score_passes_flat_thesis_with_gated_short() -> None:
         thesis_type="flat",
     )
     ml = MLValidationSnapshot(
-        expected_return=-0.019,
+        path_edge=-0.019,
         threshold=0.001,
         short_threshold=0.001,
         regime="neutral",
@@ -113,7 +113,7 @@ def test_score_fails_flat_thesis() -> None:
         thesis_type="flat",
     )
     ml = MLValidationSnapshot(
-        expected_return=0.0,
+        path_edge=0.0,
         threshold=0.01,
         short_threshold=0.01,
         regime="neutral",

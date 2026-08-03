@@ -15,7 +15,7 @@ def _stance(
     *,
     local_signal: str = "HOLD",
     direction: str = "neutral",
-    future_return: float = 0.0,
+    path_edge: float = 0.0,
     vol_regime: str = "NORMAL",
     confidence: float = 0.7,
 ) -> TfLocalStance:
@@ -24,7 +24,7 @@ def _stance(
         resolution=resolution,
         local_signal=local_signal,
         direction=direction,
-        future_return=future_return,
+        path_edge=path_edge,
         threshold=0.005,
         vol_regime=vol_regime,
         regime="neutral",
@@ -40,11 +40,11 @@ def _stance(
 
 def test_bias_veto_blocks_buy_when_1h_2h_bearish() -> None:
     stances = {
-        "tf_5m": _stance("tf_5m", "5m", local_signal="BUY", direction="bullish", future_return=0.01),
-        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", future_return=0.01),
+        "tf_5m": _stance("tf_5m", "5m", local_signal="BUY", direction="bullish", path_edge=0.01),
+        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", path_edge=0.01),
         "tf_30m": _stance("tf_30m", "30m", local_signal="HOLD", direction="neutral"),
-        "tf_1h": _stance("tf_1h", "1h", local_signal="SELL", direction="bearish", future_return=-0.01),
-        "tf_2h": _stance("tf_2h", "2h", local_signal="SELL", direction="bearish", future_return=-0.01),
+        "tf_1h": _stance("tf_1h", "1h", local_signal="SELL", direction="bearish", path_edge=-0.01),
+        "tf_2h": _stance("tf_2h", "2h", local_signal="SELL", direction="bearish", path_edge=-0.01),
     }
     result = evaluate_mtf_policy(stances)
     assert result.signal == "HOLD"
@@ -53,11 +53,11 @@ def test_bias_veto_blocks_buy_when_1h_2h_bearish() -> None:
 
 def test_execution_from_15m_produces_buy() -> None:
     stances = {
-        "tf_5m": _stance("tf_5m", "5m", local_signal="BUY", direction="bullish", future_return=0.008),
-        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", future_return=0.01),
-        "tf_30m": _stance("tf_30m", "30m", local_signal="BUY", direction="bullish", future_return=0.009),
-        "tf_1h": _stance("tf_1h", "1h", local_signal="BUY", direction="bullish", future_return=0.007),
-        "tf_2h": _stance("tf_2h", "2h", local_signal="BUY", direction="bullish", future_return=0.006),
+        "tf_5m": _stance("tf_5m", "5m", local_signal="BUY", direction="bullish", path_edge=0.008),
+        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", path_edge=0.01),
+        "tf_30m": _stance("tf_30m", "30m", local_signal="BUY", direction="bullish", path_edge=0.009),
+        "tf_1h": _stance("tf_1h", "1h", local_signal="BUY", direction="bullish", path_edge=0.007),
+        "tf_2h": _stance("tf_2h", "2h", local_signal="BUY", direction="bullish", path_edge=0.006),
     }
     result = evaluate_mtf_policy(stances, min_tf_alignment=3)
     assert result.signal in ("BUY", "STRONG_BUY")
@@ -66,7 +66,7 @@ def test_execution_from_15m_produces_buy() -> None:
 
 def test_extreme_veto_on_1h_forces_hold() -> None:
     stances = {
-        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", future_return=0.01),
+        "tf_15m": _stance("tf_15m", "15m", local_signal="BUY", direction="bullish", path_edge=0.01),
         "tf_1h": _stance("tf_1h", "1h", vol_regime="EXTREME"),
         "tf_2h": _stance("tf_2h", "2h"),
     }
@@ -78,7 +78,6 @@ def test_extreme_veto_on_1h_forces_hold() -> None:
 def test_interpret_tf_prediction_from_context() -> None:
     ctx = {
         "transformer_continuous_preds": {
-            "future_return": 0.01,
             "future_volatility": 0.003,
             "mae": 0.005,
             "mfe": 0.02,
@@ -86,7 +85,7 @@ def test_interpret_tf_prediction_from_context() -> None:
         },
         "transformer_vol_regime": "NORMAL",
         "entry_confidence": 0.72,
-        "expected_return": 0.01,
+        "path_edge": 0.01,
         "regime": "trending",
     }
     stance = interpret_tf_prediction(

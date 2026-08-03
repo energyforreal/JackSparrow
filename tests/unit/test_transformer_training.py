@@ -77,24 +77,24 @@ def test_vol_regime_four_classes() -> None:
 
 def test_assess_export_quality_tiers() -> None:
     metrics = [
-        TargetMetrics(name="future_return", mae=0.01, corr=0.07, n=100),
         TargetMetrics(name="future_volatility", mae=0.01, corr=0.20, n=100),
+        TargetMetrics(name="mfe", mae=0.01, corr=0.15, n=100),
     ]
     blocked = assess_export_quality(
-        [TargetMetrics(name="future_return", mae=0.01, corr=0.01, n=100)],
+        [TargetMetrics(name="future_volatility", mae=0.01, corr=0.05, n=100)],
         resolution="15m",
-        min_return_corr=0.04,
+        min_vol_corr=0.10,
     )
     assert blocked.tier == "blocked"
 
-    sanity = assess_export_quality(metrics, resolution="15m", min_return_corr=0.04, regime_accuracy=0.2)
+    sanity = assess_export_quality(metrics, resolution="15m", min_vol_corr=0.10, regime_accuracy=0.2)
     assert sanity.tier == "sanity_pass"
     assert any("promotion" in w for w in sanity.warnings)
 
     promotion = assess_export_quality(
         metrics,
         resolution="15m",
-        min_return_corr=0.04,
+        min_vol_corr=0.10,
         regime_accuracy=0.40,
     )
     assert promotion.tier == "promotion_ready"

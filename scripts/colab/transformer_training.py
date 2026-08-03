@@ -17,9 +17,7 @@ from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     EXPORT_QUALITY_DISCLAIMER,
     PROMOTION_REGIME_ACCURACY,
-    PROMOTION_RETURN_CORR,
     PROMOTION_VOL_CORR,
-    RETURN_COL,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
     onnx_filename_for_resolution,
@@ -215,14 +213,27 @@ def compute_multitask_loss(
     log_vars: nn.Parameter,
     *,
     n_continuous: int,
+    continuous_loss_weights: Sequence[float] | None = None,
 ) -> torch.Tensor:
     """Uncertainty-weighted multi-task loss over continuous heads + regime CE."""
+    if continuous_loss_weights is not None:
+        weights = [float(w) for w in continuous_loss_weights]
+        if len(weights) != n_continuous:
+            raise ValueError(
+                f"continuous_loss_weights length {len(weights)} != n_continuous {n_continuous}"
+            )
+    else:
+        weights = [1.0 for _ in range(n_continuous)]
+
     losses: List[torch.Tensor] = []
     for j in range(n_continuous):
+        task_w = float(weights[j])
+        if task_w <= 0.0:
+            continue
         diff = (continuous_pred[:, j] - yb_z[:, j]) ** 2
         masked = (diff * mb[:, j]).sum() / (mb[:, j].sum() + 1e-6)
         precision = torch.exp(-log_vars[j])
-        losses.append(precision * masked + log_vars[j])
+        losses.append(task_w * (precision * masked + log_vars[j]))
     ce = nn.functional.cross_entropy(regime_logits, rb)
     precision = torch.exp(-log_vars[n_continuous])
     losses.append(precision * ce + log_vars[n_continuous])
@@ -252,6 +263,7 @@ def train_transformer(
 ) -> TrainingResult:
     """Train with AdamW, optional LR scheduler, and early stopping."""
     n_cont = n_continuous or len(CONTINUOUS_LABEL_COLS)
+    loss_weights = config.get("continuous_loss_weights")
     log_vars = nn.Parameter(torch.zeros(n_cont + 1, device=device))
     params = list(model.parameters()) + [log_vars]
     optimizer = torch.optim.AdamW(
@@ -286,7 +298,14 @@ def train_transformer(
             optimizer.zero_grad()
             cont, reg = model(xb)
             loss = compute_multitask_loss(
-                cont, reg, yb_z, mb, rb, log_vars, n_continuous=n_cont
+                cont,
+                reg,
+                yb_z,
+                mb,
+                rb,
+                log_vars,
+                n_continuous=n_cont,
+                continuous_loss_weights=loss_weights,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, 1.0)
@@ -306,7 +325,14 @@ def train_transformer(
                 cont, reg = model(xb)
                 val_loss += float(
                     compute_multitask_loss(
-                        cont, reg, yb_z, mb, rb, log_vars, n_continuous=n_cont
+                        cont,
+                        reg,
+                        yb_z,
+                        mb,
+                        rb,
+                        log_vars,
+                        n_continuous=n_cont,
+                        continuous_loss_weights=loss_weights,
                     ).item()
                 )
         val_loss /= max(len(val_loader), 1)
@@ -418,15 +444,24 @@ def print_target_metrics(metrics: Sequence[TargetMetrics], title: str = "") -> N
         print(f"  {m.name:28s}  MAE={m.mae:.5f}  corr={m.corr:+.3f}  n={m.n}")
 
 
-def print_return_metrics(metrics: Sequence[TargetMetrics]) -> None:
-    """Highlight future_return correlation (primary signal quality check)."""
+def print_primary_metrics(metrics: Sequence[TargetMetrics]) -> None:
+    """Highlight future_volatility correlation (primary export quality check)."""
     by_name = {m.name: m for m in metrics}
-    m = by_name.get(RETURN_COL)
-    if m is None:
-        print(f"  {RETURN_COL:28s}  (no valid samples)")
-        return
-    print(f"Primary return correlation:")
-    print(f"  {m.name:28s}  corr={m.corr:+.3f}  MAE={m.mae:.5f}  n={m.n}")
+    vol_m = by_name.get("future_volatility")
+    mfe_m = by_name.get("mfe")
+    if vol_m is None:
+        print("  future_volatility            (no valid samples)")
+    else:
+        print("Primary volatility correlation:")
+        print(
+            f"  {vol_m.name:28s}  corr={vol_m.corr:+.3f}  "
+            f"MAE={vol_m.mae:.5f}  n={vol_m.n}"
+        )
+    if mfe_m is not None:
+        print(
+            f"  {mfe_m.name:28s}  corr={mfe_m.corr:+.3f}  "
+            f"MAE={mfe_m.mae:.5f}  n={mfe_m.n}"
+        )
 
 
 def evaluate_regime_head(
@@ -475,55 +510,42 @@ def assess_export_quality(
     metrics: Sequence[TargetMetrics],
     *,
     resolution: str,
-    min_return_corr: float,
+    min_vol_corr: float,
     regime_accuracy: float | None = None,
 ) -> ExportQualityAssessment:
     """Evaluate sanity and promotion tiers without blocking on promotion failures."""
     res = resolution.strip().lower()
     by_name = {m.name: m for m in metrics}
-    return_m = by_name.get(RETURN_COL)
     vol_m = by_name.get("future_volatility")
     checks: Dict[str, Any] = {}
     warnings: List[str] = []
 
-    if return_m is None:
+    if vol_m is None:
         return ExportQualityAssessment(
             tier="blocked",
             checks=checks,
-            warnings=["no valid future_return test samples"],
+            warnings=["no valid future_volatility test samples"],
             disclaimer=EXPORT_QUALITY_DISCLAIMER,
         )
 
-    sanity_floor = float(min_return_corr)
-    promotion_return_floor = float(PROMOTION_RETURN_CORR.get(res, 0.06))
-    checks["future_return"] = {
-        "corr": return_m.corr,
+    sanity_floor = float(min_vol_corr)
+    promotion_vol_floor = float(PROMOTION_VOL_CORR)
+    checks["future_volatility"] = {
+        "corr": vol_m.corr,
         "sanity_floor": sanity_floor,
-        "promotion_floor": promotion_return_floor,
-        "sanity_passed": return_m.corr >= sanity_floor,
-        "promotion_passed": return_m.corr >= promotion_return_floor,
+        "promotion_floor": promotion_vol_floor,
+        "sanity_passed": vol_m.corr >= sanity_floor,
+        "promotion_passed": vol_m.corr >= promotion_vol_floor,
     }
-    if not checks["future_return"]["sanity_passed"]:
+    if not checks["future_volatility"]["sanity_passed"]:
         return ExportQualityAssessment(
             tier="blocked",
             checks=checks,
             warnings=[
-                f"future_return corr {return_m.corr:.4f} < sanity floor {sanity_floor:.4f}"
+                f"future_volatility corr {vol_m.corr:.4f} < sanity floor {sanity_floor:.4f}"
             ],
             disclaimer=EXPORT_QUALITY_DISCLAIMER,
         )
-
-    if vol_m is not None:
-        checks["future_volatility"] = {
-            "corr": vol_m.corr,
-            "promotion_floor": PROMOTION_VOL_CORR,
-            "promotion_passed": vol_m.corr >= PROMOTION_VOL_CORR,
-        }
-        if not checks["future_volatility"]["promotion_passed"]:
-            warnings.append(
-                f"promotion: future_volatility corr {vol_m.corr:.4f} "
-                f"< {PROMOTION_VOL_CORR:.4f}"
-            )
 
     if regime_accuracy is not None:
         checks["regime_accuracy"] = {
@@ -537,15 +559,14 @@ def assess_export_quality(
                 f"< {PROMOTION_REGIME_ACCURACY:.4f}"
             )
 
-    if not checks["future_return"]["promotion_passed"]:
+    if not checks["future_volatility"]["promotion_passed"]:
         warnings.append(
-            f"promotion: future_return corr {return_m.corr:.4f} "
-            f"< {promotion_return_floor:.4f}"
+            f"promotion: future_volatility corr {vol_m.corr:.4f} "
+            f"< {promotion_vol_floor:.4f}"
         )
 
     promotion_ready = (
-        checks["future_return"]["promotion_passed"]
-        and (vol_m is None or checks.get("future_volatility", {}).get("promotion_passed", False))
+        checks["future_volatility"]["promotion_passed"]
         and (
             regime_accuracy is None
             or checks.get("regime_accuracy", {}).get("promotion_passed", False)
@@ -562,13 +583,13 @@ def assess_export_quality(
 
 def check_export_quality_gate(
     metrics: Sequence[TargetMetrics],
-    min_return_corr: float,
+    min_vol_corr: float,
 ) -> None:
-    """Raise if future_return test correlation is below export floor."""
+    """Raise if future_volatility test correlation is below export floor."""
     assessment = assess_export_quality(
         metrics,
         resolution="15m",
-        min_return_corr=min_return_corr,
+        min_vol_corr=min_vol_corr,
     )
     if assessment.tier == "blocked":
         msg = assessment.warnings[0] if assessment.warnings else "export quality blocked"
@@ -594,13 +615,13 @@ def export_transformer_bundle(
 ) -> Tuple[Path, Path, Path]:
     """Export ONNX + feature_config.json + metadata_transformer.json."""
     resolution = str(config.get("resolution") or "15m")
-    min_corr = float(config.get("min_export_return_corr") or 0.02)
+    min_corr = float(config.get("min_export_vol_corr") or 0.08)
     export_quality: Dict[str, Any] = {}
     if test_metrics is not None:
         assessment = assess_export_quality(
             test_metrics,
             resolution=resolution,
-            min_return_corr=min_corr,
+            min_vol_corr=min_corr,
             regime_accuracy=regime_accuracy,
         )
         export_quality = {

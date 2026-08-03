@@ -20,6 +20,14 @@ python scripts/validate_transformer_bundle.py agent/model_storage/JackSparrow_Tr
 
 Parity tests: `pytest tests/unit/test_transformer_btcusd_feature_parity.py`
 
+**Retrain after horizon/loss changes:** set `refresh_data = True` in the Colab config cell so
+cached parquet is rebuilt with new label horizons (or delete `/content/cache/*.parquet`).
+
+Per-TF defaults: path-only labels (no `future_return` head). Export sanity gate uses
+`future_volatility` test correlation. `continuous_loss_weights` zeros out
+`future_volume_change_pct` loss (it dominated the shared encoder). Agent uses
+`path_edge = mfe - mae` for directional signals.
+
 ## Notebook
 
 Upload **`transformer_btcusd_all_tf_train_standalone.ipynb`** to Google Colab (single file,

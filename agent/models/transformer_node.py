@@ -304,12 +304,12 @@ class TransformerModelNode(MCPModelNode):
         out_ctx["tf_key"] = self.tf_key
 
         ms = (time.perf_counter() - t0) * 1000.0
-        er = float(out_ctx.get("expected_return", 0.0))
+        pe = float(out_ctx.get("path_edge", 0.0))
         thr = float(out_ctx.get("threshold", 0.005))
         regime = str(out_ctx.get("regime", "neutral"))
         reasoning = (
             f"Transformer {self._resolution} regime={regime} vol={vol_regime} "
-            f"er={er:.5f} thr={thr:.5f}"
+            f"path_edge={pe:.5f} thr={thr:.5f}"
         )
 
         return MCPModelPrediction(

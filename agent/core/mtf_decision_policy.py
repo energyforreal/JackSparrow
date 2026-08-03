@@ -43,7 +43,7 @@ class TfLocalStance:
     resolution: str
     local_signal: str
     direction: str
-    future_return: float
+    path_edge: float
     threshold: float
     vol_regime: str
     regime: str
@@ -67,7 +67,7 @@ class MtfPolicyResult:
     reason_codes: List[str]
     multi_tf_stances: Dict[str, TfLocalStance]
     cross_tf_summary: Dict[str, Any]
-    primary_future_return: float
+    primary_path_edge: float
     primary_threshold: float
     primary_regime: str
 
@@ -124,7 +124,7 @@ def _resolve_threshold(bundle_metadata: Mapping[str, Any]) -> float:
 def _confidence_from_prediction(
     continuous: Mapping[str, float],
     vol_regime: str,
-    future_return: float,
+    path_edge: float,
     threshold: float,
 ) -> float:
     future_vol = float(continuous.get("future_volatility", 0.0))
@@ -135,7 +135,7 @@ def _confidence_from_prediction(
         vol_regime=vol_regime,
     )
     u_scale = _uncertainty_scale(unc)
-    edge = float(future_return) - float(threshold)
+    edge = float(path_edge) - float(threshold)
     return _head_confidence(edge, threshold, u_scale)
 
 
@@ -148,18 +148,20 @@ def interpret_tf_prediction(
 ) -> TfLocalStance:
     """Map a single TF model output to a local stance."""
     resolution = TF_RESOLUTION_MAP.get(tf_key, tf_key.replace("tf_", ""))
+    from feature_store.transformer_btcusd.contract import compute_path_edge
+
     continuous = prediction_context.get("transformer_continuous_preds") or {}
-    future_return = float(
-        continuous.get("future_return")
-        or prediction_context.get("expected_return", 0.0)
+    mfe = float(continuous.get("mfe", 0.0))
+    mae = float(continuous.get("mae", 0.0))
+    path_edge = float(
+        prediction_context.get("path_edge")
+        or compute_path_edge(mfe, mae)
         or 0.0
     )
     vol_regime = str(
         prediction_context.get("transformer_vol_regime") or "NORMAL"
     )
     trend_strength = float(continuous.get("trend_strength", 0.0))
-    mfe = float(continuous.get("mfe", 0.0))
-    mae = float(continuous.get("mae", 0.0))
     future_vol = float(continuous.get("future_volatility", 0.0))
     regime = str(
         prediction_context.get("regime")
@@ -172,10 +174,10 @@ def interpret_tf_prediction(
     threshold = _resolve_threshold(bundle_metadata)
     confidence = float(
         prediction_context.get("entry_confidence", 0.0)
-        or _confidence_from_prediction(continuous, vol_regime, future_return, threshold)
+        or _confidence_from_prediction(continuous, vol_regime, path_edge, threshold)
     )
     local_signal, conf, reason_codes = map_prediction_to_signal(
-        future_return=future_return,
+        path_edge=path_edge,
         threshold=threshold,
         vol_regime=vol_regime,
         confidence=confidence,
@@ -192,7 +194,7 @@ def interpret_tf_prediction(
         resolution=resolution,
         local_signal=local_signal,
         direction=_direction_from_signal(local_signal),
-        future_return=future_return,
+        path_edge=path_edge,
         threshold=threshold,
         vol_regime=vol_regime,
         regime=regime,
@@ -287,7 +289,7 @@ def evaluate_mtf_policy(
                 reason_codes=reason_codes,
                 multi_tf_stances=dict(stances),
                 cross_tf_summary=summary,
-                primary_future_return=0.0,
+                primary_path_edge=0.0,
                 primary_threshold=0.005,
                 primary_regime="crisis",
             )
@@ -313,7 +315,7 @@ def evaluate_mtf_policy(
             reason_codes=reason_codes,
             multi_tf_stances=dict(stances),
             cross_tf_summary=summary,
-            primary_future_return=0.0,
+            primary_path_edge=0.0,
             primary_threshold=0.005,
             primary_regime="neutral",
         )
@@ -332,7 +334,7 @@ def evaluate_mtf_policy(
             reason_codes=reason_codes,
             multi_tf_stances=dict(stances),
             cross_tf_summary=summary,
-            primary_future_return=float(exec_stance.future_return if exec_stance else 0.0),
+            primary_path_edge=float(exec_stance.path_edge if exec_stance else 0.0),
             primary_threshold=float(exec_stance.threshold if exec_stance else 0.005),
             primary_regime=str(exec_stance.regime if exec_stance else "neutral"),
         )
@@ -380,7 +382,7 @@ def evaluate_mtf_policy(
         reason_codes=reason_codes,
         multi_tf_stances=dict(stances),
         cross_tf_summary=summary,
-        primary_future_return=float(exec_stance.future_return if exec_stance else 0.0),
+        primary_path_edge=float(exec_stance.path_edge if exec_stance else 0.0),
         primary_threshold=float(exec_stance.threshold if exec_stance else 0.005),
         primary_regime=str(exec_stance.regime if exec_stance else "neutral"),
     )

@@ -42,7 +42,7 @@ def _build_reasoning_chain(
     symbol: str,
     signal: str,
     confidence: float,
-    future_return: float,
+    path_edge: float,
     threshold: float,
     vol_regime: str,
     regime: str,
@@ -53,7 +53,7 @@ def _build_reasoning_chain(
     chain_id = str(uuid.uuid4())
     conclusion = (
         f"MTF Transformer: {signal} "
-        f"(future_return={future_return:.5f}, thr={threshold:.5f}, "
+        f"(path_edge={path_edge:.5f}, thr={threshold:.5f}, "
         f"vol_regime={vol_regime}, regime={regime})"
     )
     return {
@@ -68,7 +68,7 @@ def _build_reasoning_chain(
                 "description": conclusion,
                 "evidence": [
                     f"symbol={symbol}",
-                    f"future_return={future_return:.5f}",
+                    f"path_edge={path_edge:.5f}",
                     f"threshold={threshold:.5f}",
                     f"vol_regime={vol_regime}",
                     f"reason_codes={','.join(reason_codes)}",
@@ -101,7 +101,7 @@ def _stance_to_dict(stance: Any) -> Dict[str, Any]:
         "resolution": stance.resolution,
         "local_signal": stance.local_signal,
         "direction": stance.direction,
-        "future_return": stance.future_return,
+        "path_edge": stance.path_edge,
         "threshold": stance.threshold,
         "vol_regime": stance.vol_regime,
         "regime": stance.regime,
@@ -209,7 +209,7 @@ async def evaluate_transformer_prediction(
     signal = policy.signal
     confidence = float(policy.confidence)
     reason_codes = list(policy.reason_codes)
-    future_return = float(policy.primary_future_return)
+    path_edge = float(policy.primary_path_edge)
     threshold = float(policy.primary_threshold)
     regime = str(policy.primary_regime)
     vol_regime = "NORMAL"
@@ -243,7 +243,7 @@ async def evaluate_transformer_prediction(
         **mctx,
         **mtf_context,
         "format": "jacksparrow_transformer_btcusd_mtf",
-        "expected_return": future_return,
+        "path_edge": path_edge,
         "threshold": threshold,
         "regime": regime,
         "transformer_vol_regime": vol_regime,
@@ -289,7 +289,7 @@ async def evaluate_transformer_prediction(
         symbol=symbol,
         signal=signal,
         confidence=confidence,
-        future_return=future_return,
+        path_edge=path_edge,
         threshold=threshold,
         vol_regime=vol_regime,
         regime=regime,
@@ -377,7 +377,7 @@ async def evaluate_transformer_prediction(
         symbol=symbol,
         signal=signal,
         confidence=confidence,
-        future_return=future_return,
+        path_edge=path_edge,
         threshold=threshold,
         vol_regime=vol_regime,
         reason_codes=list(policy_verdict.reason_codes or []),

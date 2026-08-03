@@ -53,34 +53,53 @@ def _jacksparrow_ws_fields_from_predictions(
         if not isinstance(ctx, dict) or ctx.get("format") not in (
             "jacksparrow_v43",
             "jacksparrow_ic_rule_based",
+            "jacksparrow_transformer_btcusd_per_tf",
+            "jacksparrow_transformer_btcusd_mtf",
         ):
             continue
         try:
             tanh_score = float(p.get("prediction", 0.0))
         except (TypeError, ValueError):
             tanh_score = 0.0
+        pe_raw = ctx.get("path_edge")
+        if pe_raw is None and ctx.get("format") in (
+            "jacksparrow_transformer_btcusd_per_tf",
+            "jacksparrow_transformer_btcusd_mtf",
+        ):
+            preds = ctx.get("transformer_continuous_preds")
+            if isinstance(preds, dict):
+                mfe = preds.get("mfe")
+                mae = preds.get("mae")
+                if mfe is not None and mae is not None:
+                    pe_raw = float(mfe) - float(mae)
         er_raw = ctx.get("expected_return")
+        try:
+            pe_f = float(pe_raw) if pe_raw is not None else None
+        except (TypeError, ValueError):
+            pe_f = None
         try:
             er_f = float(er_raw) if er_raw is not None else None
         except (TypeError, ValueError):
             er_f = None
-        rank = abs(er_f) if er_f is not None else abs(tanh_score)
+        rank = abs(pe_f) if pe_f is not None else (abs(er_f) if er_f is not None else abs(tanh_score))
         if rank >= best_score:
             best_score = rank
-            best = (tanh_score, er_f, ctx)
+            best = (tanh_score, pe_f, er_f, ctx)
     if not best:
         return out
-    tanh_score, er_f, ctx = best
+    tanh_score, pe_f, er_f, ctx = best
     # Legacy MCP field: tanh-compressed score (avoid using as primary economic signal)
     out["edge"] = tanh_score
     out["mcp_tanh_prediction"] = tanh_score
-    if er_f is not None:
-        out["expected_return"] = er_f
-    elif ctx.get("expected_return") is not None:
+    if pe_f is not None:
+        out["path_edge"] = pe_f
+    elif ctx.get("path_edge") is not None:
         try:
-            out["expected_return"] = float(ctx["expected_return"])
+            out["path_edge"] = float(ctx["path_edge"])
         except (TypeError, ValueError):
             pass
+    if er_f is not None:
+        out["expected_return"] = er_f
     thr = ctx.get("threshold")
     if thr is not None:
         try:
@@ -132,6 +151,7 @@ async def _append_signal_edge_history_redis(symbol: str, signal_data: Dict[str, 
                 "ts": signal_data.get("timestamp"),
                 "edge": signal_data["edge"],
                 "mcp_tanh_prediction": signal_data.get("mcp_tanh_prediction"),
+                "path_edge": signal_data.get("path_edge"),
                 "expected_return": signal_data.get("expected_return"),
                 "signal": signal_data.get("signal"),
                 "regime": signal_data.get("regime"),
@@ -161,7 +181,17 @@ def _model_consensus_row(
         "prediction": prediction_value,
     }
     pctx = pred.get("context") or {}
-    if isinstance(pctx, dict) and pctx.get("format") in ("jacksparrow_v43", "jacksparrow_ic_rule_based"):
+    if isinstance(pctx, dict) and pctx.get("format") in (
+        "jacksparrow_v43",
+        "jacksparrow_ic_rule_based",
+        "jacksparrow_transformer_btcusd_per_tf",
+    ):
+        pe = pctx.get("path_edge")
+        if pe is not None:
+            try:
+                row["path_edge"] = float(pe)
+            except (TypeError, ValueError):
+                pass
         er = pctx.get("expected_return")
         if er is not None:
             try:

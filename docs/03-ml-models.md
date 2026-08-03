@@ -74,7 +74,7 @@ MODEL_DIR=./agent/model_storage
 
 Train/serve parity lives in [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/):
 
-- `contract.py` — per-TF resolutions, single `future_return` label
+- `contract.py` — per-TF resolutions, path labels only (MFE/MAE/vol/trend/OI/volume); no `future_return` head
 - `features.py`, `derivatives.py` — native TF feature matrix
 - `inference.py` — ONNX input assembly + metadata export
 - `labels.py` — training label helpers (Colab)

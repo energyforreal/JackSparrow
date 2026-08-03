@@ -46,6 +46,7 @@ FORBIDDEN_PATTERNS: tuple[str, ...] = (
     "base64.b64decode",
     "%%writefile",
     "colab_bundle",
+    "if __name__ == \"__main__\":",
 )
 
 INTRO_MARKDOWN = """# BTCUSD Multi-Timeframe Transformer Training (Standalone)
@@ -93,17 +94,17 @@ Copy each subdirectory into `agent/model_storage/` after training."""
 
 NOTES_MARKDOWN = """## Notes before wiring into your live agent
 
-- **No trading label was trained** — models predict continuous market properties + a volatility-regime
-  class. Trading decisions are a downstream step in JackSparrow.
-- **Label horizon** scales to ~8 hours wall-clock per TF (32 bars on 15m, 96 on 5m, etc.). It is
-  independent of `window_len` (input lookback) and worth sweeping separately.
-- **Early stopping is enabled** by default (patience 12, max 120 epochs); best val-loss checkpoint is
-  used for export.
+- **No directional return head** — models predict path structure (MFE/MAE/vol/trend), OI/volume
+  change, and a volatility-regime class. Agent derives `path_edge = mfe - mae` for signals.
+- **Path label horizon** scales per TF (e.g. 240m wall-clock on 5m/15m). Independent of
+  `window_len` (input lookback).
+- **Early stopping is enabled** by default (patience 12, max 120 epochs); best val-loss checkpoint
+  is used for export.
 - **Feature parity is the #1 deployment failure mode** — train/serve uses
   `feature_store/transformer_btcusd/` (not `unified_feature_engine`). Run
   `pytest tests/unit/test_transformer_btcusd_feature_parity.py` before deploy.
-- **Export quality tiers** — sanity floors block broken exports; promotion targets in metadata are
-  informational, not proof of tradability.
+- **Export quality tiers** — sanity floor on `future_volatility` test corr blocks broken exports;
+  promotion targets in metadata are informational.
 - **ONNX export** embeds all weights in a single file (`dynamo=False`) and is verified before download."""
 
 PIP_CELL = (
@@ -124,10 +125,12 @@ else:
 
 CONFIG_PREVIEW_CELL = """import json
 
-print("Per-TF label horizons (~8h wall-clock):")
+print("Per-TF path label horizons (wall-clock minutes):")
 for res in SUPPORTED_RESOLUTIONS:
-    bars = label_horizon_bars_for_resolution(RESOLUTION_MINUTES[res])
-    print(f"  {res:>4s}: {bars:3d} bars")
+    path_m = DEFAULT_PATH_LABEL_HORIZON_MINUTES[res]
+    path_b = path_label_horizon_bars_for_resolution(res)
+    weights = continuous_loss_weights_for_resolution(res)
+    print(f"  {res:>4s}: path {path_m}m ({path_b} bars)  loss_weights={list(weights)}")
 
 print("\\n15m default_training_config:")
 print(json.dumps(default_training_config("15m"), indent=2))
@@ -147,7 +150,7 @@ epochs = None  # e.g. 5 for smoke test
 history_days = None  # e.g. 900; BTCUSD India history ~950 days as of 2026
 refresh_data = False  # set True to re-fetch from Delta API instead of parquet cache
 continue_on_error = True  # finish remaining TFs if one fails quality gate
-enforce_quality_gate = True  # set False to export even if future_return corr is low
+enforce_quality_gate = True  # set False to export even if future_volatility corr is low
 """
 
 TRAIN_CELL = """results = run_all_training(
@@ -171,14 +174,14 @@ from pathlib import Path
 if "results" not in globals():
     raise NameError("Run the training cell above first.")
 
-print(f"{'Resolution':<10}{'Status':<8}{'Return Corr':<14}Export Dir")
+print(f"{'Resolution':<10}{'Status':<8}{'Vol Corr':<14}Export Dir")
 for result in results:
     corr_str = "-"
     if result["status"] == "ok":
         meta_path = Path(result["export_dir"]) / "metadata_transformer.json"
         if meta_path.is_file():
             metrics = json.loads(meta_path.read_text()).get("test_metrics", {})
-            corr = metrics.get("future_return", {}).get("corr")
+            corr = metrics.get("future_volatility", {}).get("corr")
             if corr is not None:
                 corr_str = f"{corr:+.4f}"
     print(
@@ -210,6 +213,38 @@ else:
     except ImportError:
         print("Not running in Colab; download manually from the path above.")
 """
+
+
+def _is_main_guard(test: ast.AST) -> bool:
+    if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq):
+        left, right = test.left, test.comparators[0]
+        if isinstance(left, ast.Name) and left.id == "__name__":
+            return isinstance(right, ast.Constant) and right.value == "__main__"
+    if isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And) and test.values:
+        return _is_main_guard(test.values[0])
+    return False
+
+
+def _strip_cli_entrypoint(source: str) -> str:
+    """Remove CLI entry blocks (``if __name__ == '__main__'``) from inlined notebook cells."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    lines = source.splitlines(keepends=True)
+    drop_lines: set[int] = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "_running_under_ipython":
+            end = node.end_lineno or node.lineno
+            drop_lines.update(range(node.lineno, end + 1))
+        if isinstance(node, ast.If) and _is_main_guard(node.test):
+            end = node.end_lineno or node.lineno
+            drop_lines.update(range(node.lineno, end + 1))
+    if not drop_lines:
+        return source
+    kept = [line for idx, line in enumerate(lines, start=1) if idx not in drop_lines]
+    text = "".join(kept)
+    return re.sub(r"\n{3,}", "\n\n", text).strip() + "\n"
 
 
 def _is_internal_module(module: str | None) -> bool:
@@ -253,7 +288,7 @@ def _read_source(relative_path: str) -> str:
 
 def _prepare_module_chunks(relative_path: str) -> list[str]:
     raw = _read_source(relative_path)
-    prepared = _strip_internal_imports(raw)
+    prepared = _strip_cli_entrypoint(_strip_internal_imports(raw))
     if NOTEBOOK_CELL_SPLIT in prepared:
         return [chunk.strip() + "\n" for chunk in prepared.split(NOTEBOOK_CELL_SPLIT) if chunk.strip()]
     return [prepared]

@@ -355,7 +355,7 @@ def build_high_drawdown(base_price: float = 45000.0) -> Dict[str, Any]:
 def build_thesis_ml_disagreement(base_price: float = 45000.0) -> Dict[str, Any]:
     """
     Structure looks mildly bullish (thesis = BUY) but OHLCV features are
-    ambiguous enough that ML expected_return hovers near threshold.
+    ambiguous enough that ML path_edge hovers near threshold.
 
     Expected: policy fuses signals → HOLD (disagreement = no trade).
     """
@@ -382,7 +382,7 @@ def build_thesis_ml_disagreement(base_price: float = 45000.0) -> Dict[str, Any]:
 
     return {
         "scenario_name": "thesis_ml_disagreement",
-        "description": "Thesis sees BUY signal but ML expected_return is weak/borderline",
+        "description": "Thesis sees BUY signal but ML path_edge is weak/borderline",
         "feature_overrides": {
             "vol_regime": 1.2,
             "h_trend": 0.015,
@@ -465,7 +465,7 @@ def build_high_confidence_bad_portfolio(base_price: float = 45000.0) -> Dict[str
             "adx_14": 35.0,
         },
         # Synthetic scalp ER is borderline vs gate5 min_edge_cost; boost for harness only
-        "ml_expected_return_boost": 0.0004,
+        "ml_path_edge_boost": 0.0004,
         "expected": {
             "portfolio_guard_action_in": ["reduce_size", "block"],
             "execute": False,

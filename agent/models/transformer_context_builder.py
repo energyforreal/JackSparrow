@@ -9,7 +9,7 @@ import numpy as np
 from feature_store.transformer_btcusd.contract import (
     PATH_LABEL_HORIZON_BARS,
     REGIME_NAMES,
-    RETURN_COL,
+    compute_path_edge,
 )
 
 
@@ -60,20 +60,20 @@ def estimate_uncertainty(
 
 
 def synthetic_entry_proba_from_transformer(
-    expected_return: float,
+    path_edge: float,
     edge: float,
     threshold: float,
     unc_scale: float,
 ) -> Dict[str, float]:
-    """Emit buy/sell/hold simplex from signed expected return."""
+    """Emit buy/sell/hold simplex from signed path edge (mfe - mae)."""
     thr = max(float(threshold), 1e-6)
     ratio = float(np.tanh(float(edge) / thr))
     hold = max(0.05, min(0.5, 0.35 * max(0.3, min(1.0, float(unc_scale)))))
     rem = max(0.0, 1.0 - hold)
-    if expected_return > thr * 0.25:
+    if path_edge > thr * 0.25:
         buy = rem * (0.55 + 0.45 * min(1.0, abs(ratio)))
         sell = rem - buy
-    elif expected_return < -thr * 0.25:
+    elif path_edge < -thr * 0.25:
         sell = rem * (0.55 + 0.45 * min(1.0, abs(ratio)))
         buy = rem - sell
     else:
@@ -87,7 +87,7 @@ def synthetic_entry_proba_from_transformer(
 
 def map_prediction_to_signal(
     *,
-    future_return: float,
+    path_edge: float,
     threshold: float,
     vol_regime: str,
     confidence: float,
@@ -98,7 +98,7 @@ def map_prediction_to_signal(
     """Map transformer outputs to trading signal, confidence, and reason codes."""
     reason_codes: list[str] = []
     thr = max(float(threshold), 1e-6)
-    edge = float(future_return)
+    edge = float(path_edge)
 
     if extreme_regime_veto and str(vol_regime or "").upper() == "EXTREME":
         reason_codes.append("transformer_extreme_regime_veto")
@@ -137,7 +137,7 @@ def build_transformer_prediction_context(
     mae = float(continuous_preds.get("mae", 0.0))
     mfe = float(continuous_preds.get("mfe", 0.0))
     trend_strength = float(continuous_preds.get("trend_strength", 0.0))
-    expected_return = float(continuous_preds.get(RETURN_COL, 0.0))
+    path_edge = compute_path_edge(mfe, mae)
 
     regime = map_vol_regime_to_agent_regime(
         vol_regime,
@@ -152,11 +152,11 @@ def build_transformer_prediction_context(
     u_scale = _uncertainty_scale(unc)
 
     primary_thr = float(bundle_metadata.get("default_threshold") or 0.005)
-    edge = expected_return - primary_thr
+    edge = path_edge - primary_thr
     primary_pred_val = float(np.tanh(edge * 80.0))
     primary_conf = _head_confidence(edge, primary_thr, u_scale)
     entry_proba = synthetic_entry_proba_from_transformer(
-        expected_return,
+        path_edge,
         edge,
         primary_thr,
         u_scale,
@@ -169,7 +169,7 @@ def build_transformer_prediction_context(
         "resolution_minutes": int(resolution_minutes),
         "entry_proba": entry_proba,
         "entry_confidence": primary_conf,
-        "expected_return": expected_return,
+        "path_edge": path_edge,
         "threshold": primary_thr,
         "regime": regime,
         "uncertainty": float(unc),
@@ -200,7 +200,7 @@ def build_mtf_aggregation_context(
         "format": "jacksparrow_transformer_btcusd_mtf",
         "multi_tf_heads": {
             key: {
-                "expected_return": ctx.get("expected_return"),
+                "path_edge": ctx.get("path_edge"),
                 "regime": ctx.get("regime"),
                 "vol_regime": ctx.get("transformer_vol_regime"),
                 "confidence": ctx.get("entry_confidence"),

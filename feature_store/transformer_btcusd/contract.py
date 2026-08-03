@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 # Bump when FEATURE_COLS or semantics change (requires retrain + re-export).
-FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v1"
+FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v2"
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
 
@@ -50,8 +50,6 @@ FEATURE_COLS: Tuple[str, ...] = (
     "funding_x_oi",
 )
 
-RETURN_COL = "future_return"
-
 PATH_LABEL_COLS: Tuple[str, ...] = (
     "mfe",
     "mae",
@@ -62,12 +60,31 @@ PATH_LABEL_COLS: Tuple[str, ...] = (
     "future_volume_change_pct",
 )
 
-CONTINUOUS_LABEL_COLS: Tuple[str, ...] = (RETURN_COL,) + PATH_LABEL_COLS
+CONTINUOUS_LABEL_COLS: Tuple[str, ...] = PATH_LABEL_COLS
 
 PATH_LABEL_HORIZON_BARS: int = 8
 
-# Reference Colab notebook (btcusd_15m_transformer) uses 32 bars on 15m (~8h wall-clock).
+# Legacy 8h reference (btcusd_15m_transformer used 32 bars on 15m).
 REFERENCE_LABEL_HORIZON_MINUTES: int = 480
+
+DEFAULT_PATH_LABEL_HORIZON_MINUTES: Dict[str, int] = {
+    "5m": 240,
+    "15m": 240,
+    "30m": 480,
+    "1h": 480,
+    "2h": 480,
+}
+
+# Volume change excluded from loss (dominates shared encoder).
+DEFAULT_CONTINUOUS_LOSS_WEIGHTS: Dict[str, float] = {
+    "mfe": 0.5,
+    "mae": 0.5,
+    "future_volatility": 1.0,
+    "trend_strength": 0.5,
+    "drawdown_before_mfe": 0.5,
+    "future_oi_change_pct": 0.25,
+    "future_volume_change_pct": 0.0,
+}
 
 REGIME_NAMES: Dict[int, str] = {
     0: "LOW",
@@ -76,23 +93,15 @@ REGIME_NAMES: Dict[int, str] = {
     3: "EXTREME",
 }
 
-# Minimum test-set correlation for future_return before ONNX export.
-MIN_EXPORT_RETURN_CORR: Dict[str, float] = {
-    "5m": 0.03,
-    "15m": 0.04,
-    "30m": 0.03,
-    "1h": 0.02,
-    "2h": 0.02,
+# Minimum test-set correlation for future_volatility before ONNX export.
+MIN_EXPORT_VOL_CORR: Dict[str, float] = {
+    "5m": 0.10,
+    "15m": 0.10,
+    "30m": 0.10,
+    "1h": 0.08,
+    "2h": 0.08,
 }
 
-# Stricter optional targets for promotion-ready bundles (warn-only unless agent flag set).
-PROMOTION_RETURN_CORR: Dict[str, float] = {
-    "5m": 0.05,
-    "15m": 0.06,
-    "30m": 0.05,
-    "1h": 0.04,
-    "2h": 0.04,
-}
 PROMOTION_VOL_CORR: float = 0.15
 PROMOTION_REGIME_ACCURACY: float = 0.35
 
@@ -103,6 +112,11 @@ EXPORT_QUALITY_DISCLAIMER = (
 
 TRANSFORMER_METADATA_FILENAME = "metadata_transformer.json"
 TRANSFORMER_FEATURE_CONFIG_FILENAME = "feature_config.json"
+
+
+def compute_path_edge(mfe: float, mae: float) -> float:
+    """Directional edge from predicted path asymmetry (MFE minus MAE)."""
+    return float(mfe) - float(mae)
 
 
 def model_family_for_resolution(resolution: str) -> str:
@@ -125,9 +139,30 @@ def bundle_dir_name(resolution: str) -> str:
     return f"JackSparrow_Transformer_BTCUSD_{res}"
 
 
+def horizon_bars_for_wall_minutes(wall_minutes: int, resolution_minutes: int) -> int:
+    """Convert wall-clock minutes to native-TF bar count."""
+    return max(1, int(round(int(wall_minutes) / resolution_minutes)))
+
+
 def label_horizon_bars_for_resolution(resolution_minutes: int) -> int:
-    """Forward label window in bars (~8h wall-clock; 32 bars on 15m per reference notebook)."""
-    return max(1, int(round(REFERENCE_LABEL_HORIZON_MINUTES / resolution_minutes)))
+    """Legacy helper: 8h wall-clock in bars for a TF grid."""
+    return horizon_bars_for_wall_minutes(REFERENCE_LABEL_HORIZON_MINUTES, resolution_minutes)
+
+
+def path_label_horizon_bars_for_resolution(resolution: str) -> int:
+    """Path-label forward window in bars for a TF."""
+    res = resolution.strip().lower()
+    if res not in RESOLUTION_MINUTES:
+        raise ValueError(f"Unsupported resolution: {resolution!r}")
+    minutes = RESOLUTION_MINUTES[res]
+    wall = DEFAULT_PATH_LABEL_HORIZON_MINUTES.get(res, REFERENCE_LABEL_HORIZON_MINUTES)
+    return horizon_bars_for_wall_minutes(wall, minutes)
+
+
+def continuous_loss_weights_for_resolution(resolution: str) -> Tuple[float, ...]:
+    """Per-head loss weights aligned with CONTINUOUS_LABEL_COLS (0 = no gradient)."""
+    weights = dict(DEFAULT_CONTINUOUS_LOSS_WEIGHTS)
+    return tuple(float(weights.get(col, 1.0)) for col in CONTINUOUS_LABEL_COLS)
 
 
 def default_training_config(resolution: str) -> Dict[str, Any]:
@@ -136,7 +171,7 @@ def default_training_config(resolution: str) -> Dict[str, Any]:
     if res not in RESOLUTION_MINUTES:
         raise ValueError(f"Unsupported resolution: {resolution!r}")
     minutes = RESOLUTION_MINUTES[res]
-    label_horizon = label_horizon_bars_for_resolution(minutes)
+    path_horizon = path_label_horizon_bars_for_resolution(res)
     return {
         "symbol": "BTCUSD",
         "resolution": res,
@@ -144,15 +179,18 @@ def default_training_config(resolution: str) -> Dict[str, Any]:
         "history_days": 900,
         "base_url": "https://api.india.delta.exchange",
         "atr_period": 14,
-        "return_horizon_bars": label_horizon,
-        "path_label_horizon_bars": label_horizon,
+        "path_label_horizon_bars": path_horizon,
+        "label_horizon_minutes_path": DEFAULT_PATH_LABEL_HORIZON_MINUTES.get(
+            res, REFERENCE_LABEL_HORIZON_MINUTES
+        ),
+        "continuous_loss_weights": list(continuous_loss_weights_for_resolution(res)),
         "mae_floor_atr_mult": 0.25,
         "vol_regime_quantiles": [0.25, 0.5, 0.75],
         "window_len": 128,
         "stride": 8,
         "train_frac": 0.65,
         "val_frac": 0.15,
-        "embargo_bars": label_horizon,
+        "embargo_bars": path_horizon,
         "batch_size": 128,
         "epochs": 120,
         "lr": 1e-4,
@@ -165,18 +203,17 @@ def default_training_config(resolution: str) -> Dict[str, Any]:
         "early_stopping_enabled": True,
         "min_derivatives_coverage": 0.5,
         "derivatives_coverage_warn": 0.9,
-        "min_export_return_corr": MIN_EXPORT_RETURN_CORR.get(res, 0.02),
+        "min_export_vol_corr": MIN_EXPORT_VOL_CORR.get(res, 0.08),
         "default_threshold": 0.005,
         "seed": 42,
     }
 
 
 def max_label_horizon_bars(
-    return_horizon_bars: int = 1,
     path_label_horizon_bars: int = PATH_LABEL_HORIZON_BARS,
 ) -> int:
     """Maximum forward bars across all training labels."""
-    return max(int(return_horizon_bars), int(path_label_horizon_bars))
+    return int(path_label_horizon_bars)
 
 
 def scale_period(period: int, resolution_minutes: int, *, base_minutes: int = 5) -> int:

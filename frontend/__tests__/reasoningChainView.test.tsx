@@ -19,12 +19,12 @@ describe('ReasoningChainView', () => {
     render(
       <ReasoningChainView
         reasoningChain={[]}
-        v43GateReject="expected_return_below_threshold"
+        v43GateReject="path_edge_below_threshold"
       />
     )
 
     expect(screen.getByText(/Gate reject:/)).toBeInTheDocument()
-    expect(screen.getByText('expected_return_below_threshold')).toBeInTheDocument()
+    expect(screen.getByText('path_edge_below_threshold')).toBeInTheDocument()
   })
 
   it('shows empty state when no steps or economics fields', () => {

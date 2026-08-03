@@ -1,0 +1,133 @@
+{
+  "version": "transformer_per_tf_v1",
+  "model_name": "jacksparrow_transformer_BTCUSD_5m",
+  "model_family": "jacksparrow_transformer_btcusd_5m",
+  "symbol": "BTCUSD",
+  "resolution": "5m",
+  "resolution_minutes": 5,
+  "onnx_filename": "btcusd_5m_transformer.onnx",
+  "feature_config_filename": "feature_config.json",
+  "path_label_horizon_bars": 48,
+  "atr_period": 14,
+  "default_threshold": 0.005,
+  "primary_signal_mode": "path_edge",
+  "label_mean": [
+    0.007138071007876322,
+    0.007307994401807754,
+    0.001306413633372866,
+    4.244176764904668,
+    0.0027753727802365047,
+    0.07139399627875818,
+    0.27372456565143893
+  ],
+  "label_std": [
+    0.007956635397953294,
+    0.00870386580353759,
+    0.0008088728407599244,
+    4.7185420348220966,
+    0.003533290226136705,
+    2.630189172937937,
+    0.8671019236839732
+  ],
+  "test_metrics": {
+    "mfe": {
+      "mae": 0.005107663142878307,
+      "corr": 0.19387056679519735,
+      "n": 6392
+    },
+    "mae": {
+      "mae": 0.005004508592837302,
+      "corr": 0.19999173751493265,
+      "n": 6392
+    },
+    "future_volatility": {
+      "mae": 0.0004809170490178509,
+      "corr": 0.39930899906450307,
+      "n": 6392
+    },
+    "trend_strength": {
+      "mae": 2.979893668868554,
+      "corr": 0.22176819819808935,
+      "n": 6392
+    },
+    "drawdown_before_mfe": {
+      "mae": 0.002249458069329417,
+      "corr": 0.18235992944877746,
+      "n": 6033
+    },
+    "future_oi_change_pct": {
+      "mae": 0.13816720900886842,
+      "corr": 0.10989789994109758,
+      "n": 6392
+    },
+    "future_volume_change_pct": {
+      "mae": 0.6520126721867426,
+      "corr": -0.20654359991639762,
+      "n": 6392
+    }
+  },
+  "training_config": {
+    "symbol": "BTCUSD",
+    "resolution": "5m",
+    "resolution_minutes": 5,
+    "history_days": 900,
+    "base_url": "https://api.india.delta.exchange",
+    "atr_period": 14,
+    "path_label_horizon_bars": 48,
+    "label_horizon_minutes_path": 240,
+    "continuous_loss_weights": [
+      0.5,
+      0.5,
+      1.0,
+      0.5,
+      0.5,
+      0.25,
+      0.0
+    ],
+    "mae_floor_atr_mult": 0.25,
+    "vol_regime_quantiles": [
+      0.25,
+      0.5,
+      0.75
+    ],
+    "window_len": 128,
+    "stride": 8,
+    "train_frac": 0.65,
+    "val_frac": 0.15,
+    "embargo_bars": 48,
+    "batch_size": 128,
+    "epochs": 120,
+    "lr": 0.0001,
+    "d_model": 64,
+    "nhead": 4,
+    "num_layers": 2,
+    "dropout": 0.25,
+    "weight_decay": 0.01,
+    "early_stop_patience": 12,
+    "early_stopping_enabled": true,
+    "min_derivatives_coverage": 0.5,
+    "derivatives_coverage_warn": 0.9,
+    "min_export_vol_corr": 0.1,
+    "default_threshold": 0.005,
+    "seed": 42
+  },
+  "export_quality": {
+    "tier": "promotion_ready",
+    "checks": {
+      "future_volatility": {
+        "corr": 0.39930899906450307,
+        "sanity_floor": 0.1,
+        "promotion_floor": 0.15,
+        "sanity_passed": true,
+        "promotion_passed": true
+      },
+      "regime_accuracy": {
+        "value": 0.373279098873592,
+        "promotion_floor": 0.35,
+        "promotion_passed": true
+      }
+    },
+    "warnings": [],
+    "disclaimer": "Sanity gates detect broken exports, not trading edge. Promotion tier targets are informational."
+  }
+}

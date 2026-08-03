@@ -10,7 +10,6 @@ import pandas as pd
 from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     PATH_LABEL_HORIZON_BARS,
-    RETURN_COL,
     max_label_horizon_bars,
 )
 
@@ -18,14 +17,12 @@ from feature_store.transformer_btcusd.contract import (
 def compute_market_labels(
     df: pd.DataFrame,
     *,
-    return_horizon_bars: int = 1,
     path_label_horizon_bars: int = PATH_LABEL_HORIZON_BARS,
     mae_floor_atr_mult: float,
 ) -> pd.DataFrame:
-    """Compute single-bar return target and path/risk labels on native TF grid."""
+    """Compute path/risk labels on native TF grid (no future_return head)."""
     path_horizon = int(path_label_horizon_bars)
-    ret_horizon = int(return_horizon_bars)
-    max_horizon = max_label_horizon_bars(ret_horizon, path_horizon)
+    max_horizon = max_label_horizon_bars(path_horizon)
 
     out_df = df.copy()
     n = len(out_df)
@@ -46,16 +43,10 @@ def compute_market_labels(
         "future_oi_change_pct",
         "future_volume_change_pct",
     ]
-    out: dict[str, np.ndarray] = {
-        RETURN_COL: np.full(n, np.nan),
-        **{c: np.full(n, np.nan) for c in path_cols},
-    }
+    out: dict[str, np.ndarray] = {c: np.full(n, np.nan) for c in path_cols}
 
     for i in range(n - max_horizon):
         entry = close[i]
-
-        if ret_horizon > 0 and i + ret_horizon < n:
-            out[RETURN_COL][i] = (close[i + ret_horizon] - entry) / entry
 
         fwd_close = close[i + 1 : i + path_horizon + 1]
         fwd_high = high[i + 1 : i + path_horizon + 1]
@@ -95,11 +86,10 @@ def compute_market_labels(
 def trim_label_tail(
     df: pd.DataFrame,
     *,
-    return_horizon_bars: int = 1,
     path_label_horizon_bars: int = PATH_LABEL_HORIZON_BARS,
 ) -> pd.DataFrame:
     """Drop rows without complete forward labels."""
-    max_horizon = max_label_horizon_bars(return_horizon_bars, path_label_horizon_bars)
+    max_horizon = max_label_horizon_bars(path_label_horizon_bars)
     return df.iloc[: -(max_horizon + 1)].reset_index(drop=True)
 
 

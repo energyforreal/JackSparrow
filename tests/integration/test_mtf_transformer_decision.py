@@ -32,7 +32,7 @@ def _ohlcv_df(n: int = 200) -> pd.DataFrame:
 def _prediction(
     resolution: str,
     *,
-    future_return: float = 0.01,
+    path_edge: float = 0.01,
     signal: str = "BUY",
 ) -> MCPModelPrediction:
     tf_key = f"tf_{resolution}"
@@ -49,10 +49,9 @@ def _prediction(
         context={
             "tf_key": tf_key,
             "resolution": resolution,
-            "expected_return": future_return,
+            "path_edge": path_edge,
             "threshold": 0.005,
             "transformer_continuous_preds": {
-                "future_return": future_return,
                 "mfe": 0.02,
                 "mae": 0.005,
                 "future_volatility": 0.003,
@@ -199,9 +198,9 @@ async def test_mtf_decision_bias_veto_forces_hold(monkeypatch: pytest.MonkeyPatc
     )
 
     predictions = [
-        _prediction("5m", future_return=0.01),
-        _prediction("15m", future_return=0.01),
-        _prediction("30m", future_return=0.01),
+        _prediction("5m", path_edge=0.01),
+        _prediction("15m", path_edge=0.01),
+        _prediction("30m", path_edge=0.01),
         MCPModelPrediction(
             model_name="jacksparrow_transformer_BTCUSD_1h",
             model_version="v1",
@@ -215,10 +214,9 @@ async def test_mtf_decision_bias_veto_forces_hold(monkeypatch: pytest.MonkeyPatc
             context={
                 "tf_key": "tf_1h",
                 "resolution": "1h",
-                "expected_return": -0.01,
+                "path_edge": -0.01,
                 "threshold": 0.005,
                 "transformer_continuous_preds": {
-                    "future_return": -0.01,
                     "mfe": 0.01,
                     "mae": 0.02,
                     "future_volatility": 0.004,
@@ -242,10 +240,9 @@ async def test_mtf_decision_bias_veto_forces_hold(monkeypatch: pytest.MonkeyPatc
             context={
                 "tf_key": "tf_2h",
                 "resolution": "2h",
-                "expected_return": -0.01,
+                "path_edge": -0.01,
                 "threshold": 0.005,
                 "transformer_continuous_preds": {
-                    "future_return": -0.01,
                     "mfe": 0.01,
                     "mae": 0.02,
                     "future_volatility": 0.004,

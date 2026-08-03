@@ -138,7 +138,9 @@ export interface ModelConsensus {
   p_sell?: number
   p_hold?: number
   edge?: number
-  /** v43 ensemble: simple forward-return scale (preferred over tanh MCP score) */
+  /** Transformer path asymmetry (mfe - mae); preferred over legacy expected_return */
+  path_edge?: number
+  /** Legacy v43 expected return (deprecated for transformer bundles) */
   expected_return?: number
   threshold?: number
   regime?: string
@@ -199,8 +201,8 @@ export interface Signal {
   decision_event_id?: string
   /** v43 JackSparrow: regime label from model context when surfaced on signal. */
   regime?: string
-  /** v43: expected return from model context. */
-  expected_return?: number
+  /** Transformer path asymmetry (mfe - mae). */
+  path_edge?: number
   /** v43: decision threshold. */
   threshold?: number
   /** v43: orchestrator/post-threshold gate reason when HOLD. */

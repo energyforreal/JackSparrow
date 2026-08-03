@@ -9,7 +9,6 @@ import pytest
 from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     FEATURE_COLS,
-    RETURN_COL,
     RESOLUTION_MINUTES,
     SUPPORTED_RESOLUTIONS,
     max_label_horizon_bars,
@@ -76,24 +75,20 @@ def test_build_inference_window_shape(resolution: str) -> None:
     assert np.isfinite(window).all()
 
 
-def test_single_return_label_no_lookahead() -> None:
+def test_path_labels_trim_tail() -> None:
     n = _bars_needed("15m")
     raw = _synthetic_ohlcv(n, freq="15min")
     feat = add_features(raw, resolution_minutes=15).dropna().reset_index(drop=True)
     labeled = compute_market_labels(
         feat,
-        return_horizon_bars=1,
         path_label_horizon_bars=8,
         mae_floor_atr_mult=0.25,
     )
-    trimmed = trim_label_tail(labeled, return_horizon_bars=1, path_label_horizon_bars=8)
-    max_h = max_label_horizon_bars(1, 8)
+    trimmed = trim_label_tail(labeled, path_label_horizon_bars=8)
+    max_h = max_label_horizon_bars(8)
     assert len(trimmed) == len(labeled) - (max_h + 1)
-
-    i = 50
-    entry = float(trimmed.loc[i, "close"])
-    expected = (float(trimmed.loc[i + 1, "close"]) - entry) / entry
-    assert trimmed.loc[i, RETURN_COL] == pytest.approx(expected, rel=1e-6)
+    assert trimmed.loc[50, "mfe"] >= 0.0
+    assert trimmed.loc[50, "mae"] >= 0.0
 
 
 def test_unstandardize_continuous_roundtrip() -> None:
@@ -102,4 +97,4 @@ def test_unstandardize_continuous_roundtrip() -> None:
     z = np.random.default_rng(0).normal(size=len(CONTINUOUS_LABEL_COLS))
     out = unstandardize_continuous(z, mean, std)
     assert set(out.keys()) == set(CONTINUOUS_LABEL_COLS)
-    assert out[RETURN_COL] == pytest.approx(float(z[0]))
+    assert out["mfe"] == pytest.approx(float(z[0]))

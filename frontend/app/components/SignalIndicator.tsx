@@ -127,17 +127,17 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
         )}
 
         {/* v43 Signal Economics */}
-        {(signal.expected_return != null ||
+        {(signal.path_edge != null ||
           signal.threshold != null ||
           Boolean(signal.v43_gate_reject)) && (
           <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
             <p className="font-medium text-foreground">Signal economics</p>
             <ul className="list-inside list-disc space-y-0.5 tabular-nums">
-              {signal.expected_return != null && Number.isFinite(Number(signal.expected_return)) && (
+              {signal.path_edge != null && Number.isFinite(Number(signal.path_edge)) && (
                 <li>
-                  Expected return:{' '}
+                  Path edge (MFE−MAE):{' '}
                   <span className="text-foreground font-medium">
-                    {Number(signal.expected_return).toFixed(5)}
+                    {Number(signal.path_edge).toFixed(5)}
                   </span>
                 </li>
               )}

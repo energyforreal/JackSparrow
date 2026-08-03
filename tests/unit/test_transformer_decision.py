@@ -9,7 +9,7 @@ from agent.models.transformer_context_builder import map_prediction_to_signal
 
 def test_map_prediction_buy_signal() -> None:
     signal, conf, codes = map_prediction_to_signal(
-        future_return=0.01,
+        path_edge=0.01,
         threshold=0.005,
         vol_regime="NORMAL",
         confidence=0.72,
@@ -22,7 +22,7 @@ def test_map_prediction_buy_signal() -> None:
 
 def test_map_prediction_hold_below_threshold() -> None:
     signal, conf, codes = map_prediction_to_signal(
-        future_return=0.001,
+        path_edge=0.001,
         threshold=0.005,
         vol_regime="NORMAL",
         confidence=0.8,
@@ -33,7 +33,7 @@ def test_map_prediction_hold_below_threshold() -> None:
 
 def test_map_prediction_extreme_regime_veto() -> None:
     signal, _, codes = map_prediction_to_signal(
-        future_return=0.02,
+        path_edge=0.02,
         threshold=0.005,
         vol_regime="EXTREME",
         confidence=0.9,
@@ -45,7 +45,7 @@ def test_map_prediction_extreme_regime_veto() -> None:
 
 def test_map_prediction_low_confidence_hold() -> None:
     signal, _, codes = map_prediction_to_signal(
-        future_return=0.02,
+        path_edge=0.02,
         threshold=0.005,
         vol_regime="NORMAL",
         confidence=0.4,

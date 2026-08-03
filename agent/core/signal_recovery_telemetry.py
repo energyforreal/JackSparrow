@@ -45,7 +45,7 @@ def record_decision_cycle(
     symbol: str,
     signal: str,
     confidence: float,
-    expected_return: Optional[float] = None,
+    path_edge: Optional[float] = None,
     trade_score: Optional[float] = None,
     thesis_signal: Optional[str] = None,
     policy_reason_codes: Optional[List[str]] = None,
@@ -66,8 +66,8 @@ def record_decision_cycle(
         "signal": signal,
         "confidence": float(confidence),
     }
-    if expected_return is not None:
-        row["expected_return"] = float(expected_return)
+    if path_edge is not None:
+        row["path_edge"] = float(path_edge)
     if trade_score is not None:
         row["trade_score"] = float(trade_score)
     if thesis_signal is not None:

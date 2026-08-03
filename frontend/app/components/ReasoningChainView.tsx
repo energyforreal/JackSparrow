@@ -25,7 +25,7 @@ interface ReasoningChainViewProps {
   modelVersion?: string
   inferenceLatencyMs?: number
   inferenceMode?: string
-  v43ExpectedReturn?: number
+  v43PathEdge?: number
   v43Threshold?: number
   v43GateReject?: string
 }
@@ -42,7 +42,7 @@ export function ReasoningChainView({
   chainMeta,
   overallConfidence,
   isLoading = false,
-  v43ExpectedReturn,
+  v43PathEdge,
   v43Threshold,
   v43GateReject,
 }: ReasoningChainViewProps) {
@@ -71,7 +71,7 @@ export function ReasoningChainView({
 
   const hasSteps = reasoningChain && reasoningChain.length > 0
 
-  if (!hasSteps && !v43ExpectedReturn && !v43GateReject && v43Threshold == null) {
+  if (!hasSteps && !v43PathEdge && !v43GateReject && v43Threshold == null) {
     return (
       <Card>
         <CardHeader>
@@ -118,15 +118,15 @@ export function ReasoningChainView({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* v43 economics summary */}
-        {(v43ExpectedReturn != null || v43Threshold != null || v43GateReject) && (
+        {(v43PathEdge != null || v43Threshold != null || v43GateReject) && (
           <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
             <p className="font-medium text-foreground">Decision economics</p>
             <ul className="list-inside list-disc space-y-0.5 tabular-nums">
-              {v43ExpectedReturn != null && Number.isFinite(v43ExpectedReturn) && (
+              {v43PathEdge != null && Number.isFinite(v43PathEdge) && (
                 <li>
-                  Expected return:{' '}
+                  Path edge (MFE−MAE):{' '}
                   <span className="text-foreground font-medium">
-                    {v43ExpectedReturn.toFixed(5)}
+                    {v43PathEdge.toFixed(5)}
                   </span>
                 </li>
               )}

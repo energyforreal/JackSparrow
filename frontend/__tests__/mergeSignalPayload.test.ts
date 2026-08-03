@@ -6,7 +6,7 @@ describe('mergeSignalPayload', () => {
     const prev: Signal = {
       signal: 'HOLD',
       confidence: 0.4,
-      v43_gate_reject: 'expected_return_below_threshold',
+      v43_gate_reject: 'path_edge_below_threshold',
     }
 
     const merged = mergeSignalPayload(prev, {
@@ -15,7 +15,7 @@ describe('mergeSignalPayload', () => {
       reasoning_chain: [],
     })
 
-    expect(merged.v43_gate_reject).toBe('expected_return_below_threshold')
+    expect(merged.v43_gate_reject).toBe('path_edge_below_threshold')
   })
 
   it('stamps merge time when patch omits timestamp', () => {

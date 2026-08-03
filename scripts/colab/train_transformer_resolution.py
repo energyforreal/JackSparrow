@@ -34,7 +34,7 @@ from scripts.colab.transformer_training import (
     export_transformer_bundle,
     fit_label_stats,
     fit_vol_regime_edges,
-    print_return_metrics,
+    print_primary_metrics,
     print_target_metrics,
     set_training_seed,
     split_purged_windows,
@@ -98,13 +98,11 @@ def run_training(
     ).dropna().reset_index(drop=True)
     feat_df = compute_market_labels(
         feat_df,
-        return_horizon_bars=int(config["return_horizon_bars"]),
         path_label_horizon_bars=config["path_label_horizon_bars"],
         mae_floor_atr_mult=config["mae_floor_atr_mult"],
     )
     feat_df = trim_label_tail(
         feat_df,
-        return_horizon_bars=int(config["return_horizon_bars"]),
         path_label_horizon_bars=config["path_label_horizon_bars"],
     )
 
@@ -171,6 +169,16 @@ def run_training(
     model.load_state_dict(result.model_state)
     model.eval()
 
+    train_metrics = evaluate_continuous_targets(
+        model,
+        train_loader,
+        device=device,
+        label_mean=label_mean,
+        label_std=label_std,
+    )
+    print_primary_metrics(train_metrics)
+    print_target_metrics(train_metrics, title="Train set — all continuous targets:")
+
     test_metrics = evaluate_continuous_targets(
         model,
         test_loader,
@@ -178,7 +186,7 @@ def run_training(
         label_mean=label_mean,
         label_std=label_std,
     )
-    print_return_metrics(test_metrics)
+    print_primary_metrics(test_metrics)
     print_target_metrics(test_metrics, title="Test set — all continuous targets:")
 
     regime_accuracy = evaluate_regime_accuracy(model, test_loader, device=device)
@@ -305,5 +313,15 @@ def main() -> None:
     )
 
 
-if __name__ == "__main__":
+def _running_under_ipython() -> bool:
+    """True when executed inside Jupyter/Colab (not a plain CLI invocation)."""
+    try:
+        from IPython import get_ipython
+
+        return get_ipython() is not None
+    except ImportError:
+        return False
+
+
+if __name__ == "__main__" and not _running_under_ipython():
     main()

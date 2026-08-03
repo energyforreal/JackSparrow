@@ -404,12 +404,21 @@ class MCPOrchestrator:
                 return False
             p0 = preds[0]
             ctx = getattr(p0, "context", None) or {}
-            er = ctx.get("expected_return") if isinstance(ctx, dict) else None
-            if er is None:
-                er = getattr(p0, "prediction", None)
-            if er is None:
+            pe = ctx.get("path_edge") if isinstance(ctx, dict) else None
+            if pe is None:
+                preds = ctx.get("transformer_continuous_preds") if isinstance(ctx, dict) else None
+                if isinstance(preds, dict):
+                    mfe = preds.get("mfe")
+                    mae = preds.get("mae")
+                    if mfe is not None and mae is not None:
+                        from feature_store.transformer_btcusd.contract import compute_path_edge
+
+                        pe = compute_path_edge(float(mfe), float(mae))
+            if pe is None:
+                pe = getattr(p0, "prediction", None)
+            if pe is None:
                 return False
-            return math.isfinite(float(er))
+            return math.isfinite(float(pe))
         except Exception as e:
             logger.warning("model_dry_run_validation_failed", error=str(e), exc_info=True)
             return False
