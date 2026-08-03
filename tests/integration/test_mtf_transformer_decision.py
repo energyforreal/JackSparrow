@@ -109,7 +109,7 @@ async def test_mtf_decision_emits_multi_tf_context(monkeypatch: pytest.MonkeyPat
         trading_status="open",
     )
     monkeypatch.setattr(
-        "agent.core.v43_contract_state.get_contract_state",
+        "agent.core.contract_state.get_contract_state",
         AsyncMock(return_value=contract_state),
     )
 
@@ -172,7 +172,7 @@ async def test_mtf_decision_bias_veto_forces_hold(monkeypatch: pytest.MonkeyPatc
         AsyncMock(return_value=frames),
     )
     monkeypatch.setattr(
-        "agent.core.v43_contract_state.get_contract_state",
+        "agent.core.contract_state.get_contract_state",
         AsyncMock(
             return_value=SimpleNamespace(
                 is_operational=True,

@@ -19,11 +19,12 @@ os.environ.setdefault("MODEL_PATH", "")
 from agent.models.model_discovery import ModelDiscovery
 from agent.models.mcp_model_registry import MCPModelRegistry
 from agent.models.transformer_node import TransformerModelNode
-from feature_store.transformer_btcusd_15m.contract import (
+from feature_store.transformer_btcusd.contract import (
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
-    TRANSFORMER_MODEL_FAMILY,
-    TRANSFORMER_ONNX_FILENAME,
+    bundle_dir_name,
+    model_family_for_resolution,
+    onnx_filename_for_resolution,
 )
 
 
@@ -38,20 +39,23 @@ def model_registry() -> MCPModelRegistry:
 
 
 def _write_transformer_bundle(model_dir: Path, name: str = "test_transformer") -> Path:
-    src = Path("agent/model_storage/JackSparrow_Transformer_BTCUSD")
+    src = Path("agent/model_storage/JackSparrow_Transformer_BTCUSD_15m")
     meta = model_dir / TRANSFORMER_METADATA_FILENAME
     meta.write_text(
         json.dumps(
             {
                 "model_name": name,
                 "version": "transformer_v1",
-                "model_family": TRANSFORMER_MODEL_FAMILY,
+                "model_family": model_family_for_resolution("15m"),
+                "resolution": "15m",
+                "onnx_filename": onnx_filename_for_resolution("15m"),
                 "default_threshold": 0.005,
             }
         ),
         encoding="utf-8",
     )
-    shutil.copy2(src / TRANSFORMER_ONNX_FILENAME, model_dir / TRANSFORMER_ONNX_FILENAME)
+    onnx_name = onnx_filename_for_resolution("15m")
+    shutil.copy2(src / onnx_name, model_dir / onnx_name)
     shutil.copy2(src / TRANSFORMER_FEATURE_CONFIG_FILENAME, model_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME)
     return meta
 
@@ -60,7 +64,9 @@ def _write_transformer_bundle(model_dir: Path, name: str = "test_transformer") -
 async def test_discover_transformer_registers_when_auto_register(
     temp_model_dir: Path, model_registry: MCPModelRegistry
 ) -> None:
-    _write_transformer_bundle(temp_model_dir)
+    bundle_dir = temp_model_dir / bundle_dir_name("15m")
+    bundle_dir.mkdir(parents=True)
+    _write_transformer_bundle(bundle_dir)
     mock_node = MagicMock(spec=TransformerModelNode)
     mock_node.model_name = "test_transformer"
     mock_node.model_type = "transformer"
@@ -96,3 +102,24 @@ async def test_discover_empty_when_metadata_missing(
 
     assert discovered == []
     assert model_registry.list_models() == []
+
+
+@pytest.mark.asyncio
+async def test_discover_fails_without_onnx(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bundle = tmp_path / bundle_dir_name("15m")
+    bundle.mkdir(parents=True)
+    (bundle / TRANSFORMER_METADATA_FILENAME).write_text("{}", encoding="utf-8")
+
+    from agent.core import config as config_mod
+
+    monkeypatch.setattr(config_mod.settings, "model_dir", str(tmp_path))
+    monkeypatch.setattr(config_mod.settings, "model_auto_register", True)
+
+    registry = MCPModelRegistry()
+    await registry.initialize()
+    discovery = ModelDiscovery(registry)
+    discovered = await discovery.discover_models()
+    assert discovered == []
+    assert len(registry.models) == 0

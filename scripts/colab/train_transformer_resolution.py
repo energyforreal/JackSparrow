@@ -205,6 +205,7 @@ def run_all_training(
     *,
     resolutions: Sequence[str] | None = None,
     export_dir: Path,
+    cache_dir: Path | None = None,
     epochs: int | None = None,
     history_days: int | None = None,
     refresh_data: bool = False,
@@ -214,11 +215,12 @@ def run_all_training(
     """Train and export all requested per-TF transformer bundles."""
     tfs = list(resolutions or SUPPORTED_RESOLUTIONS)
     results: list[dict[str, Any]] = []
+    cache_root = cache_dir or Path(".")
 
     for resolution in tfs:
         res = resolution.strip().lower()
         tf_export_dir = export_dir / bundle_dir_name(res)
-        raw_cache_path = Path(f"btcusd_{res}_raw.parquet")
+        raw_cache_path = cache_root / f"btcusd_{res}_raw.parquet"
         print(f"\n{'=' * 60}\nTraining {res} -> {tf_export_dir}\n{'=' * 60}")
 
         try:

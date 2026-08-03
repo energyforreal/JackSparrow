@@ -55,6 +55,9 @@ temp_fix.py
 test_output.txt
 retraining_state.json
 dump.rdb
+**/.deps_stamp
+*.tsbuildinfo
+*.parquet
 
 # IDE
 .vscode/

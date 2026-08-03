@@ -9,7 +9,7 @@ import numpy as np
 import structlog
 
 from agent.memory.vector_store import DecisionContext, VectorMemoryStore
-from feature_store.jacksparrow_v43_contract import V43_EXPECTED_FEATURE_COUNT as EXPECTED_FEATURE_COUNT
+from feature_store.feature_registry import EXPECTED_FEATURE_COUNT
 
 logger = structlog.get_logger()
 

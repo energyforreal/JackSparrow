@@ -14,7 +14,7 @@ from agent.core.mtf_decision_policy import (
     interpret_tf_prediction,
     resolution_to_tf_key,
 )
-from agent.core.v43_market_frames import closed_5m_bar_index, fetch_mtf_market_frames
+from agent.core.market_frames import closed_5m_bar_index, fetch_mtf_market_frames
 from agent.data.feature_server import FeatureQuality, MCPFeature, MCPFeatureResponse
 from agent.events.schemas import PolicyVerdict
 from agent.models.mcp_model_registry import (
@@ -142,7 +142,7 @@ async def evaluate_transformer_prediction(
     if df5.empty or len(df5) < 2:
         raise ValueError("Insufficient OHLCV data for transformer prediction")
 
-    from agent.core.v43_contract_state import get_contract_state
+    from agent.core.contract_state import get_contract_state
 
     ticker_row: Dict[str, Any] = {}
     if isinstance(df_oi, pd.DataFrame) and not df_oi.empty:

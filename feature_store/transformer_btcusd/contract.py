@@ -66,6 +66,9 @@ CONTINUOUS_LABEL_COLS: Tuple[str, ...] = (RETURN_COL,) + PATH_LABEL_COLS
 
 PATH_LABEL_HORIZON_BARS: int = 8
 
+# Reference Colab notebook (btcusd_15m_transformer) uses 32 bars on 15m (~8h wall-clock).
+REFERENCE_LABEL_HORIZON_MINUTES: int = 480
+
 REGIME_NAMES: Dict[int, str] = {
     0: "LOW",
     1: "NORMAL",
@@ -106,27 +109,34 @@ def bundle_dir_name(resolution: str) -> str:
     return f"JackSparrow_Transformer_BTCUSD_{res}"
 
 
+def label_horizon_bars_for_resolution(resolution_minutes: int) -> int:
+    """Forward label window in bars (~8h wall-clock; 32 bars on 15m per reference notebook)."""
+    return max(1, int(round(REFERENCE_LABEL_HORIZON_MINUTES / resolution_minutes)))
+
+
 def default_training_config(resolution: str) -> Dict[str, Any]:
     """Default Colab training config for a single TF model."""
     res = resolution.strip().lower()
     if res not in RESOLUTION_MINUTES:
         raise ValueError(f"Unsupported resolution: {resolution!r}")
+    minutes = RESOLUTION_MINUTES[res]
+    label_horizon = label_horizon_bars_for_resolution(minutes)
     return {
         "symbol": "BTCUSD",
         "resolution": res,
-        "resolution_minutes": RESOLUTION_MINUTES[res],
+        "resolution_minutes": minutes,
         "history_days": 900,
         "base_url": "https://api.india.delta.exchange",
         "atr_period": 14,
-        "return_horizon_bars": 1,
-        "path_label_horizon_bars": PATH_LABEL_HORIZON_BARS,
+        "return_horizon_bars": label_horizon,
+        "path_label_horizon_bars": label_horizon,
         "mae_floor_atr_mult": 0.25,
         "vol_regime_quantiles": [0.25, 0.5, 0.75],
         "window_len": 128,
         "stride": 8,
         "train_frac": 0.65,
         "val_frac": 0.15,
-        "embargo_bars": PATH_LABEL_HORIZON_BARS,
+        "embargo_bars": label_horizon,
         "batch_size": 128,
         "epochs": 200,
         "lr": 1e-4,
@@ -136,7 +146,7 @@ def default_training_config(resolution: str) -> Dict[str, Any]:
         "dropout": 0.25,
         "weight_decay": 1e-2,
         "early_stop_patience": 10,
-        "early_stopping_enabled": True,
+        "early_stopping_enabled": False,
         "min_derivatives_coverage": 0.5,
         "derivatives_coverage_warn": 0.9,
         "min_export_return_corr": MIN_EXPORT_RETURN_CORR.get(res, 0.02),

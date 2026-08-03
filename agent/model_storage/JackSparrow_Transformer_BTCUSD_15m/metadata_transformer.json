@@ -1,0 +1,14 @@
+{
+  "version": "transformer_v2",
+  "model_name": "jacksparrow_transformer_BTCUSD_15m",
+  "model_family": "jacksparrow_transformer_btcusd_15m",
+  "symbol": "BTCUSD",
+  "resolution": "15m",
+  "onnx_filename": "btcusd_15m_transformer.onnx",
+  "feature_config_filename": "feature_config.json",
+  "path_label_horizon_bars": 32,
+  "return_horizon_bars": 32,
+  "atr_period": 14,
+  "default_threshold": 0.005,
+  "primary_signal_mode": "returns"
+}

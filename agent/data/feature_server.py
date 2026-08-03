@@ -17,10 +17,6 @@ from agent.core.config import settings
 from agent.core.log_context import EVENT_FEATURE_RESPONSE, KEY_FEATURE_QUALITY
 from agent.data.feature_engineering import FeatureEngineering
 from agent.data.market_data_service import MarketDataService
-from feature_store.jacksparrow_v43_mcp_row import (
-    V43_MCP_FEATURE_NAMES,
-    build_v43_last_row,
-)
 from agent.events.event_bus import event_bus
 from agent.events.schemas import FeatureRequestEvent, FeatureComputedEvent, EventType
 
@@ -30,10 +26,6 @@ logger = structlog.get_logger()
 MIN_CANDLES_FOR_PATTERNS = 100
 CANDLES_FOR_PATTERNS = 200
 PATTERN_FEATURE_PREFIXES = ("cdl_", "chp_", "sr_", "tl_", "bo_")
-
-V43_MCP_CANDLE_LIMIT = 400
-V43_PRIMARY_INTERVAL = "5m"
-
 
 class FeatureQuality(str, Enum):
     """Feature quality enumeration."""
@@ -226,28 +218,6 @@ class MCPFeatureServer:
 
         features: List[MCPFeature] = []
         names = list(request.feature_names)
-        wants_v43 = any(n in V43_MCP_FEATURE_NAMES for n in names)
-        wants_other = any(n not in V43_MCP_FEATURE_NAMES for n in names)
-
-        v43_row: Dict[str, float] = {}
-        if wants_v43:
-            md43 = await self.market_data_service.get_market_data(
-                symbol=request.symbol,
-                interval=V43_PRIMARY_INTERVAL,
-                limit=V43_MCP_CANDLE_LIMIT,
-            )
-            if md43 and md43.get("candles"):
-                v43_row = build_v43_last_row(
-                    md43["candles"],
-                    primary_interval=V43_PRIMARY_INTERVAL,
-                    funding_zscore=None,
-                )
-            else:
-                logger.warning(
-                    "feature_server_v43_no_candles",
-                    symbol=request.symbol,
-                    message="v43 MCP features degraded: no 5m OHLCV",
-                )
 
         has_pattern_features = any(
             name.startswith(PATTERN_FEATURE_PREFIXES) for name in names
@@ -255,59 +225,33 @@ class MCPFeatureServer:
         has_regime_features = any(name.startswith("regime_") for name in names)
         limit = CANDLES_FOR_PATTERNS if (has_pattern_features or has_regime_features) else 100
 
-        market_data: Optional[Dict[str, Any]] = None
-        if wants_other:
-            market_data = await self.market_data_service.get_market_data(
-                symbol=request.symbol,
-                limit=limit,
+        market_data: Optional[Dict[str, Any]] = await self.market_data_service.get_market_data(
+            symbol=request.symbol,
+            limit=limit,
+        )
+        if not market_data or not market_data.get("candles"):
+            if bool(getattr(settings, "feature_server_fail_closed_no_candles", True)):
+                return MCPFeatureResponse(
+                    features=[],
+                    quality_score=0.0,
+                    overall_quality=FeatureQuality.UNAVAILABLE,
+                    timestamp=timestamp,
+                    request_id=request_id,
+                )
+            return MCPFeatureResponse(
+                features=[],
+                quality_score=0.0,
+                overall_quality=FeatureQuality.DEGRADED,
+                timestamp=timestamp,
+                request_id=request_id,
             )
-            if not market_data or not market_data.get("candles"):
-                if bool(getattr(settings, "feature_server_fail_closed_no_candles", True)):
-                    if not wants_v43:
-                        return MCPFeatureResponse(
-                            features=[],
-                            quality_score=0.0,
-                            overall_quality=FeatureQuality.UNAVAILABLE,
-                            timestamp=timestamp,
-                            request_id=request_id,
-                        )
-                elif not wants_v43:
-                    return MCPFeatureResponse(
-                        features=[],
-                        quality_score=0.0,
-                        overall_quality=FeatureQuality.DEGRADED,
-                        timestamp=timestamp,
-                        request_id=request_id,
-                    )
 
-        candles = market_data.get("candles", []) if market_data else []
+        candles = market_data.get("candles", [])
         candle_count = len(candles)
 
         # Compute each feature
         for feature_name in names:
             start_time = time.time()
-
-            if feature_name in V43_MCP_FEATURE_NAMES:
-                feature_value = float(v43_row.get(feature_name, 0.0))
-                computation_time_ms = (time.time() - start_time) * 1000
-                quality = self._assess_quality(feature_value, market_data or {})
-                version = self.feature_registry.get(feature_name, "1.0.0")
-                features.append(
-                    MCPFeature(
-                        name=feature_name,
-                        version=version,
-                        value=feature_value,
-                        timestamp=timestamp,
-                        quality=quality,
-                        metadata={
-                            "symbol": request.symbol,
-                            "computation_method": "jacksparrow_v43_mcp_row",
-                            "primary_interval": V43_PRIMARY_INTERVAL,
-                        },
-                        computation_time_ms=computation_time_ms,
-                    )
-                )
-                continue
 
             # Candle count guard for pattern features
             if any(feature_name.startswith(p) for p in PATTERN_FEATURE_PREFIXES):
@@ -337,7 +281,7 @@ class MCPFeatureServer:
                     value=0.0,
                     timestamp=timestamp,
                     quality=FeatureQuality.DEGRADED,
-                    metadata={"reason": "no_market_data_for_non_v43_features"},
+                    metadata={"reason": "no_market_data"},
                     computation_time_ms=0.0,
                 ))
                 continue

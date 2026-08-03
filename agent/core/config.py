@@ -390,13 +390,6 @@ class Settings(BaseSettings):
             "When True (non-v43 path), trade side must align with model consensus_signal."
         ),
     )
-    require_v43_gates_for_entry: bool = Field(
-        default=True,
-        env="REQUIRE_V43_GATES_FOR_ENTRY",
-        description=(
-            "When True, JackSparrow v43 entries require final_long/final_short gates passed."
-        ),
-    )
     agent_only_delta_orders: bool = Field(
         default=True,
         env="AGENT_ONLY_DELTA_ORDERS",
@@ -792,14 +785,6 @@ class Settings(BaseSettings):
         ge=0.0,
         description="Maximum exponential-backoff cooldown after adaptive retrain failures.",
     )
-    adaptive_v43_five_gates_enabled: bool = Field(
-        default=True,
-        env="ADAPTIVE_V43_FIVE_GATES_ENABLED",
-        description=(
-            "When True, adaptive model promotion also requires the five v43-style validation gates "
-            "(macro AUC, IC proxy, win rate, return proxy, Sharpe proxy) on the holdout slice."
-        ),
-    )
     feature_server_fail_closed_no_candles: bool = Field(
         default=True,
         env="FEATURE_SERVER_FAIL_CLOSED_NO_CANDLES",
@@ -817,60 +802,6 @@ class Settings(BaseSettings):
         description="Minimum candle rows required after validation.",
     )
 
-    # JackSparrow v43 dedicated bundle (metadata_v43.json + model_artifact_v43.pkl)
-    jacksparrow_v43_mode_enabled: bool = Field(
-        default=True,
-        env="JACKSPARROW_V43_MODE_ENABLED",
-        description=(
-            "DEPRECATED: v43 is the only integration path; discovery always loads the v43 "
-            "bundle under MODEL_DIR. Kept for env compat."
-        ),
-    )
-
-    # JackSparrow MSO v50 market-state oracle (optional alongside v43)
-    mso_model_enabled: bool = Field(
-        default=False,
-        env="MSO_MODEL_ENABLED",
-        description="Load MarketStateOracleNode when metadata_mso_v50.json exists in MODEL_DIR.",
-    )
-    mso_require_trend_regime: bool = Field(
-        default=False,
-        env="MSO_REQUIRE_TREND_REGIME",
-        description="When True, block entries unless intraday_30m trend regime is directional.",
-    )
-    mso_breakout_min_prob: float = Field(
-        default=0.55,
-        env="MSO_BREAKOUT_MIN_PROB",
-        ge=0.0,
-        le=1.0,
-        description="Minimum P(BREAKOUT_FORMING|CONFIRMED) for momentum-style entries.",
-    )
-    mso_liquidity_veto_classes: str = Field(
-        default="STOP_HUNT_ENV,LIQ_SWEEP_ACTIVE",
-        env="MSO_LIQUIDITY_VETO_CLASSES",
-        description="Comma-separated liquidity_condition labels that veto new entries.",
-    )
-    mso_oi_max_staleness_seconds: int = Field(
-        default=600,
-        env="MSO_OI_MAX_STALENESS_SECONDS",
-        ge=60,
-        description="Block MSO inference if OI snapshot older than this (seconds).",
-    )
-    mso_require_real_oi: bool = Field(
-        default=True,
-        env="MSO_REQUIRE_REAL_OI",
-        description="Raise InsufficientRealDataError on zero/stale OI (no synthetic fallback).",
-    )
-    mso_require_export_gates: bool = Field(
-        default=True,
-        env="MSO_REQUIRE_EXPORT_GATES",
-        description="Refuse MSO node init when metadata export_gate_passed is false.",
-    )
-    mso_shadow_mode: bool = Field(
-        default=False,
-        env="MSO_SHADOW_MODE",
-        description="Log MSO policy vetoes/boosts without applying them (paper validation).",
-    )
     use_bracket_orders: bool = Field(
         default=True,
         env="USE_BRACKET_ORDERS",
@@ -928,36 +859,23 @@ class Settings(BaseSettings):
         description="When exchange bracket API fails, keep local manage_position SL/TP checks.",
     )
 
-    jacksparrow_v43_artifact_basename: str = Field(
-        default="model_artifact_v43_patched.pkl",
-        env="JACKSPARROW_V43_ARTIFACT_BASENAME",
-        description=(
-            "Primary v43 artifact filename when present in MODEL_DIR; "
-            "falls back to v43/v44 artifact aliases when missing."
-        ),
-    )
-    jacksparrow_v43_metadata_glob: str = Field(
-        default="**/metadata_v43.json",
-        env="JACKSPARROW_V43_METADATA_GLOB",
-        description="Glob under MODEL_DIR to locate v43 metadata (unused when MODEL_DIR is bundle root).",
-    )
     jacksparrow_v43_candles_5m: int = Field(
         default=600,
         env="JACKSPARROW_V43_CANDLES_5M",
         ge=50,
-        description="Number of 5m candles to fetch for v43 feature_engineer.transform.",
+        description="Number of 5m candles to fetch for MTF market frames.",
     )
     jacksparrow_v43_candles_15m: int = Field(
         default=400,
         env="JACKSPARROW_V43_CANDLES_15M",
         ge=50,
-        description="Number of 15m candles for v43.",
+        description="Number of 15m candles for MTF market frames.",
     )
     jacksparrow_v43_candles_1h: int = Field(
         default=300,
         env="JACKSPARROW_V43_CANDLES_1H",
         ge=48,
-        description="Number of 1h candles for v43 (OHLCV + funding alignment).",
+        description="Number of 1h candles for MTF market frames.",
     )
     transformer_candles_30m: int = Field(
         default=300,
@@ -1003,33 +921,6 @@ class Settings(BaseSettings):
             "May differ from DELTA_EXCHANGE_BASE_URL (testnet trading)."
         ),
     )
-    jacksparrow_v43_basis_zscore_window: int = Field(
-        default=48,
-        env="JACKSPARROW_V43_BASIS_ZSCORE_WINDOW",
-        ge=12,
-        le=200,
-        description="Rolling window (5m bars) for basis z-score feature.",
-    )
-    jacksparrow_v43_crowding_basis_threshold: float = Field(
-        default=2.0,
-        env="JACKSPARROW_V43_CROWDING_BASIS_THRESHOLD",
-        description="Absolute basis_zscore threshold for basis crowding thesis.",
-    )
-    jacksparrow_v43_crowding_oi_threshold: float = Field(
-        default=1.0,
-        env="JACKSPARROW_V43_CROWDING_OI_THRESHOLD",
-        description="Minimum oi_zscore for basis crowding thesis.",
-    )
-    jacksparrow_v43_crowding_funding_x_oi_threshold: float = Field(
-        default=1.5,
-        env="JACKSPARROW_V43_CROWDING_FUNDING_X_OI_THRESHOLD",
-        description="Absolute funding_x_oi threshold for funding crowding thesis.",
-    )
-    jacksparrow_v43_price_band_veto_pct: float = Field(
-        default=0.5,
-        env="JACKSPARROW_V43_PRICE_BAND_VETO_PCT",
-        description="Veto longs within this %% of upper band; shorts near lower band.",
-    )
     jacksparrow_v43_contract_state_ttl_s: float = Field(
         default=60.0,
         env="JACKSPARROW_V43_CONTRACT_STATE_TTL_S",
@@ -1037,219 +928,11 @@ class Settings(BaseSettings):
         le=600.0,
         description="TTL for in-process contract state cache (seconds).",
     )
-    jacksparrow_v43_forward_target_bars: int = Field(
-        default=2,
-        env="JACKSPARROW_V43_FORWARD_TARGET_BARS",
-        ge=1,
-        description=(
-            "Training label horizon in 5m bars for new v43 exports (2 = scalp 10m). "
-            "Runtime uses metadata.primary_execution_horizon_bars from the loaded bundle."
-        ),
-    )
-    jacksparrow_v43_align_execution_to_horizon: bool = Field(
-        default=True,
-        env="JACKSPARROW_V43_ALIGN_EXECUTION_TO_HORIZON",
-        description=(
-            "When True, debounce/max-hold/TP hints follow the loaded model's "
-            "training_forward_bars via v43 execution profile."
-        ),
-    )
-    jacksparrow_v43_require_horizon_fusion_match: bool = Field(
-        default=False,
-        env="JACKSPARROW_V43_REQUIRE_HORIZON_FUSION_MATCH",
-        description=(
-            "When True, ml_and_thesis fusion requires thesis intended_horizon_bars "
-            "to match the ML bundle training_forward_bars."
-        ),
-    )
-    jacksparrow_v43_trade_debounce_bars: int = Field(
-        default=1,
-        env="JACKSPARROW_V43_TRADE_DEBOUNCE_BARS",
-        ge=1,
-        description=(
-            "Minimum 5m bars between v43 entries when horizon alignment is off "
-            "(default 2 ≈ 10 min for 30m label training)."
-        ),
-    )
-    jacksparrow_v43_max_trades_per_hour: int = Field(
-        default=6,
-        env="JACKSPARROW_V43_MAX_TRADES_PER_HOUR",
-        ge=1,
-        description="Gate 3: max entries per rolling hour.",
-    )
-    jacksparrow_v43_max_trades_per_day: int = Field(
-        default=20,
-        env="JACKSPARROW_V43_MAX_TRADES_PER_DAY",
-        ge=1,
-        description="Gate 3: max entries per UTC day.",
-    )
-    jacksparrow_v43_min_edge_cost_ratio: float = Field(
-        default=0.2,
-        env="JACKSPARROW_V43_MIN_EDGE_COST_RATIO",
-        ge=0.0,
-        description=(
-            "Gate 5: min multiple of round-trip cost vs expected-return edge. "
-            "Default 0.2 matches v43 regressor scale (~1e-4 predictions); raise toward "
-            "0.5–1.25 after measuring reject rates (docs/v43_trade_execution_runbook.md)."
-        ),
-    )
-    jacksparrow_v43_block_trending_entries: bool = Field(
-        default=False,
-        env="JACKSPARROW_V43_BLOCK_TRENDING_ENTRIES",
-        description="When True, skip entries when regime_label is trending.",
-    )
-    jacksparrow_v43_threshold_oof_percentile: float = Field(
-        default=60.0,
-        env="JACKSPARROW_V43_THRESHOLD_OOF_PERCENTILE",
-        ge=1.0,
-        le=99.0,
-        description="OOF percentile hint for diagnostics / collapse tuning (75 default).",
-    )
-    jacksparrow_v43_signal_threshold_floor: float = Field(
-        default=0.003,
-        env="JACKSPARROW_V43_SIGNAL_THRESHOLD_FLOOR",
-        ge=0.0,
-        description=(
-            "Soft floor for threshold resolution; must stay below OOF P75 (~0.011) so "
-            "it does not block patched calibrations."
-        ),
-    )
-    jacksparrow_v43_metadata_promotion_strict: bool = Field(
-        default=False,
-        env="JACKSPARROW_V43_METADATA_PROMOTION_STRICT",
-        description=(
-            "When True, reject v43 bundle load if metadata promotion audit finds "
-            "meta_calibrator issues (zero short candidates, low meta_auc, missing calibrator)."
-        ),
-    )
-    jacksparrow_v43_near_threshold_epsilon: float = Field(
-        default=0.0015,
-        env="JACKSPARROW_V43_NEAR_THRESHOLD_EPSILON",
-        ge=0.0,
-        description=(
-            "Optional near-threshold band for v43: treat expected_return within "
-            "`threshold - epsilon` as a raw signal candidate. Keep 0.0 for strict gating."
-        ),
-    )
-    jacksparrow_v43_max_position_pct: float = Field(
-        default=0.20,
-        env="JACKSPARROW_V43_MAX_POSITION_PCT",
-        ge=0.01,
-        le=1.0,
-        description=(
-            "Fraction of capital for v43 notional sizing before uncertainty scale. "
-            "With leverage_assumption=3, effective notional exposure is up to "
-            "max_position_pct * leverage (default 0.20 * 3 = 60% of capital per position)."
-        ),
-    )
-    jacksparrow_v43_leverage_assumption: int = Field(
+    default_leverage_assumption: int = Field(
         default=3,
-        env="JACKSPARROW_V43_LEVERAGE_ASSUMPTION",
+        env="DEFAULT_LEVERAGE_ASSUMPTION",
         ge=1,
-        description=(
-            "Leverage for position sizing (not applied to label returns or Gate-5 edge math). "
-            "Training stores this in runtime_cost_assumptions with "
-            "round_trip_cost_includes_leverage=False. Effective notional per position: "
-            "max_position_pct * leverage_assumption (default 60%)."
-        ),
-    )
-    jacksparrow_v43_take_profit_pct: float = Field(
-        default=0.01,
-        env="JACKSPARROW_V43_TAKE_PROFIT_PCT",
-        ge=0.0,
-        description=(
-            "TP fraction for v43 diagnostics when horizon alignment is off "
-            "(profile uses ~1% for 30m / 2.5% for 10h when alignment on)."
-        ),
-    )
-    jacksparrow_v43_maker_fee_rate: float = Field(
-        default=0.0002,
-        env="JACKSPARROW_V43_MAKER_FEE_RATE",
-        ge=0.0,
-        description=(
-            "Per-leg maker fee for v43 round-trip cost estimate. "
-            "Delta India BTC perp maker = 2 bps (0.0002)."
-        ),
-    )
-    jacksparrow_v43_taker_fee_rate: float = Field(
-        default=0.0010,
-        env="JACKSPARROW_V43_TAKER_FEE_RATE",
-        ge=0.0,
-        description=(
-            "Per-leg taker fee for market-order fallback cost estimate. "
-            "Delta India BTC perp taker = 10 bps (0.0010)."
-        ),
-    )
-    jacksparrow_v43_slippage_pct: float = Field(
-        default=0.0003,
-        env="JACKSPARROW_V43_SLIPPAGE_PCT",
-        ge=0.0,
-        description="Per-leg slippage fraction for v43 round-trip cost estimate.",
-    )
-
-    jacksparrow_v43_short_execution_enabled: bool = Field(
-        default=True,
-        env="JACKSPARROW_V43_SHORT_EXECUTION_ENABLED",
-        description=(
-            "When True, symmetric short entries fire when expected_return < -threshold "
-            "(same gates/cost model as long). Default on for BTCUSD perpetual futures; "
-            "set false only to run long-only experiments."
-        ),
-    )
-    jacksparrow_v43_inference_stack: str = Field(
-        default="meta_calibrator",
-        env="JACKSPARROW_V43_INFERENCE_STACK",
-        description=(
-            "v43 ensemble inference path: meta_calibrator (production default) or "
-            "regressor_mean (A/B ablation — base regressor mean only, skips meta+calibrator)."
-        ),
-    )
-    jacksparrow_v43_regime_classifier_coercion_guard_enabled: bool = Field(
-        default=True,
-        env="JACKSPARROW_V43_REGIME_CLASSIFIER_COERCION_GUARD_ENABLED",
-        description=(
-            "When True, regime submodels that emit classifier-like probabilities on the "
-            "return-target path fall back to the head ensemble instead of coercing P(class=1) "
-            "to a small return proxy."
-        ),
-    )
-    jacksparrow_v43_primary_signal_mode: str = Field(
-        default="conditions",
-        env="JACKSPARROW_V43_PRIMARY_SIGNAL_MODE",
-        description=(
-            "v43 signal priority: conditions (state heads), returns (forward-return heads), "
-            "or hybrid (blend)."
-        ),
-    )
-    jacksparrow_v43_state_heads_enabled: bool = Field(
-        default=False,
-        env="JACKSPARROW_V43_STATE_HEADS_ENABLED",
-        description="When True, run state-intelligence heads at inference and apply policy gates.",
-    )
-    jacksparrow_v43_state_head_policy_enabled: bool = Field(
-        default=False,
-        env="JACKSPARROW_V43_STATE_HEAD_POLICY_ENABLED",
-        description="When True, ml_and_thesis fusion enforces state-head probability minima.",
-    )
-    jacksparrow_v43_regime_min: float = Field(
-        default=0.40,
-        env="JACKSPARROW_V43_REGIME_MIN",
-        description="Minimum p_regime_favorable for ML entry adoption.",
-    )
-    jacksparrow_v43_quality_min: float = Field(
-        default=0.40,
-        env="JACKSPARROW_V43_QUALITY_MIN",
-        description="Minimum p_setup_quality for ML entry adoption.",
-    )
-    jacksparrow_v43_vol_min: float = Field(
-        default=0.50,
-        env="JACKSPARROW_V43_VOL_MIN",
-        description="Below this p_vol_expansion, reduce size or hold (policy layer).",
-    )
-    jacksparrow_v43_uncertainty_max: float = Field(
-        default=0.08,
-        env="JACKSPARROW_V43_UNCERTAINTY_MAX",
-        description="Force hold when uncertainty_score exceeds this threshold.",
+        description="Leverage assumption for position sizing diagnostics.",
     )
     signal_recovery_telemetry_enabled: bool = Field(
         default=True,

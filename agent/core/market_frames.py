@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 import structlog
 
-from agent.core.v43_oi_frames import fetch_oi_history
+from agent.core.oi_frames import fetch_oi_history
 from agent.data.candle_validation import dataframe_from_delta_candles, validate_candles
 from agent.core.config import settings
 

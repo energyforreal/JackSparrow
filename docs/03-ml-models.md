@@ -186,7 +186,7 @@ docker compose up -d --force-recreate agent
 | `model_discovery_transformer_missing` | `metadata_transformer.json` present under `MODEL_DIR` |
 | `model_discovery_artifact_missing` | ONNX + `feature_config.json` in bundle dir |
 | No trades / all HOLD | `TRANSFORMER_MIN_CONFIDENCE`, `TRANSFORMER_EXTREME_REGIME_VETO`, `MIN_CONFIDENCE_THRESHOLD` |
-| Feature parity errors | `pytest tests/unit/test_transformer_btcusd_15m.py` |
+| Feature parity errors | `pytest tests/unit/test_transformer_btcusd_per_tf.py` |
 | Stale model after Colab export | Restart agent; verify bind mount path in Docker |
 
 Scan logs for `model_discovered_transformer`, `transformer_decision`, and `trading_entry_rejected`.

@@ -440,23 +440,6 @@ class MCPOrchestrator:
             "required_feature_count": len(self._required_feature_names_cache),
         }
 
-    def _resolve_v43_bundle_metadata(self, model_name: str) -> Dict[str, Any]:
-        """Load full v43 bundle metadata for multi-horizon threshold validation."""
-        if not self.model_registry:
-            raise RuntimeError("Model registry not initialized")
-        model = self.model_registry.get_model(model_name)
-        bundle_meta = getattr(model, "_bundle_metadata", None) if model is not None else None
-        if isinstance(bundle_meta, dict) and isinstance(bundle_meta.get("horizons"), dict):
-            return bundle_meta
-        for node in self.model_registry.models.values():
-            candidate = getattr(node, "_bundle_metadata", None)
-            if isinstance(candidate, dict) and isinstance(candidate.get("horizons"), dict):
-                return candidate
-        raise ValueError(
-            f"bundle metadata unavailable for model {model_name!r}; "
-            "ensure metadata_ic.json is loaded on RuleBasedIntelligenceNode"
-        )
-
 
     async def _process_transformer_prediction(
         self,
@@ -1041,24 +1024,6 @@ class MCPOrchestrator:
                 error=str(e),
                 exc_info=True,
             )
-
-
-
-    async def _persist_v43_gate_state_locked(self, symbol: str) -> None:
-        return None
-
-    def record_v43_signal_decision(self, bar_index: int) -> None:
-        return None
-
-    def rollback_v43_signal_decision(self, bar_index: Optional[int] = None) -> None:
-        return None
-
-    def record_v43_trade_executed(self, bar_index: int) -> None:
-        return None
-
-    async def persist_v43_gate_state_after_trade(self, symbol: str) -> None:
-        return None
-
 
 
 # Create global MCP orchestrator instance

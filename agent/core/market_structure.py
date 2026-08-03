@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from agent.core.config import settings
 from agent.core.strategy_types import MarketStructureSnapshot
-from agent.core.v43_contract_state import ContractStateSnapshot
+from agent.core.contract_state import ContractStateSnapshot
 
 
 def _feat(features: Dict[str, Any], key: str, default: float = 0.0) -> float:

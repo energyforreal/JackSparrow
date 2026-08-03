@@ -13,9 +13,9 @@ import structlog
 import json
 import hashlib
 
-from feature_store.jacksparrow_v43_contract import (
-    V43_CANONICAL_FEATURES as FEATURE_LIST,
-    V43_EXPECTED_FEATURE_COUNT as EXPECTED_FEATURE_COUNT,
+from feature_store.feature_registry import (
+    EXPECTED_FEATURE_COUNT,
+    FEATURE_LIST,
 )
 
 logger = structlog.get_logger()

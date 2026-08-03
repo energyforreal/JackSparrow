@@ -3,7 +3,7 @@
 Per-TF transformer training for BTCUSD. Each timeframe is trained **independently**;
 the agent integrates outputs at decision time via `mtf_decision_policy`.
 
-## Shared modules
+## Shared modules (repo source of truth)
 
 - Feature contract: `feature_store/transformer_btcusd/`
 - Training loop: `scripts/colab/transformer_training.py`
@@ -12,13 +12,30 @@ the agent integrates outputs at decision time via `mtf_decision_policy`.
 ## Notebook
 
 Upload **`transformer_btcusd_all_tf_train_standalone.ipynb`** to Google Colab (single file,
-no GitHub or repo upload). Bootstrap cells write training modules to `/content/colab_bundle/`
-at runtime.
+no GitHub clone, no data uploads). All training code is **inline** in readable Python cells.
+The only external input at runtime is the **Delta Exchange India public API**.
+
+### Troubleshooting map
+
+| Notebook section | Repo source | What to inspect |
+|------------------|-------------|-----------------|
+| Feature contract | `contract.py` | `FEATURE_COLS`, `CONTINUOUS_LABEL_COLS`, horizons |
+| Derivatives | `derivatives.py` | Funding/OI z-scores |
+| Feature engineering | `features.py` | `add_features` |
+| Labels / targets | `labels.py` | `compute_market_labels` |
+| Inference helpers | `inference.py` | `feature_config.json` builders |
+| Delta data | `transformer_data.py` | `fetch_candles`, `fetch_history_bundle` |
+| Training pipeline | `transformer_training.py` | Model, loss, ONNX export |
+| Training runner | `train_transformer_resolution.py` | `run_all_training` |
+
+Edits made directly in Colab are ephemeral. For permanent changes, edit the repo `.py` files
+and regenerate the notebook.
 
 Regenerate after changing training source:
 
 ```bash
 python scripts/colab/build_standalone_notebook.py
+python scripts/colab/smoke_test_notebook_structure.py
 ```
 
 Set `resolutions` in the config cell to train a subset, e.g. `["15m", "1h"]`.

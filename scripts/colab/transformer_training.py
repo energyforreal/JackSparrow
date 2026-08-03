@@ -484,21 +484,27 @@ def export_transformer_bundle(
     meta_path = export_dir / TRANSFORMER_METADATA_FILENAME
 
     dummy = torch.randn(1, window_len, n_features, device=device)
-    torch.onnx.export(
-        model,
-        dummy,
-        str(onnx_path),
-        input_names=["window"],
-        output_names=["continuous_pred", "regime_logits"],
-        dynamic_axes={
+    export_kwargs: Dict[str, Any] = {
+        "input_names": ["window"],
+        "output_names": ["continuous_pred", "regime_logits"],
+        "dynamic_axes": {
             "window": {0: "batch"},
             "continuous_pred": {0: "batch"},
             "regime_logits": {0: "batch"},
         },
-        opset_version=17,
-        export_params=True,
-        dynamo=False,
-    )
+        "opset_version": 17,
+        "export_params": True,
+    }
+    try:
+        torch.onnx.export(
+            model,
+            dummy,
+            str(onnx_path),
+            dynamo=False,
+            **export_kwargs,
+        )
+    except TypeError:
+        torch.onnx.export(model, dummy, str(onnx_path), **export_kwargs)
 
     if verify:
         import onnx as onnx_lib

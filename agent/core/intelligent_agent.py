@@ -324,13 +324,13 @@ class IntelligentAgent:
                 error=str(exc),
             )
         live_lev = int(getattr(settings, "isolated_margin_leverage", 5) or 5)
-        train_lev = int(getattr(settings, "jacksparrow_v43_leverage_assumption", 3) or 3)
+        train_lev = int(getattr(settings, "default_leverage_assumption", 3) or 3)
         if live_lev != train_lev:
             logger.info(
                 "leverage_training_live_mismatch",
                 service="agent",
                 isolated_margin_leverage=live_lev,
-                jacksparrow_v43_leverage_assumption=train_lev,
+                default_leverage_assumption=train_lev,
                 note=(
                     "Lot sizing uses isolated_margin_leverage only; "
                     "v43 assumption affects gate diagnostics, not live leverage."

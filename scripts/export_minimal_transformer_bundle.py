@@ -1,7 +1,7 @@
 """Export a minimal transformer bundle for local dev/testing.
 
 Trains a tiny model on synthetic data (1 epoch) and writes ONNX + feature_config
-into agent/model_storage/JackSparrow_Transformer_BTCUSD/.
+into agent/model_storage/JackSparrow_Transformer_BTCUSD_15m/.
 """
 
 from __future__ import annotations
@@ -19,13 +19,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from feature_store.transformer_btcusd_15m.contract import (
+from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
-    DEFAULT_TRAINING_CONFIG,
     FEATURE_COLS,
+    bundle_dir_name,
+    default_training_config,
 )
-from feature_store.transformer_btcusd_15m.features import add_features
-from feature_store.transformer_btcusd_15m.labels import compute_market_labels, trim_label_tail
+from feature_store.transformer_btcusd.features import add_features
+from feature_store.transformer_btcusd.labels import compute_market_labels, trim_label_tail
 from scripts.colab.transformer_training import (
     MarketTransformer,
     WindowDataset,
@@ -40,7 +41,8 @@ from scripts.colab.transformer_training import (
     train_transformer,
 )
 
-BUNDLE_DIR = ROOT / "agent" / "model_storage" / "JackSparrow_Transformer_BTCUSD"
+RESOLUTION = "15m"
+BUNDLE_DIR = ROOT / "agent" / "model_storage" / bundle_dir_name(RESOLUTION)
 
 
 def _synthetic_ohlcv(n_bars: int = 2500, seed: int = 42) -> pd.DataFrame:
@@ -66,7 +68,7 @@ def _synthetic_ohlcv(n_bars: int = 2500, seed: int = 42) -> pd.DataFrame:
 
 
 def main() -> None:
-    config = dict(DEFAULT_TRAINING_CONFIG)
+    config = dict(default_training_config(RESOLUTION))
     config["epochs"] = 1
     config["batch_size"] = 32
     set_training_seed(config["seed"])
@@ -74,7 +76,11 @@ def main() -> None:
     raw_df = _synthetic_ohlcv(n_bars=2500)
     raw_df["funding_rate"] = 0.0001
     raw_df["open_interest"] = 1e6
-    feat_df = add_features(raw_df, atr_period=config["atr_period"]).dropna().reset_index(drop=True)
+    feat_df = add_features(
+        raw_df,
+        atr_period=config["atr_period"],
+        resolution_minutes=config["resolution_minutes"],
+    ).dropna().reset_index(drop=True)
     feat_df = compute_market_labels(
         feat_df,
         return_horizon_bars=config["return_horizon_bars"],

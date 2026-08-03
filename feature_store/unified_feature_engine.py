@@ -4,7 +4,8 @@ Unified feature computation engine: single source of truth for all features.
 Both training (batch) and live (single) paths MUST use this class to ensure
 train-serve parity. No separate implementations elsewhere.
 
-Path map (v43 pickle path, MCP row builders, backtests): ``docs/feature_entrypoints_audit.md``.
+Train-serve parity for the canonical feature registry. Transformer models use
+``feature_store/transformer_btcusd/`` instead.
 """
 
 from typing import List, Optional

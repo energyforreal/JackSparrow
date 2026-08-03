@@ -14,7 +14,7 @@ import structlog
 
 from agent.core.config import settings
 from agent.core.mtf_decision_policy import resolution_to_ctx_key, resolution_to_tf_key
-from agent.core.v43_market_frames import closed_5m_bar_index
+from agent.core.market_frames import closed_5m_bar_index
 from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
 from agent.models.transformer_context_builder import build_transformer_prediction_context
 from feature_store.transformer_btcusd.contract import (
