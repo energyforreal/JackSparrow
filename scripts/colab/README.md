@@ -5,9 +5,20 @@ the agent integrates outputs at decision time via `mtf_decision_policy`.
 
 ## Shared modules (repo source of truth)
 
+Transformer train/serve parity lives in **`feature_store/transformer_btcusd/`** (not
+`unified_feature_engine.py`, which is for the canonical v5 feature registry).
+
 - Feature contract: `feature_store/transformer_btcusd/`
 - Training loop: `scripts/colab/transformer_training.py`
 - CLI runner: `scripts/colab/train_transformer_resolution.py`
+
+Before copying a bundle into `agent/model_storage/`, validate it:
+
+```bash
+python scripts/validate_transformer_bundle.py agent/model_storage/JackSparrow_Transformer_BTCUSD_15m
+```
+
+Parity tests: `pytest tests/unit/test_transformer_btcusd_feature_parity.py`
 
 ## Notebook
 

@@ -9,6 +9,8 @@ from typing import Any, Dict
 import pandas as pd
 import requests
 
+from feature_store.transformer_btcusd.features import assemble_raw_frame
+
 _RESOLUTION_MINUTES = {
     "1m": 1,
     "3m": 3,
@@ -135,10 +137,7 @@ def fetch_history_bundle(
     except Exception:
         oi_df = pd.DataFrame({"time": [], "open_interest": []})
 
-    raw_df = raw_df.merge(funding_df, on="time", how="left")
-    raw_df = raw_df.merge(oi_df, on="time", how="left")
-    raw_df["funding_rate"] = raw_df["funding_rate"].ffill()
-    raw_df["open_interest"] = raw_df["open_interest"].ffill()
+    raw_df = assemble_raw_frame(raw_df, funding_df=funding_df, oi_df=oi_df)
 
     report = validate_derivatives_coverage(
         raw_df,

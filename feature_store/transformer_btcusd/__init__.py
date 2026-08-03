@@ -12,7 +12,7 @@ from feature_store.transformer_btcusd.contract import (
     TF_KEYS,
     default_training_config,
 )
-from feature_store.transformer_btcusd.features import add_features, prepare_raw_frame
+from feature_store.transformer_btcusd.features import add_features, assemble_raw_frame, prepare_raw_frame
 from feature_store.transformer_btcusd.inference import (
     build_inference_window,
     load_feature_config,
@@ -30,6 +30,7 @@ __all__ = [
     "SUPPORTED_RESOLUTIONS",
     "TF_KEYS",
     "add_features",
+    "assemble_raw_frame",
     "build_inference_window",
     "default_training_config",
     "load_feature_config",

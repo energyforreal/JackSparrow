@@ -130,11 +130,12 @@ def metadata_from_training_export(
     label_std: Sequence[float],
     config: Mapping[str, Any],
     test_metrics: Mapping[str, Any] | None = None,
+    export_quality: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Build metadata_transformer.json for a per-TF bundle."""
     res = resolution.strip().lower()
     cfg = dict(config)
-    return {
+    meta: Dict[str, Any] = {
         "version": "transformer_per_tf_v1",
         "model_name": f"jacksparrow_transformer_BTCUSD_{res}",
         "model_family": model_family_for_resolution(res),
@@ -153,6 +154,9 @@ def metadata_from_training_export(
         "test_metrics": dict(test_metrics or {}),
         "training_config": cfg,
     }
+    if export_quality:
+        meta["export_quality"] = dict(export_quality)
+    return meta
 
 
 def training_config_for_resolution(resolution: str) -> Dict[str, Any]:

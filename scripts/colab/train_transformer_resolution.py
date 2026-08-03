@@ -30,7 +30,7 @@ from scripts.colab.transformer_training import (
     WindowDataset,
     build_windows,
     evaluate_continuous_targets,
-    evaluate_regime_head,
+    evaluate_regime_accuracy,
     export_transformer_bundle,
     fit_label_stats,
     fit_vol_regime_edges,
@@ -181,6 +181,9 @@ def run_training(
     print_return_metrics(test_metrics)
     print_target_metrics(test_metrics, title="Test set — all continuous targets:")
 
+    regime_accuracy = evaluate_regime_accuracy(model, test_loader, device=device)
+    print(f"Regime head test accuracy: {regime_accuracy:.3f}")
+
     export_dir.mkdir(parents=True, exist_ok=True)
     onnx_path, cfg_path, meta_path = export_transformer_bundle(
         model,
@@ -194,6 +197,7 @@ def run_training(
         q_edges=q_edges,
         config=config,
         test_metrics=test_metrics,
+        regime_accuracy=regime_accuracy,
         enforce_quality_gate=enforce_quality_gate,
     )
     print(f"Exported {onnx_path}")

@@ -14,13 +14,13 @@ from feature_store.transformer_btcusd.derivatives import (
 )
 
 
-def prepare_raw_frame(
+def assemble_raw_frame(
     df: pd.DataFrame,
     *,
     funding_df: Optional[pd.DataFrame] = None,
     oi_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
-    """Normalize agent/OHLCV frames to the notebook raw_df schema."""
+    """Merge OHLCV with funding/OI using the same path as live inference."""
     out = df.copy()
     if "timestamp" in out.columns and "time" not in out.columns:
         out["time"] = pd.to_datetime(out["timestamp"], utc=True)
@@ -71,7 +71,22 @@ def prepare_raw_frame(
     elif "open_interest" not in out.columns:
         out["open_interest"] = np.nan
 
+    if "funding_rate" in out.columns:
+        out["funding_rate"] = out["funding_rate"].ffill().bfill()
+    if "open_interest" in out.columns:
+        out["open_interest"] = out["open_interest"].ffill().bfill()
+
     return out
+
+
+def prepare_raw_frame(
+    df: pd.DataFrame,
+    *,
+    funding_df: Optional[pd.DataFrame] = None,
+    oi_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Alias for assemble_raw_frame (agent inference entry point)."""
+    return assemble_raw_frame(df, funding_df=funding_df, oi_df=oi_df)
 
 
 def add_features(
@@ -228,7 +243,17 @@ def latest_closed_feature_row(feat_df: pd.DataFrame) -> pd.Series:
     return feat_df.iloc[-2]
 
 
-def validate_feature_columns(feat_df: pd.DataFrame) -> None:
+def validate_feature_columns(
+    feat_df: pd.DataFrame,
+    *,
+    require_finite_closed_bar: bool = False,
+) -> None:
     missing = [c for c in FEATURE_COLS if c not in feat_df.columns]
     if missing:
         raise ValueError(f"Feature matrix missing columns: {missing}")
+    if require_finite_closed_bar and len(feat_df) >= 2:
+        closed = latest_closed_feature_row(feat_df)
+        for col in FEATURE_COLS:
+            val = closed[col]
+            if not np.isfinite(float(val)):
+                raise ValueError(f"Non-finite closed-bar value for {col}: {val}")

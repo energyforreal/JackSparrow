@@ -15,6 +15,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
+    EXPORT_QUALITY_DISCLAIMER,
+    PROMOTION_REGIME_ACCURACY,
+    PROMOTION_RETURN_CORR,
+    PROMOTION_VOL_CORR,
     RETURN_COL,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
@@ -234,6 +238,7 @@ class TrainingResult:
     model_state: Dict[str, torch.Tensor]
     log_vars: torch.Tensor
     history: List[Tuple[int, float, float]] = field(default_factory=list)
+    stopped_at_epoch: int = 0
 
 
 def train_transformer(
@@ -341,12 +346,16 @@ def train_transformer(
     if best_state is None or best_log_vars is None:
         raise RuntimeError("Training did not produce a checkpoint")
 
+    stopped_at = history[-1][0] if history else best_epoch
+    print(f"Training finished at epoch {stopped_at}, best epoch {best_epoch}")
+
     return TrainingResult(
         best_val_loss=best_val,
         best_epoch=best_epoch,
         model_state=best_state,
         log_vars=best_log_vars,
         history=history,
+        stopped_at_epoch=stopped_at,
     )
 
 
@@ -439,20 +448,131 @@ def evaluate_regime_head(
     return np.array(pred_list), np.array(true_list)
 
 
+def evaluate_regime_accuracy(
+    model: MarketTransformer,
+    loader: DataLoader,
+    *,
+    device: torch.device,
+) -> float:
+    """Test-set accuracy for the volatility-regime classification head."""
+    pred, true = evaluate_regime_head(model, loader, device=device)
+    if len(true) == 0:
+        return 0.0
+    return float((pred == true).mean())
+
+
+@dataclass
+class ExportQualityAssessment:
+    """Tiered export quality result (sanity vs promotion-ready)."""
+
+    tier: str
+    checks: Dict[str, Any]
+    warnings: List[str]
+    disclaimer: str
+
+
+def assess_export_quality(
+    metrics: Sequence[TargetMetrics],
+    *,
+    resolution: str,
+    min_return_corr: float,
+    regime_accuracy: float | None = None,
+) -> ExportQualityAssessment:
+    """Evaluate sanity and promotion tiers without blocking on promotion failures."""
+    res = resolution.strip().lower()
+    by_name = {m.name: m for m in metrics}
+    return_m = by_name.get(RETURN_COL)
+    vol_m = by_name.get("future_volatility")
+    checks: Dict[str, Any] = {}
+    warnings: List[str] = []
+
+    if return_m is None:
+        return ExportQualityAssessment(
+            tier="blocked",
+            checks=checks,
+            warnings=["no valid future_return test samples"],
+            disclaimer=EXPORT_QUALITY_DISCLAIMER,
+        )
+
+    sanity_floor = float(min_return_corr)
+    promotion_return_floor = float(PROMOTION_RETURN_CORR.get(res, 0.06))
+    checks["future_return"] = {
+        "corr": return_m.corr,
+        "sanity_floor": sanity_floor,
+        "promotion_floor": promotion_return_floor,
+        "sanity_passed": return_m.corr >= sanity_floor,
+        "promotion_passed": return_m.corr >= promotion_return_floor,
+    }
+    if not checks["future_return"]["sanity_passed"]:
+        return ExportQualityAssessment(
+            tier="blocked",
+            checks=checks,
+            warnings=[
+                f"future_return corr {return_m.corr:.4f} < sanity floor {sanity_floor:.4f}"
+            ],
+            disclaimer=EXPORT_QUALITY_DISCLAIMER,
+        )
+
+    if vol_m is not None:
+        checks["future_volatility"] = {
+            "corr": vol_m.corr,
+            "promotion_floor": PROMOTION_VOL_CORR,
+            "promotion_passed": vol_m.corr >= PROMOTION_VOL_CORR,
+        }
+        if not checks["future_volatility"]["promotion_passed"]:
+            warnings.append(
+                f"promotion: future_volatility corr {vol_m.corr:.4f} "
+                f"< {PROMOTION_VOL_CORR:.4f}"
+            )
+
+    if regime_accuracy is not None:
+        checks["regime_accuracy"] = {
+            "value": float(regime_accuracy),
+            "promotion_floor": PROMOTION_REGIME_ACCURACY,
+            "promotion_passed": float(regime_accuracy) >= PROMOTION_REGIME_ACCURACY,
+        }
+        if not checks["regime_accuracy"]["promotion_passed"]:
+            warnings.append(
+                f"promotion: regime accuracy {regime_accuracy:.4f} "
+                f"< {PROMOTION_REGIME_ACCURACY:.4f}"
+            )
+
+    if not checks["future_return"]["promotion_passed"]:
+        warnings.append(
+            f"promotion: future_return corr {return_m.corr:.4f} "
+            f"< {promotion_return_floor:.4f}"
+        )
+
+    promotion_ready = (
+        checks["future_return"]["promotion_passed"]
+        and (vol_m is None or checks.get("future_volatility", {}).get("promotion_passed", False))
+        and (
+            regime_accuracy is None
+            or checks.get("regime_accuracy", {}).get("promotion_passed", False)
+        )
+    )
+    tier = "promotion_ready" if promotion_ready else "sanity_pass"
+    return ExportQualityAssessment(
+        tier=tier,
+        checks=checks,
+        warnings=warnings,
+        disclaimer=EXPORT_QUALITY_DISCLAIMER,
+    )
+
+
 def check_export_quality_gate(
     metrics: Sequence[TargetMetrics],
     min_return_corr: float,
 ) -> None:
     """Raise if future_return test correlation is below export floor."""
-    by_name = {m.name: m for m in metrics}
-    m = by_name.get(RETURN_COL)
-    if m is None:
-        raise RuntimeError(f"Export blocked: no valid {RETURN_COL} test samples")
-    if m.corr < min_return_corr:
-        raise RuntimeError(
-            f"Export blocked: {RETURN_COL} test corr {m.corr:.4f} "
-            f"< floor {min_return_corr:.4f}"
-        )
+    assessment = assess_export_quality(
+        metrics,
+        resolution="15m",
+        min_return_corr=min_return_corr,
+    )
+    if assessment.tier == "blocked":
+        msg = assessment.warnings[0] if assessment.warnings else "export quality blocked"
+        raise RuntimeError(f"Export blocked: {msg}")
 
 
 def export_transformer_bundle(
@@ -468,14 +588,34 @@ def export_transformer_bundle(
     q_edges: np.ndarray,
     config: Dict[str, Any],
     test_metrics: Sequence[TargetMetrics] | None = None,
+    regime_accuracy: float | None = None,
     verify: bool = True,
     enforce_quality_gate: bool = True,
 ) -> Tuple[Path, Path, Path]:
     """Export ONNX + feature_config.json + metadata_transformer.json."""
     resolution = str(config.get("resolution") or "15m")
     min_corr = float(config.get("min_export_return_corr") or 0.02)
-    if enforce_quality_gate and test_metrics is not None:
-        check_export_quality_gate(test_metrics, min_corr)
+    export_quality: Dict[str, Any] = {}
+    if test_metrics is not None:
+        assessment = assess_export_quality(
+            test_metrics,
+            resolution=resolution,
+            min_return_corr=min_corr,
+            regime_accuracy=regime_accuracy,
+        )
+        export_quality = {
+            "tier": assessment.tier,
+            "checks": assessment.checks,
+            "warnings": assessment.warnings,
+            "disclaimer": assessment.disclaimer,
+        }
+        if assessment.warnings:
+            for warning in assessment.warnings:
+                print(f"Export quality warning: {warning}")
+        print(f"Export quality tier: {assessment.tier}")
+        if enforce_quality_gate and assessment.tier == "blocked":
+            msg = assessment.warnings[0] if assessment.warnings else "quality gate failed"
+            raise RuntimeError(f"Export blocked: {msg}")
 
     export_dir.mkdir(parents=True, exist_ok=True)
     onnx_name = onnx_filename_for_resolution(resolution)
@@ -550,6 +690,7 @@ def export_transformer_bundle(
         label_std=label_std,
         config=config,
         test_metrics=metrics_dict,
+        export_quality=export_quality or None,
     )
     meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 

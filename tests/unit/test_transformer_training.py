@@ -8,11 +8,13 @@ import pytest
 
 from feature_store.transformer_btcusd.contract import CONTINUOUS_LABEL_COLS, FEATURE_COLS
 from scripts.colab.transformer_training import (
+    assess_export_quality,
     build_windows,
     fit_label_stats,
     fit_vol_regime_edges,
     split_purged_windows,
     standardize_labels,
+    TargetMetrics,
     to_vol_regime,
 )
 
@@ -71,3 +73,28 @@ def test_vol_regime_four_classes() -> None:
     regimes = to_vol_regime(y, edges)
     assert regimes.min() >= 0
     assert regimes.max() <= 3
+
+
+def test_assess_export_quality_tiers() -> None:
+    metrics = [
+        TargetMetrics(name="future_return", mae=0.01, corr=0.07, n=100),
+        TargetMetrics(name="future_volatility", mae=0.01, corr=0.20, n=100),
+    ]
+    blocked = assess_export_quality(
+        [TargetMetrics(name="future_return", mae=0.01, corr=0.01, n=100)],
+        resolution="15m",
+        min_return_corr=0.04,
+    )
+    assert blocked.tier == "blocked"
+
+    sanity = assess_export_quality(metrics, resolution="15m", min_return_corr=0.04, regime_accuracy=0.2)
+    assert sanity.tier == "sanity_pass"
+    assert any("promotion" in w for w in sanity.warnings)
+
+    promotion = assess_export_quality(
+        metrics,
+        resolution="15m",
+        min_return_corr=0.04,
+        regime_accuracy=0.40,
+    )
+    assert promotion.tier == "promotion_ready"

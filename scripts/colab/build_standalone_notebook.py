@@ -97,11 +97,13 @@ NOTES_MARKDOWN = """## Notes before wiring into your live agent
   class. Trading decisions are a downstream step in JackSparrow.
 - **Label horizon** scales to ~8 hours wall-clock per TF (32 bars on 15m, 96 on 5m, etc.). It is
   independent of `window_len` (input lookback) and worth sweeping separately.
-- **Early stopping is disabled** by default — training runs all epochs; best val-loss checkpoint is
-  still used for export.
-- **Feature parity is the #1 deployment failure mode** — live feature computation must match training
-  exactly. Use `label_mean` / `label_std` from each TF's `feature_config.json` when un-standardizing
-  predictions.
+- **Early stopping is enabled** by default (patience 12, max 120 epochs); best val-loss checkpoint is
+  used for export.
+- **Feature parity is the #1 deployment failure mode** — train/serve uses
+  `feature_store/transformer_btcusd/` (not `unified_feature_engine`). Run
+  `pytest tests/unit/test_transformer_btcusd_feature_parity.py` before deploy.
+- **Export quality tiers** — sanity floors block broken exports; promotion targets in metadata are
+  informational, not proof of tradability.
 - **ONNX export** embeds all weights in a single file (`dynamo=False`) and is verified before download."""
 
 PIP_CELL = (

@@ -19,6 +19,7 @@ from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPMod
 from agent.models.transformer_context_builder import build_transformer_prediction_context
 from feature_store.transformer_btcusd.contract import (
     FEATURE_COLS,
+    FEATURE_CONTRACT_VERSION,
     RESOLUTION_MINUTES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
@@ -136,6 +137,15 @@ class TransformerModelNode(MCPModelNode):
 
         bundle_dir = meta_path.parent
         feature_config = resolve_feature_config(bundle_dir)
+        bundle_contract = str(feature_config.get("feature_contract_version") or "")
+        if bundle_contract and bundle_contract != FEATURE_CONTRACT_VERSION:
+            logger.warning(
+                "transformer_feature_contract_mismatch",
+                model_family=family,
+                bundle_version=bundle_contract,
+                runtime_version=FEATURE_CONTRACT_VERSION,
+                metadata=str(meta_path),
+            )
         resolution = str(raw.get("resolution") or "15m")
         onnx_name = str(
             raw.get("onnx_filename") or onnx_filename_for_resolution(resolution)
@@ -249,7 +259,7 @@ class TransformerModelNode(MCPModelNode):
             atr_period=atr_period,
             dropna=True,
         )
-        validate_feature_columns(feat_df)
+        validate_feature_columns(feat_df, require_finite_closed_bar=True)
 
         feature_cols = list(self._feature_config.get("feature_cols") or FEATURE_COLS)
         window_len = int(self._feature_config.get("window_len") or 128)

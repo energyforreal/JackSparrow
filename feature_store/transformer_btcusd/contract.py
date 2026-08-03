@@ -85,6 +85,22 @@ MIN_EXPORT_RETURN_CORR: Dict[str, float] = {
     "2h": 0.02,
 }
 
+# Stricter optional targets for promotion-ready bundles (warn-only unless agent flag set).
+PROMOTION_RETURN_CORR: Dict[str, float] = {
+    "5m": 0.05,
+    "15m": 0.06,
+    "30m": 0.05,
+    "1h": 0.04,
+    "2h": 0.04,
+}
+PROMOTION_VOL_CORR: float = 0.15
+PROMOTION_REGIME_ACCURACY: float = 0.35
+
+EXPORT_QUALITY_DISCLAIMER = (
+    "Sanity gates detect broken exports, not trading edge. "
+    "Promotion tier targets are informational."
+)
+
 TRANSFORMER_METADATA_FILENAME = "metadata_transformer.json"
 TRANSFORMER_FEATURE_CONFIG_FILENAME = "feature_config.json"
 
@@ -138,15 +154,15 @@ def default_training_config(resolution: str) -> Dict[str, Any]:
         "val_frac": 0.15,
         "embargo_bars": label_horizon,
         "batch_size": 128,
-        "epochs": 200,
+        "epochs": 120,
         "lr": 1e-4,
         "d_model": 64,
         "nhead": 4,
         "num_layers": 2,
         "dropout": 0.25,
         "weight_decay": 1e-2,
-        "early_stop_patience": 10,
-        "early_stopping_enabled": False,
+        "early_stop_patience": 12,
+        "early_stopping_enabled": True,
         "min_derivatives_coverage": 0.5,
         "derivatives_coverage_warn": 0.9,
         "min_export_return_corr": MIN_EXPORT_RETURN_CORR.get(res, 0.02),
