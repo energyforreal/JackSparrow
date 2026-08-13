@@ -158,6 +158,14 @@ async def test_mtf_decision_emits_multi_tf_context(monkeypatch: pytest.MonkeyPat
     assert "multi_tf_predictions" in mctx
     assert len(mctx["multi_tf_predictions"]) == 5
     assert "cross_tf_summary" in mctx
+    assert mctx.get("decision_path") == "transformer_mtf"
+    plan = mctx.get("execution_plan") or {}
+    assert isinstance(plan, dict)
+    if result["decision"]["signal"] in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL"):
+        assert "stop_loss_pct" in plan
+        assert "take_profit_pct" in plan
+        assert "size_fraction" in plan
+        assert "rr_soft_action" in plan
     assert result["decision"]["signal"] in ("BUY", "STRONG_BUY", "HOLD", "SELL", "STRONG_SELL")
 
 

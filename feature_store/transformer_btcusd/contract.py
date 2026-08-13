@@ -115,8 +115,38 @@ TRANSFORMER_FEATURE_CONFIG_FILENAME = "feature_config.json"
 
 
 def compute_path_edge(mfe: float, mae: float) -> float:
-    """Directional edge from predicted path asymmetry (MFE minus MAE)."""
+    """Directional edge from predicted path asymmetry (MFE minus MAE).
+
+    Alias of :func:`compute_long_edge` kept for train/serve telemetry compatibility.
+    """
+    return compute_long_edge(mfe, mae)
+
+
+def compute_long_edge(mfe: float, mae: float) -> float:
+    """Long-side path edge: upside (MFE) minus downside (MAE)."""
     return float(mfe) - float(mae)
+
+
+def compute_short_edge(mfe: float, mae: float) -> float:
+    """Short-side path edge: downside (MAE) minus upside (MFE)."""
+    return float(mae) - float(mfe)
+
+
+def path_favorable_adverse(
+    mfe: float,
+    mae: float,
+    *,
+    side: str,
+) -> Tuple[float, float]:
+    """Return (favorable_pct, adverse_pct) for bracket sizing.
+
+    Labels are long-centric (MFE = upside, MAE = downside). For shorts, favorable
+    excursion is downside (MAE) and adverse is upside (MFE).
+    """
+    s = str(side or "BUY").strip().upper()
+    if s in ("SELL", "SHORT", "STRONG_SELL"):
+        return float(mae), float(mfe)
+    return float(mfe), float(mae)
 
 
 def model_family_for_resolution(resolution: str) -> str:

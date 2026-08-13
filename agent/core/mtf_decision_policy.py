@@ -56,6 +56,10 @@ class TfLocalStance:
     future_volatility: float
     reason_codes: List[str] = field(default_factory=list)
     model_name: str = ""
+    long_edge: float = 0.0
+    short_edge: float = 0.0
+    winning_edge: float = 0.0
+    size_scale: float = 1.0
 
 
 @dataclass
@@ -70,6 +74,15 @@ class MtfPolicyResult:
     primary_path_edge: float
     primary_threshold: float
     primary_regime: str
+    size_scale: float = 1.0
+    long_edge: float = 0.0
+    short_edge: float = 0.0
+    winning_edge: float = 0.0
+    mfe: float = 0.0
+    mae: float = 0.0
+    future_volatility: float = 0.0
+    vol_regime: str = "NORMAL"
+    primary_tf: str = ""
 
 
 def _parse_tf_list(raw: str) -> List[str]:
@@ -121,6 +134,23 @@ def _resolve_threshold(bundle_metadata: Mapping[str, Any]) -> float:
     return float(bundle_metadata.get("default_threshold") or 0.005)
 
 
+def _resolve_side_threshold(
+    *,
+    side: str,
+    default_threshold: float,
+) -> float:
+    if side == "long":
+        override = getattr(settings, "transformer_long_edge_threshold", None)
+    else:
+        override = getattr(settings, "transformer_short_edge_threshold", None)
+    if override is not None:
+        try:
+            return float(override)
+        except (TypeError, ValueError):
+            pass
+    return float(default_threshold)
+
+
 def _confidence_from_prediction(
     continuous: Mapping[str, float],
     vol_regime: str,
@@ -148,15 +178,34 @@ def interpret_tf_prediction(
 ) -> TfLocalStance:
     """Map a single TF model output to a local stance."""
     resolution = TF_RESOLUTION_MAP.get(tf_key, tf_key.replace("tf_", ""))
-    from feature_store.transformer_btcusd.contract import compute_path_edge
+    from feature_store.transformer_btcusd.contract import (
+        compute_long_edge,
+        compute_path_edge,
+        compute_short_edge,
+    )
 
     continuous = prediction_context.get("transformer_continuous_preds") or {}
     mfe = float(continuous.get("mfe", 0.0))
     mae = float(continuous.get("mae", 0.0))
+    long_edge = float(
+        prediction_context.get("long_edge")
+        if prediction_context.get("long_edge") is not None
+        else compute_long_edge(mfe, mae)
+    )
+    short_edge = float(
+        prediction_context.get("short_edge")
+        if prediction_context.get("short_edge") is not None
+        else compute_short_edge(mfe, mae)
+    )
     path_edge = float(
         prediction_context.get("path_edge")
-        or compute_path_edge(mfe, mae)
-        or 0.0
+        if prediction_context.get("path_edge") is not None
+        else compute_path_edge(mfe, mae)
+    )
+    winning_edge = float(
+        prediction_context.get("winning_edge")
+        if prediction_context.get("winning_edge") is not None
+        else (long_edge if long_edge >= short_edge else short_edge)
     )
     vol_regime = str(
         prediction_context.get("transformer_vol_regime") or "NORMAL"
@@ -172,11 +221,13 @@ def interpret_tf_prediction(
         )
     )
     threshold = _resolve_threshold(bundle_metadata)
+    thr_long = _resolve_side_threshold(side="long", default_threshold=threshold)
+    thr_short = _resolve_side_threshold(side="short", default_threshold=threshold)
     confidence = float(
         prediction_context.get("entry_confidence", 0.0)
         or _confidence_from_prediction(continuous, vol_regime, path_edge, threshold)
     )
-    local_signal, conf, reason_codes = map_prediction_to_signal(
+    local_signal, conf, reason_codes, size_scale = map_prediction_to_signal(
         path_edge=path_edge,
         threshold=threshold,
         vol_regime=vol_regime,
@@ -188,6 +239,14 @@ def interpret_tf_prediction(
             getattr(settings, "transformer_extreme_regime_veto", True)
         ),
         min_confidence=float(getattr(settings, "transformer_min_confidence", 0.55) or 0.55),
+        confidence_hold_floor=float(
+            getattr(settings, "transformer_confidence_hold_floor", 0.40) or 0.40
+        ),
+        size_floor=float(getattr(settings, "transformer_size_floor", 0.35) or 0.35),
+        long_edge=long_edge,
+        short_edge=short_edge,
+        long_threshold=thr_long,
+        short_threshold=thr_short,
     )
     return TfLocalStance(
         tf_key=tf_key,
@@ -207,6 +266,10 @@ def interpret_tf_prediction(
         future_volatility=future_vol,
         reason_codes=list(reason_codes),
         model_name=model_name,
+        long_edge=long_edge,
+        short_edge=short_edge,
+        winning_edge=winning_edge,
+        size_scale=float(size_scale),
     )
 
 
@@ -277,21 +340,50 @@ def evaluate_mtf_policy(
     reason_codes: List[str] = []
     weights = DEFAULT_TF_WEIGHTS
 
+    def _empty_result(
+        signal: str,
+        conf: float,
+        codes: List[str],
+        summary: Dict[str, Any],
+        *,
+        path_edge: float = 0.0,
+        threshold: float = 0.005,
+        regime: str = "neutral",
+        stance: Optional[TfLocalStance] = None,
+    ) -> MtfPolicyResult:
+        return MtfPolicyResult(
+            signal=signal,
+            confidence=conf,
+            reason_codes=codes,
+            multi_tf_stances=dict(stances),
+            cross_tf_summary=summary,
+            primary_path_edge=path_edge,
+            primary_threshold=threshold,
+            primary_regime=regime,
+            size_scale=float(stance.size_scale) if stance else 0.0,
+            long_edge=float(stance.long_edge) if stance else 0.0,
+            short_edge=float(stance.short_edge) if stance else 0.0,
+            winning_edge=float(stance.winning_edge) if stance else 0.0,
+            mfe=float(stance.mfe) if stance else 0.0,
+            mae=float(stance.mae) if stance else 0.0,
+            future_volatility=float(stance.future_volatility) if stance else 0.0,
+            vol_regime=str(stance.vol_regime) if stance else "NORMAL",
+            primary_tf=str(stance.tf_key) if stance else "",
+        )
+
     # Layer 4/5 early: extreme veto on bias TFs
     for key in veto_keys:
         stance = stances.get(key)
         if stance and stance.vol_regime.upper() == "EXTREME":
             reason_codes.append(f"mtf_{stance.resolution}_extreme_veto")
             summary = _build_summary(stances, signal="HOLD", alignment=0, trend_filter="veto")
-            return MtfPolicyResult(
-                signal="HOLD",
-                confidence=0.0,
-                reason_codes=reason_codes,
-                multi_tf_stances=dict(stances),
-                cross_tf_summary=summary,
-                primary_path_edge=0.0,
-                primary_threshold=0.005,
-                primary_regime="crisis",
+            return _empty_result(
+                "HOLD",
+                0.0,
+                reason_codes,
+                summary,
+                regime="crisis",
+                stance=stance,
             )
 
     # Layer 2: execution anchor from 15m/30m
@@ -309,16 +401,7 @@ def evaluate_mtf_policy(
         reason_codes.append("mtf_no_execution_signal")
         conf = _weighted_confidence(stances, weights)
         summary = _build_summary(stances, signal="HOLD", alignment=0, trend_filter="none")
-        return MtfPolicyResult(
-            signal="HOLD",
-            confidence=conf,
-            reason_codes=reason_codes,
-            multi_tf_stances=dict(stances),
-            cross_tf_summary=summary,
-            primary_path_edge=0.0,
-            primary_threshold=0.005,
-            primary_regime="neutral",
-        )
+        return _empty_result("HOLD", conf, reason_codes, summary)
 
     proposed = exec_signal
     direction = _direction_from_signal(proposed)
@@ -328,15 +411,15 @@ def evaluate_mtf_policy(
         reason_codes.append("mtf_bias_veto")
         conf = _weighted_confidence(stances, weights)
         summary = _build_summary(stances, signal="HOLD", alignment=0, trend_filter="opposed")
-        return MtfPolicyResult(
-            signal="HOLD",
-            confidence=conf,
-            reason_codes=reason_codes,
-            multi_tf_stances=dict(stances),
-            cross_tf_summary=summary,
-            primary_path_edge=float(exec_stance.path_edge if exec_stance else 0.0),
-            primary_threshold=float(exec_stance.threshold if exec_stance else 0.005),
-            primary_regime=str(exec_stance.regime if exec_stance else "neutral"),
+        return _empty_result(
+            "HOLD",
+            conf,
+            reason_codes,
+            summary,
+            path_edge=float(exec_stance.path_edge if exec_stance else 0.0),
+            threshold=float(exec_stance.threshold if exec_stance else 0.005),
+            regime=str(exec_stance.regime if exec_stance else "neutral"),
+            stance=exec_stance,
         )
 
     trend_filter = "bullish" if direction == "bullish" else "bearish"
@@ -369,6 +452,15 @@ def evaluate_mtf_policy(
     if exec_stance:
         confidence = float(min(1.0, max(confidence, exec_stance.confidence * 0.85)))
 
+    size_scale = float(exec_stance.size_scale) if exec_stance else 1.0
+    # Soft confidence band on exec stance: never promote to STRONG when reduced
+    if exec_stance and exec_stance.size_scale < 1.0 and proposed in (
+        "STRONG_BUY",
+        "STRONG_SELL",
+    ):
+        proposed = _downgrade_signal(proposed)
+        reason_codes.append("mtf_reduced_size_strip_strong")
+
     summary = _build_summary(
         stances,
         signal=proposed,
@@ -385,6 +477,15 @@ def evaluate_mtf_policy(
         primary_path_edge=float(exec_stance.path_edge if exec_stance else 0.0),
         primary_threshold=float(exec_stance.threshold if exec_stance else 0.005),
         primary_regime=str(exec_stance.regime if exec_stance else "neutral"),
+        size_scale=size_scale,
+        long_edge=float(exec_stance.long_edge if exec_stance else 0.0),
+        short_edge=float(exec_stance.short_edge if exec_stance else 0.0),
+        winning_edge=float(exec_stance.winning_edge if exec_stance else 0.0),
+        mfe=float(exec_stance.mfe if exec_stance else 0.0),
+        mae=float(exec_stance.mae if exec_stance else 0.0),
+        future_volatility=float(exec_stance.future_volatility if exec_stance else 0.0),
+        vol_regime=str(exec_stance.vol_regime if exec_stance else "NORMAL"),
+        primary_tf=str(exec_stance.tf_key if exec_stance else ""),
     )
 
 

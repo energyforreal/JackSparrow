@@ -2,7 +2,7 @@
 
 ## Overview
 
-On branch **Transformers**, JackSparrow loads **per-timeframe ONNX Transformer bundles** (5m, 15m, 30m, 1h, 2h). `ModelDiscovery` registers one `TransformerModelNode` per bundle; the MCP orchestrator runs all models and applies `evaluate_mtf_policy` in `agent/core/mtf_decision_policy.py` via `evaluate_transformer_prediction` in `agent/core/transformer_decision.py` to produce `DECISION_READY` events.
+On branch **Transformers**, JackSparrow loads **per-timeframe ONNX Transformer bundles** (5m, 15m, 30m, 1h, 2h). `ModelDiscovery` registers one `TransformerModelNode` per bundle; the MCP orchestrator runs all models and applies `evaluate_mtf_policy` in `agent/core/mtf_decision_policy.py` via `evaluate_transformer_prediction` in `agent/core/transformer_decision.py` to produce `DECISION_READY` events with an **`execution_plan`** (long_edge/short_edge, path SL/TP pcts, soft R:R, size_fraction).
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -92,13 +92,20 @@ Each `TransformerModelNode` builds features on its native TF grid only.
 | `TRANSFORMER_BIAS_TFS` | `1h,2h` | Bias/veto TFs |
 | `TRANSFORMER_TIMING_TF` | `5m` | Timing modifier TF |
 | `TRANSFORMER_MIN_TF_ALIGNMENT` | `3` | Min aligned TFs for STRONG signals |
-| `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Minimum confidence for entry signals |
+| `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Full-size confidence band floor |
+| `TRANSFORMER_CONFIDENCE_HOLD_FLOOR` | `0.40` | Hard HOLD below this confidence |
 | `TRANSFORMER_STRONG_EDGE_MULTIPLIER` | `1.5` | Edge multiplier for STRONG_BUY/SELL |
 | `TRANSFORMER_EXTREME_REGIME_VETO` | `true` | Force HOLD when vol regime is EXTREME |
-| `TRANSFORMER_SIGNAL_THRESHOLD` | *(from metadata)* | Optional override of `default_threshold` in metadata |
+| `TRANSFORMER_ENTRY_GATES` | `true` | Safety-only trading handler (no legacy feature vetoes) |
+| `LEGACY_FEATURE_ENTRY_GATES` | `false` | Emergency rollback for ADX/EMA/BB/SR filters |
+| `SL_TP_MODE` | `path_pred` | Use MFE/MAE path brackets (`path_pred`) |
+| `PATH_SL_ADVERSE_MULT` | `1.0` | Stop distance × adverse excursion |
+| `PATH_TP_FAVORABLE_MULT` | `1.0` | Take-profit × favorable excursion |
+| `PATH_RR_SIZE_FACTOR` | `0.7` | Soft R:R size cut (never hard-rejects) |
+| `TRANSFORMER_SIZE_FLOOR` | `0.35` | Min size_scale clip |
+| `TRANSFORMER_SIGNAL_THRESHOLD` | *(from metadata)* | Optional override of `default_threshold` |
 | `MODEL_DISCOVERY_ENABLED` | `true` | Enable startup discovery |
 | `MODEL_AUTO_REGISTER` | `true` | Register discovered node in MCP registry |
-| `MIN_CONFIDENCE_THRESHOLD` | `0.70` | Execution gate (trading handler) |
 
 See [Deployment – Agent environment variables](10-deployment.md#agent-environment-variables).
 

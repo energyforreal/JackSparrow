@@ -15,6 +15,7 @@ from agent.core.mtf_decision_policy import (
     resolution_to_tf_key,
 )
 from agent.core.market_frames import closed_5m_bar_index, fetch_mtf_market_frames
+from agent.core.path_execution_plan import build_execution_plan
 from agent.data.feature_server import FeatureQuality, MCPFeature, MCPFeatureResponse
 from agent.events.schemas import PolicyVerdict
 from agent.models.mcp_model_registry import (
@@ -30,7 +31,9 @@ logger = structlog.get_logger()
 _ENTRY_SIGNALS = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
 
 
-def _default_position_size(confidence: float) -> float:
+def _default_position_size(confidence: float, size_fraction: float | None = None) -> float:
+    if size_fraction is not None and size_fraction > 0:
+        return float(max(0.01, min(1.0, size_fraction)))
     max_pct = float(getattr(settings, "max_position_size", 0.1) or 0.1)
     if confidence <= 0:
         return 0.0
@@ -102,12 +105,18 @@ def _stance_to_dict(stance: Any) -> Dict[str, Any]:
         "local_signal": stance.local_signal,
         "direction": stance.direction,
         "path_edge": stance.path_edge,
+        "long_edge": getattr(stance, "long_edge", stance.path_edge),
+        "short_edge": getattr(stance, "short_edge", -stance.path_edge),
+        "winning_edge": getattr(stance, "winning_edge", abs(stance.path_edge)),
+        "size_scale": getattr(stance, "size_scale", 1.0),
         "threshold": stance.threshold,
         "vol_regime": stance.vol_regime,
         "regime": stance.regime,
         "confidence": stance.confidence,
         "quality": stance.quality,
         "risk": stance.risk,
+        "mfe": stance.mfe,
+        "mae": stance.mae,
         "reason_codes": list(stance.reason_codes),
         "model_name": stance.model_name,
     }
@@ -212,18 +221,59 @@ async def evaluate_transformer_prediction(
     path_edge = float(policy.primary_path_edge)
     threshold = float(policy.primary_threshold)
     regime = str(policy.primary_regime)
-    vol_regime = "NORMAL"
-    for stance in stances.values():
-        if stance.tf_key in ("tf_15m", "tf_30m"):
-            vol_regime = stance.vol_regime
-            break
+    vol_regime = str(policy.vol_regime or "NORMAL")
+    if vol_regime == "NORMAL":
+        for stance in stances.values():
+            if stance.tf_key in ("tf_15m", "tf_30m"):
+                vol_regime = stance.vol_regime
+                break
 
     if mctx.get("market_health_hold"):
         signal = "HOLD"
         confidence = 0.0
         reason_codes = list(reason_codes) + ["market_health_hold"]
 
-    position_size = _default_position_size(confidence) if signal in _ENTRY_SIGNALS else 0.0
+    execution_plan: Dict[str, Any] = {}
+    if signal in _ENTRY_SIGNALS:
+        execution_plan = build_execution_plan(
+            signal=signal,
+            confidence=confidence,
+            size_scale=float(policy.size_scale or 1.0),
+            long_edge=float(policy.long_edge),
+            short_edge=float(policy.short_edge),
+            winning_edge=float(policy.winning_edge or abs(path_edge)),
+            threshold=threshold,
+            primary_tf=str(policy.primary_tf or ""),
+            mfe=float(policy.mfe),
+            mae=float(policy.mae),
+            future_volatility=float(policy.future_volatility),
+            vol_regime=vol_regime,
+            reason_codes=reason_codes,
+            entry_portfolio_margin_fraction=float(
+                getattr(settings, "entry_portfolio_margin_fraction", 0.6) or 0.6
+            ),
+            size_floor=float(getattr(settings, "transformer_size_floor", 0.35) or 0.35),
+            edge_weight=float(
+                getattr(settings, "transformer_size_edge_weight", 1.0) or 1.0
+            ),
+            sl_adverse_mult=float(getattr(settings, "path_sl_adverse_mult", 1.0) or 1.0),
+            tp_favorable_mult=float(
+                getattr(settings, "path_tp_favorable_mult", 1.0) or 1.0
+            ),
+            min_risk_reward_ratio=float(
+                getattr(settings, "min_risk_reward_ratio", 1.2) or 1.2
+            ),
+            rr_size_factor=float(getattr(settings, "path_rr_size_factor", 0.7) or 0.7),
+        )
+        signal = str(execution_plan.get("signal") or signal)
+        reason_codes = list(execution_plan.get("reason_codes") or reason_codes)
+        position_size = _default_position_size(
+            confidence,
+            float(execution_plan.get("size_fraction") or 0.0),
+        )
+    else:
+        position_size = 0.0
+
     bar_idx = closed_5m_bar_index(df5)
 
     model_predictions_payload: List[Dict[str, Any]] = [
@@ -239,11 +289,21 @@ async def evaluate_transformer_prediction(
         },
     )
 
+    # Diagnostic-only feature map (never used as entry veto)
+    transformer_features: Dict[str, float] = {}
+    primary_key = str(policy.primary_tf or "tf_15m")
+    primary_ctx = per_tf_contexts.get(primary_key) or {}
+    for k, v in (primary_ctx.get("closed_bar_features") or {}).items():
+        if isinstance(v, (int, float)):
+            transformer_features[str(k)] = float(v)
+
     market_context: Dict[str, Any] = {
         **mctx,
         **mtf_context,
         "format": "jacksparrow_transformer_btcusd_mtf",
         "path_edge": path_edge,
+        "long_edge": float(policy.long_edge),
+        "short_edge": float(policy.short_edge),
         "threshold": threshold,
         "regime": regime,
         "transformer_vol_regime": vol_regime,
@@ -255,6 +315,9 @@ async def evaluate_transformer_prediction(
         "cross_tf_summary": policy.cross_tf_summary,
         "closed_bar_index": bar_idx,
         "model_predictions": model_predictions_payload,
+        "execution_plan": execution_plan,
+        "transformer_features": transformer_features,
+        "decision_path": "transformer_mtf",
     }
 
     policy_verdict = PolicyVerdict(

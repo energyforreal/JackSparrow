@@ -1,6 +1,7 @@
 """Trading handler: AI_SIGNAL_MINIMAL_ENTRY_GATES relaxed entry path."""
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -24,11 +25,18 @@ class _FakeExecutionModule:
     def __init__(self, open_position: dict | None) -> None:
         self.position_manager = _FakePositionManager(open_position)
 
+    async def get_exchange_portfolio_snapshot(self, symbol: str = "BTCUSD"):
+        return None
+
 
 @pytest.fixture
 def _minimal_settings(monkeypatch):
     monkeypatch.setattr(settings, "ai_signal_minimal_entry_gates", True)
+    monkeypatch.setattr(settings, "transformer_entry_gates", True)
+    monkeypatch.setattr(settings, "legacy_feature_entry_gates", False)
+    monkeypatch.setattr(settings, "transformer_confidence_hold_floor", 0.40)
     monkeypatch.setattr(settings, "ai_signal_min_entry_confidence", 0.70)
+    monkeypatch.setattr(settings, "exchange_position_reconcile_enabled", False)
     monkeypatch.setattr(settings, "portfolio_fraction_lot_sizing", True)
     monkeypatch.setattr(settings, "entry_portfolio_margin_fraction", 0.60)
     monkeypatch.setattr(settings, "isolated_margin_leverage", 5)
@@ -36,6 +44,10 @@ def _minimal_settings(monkeypatch):
     monkeypatch.setattr(settings, "fixed_lot_size", 1)
     monkeypatch.setattr(settings, "min_lot_size", 1)
     monkeypatch.setattr(settings, "initial_balance", 500000.0)
+    monkeypatch.setattr(
+        "agent.core.fx_rate.resolve_usdinr_rate",
+        AsyncMock(return_value=83.0),
+    )
 
 
 @pytest.mark.asyncio
@@ -48,9 +60,11 @@ async def test_minimal_entry_publishes_above_floor(monkeypatch, _minimal_setting
 
     monkeypatch.setattr(trading_handler_mod.event_bus, "publish", capture_publish)
 
-    fake_state = MagicMock()
-    fake_state.config = {"market_data": {"price": 50000.0}}
-    fake_state.portfolio_value = 500000.0
+    fake_state = SimpleNamespace(
+        config={"market_data": {"price": 50000.0}},
+        portfolio_value=500000.0,
+        cash_balance=500000.0,
+    )
     monkeypatch.setattr(
         trading_handler_mod,
         "context_manager",
@@ -69,6 +83,7 @@ async def test_minimal_entry_publishes_above_floor(monkeypatch, _minimal_setting
     monkeypatch.setattr(trading_handler_mod, "get_contract_specs", fake_specs)
 
     risk = MagicMock()
+    risk.portfolio = None
     risk.validate_trade = AsyncMock(return_value={"approved": True, "reason": "ok"})
     handler = TradingEventHandler(
         risk_manager=risk,
@@ -90,6 +105,7 @@ async def test_minimal_entry_publishes_above_floor(monkeypatch, _minimal_setting
             "confidence": 0.71,
             "position_size": 0.1,
             "timestamp": now,
+            "server_timestamp_ms": int(now.timestamp() * 1000),
             "reasoning_chain": {
                 "market_context": {"features": {}},
                 "model_predictions": [],
@@ -129,9 +145,10 @@ async def test_minimal_entry_rejects_below_floor(monkeypatch, _minimal_settings)
         payload={
             "symbol": "BTCUSD",
             "signal": "BUY",
-            "confidence": 0.69,
+            "confidence": 0.35,  # below TRANSFORMER_CONFIDENCE_HOLD_FLOOR
             "position_size": 0.1,
             "timestamp": now,
+            "server_timestamp_ms": int(now.timestamp() * 1000),
             "reasoning_chain": {"market_context": {"features": {}}, "model_predictions": []},
         },
     )
@@ -173,6 +190,7 @@ async def test_minimal_entry_same_side_open_still_blocks(monkeypatch, _minimal_s
             "confidence": 0.99,
             "position_size": 0.1,
             "timestamp": now,
+            "server_timestamp_ms": int(now.timestamp() * 1000),
             "reasoning_chain": {"market_context": {"features": {}}, "model_predictions": []},
         },
     )
@@ -193,9 +211,11 @@ async def test_minimal_entry_still_applies_debounce(monkeypatch, _minimal_settin
 
     monkeypatch.setattr(trading_handler_mod.event_bus, "publish", capture_publish)
 
-    fake_state = MagicMock()
-    fake_state.config = {"market_data": {"price": 50000.0}}
-    fake_state.portfolio_value = 500000.0
+    fake_state = SimpleNamespace(
+        config={"market_data": {"price": 50000.0}},
+        portfolio_value=500000.0,
+        cash_balance=500000.0,
+    )
     monkeypatch.setattr(
         trading_handler_mod,
         "context_manager",
@@ -214,6 +234,7 @@ async def test_minimal_entry_still_applies_debounce(monkeypatch, _minimal_settin
     monkeypatch.setattr(trading_handler_mod, "get_contract_specs", fake_specs)
 
     risk = MagicMock()
+    risk.portfolio = None
     risk.validate_trade = AsyncMock(return_value={"approved": True, "reason": "ok"})
     handler = TradingEventHandler(
         risk_manager=risk,
@@ -235,6 +256,7 @@ async def test_minimal_entry_still_applies_debounce(monkeypatch, _minimal_settin
             "confidence": 0.99,
             "position_size": 0.1,
             "timestamp": now,
+            "server_timestamp_ms": int(now.timestamp() * 1000),
             "reasoning_chain": {"market_context": {"features": {}}, "model_predictions": []},
         },
     )
@@ -246,6 +268,7 @@ async def test_minimal_entry_still_applies_debounce(monkeypatch, _minimal_settin
             "confidence": 0.99,
             "position_size": 0.1,
             "timestamp": now,
+            "server_timestamp_ms": int(now.timestamp() * 1000),
             "reasoning_chain": {"market_context": {"features": {}}, "model_predictions": []},
         },
     )

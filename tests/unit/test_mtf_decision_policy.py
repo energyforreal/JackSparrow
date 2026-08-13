@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent.core.mtf_decision_policy import (
     TfLocalStance,
     evaluate_mtf_policy,
@@ -18,7 +20,11 @@ def _stance(
     path_edge: float = 0.0,
     vol_regime: str = "NORMAL",
     confidence: float = 0.7,
+    size_scale: float = 1.0,
 ) -> TfLocalStance:
+    long_edge = float(path_edge)
+    short_edge = float(-path_edge)
+    winning = long_edge if long_edge >= short_edge else short_edge
     return TfLocalStance(
         tf_key=tf_key,
         resolution=resolution,
@@ -35,6 +41,10 @@ def _stance(
         mfe=0.01,
         mae=0.005,
         future_volatility=0.003,
+        long_edge=long_edge,
+        short_edge=short_edge,
+        winning_edge=winning,
+        size_scale=size_scale,
     )
 
 
@@ -97,3 +107,31 @@ def test_interpret_tf_prediction_from_context() -> None:
     assert stance.tf_key == "tf_15m"
     assert stance.local_signal in ("BUY", "STRONG_BUY")
     assert stance.direction == "bullish"
+    assert stance.long_edge == pytest.approx(0.015)  # mfe - mae
+    assert stance.size_scale > 0.0
+
+
+def test_interpret_short_edge_stance() -> None:
+    ctx = {
+        "transformer_continuous_preds": {
+            "future_volatility": 0.003,
+            "mae": 0.02,
+            "mfe": 0.005,
+            "trend_strength": 1.2,
+        },
+        "transformer_vol_regime": "NORMAL",
+        "entry_confidence": 0.7,
+        "path_edge": -0.015,
+        "long_edge": -0.015,
+        "short_edge": 0.015,
+        "regime": "neutral",
+    }
+    stance = interpret_tf_prediction(
+        tf_key="tf_15m",
+        prediction_context=ctx,
+        bundle_metadata={"default_threshold": 0.005},
+        model_name="test_15m",
+    )
+    assert stance.local_signal in ("SELL", "STRONG_SELL")
+    assert stance.direction == "bearish"
+    assert stance.short_edge == pytest.approx(0.015)

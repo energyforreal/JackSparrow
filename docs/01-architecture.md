@@ -98,7 +98,8 @@ Trade *intent* on the event bus is issued as **`DECISION_READY`** after transfor
 1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
 2. **Feature build** — each `TransformerModelNode` builds its native TF matrix from `feature_store/transformer_btcusd`
 3. **ONNX inference** — five independent models (5m, 15m, 30m, 1h, 2h) via `TransformerModelNode.predict()`
-4. **Decision** — `mtf_decision_policy` + `evaluate_transformer_prediction` apply cross-TF rules and confidence gates
+4. **Decision** — `mtf_decision_policy` + `evaluate_transformer_prediction` apply cross-TF rules, soft confidence bands, and build `execution_plan` (path SL/TP + size)
+5. **DECISION_READY** — trading handler uses **transformer safety gates** (`TRANSFORMER_ENTRY_GATES`); legacy feature-dict filters are off unless `LEGACY_FEATURE_ENTRY_GATES=true`
 5. **Risk & execution** — trading handler + risk manager before Delta testnet order placement
 
 **Vector Memory Store**

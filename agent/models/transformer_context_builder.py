@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
 from feature_store.transformer_btcusd.contract import (
     PATH_LABEL_HORIZON_BARS,
     REGIME_NAMES,
+    compute_long_edge,
     compute_path_edge,
+    compute_short_edge,
 )
 
 
@@ -94,33 +96,74 @@ def map_prediction_to_signal(
     strong_edge_multiplier: float = 1.5,
     extreme_regime_veto: bool = True,
     min_confidence: float = 0.55,
-) -> tuple[str, float, list[str]]:
-    """Map transformer outputs to trading signal, confidence, and reason codes."""
+    confidence_hold_floor: float = 0.40,
+    size_floor: float = 0.35,
+    long_edge: Optional[float] = None,
+    short_edge: Optional[float] = None,
+    long_threshold: Optional[float] = None,
+    short_threshold: Optional[float] = None,
+) -> tuple[str, float, list[str], float]:
+    """Map transformer outputs to signal, confidence, reason codes, and size_scale.
+
+    Confidence bands:
+    - below ``confidence_hold_floor`` → HOLD (size_scale=0)
+    - ``[hold_floor, min_confidence)`` → BUY/SELL only (not STRONG), reduced size_scale
+    - ``>= min_confidence`` → full size_scale=1.0; STRONG allowed by edge
+
+    Returns:
+        (signal, confidence, reason_codes, size_scale)
+    """
     reason_codes: list[str] = []
-    thr = max(float(threshold), 1e-6)
-    edge = float(path_edge)
+    thr_default = max(float(threshold), 1e-6)
+    thr_long = max(float(long_threshold if long_threshold is not None else thr_default), 1e-6)
+    thr_short = max(
+        float(short_threshold if short_threshold is not None else thr_default),
+        1e-6,
+    )
+    le = float(long_edge if long_edge is not None else path_edge)
+    se = float(short_edge if short_edge is not None else -float(path_edge))
 
     if extreme_regime_veto and str(vol_regime or "").upper() == "EXTREME":
         reason_codes.append("transformer_extreme_regime_veto")
-        return "HOLD", 0.0, reason_codes
+        return "HOLD", 0.0, reason_codes, 0.0
+
+    conf = float(confidence)
+    hold_floor = float(confidence_hold_floor)
+    full_band = float(min_confidence)
+    if hold_floor > full_band:
+        hold_floor = full_band
+
+    if conf < hold_floor:
+        reason_codes.append("transformer_below_confidence_hold_floor")
+        return "HOLD", conf, reason_codes, 0.0
+
+    reduced_band = conf < full_band
+    if reduced_band:
+        reason_codes.append("transformer_reduced_size_confidence_band")
+        size_scale = float(
+            max(float(size_floor), min(1.0, conf / max(full_band, 1e-6)))
+        )
+    else:
+        size_scale = 1.0
 
     strong_mult = max(float(strong_edge_multiplier), 1.0)
-    conf = float(confidence)
-    if conf < float(min_confidence):
-        reason_codes.append("transformer_below_min_confidence")
-        return "HOLD", conf, reason_codes
-
-    if edge > thr:
-        signal = "STRONG_BUY" if edge > thr * strong_mult else "BUY"
+    if le > thr_long and le >= se:
+        if reduced_band:
+            signal = "BUY"
+        else:
+            signal = "STRONG_BUY" if le > thr_long * strong_mult else "BUY"
         reason_codes.append("transformer_long_edge")
-        return signal, conf, reason_codes
-    if edge < -thr:
-        signal = "STRONG_SELL" if edge < -thr * strong_mult else "SELL"
+        return signal, conf, reason_codes, size_scale
+    if se > thr_short and se > le:
+        if reduced_band:
+            signal = "SELL"
+        else:
+            signal = "STRONG_SELL" if se > thr_short * strong_mult else "SELL"
         reason_codes.append("transformer_short_edge")
-        return signal, conf, reason_codes
+        return signal, conf, reason_codes, size_scale
 
     reason_codes.append("transformer_below_threshold")
-    return "HOLD", conf, reason_codes
+    return "HOLD", conf, reason_codes, 0.0
 
 
 def build_transformer_prediction_context(
@@ -137,6 +180,8 @@ def build_transformer_prediction_context(
     mae = float(continuous_preds.get("mae", 0.0))
     mfe = float(continuous_preds.get("mfe", 0.0))
     trend_strength = float(continuous_preds.get("trend_strength", 0.0))
+    long_edge = compute_long_edge(mfe, mae)
+    short_edge = compute_short_edge(mfe, mae)
     path_edge = compute_path_edge(mfe, mae)
 
     regime = map_vol_regime_to_agent_regime(
@@ -152,12 +197,13 @@ def build_transformer_prediction_context(
     u_scale = _uncertainty_scale(unc)
 
     primary_thr = float(bundle_metadata.get("default_threshold") or 0.005)
-    edge = path_edge - primary_thr
-    primary_pred_val = float(np.tanh(edge * 80.0))
+    winning = long_edge if long_edge >= short_edge else short_edge
+    edge = winning - primary_thr
+    primary_pred_val = float(np.tanh((long_edge - primary_thr) * 80.0))
     primary_conf = _head_confidence(edge, primary_thr, u_scale)
     entry_proba = synthetic_entry_proba_from_transformer(
         path_edge,
-        edge,
+        long_edge - primary_thr,
         primary_thr,
         u_scale,
     )
@@ -170,6 +216,9 @@ def build_transformer_prediction_context(
         "entry_proba": entry_proba,
         "entry_confidence": primary_conf,
         "path_edge": path_edge,
+        "long_edge": long_edge,
+        "short_edge": short_edge,
+        "winning_edge": float(winning),
         "threshold": primary_thr,
         "regime": regime,
         "uncertainty": float(unc),
@@ -201,6 +250,8 @@ def build_mtf_aggregation_context(
         "multi_tf_heads": {
             key: {
                 "path_edge": ctx.get("path_edge"),
+                "long_edge": ctx.get("long_edge"),
+                "short_edge": ctx.get("short_edge"),
                 "regime": ctx.get("regime"),
                 "vol_regime": ctx.get("transformer_vol_regime"),
                 "confidence": ctx.get("entry_confidence"),

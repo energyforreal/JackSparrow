@@ -161,7 +161,93 @@ class Settings(BaseSettings):
         env="TRANSFORMER_MIN_CONFIDENCE",
         ge=0.0,
         le=1.0,
-        description="Minimum model confidence before emitting entry signals.",
+        description=(
+            "Full-size confidence band floor. Between "
+            "TRANSFORMER_CONFIDENCE_HOLD_FLOOR and this value, entries are allowed "
+            "with reduced size_scale (not STRONG)."
+        ),
+    )
+    transformer_confidence_hold_floor: float = Field(
+        default=0.40,
+        env="TRANSFORMER_CONFIDENCE_HOLD_FLOOR",
+        ge=0.0,
+        le=1.0,
+        description="Hard HOLD when model confidence is strictly below this floor.",
+    )
+    transformer_long_edge_threshold: Optional[float] = Field(
+        default=None,
+        env="TRANSFORMER_LONG_EDGE_THRESHOLD",
+        description=(
+            "Optional long-edge threshold override. Defaults to "
+            "TRANSFORMER_SIGNAL_THRESHOLD / metadata default_threshold."
+        ),
+    )
+    transformer_short_edge_threshold: Optional[float] = Field(
+        default=None,
+        env="TRANSFORMER_SHORT_EDGE_THRESHOLD",
+        description=(
+            "Optional short-edge threshold override. Defaults to "
+            "TRANSFORMER_SIGNAL_THRESHOLD / metadata default_threshold."
+        ),
+    )
+    transformer_entry_gates: bool = Field(
+        default=True,
+        env="TRANSFORMER_ENTRY_GATES",
+        description=(
+            "When true, trading handler uses transformer-native safety gates "
+            "(no legacy feature-dict vetoes)."
+        ),
+    )
+    legacy_feature_entry_gates: bool = Field(
+        default=False,
+        env="LEGACY_FEATURE_ENTRY_GATES",
+        description=(
+            "Emergency rollback: re-enable ADX/EMA/BB/SR/volatility feature filters "
+            "in the trading handler. Default off."
+        ),
+    )
+    sl_tp_mode: str = Field(
+        default="path_pred",
+        env="SL_TP_MODE",
+        description=(
+            "Stop/take mode: 'path_pred' uses transformer MFE/MAE; "
+            "'atr' / 'fixed' fall back to legacy ATR or percentage brackets."
+        ),
+    )
+    path_sl_adverse_mult: float = Field(
+        default=1.0,
+        env="PATH_SL_ADVERSE_MULT",
+        ge=0.1,
+        description="Multiplier on predicted adverse excursion for stop-loss distance.",
+    )
+    path_tp_favorable_mult: float = Field(
+        default=1.0,
+        env="PATH_TP_FAVORABLE_MULT",
+        ge=0.1,
+        description="Multiplier on predicted favorable excursion for take-profit distance.",
+    )
+    path_rr_size_factor: float = Field(
+        default=0.7,
+        env="PATH_RR_SIZE_FACTOR",
+        ge=0.1,
+        le=1.0,
+        description=(
+            "When planned TP/SL ratio is below MIN_RISK_REWARD_RATIO, multiply "
+            "size_scale by this factor (soft downgrade; never hard-rejects)."
+        ),
+    )
+    transformer_size_floor: float = Field(
+        default=0.35,
+        env="TRANSFORMER_SIZE_FLOOR",
+        ge=0.05,
+        le=1.0,
+        description="Minimum size_scale clip for edge×confidence sizing.",
+    )
+    transformer_size_edge_weight: float = Field(
+        default=1.0,
+        env="TRANSFORMER_SIZE_EDGE_WEIGHT",
+        ge=0.0,
+        description="Weight applied to edge_ratio when computing size scale.",
     )
     transformer_execution_tfs: str = Field(
         default="15m,30m",

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes **JackSparrow's** decision-making process on the **Transformers** branch. Runtime uses a single ONNX transformer model: `evaluate_transformer_prediction` in `agent/core/transformer_decision.py` maps inference output to trade signals before `DECISION_READY` is published.
+This document describes **JackSparrow's** decision-making process on the **Transformers** branch. Runtime runs **five per-TF ONNX Transformers**; `evaluate_transformer_prediction` maps path heads to `long_edge` / `short_edge`, applies MTF policy, builds an `execution_plan`, then emits `DECISION_READY`.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -11,17 +11,18 @@ This document describes **JackSparrow's** decision-making process on the **Trans
 ## Transformer decision path (current runtime)
 
 1. **Trigger** — `CANDLE_CLOSED` or price fluctuation exceeds `PRICE_FLUCTUATION_THRESHOLD_PCT`
-2. **Features** — `feature_store/transformer_btcusd_15m` builds the inference matrix
-3. **Inference** — `TransformerModelNode.predict()` runs ONNX model
-4. **Decision** — `evaluate_transformer_prediction()` applies:
-   - `TRANSFORMER_SIGNAL_THRESHOLD` or metadata `default_threshold`
-   - `TRANSFORMER_MIN_CONFIDENCE` for entry signals
-   - `TRANSFORMER_EXTREME_REGIME_VETO` (HOLD when vol regime is EXTREME)
-   - `TRANSFORMER_STRONG_EDGE_MULTIPLIER` for STRONG_BUY/SELL
-5. **Output** — `PolicyVerdict` + reasoning chain payload → `DECISION_READY`
-6. **Gates** — Trading handler + risk manager before Delta testnet execution
+2. **Features** — `feature_store/transformer_btcusd/` builds each TF inference matrix
+3. **Inference** — each `TransformerModelNode.predict()` runs ONNX on its native TF
+4. **Per-TF map** — `long_edge = mfe − mae`, `short_edge = mae − mfe`; soft confidence bands:
+   - `< TRANSFORMER_CONFIDENCE_HOLD_FLOOR` (0.40) → HOLD
+   - `[0.40, TRANSFORMER_MIN_CONFIDENCE)` → BUY/SELL with reduced `size_scale`
+   - `≥ 0.55` → full size; STRONG allowed by edge
+5. **MTF policy** — bias / execution / alignment / timing / extreme veto (unchanged layers)
+6. **execution_plan** — path SL/TP pcts (short: favorable=`mae`, adverse=`mfe`), soft R:R (strip STRONG / cut size only), edge×confidence `size_fraction`
+7. **Output** — `PolicyVerdict` + `execution_plan` on `market_context` → `DECISION_READY`
+8. **Gates** — trading handler safety only (`TRANSFORMER_ENTRY_GATES=true`): stale, price, margin, open position, risk, kill switch — not legacy ADX/EMA/BB/SR/`features.volatility`
 
-**Implementation**: [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py), orchestrated by [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py).
+**Implementation**: [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py), [`agent/core/path_execution_plan.py`](../agent/core/path_execution_plan.py), orchestrated by [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py).
 
 ---
 

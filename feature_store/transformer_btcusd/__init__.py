@@ -9,8 +9,11 @@ from feature_store.transformer_btcusd.contract import (
     RESOLUTION_MINUTES,
     SUPPORTED_RESOLUTIONS,
     TF_KEYS,
+    compute_long_edge,
     compute_path_edge,
+    compute_short_edge,
     default_training_config,
+    path_favorable_adverse,
 )
 from feature_store.transformer_btcusd.features import add_features, assemble_raw_frame, prepare_raw_frame
 from feature_store.transformer_btcusd.inference import (
@@ -31,9 +34,12 @@ __all__ = [
     "add_features",
     "assemble_raw_frame",
     "build_inference_window",
+    "compute_long_edge",
     "compute_path_edge",
+    "compute_short_edge",
     "default_training_config",
     "load_feature_config",
+    "path_favorable_adverse",
     "prepare_raw_frame",
     "unstandardize_continuous",
 ]
