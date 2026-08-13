@@ -190,6 +190,15 @@ async def evaluate_transformer_prediction(
     stances: Dict[str, Any] = {}
     per_tf_contexts: Dict[str, Dict[str, Any]] = {}
     for pred in model_response.predictions:
+        # Degraded / failed nodes return empty context; do not invent a NORMAL
+        # HOLD stance that pollutes MTF bias weight.
+        if str(getattr(pred, "health_status", "") or "").lower() != "healthy":
+            logger.info(
+                "transformer_stance_skipped_unhealthy",
+                model_name=getattr(pred, "model_name", None),
+                health_status=getattr(pred, "health_status", None),
+            )
+            continue
         pctx = pred.context if isinstance(pred.context, dict) else {}
         tf_key = str(pctx.get("tf_key") or "")
         if not tf_key:

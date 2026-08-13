@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
+import httpx
 import pandas as pd
 import structlog
 
@@ -19,6 +20,73 @@ _OHLCV_FRAME_CACHE: Dict[str, Dict[str, pd.DataFrame]] = {}
 _INCREMENTAL_TAIL_BARS = 3
 # Delta history/candles typically caps ~500 bars per request.
 _DELTA_CANDLE_PAGE_BARS = 500
+
+
+def candles_public_base_url() -> str:
+    """Production-public REST host for historical candles (no auth)."""
+    return str(
+        getattr(
+            settings,
+            "jacksparrow_v43_candles_public_base_url",
+            "https://api.india.delta.exchange",
+        )
+        or "https://api.india.delta.exchange"
+    ).rstrip("/")
+
+
+def candles_public_timeout_s() -> float:
+    return float(
+        getattr(settings, "jacksparrow_v43_candles_public_timeout_s", 15.0) or 15.0
+    )
+
+
+class PublicCandleClient:
+    """Unauthenticated ``get_candles`` against the configured public base URL.
+
+    Used for all model-frame OHLCV / MARK / FUNDING history so inference sees
+    full production tape while private trading stays on testnet.
+    """
+
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        timeout_s: Optional[float] = None,
+    ) -> None:
+        self.base_url = (base_url or candles_public_base_url()).rstrip("/")
+        self.timeout_s = float(
+            timeout_s if timeout_s is not None else candles_public_timeout_s()
+        )
+
+    async def get_candles(
+        self,
+        symbol: str,
+        resolution: str = "1h",
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        if start is None or end is None:
+            raise ValueError("Public candle client requires explicit start and end")
+        params = {
+            "symbol": symbol,
+            "resolution": resolution,
+            "start": int(start),
+            "end": int(end),
+        }
+        url = f"{self.base_url}/v2/history/candles"
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            resp = await client.get(
+                url,
+                params=params,
+                headers={"Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+
+def get_public_candle_client() -> PublicCandleClient:
+    """Factory for the shared production-public candle client."""
+    return PublicCandleClient()
 
 
 def _candle_timestamp_epoch(value: Any) -> Optional[int]:
@@ -74,7 +142,7 @@ def _parse_candles_response(resp: Any) -> List[dict[str, Any]]:
 
 
 async def _fetch_ohlcv_paginated(
-    delta_client: Any,
+    candle_client: Any,
     symbol: str,
     resolution: str,
     bar_seconds: int,
@@ -93,7 +161,7 @@ async def _fetch_ohlcv_paginated(
         start_ts = cursor_end - int(page_bars * bar_seconds * 1.05)
         if start_ts >= cursor_end:
             start_ts = cursor_end - max(1, bar_seconds)
-        resp = await delta_client.get_candles(
+        resp = await candle_client.get_candles(
             symbol=symbol,
             resolution=resolution,
             start=start_ts,
@@ -138,7 +206,7 @@ async def _fetch_ohlcv_paginated(
 
 
 async def _fetch_ohlcv_df(
-    delta_client: Any,
+    candle_client: Any,
     symbol: str,
     resolution: str,
     bar_seconds: int,
@@ -169,7 +237,7 @@ async def _fetch_ohlcv_df(
 
     if can_incremental:
         start_ts = end_ts - int(_INCREMENTAL_TAIL_BARS * bar_seconds * 2)
-        resp = await delta_client.get_candles(
+        resp = await candle_client.get_candles(
             symbol=symbol,
             resolution=resolution,
             start=start_ts,
@@ -190,7 +258,7 @@ async def _fetch_ohlcv_df(
         return out
 
     out = await _fetch_ohlcv_paginated(
-        delta_client,
+        candle_client,
         symbol,
         resolution,
         bar_seconds,
@@ -205,7 +273,7 @@ async def _fetch_ohlcv_df(
 
 
 async def _fetch_funding_series(
-    delta_client: Any,
+    candle_client: Any,
     symbol: str,
     n1h: int,
 ) -> pd.DataFrame:
@@ -213,7 +281,7 @@ async def _fetch_funding_series(
     fund_symbol = f"FUNDING:{symbol}"
     try:
         df_raw = await _fetch_ohlcv_df(
-            delta_client, fund_symbol, "1h", 3600, min(n1h, 500)
+            candle_client, fund_symbol, "1h", 3600, min(n1h, 500)
         )
         if not df_raw.empty and "close" in df_raw.columns:
             return df_raw.rename(columns={"close": "funding_rate"}).copy()
@@ -254,6 +322,10 @@ async def fetch_mtf_market_frames(
 ]:
     """Load 5m/15m/30m/1h/2h OHLCV, funding, OI, and MARK candles.
 
+    OHLCV / MARK / FUNDING always use the production-public candle host.
+    OI uses the existing public ticker path. ``delta_client`` is retained for
+    call-site compatibility (OI helpers may still receive it).
+
     Returns:
         Tuple ``(df5m, df15m, df30m, df1h, df2h, df_funding, df_oi, df_mark)``.
     """
@@ -264,6 +336,12 @@ async def fetch_mtf_market_frames(
     n2h = int(getattr(settings, "transformer_candles_2h", 2600) or 2600)
     n_oi = int(getattr(settings, "jacksparrow_v43_candles_oi", 300) or 300)
     mark_symbol = f"MARK:{symbol}"
+    candle_client = get_public_candle_client()
+    logger.info(
+        "mtf_candles_public_base",
+        base_url=candle_client.base_url,
+        symbol=symbol,
+    )
 
     (
         df5m,
@@ -275,14 +353,14 @@ async def fetch_mtf_market_frames(
         df_oi,
         df_mark,
     ) = await asyncio.gather(
-        _fetch_ohlcv_df(delta_client, symbol, "5m", 300, n5),
-        _fetch_ohlcv_df(delta_client, symbol, "15m", 900, n15),
-        _fetch_ohlcv_df(delta_client, symbol, "30m", 1800, n30),
-        _fetch_ohlcv_df(delta_client, symbol, "1h", 3600, n1h),
-        _fetch_ohlcv_df(delta_client, symbol, "2h", 7200, n2h),
-        _fetch_funding_series(delta_client, symbol, n1h),
+        _fetch_ohlcv_df(candle_client, symbol, "5m", 300, n5),
+        _fetch_ohlcv_df(candle_client, symbol, "15m", 900, n15),
+        _fetch_ohlcv_df(candle_client, symbol, "30m", 1800, n30),
+        _fetch_ohlcv_df(candle_client, symbol, "1h", 3600, n1h),
+        _fetch_ohlcv_df(candle_client, symbol, "2h", 7200, n2h),
+        _fetch_funding_series(candle_client, symbol, n1h),
         _fetch_oi_df(delta_client, symbol, n_oi),
-        _fetch_ohlcv_df(delta_client, mark_symbol, "5m", 300, n5),
+        _fetch_ohlcv_df(candle_client, mark_symbol, "5m", 300, n5),
     )
 
     if df_funding.empty and not df_oi.empty and "predicted_funding_rate" in df_oi.columns:
@@ -346,8 +424,10 @@ async def fetch_v43_market_frames(
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load 5m / 15m / 1h OHLCV, funding, ticker snapshots, and MARK candles for ``fe.transform``.
 
+    OHLCV / MARK / FUNDING use the production-public candle host.
+
     Args:
-        delta_client: ``DeltaExchangeClient`` with ``get_candles``.
+        delta_client: Kept for OI / call-site compatibility.
         symbol: Underlying (e.g. ``BTCUSD``).
 
     Returns:
@@ -360,14 +440,15 @@ async def fetch_v43_market_frames(
     n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 1400) or 1400)
     n_oi = int(getattr(settings, "jacksparrow_v43_candles_oi", 300) or 300)
     mark_symbol = f"MARK:{symbol}"
+    candle_client = get_public_candle_client()
 
     df5m, df15m, df1h, df_funding, df_oi, df_mark = await asyncio.gather(
-        _fetch_ohlcv_df(delta_client, symbol, "5m", 300, n5),
-        _fetch_ohlcv_df(delta_client, symbol, "15m", 900, n15),
-        _fetch_ohlcv_df(delta_client, symbol, "1h", 3600, n1h),
-        _fetch_funding_series(delta_client, symbol, n1h),
+        _fetch_ohlcv_df(candle_client, symbol, "5m", 300, n5),
+        _fetch_ohlcv_df(candle_client, symbol, "15m", 900, n15),
+        _fetch_ohlcv_df(candle_client, symbol, "1h", 3600, n1h),
+        _fetch_funding_series(candle_client, symbol, n1h),
         _fetch_oi_df(delta_client, symbol, n_oi),
-        _fetch_ohlcv_df(delta_client, mark_symbol, "5m", 300, n5),
+        _fetch_ohlcv_df(candle_client, mark_symbol, "5m", 300, n5),
     )
 
     if df_funding.empty and not df_oi.empty and "predicted_funding_rate" in df_oi.columns:

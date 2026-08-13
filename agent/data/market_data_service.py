@@ -1054,13 +1054,17 @@ class MarketDataService:
             start_time, end_time = self.delta_client._calculate_candle_time_range(
                 resolution, limit
             )
-            
-            # Fetch from Delta Exchange
-            response = await self.delta_client.get_candles(
+
+            # Historical candles always use production-public API (same tape as
+            # model frames). Private/testnet delta_client is for trading only.
+            from agent.core.market_frames import get_public_candle_client
+
+            public_candles = get_public_candle_client()
+            response = await public_candles.get_candles(
                 symbol=symbol,
                 resolution=resolution,
                 start=start_time,
-                end=end_time
+                end=end_time,
             )
             
             # Parse response - handle different response structures

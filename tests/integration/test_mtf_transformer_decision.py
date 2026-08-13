@@ -70,7 +70,13 @@ def _mock_registry(predictions: List[MCPModelPrediction]) -> MCPModelRegistry:
     registry.models = {p.model_name: MagicMock() for p in predictions}
     for pred in predictions:
         node = registry.models[pred.model_name]
-        node.resolution = pred.context["resolution"]
+        ctx = pred.context if isinstance(pred.context, dict) else {}
+        if "resolution" in ctx:
+            node.resolution = ctx["resolution"]
+        else:
+            # e.g. degraded stubs with empty context — infer from model_name suffix
+            name = str(pred.model_name or "")
+            node.resolution = name.rsplit("_", 1)[-1] if "_" in name else "15m"
         node._bundle_metadata = {"default_threshold": 0.005}
 
     async def _get_predictions(request: Any) -> MCPModelResponse:
@@ -276,3 +282,80 @@ async def test_mtf_decision_bias_veto_forces_hold(monkeypatch: pytest.MonkeyPatc
     assert result["decision"]["signal"] == "HOLD"
     codes = result["market_context"].get("transformer_reason_codes") or []
     assert any("bias_veto" in c for c in codes)
+
+
+@pytest.mark.asyncio
+async def test_mtf_skips_degraded_predictions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unhealthy TF predictions must not become dummy NORMAL stances."""
+    df = _ohlcv_df()
+    frames = (df, df, df, df, df, df, df, df)
+
+    monkeypatch.setattr(
+        "agent.core.transformer_decision.fetch_mtf_market_frames",
+        AsyncMock(return_value=frames),
+    )
+    monkeypatch.setattr(
+        "agent.core.contract_state.get_contract_state",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                is_operational=True,
+                state="active",
+                trading_status="open",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "agent.core.portfolio_intelligence.fetch_portfolio_exposure_snapshot",
+        AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {})),
+    )
+    monkeypatch.setattr(
+        "agent.core.portfolio_intelligence.evaluate_portfolio_guard",
+        lambda *_a, **_k: SimpleNamespace(
+            allowed=True,
+            reason_codes=[],
+            to_dict=lambda: {},
+        ),
+    )
+    monkeypatch.setattr(
+        "agent.core.portfolio_intelligence.apply_portfolio_guard_to_verdict",
+        lambda verdict, *_a, **_k: verdict,
+    )
+
+    degraded_2h = MCPModelPrediction(
+        model_name="jacksparrow_transformer_BTCUSD_2h",
+        model_version="v1",
+        prediction=0.0,
+        confidence=0.0,
+        reasoning="Model error: Need at least 128 feature rows",
+        features_used=[],
+        feature_importance={},
+        computation_time_ms=1.0,
+        health_status="degraded",
+        context={},
+    )
+    predictions = [
+        _prediction("5m"),
+        _prediction("15m"),
+        _prediction("30m"),
+        _prediction("1h"),
+        degraded_2h,
+    ]
+    registry = _mock_registry(predictions)
+
+    result = await evaluate_transformer_prediction(
+        symbol="BTCUSD",
+        context={},
+        model_registry=registry,
+        delta_client=MagicMock(),
+        t0=0.0,
+        serialize_prediction=lambda p: {
+            "model_name": p.model_name,
+            "health_status": p.health_status,
+        },
+    )
+
+    multi = result["market_context"].get("multi_tf_predictions") or {}
+    assert "tf_2h" not in multi
+    assert "tf_5m" in multi
+    assert "tf_15m" in multi
+    assert len(multi) == 4

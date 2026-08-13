@@ -1022,6 +1022,22 @@ class Settings(BaseSettings):
             "May differ from DELTA_EXCHANGE_BASE_URL (testnet trading)."
         ),
     )
+    jacksparrow_v43_candles_public_base_url: str = Field(
+        default="https://api.india.delta.exchange",
+        env="JACKSPARROW_V43_CANDLES_PUBLIC_BASE_URL",
+        description=(
+            "Public REST base URL for all historical OHLCV / MARK / FUNDING "
+            "candle reads (no auth). Defaults to India production public API "
+            "so model frames get full history while trading stays on testnet."
+        ),
+    )
+    jacksparrow_v43_candles_public_timeout_s: float = Field(
+        default=15.0,
+        env="JACKSPARROW_V43_CANDLES_PUBLIC_TIMEOUT_S",
+        ge=2.0,
+        le=60.0,
+        description="Per-request timeout for public history/candles fetches (seconds).",
+    )
     jacksparrow_v43_contract_state_ttl_s: float = Field(
         default=60.0,
         env="JACKSPARROW_V43_CONTRACT_STATE_TTL_S",

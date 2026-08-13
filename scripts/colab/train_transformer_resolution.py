@@ -24,7 +24,11 @@ from feature_store.transformer_btcusd.labels import (
     label_nan_summary,
     trim_label_tail,
 )
-from scripts.colab.transformer_data import fetch_history_bundle, validate_derivatives_coverage
+from scripts.colab.transformer_data import (
+    fetch_history_bundle,
+    validate_derivatives_coverage,
+    validate_ohlcv_completeness,
+)
 from scripts.colab.transformer_training import (
     MarketTransformer,
     WindowDataset,
@@ -72,6 +76,11 @@ def run_training(
     if cache.is_file() and not refresh_data:
         print(f"Loading cached raw data from {cache}")
         raw_df = pd.read_parquet(cache)
+        validate_ohlcv_completeness(
+            raw_df,
+            res,
+            symbol=config["symbol"],
+        )
         validate_derivatives_coverage(
             raw_df,
             min_coverage=config["min_derivatives_coverage"],
