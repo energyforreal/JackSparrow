@@ -1,5 +1,24 @@
-import type { Signal, SignalType } from '@/types'
+import type { ExecutionPlan, Signal, SignalType } from '@/types'
 import { AgentIntrospectionSnapshotSchema } from '@/schemas/api.validation'
+
+const ACTIONABLE_SIGNALS = new Set([
+  'BUY',
+  'SELL',
+  'STRONG_BUY',
+  'STRONG_SELL',
+])
+
+const TRANSFORMER_PLAN_KEYS = [
+  'execution_plan',
+  'long_edge',
+  'short_edge',
+  'winning_edge',
+  'primary_tf',
+  'transformer_vol_regime',
+  'decision_path',
+  'multi_tf_predictions',
+  'cross_tf_summary',
+] as const
 
 /** Merge WS signal payloads without retaining omitted confidence keys (BUG 2). */
 export function mergeSignalPayload(
@@ -14,6 +33,8 @@ export function mergeSignalPayload(
   const incomingSignal =
     data.signal != null ? String(data.signal) : undefined
   const isHoldPatch = incomingSignal === 'HOLD'
+  const isActionablePatch =
+    incomingSignal != null && ACTIONABLE_SIGNALS.has(incomingSignal.toUpperCase())
   const partialHold =
     isHoldPatch &&
     !('confidence' in data) &&
@@ -29,7 +50,9 @@ export function mergeSignalPayload(
     if (
       key === 'confidence' ||
       key === 'final_confidence' ||
-      key === 'signal_strength'
+      key === 'signal_strength' ||
+      key === 'v43_gate_reject' ||
+      key === 'execution_plan'
     ) {
       continue
     }
@@ -66,10 +89,44 @@ export function mergeSignalPayload(
     out.server_timestamp_ms = prev.server_timestamp_ms
   }
 
+  // Gate reject: update when present; clear on actionable patches that omit it
+  // (avoids sticky leftover after transformer_mtf nulls the field).
   if ('v43_gate_reject' in data && data.v43_gate_reject !== undefined) {
     out.v43_gate_reject = data.v43_gate_reject
+  } else if (isActionablePatch) {
+    delete out.v43_gate_reject
   } else if (prev?.v43_gate_reject !== undefined) {
     out.v43_gate_reject = prev.v43_gate_reject
+  }
+
+  if ('execution_plan' in data && data.execution_plan !== undefined) {
+    const incoming = data.execution_plan
+    if (incoming && typeof incoming === 'object' && !Array.isArray(incoming)) {
+      const prevPlan =
+        prev?.execution_plan && typeof prev.execution_plan === 'object'
+          ? prev.execution_plan
+          : {}
+      out.execution_plan = {
+        ...(prevPlan as ExecutionPlan),
+        ...(incoming as ExecutionPlan),
+      }
+    } else {
+      out.execution_plan = incoming
+    }
+  } else if (prev?.execution_plan !== undefined && !isHoldPatch) {
+    out.execution_plan = prev.execution_plan
+  } else if (isHoldPatch && !('execution_plan' in data)) {
+    // HOLD without a plan: drop stale size/SL from prior entry signal
+    delete out.execution_plan
+  }
+
+  for (const key of TRANSFORMER_PLAN_KEYS) {
+    if (key === 'execution_plan') continue
+    if (key in data && data[key] !== undefined) {
+      out[key] = data[key]
+    } else if (prev && (prev as Record<string, unknown>)[key] !== undefined && !isHoldPatch) {
+      out[key] = (prev as Record<string, unknown>)[key]
+    }
   }
 
   if (data.timestamp !== undefined) {

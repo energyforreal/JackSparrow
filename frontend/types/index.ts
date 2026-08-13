@@ -128,6 +128,50 @@ export interface Prediction {
 
 export type SignalType = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL'
 
+/** Path-prediction execution plan from transformer_mtf (v0.2). */
+export interface ExecutionPlan {
+  signal?: string
+  confidence?: number
+  size_scale?: number
+  long_edge?: number
+  short_edge?: number
+  winning_edge?: number
+  primary_tf?: string
+  mfe?: number
+  mae?: number
+  favorable_pct?: number
+  adverse_pct?: number
+  future_volatility?: number
+  vol_regime?: string
+  stop_loss_pct?: number
+  take_profit_pct?: number
+  size_fraction?: number
+  reason_codes?: string[]
+  rr_soft_action?: string
+  threshold?: number
+}
+
+/** Per-timeframe stance from MTF policy. */
+export interface TfStance {
+  tf_key?: string
+  resolution?: string
+  local_signal?: string
+  direction?: string
+  path_edge?: number
+  long_edge?: number
+  short_edge?: number
+  winning_edge?: number
+  size_scale?: number
+  threshold?: number
+  vol_regime?: string
+  regime?: string
+  confidence?: number
+  quality?: string
+  risk?: string
+  mfe?: number
+  mae?: number
+}
+
 export interface ModelConsensus {
   model_name: string
   signal: SignalType
@@ -203,6 +247,18 @@ export interface Signal {
   regime?: string
   /** Transformer path asymmetry (mfe - mae). */
   path_edge?: number
+  /** Direction-aware edges from MTF / execution_plan. */
+  long_edge?: number
+  short_edge?: number
+  winning_edge?: number
+  primary_tf?: string
+  transformer_vol_regime?: string
+  decision_path?: string
+  /** Path SL/TP + sizing plan from transformer_mtf. */
+  execution_plan?: ExecutionPlan
+  /** Per-TF stances keyed by tf_5m … tf_2h. */
+  multi_tf_predictions?: Record<string, TfStance>
+  cross_tf_summary?: Record<string, unknown>
   /** v43: decision threshold. */
   threshold?: number
   /** v43: orchestrator/post-threshold gate reason when HOLD. */

@@ -2,8 +2,11 @@ import { describe, expect, it } from '@jest/globals'
 
 import {
   isHoldNonActionableDisplay,
+  isTransformerMtfPath,
+  resolveConfidenceBand,
   resolveDisplayConfidence,
   resolvePolicyEntryPercent,
+  resolveReasonCodes,
   resolveSignalEntryMetrics,
   resolveTradeScore,
 } from '@/utils/signalConfidence'
@@ -114,6 +117,15 @@ describe('resolveSignalEntryMetrics', () => {
     expect(m?.policyEntryPercent).toBe(0)
     expect(m?.showSplitConfidence).toBe(false)
   })
+
+  it('hides trade score on transformer_mtf path', () => {
+    const m = resolveSignalEntryMetrics({
+      confidence: 0.5,
+      trade_score: 90,
+      decision_path: 'transformer_mtf',
+    } as Parameters<typeof resolveSignalEntryMetrics>[0])
+    expect(m?.tradeScore).toBeUndefined()
+  })
 })
 
 describe('isHoldNonActionableDisplay', () => {
@@ -125,5 +137,48 @@ describe('isHoldNonActionableDisplay', () => {
     expect(
       isHoldNonActionableDisplay({ signal: 'BUY', is_actionable_entry: true })
     ).toBe(false)
+  })
+})
+
+describe('resolveConfidenceBand', () => {
+  it('uses size_scale from execution_plan for reduced band', () => {
+    const band = resolveConfidenceBand({
+      signal: 'BUY',
+      confidence: 0.62,
+      is_actionable_entry: true,
+      execution_plan: { size_scale: 0.7, size_fraction: 0.42, rr_soft_action: 'reduce_size' },
+    })
+    expect(band.band).toBe('reduced')
+    expect(band.sizeScale).toBe(0.7)
+    expect(band.rrSoftAction).toBe('reduce_size')
+  })
+
+  it('returns full when size_scale is 1', () => {
+    const band = resolveConfidenceBand({
+      signal: 'BUY',
+      confidence: 0.8,
+      execution_plan: { size_scale: 1, size_fraction: 0.6 },
+    })
+    expect(band.band).toBe('full')
+  })
+
+  it('returns hold for HOLD signal', () => {
+    expect(resolveConfidenceBand({ signal: 'HOLD', confidence: 0.2 }).band).toBe('hold')
+  })
+})
+
+describe('isTransformerMtfPath / resolveReasonCodes', () => {
+  it('detects transformer_mtf decision_path', () => {
+    expect(isTransformerMtfPath({ decision_path: 'transformer_mtf' })).toBe(true)
+    expect(isTransformerMtfPath({ decision_path: 'legacy' })).toBe(false)
+  })
+
+  it('prefers execution_plan reason codes', () => {
+    expect(
+      resolveReasonCodes({
+        policy_reason_codes: ['a'],
+        execution_plan: { reason_codes: ['path_rr_reduce_size', 'mtf_aligned'] },
+      })
+    ).toEqual(['path_rr_reduce_size', 'mtf_aligned'])
   })
 })

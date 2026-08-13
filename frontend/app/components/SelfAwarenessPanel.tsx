@@ -22,6 +22,10 @@ export function SelfAwarenessPanel({ introspection, reflection }: SelfAwarenessP
     return null
   }
 
+  const transformerPath =
+    introspection?.policy_mode === 'transformer_mtf' ||
+    String(introspection?.policy_mode || '').includes('transformer')
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -43,7 +47,7 @@ export function SelfAwarenessPanel({ introspection, reflection }: SelfAwarenessP
               <li>
                 Agent state: <span className="text-foreground">{introspection.agent_state}</span>
               </li>
-              {introspection.trade_score != null && (
+              {!transformerPath && introspection.trade_score != null && (
                 <li>
                   Trade score:{' '}
                   <span className="text-foreground">
@@ -54,12 +58,17 @@ export function SelfAwarenessPanel({ introspection, reflection }: SelfAwarenessP
                   </span>
                 </li>
               )}
+              {!transformerPath && introspection.thesis_signal && (
+                <li>
+                  Thesis: <span className="text-foreground">{introspection.thesis_signal}</span>
+                </li>
+              )}
               {introspection.v43_regime && (
                 <li>
                   Regime: <span className="text-foreground">{introspection.v43_regime}</span>
                 </li>
               )}
-              {introspection.v43_gate_reject && (
+              {!transformerPath && introspection.v43_gate_reject && (
                 <li>
                   Gate reject: <span className="text-foreground">{introspection.v43_gate_reject}</span>
                 </li>
@@ -80,7 +89,7 @@ export function SelfAwarenessPanel({ introspection, reflection }: SelfAwarenessP
             </ul>
             {introspection.policy_reason_codes?.length > 0 && (
               <div className="flex flex-wrap gap-1 pt-1">
-                {introspection.policy_reason_codes.slice(0, 6).map((code) => (
+                {introspection.policy_reason_codes.slice(0, 8).map((code) => (
                   <Badge key={code} variant="outline" className="text-[10px] font-normal">
                     {code}
                   </Badge>

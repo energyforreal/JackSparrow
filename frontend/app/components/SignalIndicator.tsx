@@ -8,7 +8,12 @@ import { normalizeConfidenceToPercent } from '@/utils/formatters'
 import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
 import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
-import { resolveDecisionReasoning } from '@/utils/signalConfidence'
+import {
+  isTransformerMtfPath,
+  resolveConfidenceBand,
+  resolveDecisionReasoning,
+  resolveReasonCodes,
+} from '@/utils/signalConfidence'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
@@ -49,6 +54,17 @@ const getSignalIcon = (signal: SignalType) => {
   }
 }
 
+const bandBadgeVariant = (band: string) => {
+  if (band === 'full') return 'default' as const
+  if (band === 'reduced') return 'secondary' as const
+  return 'outline' as const
+}
+
+function formatEdge(value: number | undefined | null): string | null {
+  if (value == null || !Number.isFinite(Number(value))) return null
+  return Number(value).toFixed(5)
+}
+
 export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalIndicatorProps) {
   if (!signal) {
     return (
@@ -67,48 +83,122 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
     )
   }
 
+  const band = resolveConfidenceBand(signal)
+  const reasonCodes = resolveReasonCodes(signal)
+  const transformerPath = isTransformerMtfPath(signal)
+  const plan = signal.execution_plan
+  const longEdge = formatEdge(signal.long_edge ?? plan?.long_edge)
+  const shortEdge = formatEdge(signal.short_edge ?? plan?.short_edge)
+  const winningEdge = formatEdge(signal.winning_edge ?? plan?.winning_edge)
+  const threshold = formatEdge(signal.threshold ?? plan?.threshold)
+  const pathEdge = formatEdge(signal.path_edge)
+  const hasEconomics =
+    longEdge != null ||
+    shortEdge != null ||
+    winningEdge != null ||
+    threshold != null ||
+    pathEdge != null ||
+    Boolean(signal.v43_gate_reject)
+  const showThesis =
+    !transformerPath &&
+    Boolean(signal.thesis_signal ?? signal.agent_introspection?.thesis_signal)
+
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Trading Signal</CardTitle>
-          {signal.regime && (
-            <Badge variant="outline" className="text-xs font-normal capitalize">
-              {signal.regime} regime
-            </Badge>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {(signal.regime || signal.transformer_vol_regime) && (
+              <Badge variant="outline" className="text-xs font-normal capitalize">
+                {signal.regime || signal.transformer_vol_regime} regime
+              </Badge>
+            )}
+            {signal.primary_tf && (
+              <Badge variant="outline" className="text-xs font-normal">
+                {signal.primary_tf.replace(/^tf_/, '')}
+              </Badge>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex items-center gap-4">
-          {(() => {
-            const isStrong =
-              signal.signal === 'STRONG_BUY' || signal.signal === 'STRONG_SELL'
-            return (
-              <span className="relative inline-flex rounded-md">
-                {isStrong && (
-                  <span
-                    className="absolute inset-0 rounded-md animate-ping opacity-30 bg-current"
-                    aria-hidden
-                  />
-                )}
-                <Badge
-                  className={cn(
-                    'relative px-4 py-2 text-base flex items-center gap-1.5',
-                    getSignalBadgeClasses(signal.signal)
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <div className="flex flex-wrap items-center gap-3">
+            {(() => {
+              const isStrong =
+                signal.signal === 'STRONG_BUY' || signal.signal === 'STRONG_SELL'
+              return (
+                <span className="relative inline-flex rounded-md">
+                  {isStrong && (
+                    <span
+                      className="absolute inset-0 rounded-md animate-ping opacity-30 bg-current"
+                      aria-hidden
+                    />
                   )}
-                  aria-label={`Trading signal: ${signal.signal}`}
-                >
-                  {getSignalIcon(signal.signal)}
-                  {signal.signal ? signal.signal.toString().replace('_', ' ') : 'Unknown'}
-                </Badge>
-              </span>
-            )
-          })()}
+                  <Badge
+                    className={cn(
+                      'relative px-4 py-2 text-base flex items-center gap-1.5',
+                      getSignalBadgeClasses(signal.signal)
+                    )}
+                    aria-label={`Trading signal: ${signal.signal}`}
+                  >
+                    {getSignalIcon(signal.signal)}
+                    {signal.signal ? signal.signal.toString().replace('_', ' ') : 'Unknown'}
+                  </Badge>
+                </span>
+              )
+            })()}
+            <Badge variant={bandBadgeVariant(band.band)} className="text-xs font-normal">
+              {band.label}
+            </Badge>
+            {band.rrSoftAction && (
+              <Badge variant="outline" className="text-xs font-normal">
+                R:R {band.rrSoftAction.replace(/_/g, ' ')}
+              </Badge>
+            )}
+          </div>
           <div className="flex-1 min-w-0">
             <SignalEntryMetricsBlock signal={signal} />
           </div>
         </div>
+
+        {(band.sizeScale != null || band.sizeFraction != null) && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs">
+            {band.sizeScale != null && (
+              <div>
+                <p className="text-muted-foreground">Size scale</p>
+                <p className="font-medium tabular-nums text-foreground">
+                  {(band.sizeScale * 100).toFixed(0)}%
+                </p>
+              </div>
+            )}
+            {band.sizeFraction != null && (
+              <div>
+                <p className="text-muted-foreground">Size fraction</p>
+                <p className="font-medium tabular-nums text-foreground">
+                  {(band.sizeFraction * 100).toFixed(1)}%
+                </p>
+              </div>
+            )}
+            {plan?.stop_loss_pct != null && Number.isFinite(plan.stop_loss_pct) && (
+              <div>
+                <p className="text-muted-foreground">Stop %</p>
+                <p className="font-medium tabular-nums text-foreground">
+                  {(Number(plan.stop_loss_pct) * 100).toFixed(2)}%
+                </p>
+              </div>
+            )}
+            {plan?.take_profit_pct != null && Number.isFinite(plan.take_profit_pct) && (
+              <div>
+                <p className="text-muted-foreground">Take %</p>
+                <p className="font-medium tabular-nums text-foreground">
+                  {(Number(plan.take_profit_pct) * 100).toFixed(2)}%
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {modelEdge && modelEdge.confidence > 0 && (
           <div className="rounded-md border border-dashed border-border/60 px-3 py-2">
@@ -126,25 +216,37 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
-        {/* v43 Signal Economics */}
-        {(signal.path_edge != null ||
-          signal.threshold != null ||
-          Boolean(signal.v43_gate_reject)) && (
+        {hasEconomics && (
           <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
-            <p className="font-medium text-foreground">Signal economics</p>
+            <p className="font-medium text-foreground">Path economics</p>
             <ul className="list-inside list-disc space-y-0.5 tabular-nums">
-              {signal.path_edge != null && Number.isFinite(Number(signal.path_edge)) && (
+              {longEdge != null && (
                 <li>
-                  Path edge (MFE−MAE):{' '}
-                  <span className="text-foreground font-medium">
-                    {Number(signal.path_edge).toFixed(5)}
-                  </span>
+                  Long edge:{' '}
+                  <span className="text-foreground font-medium">{longEdge}</span>
                 </li>
               )}
-              {signal.threshold != null && Number.isFinite(Number(signal.threshold)) && (
+              {shortEdge != null && (
                 <li>
-                  Threshold:{' '}
-                  <span className="text-foreground">{Number(signal.threshold).toFixed(5)}</span>
+                  Short edge:{' '}
+                  <span className="text-foreground font-medium">{shortEdge}</span>
+                </li>
+              )}
+              {winningEdge != null && (
+                <li>
+                  Winning edge:{' '}
+                  <span className="text-foreground font-medium">{winningEdge}</span>
+                </li>
+              )}
+              {longEdge == null && shortEdge == null && pathEdge != null && (
+                <li>
+                  Path edge:{' '}
+                  <span className="text-foreground font-medium">{pathEdge}</span>
+                </li>
+              )}
+              {threshold != null && (
+                <li>
+                  Threshold: <span className="text-foreground">{threshold}</span>
                 </li>
               )}
               {signal.v43_gate_reject != null && signal.v43_gate_reject !== '' && (
@@ -157,18 +259,34 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
+        {reasonCodes.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {reasonCodes.map((code) => (
+              <Badge key={code} variant="outline" className="text-[10px] font-normal">
+                {code}
+              </Badge>
+            ))}
+          </div>
+        )}
+
         {signal.agent_introspection && (
           <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
             <p className="font-medium text-foreground text-xs">Agent context</p>
             <p>
-              {signal.agent_introspection.policy_mode} · thesis{' '}
-              {signal.thesis_signal ?? signal.agent_introspection.thesis_signal ?? '—'} ·
-              memory {signal.agent_introspection.memory_context_count}
+              {signal.agent_introspection.policy_mode}
+              {showThesis && (
+                <>
+                  {' '}
+                  · thesis{' '}
+                  {signal.thesis_signal ?? signal.agent_introspection.thesis_signal}
+                </>
+              )}
+              {' '}
+              · memory {signal.agent_introspection.memory_context_count}
             </p>
           </div>
         )}
 
-        {/* Latest reflection */}
         {(lastReflection ?? signal.reflection_snapshot) && (
           <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground space-y-0.5">
             <p className="font-medium text-foreground text-xs">Latest reflection</p>

@@ -84,6 +84,8 @@ type ConfidenceCarrier = {
   agent_introspection?: {
     trade_score?: number | null
     trade_score_pass?: boolean | null
+    policy_mode?: string | null
+    policy_reason_codes?: string[] | null
   } | null
 }
 
@@ -194,6 +196,143 @@ export function isHoldNonActionableDisplay(
   return signal.is_actionable_entry !== true
 }
 
+export type ConfidenceBand = 'hold' | 'reduced' | 'full'
+
+export interface ConfidenceBandResult {
+  band: ConfidenceBand
+  label: string
+  sizeScale?: number
+  sizeFraction?: number
+  rrSoftAction?: string
+}
+
+type PlanCarrier = ConfidenceCarrier & {
+  decision_path?: string | null
+  execution_plan?: {
+    size_scale?: number | null
+    size_fraction?: number | null
+    rr_soft_action?: string | null
+    reason_codes?: string[] | null
+    threshold?: number | null
+    long_edge?: number | null
+    short_edge?: number | null
+    winning_edge?: number | null
+    stop_loss_pct?: number | null
+    take_profit_pct?: number | null
+    favorable_pct?: number | null
+    adverse_pct?: number | null
+  } | null
+  long_edge?: number | null
+  short_edge?: number | null
+  winning_edge?: number | null
+  threshold?: number | null
+  policy_reason_codes?: string[] | null
+  thesis_signal?: string | null
+}
+
+const HOLD_FLOOR = 0.4
+const FULL_FLOOR = 0.55
+
+/**
+ * Resolve soft confidence band for transformer_mtf (0.40 HOLD / 0.40–0.55 reduced / ≥0.55 full).
+ * Prefers execution_plan.size_scale when present.
+ */
+export function resolveConfidenceBand(
+  signal: PlanCarrier | null | undefined,
+  holdFloor = HOLD_FLOOR,
+  fullFloor = FULL_FLOOR
+): ConfidenceBandResult {
+  if (!signal) {
+    return { band: 'hold', label: 'HOLD band' }
+  }
+  const sig = String(signal.signal || '').toUpperCase()
+  const plan = signal.execution_plan
+  const sizeScale =
+    plan?.size_scale != null && Number.isFinite(Number(plan.size_scale))
+      ? Number(plan.size_scale)
+      : undefined
+  const sizeFraction =
+    plan?.size_fraction != null && Number.isFinite(Number(plan.size_fraction))
+      ? Number(plan.size_fraction)
+      : undefined
+  const rrSoftAction =
+    plan?.rr_soft_action && plan.rr_soft_action !== 'none'
+      ? String(plan.rr_soft_action)
+      : undefined
+
+  if (sig === 'HOLD' || signal.is_actionable_entry === false) {
+    return {
+      band: 'hold',
+      label: 'Below hold floor / no entry',
+      sizeScale: 0,
+      sizeFraction: 0,
+      rrSoftAction,
+    }
+  }
+
+  if (sizeScale != null) {
+    if (sizeScale < 0.999) {
+      return {
+        band: 'reduced',
+        label: 'Reduced size',
+        sizeScale,
+        sizeFraction,
+        rrSoftAction,
+      }
+    }
+    return {
+      band: 'full',
+      label: 'Full size',
+      sizeScale,
+      sizeFraction,
+      rrSoftAction,
+    }
+  }
+
+  const policy01 = resolvePolicyEntryPercent(signal) / 100
+  if (policy01 < holdFloor) {
+    return { band: 'hold', label: 'Below hold floor', sizeScale: 0, sizeFraction: 0 }
+  }
+  if (policy01 < fullFloor) {
+    return {
+      band: 'reduced',
+      label: 'Reduced-size band',
+      sizeScale,
+      sizeFraction,
+      rrSoftAction,
+    }
+  }
+  return {
+    band: 'full',
+    label: 'Full-size band',
+    sizeScale,
+    sizeFraction,
+    rrSoftAction,
+  }
+}
+
+/** True when thesis / trade-score UI slots should be hidden (transformer_mtf path). */
+export function isTransformerMtfPath(
+  signal: PlanCarrier | null | undefined
+): boolean {
+  if (!signal) return false
+  if (signal.decision_path === 'transformer_mtf') return true
+  const mode = signal.agent_introspection?.policy_mode
+  return mode === 'transformer_mtf'
+}
+
+export function resolveReasonCodes(
+  signal: PlanCarrier | null | undefined,
+  limit = 6
+): string[] {
+  if (!signal) return []
+  const fromPlan = signal.execution_plan?.reason_codes
+  const fromPolicy = signal.policy_reason_codes
+  const fromIntro = signal.agent_introspection?.policy_reason_codes
+  const codes = (fromPlan?.length ? fromPlan : fromPolicy?.length ? fromPolicy : fromIntro) ?? []
+  return codes.filter(Boolean).slice(0, limit)
+}
+
 /** Full entry vs display breakdown for the Trading Signal card. */
 export function resolveSignalEntryMetrics(
   signal: ConfidenceCarrier | null | undefined
@@ -207,7 +346,9 @@ export function resolveSignalEntryMetrics(
     policyEntryPercent = 0
     reasoningPercent = 0
   }
-  const tradeScore = resolveTradeScore(signal)
+  const tradeScore = isTransformerMtfPath(signal as PlanCarrier)
+    ? undefined
+    : resolveTradeScore(signal)
   const showSplitConfidence =
     !holdDim &&
     display.source === 'reasoning' &&

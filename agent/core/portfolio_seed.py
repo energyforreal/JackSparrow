@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import structlog
 
-from agent.core.config import settings
 from agent.core.fx_rate import resolve_usdinr_rate
 
 logger = structlog.get_logger()
@@ -47,7 +46,7 @@ async def seed_risk_manager_portfolio_from_exchange(
     risk_manager: Any,
     symbol: str,
 ) -> Optional[float]:
-    """Set ``risk_manager.portfolio.total_value`` (USD) from exchange wallet when possible."""
+    """Set ``risk_manager.portfolio`` cash/book equity (USD) from exchange wallet when possible."""
     if execution_module is None or risk_manager is None:
         return None
     portfolio = getattr(risk_manager, "portfolio", None)
@@ -77,11 +76,19 @@ async def seed_risk_manager_portfolio_from_exchange(
     if equity_usd <= 0:
         return None
     prev = float(getattr(portfolio, "total_value", 0.0) or 0.0)
-    portfolio.total_value = equity_usd
+    # ``total_value`` is a read-only computed property (cash + positions).
+    portfolio.cash_balance = float(equity_usd)
+    if hasattr(portfolio, "_update_portfolio_value"):
+        portfolio._update_portfolio_value()
+    else:
+        portfolio.current_portfolio_value = float(equity_usd)
+        peak = float(getattr(portfolio, "peak_portfolio_value", 0.0) or 0.0)
+        portfolio.peak_portfolio_value = max(peak, float(equity_usd))
     logger.info(
         "portfolio_seed_from_exchange",
         symbol=symbol,
         previous_total_value_usd=prev,
         seeded_total_value_usd=equity_usd,
+        seeded_cash_balance_usd=float(getattr(portfolio, "cash_balance", equity_usd)),
     )
     return equity_usd

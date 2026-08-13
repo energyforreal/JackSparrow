@@ -949,31 +949,46 @@ class Settings(BaseSettings):
         default=600,
         env="JACKSPARROW_V43_CANDLES_5M",
         ge=50,
-        description="Number of 5m candles to fetch for MTF market frames.",
+        description=(
+            "Number of 5m candles to fetch for MTF market frames. "
+            "Need >= scale_period(96)+window_len+buffer (~274); 600 keeps headroom."
+        ),
     )
     jacksparrow_v43_candles_15m: int = Field(
-        default=400,
+        default=500,
         env="JACKSPARROW_V43_CANDLES_15M",
         ge=50,
-        description="Number of 15m candles for MTF market frames.",
+        description=(
+            "Number of 15m candles for MTF market frames. "
+            "Need >= scale_period(96,15)+128+50 (~466) after feature dropna."
+        ),
     )
     jacksparrow_v43_candles_1h: int = Field(
-        default=300,
+        default=1400,
         env="JACKSPARROW_V43_CANDLES_1H",
         ge=48,
-        description="Number of 1h candles for MTF market frames.",
+        description=(
+            "Number of 1h candles for MTF market frames. "
+            "Need >= scale_period(96,60)+128+50 (~1330); requires paginated fetch."
+        ),
     )
     transformer_candles_30m: int = Field(
-        default=300,
+        default=800,
         env="TRANSFORMER_CANDLES_30M",
         ge=50,
-        description="Number of 30m candles for per-TF transformer inference.",
+        description=(
+            "Number of 30m candles for per-TF transformer inference. "
+            "Need >= scale_period(96,30)+128+50 (~754) after feature dropna."
+        ),
     )
     transformer_candles_2h: int = Field(
-        default=200,
+        default=2600,
         env="TRANSFORMER_CANDLES_2H",
         ge=48,
-        description="Number of 2h candles for per-TF transformer inference.",
+        description=(
+            "Number of 2h candles for per-TF transformer inference. "
+            "Need >= scale_period(96,120)+128+50 (~2482); requires paginated fetch."
+        ),
     )
     jacksparrow_v43_candles_oi: int = Field(
         default=300,

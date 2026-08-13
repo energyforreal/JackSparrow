@@ -126,6 +126,52 @@ export const AgentIntrospectionSnapshotSchema = z.object({
   limits: z.record(z.string(), z.unknown()).optional(),
 });
 
+export const ExecutionPlanSchema = z
+  .object({
+    signal: z.string().optional(),
+    confidence: z.number().optional(),
+    size_scale: z.number().optional(),
+    long_edge: z.number().optional(),
+    short_edge: z.number().optional(),
+    winning_edge: z.number().optional(),
+    primary_tf: z.string().optional(),
+    mfe: z.number().optional(),
+    mae: z.number().optional(),
+    favorable_pct: z.number().optional(),
+    adverse_pct: z.number().optional(),
+    future_volatility: z.number().optional(),
+    vol_regime: z.string().optional(),
+    stop_loss_pct: z.number().optional(),
+    take_profit_pct: z.number().optional(),
+    size_fraction: z.number().optional(),
+    reason_codes: z.array(z.string()).optional(),
+    rr_soft_action: z.string().optional(),
+    threshold: z.number().optional(),
+  })
+  .passthrough()
+
+export const TfStanceSchema = z
+  .object({
+    tf_key: z.string().optional(),
+    resolution: z.string().optional(),
+    local_signal: z.string().optional(),
+    direction: z.string().optional(),
+    path_edge: z.number().optional(),
+    long_edge: z.number().optional(),
+    short_edge: z.number().optional(),
+    winning_edge: z.number().optional(),
+    size_scale: z.number().optional(),
+    threshold: z.number().optional(),
+    vol_regime: z.string().optional(),
+    regime: z.string().optional(),
+    confidence: z.number().optional(),
+    quality: z.string().optional(),
+    risk: z.string().optional(),
+    mfe: z.number().optional(),
+    mae: z.number().optional(),
+  })
+  .passthrough()
+
 export const ReflectionSnapshotSchema = z.object({
   version: z.string(),
   timestamp: z.string(),
@@ -185,6 +231,18 @@ export const PredictResponseSchema = z
     ml_evidence_snapshot: z.record(z.string(), z.unknown()).optional(),
     memory_context_id: z.string().optional(),
     reflection_snapshot: ReflectionSnapshotSchema.optional(),
+    execution_plan: ExecutionPlanSchema.optional(),
+    long_edge: z.number().optional(),
+    short_edge: z.number().optional(),
+    winning_edge: z.number().optional(),
+    primary_tf: z.string().optional(),
+    transformer_vol_regime: z.string().optional(),
+    decision_path: z.string().optional(),
+    multi_tf_predictions: z.record(z.string(), TfStanceSchema).optional(),
+    cross_tf_summary: z.record(z.string(), z.unknown()).optional(),
+    path_edge: z.number().optional(),
+    threshold: z.number().optional(),
+    policy_reason_codes: z.array(z.string()).optional(),
   })
   .describe('Predict response')
 

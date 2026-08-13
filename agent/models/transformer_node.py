@@ -217,13 +217,28 @@ class TransformerModelNode(MCPModelNode):
         except Exception as exc:
             self._error_count += 1
             self._health = "degraded"
-            logger.error(
-                "transformer_predict_failed",
-                model_name=self._model_name,
-                resolution=self._resolution,
-                error=str(exc),
-                exc_info=True,
-            )
+            err = str(exc)
+            log_kwargs: Dict[str, Any] = {
+                "model_name": self._model_name,
+                "resolution": self._resolution,
+                "error": err,
+                "exc_info": True,
+            }
+            # Surface OHLCV vs post-dropna feature depth when window build fails.
+            if "feature rows" in err and "fetched_bars=" in err:
+                try:
+                    # "... got 111 (fetched_bars=400, resolution=15m)"
+                    after_got = err.split("got", 1)[1]
+                    finite = int(after_got.strip().split()[0])
+                    fetched = int(err.split("fetched_bars=", 1)[1].split(",", 1)[0])
+                    log_kwargs["finite_feature_rows"] = finite
+                    log_kwargs["fetched_bars"] = fetched
+                    log_kwargs["window_len"] = int(
+                        self._feature_config.get("window_len") or 128
+                    )
+                except (IndexError, ValueError, TypeError):
+                    pass
+            logger.error("transformer_predict_failed", **log_kwargs)
             raise
 
     def _resolve_ohlcv_frame(self, ctx: Dict[str, Any]) -> pd.DataFrame:
@@ -264,6 +279,13 @@ class TransformerModelNode(MCPModelNode):
         feature_cols = list(self._feature_config.get("feature_cols") or FEATURE_COLS)
         window_len = int(self._feature_config.get("window_len") or 128)
         values = feat_df[feature_cols].values.astype(np.float32)
+        fetched_bars = int(len(df_ohlcv))
+        finite_feature_rows = int(values.shape[0])
+        if finite_feature_rows < window_len:
+            raise ValueError(
+                f"Need at least {window_len} feature rows, got {finite_feature_rows} "
+                f"(fetched_bars={fetched_bars}, resolution={self._resolution})"
+            )
         window = build_inference_window(values, window_len=window_len, feature_cols=feature_cols)
 
         continuous_z, regime_logits = self._session.run(None, {"window": window})

@@ -6,6 +6,7 @@ import type { Signal } from '@/types'
 import { formatConfidence } from '@/utils/formatters'
 import {
   isHoldNonActionableDisplay,
+  isTransformerMtfPath,
   resolveDisplayConfidence,
   resolveSignalEntryMetrics,
 } from '@/utils/signalConfidence'
@@ -26,10 +27,11 @@ export function SignalEntryMetricsBlock({
   if (!metrics) return null
 
   const holdDim = isHoldNonActionableDisplay(signal)
+  const transformerPath = isTransformerMtfPath(signal)
 
   const reasoningLabel =
     display.source === 'reasoning' ? 'Reasoning confidence' : 'Signal confidence'
-  const policyLabel = 'Policy entry confidence'
+  const policyLabel = 'Policy confidence'
 
   if (compact) {
     return (
@@ -42,10 +44,10 @@ export function SignalEntryMetricsBlock({
           <p>
             <span className="font-medium text-foreground">{policyLabel}:</span>{' '}
             {formatConfidence(metrics.policyEntryPercent)}
-            <span className="ml-1 opacity-80">(used for entry gating)</span>
+            <span className="ml-1 opacity-80">(decision / sizing)</span>
           </p>
         )}
-        {metrics.tradeScore != null && (
+        {!transformerPath && metrics.tradeScore != null && (
           <p className="tabular-nums">
             <span className="font-medium text-foreground">Trade score:</span>{' '}
             {Math.round(metrics.tradeScore.score)}
@@ -82,7 +84,7 @@ export function SignalEntryMetricsBlock({
         </div>
         <ConfidenceProgress value={metrics.reasoningPercent} className="h-2" />
         <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
-          Calibrated across reasoning steps (may differ from execution gates).
+          Calibrated across reasoning steps (may differ from policy confidence).
         </p>
       </div>
 
@@ -105,10 +107,10 @@ export function SignalEntryMetricsBlock({
           className="h-1.5 opacity-90"
         />
         <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-          Agent policy / ML candidate — authoritative for DecisionReady and risk
-          approval.
+          Soft bands: &lt;40% HOLD · 40–55% reduced size · ≥55% full size. Soft R:R may
+          strip STRONG or cut size without forcing HOLD.
         </p>
-        {metrics.tradeScore != null && (
+        {!transformerPath && metrics.tradeScore != null && (
           <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-border/50 text-xs">
             <span className="text-muted-foreground">Trade score</span>
             <span className="font-semibold text-foreground tabular-nums text-sm">
@@ -123,10 +125,6 @@ export function SignalEntryMetricsBlock({
                 {metrics.tradeScore.passed ? 'passed' : 'not passed'}
               </Badge>
             )}
-            <span className="text-[10px] text-muted-foreground w-full">
-              Confluence gate (thesis + v43 gates + structure); primary adoption
-              signal besides policy %.
-            </span>
           </div>
         )}
       </div>

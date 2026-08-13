@@ -96,4 +96,58 @@ describe('mergeSignalPayload', () => {
 
     expect(merged.v43_gate_reject).toBe('regime_unfavorable')
   })
+
+  it('clears sticky v43_gate_reject on actionable signal that omits it', () => {
+    const prev: Signal = {
+      signal: 'HOLD',
+      confidence: 0.4,
+      v43_gate_reject: 'path_edge_below_threshold',
+    }
+    const merged = mergeSignalPayload(prev, {
+      signal: 'BUY',
+      confidence: 0.62,
+      is_actionable_entry: true,
+    })
+    expect(merged.v43_gate_reject).toBeUndefined()
+  })
+
+  it('merges execution_plan fields from patch', () => {
+    const prev: Signal = {
+      signal: 'BUY',
+      confidence: 0.5,
+      execution_plan: {
+        size_scale: 0.5,
+        size_fraction: 0.3,
+        rr_soft_action: 'none',
+      },
+    }
+    const merged = mergeSignalPayload(prev, {
+      signal: 'BUY',
+      confidence: 0.55,
+      execution_plan: {
+        size_scale: 0.7,
+        stop_loss_pct: 0.004,
+        take_profit_pct: 0.008,
+        rr_soft_action: 'reduce_size',
+      },
+      long_edge: 0.01,
+      decision_path: 'transformer_mtf',
+    })
+    expect(merged.execution_plan?.size_scale).toBe(0.7)
+    expect(merged.execution_plan?.size_fraction).toBe(0.3)
+    expect(merged.execution_plan?.rr_soft_action).toBe('reduce_size')
+    expect(merged.execution_plan?.stop_loss_pct).toBe(0.004)
+    expect(merged.long_edge).toBe(0.01)
+    expect(merged.decision_path).toBe('transformer_mtf')
+  })
+
+  it('drops stale execution_plan on HOLD patch without plan', () => {
+    const prev: Signal = {
+      signal: 'BUY',
+      confidence: 0.7,
+      execution_plan: { size_scale: 1, size_fraction: 0.6 },
+    }
+    const merged = mergeSignalPayload(prev, { signal: 'HOLD', confidence: 0 })
+    expect(merged.execution_plan).toBeUndefined()
+  })
 })

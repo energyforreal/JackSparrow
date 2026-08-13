@@ -192,8 +192,8 @@ export function Dashboard() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            {/* Real-Time Price, Agent Status, Signal Indicator, Health Monitor */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Real-Time Price, Agent Status, Health Monitor */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <ErrorBoundary>
                 <RealTimePrice
                   symbol="BTCUSD"
@@ -211,22 +211,24 @@ export function Dashboard() {
                 />
               </ErrorBoundary>
               <ErrorBoundary>
-                <div className="space-y-1">
-                  <SignalIndicator
-                    signal={signal || undefined}
-                    lastReflection={lastReflection}
-                    modelEdge={modelEdge}
-                  />
-                  <p className="text-[10px] text-muted-foreground text-center px-1">
-                    Press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">P</kbd> for
-                    prediction
-                  </p>
-                </div>
-              </ErrorBoundary>
-              <ErrorBoundary>
                 <HealthMonitor health={health || undefined} />
               </ErrorBoundary>
             </div>
+
+            {/* Full-width trading signal (direction, band, size, why) */}
+            <ErrorBoundary>
+              <div className="space-y-1">
+                <SignalIndicator
+                  signal={signal || undefined}
+                  lastReflection={lastReflection}
+                  modelEdge={modelEdge}
+                />
+                <p className="text-[10px] text-muted-foreground text-center px-1">
+                  Press <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">P</kbd> for
+                  prediction
+                </p>
+              </div>
+            </ErrorBoundary>
 
             {/* Portfolio Summary */}
             <ErrorBoundary>
@@ -309,14 +311,22 @@ export function Dashboard() {
                   signal?.final_confidence ?? signal?.display_confidence ?? signal?.confidence
                 }
                 isLoading={isLoading}
-                v43PathEdge={
+                pathEdge={
                   signal?.path_edge != null ? Number(signal.path_edge) : undefined
                 }
-                v43Threshold={
+                threshold={
                   signal?.threshold != null ? Number(signal.threshold) : undefined
                 }
-                v43GateReject={
+                gateReject={
                   signal?.v43_gate_reject ?? signal?.agent_introspection?.v43_gate_reject
+                }
+                multiTfPredictions={signal?.multi_tf_predictions}
+                crossTfSummary={signal?.cross_tf_summary}
+                longEdge={
+                  signal?.long_edge != null ? Number(signal.long_edge) : undefined
+                }
+                shortEdge={
+                  signal?.short_edge != null ? Number(signal.short_edge) : undefined
                 }
               />
             </ErrorBoundary>
@@ -324,19 +334,23 @@ export function Dashboard() {
 
           {/* System Tab */}
           <TabsContent value="system" className="space-y-6">
-            {/* Health Monitor (detailed system view) */}
             <ErrorBoundary>
               <HealthMonitor health={health || undefined} />
             </ErrorBoundary>
-
-            {/* System Status Information */}
             <Card>
-              <CardContent className="pt-6">
-                <div className="text-center text-muted-foreground">
-                  <Settings className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p>System Health and Monitoring</p>
-                  <p className="text-sm mt-2">Comprehensive system status and diagnostics</p>
-                </div>
+              <CardContent className="pt-6 space-y-2 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">Transformer entry gates</p>
+                <p>
+                  Safety-only gates (stale data, price, margin, open position, risk, kill switch).
+                  Soft confidence bands and path R:R adjust size — they do not hard-HOLD entries
+                  the way legacy ADX/EMA feature filters did.
+                </p>
+                {signal?.decision_path && (
+                  <p className="text-xs">
+                    Decision path:{' '}
+                    <span className="font-mono text-foreground">{signal.decision_path}</span>
+                  </p>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

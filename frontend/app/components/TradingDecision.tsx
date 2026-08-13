@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Signal, SignalType, Trade } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatConfidence, formatCurrency, formatDateTime } from '@/utils/formatters'
+import { formatCurrency, formatDateTime } from '@/utils/formatters'
 import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
 import {
   parseFiniteNumber,
@@ -13,7 +13,11 @@ import {
   sideBadgeVariant,
 } from '@/utils/tradingDisplay'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
-import { resolveDecisionReasoning } from '@/utils/signalConfidence'
+import {
+  resolveConfidenceBand,
+  resolveDecisionReasoning,
+  resolveReasonCodes,
+} from '@/utils/signalConfidence'
 
 interface TradingDecisionProps {
   signal?: Signal | null
@@ -40,19 +44,37 @@ const getSignalBadgeClasses = (signal: SignalType) => {
   }
 }
 
-const getDecisionAction = (signal: SignalType): string => {
-  switch (signal) {
-    case 'STRONG_BUY':
-    case 'BUY':
-      return 'Enter Long Position'
-    case 'STRONG_SELL':
-    case 'SELL':
-      return 'Enter Short Position'
-    case 'HOLD':
-      return 'Wait for Better Opportunity'
-    default:
-      return 'No Action'
+const getDecisionAction = (signal: Signal): string => {
+  const sig = signal.signal
+  const band = resolveConfidenceBand(signal)
+  const codes = resolveReasonCodes(signal, 3)
+
+  if (sig === 'HOLD') {
+    if (codes.length > 0) {
+      return `No entry — ${codes[0].replace(/_/g, ' ')}`
+    }
+    return 'No entry — waiting (hold floor / safety / alignment)'
   }
+
+  const side =
+    sig === 'STRONG_BUY' || sig === 'BUY'
+      ? 'Long'
+      : sig === 'STRONG_SELL' || sig === 'SELL'
+        ? 'Short'
+        : 'Position'
+
+  if (band.band === 'reduced') {
+    return `Enter ${side} (reduced size)`
+  }
+  if (sig === 'STRONG_BUY' || sig === 'STRONG_SELL') {
+    return `Enter ${side} (strong)`
+  }
+  return `Enter ${side}`
+}
+
+const formatPct = (value: number | undefined | null): string | null => {
+  if (value == null || !Number.isFinite(Number(value))) return null
+  return `${(Number(value) * 100).toFixed(2)}%`
 }
 
 const formatDate = (date: Date | string) => {
@@ -89,6 +111,9 @@ export function TradingDecision({
     return formatCurrency(valueInr)
   }
 
+  const plan = hasSignal ? signal.execution_plan : undefined
+  const band = hasSignal ? resolveConfidenceBand(signal) : null
+
   return (
     <Card role="region" aria-label="Trading Decision Flow">
       <CardHeader>
@@ -101,10 +126,9 @@ export function TradingDecision({
         )}
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Current Decision */}
         <div className="space-y-3">
           <h3 className="text-sm font-semibold">Current Decision</h3>
-          
+
           {hasSignal ? (
             <div className="space-y-3 p-4 rounded-lg border bg-card">
               <div className="flex items-center gap-4">
@@ -116,13 +140,65 @@ export function TradingDecision({
                 >
                   {signal.signal.replace('_', ' ')}
                 </Badge>
-                <div className="flex-1">
-                  <div className="text-sm font-medium">
-                    {getDecisionAction(signal.signal)}
-                  </div>
+                <div className="flex-1 space-y-1">
+                  <div className="text-sm font-medium">{getDecisionAction(signal)}</div>
+                  {band && (
+                    <p className="text-xs text-muted-foreground">{band.label}</p>
+                  )}
                 </div>
               </div>
               <SignalEntryMetricsBlock signal={signal} compact />
+
+              {plan && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t text-xs">
+                  {plan.size_fraction != null && (
+                    <div>
+                      <p className="text-muted-foreground">Size fraction</p>
+                      <p className="font-medium tabular-nums">
+                        {(Number(plan.size_fraction) * 100).toFixed(1)}%
+                      </p>
+                    </div>
+                  )}
+                  {plan.size_scale != null && (
+                    <div>
+                      <p className="text-muted-foreground">Size scale</p>
+                      <p className="font-medium tabular-nums">
+                        {(Number(plan.size_scale) * 100).toFixed(0)}%
+                      </p>
+                    </div>
+                  )}
+                  {formatPct(plan.favorable_pct) && (
+                    <div>
+                      <p className="text-muted-foreground">Favorable</p>
+                      <p className="font-medium tabular-nums">{formatPct(plan.favorable_pct)}</p>
+                    </div>
+                  )}
+                  {formatPct(plan.adverse_pct) && (
+                    <div>
+                      <p className="text-muted-foreground">Adverse</p>
+                      <p className="font-medium tabular-nums">{formatPct(plan.adverse_pct)}</p>
+                    </div>
+                  )}
+                  {formatPct(plan.stop_loss_pct) && (
+                    <div>
+                      <p className="text-muted-foreground">Stop loss</p>
+                      <p className="font-medium tabular-nums">{formatPct(plan.stop_loss_pct)}</p>
+                    </div>
+                  )}
+                  {formatPct(plan.take_profit_pct) && (
+                    <div>
+                      <p className="text-muted-foreground">Take profit</p>
+                      <p className="font-medium tabular-nums">{formatPct(plan.take_profit_pct)}</p>
+                    </div>
+                  )}
+                  {plan.rr_soft_action && plan.rr_soft_action !== 'none' && (
+                    <div className="col-span-2 sm:col-span-3">
+                      <p className="text-muted-foreground">Soft R:R</p>
+                      <p className="font-medium">{plan.rr_soft_action.replace(/_/g, ' ')}</p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {signal.symbol && (
                 <div className="text-sm text-muted-foreground">
@@ -148,8 +224,6 @@ export function TradingDecision({
                   label="Decision time"
                 />
               )}
-
-
             </div>
           ) : (
             <div className="p-4 rounded-lg border bg-muted/50 space-y-3">
@@ -159,12 +233,10 @@ export function TradingDecision({
               <p className="text-xs text-muted-foreground mt-1">
                 Ensure backend and agent services are running.
               </p>
-              
             </div>
           )}
         </div>
 
-        {/* Recent Trade Connection */}
         {hasRecentTrade && (
           <div className="space-y-3 pt-2 border-t">
             <h3 className="text-sm font-semibold">Latest fill</h3>
@@ -232,7 +304,6 @@ export function TradingDecision({
             </div>
           </div>
         )}
-
       </CardContent>
     </Card>
   )

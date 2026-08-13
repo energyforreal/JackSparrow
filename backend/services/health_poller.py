@@ -59,22 +59,17 @@ class HealthPoller:
         logger.info("health_poller_stopped", service="backend")
 
     async def _poll_loop(self) -> None:
-        """Main polling loop (no broadcast; unified manager owns health/agent_state)."""
-        from backend.services.agent_service import agent_service
+        """Main polling loop (no broadcast; unified manager owns health/agent_state).
+
+        Intentionally does **not** call ``agent_service.get_agent_status()`` — that
+        duplicates ``_agent_state_sync_loop`` / health sync and drove WS churn.
+        This loop only refreshes model-serving heartbeats in Redis.
+        """
         from backend.services.model_service import model_service
         from backend.core.redis import set_model_health_heartbeat
         from backend.core.config import settings
 
         while self.running:
-            try:
-                await agent_service.get_agent_status()
-            except Exception as e:
-                logger.debug(
-                    "health_poller_poll_error",
-                    service="backend",
-                    error=str(e),
-                    message="Poll cycle failed, continuing",
-                )
             try:
                 health = await model_service.get_health()
                 ttl = getattr(settings, "model_health_ttl", 30)

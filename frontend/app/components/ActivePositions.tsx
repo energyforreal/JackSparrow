@@ -64,6 +64,8 @@ export function ActivePositions({
                   <TableHead>Lots</TableHead>
                   <TableHead>Entry</TableHead>
                   <TableHead>Mark</TableHead>
+                  <TableHead>SL</TableHead>
+                  <TableHead>TP</TableHead>
                   <TableHead>Liq.</TableHead>
                   <TableHead>PnL</TableHead>
                   <TableHead>Duration</TableHead>
@@ -89,6 +91,12 @@ export function ActivePositions({
                     </TableCell>
                     <TableCell>
                       <div className="h-4 bg-muted rounded-md w-20" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-16" />
+                    </TableCell>
+                    <TableCell>
+                      <div className="h-4 bg-muted rounded-md w-16" />
                     </TableCell>
                     <TableCell>
                       <div className="h-4 bg-muted rounded-md w-20" />
@@ -194,6 +202,8 @@ export function ActivePositions({
                 <TableHead>Lots</TableHead>
                 <TableHead>Entry</TableHead>
                 <TableHead>Mark</TableHead>
+                <TableHead title="Path or exchange stop-loss">SL</TableHead>
+                <TableHead title="Path or exchange take-profit">TP</TableHead>
                 <TableHead>Liq.</TableHead>
                 <TableHead>PnL</TableHead>
                 <TableHead>Duration</TableHead>
@@ -218,6 +228,16 @@ export function ActivePositions({
                       const markUsd = resolveMarkPriceUsd(position)
                       return markUsd === null ? '—' : formatPrice(markUsd)
                     })()}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {position.stop_loss != null
+                      ? formatPrice(position.stop_loss)
+                      : '—'}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {position.take_profit != null
+                      ? formatPrice(position.take_profit)
+                      : '—'}
                   </TableCell>
                   <TableCell>
                     {position.liquidation_price != null ||

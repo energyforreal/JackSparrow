@@ -15,6 +15,13 @@ interface AgentStatusProps {
 
 const getStateConfig = (state: string) => {
   switch (state) {
+    case 'INITIALIZING':
+      return {
+        color: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
+        icon: AlertCircle,
+        label: 'Initializing',
+        bgColor: 'bg-slate-500',
+      }
     case 'MONITORING':
     case 'OBSERVING':
       return {
@@ -39,6 +46,13 @@ const getStateConfig = (state: string) => {
         icon: Zap,
         label: 'Active Trade',
         bgColor: 'bg-amber-500',
+      }
+    case 'MONITORING_POSITION':
+      return {
+        color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+        icon: Eye,
+        label: 'Monitoring Position',
+        bgColor: 'bg-cyan-500',
       }
     case 'DEGRADED':
       return {

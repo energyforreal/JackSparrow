@@ -17,6 +17,25 @@ logger = structlog.get_logger()
 # Incremental OHLCV cache: symbol -> resolution -> DataFrame (PERF-01)
 _OHLCV_FRAME_CACHE: Dict[str, Dict[str, pd.DataFrame]] = {}
 _INCREMENTAL_TAIL_BARS = 3
+# Delta history/candles typically caps ~500 bars per request.
+_DELTA_CANDLE_PAGE_BARS = 500
+
+
+def _candle_timestamp_epoch(value: Any) -> Optional[int]:
+    """Best-effort Unix seconds from a candle timestamp field."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return int(value)
+        t = pd.Timestamp(value)
+        if t.tzinfo is None:
+            t = t.tz_localize("UTC")
+        else:
+            t = t.tz_convert("UTC")
+        return int(t.timestamp())
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def _normalize_delta_candles(raw: List[dict[str, Any]]) -> List[dict[str, Any]]:
@@ -54,6 +73,70 @@ def _parse_candles_response(resp: Any) -> List[dict[str, Any]]:
     return _normalize_delta_candles([c for c in candles if isinstance(c, dict)])
 
 
+async def _fetch_ohlcv_paginated(
+    delta_client: Any,
+    symbol: str,
+    resolution: str,
+    bar_seconds: int,
+    n_candles: int,
+    end_ts: int,
+) -> pd.DataFrame:
+    """Fetch up to ``n_candles`` bars by walking start backward in ~500-bar pages."""
+    need = max(1, int(n_candles))
+    page_bars = _DELTA_CANDLE_PAGE_BARS
+    frames: List[pd.DataFrame] = []
+    cursor_end = int(end_ts)
+    max_pages = max(2, (need // page_bars) + 3)
+    seen_oldest: Optional[int] = None
+
+    for _ in range(max_pages):
+        start_ts = cursor_end - int(page_bars * bar_seconds * 1.05)
+        if start_ts >= cursor_end:
+            start_ts = cursor_end - max(1, bar_seconds)
+        resp = await delta_client.get_candles(
+            symbol=symbol,
+            resolution=resolution,
+            start=start_ts,
+            end=cursor_end,
+        )
+        formatted = _parse_candles_response(resp)
+        if not formatted:
+            break
+        page_df = dataframe_from_delta_candles(formatted)
+        if page_df.empty:
+            break
+        frames.append(page_df)
+        epochs = [
+            e
+            for e in (_candle_timestamp_epoch(v) for v in page_df["timestamp"].tolist())
+            if e is not None
+        ]
+        if not epochs:
+            break
+        oldest = min(epochs)
+        if seen_oldest is not None and oldest >= seen_oldest:
+            break
+        seen_oldest = oldest
+        combined = (
+            pd.concat(frames, ignore_index=True)
+            .drop_duplicates(subset=["timestamp"], keep="last")
+            .sort_values("timestamp")
+        )
+        if len(combined) >= need:
+            return combined.tail(need).reset_index(drop=True)
+        cursor_end = oldest - 1
+
+    if not frames:
+        return pd.DataFrame()
+    return (
+        pd.concat(frames, ignore_index=True)
+        .drop_duplicates(subset=["timestamp"], keep="last")
+        .sort_values("timestamp")
+        .tail(need)
+        .reset_index(drop=True)
+    )
+
+
 async def _fetch_ohlcv_df(
     delta_client: Any,
     symbol: str,
@@ -63,45 +146,61 @@ async def _fetch_ohlcv_df(
     *,
     use_incremental_cache: bool = True,
 ) -> pd.DataFrame:
-    """Fetch last ``n_candles`` bars ending now (incremental append when cached)."""
+    """Fetch last ``n_candles`` bars ending now (incremental append when cached).
+
+    Full history requests paginate past Delta's ~500-bar page limit so higher TFs
+    (1h/2h) can satisfy ``scale_period(96) + window_len`` after feature ``dropna``.
+    """
     from datetime import datetime, timezone
 
     end_ts = int(datetime.now(timezone.utc).timestamp())
     sym_cache = _OHLCV_FRAME_CACHE.setdefault(symbol, {})
     cached = sym_cache.get(resolution) if use_incremental_cache else None
+    need = max(1, int(n_candles))
 
-    if (
+    # Incremental only when cache already has sufficient depth for the target window.
+    can_incremental = (
         use_incremental_cache
         and cached is not None
         and not cached.empty
         and "timestamp" in cached.columns
-    ):
-        start_ts = end_ts - int(_INCREMENTAL_TAIL_BARS * bar_seconds * 2)
-    else:
-        start_ts = end_ts - int(n_candles * bar_seconds * 1.05)
-
-    resp = await delta_client.get_candles(
-        symbol=symbol,
-        resolution=resolution,
-        start=start_ts,
-        end=end_ts,
+        and len(cached) >= need
     )
-    formatted = _parse_candles_response(resp)
-    fresh = dataframe_from_delta_candles(formatted)
-    if fresh.empty:
-        return cached.copy() if cached is not None and not cached.empty else fresh
 
-    if cached is not None and not cached.empty and use_incremental_cache:
-        combined = (
-            pd.concat([cached, fresh], ignore_index=True)
-            .drop_duplicates(subset=["timestamp"], keep="last")
-            .sort_values("timestamp")
+    if can_incremental:
+        start_ts = end_ts - int(_INCREMENTAL_TAIL_BARS * bar_seconds * 2)
+        resp = await delta_client.get_candles(
+            symbol=symbol,
+            resolution=resolution,
+            start=start_ts,
+            end=end_ts,
         )
-        out = combined.tail(n_candles).reset_index(drop=True)
-    else:
-        out = fresh.tail(n_candles).reset_index(drop=True)
+        formatted = _parse_candles_response(resp)
+        fresh = dataframe_from_delta_candles(formatted)
+        if fresh.empty:
+            out = cached.tail(need).reset_index(drop=True)
+        else:
+            combined = (
+                pd.concat([cached, fresh], ignore_index=True)
+                .drop_duplicates(subset=["timestamp"], keep="last")
+                .sort_values("timestamp")
+            )
+            out = combined.tail(need).reset_index(drop=True)
+        sym_cache[resolution] = out
+        return out
 
-    sym_cache[resolution] = out
+    out = await _fetch_ohlcv_paginated(
+        delta_client,
+        symbol,
+        resolution,
+        bar_seconds,
+        need,
+        end_ts,
+    )
+    if out.empty and cached is not None and not cached.empty:
+        out = cached.tail(need).reset_index(drop=True)
+    if not out.empty:
+        sym_cache[resolution] = out
     return out
 
 
@@ -159,10 +258,10 @@ async def fetch_mtf_market_frames(
         Tuple ``(df5m, df15m, df30m, df1h, df2h, df_funding, df_oi, df_mark)``.
     """
     n5 = int(getattr(settings, "jacksparrow_v43_candles_5m", 600) or 600)
-    n15 = int(getattr(settings, "jacksparrow_v43_candles_15m", 400) or 400)
-    n30 = int(getattr(settings, "transformer_candles_30m", 300) or 300)
-    n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 300) or 300)
-    n2h = int(getattr(settings, "transformer_candles_2h", 200) or 200)
+    n15 = int(getattr(settings, "jacksparrow_v43_candles_15m", 500) or 500)
+    n30 = int(getattr(settings, "transformer_candles_30m", 800) or 800)
+    n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 1400) or 1400)
+    n2h = int(getattr(settings, "transformer_candles_2h", 2600) or 2600)
     n_oi = int(getattr(settings, "jacksparrow_v43_candles_oi", 300) or 300)
     mark_symbol = f"MARK:{symbol}"
 
@@ -257,8 +356,8 @@ async def fetch_v43_market_frames(
         ring buffer (OI + microstructure fields). ``df_mark`` is ``MARK:{symbol}`` 5m OHLCV.
     """
     n5 = int(getattr(settings, "jacksparrow_v43_candles_5m", 600) or 600)
-    n15 = int(getattr(settings, "jacksparrow_v43_candles_15m", 400) or 400)
-    n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 300) or 300)
+    n15 = int(getattr(settings, "jacksparrow_v43_candles_15m", 500) or 500)
+    n1h = int(getattr(settings, "jacksparrow_v43_candles_1h", 1400) or 1400)
     n_oi = int(getattr(settings, "jacksparrow_v43_candles_oi", 300) or 300)
     mark_symbol = f"MARK:{symbol}"
 

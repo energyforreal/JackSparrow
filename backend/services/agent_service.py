@@ -56,13 +56,16 @@ class AgentService:
         # Response mechanism uses Redis key-value store (response:{request_id})
         # Backend polls using get_response() which reads from key-value, not list queue
 
-        # Small TTL cache to avoid bursty get_agent_status fan-out during health sync.
+        # Status cache TTL covers overlapping 30s health/agent-state pollers.
         self._agent_status_fetch_lock: asyncio.Lock = asyncio.Lock()
         self._agent_status_cache: Optional[Dict[str, Any]] = None
         self._agent_status_cache_updated_at: float = 0.0
-        self._agent_status_cache_ttl_seconds: float = 2.0
+        self._agent_status_cache_ttl_seconds: float = 25.0
         self._last_good_agent_status: Optional[Dict[str, Any]] = None
         self._last_good_agent_status_at: float = 0.0
+        # Tear down outbound WS only after consecutive timeouts (not a single slow get_status).
+        self._ws_consecutive_timeouts: int = 0
+        self._ws_timeout_teardown_threshold: int = 3
     
     async def _initialize_websocket(self):
         """Initialize WebSocket connection to agent."""
@@ -358,6 +361,7 @@ class AgentService:
                         payload=response,
                         latency_ms=latency_ms
                     )
+                    self._ws_consecutive_timeouts = 0
 
                     return response
                 except asyncio.TimeoutError:
@@ -374,16 +378,22 @@ class AgentService:
                         error="WebSocket timeout"
                     )
 
+                    self._ws_consecutive_timeouts += 1
                     logger.warning(
                         "agent_service_websocket_timeout",
                         service="backend",
                         request_id=request_id,
                         command=command,
-                        timeout=timeout
+                        timeout=timeout,
+                        consecutive_timeouts=self._ws_consecutive_timeouts,
+                        teardown_threshold=self._ws_timeout_teardown_threshold,
                     )
-                    # Treat a timeout as an unhealthy socket and reconnect.
-                    await self._teardown_websocket()
-                    await self._schedule_reconnect()
+                    # Only tear down after consecutive timeouts; a single slow
+                    # get_status must not recreate the outbound socket every cycle.
+                    if self._ws_consecutive_timeouts >= self._ws_timeout_teardown_threshold:
+                        self._ws_consecutive_timeouts = 0
+                        await self._teardown_websocket()
+                        await self._schedule_reconnect()
                     # Fall through to Redis fallback
                 except Exception as e:
                     self._pending_responses.pop(request_id, None)
@@ -406,7 +416,8 @@ class AgentService:
                         command=command,
                         error=str(e)
                     )
-                    # Treat errors as unhealthy socket and reconnect.
+                    self._ws_consecutive_timeouts = 0
+                    # Treat connection/send errors as unhealthy socket and reconnect.
                     await self._teardown_websocket()
                     await self._schedule_reconnect()
                     # Fall through to Redis fallback

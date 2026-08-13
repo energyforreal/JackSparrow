@@ -126,6 +126,74 @@ def _v43_gate_reject_from_context(reasoning_chain: Any, market_context: Any) -> 
     return None
 
 
+# Transformer-MTF fields forwarded onto WS signal payloads (v0.2 gating UI).
+_TRANSFORMER_PLAN_SCALAR_KEYS = (
+    "long_edge",
+    "short_edge",
+    "winning_edge",
+    "primary_tf",
+    "transformer_vol_regime",
+    "decision_path",
+)
+_TRANSFORMER_PLAN_OBJECT_KEYS = (
+    "execution_plan",
+    "multi_tf_predictions",
+    "cross_tf_summary",
+)
+_MARKET_CONTEXT_EXCERPT_KEYS = (
+    "trade_score",
+    "strategy_candidate",
+    "ml_validation",
+    "market_structure",
+    "execution_plan",
+    "long_edge",
+    "short_edge",
+    "winning_edge",
+    "primary_tf",
+    "transformer_vol_regime",
+    "decision_path",
+    "multi_tf_predictions",
+    "cross_tf_summary",
+    "path_edge",
+    "threshold",
+)
+
+
+def _transformer_plan_ws_fields(market_context: Any) -> Dict[str, Any]:
+    """Copy execution_plan + MTF stance fields from market_context onto the WS signal."""
+    out: Dict[str, Any] = {}
+    if not isinstance(market_context, dict):
+        return out
+    for key in _TRANSFORMER_PLAN_SCALAR_KEYS:
+        value = market_context.get(key)
+        if value is not None:
+            out[key] = value
+    for key in _TRANSFORMER_PLAN_OBJECT_KEYS:
+        value = market_context.get(key)
+        if value is not None:
+            out[key] = value
+    # Prefer top-level plan edges when execution_plan carries them but mctx omits.
+    plan = market_context.get("execution_plan")
+    if isinstance(plan, dict):
+        out.setdefault("execution_plan", plan)
+        for key in ("long_edge", "short_edge", "winning_edge", "primary_tf"):
+            if key not in out and plan.get(key) is not None:
+                out[key] = plan.get(key)
+    return out
+
+
+def _market_context_excerpt(market_context: Any) -> Dict[str, Any]:
+    """Compact market_context subset for REST /signal/latest hydration."""
+    excerpt: Dict[str, Any] = {}
+    if not isinstance(market_context, dict):
+        return excerpt
+    for key in _MARKET_CONTEXT_EXCERPT_KEYS:
+        value = market_context.get(key)
+        if value is not None:
+            excerpt[key] = value
+    return excerpt
+
+
 async def _cache_last_signal_redis(symbol: str, signal_data: Dict[str, Any]) -> None:
     """Persist latest broadcast signal for REST hydration on dashboard connect."""
     try:
@@ -1212,6 +1280,10 @@ class AgentEventSubscriber:
             reasoning_data.update(
                 _jacksparrow_ws_fields_from_predictions(model_preds, reasoning_chain)
             )
+            reasoning_data.update(_transformer_plan_ws_fields(market_context))
+            excerpt = _market_context_excerpt(market_context)
+            if excerpt:
+                reasoning_data["market_context_excerpt"] = excerpt
             rj = _v43_gate_reject_from_context(reasoning_chain, market_context)
             if rj:
                 reasoning_data["v43_gate_reject"] = rj
@@ -1650,6 +1722,7 @@ class AgentEventSubscriber:
         signal_data.update(
             _jacksparrow_ws_fields_from_predictions(model_predictions, reasoning_chain)
         )
+        signal_data.update(_transformer_plan_ws_fields(market_context))
         for k in ("inference_latency_ms", "inference_source", "inference_mode", "model_version"):
             v = payload.get(k)
             if v is not None:
@@ -1686,14 +1759,9 @@ class AgentEventSubscriber:
             v = payload.get(k)
             if v is not None:
                 signal_data[k] = v
-        if isinstance(market_context, dict):
-            excerpt: Dict[str, Any] = {}
-            for k in ("trade_score", "strategy_candidate", "ml_validation", "market_structure"):
-                v = market_context.get(k)
-                if v is not None:
-                    excerpt[k] = v
-            if excerpt:
-                signal_data["market_context_excerpt"] = excerpt
+        excerpt = _market_context_excerpt(market_context)
+        if excerpt:
+            signal_data["market_context_excerpt"] = excerpt
 
         rj = _v43_gate_reject_from_context(reasoning_chain, market_context)
         if rj:
@@ -1897,6 +1965,10 @@ class AgentEventSubscriber:
         reasoning_data.update(
             _jacksparrow_ws_fields_from_predictions(model_preds_rc, reasoning_chain)
         )
+        reasoning_data.update(_transformer_plan_ws_fields(market_context_rc))
+        excerpt = _market_context_excerpt(market_context_rc)
+        if excerpt:
+            reasoning_data["market_context_excerpt"] = excerpt
         rj = _v43_gate_reject_from_context(reasoning_chain, market_context_rc)
         if rj:
             reasoning_data["v43_gate_reject"] = rj
