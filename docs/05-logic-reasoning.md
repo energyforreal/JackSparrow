@@ -2,33 +2,48 @@
 
 ## Overview
 
-This document describes **JackSparrow's** decision-making process on the **Transformers** branch. Runtime runs **five per-TF ONNX Transformers**; `evaluate_transformer_prediction` maps path heads to `long_edge` / `short_edge`, applies MTF policy, builds an `execution_plan`, then emits `DECISION_READY`.
+This document describes **JackSparrow's** decision-making process on the **Transformers** branch. Runtime runs **five per-TF ONNX Transformers**. Models remain sensors; [`agent/core/market_understanding.py`](../agent/core/market_understanding.py) maps heads into climate / setup / timing views and the **agent** owns long/short/flat → wire `BUY`/`SELL`/`HOLD`. There is no MTF BUY/SELL fallback and no feature flag.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
 ---
 
-## Transformer decision path (current runtime)
+## Agent market synthesis (only live path)
+
+ML models remain sensors. `build_tf_market_view` builds per-TF `TfMarketView`s using scaled `path_imbalance_z` (edge / typical abs edge from that bundle’s label stats), then `synthesize_agent_decision`:
+
+1. **Climate** (1h/2h) — long / short / two_sided / conflicted / crisis  
+2. **Setup** (15m required; 30m confirms STRONG only) — long_path / short_path / flat  
+3. **Timing** (5m) — with / against / quiet; **against → flat** (no soft entry)  
+4. Wire signal — thesis long/short/flat mapped to `BUY`/`SELL`/`HOLD` (+ STRONG when 30m aligned, timing with, OI not opposing)  
+5. **execution_plan** — SL/TP/`size_fraction` from **15m** path heads only  
+
+Also applied on 15m: drawdown-before-MFE flatten, low-trend flatten, HIGH vol size cap. HOLD cycles still attach full `market_state` with real 15m `path_edge` (never zeroed for telemetry).
+
+Payload: `market_context.decision_path = "transformer_agent_synthesis"`, `market_context.market_state` (climate, setup, timing, thesis, views, reason_codes).
+
+Invariants: 5m alone never trades; crisis HOLDs; ranging/conflicted HOLDs; timing against HOLDs; 30m never opens risk alone.
+
+---
+
+## Transformer decision path
 
 1. **Trigger** — `CANDLE_CLOSED` or price fluctuation exceeds `PRICE_FLUCTUATION_THRESHOLD_PCT`
 2. **Features** — `feature_store/transformer_btcusd/` builds each TF inference matrix
 3. **Inference** — each `TransformerModelNode.predict()` runs ONNX on its native TF
-4. **Per-TF map** — `long_edge = mfe − mae`, `short_edge = mae − mfe`; soft confidence bands:
-   - `< TRANSFORMER_CONFIDENCE_HOLD_FLOOR` (0.40) → HOLD
-   - `[0.40, TRANSFORMER_MIN_CONFIDENCE)` → BUY/SELL with reduced `size_scale`
-   - `≥ 0.55` → full size; STRONG allowed by edge
-5. **MTF policy** — bias / execution / alignment / timing / extreme veto (unchanged layers)
-6. **execution_plan** — path SL/TP pcts (short: favorable=`mae`, adverse=`mfe`), soft R:R (strip STRONG / cut size only), edge×confidence `size_fraction`
-7. **Output** — `PolicyVerdict` + `execution_plan` on `market_context` → `DECISION_READY`
+4. **Per-TF views** — role stances from continuous heads (mfe/mae → path_edge → imbalance_z); unused heads (drawdown, OI, trend, vol) as filters
+5. **Agent synthesis** — climate × setup × timing → wire signal
+6. **execution_plan** — path SL/TP pcts (short: favorable=`mae`, adverse=`mfe`), soft R:R (strip STRONG / cut size only), edge×confidence `size_fraction` from 15m
+7. **Output** — `PolicyVerdict` + `execution_plan` + `market_state` on `market_context` → `DECISION_READY`
 8. **Gates** — trading handler safety only (`TRANSFORMER_ENTRY_GATES=true`): stale, price, margin, open position, risk, kill switch — not legacy ADX/EMA/BB/SR/`features.volatility`
 
-**Implementation**: [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py), [`agent/core/path_execution_plan.py`](../agent/core/path_execution_plan.py), orchestrated by [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py).
+**Implementation**: [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py), [`agent/core/market_understanding.py`](../agent/core/market_understanding.py), [`agent/core/path_execution_plan.py`](../agent/core/path_execution_plan.py), orchestrated by [`agent/core/mcp_orchestrator.py`](../agent/core/mcp_orchestrator.py).
 
 ---
 
 ## Overview (historical context)
 
-The agent **thinks**, not just reacts. Earlier branches used a 6-step reasoning chain and multi-model consensus; the Transformers branch consolidates inference into the transformer decision path above while retaining vector memory and deterministic self-awareness.
+The agent **thinks**, not just reacts. Earlier branches used a 6-step reasoning chain and multi-model consensus; the Transformers branch consolidates inference into the synthesis decision path above while retaining vector memory and deterministic self-awareness.
 
 ---
 

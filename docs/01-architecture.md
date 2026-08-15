@@ -75,7 +75,7 @@ The Intelligence Layer contains the "brain" of the trading agent:
 - **`TransformerModelNode`** (`agent/models/transformer_node.py`) — loads per-TF `btcusd_{tf}_transformer.onnx` via `onnxruntime`
 - Feature contract: [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/)
 - Discovery via **`metadata_transformer.json`** in **`MODEL_DIR/JackSparrow_Transformer_BTCUSD_{tf}/`**
-- MTF policy: [`agent/core/mtf_decision_policy.py`](../agent/core/mtf_decision_policy.py)
+- Decision path: [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py) + [`agent/core/market_understanding.py`](../agent/core/market_understanding.py)
 - See [ML models – Runtime discovery](03-ml-models.md#runtime-discovery-transformer-onnx)
 
 **Decision Engine (Transformer decision path)**
@@ -98,7 +98,7 @@ Trade *intent* on the event bus is issued as **`DECISION_READY`** after transfor
 1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
 2. **Feature build** — each `TransformerModelNode` builds its native TF matrix from `feature_store/transformer_btcusd`
 3. **ONNX inference** — five independent models (5m, 15m, 30m, 1h, 2h) via `TransformerModelNode.predict()`
-4. **Decision** — `mtf_decision_policy` + `evaluate_transformer_prediction` apply cross-TF rules, soft confidence bands, and build `execution_plan` (path SL/TP + size)
+4. **Decision** — `synthesize_agent_decision` (climate × setup × timing) + `evaluate_transformer_prediction` build `execution_plan` (path SL/TP + size from 15m)
 5. **DECISION_READY** — trading handler uses **transformer safety gates** (`TRANSFORMER_ENTRY_GATES`); legacy feature-dict filters are off unless `LEGACY_FEATURE_ENTRY_GATES=true`
 5. **Risk & execution** — trading handler + risk manager before Delta testnet order placement
 

@@ -2,7 +2,7 @@
 Multi-timeframe (MTF) decision synthesis from per-timeframe model outputs.
 
 DEPRECATED for live JackSparrow Transformers path: the orchestrator uses
-``agent.core.mtf_decision_policy`` + ``transformer_decision`` instead.
+``agent.core.market_understanding`` + ``transformer_decision`` instead.
 Kept for unit tests / historical short_tf_primary experiments only.
 
 Maps model names like ``jacksparrow_BTCUSD_15m`` to timeframes and applies:

@@ -33,6 +33,13 @@ function latencyBarColor(ms: number): string {
   return 'bg-red-500'
 }
 
+/** market_data.latency_ms is tick age, not request RTT — use freshness thresholds. */
+function tickAgeBarColor(ms: number): string {
+  if (ms < 5000) return 'bg-green-500'
+  if (ms < 30000) return 'bg-amber-500'
+  return 'bg-red-500'
+}
+
 const getStatusVariant = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
   switch (status) {
     case 'up':
@@ -177,19 +184,32 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
                     {executionLatencyMs !== undefined && executionLatencyMs !== null && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground tabular-nums">
-                          {Math.round(executionLatencyMs)}ms
+                          {service.name === 'market_data'
+                            ? `${(executionLatencyMs / 1000).toFixed(1)}s age`
+                            : `${Math.round(executionLatencyMs)}ms`}
                         </span>
                         <div
                           className="w-16 h-1 rounded-full bg-muted overflow-hidden"
-                          title={`Latency vs 500ms reference: ${Math.round(executionLatencyMs)}ms`}
+                          title={
+                            service.name === 'market_data'
+                              ? `Tick age: ${(executionLatencyMs / 1000).toFixed(1)}s (stale after 30s)`
+                              : `Latency vs 500ms reference: ${Math.round(executionLatencyMs)}ms`
+                          }
                         >
                           <div
                             className={cn(
                               'h-1 rounded-full transition-all',
-                              latencyBarColor(executionLatencyMs)
+                              service.name === 'market_data'
+                                ? tickAgeBarColor(executionLatencyMs)
+                                : latencyBarColor(executionLatencyMs)
                             )}
                             style={{
-                              width: `${Math.min((executionLatencyMs / 500) * 100, 100)}%`,
+                              width: `${Math.min(
+                                (executionLatencyMs /
+                                  (service.name === 'market_data' ? 30000 : 500)) *
+                                  100,
+                                100
+                              )}%`,
                             }}
                           />
                         </div>

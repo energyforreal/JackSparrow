@@ -100,7 +100,7 @@ async def test_transformer_entry_without_volatility_feature(monkeypatch) -> None
                 "chain_id": "c1",
                 "model_predictions": [],
                 "market_context": {
-                    "decision_path": "transformer_mtf",
+                    "decision_path": "transformer_agent_synthesis",
                     # No features.volatility — must still approve under transformer gates
                     "execution_plan": {
                         "signal": "BUY",
@@ -112,6 +112,12 @@ async def test_transformer_entry_without_volatility_feature(monkeypatch) -> None
                         "size_scale": 1.0,
                         "rr_soft_action": "none",
                     },
+                    "market_state": {
+                        "climate": "long",
+                        "setup": "long_path",
+                        "timing": "with",
+                        "thesis": "long",
+                    },
                 },
             },
         },
@@ -119,6 +125,6 @@ async def test_transformer_entry_without_volatility_feature(monkeypatch) -> None
 
     await handler.handle_decision_ready_for_trading(event)
     assert published, "expected RiskApprovedEvent without features.volatility"
-    assert published[0].payload.get("ml_signal_source") == "transformer_mtf"
+    assert published[0].payload.get("ml_signal_source") == "transformer_agent_synthesis"
     assert published[0].payload.get("stop_loss") is not None
     assert published[0].payload.get("take_profit") is not None

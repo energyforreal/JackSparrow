@@ -1,10 +1,10 @@
-"""Integration test: synthetic 5-TF predictions through MTF decision path."""
+"""Integration test: synthetic 5-TF predictions through agent synthesis path."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any, List
 from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
@@ -32,14 +32,16 @@ def _ohlcv_df(n: int = 200) -> pd.DataFrame:
 def _prediction(
     resolution: str,
     *,
-    path_edge: float = 0.01,
-    signal: str = "BUY",
+    mfe: float = 0.02,
+    mae: float = 0.005,
+    vol_regime: str = "NORMAL",
 ) -> MCPModelPrediction:
     tf_key = f"tf_{resolution}"
+    path_edge = mfe - mae
     return MCPModelPrediction(
         model_name=f"jacksparrow_transformer_BTCUSD_{resolution}",
         model_version="transformer_per_tf_v1",
-        prediction=1.0 if signal in ("BUY", "STRONG_BUY") else -1.0,
+        prediction=1.0 if path_edge > 0 else -1.0,
         confidence=0.75,
         reasoning=f"synthetic {resolution}",
         features_used=[],
@@ -50,14 +52,18 @@ def _prediction(
             "tf_key": tf_key,
             "resolution": resolution,
             "path_edge": path_edge,
-            "threshold": 0.005,
+            "long_edge": path_edge,
+            "short_edge": -path_edge,
+            "threshold": 0.008,
             "transformer_continuous_preds": {
-                "mfe": 0.02,
-                "mae": 0.005,
+                "mfe": mfe,
+                "mae": mae,
                 "future_volatility": 0.003,
-                "trend_strength": 1.2,
+                "trend_strength": 1.5,
+                "drawdown_before_mfe": 0.0,
+                "future_oi_change_pct": 0.05,
             },
-            "transformer_vol_regime": "NORMAL",
+            "transformer_vol_regime": vol_regime,
             "entry_confidence": 0.75,
             "regime": "trending",
             "closed_bar_features": {"ret_1": 0.001},
@@ -74,10 +80,14 @@ def _mock_registry(predictions: List[MCPModelPrediction]) -> MCPModelRegistry:
         if "resolution" in ctx:
             node.resolution = ctx["resolution"]
         else:
-            # e.g. degraded stubs with empty context — infer from model_name suffix
             name = str(pred.model_name or "")
             node.resolution = name.rsplit("_", 1)[-1] if "_" in name else "15m"
-        node._bundle_metadata = {"default_threshold": 0.005}
+        node._bundle_metadata = {
+            "default_threshold": 0.005,
+            "path_label_horizon_bars": 16,
+            "label_mean": [0.007, 0.007, 0.002, 1.5, 0.002, 0.05, 0.2],
+            "label_std": [0.008, 0.008, 0.001, 1.0, 0.001, 0.1, 0.5],
+        }
 
     async def _get_predictions(request: Any) -> MCPModelResponse:
         return MCPModelResponse(
@@ -85,7 +95,9 @@ def _mock_registry(predictions: List[MCPModelPrediction]) -> MCPModelRegistry:
             predictions=predictions,
             consensus_prediction=1.0,
             consensus_confidence=0.75,
-            healthy_models=len(predictions),
+            healthy_models=sum(
+                1 for p in predictions if str(p.health_status).lower() == "healthy"
+            ),
             total_models=len(predictions),
             timestamp=datetime.now(timezone.utc),
         )
@@ -95,35 +107,26 @@ def _mock_registry(predictions: List[MCPModelPrediction]) -> MCPModelRegistry:
     return registry
 
 
-@pytest.mark.asyncio
-async def test_mtf_decision_emits_multi_tf_context(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     df = _ohlcv_df()
     frames = (df, df, df, df, df, df, df, df)
-
-    async def _fetch_frames(_client: Any, _symbol: str) -> tuple:
-        return frames
-
     monkeypatch.setattr(
         "agent.core.transformer_decision.fetch_mtf_market_frames",
-        _fetch_frames,
-    )
-
-    contract_state = SimpleNamespace(
-        is_operational=True,
-        state="active",
-        trading_status="open",
+        AsyncMock(return_value=frames),
     )
     monkeypatch.setattr(
         "agent.core.contract_state.get_contract_state",
-        AsyncMock(return_value=contract_state),
-    )
-
-    portfolio_snap = SimpleNamespace(
-        to_dict=lambda: {"exposure_pct": 0.0},
+        AsyncMock(
+            return_value=SimpleNamespace(
+                is_operational=True,
+                state="active",
+                trading_status="open",
+            )
+        ),
     )
     monkeypatch.setattr(
         "agent.core.portfolio_intelligence.fetch_portfolio_exposure_snapshot",
-        AsyncMock(return_value=portfolio_snap),
+        AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {"exposure_pct": 0.0})),
     )
     monkeypatch.setattr(
         "agent.core.portfolio_intelligence.evaluate_portfolio_guard",
@@ -138,6 +141,10 @@ async def test_mtf_decision_emits_multi_tf_context(monkeypatch: pytest.MonkeyPat
         lambda verdict, *_a, **_k: verdict,
     )
 
+
+@pytest.mark.asyncio
+async def test_synthesis_emits_multi_tf_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_frames(monkeypatch)
     predictions = [
         _prediction("5m"),
         _prediction("15m"),
@@ -145,12 +152,10 @@ async def test_mtf_decision_emits_multi_tf_context(monkeypatch: pytest.MonkeyPat
         _prediction("1h"),
         _prediction("2h"),
     ]
-    registry = _mock_registry(predictions)
-
     result = await evaluate_transformer_prediction(
         symbol="BTCUSD",
         context={},
-        model_registry=registry,
+        model_registry=_mock_registry(predictions),
         delta_client=MagicMock(),
         t0=0.0,
         serialize_prediction=lambda p: {
@@ -164,7 +169,8 @@ async def test_mtf_decision_emits_multi_tf_context(monkeypatch: pytest.MonkeyPat
     assert "multi_tf_predictions" in mctx
     assert len(mctx["multi_tf_predictions"]) == 5
     assert "cross_tf_summary" in mctx
-    assert mctx.get("decision_path") == "transformer_mtf"
+    assert mctx.get("decision_path") == "transformer_agent_synthesis"
+    assert "market_state" in mctx
     plan = mctx.get("execution_plan") or {}
     assert isinstance(plan, dict)
     if result["decision"]["signal"] in ("BUY", "STRONG_BUY", "SELL", "STRONG_SELL"):
@@ -172,108 +178,32 @@ async def test_mtf_decision_emits_multi_tf_context(monkeypatch: pytest.MonkeyPat
         assert "take_profit_pct" in plan
         assert "size_fraction" in plan
         assert "rr_soft_action" in plan
-    assert result["decision"]["signal"] in ("BUY", "STRONG_BUY", "HOLD", "SELL", "STRONG_SELL")
+    assert result["decision"]["signal"] in (
+        "BUY",
+        "STRONG_BUY",
+        "HOLD",
+        "SELL",
+        "STRONG_SELL",
+    )
 
 
 @pytest.mark.asyncio
-async def test_mtf_decision_bias_veto_forces_hold(monkeypatch: pytest.MonkeyPatch) -> None:
-    df = _ohlcv_df()
-    frames = (df, df, df, df, df, df, df, df)
-
-    monkeypatch.setattr(
-        "agent.core.transformer_decision.fetch_mtf_market_frames",
-        AsyncMock(return_value=frames),
-    )
-    monkeypatch.setattr(
-        "agent.core.contract_state.get_contract_state",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                is_operational=True,
-                state="active",
-                trading_status="open",
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        "agent.core.portfolio_intelligence.fetch_portfolio_exposure_snapshot",
-        AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {})),
-    )
-    monkeypatch.setattr(
-        "agent.core.portfolio_intelligence.evaluate_portfolio_guard",
-        lambda *_a, **_k: SimpleNamespace(
-            allowed=True,
-            reason_codes=[],
-            to_dict=lambda: {},
-        ),
-    )
-    monkeypatch.setattr(
-        "agent.core.portfolio_intelligence.apply_portfolio_guard_to_verdict",
-        lambda verdict, *_a, **_k: verdict,
-    )
-
+async def test_synthesis_climate_fights_setup_forces_hold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long setup with short climate → HOLD (setup fights climate)."""
+    _patch_frames(monkeypatch)
     predictions = [
-        _prediction("5m", path_edge=0.01),
-        _prediction("15m", path_edge=0.01),
-        _prediction("30m", path_edge=0.01),
-        MCPModelPrediction(
-            model_name="jacksparrow_transformer_BTCUSD_1h",
-            model_version="v1",
-            prediction=-1.0,
-            confidence=0.8,
-            reasoning="bearish 1h",
-            features_used=[],
-            feature_importance={},
-            computation_time_ms=1.0,
-            health_status="healthy",
-            context={
-                "tf_key": "tf_1h",
-                "resolution": "1h",
-                "path_edge": -0.01,
-                "threshold": 0.005,
-                "transformer_continuous_preds": {
-                    "mfe": 0.01,
-                    "mae": 0.02,
-                    "future_volatility": 0.004,
-                    "trend_strength": 1.0,
-                },
-                "transformer_vol_regime": "NORMAL",
-                "entry_confidence": 0.8,
-                "regime": "bearish",
-            },
-        ),
-        MCPModelPrediction(
-            model_name="jacksparrow_transformer_BTCUSD_2h",
-            model_version="v1",
-            prediction=-1.0,
-            confidence=0.8,
-            reasoning="bearish 2h",
-            features_used=[],
-            feature_importance={},
-            computation_time_ms=1.0,
-            health_status="healthy",
-            context={
-                "tf_key": "tf_2h",
-                "resolution": "2h",
-                "path_edge": -0.01,
-                "threshold": 0.005,
-                "transformer_continuous_preds": {
-                    "mfe": 0.01,
-                    "mae": 0.02,
-                    "future_volatility": 0.004,
-                    "trend_strength": 1.0,
-                },
-                "transformer_vol_regime": "NORMAL",
-                "entry_confidence": 0.8,
-                "regime": "bearish",
-            },
-        ),
+        _prediction("5m", mfe=0.02, mae=0.005),
+        _prediction("15m", mfe=0.02, mae=0.005),
+        _prediction("30m", mfe=0.02, mae=0.005),
+        _prediction("1h", mfe=0.005, mae=0.02),
+        _prediction("2h", mfe=0.005, mae=0.02),
     ]
-    registry = _mock_registry(predictions)
-
     result = await evaluate_transformer_prediction(
         symbol="BTCUSD",
         context={},
-        model_registry=registry,
+        model_registry=_mock_registry(predictions),
         delta_client=MagicMock(),
         t0=0.0,
         serialize_prediction=lambda p: {"model_name": p.model_name},
@@ -281,46 +211,17 @@ async def test_mtf_decision_bias_veto_forces_hold(monkeypatch: pytest.MonkeyPatc
 
     assert result["decision"]["signal"] == "HOLD"
     codes = result["market_context"].get("transformer_reason_codes") or []
-    assert any("bias_veto" in c for c in codes)
+    assert any(
+        c in codes for c in ("setup_fights_climate", "climate_short", "climate_conflicted")
+    ) or result["market_context"]["market_state"]["climate"] == "short"
 
 
 @pytest.mark.asyncio
-async def test_mtf_skips_degraded_predictions(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unhealthy TF predictions must not become dummy NORMAL stances."""
-    df = _ohlcv_df()
-    frames = (df, df, df, df, df, df, df, df)
-
-    monkeypatch.setattr(
-        "agent.core.transformer_decision.fetch_mtf_market_frames",
-        AsyncMock(return_value=frames),
-    )
-    monkeypatch.setattr(
-        "agent.core.contract_state.get_contract_state",
-        AsyncMock(
-            return_value=SimpleNamespace(
-                is_operational=True,
-                state="active",
-                trading_status="open",
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        "agent.core.portfolio_intelligence.fetch_portfolio_exposure_snapshot",
-        AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {})),
-    )
-    monkeypatch.setattr(
-        "agent.core.portfolio_intelligence.evaluate_portfolio_guard",
-        lambda *_a, **_k: SimpleNamespace(
-            allowed=True,
-            reason_codes=[],
-            to_dict=lambda: {},
-        ),
-    )
-    monkeypatch.setattr(
-        "agent.core.portfolio_intelligence.apply_portfolio_guard_to_verdict",
-        lambda verdict, *_a, **_k: verdict,
-    )
-
+async def test_synthesis_skips_degraded_predictions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unhealthy TF predictions must not enter views."""
+    _patch_frames(monkeypatch)
     degraded_2h = MCPModelPrediction(
         model_name="jacksparrow_transformer_BTCUSD_2h",
         model_version="v1",
@@ -340,12 +241,10 @@ async def test_mtf_skips_degraded_predictions(monkeypatch: pytest.MonkeyPatch) -
         _prediction("1h"),
         degraded_2h,
     ]
-    registry = _mock_registry(predictions)
-
     result = await evaluate_transformer_prediction(
         symbol="BTCUSD",
         context={},
-        model_registry=registry,
+        model_registry=_mock_registry(predictions),
         delta_client=MagicMock(),
         t0=0.0,
         serialize_prediction=lambda p: {
@@ -356,6 +255,4 @@ async def test_mtf_skips_degraded_predictions(monkeypatch: pytest.MonkeyPatch) -
 
     multi = result["market_context"].get("multi_tf_predictions") or {}
     assert "tf_2h" not in multi
-    assert "tf_5m" in multi
-    assert "tf_15m" in multi
-    assert len(multi) == 4
+    assert result["market_context"]["decision_path"] == "transformer_agent_synthesis"

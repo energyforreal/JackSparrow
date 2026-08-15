@@ -125,9 +125,9 @@ export function mergeHealthPreserveFields(
       next.delta_environment !== undefined ? next.delta_environment : previous.delta_environment,
     ml_models: next.ml_models !== undefined ? next.ml_models : previous.ml_models,
     agent_state: next.agent_state !== undefined ? next.agent_state : previous.agent_state,
-    degradation_reasons:
-      Array.isArray(next.degradation_reasons) && next.degradation_reasons.length > 0
-        ? next.degradation_reasons
-        : previous.degradation_reasons,
+    // Empty array is a real clear (recovery). Only preserve when the field is omitted.
+    degradation_reasons: Array.isArray(next.degradation_reasons)
+      ? next.degradation_reasons
+      : previous.degradation_reasons,
   }
 }

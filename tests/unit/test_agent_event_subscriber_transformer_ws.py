@@ -8,7 +8,7 @@ from backend.services.agent_event_subscriber import (
 
 def test_transformer_plan_ws_fields_copies_execution_plan_and_mtf() -> None:
     market_context = {
-        "decision_path": "transformer_mtf",
+        "decision_path": "transformer_agent_synthesis",
         "long_edge": 0.012,
         "short_edge": -0.012,
         "winning_edge": 0.012,
@@ -34,7 +34,7 @@ def test_transformer_plan_ws_fields_copies_execution_plan_and_mtf() -> None:
 
     out = _transformer_plan_ws_fields(market_context)
 
-    assert out["decision_path"] == "transformer_mtf"
+    assert out["decision_path"] == "transformer_agent_synthesis"
     assert out["long_edge"] == 0.012
     assert out["short_edge"] == -0.012
     assert out["winning_edge"] == 0.012
@@ -74,12 +74,12 @@ def test_market_context_excerpt_includes_execution_plan() -> None:
         "trade_score": 80,
         "execution_plan": {"size_scale": 1.0},
         "long_edge": 0.01,
-        "decision_path": "transformer_mtf",
+        "decision_path": "transformer_agent_synthesis",
         "unrelated": "drop_me",
     }
     excerpt = _market_context_excerpt(market_context)
     assert excerpt["trade_score"] == 80
     assert excerpt["execution_plan"]["size_scale"] == 1.0
     assert excerpt["long_edge"] == 0.01
-    assert excerpt["decision_path"] == "transformer_mtf"
+    assert excerpt["decision_path"] == "transformer_agent_synthesis"
     assert "unrelated" not in excerpt

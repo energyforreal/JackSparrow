@@ -216,7 +216,9 @@ def build_introspection_snapshot(
             getattr(settings, "require_ml_signal_for_orders", False)
         ),
         "agent_policy_force_hold": bool(getattr(settings, "agent_policy_force_hold", False)),
-        "decision_path": str(mctx.get("decision_path") or "transformer_mtf"),
+        "decision_path": str(
+            mctx.get("decision_path") or "transformer_agent_synthesis"
+        ),
         "transformer_confidence_hold_floor": float(
             getattr(settings, "transformer_confidence_hold_floor", 0.40) or 0.40
         ),
@@ -225,25 +227,30 @@ def build_introspection_snapshot(
         ),
     }
 
-    decision_path = str(mctx.get("decision_path") or "transformer_mtf")
-    # Transformer-MTF path: obsolete thesis / trade_score / v43 fields stay null for UI compat
-    if decision_path == "transformer_mtf":
-        ts_val = None
-        trade_pass = None
-        v43_regime = mctx.get("regime") or mctx.get("transformer_vol_regime")
-        v43_gate = None
+    # Synthesis path: obsolete trade_score / v43 gate fields stay null for UI compat
+    ts_val = None
+    trade_pass = None
+    v43_regime = mctx.get("regime") or mctx.get("transformer_vol_regime")
+    v43_gate = None
+    market_state = mctx.get("market_state") if isinstance(mctx, dict) else None
+    thesis_from_state = None
+    if isinstance(market_state, dict):
+        thesis_from_state = market_state.get("thesis") or market_state.get("wire_signal")
 
     return AgentIntrospectionSnapshot(
         version=INTROSPECTION_VERSION,
         timestamp=now,
         symbol=str(symbol or ""),
         agent_state=_resolve_agent_state(),
-        policy_mode=str(getattr(settings, "agent_policy_mode", "") or "") or "transformer_mtf",
+        policy_mode=(
+            str(getattr(settings, "agent_policy_mode", "") or "")
+            or "transformer_agent_synthesis"
+        ),
         policy_signal=str(signal or "HOLD"),
         policy_confidence=float(confidence or 0.0),
         policy_reason_codes=list(policy_reason_codes or pv.get("reason_codes") or []),
         ml_candidate_signal=ml.get("ml_candidate_signal"),
-        thesis_signal=None if decision_path == "transformer_mtf" else ml.get("thesis_signal"),
+        thesis_signal=thesis_from_state or ml.get("thesis_signal"),
         trade_score=ts_val,
         trade_score_pass=trade_pass,
         v43_regime=str(v43_regime) if v43_regime is not None else None,

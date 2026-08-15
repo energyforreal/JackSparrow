@@ -1252,7 +1252,10 @@ class TradingEventHandler:
                 "confidence": confidence,
                 "model_predictions": (payload.get("reasoning_chain") or {}).get("model_predictions"),
                 "ml_signal_validated": True,
-                "ml_signal_source": "transformer_mtf",
+                "ml_signal_source": (
+                    (market_context.get("decision_path") if isinstance(market_context, dict) else None)
+                    or "transformer_agent_synthesis"
+                ),
                 "ml_evidence_id": (
                     (payload.get("ml_evidence_snapshot") or {}).get("evidence_id")
                     if isinstance(payload.get("ml_evidence_snapshot"), dict)

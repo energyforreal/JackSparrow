@@ -1,7 +1,8 @@
 # Colab notebook helpers (non-production)
 
 Per-TF transformer training for BTCUSD. Each timeframe is trained **independently**;
-the agent integrates outputs at decision time via `mtf_decision_policy`.
+the agent integrates outputs at decision time via climate/setup/timing synthesis
+(`agent/core/market_understanding.py`).
 
 ## Shared modules (repo source of truth)
 

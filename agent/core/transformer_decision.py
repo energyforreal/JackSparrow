@@ -1,4 +1,4 @@
-"""Slim transformer-only decision path for MCP orchestrator (per-TF ensemble)."""
+"""Slim transformer-only decision path for MCP orchestrator (agent synthesis)."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from typing import Any, Dict, List, Optional
 import structlog
 
 from agent.core.config import settings
-from agent.core.mtf_decision_policy import (
-    evaluate_mtf_policy,
-    interpret_tf_prediction,
-    resolution_to_tf_key,
-)
 from agent.core.market_frames import closed_5m_bar_index, fetch_mtf_market_frames
+from agent.core.market_understanding import (
+    build_views_from_predictions,
+    resolution_to_tf_key,
+    synthesize_agent_decision,
+)
 from agent.core.path_execution_plan import build_execution_plan
 from agent.data.feature_server import FeatureQuality, MCPFeature, MCPFeatureResponse
 from agent.events.schemas import PolicyVerdict
@@ -29,6 +29,73 @@ from agent.models.transformer_context_builder import build_mtf_aggregation_conte
 logger = structlog.get_logger()
 
 _ENTRY_SIGNALS = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
+_DECISION_PATH = "transformer_agent_synthesis"
+
+
+def _view_to_multi_tf_dict(view: Any) -> Dict[str, Any]:
+    """UI-compatible multi_tf entry derived from TfMarketView."""
+    direction = "neutral"
+    local_signal = "HOLD"
+    if view.setup_stance == "long_path" or view.climate_stance == "long":
+        direction = "bullish"
+        local_signal = "BUY"
+    elif view.setup_stance == "short_path" or view.climate_stance == "short":
+        direction = "bearish"
+        local_signal = "SELL"
+    elif view.timing_stance == "with":
+        direction = "bullish" if view.path_imbalance_z > 0 else "bearish"
+    return {
+        "tf_key": view.tf_key,
+        "resolution": view.resolution,
+        "local_signal": local_signal,
+        "direction": direction,
+        "path_edge": view.path_edge,
+        "long_edge": view.long_edge,
+        "short_edge": view.short_edge,
+        "winning_edge": max(view.long_edge, view.short_edge),
+        "size_scale": 1.0,
+        "threshold": view.typical_abs_edge,
+        "vol_regime": view.vol_regime,
+        "regime": view.climate_stance or view.setup_stance or view.timing_stance or "neutral",
+        "confidence": view.confidence,
+        "quality": view.quality,
+        "risk": view.risk,
+        "mfe": view.mfe,
+        "mae": view.mae,
+        "drawdown_before_mfe": getattr(view, "drawdown_before_mfe", 0.0),
+        "future_oi_change_pct": getattr(view, "future_oi_change_pct", 0.0),
+        "imbalance_ratio": getattr(view, "imbalance_ratio", 0.0),
+        "trend_strength": view.trend_strength,
+        "path_imbalance_z": view.path_imbalance_z,
+        "reason_codes": [],
+        "model_name": view.model_name,
+        "climate_stance": view.climate_stance,
+        "setup_stance": view.setup_stance,
+        "timing_stance": view.timing_stance,
+    }
+
+
+def _per_tf_log_summary(views: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for key in ("tf_2h", "tf_1h", "tf_30m", "tf_15m", "tf_5m"):
+        view = views.get(key)
+        if view is None:
+            continue
+        rows.append(
+            {
+                "tf": key,
+                "mfe": round(float(view.mfe), 6),
+                "mae": round(float(view.mae), 6),
+                "path_imbalance_z": round(float(view.path_imbalance_z), 4),
+                "vol_regime": view.vol_regime,
+                "trend_strength": round(float(view.trend_strength), 4),
+                "drawdown_before_mfe": round(float(view.drawdown_before_mfe), 6),
+                "climate": view.climate_stance,
+                "setup": view.setup_stance,
+                "timing": view.timing_stance,
+            }
+        )
+    return rows
 
 
 def _default_position_size(confidence: float, size_fraction: float | None = None) -> float:
@@ -52,12 +119,17 @@ def _build_reasoning_chain(
     model_predictions: List[Dict[str, Any]],
     market_context: Dict[str, Any],
     reason_codes: List[str],
+    climate: str = "",
+    setup: str = "",
+    timing: str = "",
+    thesis: str = "",
 ) -> Dict[str, Any]:
     chain_id = str(uuid.uuid4())
     conclusion = (
-        f"MTF Transformer: {signal} "
-        f"(path_edge={path_edge:.5f}, thr={threshold:.5f}, "
-        f"vol_regime={vol_regime}, regime={regime})"
+        f"Agent synthesis: {signal} "
+        f"(climate={climate or regime}, setup={setup}, timing={timing}, "
+        f"thesis={thesis}, path_edge={path_edge:.5f}, thr={threshold:.5f}, "
+        f"vol_regime={vol_regime})"
     )
     return {
         "chain_id": chain_id,
@@ -67,10 +139,14 @@ def _build_reasoning_chain(
         "steps": [
             {
                 "step_number": 1,
-                "step_name": "mtf_transformer_inference",
+                "step_name": "agent_market_synthesis",
                 "description": conclusion,
                 "evidence": [
                     f"symbol={symbol}",
+                    f"climate={climate}",
+                    f"setup={setup}",
+                    f"timing={timing}",
+                    f"thesis={thesis}",
                     f"path_edge={path_edge:.5f}",
                     f"threshold={threshold:.5f}",
                     f"vol_regime={vol_regime}",
@@ -85,43 +161,6 @@ def _build_reasoning_chain(
     }
 
 
-def _serialize_prediction(pred: Any) -> Dict[str, Any]:
-    return {
-        "model_name": pred.model_name,
-        "model_version": pred.model_version,
-        "prediction": pred.prediction,
-        "confidence": pred.confidence,
-        "reasoning": pred.reasoning,
-        "context": pred.context if isinstance(pred.context, dict) else {},
-        "computation_time_ms": pred.computation_time_ms,
-        "health_status": pred.health_status,
-    }
-
-
-def _stance_to_dict(stance: Any) -> Dict[str, Any]:
-    return {
-        "tf_key": stance.tf_key,
-        "resolution": stance.resolution,
-        "local_signal": stance.local_signal,
-        "direction": stance.direction,
-        "path_edge": stance.path_edge,
-        "long_edge": getattr(stance, "long_edge", stance.path_edge),
-        "short_edge": getattr(stance, "short_edge", -stance.path_edge),
-        "winning_edge": getattr(stance, "winning_edge", abs(stance.path_edge)),
-        "size_scale": getattr(stance, "size_scale", 1.0),
-        "threshold": stance.threshold,
-        "vol_regime": stance.vol_regime,
-        "regime": stance.regime,
-        "confidence": stance.confidence,
-        "quality": stance.quality,
-        "risk": stance.risk,
-        "mfe": stance.mfe,
-        "mae": stance.mae,
-        "reason_codes": list(stance.reason_codes),
-        "model_name": stance.model_name,
-    }
-
-
 async def evaluate_transformer_prediction(
     *,
     symbol: str,
@@ -131,7 +170,7 @@ async def evaluate_transformer_prediction(
     t0: float,
     serialize_prediction: Any,
 ) -> Dict[str, Any]:
-    """Run per-TF transformer inference and apply MTF decision policy."""
+    """Run per-TF transformer inference and climate/setup/timing synthesis."""
     import time
 
     import pandas as pd
@@ -187,55 +226,70 @@ async def evaluate_transformer_prediction(
     )
     model_response = await model_registry.get_predictions(model_request)
 
-    stances: Dict[str, Any] = {}
+    decision_path = _DECISION_PATH
     per_tf_contexts: Dict[str, Dict[str, Any]] = {}
-    for pred in model_response.predictions:
-        # Degraded / failed nodes return empty context; do not invent a NORMAL
-        # HOLD stance that pollutes MTF bias weight.
-        if str(getattr(pred, "health_status", "") or "").lower() != "healthy":
-            logger.info(
-                "transformer_stance_skipped_unhealthy",
-                model_name=getattr(pred, "model_name", None),
-                health_status=getattr(pred, "health_status", None),
-            )
-            continue
-        pctx = pred.context if isinstance(pred.context, dict) else {}
-        tf_key = str(pctx.get("tf_key") or "")
-        if not tf_key:
-            node = model_registry.get_model(pred.model_name)
-            if node is not None and hasattr(node, "resolution"):
-                tf_key = resolution_to_tf_key(getattr(node, "resolution"))
-            else:
-                tf_key = f"tf_unknown_{pred.model_name}"
-        bundle_metadata: Dict[str, Any] = {}
-        node = model_registry.get_model(pred.model_name)
-        if node is not None and hasattr(node, "_bundle_metadata"):
-            raw_meta = getattr(node, "_bundle_metadata")
-            if isinstance(raw_meta, dict):
-                bundle_metadata = raw_meta
-        stance = interpret_tf_prediction(
-            tf_key=tf_key,
-            prediction_context=pctx,
-            bundle_metadata=bundle_metadata,
-            model_name=pred.model_name,
+    multi_tf_predictions: Dict[str, Any] = {}
+
+    views = build_views_from_predictions(
+        predictions=model_response.predictions,
+        model_registry=model_registry,
+        resolution_to_tf_key_fn=resolution_to_tf_key,
+    )
+    for tf_key, view in views.items():
+        per_tf_contexts[tf_key] = next(
+            (
+                (p.context if isinstance(p.context, dict) else {})
+                for p in model_response.predictions
+                if str(getattr(p, "model_name", "")) == view.model_name
+                or (
+                    isinstance(getattr(p, "context", None), dict)
+                    and p.context.get("tf_key") == tf_key
+                )
+            ),
+            {},
         )
-        stances[tf_key] = stance
-        per_tf_contexts[tf_key] = pctx
+        multi_tf_predictions[tf_key] = _view_to_multi_tf_dict(view)
 
-    policy = evaluate_mtf_policy(stances)
-
-    signal = policy.signal
-    confidence = float(policy.confidence)
-    reason_codes = list(policy.reason_codes)
-    path_edge = float(policy.primary_path_edge)
-    threshold = float(policy.primary_threshold)
-    regime = str(policy.primary_regime)
-    vol_regime = str(policy.vol_regime or "NORMAL")
-    if vol_regime == "NORMAL":
-        for stance in stances.values():
-            if stance.tf_key in ("tf_15m", "tf_30m"):
-                vol_regime = stance.vol_regime
-                break
+    state = synthesize_agent_decision(views)
+    market_state_payload = state.to_dict()
+    signal = str(state.wire_signal)
+    confidence = float(state.confidence)
+    reason_codes = list(state.reason_codes)
+    path_edge = float(state.path_edge)
+    threshold = float(state.threshold)
+    regime = str(state.climate)
+    vol_regime = str(state.vol_regime or "NORMAL")
+    policy_size_scale = float(state.size_scale or 0.0)
+    policy_long_edge = float(state.long_edge)
+    policy_short_edge = float(state.short_edge)
+    policy_winning_edge = float(state.winning_edge or abs(path_edge))
+    policy_mfe = float(state.mfe)
+    policy_mae = float(state.mae)
+    policy_future_vol = float(state.future_volatility)
+    policy_primary_tf = str(state.primary_tf or "tf_15m")
+    cross_tf_summary = {
+        "climate": state.climate,
+        "setup": state.setup,
+        "timing": state.timing,
+        "thesis": state.thesis,
+        "dominant_tf": policy_primary_tf,
+        "primary_execution_tf": policy_primary_tf,
+        "decision_path": decision_path,
+    }
+    tf_summary = _per_tf_log_summary(views)
+    logger.info(
+        "transformer_agent_synthesis_complete",
+        symbol=symbol,
+        thesis=state.thesis,
+        wire_signal=signal,
+        climate=state.climate,
+        setup=state.setup,
+        timing=state.timing,
+        path_edge=path_edge,
+        threshold=threshold,
+        reason_codes=reason_codes,
+        per_tf=tf_summary,
+    )
 
     if mctx.get("market_health_hold"):
         signal = "HOLD"
@@ -247,15 +301,15 @@ async def evaluate_transformer_prediction(
         execution_plan = build_execution_plan(
             signal=signal,
             confidence=confidence,
-            size_scale=float(policy.size_scale or 1.0),
-            long_edge=float(policy.long_edge),
-            short_edge=float(policy.short_edge),
-            winning_edge=float(policy.winning_edge or abs(path_edge)),
+            size_scale=float(policy_size_scale or 1.0),
+            long_edge=float(policy_long_edge),
+            short_edge=float(policy_short_edge),
+            winning_edge=float(policy_winning_edge or abs(path_edge)),
             threshold=threshold,
-            primary_tf=str(policy.primary_tf or ""),
-            mfe=float(policy.mfe),
-            mae=float(policy.mae),
-            future_volatility=float(policy.future_volatility),
+            primary_tf=str(policy_primary_tf or ""),
+            mfe=float(policy_mfe),
+            mae=float(policy_mae),
+            future_volatility=float(policy_future_vol),
             vol_regime=vol_regime,
             reason_codes=reason_codes,
             entry_portfolio_margin_fraction=float(
@@ -294,13 +348,12 @@ async def evaluate_transformer_prediction(
         policy_result={
             "signal": signal,
             "reason_codes": reason_codes,
-            "cross_tf_summary": policy.cross_tf_summary,
+            "cross_tf_summary": cross_tf_summary,
         },
     )
 
-    # Diagnostic-only feature map (never used as entry veto)
     transformer_features: Dict[str, float] = {}
-    primary_key = str(policy.primary_tf or "tf_15m")
+    primary_key = str(policy_primary_tf or "tf_15m")
     primary_ctx = per_tf_contexts.get(primary_key) or {}
     for k, v in (primary_ctx.get("closed_bar_features") or {}).items():
         if isinstance(v, (int, float)):
@@ -311,22 +364,21 @@ async def evaluate_transformer_prediction(
         **mtf_context,
         "format": "jacksparrow_transformer_btcusd_mtf",
         "path_edge": path_edge,
-        "long_edge": float(policy.long_edge),
-        "short_edge": float(policy.short_edge),
+        "long_edge": float(policy_long_edge),
+        "short_edge": float(policy_short_edge),
         "threshold": threshold,
         "regime": regime,
         "transformer_vol_regime": vol_regime,
         "transformer_signal": signal,
         "transformer_reason_codes": reason_codes,
-        "multi_tf_predictions": {
-            k: _stance_to_dict(v) for k, v in policy.multi_tf_stances.items()
-        },
-        "cross_tf_summary": policy.cross_tf_summary,
+        "multi_tf_predictions": multi_tf_predictions,
+        "cross_tf_summary": cross_tf_summary,
         "closed_bar_index": bar_idx,
         "model_predictions": model_predictions_payload,
         "execution_plan": execution_plan,
         "transformer_features": transformer_features,
-        "decision_path": "transformer_mtf",
+        "decision_path": decision_path,
+        "market_state": market_state_payload,
     }
 
     policy_verdict = PolicyVerdict(
@@ -368,6 +420,10 @@ async def evaluate_transformer_prediction(
         model_predictions=model_predictions_payload,
         market_context=market_context,
         reason_codes=list(policy_verdict.reason_codes or reason_codes),
+        climate=state.climate,
+        setup=state.setup,
+        timing=state.timing,
+        thesis=state.thesis,
     )
 
     closed_feats: Dict[str, float] = {}
@@ -384,7 +440,7 @@ async def evaluate_transformer_prediction(
             value=float(v),
             timestamp=ts,
             quality=FeatureQuality.HIGH,
-            metadata={"transformer": True, "mtf": True},
+            metadata={"transformer": True, "synthesis": True},
             computation_time_ms=0.0,
         )
         for k, v in sorted(closed_feats.items())
@@ -393,7 +449,7 @@ async def evaluate_transformer_prediction(
     if not feat_list:
         feat_list = [
             MCPFeature(
-                name="transformer_mtf_placeholder",
+                name="transformer_synthesis_placeholder",
                 version="1.0.0",
                 value=0.0,
                 timestamp=ts,
@@ -452,8 +508,14 @@ async def evaluate_transformer_prediction(
         path_edge=path_edge,
         threshold=threshold,
         vol_regime=vol_regime,
+        climate=state.climate,
+        setup=state.setup,
+        timing=state.timing,
+        thesis=state.thesis,
         reason_codes=list(policy_verdict.reason_codes or []),
-        tf_count=len(stances),
+        tf_count=len(multi_tf_predictions),
+        per_tf=tf_summary,
+        decision_path=decision_path,
     )
     return result
 

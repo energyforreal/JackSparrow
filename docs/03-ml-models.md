@@ -2,7 +2,9 @@
 
 ## Overview
 
-On branch **Transformers**, JackSparrow loads **per-timeframe ONNX Transformer bundles** (5m, 15m, 30m, 1h, 2h). `ModelDiscovery` registers one `TransformerModelNode` per bundle; the MCP orchestrator runs all models and applies `evaluate_mtf_policy` in `agent/core/mtf_decision_policy.py` via `evaluate_transformer_prediction` in `agent/core/transformer_decision.py` to produce `DECISION_READY` events with an **`execution_plan`** (long_edge/short_edge, path SL/TP pcts, soft R:R, size_fraction).
+On branch **Transformers**, JackSparrow loads **per-timeframe ONNX Transformer bundles** (5m, 15m, 30m, 1h, 2h). `ModelDiscovery` registers one `TransformerModelNode` per bundle; the MCP orchestrator runs all models and applies **climate / setup / timing agent synthesis** in [`agent/core/market_understanding.py`](../agent/core/market_understanding.py) via `evaluate_transformer_prediction` in [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py) to produce `DECISION_READY` events with an **`execution_plan`** (long_edge/short_edge, path SL/TP pcts, soft R:R, size_fraction) from the **15m** path heads.
+
+Models are sensors (MFE/MAE/vol/trend/OI). The agent owns long/short/flat → wire `BUY`/`SELL`/`HOLD`. There is no MTF BUY/SELL map and no `TRANSFORMER_AGENT_SYNTHESIS` flag.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -88,14 +90,10 @@ Each `TransformerModelNode` builds features on its native TF grid only.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MODEL_DIR` | `./agent/model_storage` | Parent directory for per-TF bundles |
-| `TRANSFORMER_EXECUTION_TFS` | `15m,30m` | Execution anchor TFs for MTF policy |
-| `TRANSFORMER_BIAS_TFS` | `1h,2h` | Bias/veto TFs |
-| `TRANSFORMER_TIMING_TF` | `5m` | Timing modifier TF |
-| `TRANSFORMER_MIN_TF_ALIGNMENT` | `3` | Min aligned TFs for STRONG signals |
-| `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Full-size confidence band floor |
-| `TRANSFORMER_CONFIDENCE_HOLD_FLOOR` | `0.40` | Hard HOLD below this confidence |
-| `TRANSFORMER_STRONG_EDGE_MULTIPLIER` | `1.5` | Edge multiplier for STRONG_BUY/SELL |
-| `TRANSFORMER_EXTREME_REGIME_VETO` | `true` | Force HOLD when vol regime is EXTREME |
+| `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Full-size confidence band floor (sizing) |
+| `TRANSFORMER_CONFIDENCE_HOLD_FLOOR` | `0.40` | Soft confidence floor used in size bands |
+| `TRANSFORMER_STRONG_EDGE_MULTIPLIER` | `1.5` | Legacy edge multiplier (execution plan STRONG sizing) |
+| `TRANSFORMER_EXTREME_REGIME_VETO` | `true` | Climate EXTREME → crisis HOLD in synthesis |
 | `TRANSFORMER_ENTRY_GATES` | `true` | Safety-only trading handler (no legacy feature vetoes) |
 | `LEGACY_FEATURE_ENTRY_GATES` | `false` | Emergency rollback for ADX/EMA/BB/SR filters |
 | `SL_TP_MODE` | `path_pred` | Use MFE/MAE path brackets (`path_pred`) |
@@ -133,8 +131,10 @@ Exports auto-generate `metadata_transformer.json`, `btcusd_{tf}_transformer.onnx
 
 ```bash
 pytest tests/unit/test_transformer_btcusd_per_tf.py \
-       tests/unit/test_mtf_decision_policy.py \
+       tests/unit/test_market_understanding.py \
        tests/unit/test_transformer_decision.py \
+       tests/integration/test_agent_synthesis_decision.py \
+       tests/integration/test_mtf_transformer_decision.py \
        tests/unit/test_transformer_model_discovery.py -q
 ```
 
@@ -150,6 +150,7 @@ Runtime-critical modules:
 | `agent/models/transformer_node.py` | `TransformerModelNode` (ONNX via onnxruntime) |
 | `agent/models/transformer_context_builder.py` | Maps prediction → signal context |
 | `agent/models/mcp_model_registry.py` | MCP model registry |
+| `agent/core/market_understanding.py` | Climate/setup/timing views + agent synthesis |
 | `agent/core/transformer_decision.py` | Slim decision path → `PolicyVerdict` / `DECISION_READY` |
 | `agent/core/mcp_orchestrator.py` | Orchestrates features → model → decision |
 
@@ -157,9 +158,11 @@ Decision flow:
 
 1. `CANDLE_CLOSED` / price trigger → fetch 5m/15m/30m/1h/2h frames
 2. Each `TransformerModelNode.predict()` runs ONNX on its native TF
-3. `evaluate_mtf_policy()` applies layered rules (bias → execution → alignment → timing → veto)
-4. `evaluate_transformer_prediction()` emits BUY/SELL/HOLD + confidence
+3. `build_views_from_predictions` → `synthesize_agent_decision()` (climate × setup × timing)
+4. `evaluate_transformer_prediction()` emits BUY/SELL/HOLD + confidence + `market_state`
 5. `DECISION_READY` → trading handler → risk → execution
+
+Role contract: 1h/2h = climate; 15m = setup (only TF that opens risk); 30m = confirm STRONG; 5m = timing. Statistic is per-TF `path_imbalance_z` (edge / typical label scale), not a shared 0.5% BUY cliff.
 
 See [Logic & reasoning](05-logic-reasoning.md) and [Architecture](01-architecture.md).
 
@@ -192,7 +195,7 @@ docker compose up -d --force-recreate agent
 |---------|-------|
 | `model_discovery_transformer_missing` | `metadata_transformer.json` present under `MODEL_DIR` |
 | `model_discovery_artifact_missing` | ONNX + `feature_config.json` in bundle dir |
-| No trades / all HOLD | `TRANSFORMER_MIN_CONFIDENCE`, `TRANSFORMER_EXTREME_REGIME_VETO`, `MIN_CONFIDENCE_THRESHOLD` |
+| No trades / all HOLD | Inspect `market_context.market_state` (`climate`/`setup`/`timing`); ranging, conflicted, crisis, timing-against, and flat 15m setup all HOLD by design |
 | Feature parity errors | `pytest tests/unit/test_transformer_btcusd_per_tf.py` |
 | Stale model after Colab export | Restart agent; verify bind mount path in Docker |
 

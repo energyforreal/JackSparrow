@@ -67,16 +67,22 @@ def synthetic_entry_proba_from_transformer(
     threshold: float,
     unc_scale: float,
 ) -> Dict[str, float]:
-    """Emit buy/sell/hold simplex from signed path edge (mfe - mae)."""
+    """Emit buy/sell/hold simplex from path imbalance vs typical scale.
+
+    ``threshold`` is the per-TF typical abs edge (label scale), not a hard
+    0.5% BUY cliff. ``edge`` is path_edge (mfe - mae).
+    """
     thr = max(float(threshold), 1e-6)
-    ratio = float(np.tanh(float(edge) / thr))
+    imbalance_z = float(edge) / thr
     hold = max(0.05, min(0.5, 0.35 * max(0.3, min(1.0, float(unc_scale)))))
     rem = max(0.0, 1.0 - hold)
-    if path_edge > thr * 0.25:
-        buy = rem * (0.55 + 0.45 * min(1.0, abs(ratio)))
+    # Soft lean: |z| < 0.25 → balanced; stronger z tilts buy/sell
+    lean = float(np.clip(imbalance_z / 1.25, -1.0, 1.0))
+    if lean > 0.25:
+        buy = rem * (0.55 + 0.45 * lean)
         sell = rem - buy
-    elif path_edge < -thr * 0.25:
-        sell = rem * (0.55 + 0.45 * min(1.0, abs(ratio)))
+    elif lean < -0.25:
+        sell = rem * (0.55 + 0.45 * abs(lean))
         buy = rem - sell
     else:
         buy = rem * 0.5
@@ -103,15 +109,9 @@ def map_prediction_to_signal(
     long_threshold: Optional[float] = None,
     short_threshold: Optional[float] = None,
 ) -> tuple[str, float, list[str], float]:
-    """Map transformer outputs to signal, confidence, reason codes, and size_scale.
+    """Deprecated leftover mapping; live path uses agent synthesis.
 
-    Confidence bands:
-    - below ``confidence_hold_floor`` → HOLD (size_scale=0)
-    - ``[hold_floor, min_confidence)`` → BUY/SELL only (not STRONG), reduced size_scale
-    - ``>= min_confidence`` → full size_scale=1.0; STRONG allowed by edge
-
-    Returns:
-        (signal, confidence, reason_codes, size_scale)
+    Kept for unit tests of edge arithmetic only. Prefer climate/setup/timing.
     """
     reason_codes: list[str] = []
     thr_default = max(float(threshold), 1e-6)
@@ -166,6 +166,34 @@ def map_prediction_to_signal(
     return "HOLD", conf, reason_codes, 0.0
 
 
+def _typical_abs_edge_from_bundle(bundle_metadata: Mapping[str, Any]) -> float:
+    """Match market_understanding.typical_abs_edge_from_metadata without cycle import."""
+    from feature_store.transformer_btcusd.contract import CONTINUOUS_LABEL_COLS
+
+    mfe_idx = CONTINUOUS_LABEL_COLS.index("mfe")
+    mae_idx = CONTINUOUS_LABEL_COLS.index("mae")
+    means = bundle_metadata.get("label_mean")
+    stds = bundle_metadata.get("label_std")
+    typical = 0.005
+    if isinstance(means, (list, tuple)) and len(means) > max(mfe_idx, mae_idx):
+        try:
+            typical = abs(float(means[mfe_idx]) - float(means[mae_idx]))
+        except (TypeError, ValueError):
+            typical = 0.0
+    if typical < 1e-4 and isinstance(stds, (list, tuple)) and len(stds) > max(mfe_idx, mae_idx):
+        try:
+            typical = 0.5 * (float(stds[mfe_idx]) + float(stds[mae_idx]))
+        except (TypeError, ValueError):
+            typical = 0.005
+    if typical < 1e-4:
+        thr = bundle_metadata.get("default_threshold")
+        try:
+            typical = float(thr) if thr is not None else 0.005
+        except (TypeError, ValueError):
+            typical = 0.005
+    return float(max(typical, 1e-4))
+
+
 def build_transformer_prediction_context(
     *,
     bundle_metadata: Mapping[str, Any],
@@ -196,15 +224,16 @@ def build_transformer_prediction_context(
     )
     u_scale = _uncertainty_scale(unc)
 
-    primary_thr = float(bundle_metadata.get("default_threshold") or 0.005)
+    typical = _typical_abs_edge_from_bundle(bundle_metadata)
     winning = long_edge if long_edge >= short_edge else short_edge
-    edge = winning - primary_thr
-    primary_pred_val = float(np.tanh((long_edge - primary_thr) * 80.0))
-    primary_conf = _head_confidence(edge, primary_thr, u_scale)
+    imbalance_z = float(path_edge) / max(typical, 1e-6)
+    # Signed imbalance in (-1, 1) — not tanh vs a 0.5% BUY cliff
+    primary_pred_val = float(np.tanh(imbalance_z))
+    primary_conf = _head_confidence(winning - typical, typical, u_scale)
     entry_proba = synthetic_entry_proba_from_transformer(
         path_edge,
-        long_edge - primary_thr,
-        primary_thr,
+        path_edge,
+        typical,
         u_scale,
     )
 
@@ -219,7 +248,8 @@ def build_transformer_prediction_context(
         "long_edge": long_edge,
         "short_edge": short_edge,
         "winning_edge": float(winning),
-        "threshold": primary_thr,
+        "path_imbalance_z": float(imbalance_z),
+        "threshold": typical,
         "regime": regime,
         "uncertainty": float(unc),
         "uncertainty_score": float(unc),
@@ -252,10 +282,19 @@ def build_mtf_aggregation_context(
                 "path_edge": ctx.get("path_edge"),
                 "long_edge": ctx.get("long_edge"),
                 "short_edge": ctx.get("short_edge"),
+                "path_imbalance_z": ctx.get("path_imbalance_z"),
                 "regime": ctx.get("regime"),
                 "vol_regime": ctx.get("transformer_vol_regime"),
                 "confidence": ctx.get("entry_confidence"),
                 "resolution": ctx.get("resolution"),
+                "mfe": (ctx.get("transformer_continuous_preds") or {}).get("mfe"),
+                "mae": (ctx.get("transformer_continuous_preds") or {}).get("mae"),
+                "drawdown_before_mfe": (ctx.get("transformer_continuous_preds") or {}).get(
+                    "drawdown_before_mfe"
+                ),
+                "trend_strength": (ctx.get("transformer_continuous_preds") or {}).get(
+                    "trend_strength"
+                ),
             }
             for key, ctx in per_tf_contexts.items()
         },
