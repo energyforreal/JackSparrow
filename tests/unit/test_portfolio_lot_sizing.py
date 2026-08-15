@@ -91,7 +91,19 @@ def test_entry_lots_capped_by_live_wallet_not_book_value() -> None:
 
 
 @pytest.mark.asyncio
-async def test_validate_trade_budget_uses_margin_inr_override() -> None:
+async def test_validate_trade_budget_uses_margin_inr_override(monkeypatch) -> None:
+    from agent.core import config as cfg
+
+    monkeypatch.setattr(cfg.settings, "entry_gates_enabled", True)
+    monkeypatch.setattr(cfg.settings, "trading_kill_switch", False)
+    monkeypatch.setattr(
+        "agent.core.trading_controls.should_block_new_orders",
+        lambda *a, **k: (False, ""),
+    )
+    monkeypatch.setattr(
+        "agent.core.position_reconcile.is_reconcile_healthy",
+        lambda: True,
+    )
     rm = RiskManager()
     await rm.initialize(10000.0)
     result = await rm.validate_trade(
@@ -117,8 +129,20 @@ async def test_validate_trade_budget_uses_margin_inr_override() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cash_reserve_uses_live_wallet_not_in_memory_book() -> None:
+async def test_cash_reserve_uses_live_wallet_not_in_memory_book(monkeypatch) -> None:
     """40% reserve must be of available cash, not portfolio.total_value × FX."""
+    from agent.core import config as cfg
+
+    monkeypatch.setattr(cfg.settings, "entry_gates_enabled", True)
+    monkeypatch.setattr(cfg.settings, "trading_kill_switch", False)
+    monkeypatch.setattr(
+        "agent.core.trading_controls.should_block_new_orders",
+        lambda *a, **k: (False, ""),
+    )
+    monkeypatch.setattr(
+        "agent.core.position_reconcile.is_reconcile_healthy",
+        lambda: True,
+    )
     rm = RiskManager()
     await rm.initialize(20_000.0)  # stale USD book → would imply ~₹17.2L reserve floor
     wallet_inr = 15_740.0

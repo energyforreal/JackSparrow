@@ -738,22 +738,24 @@ class ExecutionEngine:
                 trade["reasoning_chain_id"] = eff_reasoning_chain_id
 
             if not payload.get("ml_signal_validated"):
-                min_conf = float(
-                    getattr(settings, "transformer_min_confidence", None)
-                    or getattr(settings, "min_confidence_threshold", 0.52)
-                    or 0.52
-                )
-                conf = float(payload.get("confidence") or 0.0)
-                if conf < min_conf:
-                    logger.warning(
-                        "execution_risk_approved_low_confidence_rejected",
-                        symbol=symbol,
-                        side=side_raw,
-                        confidence=conf,
-                        threshold=min_conf,
-                        event_id=event.event_id,
+                gates_on = bool(getattr(settings, "entry_gates_enabled", False))
+                if gates_on:
+                    min_conf = float(
+                        getattr(settings, "transformer_min_confidence", None)
+                        or getattr(settings, "min_confidence_threshold", 0.52)
+                        or 0.52
                     )
-                    return
+                    conf = float(payload.get("confidence") or 0.0)
+                    if conf < min_conf:
+                        logger.warning(
+                            "execution_risk_approved_low_confidence_rejected",
+                            symbol=symbol,
+                            side=side_raw,
+                            confidence=conf,
+                            threshold=min_conf,
+                            event_id=event.event_id,
+                        )
+                        return
             trade["ml_signal_validated"] = True
             trade["ml_signal_source"] = payload.get("ml_signal_source") or "ml_models"
             if payload.get("model_predictions"):

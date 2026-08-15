@@ -46,7 +46,19 @@ async def test_calculate_position_size_scales_with_confidence(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_validate_trade_rejects_zero_entry_price_for_stop_loss_suggestion():
+async def test_validate_trade_rejects_zero_entry_price_for_stop_loss_suggestion(monkeypatch):
+    from agent.core import config as cfg
+
+    monkeypatch.setattr(cfg.settings, "entry_gates_enabled", True)
+    monkeypatch.setattr(cfg.settings, "trading_kill_switch", False)
+    monkeypatch.setattr(
+        "agent.core.trading_controls.should_block_new_orders",
+        lambda *a, **k: (False, ""),
+    )
+    monkeypatch.setattr(
+        "agent.core.position_reconcile.is_reconcile_healthy",
+        lambda: True,
+    )
     manager = RiskManager()
     await manager.initialize(initial_balance=10_000.0)
 
@@ -63,7 +75,19 @@ async def test_validate_trade_rejects_zero_entry_price_for_stop_loss_suggestion(
 
 
 @pytest.mark.asyncio
-async def test_validate_trade_rejects_zero_entry_price_for_stop_loss_validation():
+async def test_validate_trade_rejects_zero_entry_price_for_stop_loss_validation(monkeypatch):
+    from agent.core import config as cfg
+
+    monkeypatch.setattr(cfg.settings, "entry_gates_enabled", True)
+    monkeypatch.setattr(cfg.settings, "trading_kill_switch", False)
+    monkeypatch.setattr(
+        "agent.core.trading_controls.should_block_new_orders",
+        lambda *a, **k: (False, ""),
+    )
+    monkeypatch.setattr(
+        "agent.core.position_reconcile.is_reconcile_healthy",
+        lambda: True,
+    )
     manager = RiskManager()
     await manager.initialize(initial_balance=10_000.0)
 

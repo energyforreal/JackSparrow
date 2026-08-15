@@ -319,18 +319,20 @@ class RiskManager:
             "daily_pnl": 0.0  # Would come from context manager
         }
 
+        from agent.core.config import settings as agent_settings
+
+        gates_on = bool(getattr(agent_settings, "entry_gates_enabled", False))
+
         # Assess individual risk factors
         risk_score = 0.0
 
         # Drawdown risk
         drawdown = assessment.risk_factors["drawdown"]
         try:
-            from agent.core.config import settings as agent_settings
-
             daily_halt_pct = float(
-                getattr(agent_settings, "agent_daily_drawdown_halt_pct", 4.0) or 4.0
+                getattr(agent_settings, "agent_daily_drawdown_halt_pct", 0.0) or 0.0
             )
-            if daily_halt_pct > 0 and drawdown * 100.0 >= daily_halt_pct:
+            if gates_on and daily_halt_pct > 0 and drawdown * 100.0 >= daily_halt_pct:
                 assessment.can_trade = False
                 assessment.emergency_actions.append(
                     f"Daily drawdown halt: {drawdown * 100:.2f}% >= {daily_halt_pct:.1f}%"
@@ -342,10 +344,11 @@ class RiskManager:
                 drawdown=drawdown,
                 exc_info=True,
             )
-            assessment.can_trade = False
-            assessment.emergency_actions.append(
-                "Daily drawdown halt check failed — trading denied (fail-safe)"
-            )
+            if gates_on:
+                assessment.can_trade = False
+                assessment.emergency_actions.append(
+                    "Daily drawdown halt check failed — trading denied (fail-safe)"
+                )
 
         if drawdown > self.risk_limits["max_drawdown"]:
             risk_score += 0.4
@@ -367,7 +370,8 @@ class RiskManager:
         position_count = assessment.risk_factors["open_positions"]
         if position_count >= self.risk_limits["max_open_positions"]:
             risk_score += 0.2
-            assessment.can_trade = False
+            if gates_on:
+                assessment.can_trade = False
             assessment.recommendations.append("Maximum open positions reached")
         elif position_count > self.risk_limits["max_open_positions"] * 0.8:
             risk_score += 0.1
@@ -395,7 +399,8 @@ class RiskManager:
         # Determine overall risk level
         if risk_score >= 0.6:
             assessment.overall_risk_level = "critical"
-            assessment.can_trade = False
+            if gates_on:
+                assessment.can_trade = False
         elif risk_score >= 0.4:
             assessment.overall_risk_level = "high"
             assessment.max_position_size = self.risk_limits["max_position_size"] * 0.5
@@ -406,12 +411,17 @@ class RiskManager:
             assessment.overall_risk_level = "low"
             assessment.max_position_size = self.risk_limits["max_position_size"]
 
+        if not gates_on:
+            assessment.can_trade = True
+            assessment.max_position_size = self.risk_limits["max_position_size"]
+
         assessment.position_limit = max(1, self.risk_limits["max_open_positions"] - len(self.portfolio.positions))
 
         logger.info("portfolio_risk_assessed",
                    risk_level=assessment.overall_risk_level,
                    risk_score=assessment.portfolio_risk_score,
                    can_trade=assessment.can_trade,
+                   entry_gates_enabled=gates_on,
                    recommendations=len(assessment.recommendations))
 
         return assessment
@@ -635,6 +645,10 @@ class RiskManager:
                 "adjusted_size": 0.0
             }
 
+        from agent.core.config import settings as agent_settings
+
+        gates_on = bool(getattr(agent_settings, "entry_gates_enabled", False))
+
         result = {
             "approved": True,
             "reason": "Trade approved",
@@ -642,6 +656,27 @@ class RiskManager:
             "warnings": [],
             "stop_loss_required": stop_loss is None
         }
+
+        # Kill switch / circuit breaker always apply (safety, not policy gates).
+        try:
+            from agent.core.trading_controls import should_block_new_orders
+
+            blocked, halt_reason = should_block_new_orders()
+            if blocked:
+                result["approved"] = False
+                result["reason"] = halt_reason
+                return result
+        except ImportError:
+            pass
+
+        if not gates_on:
+            logger.info(
+                "trade_validated_gates_disabled",
+                symbol=symbol,
+                side=side,
+                size=proposed_size,
+            )
+            return result
 
         try:
             from agent.core.position_reconcile import (
@@ -652,17 +687,6 @@ class RiskManager:
             if not is_reconcile_healthy():
                 result["approved"] = False
                 result["reason"] = get_reconcile_block_reason()
-                return result
-        except ImportError:
-            pass
-
-        try:
-            from agent.core.trading_controls import should_block_new_orders
-
-            blocked, halt_reason = should_block_new_orders()
-            if blocked:
-                result["approved"] = False
-                result["reason"] = halt_reason
                 return result
         except ImportError:
             pass

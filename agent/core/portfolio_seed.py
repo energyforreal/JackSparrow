@@ -76,19 +76,22 @@ async def seed_risk_manager_portfolio_from_exchange(
     if equity_usd <= 0:
         return None
     prev = float(getattr(portfolio, "total_value", 0.0) or 0.0)
+    prev_peak = float(getattr(portfolio, "peak_portfolio_value", 0.0) or 0.0)
     # ``total_value`` is a read-only computed property (cash + positions).
     portfolio.cash_balance = float(equity_usd)
-    if hasattr(portfolio, "_update_portfolio_value"):
-        portfolio._update_portfolio_value()
-    else:
-        portfolio.current_portfolio_value = float(equity_usd)
-        peak = float(getattr(portfolio, "peak_portfolio_value", 0.0) or 0.0)
-        portfolio.peak_portfolio_value = max(peak, float(equity_usd))
+    # Reset peak to seeded equity so INITIAL_BALANCE → live wallet does not
+    # fabricate a ~99% drawdown that blocks every entry.
+    portfolio.current_portfolio_value = float(equity_usd)
+    portfolio.peak_portfolio_value = float(equity_usd)
+    if hasattr(portfolio, "initial_balance"):
+        portfolio.initial_balance = float(equity_usd)
     logger.info(
         "portfolio_seed_from_exchange",
         symbol=symbol,
         previous_total_value_usd=prev,
+        previous_peak_usd=prev_peak,
         seeded_total_value_usd=equity_usd,
+        seeded_peak_usd=float(equity_usd),
         seeded_cash_balance_usd=float(getattr(portfolio, "cash_balance", equity_usd)),
     )
     return equity_usd

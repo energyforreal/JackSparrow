@@ -28,6 +28,7 @@ class _FakeExecutionModule:
 
 @pytest.mark.asyncio
 async def test_transformer_entry_without_volatility_feature(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "entry_gates_enabled", True)
     monkeypatch.setattr(settings, "transformer_entry_gates", True)
     monkeypatch.setattr(settings, "legacy_feature_entry_gates", False)
     monkeypatch.setattr(settings, "ai_signal_minimal_entry_gates", False)

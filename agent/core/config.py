@@ -168,11 +168,14 @@ class Settings(BaseSettings):
         ),
     )
     transformer_confidence_hold_floor: float = Field(
-        default=0.40,
+        default=0.0,
         env="TRANSFORMER_CONFIDENCE_HOLD_FLOOR",
         ge=0.0,
         le=1.0,
-        description="Hard HOLD when model confidence is strictly below this floor.",
+        description=(
+            "Hard reject when model confidence is strictly below this floor "
+            "(only when ENTRY_GATES_ENABLED)."
+        ),
     )
     transformer_long_edge_threshold: Optional[float] = Field(
         default=None,
@@ -190,12 +193,21 @@ class Settings(BaseSettings):
             "TRANSFORMER_SIGNAL_THRESHOLD / metadata default_threshold."
         ),
     )
+    entry_gates_enabled: bool = Field(
+        default=False,
+        env="ENTRY_GATES_ENABLED",
+        description=(
+            "Master switch for policy entry gates (confidence floors, stale signal, "
+            "drawdown halt, risk/budget rejects, debounce, execution confidence). "
+            "Default False so synthesis BUY/STRONG_BUY can execute; set True to restore."
+        ),
+    )
     transformer_entry_gates: bool = Field(
-        default=True,
+        default=False,
         env="TRANSFORMER_ENTRY_GATES",
         description=(
-            "When true, trading handler uses transformer-native safety gates "
-            "(no legacy feature-dict vetoes)."
+            "When true (and ENTRY_GATES_ENABLED), trading handler uses transformer-native "
+            "safety gates (no legacy feature-dict vetoes)."
         ),
     )
     legacy_feature_entry_gates: bool = Field(
@@ -1639,9 +1651,12 @@ class Settings(BaseSettings):
         ),
     )
     trade_signal_debounce_seconds: int = Field(
-        default=10,
+        default=0,
         env="TRADE_SIGNAL_DEBOUNCE_SECONDS",
-        description="Debounce: block duplicate (symbol, side) approvals within this many seconds",
+        description=(
+            "Debounce: block duplicate (symbol, side) approvals within this many seconds. "
+            "0 disables."
+        ),
     )
     min_risk_reward_ratio: float = Field(
         default=1.2,
@@ -2048,9 +2063,12 @@ class Settings(BaseSettings):
         env="AGENT_THESIS_FUNDING_PRESSURE_MAX",
     )
     agent_daily_drawdown_halt_pct: float = Field(
-        default=4.0,
+        default=0.0,
         env="AGENT_DAILY_DRAWDOWN_HALT_PCT",
-        description="Halt new entries when daily drawdown exceeds this percent.",
+        description=(
+            "Halt new entries when daily drawdown exceeds this percent. "
+            "0 disables (default; entry gates off)."
+        ),
     )
     agent_thesis_breakout_enabled: bool = Field(
         default=True,

@@ -90,8 +90,10 @@ class TradingEventHandler:
         last = self._last_risk_approved.get(key, 0)
         debounce_seconds = int(
             getattr(settings, "trade_signal_debounce_seconds", DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS)
-            or DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS
+            or 0
         )
+        if debounce_seconds <= 0:
+            return False
         if now - last < debounce_seconds:
             return True
         self._last_risk_approved[key] = now
@@ -304,10 +306,12 @@ class TradingEventHandler:
             )
             if not isinstance(execution_plan, dict):
                 execution_plan = {}
-            transformer_gates = bool(
-                getattr(settings, "transformer_entry_gates", True)
-            ) or bool(getattr(settings, "ai_signal_minimal_entry_gates", False))
-            legacy_feature_gates = bool(
+            gates_on = bool(getattr(settings, "entry_gates_enabled", False))
+            transformer_gates = gates_on and (
+                bool(getattr(settings, "transformer_entry_gates", False))
+                or bool(getattr(settings, "ai_signal_minimal_entry_gates", False))
+            )
+            legacy_feature_gates = gates_on and bool(
                 getattr(settings, "legacy_feature_entry_gates", False)
             )
             # Legacy alias: minimal_entry historically skipped most feature gates.
@@ -323,13 +327,14 @@ class TradingEventHandler:
             raw_confidence = confidence
             diagnostics_base["raw_confidence"] = raw_confidence
             diagnostics_base["calibrated_confidence"] = confidence
+            diagnostics_base["entry_gates_enabled"] = gates_on
 
             try:
                 raw_ai_gate = max(0.0, min(1.0, float(payload.get("confidence", 0.0) or 0.0)))
             except (TypeError, ValueError):
                 raw_ai_gate = 0.0
             hold_floor = float(
-                getattr(settings, "transformer_confidence_hold_floor", 0.40) or 0.40
+                getattr(settings, "transformer_confidence_hold_floor", 0.0) or 0.0
             )
             ai_floor = hold_floor if transformer_gates else max(
                 0.0,
@@ -342,7 +347,7 @@ class TradingEventHandler:
             diagnostics_base["legacy_feature_entry_gates"] = legacy_feature_gates
             diagnostics_base["decision_path"] = (
                 mc.get("decision_path") if isinstance(mc, dict) else None
-            ) or "transformer_mtf"
+            ) or "transformer_agent_synthesis"
 
             # HOLD: optional gated-ML reversal exit while positioned (PIPE-01)
             if signal == "HOLD" or not signal:
@@ -363,7 +368,7 @@ class TradingEventHandler:
                 )
                 return
 
-            if transformer_gates and raw_ai_gate < hold_floor:
+            if gates_on and transformer_gates and raw_ai_gate < hold_floor:
                 self._log_entry_rejected(
                     "low_ai_signal_confidence",
                     symbol=symbol,
@@ -374,7 +379,8 @@ class TradingEventHandler:
                 )
                 return
             if (
-                not transformer_gates
+                gates_on
+                and not transformer_gates
                 and bool(getattr(settings, "ai_signal_minimal_entry_gates", False))
                 and raw_ai_gate < ai_floor
             ):
@@ -388,8 +394,8 @@ class TradingEventHandler:
                 )
                 return
 
-            # Signal expiry: always enforce for transformer path (safety gate)
-            if transformer_gates or not minimal_entry:
+            # Signal expiry (only when entry gates enabled)
+            if gates_on and (transformer_gates or not minimal_entry):
                 if payload.get("server_timestamp_ms") is None:
                     payload["server_timestamp_ms"] = int(
                         getattr(event, "timestamp", now_utc).timestamp() * 1000
@@ -505,7 +511,7 @@ class TradingEventHandler:
                         )
                         return
 
-            if transformer_gates:
+            if gates_on and transformer_gates:
                 # Soft bands already applied in policy; only hard-reject below hold floor.
                 if float(raw_confidence or 0.0) < hold_floor:
                     self._log_entry_rejected(
@@ -520,14 +526,14 @@ class TradingEventHandler:
                         **diagnostics_base,
                     )
                     return
-            elif minimal_entry:
+            elif gates_on and minimal_entry:
                 confidence = raw_ai_gate
-            elif v43_exec_enabled:
+            elif gates_on and v43_exec_enabled:
                 confidence = max(
                     float(confidence or 0.0),
                     float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52) * 0.85,
                 )
-            else:
+            elif gates_on:
                 eff_min_conf = float(
                     getattr(settings, "transformer_min_confidence", None)
                     or getattr(settings, "min_confidence_threshold", 0.52)
@@ -665,7 +671,7 @@ class TradingEventHandler:
                     ),
                 ),
             )
-            if transformer_gates and execution_plan.get("size_fraction") is not None:
+            if execution_plan.get("size_fraction") is not None:
                 try:
                     plan_frac = float(execution_plan.get("size_fraction") or 0.0)
                     if plan_frac > 0:
@@ -766,8 +772,7 @@ class TradingEventHandler:
                 entry_lots = min(entry_lots, affordable_lots)
             # Avoid silent starve from size_scale: floor to min lot once if unscaled budget allows
             if (
-                transformer_gates
-                and entry_lots < min_lot_size
+                entry_lots < min_lot_size
                 and affordable_lots >= min_lot_size
                 and getattr(settings, "portfolio_fraction_lot_sizing", True)
             ):
@@ -805,7 +810,7 @@ class TradingEventHandler:
                 entry_fee_inr = entry_fee_usd * usdinr_rate
             required_total_inr = required_margin_inr + entry_fee_inr
 
-            if required_total_inr <= 0 or available_cash_inr < required_total_inr:
+            if gates_on and (required_total_inr <= 0 or available_cash_inr < required_total_inr):
                 self._log_entry_rejected(
                     "insufficient_margin_inr",
                     symbol=symbol,
@@ -837,7 +842,7 @@ class TradingEventHandler:
                 except Exception as exc:
                     logger.warning("pre_entry_reconcile_failed", error=str(exc))
 
-            # Validate trade with risk manager (always — agent-first authority; no bypass in live/paper)
+            # Validate trade with risk manager (policy rejects only when ENTRY_GATES_ENABLED)
             validation = await self.risk_manager.validate_trade(
                 symbol=symbol,
                 side=risk_side,
@@ -848,7 +853,7 @@ class TradingEventHandler:
                 available_balance_override=available_cash_inr,
             )
 
-            if not validation.get("approved", False):
+            if gates_on and not validation.get("approved", False):
                 self._log_entry_rejected(
                     "risk_rejected",
                     symbol=symbol,
@@ -862,8 +867,7 @@ class TradingEventHandler:
                 return
 
             # Deduplicate: one RiskApproved per (symbol, side) per time window.
-            # Keep this active even in minimal-entry mode to prevent burst duplicate fills.
-            if self._should_skip_debounce(symbol, side):
+            if gates_on and self._should_skip_debounce(symbol, side):
                 self._log_entry_rejected(
                     "debounce",
                     symbol=symbol,
@@ -876,11 +880,13 @@ class TradingEventHandler:
                             "trade_signal_debounce_seconds",
                             DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS,
                         )
-                        or DEFAULT_TRADE_SIGNAL_DEBOUNCE_SECONDS
+                        or 0
                     ),
                     **diagnostics_base,
                 )
                 return
+            if not gates_on:
+                self._last_risk_approved[self._debounce_key(symbol, side)] = time.time()
 
             # Path-pred / ATR / fixed SL/TP
             atr = features.get("atr_14")
@@ -892,8 +898,7 @@ class TradingEventHandler:
             take_pct = settings.take_profit_percentage
 
             if (
-                transformer_gates
-                and sl_tp_mode == "path_pred"
+                sl_tp_mode == "path_pred"
                 and execution_plan.get("mfe") is not None
             ):
                 try:
@@ -1205,9 +1210,9 @@ class TradingEventHandler:
                 market_context = {}
 
             hold_floor_late = float(
-                getattr(settings, "transformer_confidence_hold_floor", 0.40) or 0.40
+                getattr(settings, "transformer_confidence_hold_floor", 0.0) or 0.0
             )
-            if transformer_gates:
+            if gates_on and transformer_gates:
                 if float(confidence or 0.0) < hold_floor_late:
                     self._log_entry_rejected(
                         "low_confidence_reject",
@@ -1219,7 +1224,7 @@ class TradingEventHandler:
                         **diagnostics_base,
                     )
                     return
-            else:
+            elif gates_on:
                 eff_min_conf = float(
                     getattr(settings, "transformer_min_confidence", None)
                     or getattr(settings, "min_confidence_threshold", 0.52)

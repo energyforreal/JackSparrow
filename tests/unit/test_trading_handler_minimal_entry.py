@@ -31,6 +31,7 @@ class _FakeExecutionModule:
 
 @pytest.fixture
 def _minimal_settings(monkeypatch):
+    monkeypatch.setattr(settings, "entry_gates_enabled", True)
     monkeypatch.setattr(settings, "ai_signal_minimal_entry_gates", True)
     monkeypatch.setattr(settings, "transformer_entry_gates", True)
     monkeypatch.setattr(settings, "legacy_feature_entry_gates", False)
