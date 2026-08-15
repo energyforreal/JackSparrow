@@ -37,6 +37,7 @@ from agent.core.sl_tp import (
     rebase_sl_tp_to_fill,
 )
 from agent.core.dynamic_sl_tp import (
+    SlTpLevels,
     compute_sl_tp_levels,
     should_update_bracket,
     to_delta_bracket_payload,
@@ -695,6 +696,8 @@ class ExecutionEngine:
                     pex["atr_14"] = float(payload["atr_14"])
                 except (TypeError, ValueError):
                     pass
+            if payload.get("sl_tp_source"):
+                pex["sl_tp_source"] = str(payload["sl_tp_source"]).strip().lower()
             uir = payload.get("usd_inr_rate")
             if uir is not None:
                 try:
@@ -1139,6 +1142,16 @@ class ExecutionEngine:
                 pex = dict(trade.get("position_extras") or {})
                 if order_result.get("bracket_sl_tp_active"):
                     pex["exchange_bracket_sl_tp"] = True
+                if not pex.get("sl_tp_source") and (stop_loss is not None or take_profit is not None):
+                    mode = str(
+                        getattr(settings, "sl_tp_mode", "path_pred") or "path_pred"
+                    ).lower()
+                    if mode == "path_pred":
+                        pex["sl_tp_source"] = "path_pred"
+                    elif mode == "atr" or bool(getattr(settings, "use_atr_scaled_sl_tp", False)):
+                        pex["sl_tp_source"] = "atr"
+                    else:
+                        pex["sl_tp_source"] = "fixed"
                 position = self.position_manager.open_position(
                     symbol=symbol,
                     side="long" if side == "buy" else "short",
@@ -1858,6 +1871,28 @@ class ExecutionEngine:
                 failed[symbol] = str(res.error_message or "close_failed")
         return {"success": len(failed) == 0, "result": {"closed_symbols": closed, "failed": failed}}
 
+    @staticmethod
+    def _coerce_optional_price(raw: Any) -> Optional[float]:
+        if raw is None:
+            return None
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if val <= 0 or not math.isfinite(val):
+            return None
+        return val
+
+    @staticmethod
+    def _is_path_pred_sl_tp(position: Dict[str, Any]) -> bool:
+        source = str(position.get("sl_tp_source") or "").strip().lower()
+        if source == "path_pred":
+            return True
+        if source in ("atr", "fixed"):
+            return False
+        mode = str(getattr(settings, "sl_tp_mode", "path_pred") or "path_pred").lower()
+        return mode == "path_pred"
+
     async def _attach_position_bracket(
         self,
         position: Dict[str, Any],
@@ -1866,7 +1901,11 @@ class ExecutionEngine:
         atr_14: Optional[float] = None,
         regime: Optional[str] = None,
     ) -> None:
-        """POST /v2/orders/bracket after fill when entry order had no atomic bracket."""
+        """POST /v2/orders/bracket after fill when entry order had no atomic bracket.
+
+        Prefers planned (path-pred / handler) prices already on the position. Falls
+        back to ``compute_sl_tp_levels`` only when both SL and TP are missing.
+        """
         if not getattr(settings, "use_delta_position_bracket_api", True) or not self.delta_client:
             return
         entry = float(position.get("entry_price") or 0)
@@ -1880,18 +1919,47 @@ class ExecutionEngine:
                 tick_sz = float(tick_raw)
             except (TypeError, ValueError):
                 tick_sz = None
-        levels = compute_sl_tp_levels(
-            entry, side, atr_14, regime, settings, tick_size=tick_sz
-        )
+
+        planned_sl = self._coerce_optional_price(position.get("stop_loss"))
+        planned_tp = self._coerce_optional_price(position.get("take_profit"))
+        used_fallback = False
+        sl_tp_source = str(position.get("sl_tp_source") or "").strip().lower() or None
+
+        if planned_sl is None and planned_tp is None:
+            levels = compute_sl_tp_levels(
+                entry, side, atr_14, regime, settings, tick_size=tick_sz
+            )
+            used_fallback = True
+            use_atr = bool(getattr(settings, "use_atr_scaled_sl_tp", False)) and atr_14 is not None
+            mode = str(getattr(settings, "sl_tp_mode", "path_pred") or "path_pred").lower()
+            if mode == "atr" or use_atr:
+                sl_tp_source = "atr"
+            else:
+                sl_tp_source = "fixed"
+        else:
+            levels = SlTpLevels(planned_sl, planned_tp, None)
+            if sl_tp_source is None:
+                mode = str(getattr(settings, "sl_tp_mode", "path_pred") or "path_pred").lower()
+                if mode == "path_pred":
+                    sl_tp_source = "path_pred"
+                elif mode == "atr" or bool(getattr(settings, "use_atr_scaled_sl_tp", False)):
+                    sl_tp_source = "atr"
+                else:
+                    sl_tp_source = "fixed"
+
         if levels.stop_loss is None and levels.take_profit is None:
             return
         trigger = str(
             getattr(settings, "bracket_stop_trigger_method", "mark_price") or "mark_price"
         )
+        use_trailing = (
+            bool(getattr(settings, "use_atr_trailing_stop", False))
+            and sl_tp_source != "path_pred"
+        )
         body = to_delta_bracket_payload(
             levels,
             trigger_method=trigger,
-            use_trailing=bool(getattr(settings, "use_atr_trailing_stop", False)),
+            use_trailing=use_trailing,
         )
         try:
             await self.delta_client.create_position_bracket(
@@ -1906,15 +1974,20 @@ class ExecutionEngine:
             position["exchange_bracket_sl_tp"] = True
             position["bracket_trail_amount"] = levels.trail_amount
             position["bracket_trigger_method"] = trigger
-            position["stop_loss"] = levels.stop_loss
-            position["take_profit"] = levels.take_profit
+            # Do not overwrite path-pred/planned prices with a recomputed formula.
+            if used_fallback:
+                position["stop_loss"] = levels.stop_loss
+                position["take_profit"] = levels.take_profit
+            if sl_tp_source:
+                position["sl_tp_source"] = sl_tp_source
             position["bracket_sl_tp_updated_at"] = datetime.now(timezone.utc).isoformat()
             logger.info(
                 "position_bracket_attached",
                 symbol=symbol,
                 bracket_order_id=bid,
-                stop_loss=levels.stop_loss,
-                take_profit=levels.take_profit,
+                stop_loss=position.get("stop_loss"),
+                take_profit=position.get("take_profit"),
+                sl_tp_source=sl_tp_source,
             )
         except Exception as exc:
             logger.warning("position_bracket_attach_failed", symbol=symbol, error=str(exc))
@@ -1926,10 +1999,15 @@ class ExecutionEngine:
     async def _maybe_update_dynamic_bracket(
         self, symbol: str, position: Dict[str, Any]
     ) -> None:
-        """PUT /v2/orders/bracket when ATR/regime levels move beyond throttle thresholds."""
+        """PUT /v2/orders/bracket when ATR/regime levels move beyond throttle thresholds.
+
+        Path-pred brackets are entry-time plans and are not recomputed while open.
+        """
         if not getattr(settings, "dynamic_sl_tp_enabled", False):
             return
         if not getattr(settings, "use_delta_position_bracket_api", True) or not self.delta_client:
+            return
+        if self._is_path_pred_sl_tp(position):
             return
         entry = float(position.get("entry_price") or 0)
         if entry <= 0:
@@ -2021,6 +2099,8 @@ class ExecutionEngine:
             return
         position = self.position_manager.get_position(symbol)
         if not position or position.get("status") != "open":
+            return
+        if self._is_path_pred_sl_tp(position):
             return
         bid = position.get("bracket_order_id")
         if bid is None:
@@ -2154,8 +2234,14 @@ class ExecutionEngine:
         )
 
         past_min_hold = True
+        allow_pct_trail = not self._is_path_pred_sl_tp(position)
 
-        if past_min_hold and position["side"] == "long" and current_price > entry_price:
+        if (
+            allow_pct_trail
+            and past_min_hold
+            and position["side"] == "long"
+            and current_price > entry_price
+        ):
             profit_pct = (current_price - entry_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 - trail_pct)
@@ -2167,7 +2253,12 @@ class ExecutionEngine:
                         asyncio.create_task(
                             self._update_bracket_stop_only(position_symbol, new_trail_stop)
                         )
-        elif past_min_hold and position["side"] == "short" and current_price < entry_price:
+        elif (
+            allow_pct_trail
+            and past_min_hold
+            and position["side"] == "short"
+            and current_price < entry_price
+        ):
             profit_pct = (entry_price - current_price) / entry_price
             if act_pct <= 0 or profit_pct >= act_pct:
                 new_trail_stop = current_price * (1 + trail_pct)

@@ -129,3 +129,109 @@ async def test_transformer_entry_without_volatility_feature(monkeypatch) -> None
     assert published[0].payload.get("ml_signal_source") == "transformer_agent_synthesis"
     assert published[0].payload.get("stop_loss") is not None
     assert published[0].payload.get("take_profit") is not None
+    assert published[0].payload.get("sl_tp_source") == "path_pred"
+
+
+@pytest.mark.asyncio
+async def test_handler_attaches_stop_loss_without_take_profit(monkeypatch) -> None:
+    """Partial path levels should still be published independently."""
+    monkeypatch.setattr(settings, "entry_gates_enabled", True)
+    monkeypatch.setattr(settings, "transformer_entry_gates", True)
+    monkeypatch.setattr(settings, "legacy_feature_entry_gates", False)
+    monkeypatch.setattr(settings, "ai_signal_minimal_entry_gates", False)
+    monkeypatch.setattr(settings, "transformer_confidence_hold_floor", 0.40)
+    monkeypatch.setattr(settings, "exchange_position_reconcile_enabled", False)
+    monkeypatch.setattr(settings, "portfolio_fraction_lot_sizing", True)
+    monkeypatch.setattr(settings, "entry_portfolio_margin_fraction", 0.60)
+    monkeypatch.setattr(settings, "isolated_margin_leverage", 5)
+    monkeypatch.setattr(settings, "sl_tp_mode", "path_pred")
+    monkeypatch.setattr(settings, "initial_balance", 500000.0)
+    monkeypatch.setattr(
+        "agent.core.fx_rate.resolve_usdinr_rate",
+        AsyncMock(return_value=83.0),
+    )
+
+    published: list = []
+
+    async def capture_publish(event):
+        published.append(event)
+
+    monkeypatch.setattr(trading_handler_mod.event_bus, "publish", capture_publish)
+
+    fake_state = SimpleNamespace(
+        config={"market_data": {"price": 50000.0}},
+        portfolio_value=500000.0,
+        cash_balance=500000.0,
+    )
+    monkeypatch.setattr(
+        trading_handler_mod,
+        "context_manager",
+        MagicMock(get_state=lambda: fake_state),
+    )
+
+    async def fake_specs(symbol: str) -> ContractSpecs:
+        return ContractSpecs(
+            symbol="BTCUSD",
+            contract_value_btc=0.001,
+            tick_size=0.5,
+            product_id=27,
+            taker_commission_rate=0.0005,
+        )
+
+    monkeypatch.setattr(trading_handler_mod, "get_contract_specs", fake_specs)
+    monkeypatch.setattr(
+        "agent.core.path_execution_plan.compute_path_stop_take_prices",
+        lambda *a, **k: (49500.0, None, 0.02, 0.01),
+    )
+
+    risk = MagicMock()
+    risk.portfolio = None
+    risk.validate_trade = AsyncMock(return_value={"approved": True, "reason": "ok"})
+    handler = TradingEventHandler(
+        risk_manager=risk,
+        delta_client=None,
+        execution_module=_FakeExecutionModule(),
+    )
+    monkeypatch.setattr(
+        handler.learning_system,
+        "calibrate_runtime_confidence",
+        lambda conf, **_k: float(conf),
+    )
+
+    now = datetime.now(timezone.utc)
+    event = DecisionReadyEvent(
+        source="test",
+        payload={
+            "symbol": "BTCUSD",
+            "signal": "BUY",
+            "confidence": 0.72,
+            "position_size": 0.1,
+            "timestamp": now,
+            "server_timestamp_ms": int(now.timestamp() * 1000),
+            "reasoning_chain": {
+                "chain_id": "c1",
+                "model_predictions": [],
+                "market_context": {
+                    "decision_path": "transformer_agent_synthesis",
+                    "execution_plan": {
+                        "signal": "BUY",
+                        "mfe": 0.02,
+                        "mae": 0.01,
+                        "stop_loss_pct": 0.01,
+                        "take_profit_pct": 0.0,
+                        "size_fraction": 0.5,
+                        "size_scale": 1.0,
+                        "rr_soft_action": "none",
+                    },
+                },
+            },
+        },
+    )
+
+    await handler.handle_decision_ready_for_trading(event)
+    assert published
+    assert published[0].payload.get("stop_loss") == 49500.0
+    assert "take_profit" not in published[0].payload or published[0].payload.get(
+        "take_profit"
+    ) is None
+    assert published[0].payload.get("sl_tp_source") == "path_pred"

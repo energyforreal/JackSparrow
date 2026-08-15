@@ -245,7 +245,7 @@ The example illustrates how raw market context, historical success rate, and mod
 - Maximum position: configurable `max_position_size` caps the proposed portfolio fraction passed to risk validation
 - Volatility from `market_context.features` is still required in the default entry path (trade skipped if missing); independent of the 60% lot formula
 - ADX ranging market filter: when `adx_14` is available and &lt; 20, BUY/SELL (mild) entries are blocked
-- **SL/TP at entry** (see `agent/core/sl_tp.py`): When `USE_ATR_SCALED_SL_TP` is true and `atr_14` is present, distance uses `max(entry × STOP_LOSS_PERCENTAGE, atr_14 × ATR_SL_DISTANCE_MULT)` for the stop leg and `max(entry × TAKE_PROFIT_PERCENTAGE, atr_14 × ATR_TP_DISTANCE_MULT)` for the take-profit leg; otherwise levels come from `STOP_LOSS_PERCENTAGE` / `TAKE_PROFIT_PERCENTAGE` alone. Prices are rounded to the contract `tick_size` when known.
+- **SL/TP at entry**: Default **`SL_TP_MODE=path_pred`** uses 15m MFE/MAE from `execution_plan` (`path_execution_plan.compute_path_stop_take_prices`). Fallback when path levels are missing: if `USE_ATR_SCALED_SL_TP` is true and `atr_14` is present, distance uses `max(entry × STOP_LOSS_PERCENTAGE, atr_14 × ATR_SL_DISTANCE_MULT)` for the stop leg and `max(entry × TAKE_PROFIT_PERCENTAGE, atr_14 × ATR_TP_DISTANCE_MULT)` for the take-profit leg; otherwise levels come from `STOP_LOSS_PERCENTAGE` / `TAKE_PROFIT_PERCENTAGE` alone (`agent/core/sl_tp.py`). Prices are rounded to the contract `tick_size` when known.
 - Signal expiry: signals older than `max_signal_age_seconds` are rejected (age uses `agent/core/decision_timestamp.py` so naive UTC payloads are not misread as local time on Windows/IST hosts)
 
 **Portfolio Heat Monitoring**:
@@ -255,10 +255,11 @@ The example illustrates how raw market context, historical success rate, and mod
 - Real-time risk metrics
 
 **Stop Loss Management**:
-- Centralized SL/TP math and tick rounding (`agent/core/sl_tp.py`) shared by `TradingEventHandler` and `ExecutionEngine`
-- Optional ATR-widened stops in volatile regimes (see `max(fixed %, ATR × mult)` above); entry lot sizing is not automatically scaled to that wider stop (see [Architecture – Risk Manager](01-architecture.md#risk-manager))
-- In **paper** mode, absolute SL/TP levels are **rebased** to the simulated fill price so monitor exits match intent vs actual entry
-- Position-specific risk limits and trailing / time-based exits in `ExecutionEngine.manage_position`
+- Primary: 15m path-pred absolute prices on Delta mark-price brackets (`POST /v2/orders/bracket`); planned prices are preserved after fill (not overwritten by %/ATR)
+- Shared math/tick rounding in `agent/core/sl_tp.py` for ATR/`fixed` fallbacks; `sl_tp_source` tags positions (`path_pred` | `atr` | `fixed`)
+- Dynamic ATR/regime bracket PUTs and percentage trailing stops apply only to non-path-pred sources
+- Absolute SL/TP levels are **rebased** to the fill price so exit distances match intent vs actual entry
+- Local `manage_position` SL/TP checks remain the fallback when exchange brackets are unavailable
 
 **Circuit Breakers**:
 - Automatic trading halt after consecutive losses

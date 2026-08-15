@@ -896,6 +896,7 @@ class TradingEventHandler:
             take_profit_price = None
             stop_pct = settings.stop_loss_percentage
             take_pct = settings.take_profit_percentage
+            sl_tp_source: Optional[str] = None
 
             if (
                 sl_tp_mode == "path_pred"
@@ -917,6 +918,8 @@ class TradingEventHandler:
                         ),
                         tick_size=tick_sz,
                     )
+                    if stop_loss_price is not None or take_profit_price is not None:
+                        sl_tp_source = "path_pred"
                     if execution_plan.get("stop_loss_pct") is not None:
                         stop_pct = float(execution_plan["stop_loss_pct"])
                     if execution_plan.get("take_profit_pct") is not None:
@@ -930,7 +933,7 @@ class TradingEventHandler:
                     stop_loss_price = None
                     take_profit_price = None
 
-            if stop_loss_price is None and use_atr_sl_tp and atr is not None:
+            if stop_loss_price is None and take_profit_price is None and use_atr_sl_tp and atr is not None:
                 try:
                     atr_f = float(atr)
                     sl_mult = float(getattr(settings, "atr_sl_distance_mult", 1.0))
@@ -946,6 +949,8 @@ class TradingEventHandler:
                         atr_tp_mult=tp_mult,
                         tick_size=tick_sz,
                     )
+                    if stop_loss_price is not None or take_profit_price is not None:
+                        sl_tp_source = "atr"
                 except (TypeError, ValueError):
                     use_atr_sl_tp = False
                     stop_loss_price = None
@@ -1288,9 +1293,12 @@ class TradingEventHandler:
                     risk_payload["atr_14"] = float(atr_out)
                 except (TypeError, ValueError):
                     pass
-            if stop_loss_price is not None and take_profit_price is not None:
+            if stop_loss_price is not None:
                 risk_payload["stop_loss"] = stop_loss_price
+            if take_profit_price is not None:
                 risk_payload["take_profit"] = take_profit_price
+            if sl_tp_source is not None:
+                risk_payload["sl_tp_source"] = sl_tp_source
             v43_bar = mc.get("v43_closed_bar_index") if isinstance(mc, dict) else None
             if v43_bar is not None:
                 try:

@@ -951,14 +951,15 @@ The startup and configuration validation system implements comprehensive error h
 8. Database → Store trade record
 ```
 
-**SL/TP pricing (entry):** `agent/core/sl_tp.py` (`compute_stop_take_prices`) is the single implementation for optional ATR scaling (`USE_ATR_SCALED_SL_TP`, `ATR_SL_DISTANCE_MULT`, `ATR_TP_DISTANCE_MULT`), fixed percentages, and **tick-size rounding** (`round_to_tick`). `RiskApprovedEvent` may include `atr_14` (from features) so execution can recompute matching levels if SL/TP are omitted. **`parse_risk_approved_side`** normalizes payload side (`BUY`/`SELL`, strip/whitespace).
+**SL/TP pricing (entry):** Primary mode is **`SL_TP_MODE=path_pred`**: absolute stop/take prices come from the **15m** transformer MFE/MAE heads via `execution_plan` → `compute_path_stop_take_prices` in the trading handler, then are **rebased to fill** and posted on Delta via `POST /v2/orders/bracket`. Those planned prices are **not** overwritten by percentage/ATR recomputation after fill. Fallback modes (`atr` / `fixed`) and missing levels use `agent/core/sl_tp.py` (`compute_stop_take_prices`) with optional ATR scaling (`USE_ATR_SCALED_SL_TP`) or `STOP_LOSS_PERCENTAGE` / `TAKE_PROFIT_PERCENTAGE`, plus tick rounding. Dynamic bracket PUTs and percentage trailing stops are **disabled for path-pred** positions (`sl_tp_source=path_pred`). `RiskApprovedEvent` may include `atr_14` and `sl_tp_source` so execution can fall back consistently when levels are omitted. **`parse_risk_approved_side`** normalizes payload side (`BUY`/`SELL`, strip/whitespace).
 
 **Exit Flow (implemented):**
-- **Dual path**: (1) **Timer-based**: Position monitor loop (`IntelligentAgent._position_monitor_loop`) runs at `position_monitor_interval_seconds` (e.g. 15s) when no positions, or `min_monitor_interval_seconds` (e.g. 2s) when positions are open. (2) **WebSocket-driven** (when `websocket_sl_tp_enabled`): MarketDataService WebSocket ticker triggers `ExecutionEngine.update_position_price_and_check(symbol, price)` per symbol with a 200ms throttle.
-- For each open position: update current price, apply **trailing stop** (ratchet stop_loss on favorable moves), check **time-based exit** (force-close after `max_position_hold_hours`), then compare price to stop loss / take profit; if hit, close with appropriate `exit_reason`.
+- **Primary**: Delta mark-price position brackets close the leg when SL/TP triggers; the agent reconciles the flat exit (`exchange_bracket_exit` / inferred `stop_loss_hit` / `take_profit_hit`).
+- **Fallback (local)**: (1) **Timer-based**: Position monitor loop (`IntelligentAgent._position_monitor_loop`) runs at `position_monitor_interval_seconds` when no positions, or `min_monitor_interval_seconds` when positions are open. (2) **WebSocket-driven** (when `websocket_sl_tp_enabled`): MarketDataService WebSocket ticker triggers `ExecutionEngine.update_position_price_and_check(symbol, price)` per symbol with a 200ms throttle.
+- For each open position without a healthy exchange bracket: update current price; apply **trailing stop** only for non-path-pred sources (ratchet `stop_loss` on favorable moves); then compare price to stop loss / take profit; if hit, close with appropriate `exit_reason`.
 - **Signal-reversal exit**: TradingHandler checks open position before entry; if the new signal contradicts the position (e.g. long + SELL), it closes the position with `exit_reason='signal_reversal'` and returns.
 - ExecutionEngine.initialize() accepts optional `risk_manager`; on close it calls `risk_manager.portfolio.remove_position(symbol)`.
-- Exit reasons: `stop_loss_hit`, `take_profit_hit`, `market_close`, `signal_reversal`, `time_limit`.
+- Exit reasons: `stop_loss_hit`, `take_profit_hit`, `market_close`, `signal_reversal`, `time_limit`, `exchange_bracket_exit`.
 - State Machine → Transition MONITORING_POSITION → OBSERVING; WebSocket and database updated.
 
 ### Learning Flow
