@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -17,11 +17,17 @@ from feature_store.transformer_btcusd.derivatives import (
     compute_funding_derivatives,
     compute_oi_derivatives,
 )
+from feature_store.transformer_btcusd.structure import (
+    add_htf_structure_features,
+    add_market_structure_features,
+)
 
 WICK_NEGLIGIBLE = 0.05
 WICK_BALANCE_MAX = 0.25
 FLAT_ATR_MULT = 1e-4
 _RATIO_COLS = ("body_ratio", "upper_wick_ratio", "lower_wick_ratio")
+_STRUCTURE_EPS = 1e-9
+_ATR_NORM_CLIP = 8.0
 
 
 def assemble_raw_frame(
@@ -238,6 +244,64 @@ def summarize_candle_class_distribution(
     return counts
 
 
+def add_candle_structure_features(out: pd.DataFrame) -> pd.DataFrame:
+    """Add causal bar-geometry and bar-to-bar relation features.
+
+    All columns use OHLCV and ATR at or before bar t. Shift-based values on
+    the first bar fill to 0.
+
+    Args:
+        out: Frame with open/high/low/close and atr.
+
+    Returns:
+        The same frame with seven structure columns assigned.
+    """
+    rng_raw = (out["high"] - out["low"]).astype(float)
+    atr = out["atr"] if "atr" in out.columns else pd.Series(0.0, index=out.index)
+    is_flat = rng_raw.fillna(0) <= 0
+
+    close_loc = (out["close"] - out["low"]) / (rng_raw + _STRUCTURE_EPS)
+    out["close_loc"] = close_loc.where(~is_flat, 0.5).fillna(0.5)
+
+    out["range_atr"] = (rng_raw / (atr + _STRUCTURE_EPS)).clip(
+        -_ATR_NORM_CLIP, _ATR_NORM_CLIP
+    )
+    out["body_atr"] = (
+        (out["close"] - out["open"]).abs() / (atr + _STRUCTURE_EPS)
+    ).clip(-_ATR_NORM_CLIP, _ATR_NORM_CLIP)
+    out["gap_atr"] = (
+        (out["open"] - out["close"].shift(1)) / (atr + _STRUCTURE_EPS)
+    ).clip(-_ATR_NORM_CLIP, _ATR_NORM_CLIP)
+
+    prev_high = out["high"].shift(1)
+    prev_low = out["low"].shift(1)
+    out["inside_bar"] = (
+        (out["high"] <= prev_high) & (out["low"] >= prev_low)
+    ).astype(np.float32)
+    out["outside_bar"] = (
+        (out["high"] >= prev_high) & (out["low"] <= prev_low)
+    ).astype(np.float32)
+
+    prior_body = out["close"].shift(1) - out["open"].shift(1)
+    cur_body = out["close"] - out["open"]
+    opposite = np.sign(cur_body) != np.sign(prior_body)
+    prior_nonzero = prior_body.abs() > _STRUCTURE_EPS
+    penetration = (out["close"] - out["open"].shift(1)) / (
+        prior_body.abs() + _STRUCTURE_EPS
+    )
+    out["engulf_score"] = (
+        penetration.clip(-2.0, 2.0)
+        * np.sign(cur_body)
+        * opposite.astype(np.float64)
+        * prior_nonzero.astype(np.float64)
+    )
+
+    shift_fill_cols = ("gap_atr", "inside_bar", "outside_bar", "engulf_score")
+    for col in shift_fill_cols:
+        out[col] = out[col].fillna(0.0)
+    return out
+
+
 def add_features(
     df: pd.DataFrame,
     *,
@@ -374,7 +438,11 @@ def add_features(
     out["oi_acceleration"] = oi_deriv["oi_acceleration"]
     out["funding_x_oi"] = out["funding_zscore"] * oi_deriv["oi_zscore"]
 
+    out = add_candle_structure_features(out)
     out[CANDLE_CLASS_COL] = classify_candle_shape(out, sr_window=sr_window)
+    out = add_market_structure_features(out)
+    if int(resolution_minutes) == 5:
+        out = add_htf_structure_features(out)
 
     return out
 
@@ -404,8 +472,10 @@ def validate_feature_columns(
     feat_df: pd.DataFrame,
     *,
     require_finite_closed_bar: bool = False,
+    feature_cols: Optional[Sequence[str]] = None,
 ) -> None:
-    missing = [c for c in FEATURE_COLS if c not in feat_df.columns]
+    cols = tuple(feature_cols) if feature_cols is not None else FEATURE_COLS
+    missing = [c for c in cols if c not in feat_df.columns]
     if missing:
         raise ValueError(f"Feature matrix missing columns: {missing}")
     if CANDLE_CLASS_COL not in feat_df.columns:
@@ -417,7 +487,7 @@ def validate_feature_columns(
         )
     if require_finite_closed_bar and len(feat_df) >= 2:
         closed = latest_closed_feature_row(feat_df)
-        for col in FEATURE_COLS:
+        for col in cols:
             val = closed[col]
             if not np.isfinite(float(val)):
                 raise ValueError(f"Non-finite closed-bar value for {col}: {val}")

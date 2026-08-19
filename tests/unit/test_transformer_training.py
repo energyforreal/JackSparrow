@@ -7,11 +7,14 @@ import pandas as pd
 import pytest
 
 from feature_store.transformer_btcusd.contract import CONTINUOUS_LABEL_COLS, FEATURE_COLS
+from feature_store.transformer_btcusd.inference import require_onnx_output_names
 from scripts.colab.transformer_training import (
+    MarketTransformer,
     assess_export_quality,
     build_windows,
     fit_label_stats,
     fit_vol_regime_edges,
+    inverse_frequency_class_weights,
     split_purged_windows,
     standardize_labels,
     TargetMetrics,
@@ -106,3 +109,48 @@ def test_assess_export_quality_tiers() -> None:
         regime_accuracy=0.40,
     )
     assert promotion.tier == "promotion_ready"
+
+
+def test_market_transformer_returns_four_outputs() -> None:
+    import torch
+
+    model = MarketTransformer(
+        n_features=len(FEATURE_COLS),
+        d_model=32,
+        nhead=4,
+        num_layers=1,
+        dropout=0.0,
+        max_len=8,
+        n_continuous=len(CONTINUOUS_LABEL_COLS),
+    )
+    x = torch.randn(2, 8, len(FEATURE_COLS))
+    cat = torch.zeros(2, 8, dtype=torch.long)
+    outs = model(x, cat)
+    assert len(outs) == 4
+    assert outs[0].shape == (2, len(CONTINUOUS_LABEL_COLS))
+    assert outs[1].shape[0] == 2
+    assert outs[2].shape == (2, 6)
+    assert outs[3].shape == (2, 13)
+
+
+def test_require_onnx_output_names_rejects_v5() -> None:
+    with pytest.raises(RuntimeError, match="missing outputs"):
+        require_onnx_output_names(["continuous_pred", "regime_logits"])
+
+
+def test_require_onnx_output_names_accepts_v6() -> None:
+    require_onnx_output_names(
+        [
+            "continuous_pred",
+            "regime_logits",
+            "structure_outcome_logits",
+            "future_candle_logits",
+        ]
+    )
+
+
+def test_inverse_frequency_class_weights_upweights_rare() -> None:
+    ids = np.array([11, 11, 11, 11, 0], dtype=np.int64)
+    weights = inverse_frequency_class_weights(ids, 13)
+    assert weights.shape == (13,)
+    assert float(weights[0]) > float(weights[11])

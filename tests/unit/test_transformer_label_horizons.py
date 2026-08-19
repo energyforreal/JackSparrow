@@ -39,3 +39,7 @@ def test_default_training_config_path_only() -> None:
     assert len(weights) == len(CONTINUOUS_LABEL_COLS)
     vol_idx = CONTINUOUS_LABEL_COLS.index("future_volume_change_pct")
     assert weights[vol_idx] == 0.0
+    follow_idx = CONTINUOUS_LABEL_COLS.index("candle_follow_through_atr")
+    delta_idx = CONTINUOUS_LABEL_COLS.index("structure_delta")
+    assert weights[follow_idx] == 0.5
+    assert weights[delta_idx] == 0.5

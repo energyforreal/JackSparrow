@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-# Bump when FEATURE_COLS or semantics change (requires retrain + re-export).
-FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v3"
+# Bump when FEATURE_COLS, label heads, or ONNX outputs change (requires retrain).
+FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v6"
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
 
@@ -19,7 +19,70 @@ RESOLUTION_MINUTES: Dict[str, int] = {
 
 TF_KEYS: Tuple[str, ...] = tuple(f"tf_{r}" for r in SUPPORTED_RESOLUTIONS)
 
-FEATURE_COLS: Tuple[str, ...] = (
+HTF_SOURCE_TFS: Tuple[str, ...] = ("15m", "30m", "1h", "2h")
+HTF_FEATURE_FIELDS: Tuple[str, ...] = (
+    "structure_bias",
+    "trend_efficiency",
+    "ema21_slope_atr",
+    "dist_support_atr",
+    "dist_resistance_atr",
+    "range_width_atr",
+)
+
+NATIVE_STRUCTURE_COLS: Tuple[str, ...] = (
+    "hh_count",
+    "hl_count",
+    "lh_count",
+    "ll_count",
+    "structure_bias",
+    "last_swing_dir",
+    "bars_since_swing",
+    "swing_amp_atr",
+    "unconfirmed_ext_atr",
+    "trend_efficiency",
+    "displacement_atr",
+    "pct_with_trend",
+    "price_vs_ema9_atr",
+    "price_vs_ema21_atr",
+    "price_vs_ema50_atr",
+    "price_vs_ema200_atr",
+    "ema9_vs_21_atr",
+    "ema21_vs_50_atr",
+    "ema50_vs_200_atr",
+    "ema21_slope_atr",
+    "ema50_slope_atr",
+    "dist_to_support_atr",
+    "dist_to_resistance_atr",
+    "support_touch_count",
+    "resistance_touch_count",
+    "range_width_atr",
+    "range_width_pctile",
+    "atr_contraction",
+    "breakout_size_atr",
+    "breakout_vol_ratio",
+    "pre_breakout_comp",
+    "bars_since_breakout",
+    "retest_dist_atr",
+    "failed_break",
+    "peak_diff_atr",
+    "trough_diff_atr",
+    "peak_sep_bars",
+    "trough_sep_bars",
+    "dist_neck_atr",
+    "high_slope_atr",
+    "low_slope_atr",
+    "convergence",
+    "width_now_atr",
+    "pole_disp_atr",
+    "flag_width_atr",
+    "flag_slope_atr",
+)
+
+HTF_STRUCTURE_COLS: Tuple[str, ...] = tuple(
+    f"htf_{tf}_{field}" for tf in HTF_SOURCE_TFS for field in HTF_FEATURE_FIELDS
+)
+
+_V4_FEATURE_COLS: Tuple[str, ...] = (
     "ret_1",
     "rv_16",
     "rv_96",
@@ -32,6 +95,13 @@ FEATURE_COLS: Tuple[str, ...] = (
     "body_ratio",
     "upper_wick_ratio",
     "lower_wick_ratio",
+    "close_loc",
+    "range_atr",
+    "body_atr",
+    "gap_atr",
+    "inside_bar",
+    "outside_bar",
+    "engulf_score",
     "hour_sin",
     "hour_cos",
     "dow_sin",
@@ -50,6 +120,9 @@ FEATURE_COLS: Tuple[str, ...] = (
     "funding_x_oi",
 )
 
+# Native all-TF continuous columns (v4 plus causal structure/geometry).
+FEATURE_COLS: Tuple[str, ...] = _V4_FEATURE_COLS + NATIVE_STRUCTURE_COLS
+
 PATH_LABEL_COLS: Tuple[str, ...] = (
     "mfe",
     "mae",
@@ -58,6 +131,8 @@ PATH_LABEL_COLS: Tuple[str, ...] = (
     "drawdown_before_mfe",
     "future_oi_change_pct",
     "future_volume_change_pct",
+    "candle_follow_through_atr",
+    "structure_delta",
 )
 
 CONTINUOUS_LABEL_COLS: Tuple[str, ...] = PATH_LABEL_COLS
@@ -84,6 +159,8 @@ DEFAULT_CONTINUOUS_LOSS_WEIGHTS: Dict[str, float] = {
     "drawdown_before_mfe": 0.5,
     "future_oi_change_pct": 0.25,
     "future_volume_change_pct": 0.0,
+    "candle_follow_through_atr": 0.5,
+    "structure_delta": 0.5,
 }
 
 REGIME_NAMES: Dict[int, str] = {
@@ -113,6 +190,33 @@ CANDLE_CLASS_NAMES: Dict[int, str] = {
     12: "STANDARD_BEAR",
 }
 
+# Discrete training/inference columns (not continuous ONNX heads).
+STRUCTURE_OUTCOME_COL = "future_structure_outcome"
+FUTURE_CANDLE_COL = "future_candle_class"
+STRUCTURE_OUTCOME_CARDINALITY = 6
+N_AUX_CLASS_HEADS = 3  # vol regime + structure outcome + next-bar candle
+
+STRUCTURE_OUTCOME_NAMES: Dict[int, str] = {
+    0: "RANGE",
+    1: "CONTINUATION_LONG",
+    2: "CONTINUATION_SHORT",
+    3: "BREAKOUT",
+    4: "FAILED_BREAK",
+    5: "REVERSAL",
+}
+
+ONNX_OUTPUT_NAMES: Tuple[str, ...] = (
+    "continuous_pred",
+    "regime_logits",
+    "structure_outcome_logits",
+    "future_candle_logits",
+)
+
+# Next-bar candle families for 5m timing (not model classes).
+CANDLE_FAMILY_DOJI = frozenset({0, 1, 2, 3, 8})
+CANDLE_FAMILY_BULL = frozenset({4, 6, 9, 11})
+CANDLE_FAMILY_BEAR = frozenset({5, 7, 10, 12})
+
 # Minimum test-set correlation for future_volatility before ONNX export.
 MIN_EXPORT_VOL_CORR: Dict[str, float] = {
     "5m": 0.10,
@@ -132,6 +236,16 @@ EXPORT_QUALITY_DISCLAIMER = (
 
 TRANSFORMER_METADATA_FILENAME = "metadata_transformer.json"
 TRANSFORMER_FEATURE_CONFIG_FILENAME = "feature_config.json"
+
+
+def candle_family_from_class(class_id: int) -> str:
+    """Map a candle class id to bull / bear / doji for timing modifiers."""
+    cid = int(class_id)
+    if cid in CANDLE_FAMILY_BULL:
+        return "bull"
+    if cid in CANDLE_FAMILY_BEAR:
+        return "bear"
+    return "doji"
 
 
 def compute_path_edge(mfe: float, mae: float) -> float:
@@ -269,3 +383,13 @@ def max_label_horizon_bars(
 def scale_period(period: int, resolution_minutes: int, *, base_minutes: int = 5) -> int:
     """Scale indicator lookback to preserve wall-clock semantics across TFs."""
     return max(1, int(round(period * resolution_minutes / base_minutes)))
+
+
+def feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
+    """Continuous feature columns for a TF bundle (5m appends closed HTF context)."""
+    res = resolution.strip().lower()
+    if res not in RESOLUTION_MINUTES:
+        raise ValueError(f"Unsupported resolution: {resolution!r}")
+    if res == "5m":
+        return FEATURE_COLS + HTF_STRUCTURE_COLS
+    return FEATURE_COLS

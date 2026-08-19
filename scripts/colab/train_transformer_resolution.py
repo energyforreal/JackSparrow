@@ -12,11 +12,14 @@ import torch
 from torch.utils.data import DataLoader
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_CARDINALITY,
     CONTINUOUS_LABEL_COLS,
-    FEATURE_COLS,
+    FUTURE_CANDLE_COL,
+    STRUCTURE_OUTCOME_COL,
     SUPPORTED_RESOLUTIONS,
     bundle_dir_name,
     default_training_config,
+    feature_cols_for_resolution,
 )
 from feature_store.transformer_btcusd.features import add_features, summarize_candle_class_distribution
 from feature_store.transformer_btcusd.labels import (
@@ -32,12 +35,15 @@ from scripts.colab.transformer_data import (
 from scripts.colab.transformer_training import (
     MarketTransformer,
     WindowDataset,
+    build_class_targets,
     build_windows,
     evaluate_continuous_targets,
+    evaluate_head_accuracy,
     evaluate_regime_accuracy,
     export_transformer_bundle,
     fit_label_stats,
     fit_vol_regime_edges,
+    inverse_frequency_class_weights,
     print_primary_metrics,
     print_target_metrics,
     set_training_seed,
@@ -100,6 +106,7 @@ def run_training(
         print(f"Cached raw pull to {cache}")
 
     resolution_minutes = int(config["resolution_minutes"])
+    feature_cols = feature_cols_for_resolution(res)
     feat_df = add_features(
         raw_df,
         resolution_minutes=resolution_minutes,
@@ -124,13 +131,25 @@ def run_training(
 
     x_all, x_cat_all, y_all = build_windows(
         feat_df,
-        FEATURE_COLS,
+        feature_cols,
         CONTINUOUS_LABEL_COLS,
         config["window_len"],
         config["stride"],
     )
+    struct_all = build_class_targets(
+        feat_df, STRUCTURE_OUTCOME_COL, config["window_len"], config["stride"]
+    )
+    candle_all = build_class_targets(
+        feat_df, FUTURE_CANDLE_COL, config["window_len"], config["stride"]
+    )
     splits = split_purged_windows(
-        {"x": x_all, "x_cat": x_cat_all, "y": y_all},
+        {
+            "x": x_all,
+            "x_cat": x_cat_all,
+            "y": y_all,
+            "structure": struct_all,
+            "candle": candle_all,
+        },
         train_frac=config["train_frac"],
         val_frac=config["val_frac"],
         embargo_bars=config["embargo_bars"],
@@ -145,10 +164,19 @@ def run_training(
     r_train = to_vol_regime(splits["train"]["y"], q_edges)
     r_val = to_vol_regime(splits["val"]["y"], q_edges)
     r_test = to_vol_regime(splits["test"]["y"], q_edges)
+    candle_weights = inverse_frequency_class_weights(
+        splits["train"]["candle"], CANDLE_CLASS_CARDINALITY
+    )
 
     train_loader = DataLoader(
         WindowDataset(
-            splits["train"]["x"], splits["train"]["x_cat"], y_train_z, m_train, r_train
+            splits["train"]["x"],
+            splits["train"]["x_cat"],
+            y_train_z,
+            m_train,
+            r_train,
+            splits["train"]["structure"],
+            splits["train"]["candle"],
         ),
         batch_size=config["batch_size"],
         shuffle=True,
@@ -156,14 +184,26 @@ def run_training(
     )
     val_loader = DataLoader(
         WindowDataset(
-            splits["val"]["x"], splits["val"]["x_cat"], y_val_z, m_val, r_val
+            splits["val"]["x"],
+            splits["val"]["x_cat"],
+            y_val_z,
+            m_val,
+            r_val,
+            splits["val"]["structure"],
+            splits["val"]["candle"],
         ),
         batch_size=config["batch_size"],
         shuffle=False,
     )
     test_loader = DataLoader(
         WindowDataset(
-            splits["test"]["x"], splits["test"]["x_cat"], y_test_z, m_test, r_test
+            splits["test"]["x"],
+            splits["test"]["x_cat"],
+            y_test_z,
+            m_test,
+            r_test,
+            splits["test"]["structure"],
+            splits["test"]["candle"],
         ),
         batch_size=config["batch_size"],
         shuffle=False,
@@ -173,7 +213,7 @@ def run_training(
     print(f"device: {device}")
 
     model = MarketTransformer(
-        n_features=len(FEATURE_COLS),
+        n_features=len(feature_cols),
         d_model=config["d_model"],
         nhead=config["nhead"],
         num_layers=config["num_layers"],
@@ -182,7 +222,14 @@ def run_training(
         n_continuous=len(CONTINUOUS_LABEL_COLS),
     ).to(device)
 
-    result = train_transformer(model, train_loader, val_loader, config, device=device)
+    result = train_transformer(
+        model,
+        train_loader,
+        val_loader,
+        config,
+        device=device,
+        candle_class_weights=candle_weights,
+    )
     model.load_state_dict(result.model_state)
     model.eval()
 
@@ -208,6 +255,14 @@ def run_training(
 
     regime_accuracy = evaluate_regime_accuracy(model, test_loader, device=device)
     print(f"Regime head test accuracy: {regime_accuracy:.3f}")
+    struct_acc = evaluate_head_accuracy(
+        model, test_loader, device=device, output_index=2, target_index=5
+    )
+    candle_acc = evaluate_head_accuracy(
+        model, test_loader, device=device, output_index=3, target_index=6
+    )
+    print(f"Structure outcome test accuracy: {struct_acc:.3f}")
+    print(f"Future candle class test accuracy: {candle_acc:.3f}")
 
     export_dir.mkdir(parents=True, exist_ok=True)
     onnx_path, cfg_path, meta_path = export_transformer_bundle(
@@ -215,8 +270,8 @@ def run_training(
         export_dir,
         device=device,
         window_len=config["window_len"],
-        n_features=len(FEATURE_COLS),
-        feature_cols=FEATURE_COLS,
+        n_features=len(feature_cols),
+        feature_cols=feature_cols,
         label_mean=label_mean,
         label_std=label_std,
         q_edges=q_edges,

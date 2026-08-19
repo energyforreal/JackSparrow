@@ -202,12 +202,20 @@ def build_transformer_prediction_context(
     regime_probs: Mapping[str, float],
     bar_index_hint: int,
     resolution_minutes: int = 15,
+    structure_outcome: str = "",
+    structure_outcome_id: int = -1,
+    structure_outcome_probs: Optional[Mapping[str, float]] = None,
+    future_candle_class: int = -1,
+    future_candle_name: str = "",
+    future_candle_probs: Optional[Mapping[str, float]] = None,
 ) -> Tuple[Dict[str, Any], float, float]:
     """Return (out_ctx, primary_prediction, primary_confidence) for one TF model."""
     future_vol = float(continuous_preds.get("future_volatility", 0.0))
     mae = float(continuous_preds.get("mae", 0.0))
     mfe = float(continuous_preds.get("mfe", 0.0))
     trend_strength = float(continuous_preds.get("trend_strength", 0.0))
+    follow = float(continuous_preds.get("candle_follow_through_atr", 0.0) or 0.0)
+    struct_delta = float(continuous_preds.get("structure_delta", 0.0) or 0.0)
     long_edge = compute_long_edge(mfe, mae)
     short_edge = compute_short_edge(mfe, mae)
     path_edge = compute_path_edge(mfe, mae)
@@ -236,6 +244,11 @@ def build_transformer_prediction_context(
         typical,
         u_scale,
     )
+    setup_quality = float(np.clip(mfe / (mae + 1e-6), 0.0, 1.0))
+    if follow > 0.0:
+        setup_quality = float(np.clip(setup_quality + 0.1, 0.0, 1.0))
+    if (path_edge > 0 and struct_delta > 0) or (path_edge < 0 and struct_delta < 0):
+        setup_quality = float(np.clip(setup_quality + 0.05, 0.0, 1.0))
 
     resolution = str(bundle_metadata.get("resolution") or f"{resolution_minutes}m")
     out_ctx: Dict[str, Any] = {
@@ -262,8 +275,14 @@ def build_transformer_prediction_context(
         "transformer_vol_regime": str(vol_regime),
         "transformer_regime_probs": dict(regime_probs),
         "transformer_regime_names": dict(REGIME_NAMES),
+        "transformer_structure_outcome": str(structure_outcome or ""),
+        "transformer_structure_outcome_id": int(structure_outcome_id),
+        "transformer_structure_outcome_probs": dict(structure_outcome_probs or {}),
+        "transformer_future_candle_class": int(future_candle_class),
+        "transformer_future_candle_name": str(future_candle_name or ""),
+        "transformer_future_candle_probs": dict(future_candle_probs or {}),
         "p_regime_favorable": 1.0 - unc if regime == "trending" else max(0.0, 0.5 - unc),
-        "p_setup_quality": float(np.clip(mfe / (mae + 1e-6), 0.0, 1.0)),
+        "p_setup_quality": setup_quality,
         "p_vol_expansion": float(np.clip(future_vol / 0.01, 0.0, 1.0)),
     }
     return out_ctx, primary_pred_val, primary_conf
@@ -294,6 +313,14 @@ def build_mtf_aggregation_context(
                 ),
                 "trend_strength": (ctx.get("transformer_continuous_preds") or {}).get(
                     "trend_strength"
+                ),
+                "structure_outcome": ctx.get("transformer_structure_outcome"),
+                "future_candle_class": ctx.get("transformer_future_candle_class"),
+                "candle_follow_through_atr": (
+                    ctx.get("transformer_continuous_preds") or {}
+                ).get("candle_follow_through_atr"),
+                "structure_delta": (ctx.get("transformer_continuous_preds") or {}).get(
+                    "structure_delta"
                 ),
             }
             for key, ctx in per_tf_contexts.items()

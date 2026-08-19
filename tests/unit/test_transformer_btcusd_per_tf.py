@@ -8,9 +8,9 @@ import pytest
 
 from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
-    FEATURE_COLS,
     RESOLUTION_MINUTES,
     SUPPORTED_RESOLUTIONS,
+    feature_cols_for_resolution,
     max_label_horizon_bars,
 )
 from feature_store.transformer_btcusd.features import add_features, build_feature_matrix
@@ -41,9 +41,9 @@ def _synthetic_ohlcv(n: int = 300, *, freq: str = "15min") -> pd.DataFrame:
 
 def _bars_needed(resolution: str) -> int:
     minutes = RESOLUTION_MINUTES[resolution]
-    # Enough rows after dropna for 128-window inference with scaled lookbacks.
     scaled_long = max(1, int(round(96 * minutes / 5)))
-    return max(400, scaled_long + 150)
+    floor = 1000 if resolution == "5m" else 400
+    return max(floor, scaled_long + 150)
 
 
 def _freq_for_resolution(resolution: str) -> str:
@@ -59,7 +59,8 @@ def test_add_features_produces_all_feature_cols(resolution: str) -> None:
         resolution_minutes=minutes,
         dropna=True,
     )
-    for col in FEATURE_COLS:
+    feature_cols = feature_cols_for_resolution(resolution)
+    for col in feature_cols:
         assert col in feat_df.columns
     assert "candle_class_id" in feat_df.columns
     assert ((feat_df["candle_class_id"] >= 0) & (feat_df["candle_class_id"] <= 12)).all()
@@ -75,9 +76,10 @@ def test_build_inference_window_shape(resolution: str) -> None:
         resolution_minutes=minutes,
         dropna=True,
     )
-    values = feat_df[list(FEATURE_COLS)].values.astype(np.float32)
+    feature_cols = feature_cols_for_resolution(resolution)
+    values = feat_df[list(feature_cols)].values.astype(np.float32)
     window = build_inference_window(values, window_len=128)
-    assert window.shape == (1, 128, len(FEATURE_COLS))
+    assert window.shape == (1, 128, len(feature_cols))
     assert np.isfinite(window).all()
     cat = build_candle_class_window(feat_df["candle_class_id"].values, window_len=128)
     assert cat.shape == (1, 128)

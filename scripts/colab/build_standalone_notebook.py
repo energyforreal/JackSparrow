@@ -26,6 +26,7 @@ MAX_LINE_LENGTH = 500
 INLINE_MODULE_ORDER: tuple[tuple[str, str], ...] = (
     ("## Feature contract (agent integration)", "feature_store/transformer_btcusd/contract.py"),
     ("## Derivatives features", "feature_store/transformer_btcusd/derivatives.py"),
+    ("## Market structure", "feature_store/transformer_btcusd/structure.py"),
     ("## Feature engineering", "feature_store/transformer_btcusd/features.py"),
     ("## Labels / targets", "feature_store/transformer_btcusd/labels.py"),
     ("## Inference and export helpers", "feature_store/transformer_btcusd/inference.py"),
@@ -42,6 +43,10 @@ REQUIRED_SYMBOLS: tuple[str, ...] = (
     "classify_candle_shape",
     "candle_class_ids",
     "CANDLE_CLASS_NAMES",
+    "structure_bias",
+    "future_structure_outcome",
+    "candle_follow_through_atr",
+    "structure_outcome_logits",
 )
 
 FORBIDDEN_PATTERNS: tuple[str, ...] = (
@@ -50,6 +55,7 @@ FORBIDDEN_PATTERNS: tuple[str, ...] = (
     "%%writefile",
     "colab_bundle",
     "if __name__ == \"__main__\":",
+    "import argparse",
 )
 
 INTRO_MARKDOWN = """# BTCUSD Multi-Timeframe Transformer Training (Standalone)
@@ -65,8 +71,9 @@ OHLCV, funding, and OI are pulled from the **Delta Exchange India public API** a
 
 | Section | What to inspect |
 |---------|-----------------|
-| Feature contract | `FEATURE_COLS`, `CONTINUOUS_LABEL_COLS`, horizons |
+| Feature contract | `FEATURE_COLS`, `feature_cols_for_resolution`, horizons |
 | Derivatives | Funding/OI z-scores |
+| Market structure | ZigZag HH/HL, S/R, compression, breakout, geometry |
 | Feature engineering | `add_features`, `classify_candle_shape` |
 | Labels / targets | `compute_market_labels` |
 | Inference helpers | `feature_config.json` builders |
@@ -76,7 +83,7 @@ OHLCV, funding, and OI are pulled from the **Delta Exchange India public API** a
 | Configure & train | `resolutions`, `epochs`, `history_days` |
 
 Permanent edits: change repo `.py` files under `feature_store/transformer_btcusd/` and
-`scripts/colab/`, then regenerate::
+`scripts/colab/`, then regenerate:
 
     python scripts/colab/build_standalone_notebook.py
 
@@ -99,6 +106,12 @@ NOTES_MARKDOWN = """## Notes before wiring into your live agent
 
 - **No directional return head** — models predict path structure (MFE/MAE/vol/trend), OI/volume
   change, and a volatility-regime class. Agent derives `path_edge = mfe - mae` for signals.
+- **v6 contract** — path labels plus `candle_follow_through_atr` / `structure_delta`,
+  and two extra ONNX heads (`structure_outcome_logits`, `future_candle_logits`).
+- **5m-only HTF** — the 5m bundle appends closed 15m/30m/1h/2h structure via resample +
+  `merge_asof` backward. Live 5m inference needs enough native history for HTF warmup
+  (target ≥800 finite feature rows after dropna). Do not use forming HTF candles.
+- **Retrain required** — v5 ONNX bundles are incompatible. Retrain all TFs after this bump.
 - **Path label horizon** scales per TF (e.g. 240m wall-clock on 5m/15m). Independent of
   `window_len` (input lookback).
 - **Early stopping is enabled** by default (patience 12, max 120 epochs); best val-loss checkpoint
@@ -143,9 +156,11 @@ CONFIG_CELL = """from pathlib import Path
 
 # Train all TFs or a subset, e.g. ["15m"] for a quick smoke test.
 resolutions = list(SUPPORTED_RESOLUTIONS)
-export_dir = Path("/content/export")
+_content = Path("/content")
+_root = _content if _content.is_dir() else Path(".")
+export_dir = _root / "export"
 export_dir.mkdir(parents=True, exist_ok=True)
-cache_dir = Path("/content/cache")
+cache_dir = _root / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
 
 # Optional overrides (None = use per-TF defaults from default_training_config).
@@ -174,8 +189,9 @@ for result in results:
 DIAGNOSTICS_CELL = """from pathlib import Path
 
 cache_root = cache_dir if "cache_dir" in globals() else Path("/content/cache")
+tfs = list(resolutions) if "resolutions" in globals() else list(SUPPORTED_RESOLUTIONS)
 found = False
-for res in list(SUPPORTED_RESOLUTIONS):
+for res in tfs:
     parquet = cache_root / f"btcusd_{res}_raw.parquet"
     if not parquet.is_file():
         continue
@@ -187,6 +203,18 @@ for res in list(SUPPORTED_RESOLUTIONS):
     for cid, frac in counts.items():
         name = CANDLE_CLASS_NAMES.get(int(cid), str(cid))
         print(f"  {int(cid):2d} {name:18s} {float(frac):6.2%}")
+    for col in ("structure_bias", "trend_efficiency"):
+        if col in feat_df.columns:
+            series = feat_df[col]
+            finite = float(np.isfinite(series.to_numpy()).mean())
+            print(
+                f"  {col}: finite={finite:.1%} mean={float(series.mean()):.4f}"
+            )
+    if res == "5m" and "htf_1h_structure_bias" in feat_df.columns:
+        htf = feat_df["htf_1h_structure_bias"]
+        print(
+            f"  htf_1h_structure_bias: finite={float(np.isfinite(htf.to_numpy()).mean()):.1%}"
+        )
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -249,7 +277,8 @@ bundles = [p for p in export_dir.iterdir() if p.is_dir()]
 if not bundles:
     print("No TF bundles exported. Check training results above.")
 else:
-    zip_path = shutil.make_archive("/content/transformer_exports", "zip", export_dir)
+    zip_base = export_dir.parent / "transformer_exports"
+    zip_path = shutil.make_archive(str(zip_base), "zip", export_dir)
     print(f"Download: {zip_path} ({len(bundles)} bundle(s))")
 
     try:
@@ -270,21 +299,40 @@ def _is_main_guard(test: ast.AST) -> bool:
     return False
 
 
+def _is_argparse_import(node: ast.AST) -> bool:
+    if isinstance(node, ast.Import):
+        return all(alias.name == "argparse" for alias in node.names) and bool(node.names)
+    if isinstance(node, ast.ImportFrom):
+        return node.module == "argparse"
+    return False
+
+
 def _strip_cli_entrypoint(source: str) -> str:
-    """Remove CLI entry blocks (``if __name__ == '__main__'``) from inlined notebook cells."""
+    """Remove CLI entry blocks from inlined notebook cells."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return source
     lines = source.splitlines(keepends=True)
     drop_lines: set[int] = set()
+    dropped_main = False
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == "_running_under_ipython":
+        if isinstance(node, ast.FunctionDef) and node.name in {
+            "main",
+            "_running_under_ipython",
+        }:
             end = node.end_lineno or node.lineno
             drop_lines.update(range(node.lineno, end + 1))
+            if node.name == "main":
+                dropped_main = True
         if isinstance(node, ast.If) and _is_main_guard(node.test):
             end = node.end_lineno or node.lineno
             drop_lines.update(range(node.lineno, end + 1))
+    if dropped_main:
+        for node in tree.body:
+            if _is_argparse_import(node):
+                end = node.end_lineno or node.lineno
+                drop_lines.update(range(node.lineno, end + 1))
     if not drop_lines:
         return source
     kept = [line for idx, line in enumerate(lines, start=1) if idx not in drop_lines]
@@ -375,12 +423,12 @@ def build_notebook() -> dict[str, Any]:
         _markdown_cell("## Configure and train"),
         _code_cell(CONFIG_PREVIEW_CELL),
         _code_cell(CONFIG_CELL),
-        _markdown_cell("## Candle class diagnostics"),
-        _code_cell(DIAGNOSTICS_CELL),
         _markdown_cell("## Train all resolutions"),
         _code_cell(TRAIN_CELL),
         _markdown_cell("## Results summary"),
         _code_cell(SUMMARY_CELL),
+        _markdown_cell("## Candle class diagnostics"),
+        _code_cell(DIAGNOSTICS_CELL),
         _markdown_cell("## Download exports"),
         _code_cell(ZIP_CELL),
         _markdown_cell(NOTES_MARKDOWN),
@@ -451,11 +499,26 @@ def validate_notebook(notebook: dict[str, Any]) -> None:
                     )
 
     train_idx = next(
-        i for i, c in enumerate(cells) if "run_all_training(" in _cell_text(c) and "def " not in _cell_text(c)
+        i
+        for i, c in enumerate(cells)
+        if "run_all_training(" in _cell_text(c) and "def run_all_training" not in _cell_text(c)
     )
     contract_idx = next(i for i, c in enumerate(cells) if "FEATURE_COLS" in _cell_text(c))
     if contract_idx >= train_idx:
         raise RuntimeError("FEATURE_COLS cell must appear before train cell")
+
+    diag_idx = next(
+        i
+        for i, c in enumerate(cells)
+        if _cell_text(c).lstrip().startswith("## Candle class diagnostics")
+    )
+    if diag_idx <= train_idx:
+        raise RuntimeError("Candle class diagnostics must run after the train cell")
+
+    if re.search(r"^import argparse\b", full_text, re.MULTILINE):
+        raise RuntimeError("CLI argparse import leaked into notebook cells")
+    if re.search(r"^def main\(", full_text, re.MULTILINE):
+        raise RuntimeError("CLI main() leaked into notebook cells")
 
 
 def main() -> None:

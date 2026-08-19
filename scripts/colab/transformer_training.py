@@ -19,8 +19,11 @@ from feature_store.transformer_btcusd.contract import (
     CANDLE_EMBED_DIM,
     CONTINUOUS_LABEL_COLS,
     EXPORT_QUALITY_DISCLAIMER,
+    N_AUX_CLASS_HEADS,
+    ONNX_OUTPUT_NAMES,
     PROMOTION_REGIME_ACCURACY,
     PROMOTION_VOL_CORR,
+    STRUCTURE_OUTCOME_CARDINALITY,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
     onnx_filename_for_resolution,
@@ -62,6 +65,34 @@ def build_windows(
         cat_list.append(class_ids[start:end])
         y_list.append(labels[end - 1])
     return np.array(x_list), np.array(cat_list, dtype=np.int64), np.array(y_list)
+
+
+def build_class_targets(
+    df: pd.DataFrame,
+    class_col: str,
+    window_len: int,
+    stride: int,
+) -> np.ndarray:
+    """Integer class id at each window's last bar (aligned with ``build_windows``)."""
+    ids = pd.to_numeric(df[class_col], errors="coerce").fillna(0).to_numpy(dtype=np.int64)
+    out: List[int] = []
+    for end in range(window_len, len(df), stride):
+        out.append(int(ids[end - 1]))
+    return np.array(out, dtype=np.int64)
+
+
+def inverse_frequency_class_weights(
+    class_ids: np.ndarray,
+    n_classes: int,
+) -> np.ndarray:
+    """Inverse-frequency weights (mean-normalized) for imbalanced CE heads."""
+    counts = np.bincount(
+        np.asarray(class_ids, dtype=np.int64), minlength=int(n_classes)
+    ).astype(np.float64)
+    counts = np.maximum(counts, 1.0)
+    weights = 1.0 / counts
+    weights = weights * (float(n_classes) / weights.sum())
+    return weights.astype(np.float32)
 
 
 def split_purged_windows(
@@ -141,19 +172,40 @@ class WindowDataset(Dataset):
         y_z: np.ndarray,
         mask: np.ndarray,
         regime: np.ndarray,
+        structure_outcome: np.ndarray | None = None,
+        future_candle: np.ndarray | None = None,
     ) -> None:
         self.x = x
         self.x_cat = x_cat
         self.y_z = y_z
         self.mask = mask
         self.regime = regime
+        n = len(x)
+        self.structure_outcome = (
+            np.asarray(structure_outcome, dtype=np.int64)
+            if structure_outcome is not None
+            else np.zeros(n, dtype=np.int64)
+        )
+        self.future_candle = (
+            np.asarray(future_candle, dtype=np.int64)
+            if future_candle is not None
+            else np.zeros(n, dtype=np.int64)
+        )
 
     def __len__(self) -> int:
         return len(self.x)
 
     def __getitem__(
         self, i: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         w = zscore_window(self.x[i])
         return (
             torch.tensor(w, dtype=torch.float32),
@@ -161,6 +213,8 @@ class WindowDataset(Dataset):
             torch.tensor(self.y_z[i], dtype=torch.float32),
             torch.tensor(self.mask[i], dtype=torch.float32),
             torch.tensor(self.regime[i], dtype=torch.long),
+            torch.tensor(self.structure_outcome[i], dtype=torch.long),
+            torch.tensor(self.future_candle[i], dtype=torch.long),
         )
 
 
@@ -174,7 +228,7 @@ class PositionalEncoding(nn.Module):
 
 
 class MarketTransformer(nn.Module):
-    """Multi-task market-understanding encoder (continuous + vol-regime heads)."""
+    """Multi-task encoder: continuous path, vol regime, structure, next candle."""
 
     def __init__(
         self,
@@ -186,6 +240,7 @@ class MarketTransformer(nn.Module):
         max_len: int,
         n_continuous: int,
         n_regime_classes: int = 4,
+        n_structure_classes: int = STRUCTURE_OUTCOME_CARDINALITY,
         n_candle_classes: int = CANDLE_CLASS_CARDINALITY,
         candle_embed_dim: int = CANDLE_EMBED_DIM,
     ) -> None:
@@ -211,10 +266,12 @@ class MarketTransformer(nn.Module):
         )
         self.continuous_head = nn.Linear(shared_dim, n_continuous)
         self.regime_head = nn.Linear(shared_dim, n_regime_classes)
+        self.structure_head = nn.Linear(shared_dim, n_structure_classes)
+        self.future_candle_head = nn.Linear(shared_dim, n_candle_classes)
 
     def forward(
         self, x: torch.Tensor, candle_class_ids: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         embed = self.candle_embed(candle_class_ids)
         x = torch.cat([x, embed], dim=-1)
         h = self.input_proj(x)
@@ -223,21 +280,31 @@ class MarketTransformer(nn.Module):
         h = self.norm(h)
         pooled = h[:, -1, :]
         shared = self.shared(pooled)
-        return self.continuous_head(shared), self.regime_head(shared)
+        return (
+            self.continuous_head(shared),
+            self.regime_head(shared),
+            self.structure_head(shared),
+            self.future_candle_head(shared),
+        )
 
 
 def compute_multitask_loss(
     continuous_pred: torch.Tensor,
     regime_logits: torch.Tensor,
+    structure_logits: torch.Tensor,
+    future_candle_logits: torch.Tensor,
     yb_z: torch.Tensor,
     mb: torch.Tensor,
     rb: torch.Tensor,
+    structure_y: torch.Tensor,
+    future_candle_y: torch.Tensor,
     log_vars: nn.Parameter,
     *,
     n_continuous: int,
     continuous_loss_weights: Sequence[float] | None = None,
+    candle_class_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Uncertainty-weighted multi-task loss over continuous heads + regime CE."""
+    """Uncertainty-weighted MSE plus vol/structure/candle CE heads."""
     if continuous_loss_weights is not None:
         weights = [float(w) for w in continuous_loss_weights]
         if len(weights) != n_continuous:
@@ -256,9 +323,20 @@ def compute_multitask_loss(
         masked = (diff * mb[:, j]).sum() / (mb[:, j].sum() + 1e-6)
         precision = torch.exp(-log_vars[j])
         losses.append(task_w * (precision * masked + log_vars[j]))
-    ce = nn.functional.cross_entropy(regime_logits, rb)
-    precision = torch.exp(-log_vars[n_continuous])
-    losses.append(precision * ce + log_vars[n_continuous])
+
+    ce_terms = (
+        (regime_logits, rb, None),
+        (structure_logits, structure_y, None),
+        (future_candle_logits, future_candle_y, candle_class_weights),
+    )
+    for offset, (logits, target, cls_w) in enumerate(ce_terms):
+        idx = n_continuous + offset
+        if cls_w is not None:
+            ce = nn.functional.cross_entropy(logits, target, weight=cls_w)
+        else:
+            ce = nn.functional.cross_entropy(logits, target)
+        precision = torch.exp(-log_vars[idx])
+        losses.append(precision * ce + log_vars[idx])
     return sum(losses)
 
 
@@ -274,6 +352,13 @@ class TrainingResult:
     stopped_at_epoch: int = 0
 
 
+def _batch_to_device(
+    batch: Sequence[torch.Tensor],
+    device: torch.device,
+) -> Tuple[torch.Tensor, ...]:
+    return tuple(t.to(device) for t in batch)
+
+
 def train_transformer(
     model: MarketTransformer,
     train_loader: DataLoader,
@@ -282,12 +367,16 @@ def train_transformer(
     *,
     device: torch.device,
     n_continuous: int | None = None,
+    candle_class_weights: Sequence[float] | np.ndarray | None = None,
 ) -> TrainingResult:
     """Train with AdamW, optional LR scheduler, and early stopping."""
     n_cont = n_continuous or len(CONTINUOUS_LABEL_COLS)
     loss_weights = config.get("continuous_loss_weights")
-    log_vars = nn.Parameter(torch.zeros(n_cont + 1, device=device))
+    log_vars = nn.Parameter(torch.zeros(n_cont + N_AUX_CLASS_HEADS, device=device))
     params = list(model.parameters()) + [log_vars]
+    candle_w: Optional[torch.Tensor] = None
+    if candle_class_weights is not None:
+        candle_w = torch.as_tensor(candle_class_weights, dtype=torch.float32, device=device)
     optimizer = torch.optim.AdamW(
         params,
         lr=config["lr"],
@@ -310,25 +399,24 @@ def train_transformer(
     for epoch in range(config["epochs"]):
         model.train()
         train_loss = 0.0
-        for xb, xcat, yb_z, mb, rb in train_loader:
-            xb, xcat, yb_z, mb, rb = (
-                xb.to(device),
-                xcat.to(device),
-                yb_z.to(device),
-                mb.to(device),
-                rb.to(device),
-            )
+        for batch in train_loader:
+            xb, xcat, yb_z, mb, rb, so, fc = _batch_to_device(batch, device)
             optimizer.zero_grad()
-            cont, reg = model(xb, xcat)
+            cont, reg, struct_logits, candle_logits = model(xb, xcat)
             loss = compute_multitask_loss(
                 cont,
                 reg,
+                struct_logits,
+                candle_logits,
                 yb_z,
                 mb,
                 rb,
+                so,
+                fc,
                 log_vars,
                 n_continuous=n_cont,
                 continuous_loss_weights=loss_weights,
+                candle_class_weights=candle_w,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(params, 1.0)
@@ -338,25 +426,24 @@ def train_transformer(
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for xb, xcat, yb_z, mb, rb in val_loader:
-                xb, xcat, yb_z, mb, rb = (
-                    xb.to(device),
-                    xcat.to(device),
-                    yb_z.to(device),
-                    mb.to(device),
-                    rb.to(device),
-                )
-                cont, reg = model(xb, xcat)
+            for batch in val_loader:
+                xb, xcat, yb_z, mb, rb, so, fc = _batch_to_device(batch, device)
+                cont, reg, struct_logits, candle_logits = model(xb, xcat)
                 val_loss += float(
                     compute_multitask_loss(
                         cont,
                         reg,
+                        struct_logits,
+                        candle_logits,
                         yb_z,
                         mb,
                         rb,
+                        so,
+                        fc,
                         log_vars,
                         n_continuous=n_cont,
                         continuous_loss_weights=loss_weights,
+                        candle_class_weights=candle_w,
                     ).item()
                 )
         val_loss /= max(len(val_loader), 1)
@@ -433,10 +520,12 @@ def evaluate_continuous_targets(
     mask_list: List[np.ndarray] = []
 
     with torch.no_grad():
-        for xb, xcat, yb_z, mb, _rb in loader:
-            xb = xb.to(device)
-            xcat = xcat.to(device)
-            cont, _ = model(xb, xcat)
+        for batch in loader:
+            xb = batch[0].to(device)
+            xcat = batch[1].to(device)
+            yb_z = batch[2]
+            mb = batch[3]
+            cont, *_ = model(xb, xcat)
             pred_z_list.append(cont.cpu().numpy())
             true_z_list.append(yb_z.numpy())
             mask_list.append(mb.numpy())
@@ -500,10 +589,11 @@ def evaluate_regime_head(
     pred_list: List[int] = []
     true_list: List[int] = []
     with torch.no_grad():
-        for xb, xcat, _yb_z, _mb, rb in loader:
-            xb = xb.to(device)
-            xcat = xcat.to(device)
-            _, regime_logits = model(xb, xcat)
+        for batch in loader:
+            xb = batch[0].to(device)
+            xcat = batch[1].to(device)
+            rb = batch[4]
+            _, regime_logits, *_ = model(xb, xcat)
             pred_list.extend(torch.argmax(regime_logits, dim=1).cpu().numpy().tolist())
             true_list.extend(rb.numpy().tolist())
     return np.array(pred_list), np.array(true_list)
@@ -519,6 +609,34 @@ def evaluate_regime_accuracy(
     pred, true = evaluate_regime_head(model, loader, device=device)
     if len(true) == 0:
         return 0.0
+    return float((pred == true).mean())
+
+
+def evaluate_head_accuracy(
+    model: MarketTransformer,
+    loader: DataLoader,
+    *,
+    device: torch.device,
+    output_index: int,
+    target_index: int,
+) -> float:
+    """Accuracy for an auxiliary class head (1=regime, 2=structure, 3=candle)."""
+    model.eval()
+    pred_list: List[int] = []
+    true_list: List[int] = []
+    with torch.no_grad():
+        for batch in loader:
+            xb = batch[0].to(device)
+            xcat = batch[1].to(device)
+            target = batch[target_index]
+            outputs = model(xb, xcat)
+            logits = outputs[output_index]
+            pred_list.extend(torch.argmax(logits, dim=1).cpu().numpy().tolist())
+            true_list.extend(target.numpy().tolist())
+    if not true_list:
+        return 0.0
+    pred = np.array(pred_list)
+    true = np.array(true_list)
     return float((pred == true).mean())
 
 
@@ -674,12 +792,14 @@ def export_transformer_bundle(
     dummy_cat = torch.zeros(1, window_len, dtype=torch.long, device=device)
     export_kwargs: Dict[str, Any] = {
         "input_names": ["continuous_features", "candle_class_ids"],
-        "output_names": ["continuous_pred", "regime_logits"],
+        "output_names": list(ONNX_OUTPUT_NAMES),
         "dynamic_axes": {
             "continuous_features": {0: "batch"},
             "candle_class_ids": {0: "batch"},
             "continuous_pred": {0: "batch"},
             "regime_logits": {0: "batch"},
+            "structure_outcome_logits": {0: "batch"},
+            "future_candle_logits": {0: "batch"},
         },
         "opset_version": 17,
         "export_params": True,
@@ -711,7 +831,7 @@ def export_transformer_bundle(
             )
 
         sess = ort.InferenceSession(str(onnx_path))
-        onnx_cont, onnx_reg = sess.run(
+        onnx_outs = sess.run(
             None,
             {
                 "continuous_features": dummy_cont.cpu().numpy(),
@@ -719,12 +839,10 @@ def export_transformer_bundle(
             },
         )
         with torch.no_grad():
-            torch_cont, torch_reg = model(dummy_cont, dummy_cat)
-        diff_cont = np.abs(onnx_cont - torch_cont.cpu().numpy()).max()
-        diff_reg = np.abs(onnx_reg - torch_reg.cpu().numpy()).max()
-        print(f"ONNX verify continuous_pred max diff: {diff_cont:.2e}")
-        print(f"ONNX verify regime_logits max diff: {diff_reg:.2e}")
-        print(f"ONNX output shapes: {onnx_cont.shape}, {onnx_reg.shape}")
+            torch_outs = model(dummy_cont, dummy_cat)
+        for name, onnx_arr, torch_t in zip(ONNX_OUTPUT_NAMES, onnx_outs, torch_outs):
+            diff = np.abs(onnx_arr - torch_t.cpu().numpy()).max()
+            print(f"ONNX verify {name} max diff: {diff:.2e} shape={onnx_arr.shape}")
 
     metrics_dict = {}
     if test_metrics:

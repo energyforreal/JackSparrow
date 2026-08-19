@@ -20,6 +20,7 @@ from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     DEFAULT_PATH_LABEL_HORIZON_MINUTES,
     RESOLUTION_MINUTES,
+    candle_family_from_class,
     compute_long_edge,
     compute_path_edge,
     compute_short_edge,
@@ -87,6 +88,11 @@ class TfMarketView:
     timing_stance: Optional[str] = None  # with|against|quiet
     model_name: str = ""
     confidence: float = 0.0
+    structure_outcome: str = ""
+    future_candle_class: int = -1
+    future_candle_name: str = ""
+    candle_follow_through_atr: float = 0.0
+    structure_delta: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -191,9 +197,22 @@ def _imbalance_ratio(mfe: float, mae: float) -> float:
     return float((float(mfe) - float(mae)) / denom)
 
 
-def _quality_label(trend_strength: float, mfe: float, mae: float) -> str:
+def _quality_label(
+    trend_strength: float,
+    mfe: float,
+    mae: float,
+    *,
+    follow_through: float = 0.0,
+    structure_delta: float = 0.0,
+) -> str:
     ratio = mfe / (mae + 1e-6)
     if trend_strength >= 1.5 and ratio >= 1.5:
+        if follow_through < 0.0:
+            return "medium"
+        if (mfe > mae and structure_delta < -0.25) or (
+            mae > mfe and structure_delta > 0.25
+        ):
+            return "medium"
         return "high"
     if trend_strength >= 0.8 or ratio >= 1.0:
         return "medium"
@@ -221,6 +240,7 @@ def _apply_setup_filters(
     trend_strength: float,
     mae: float,
     drawdown_before_mfe: float,
+    structure_outcome: str = "",
 ) -> tuple[Optional[str], List[str]]:
     """Flatten weak / high-pain 15m setups. 30m stays raw for confirmation only."""
     codes: List[str] = []
@@ -230,6 +250,11 @@ def _apply_setup_filters(
         return setup_stance, codes
 
     if abs(imbalance_z) < _SETUP_PATH_Z:
+        return "flat", codes
+
+    outcome = str(structure_outcome or "").upper()
+    if outcome in ("FAILED_BREAK", "REVERSAL"):
+        codes.append(f"setup_15m_{outcome.lower()}_flat")
         return "flat", codes
 
     if trend_strength < _SETUP_MIN_TREND_STRENGTH and abs(imbalance_z) < _SETUP_STRONG_Z:
@@ -243,6 +268,31 @@ def _apply_setup_filters(
         return "flat", codes
 
     return setup_stance, codes
+
+
+def _timing_from_z_and_candle(
+    *,
+    setup_direction: Optional[str],
+    imbalance_z: float,
+    future_candle_class: int,
+) -> str:
+    """5m timing from path z, optionally shifted by next-bar candle family."""
+    if setup_direction not in ("long", "short"):
+        return "quiet"
+    if abs(imbalance_z) < _TIMING_LEAN_Z:
+        timing = "quiet"
+    elif setup_direction == "long":
+        timing = "with" if imbalance_z > 0 else "against"
+    else:
+        timing = "with" if imbalance_z < 0 else "against"
+    if int(future_candle_class) < 0:
+        return timing
+    family = candle_family_from_class(int(future_candle_class))
+    if family == "doji":
+        return "quiet"
+    if setup_direction == "long":
+        return "with" if family == "bull" else "against"
+    return "with" if family == "bear" else "against"
 
 
 def build_tf_market_view(
@@ -290,6 +340,17 @@ def build_tf_market_view(
     future_oi_change_pct = float(
         continuous.get("future_oi_change_pct", 0.0) or 0.0
     )
+    follow_through = float(continuous.get("candle_follow_through_atr", 0.0) or 0.0)
+    structure_delta = float(continuous.get("structure_delta", 0.0) or 0.0)
+    structure_outcome = str(
+        prediction_context.get("transformer_structure_outcome") or ""
+    )
+    future_candle_class = int(
+        prediction_context.get("transformer_future_candle_class", -1) or -1
+    )
+    future_candle_name = str(
+        prediction_context.get("transformer_future_candle_name") or ""
+    )
     typical = typical_abs_edge_from_metadata(bundle_metadata)
     imbalance_z = float(path_edge) / typical
     imbalance_ratio = _imbalance_ratio(mfe, mae)
@@ -321,16 +382,14 @@ def build_tf_market_view(
             trend_strength=trend_strength,
             mae=mae,
             drawdown_before_mfe=drawdown_before_mfe,
+            structure_outcome=structure_outcome,
         )
     elif tf_key in _TIMING_TFS:
-        if setup_direction not in ("long", "short"):
-            timing_stance = "quiet"
-        elif abs(imbalance_z) < _TIMING_LEAN_Z:
-            timing_stance = "quiet"
-        elif setup_direction == "long":
-            timing_stance = "with" if imbalance_z > 0 else "against"
-        else:
-            timing_stance = "with" if imbalance_z < 0 else "against"
+        timing_stance = _timing_from_z_and_candle(
+            setup_direction=setup_direction,
+            imbalance_z=imbalance_z,
+            future_candle_class=future_candle_class,
+        )
 
     conf = float(min(1.0, abs(imbalance_z) / max(_SETUP_STRONG_Z, 1e-6)))
     return TfMarketView(
@@ -347,7 +406,13 @@ def build_tf_market_view(
         vol_regime=vol_regime,
         future_volatility=future_vol,
         trend_strength=trend_strength,
-        quality=_quality_label(trend_strength, mfe, mae),
+        quality=_quality_label(
+            trend_strength,
+            mfe,
+            mae,
+            follow_through=follow_through,
+            structure_delta=structure_delta,
+        ),
         risk=_risk_label(vol_regime),
         drawdown_before_mfe=drawdown_before_mfe,
         future_oi_change_pct=future_oi_change_pct,
@@ -357,6 +422,11 @@ def build_tf_market_view(
         timing_stance=timing_stance,
         model_name=model_name,
         confidence=conf,
+        structure_outcome=structure_outcome,
+        future_candle_class=future_candle_class,
+        future_candle_name=future_candle_name,
+        candle_follow_through_atr=follow_through,
+        structure_delta=structure_delta,
     )
 
 
@@ -493,6 +563,7 @@ def synthesize_agent_decision(
         trend_strength=setup_15.trend_strength,
         mae=setup_15.mae,
         drawdown_before_mfe=setup_15.drawdown_before_mfe,
+        structure_outcome=setup_15.structure_outcome,
     )
     reason_codes.extend(filter_codes)
     setup_15.setup_stance = filtered_setup
@@ -514,17 +585,20 @@ def synthesize_agent_decision(
         return empty
 
     reason_codes.append(f"setup_15m_{setup}")
+    outcome = str(setup_15.structure_outcome or "").upper()
+    if outcome in ("BREAKOUT", "CONTINUATION_LONG") and setup_dir == "long":
+        reason_codes.append("structure_confirms_setup")
+    if outcome in ("BREAKOUT", "CONTINUATION_SHORT") and setup_dir == "short":
+        reason_codes.append("structure_confirms_setup")
 
     timing_view = view_map.get("tf_5m")
     timing = "quiet"
     if timing_view is not None:
-        z = timing_view.path_imbalance_z
-        if abs(z) < _TIMING_LEAN_Z:
-            timing = "quiet"
-        elif setup_dir == "long":
-            timing = "with" if z > 0 else "against"
-        else:
-            timing = "with" if z < 0 else "against"
+        timing = _timing_from_z_and_candle(
+            setup_direction=setup_dir,
+            imbalance_z=timing_view.path_imbalance_z,
+            future_candle_class=timing_view.future_candle_class,
+        )
         timing_view.timing_stance = timing
         reason_codes.append(f"timing_{timing}")
     else:

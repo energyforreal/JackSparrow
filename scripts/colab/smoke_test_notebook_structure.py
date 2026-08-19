@@ -14,6 +14,7 @@ FORBIDDEN_PATTERNS = (
     "base64.b64decode",
     "%%writefile",
     "colab_bundle",
+    "import argparse",
 )
 
 REQUIRED_SYMBOLS = (
@@ -24,11 +25,16 @@ REQUIRED_SYMBOLS = (
     "classify_candle_shape",
     "candle_class_ids",
     "CANDLE_CLASS_NAMES",
+    "structure_bias",
+    "future_structure_outcome",
+    "candle_follow_through_atr",
+    "structure_outcome_logits",
 )
 
 MODULE_HEADINGS = (
     "## Feature contract (agent integration)",
     "## Derivatives features",
+    "## Market structure",
     "## Feature engineering",
     "## Labels / targets",
     "## Inference and export helpers",
@@ -86,6 +92,19 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
     contract_idx = next(i for i, c in enumerate(cells) if "FEATURE_COLS" in _cell_text(c))
     if contract_idx >= train_idx:
         raise AssertionError("FEATURE_COLS must appear before train cell")
+
+    diag_idx = next(
+        i
+        for i, c in enumerate(cells)
+        if _cell_text(c).lstrip().startswith("## Candle class diagnostics")
+    )
+    if diag_idx <= train_idx:
+        raise AssertionError("Candle class diagnostics must appear after the train cell")
+
+    if re.search(r"^import argparse\b", full_text, re.MULTILINE):
+        raise AssertionError("CLI argparse import leaked into notebook cells")
+    if re.search(r"^def main\(", full_text, re.MULTILINE):
+        raise AssertionError("CLI main() leaked into notebook cells")
 
     print(f"OK: {path.name} ({len(cells)} cells)")
 

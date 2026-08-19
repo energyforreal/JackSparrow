@@ -120,6 +120,52 @@ def test_extreme_vol_on_1h_is_crisis() -> None:
     assert view.climate_stance == "crisis"
 
 
+def test_15m_failed_break_flattens_setup() -> None:
+    ctx = _ctx(mfe=0.02, mae=0.005)
+    ctx["transformer_structure_outcome"] = "FAILED_BREAK"
+    view = build_tf_market_view(
+        tf_key="tf_15m",
+        prediction_context=ctx,
+        bundle_metadata=_meta(mfe_std=0.008, mae_std=0.008),
+    )
+    assert view.setup_stance == "flat"
+
+
+def test_15m_reversal_flattens_setup() -> None:
+    ctx = _ctx(mfe=0.02, mae=0.005)
+    ctx["transformer_structure_outcome"] = "REVERSAL"
+    view = build_tf_market_view(
+        tf_key="tf_15m",
+        prediction_context=ctx,
+        bundle_metadata=_meta(mfe_std=0.008, mae_std=0.008),
+    )
+    assert view.setup_stance == "flat"
+
+
+def test_5m_future_bear_candle_is_against_long_setup() -> None:
+    ctx = _ctx(mfe=0.03, mae=0.005)
+    ctx["transformer_future_candle_class"] = 12  # STANDARD_BEAR
+    view = build_tf_market_view(
+        tf_key="tf_5m",
+        prediction_context=ctx,
+        bundle_metadata=_meta(),
+        setup_direction="long",
+    )
+    assert view.timing_stance == "against"
+
+
+def test_5m_future_doji_candle_is_quiet() -> None:
+    ctx = _ctx(mfe=0.03, mae=0.005)
+    ctx["transformer_future_candle_class"] = 3  # DOJI_STANDARD
+    view = build_tf_market_view(
+        tf_key="tf_5m",
+        prediction_context=ctx,
+        bundle_metadata=_meta(),
+        setup_direction="long",
+    )
+    assert view.timing_stance == "quiet"
+
+
 def test_15m_setup_long_path() -> None:
     view = build_tf_market_view(
         tf_key="tf_15m",

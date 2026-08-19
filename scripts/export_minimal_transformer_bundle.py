@@ -20,20 +20,25 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_CARDINALITY,
     CONTINUOUS_LABEL_COLS,
-    FEATURE_COLS,
+    FUTURE_CANDLE_COL,
+    STRUCTURE_OUTCOME_COL,
     bundle_dir_name,
     default_training_config,
+    feature_cols_for_resolution,
 )
 from feature_store.transformer_btcusd.features import add_features
 from feature_store.transformer_btcusd.labels import compute_market_labels, trim_label_tail
 from scripts.colab.transformer_training import (
     MarketTransformer,
     WindowDataset,
+    build_class_targets,
     build_windows,
     export_transformer_bundle,
     fit_label_stats,
     fit_vol_regime_edges,
+    inverse_frequency_class_weights,
     set_training_seed,
     split_purged_windows,
     standardize_labels,
@@ -76,6 +81,7 @@ def main() -> None:
     raw_df = _synthetic_ohlcv(n_bars=2500)
     raw_df["funding_rate"] = 0.0001
     raw_df["open_interest"] = 1e6
+    feature_cols = feature_cols_for_resolution(RESOLUTION)
     feat_df = add_features(
         raw_df,
         atr_period=config["atr_period"],
@@ -93,13 +99,25 @@ def main() -> None:
 
     x_all, x_cat_all, y_all = build_windows(
         feat_df,
-        FEATURE_COLS,
+        feature_cols,
         CONTINUOUS_LABEL_COLS,
         config["window_len"],
         config["stride"],
     )
+    struct_all = build_class_targets(
+        feat_df, STRUCTURE_OUTCOME_COL, config["window_len"], config["stride"]
+    )
+    candle_all = build_class_targets(
+        feat_df, FUTURE_CANDLE_COL, config["window_len"], config["stride"]
+    )
     splits = split_purged_windows(
-        {"x": x_all, "x_cat": x_cat_all, "y": y_all},
+        {
+            "x": x_all,
+            "x_cat": x_cat_all,
+            "y": y_all,
+            "structure": struct_all,
+            "candle": candle_all,
+        },
         train_frac=config["train_frac"],
         val_frac=config["val_frac"],
         embargo_bars=config["embargo_bars"],
@@ -121,22 +139,41 @@ def main() -> None:
     q_edges = fit_vol_regime_edges(y_train, config["vol_regime_quantiles"])
     r_train = to_vol_regime(y_train, q_edges)
     r_val = to_vol_regime(y_val, q_edges)
+    candle_weights = inverse_frequency_class_weights(
+        splits["train"]["candle"], CANDLE_CLASS_CARDINALITY
+    )
 
     train_loader = DataLoader(
-        WindowDataset(x_train, x_cat_train, y_train_z, m_train, r_train),
+        WindowDataset(
+            x_train,
+            x_cat_train,
+            y_train_z,
+            m_train,
+            r_train,
+            splits["train"]["structure"],
+            splits["train"]["candle"],
+        ),
         batch_size=config["batch_size"],
         shuffle=True,
         drop_last=True,
     )
     val_loader = DataLoader(
-        WindowDataset(x_val, x_cat_val, y_val_z, m_val, r_val),
+        WindowDataset(
+            x_val,
+            x_cat_val,
+            y_val_z,
+            m_val,
+            r_val,
+            splits["val"]["structure"],
+            splits["val"]["candle"],
+        ),
         batch_size=config["batch_size"],
         shuffle=False,
     )
 
     device = torch.device("cpu")
     model = MarketTransformer(
-        n_features=len(FEATURE_COLS),
+        n_features=len(feature_cols),
         d_model=config["d_model"],
         nhead=config["nhead"],
         num_layers=config["num_layers"],
@@ -145,7 +182,14 @@ def main() -> None:
         n_continuous=len(CONTINUOUS_LABEL_COLS),
     ).to(device)
 
-    result = train_transformer(model, train_loader, val_loader, config, device=device)
+    result = train_transformer(
+        model,
+        train_loader,
+        val_loader,
+        config,
+        device=device,
+        candle_class_weights=candle_weights,
+    )
     model.load_state_dict(result.model_state)
     model.eval()
 
@@ -155,8 +199,8 @@ def main() -> None:
         BUNDLE_DIR,
         device=device,
         window_len=config["window_len"],
-        n_features=len(FEATURE_COLS),
-        feature_cols=FEATURE_COLS,
+        n_features=len(feature_cols),
+        feature_cols=feature_cols,
         label_mean=label_mean,
         label_std=label_std,
         q_edges=q_edges,

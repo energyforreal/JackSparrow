@@ -15,6 +15,8 @@ from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     FEATURE_COLS,
     FEATURE_CONTRACT_VERSION,
+    ONNX_OUTPUT_NAMES,
+    STRUCTURE_OUTCOME_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     default_training_config,
     model_family_for_resolution,
@@ -135,6 +137,17 @@ def parse_regime_prediction(
     return idx, str(name), prob_map
 
 
+def require_onnx_output_names(output_names: Sequence[str]) -> None:
+    """Reject v5 (or other) bundles that lack the v6 ONNX heads."""
+    have = {str(name) for name in output_names}
+    missing = [name for name in ONNX_OUTPUT_NAMES if name not in have]
+    if missing:
+        raise RuntimeError(
+            f"ONNX bundle is not {FEATURE_CONTRACT_VERSION}: missing outputs "
+            f"{missing}. Retrain all TFs."
+        )
+
+
 def feature_config_from_training_export(
     *,
     feature_cols: Sequence[str],
@@ -156,6 +169,10 @@ def feature_config_from_training_export(
         "label_mean": [float(x) for x in label_mean],
         "label_std": [float(x) for x in label_std],
         "regime_names": {"0": "LOW", "1": "NORMAL", "2": "HIGH", "3": "EXTREME"},
+        "structure_outcome_names": {
+            str(k): v for k, v in STRUCTURE_OUTCOME_NAMES.items()
+        },
+        "onnx_output_names": list(ONNX_OUTPUT_NAMES),
         "vol_regime_quantile_edges": [float(x) for x in q_edges],
         "config": dict(config),
     }
@@ -186,6 +203,7 @@ def metadata_from_training_export(
         "atr_period": int(cfg.get("atr_period") or 14),
         "default_threshold": float(cfg.get("default_threshold") or 0.005),
         "primary_signal_mode": "path_edge",
+        "onnx_output_names": list(ONNX_OUTPUT_NAMES),
         "label_mean": [float(x) for x in label_mean],
         "label_std": [float(x) for x in label_std],
         "test_metrics": dict(test_metrics or {}),

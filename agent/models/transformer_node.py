@@ -19,11 +19,13 @@ from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPMod
 from agent.models.transformer_context_builder import build_transformer_prediction_context
 from feature_store.transformer_btcusd.contract import (
     CANDLE_CLASS_COL,
-    FEATURE_COLS,
+    CANDLE_CLASS_NAMES,
     FEATURE_CONTRACT_VERSION,
     RESOLUTION_MINUTES,
+    STRUCTURE_OUTCOME_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
+    feature_cols_for_resolution,
     onnx_filename_for_resolution,
 )
 from feature_store.transformer_btcusd.features import (
@@ -36,6 +38,7 @@ from feature_store.transformer_btcusd.inference import (
     build_candle_class_window,
     build_continuous_window,
     parse_regime_prediction,
+    require_onnx_output_names,
     resolve_feature_config,
     unstandardize_continuous,
 )
@@ -141,12 +144,9 @@ class TransformerModelNode(MCPModelNode):
         feature_config = resolve_feature_config(bundle_dir)
         bundle_contract = str(feature_config.get("feature_contract_version") or "")
         if bundle_contract and bundle_contract != FEATURE_CONTRACT_VERSION:
-            logger.warning(
-                "transformer_feature_contract_mismatch",
-                model_family=family,
-                bundle_version=bundle_contract,
-                runtime_version=FEATURE_CONTRACT_VERSION,
-                metadata=str(meta_path),
+            raise RuntimeError(
+                f"Transformer bundle contract {bundle_contract!r} is not "
+                f"{FEATURE_CONTRACT_VERSION}. Retrain all TFs."
             )
         resolution = str(raw.get("resolution") or "15m")
         onnx_name = str(
@@ -173,6 +173,7 @@ class TransformerModelNode(MCPModelNode):
             str(self._onnx_path),
             providers=["CPUExecutionProvider"],
         )
+        require_onnx_output_names([o.name for o in self._session.get_outputs()])
         self._initialized = True
         self._health = "healthy"
         logger.info(
@@ -200,8 +201,14 @@ class TransformerModelNode(MCPModelNode):
             "version": self._model_version,
             "model_type": self.model_type,
             "resolution": self._resolution,
-            "features_required": list(self._feature_config.get("feature_cols") or FEATURE_COLS),
-            "feature_list": list(self._feature_config.get("feature_cols") or FEATURE_COLS),
+            "features_required": list(
+                self._feature_config.get("feature_cols")
+                or feature_cols_for_resolution(self._resolution)
+            ),
+            "feature_list": list(
+                self._feature_config.get("feature_cols")
+                or feature_cols_for_resolution(self._resolution)
+            ),
             "description": f"BTCUSD {self._resolution} transformer ONNX (Colab-trained)",
             "metadata_path": str(self._metadata_path),
             "onnx_path": str(self._onnx_path),
@@ -276,9 +283,15 @@ class TransformerModelNode(MCPModelNode):
             atr_period=atr_period,
             dropna=True,
         )
-        validate_feature_columns(feat_df, require_finite_closed_bar=True)
-
-        feature_cols = list(self._feature_config.get("feature_cols") or FEATURE_COLS)
+        feature_cols = list(
+            self._feature_config.get("feature_cols")
+            or feature_cols_for_resolution(self._resolution)
+        )
+        validate_feature_columns(
+            feat_df,
+            require_finite_closed_bar=True,
+            feature_cols=feature_cols,
+        )
         window_len = int(self._feature_config.get("window_len") or 128)
         values = feat_df[feature_cols].values.astype(np.float32)
         fetched_bars = int(len(df_ohlcv))
@@ -295,13 +308,22 @@ class TransformerModelNode(MCPModelNode):
             feat_df[CANDLE_CLASS_COL].values, window_len=window_len
         )
 
-        continuous_z, regime_logits = self._session.run(
+        raw_outs = self._session.run(
             None,
             {
                 "continuous_features": cont_window,
                 "candle_class_ids": cat_window,
             },
         )
+        named = {
+            out_meta.name: arr
+            for out_meta, arr in zip(self._session.get_outputs(), raw_outs)
+        }
+        require_onnx_output_names(named.keys())
+        continuous_z = named["continuous_pred"]
+        regime_logits = named["regime_logits"]
+        structure_logits = named["structure_outcome_logits"]
+        future_candle_logits = named["future_candle_logits"]
         continuous_preds = unstandardize_continuous(
             continuous_z[0],
             self._feature_config["label_mean"],
@@ -315,6 +337,18 @@ class TransformerModelNode(MCPModelNode):
             "3": "EXTREME",
         }
         _, vol_regime, regime_probs = parse_regime_prediction(regime_logits[0], regime_names)
+        structure_names = self._feature_config.get("structure_outcome_names") or {
+            str(k): v for k, v in STRUCTURE_OUTCOME_NAMES.items()
+        }
+        struct_idx, struct_name, struct_probs = parse_regime_prediction(
+            structure_logits[0], structure_names
+        )
+        candle_names = self._feature_config.get("candle_class_names") or {
+            str(k): v for k, v in CANDLE_CLASS_NAMES.items()
+        }
+        fut_cid, fut_cname, fut_cprobs = parse_regime_prediction(
+            future_candle_logits[0], candle_names
+        )
 
         bar_hint = 0
         if isinstance(df5, pd.DataFrame) and not df5.empty:
@@ -336,6 +370,12 @@ class TransformerModelNode(MCPModelNode):
             regime_probs=regime_probs,
             bar_index_hint=bar_hint,
             resolution_minutes=self._resolution_minutes,
+            structure_outcome=struct_name,
+            structure_outcome_id=struct_idx,
+            structure_outcome_probs=struct_probs,
+            future_candle_class=fut_cid,
+            future_candle_name=fut_cname,
+            future_candle_probs=fut_cprobs,
         )
         out_ctx["closed_bar_features"] = closed_feats
         out_ctx["tf_key"] = self.tf_key

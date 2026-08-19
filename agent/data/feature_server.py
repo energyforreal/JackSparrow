@@ -113,7 +113,9 @@ class MCPFeatureServer:
             # Transformer models compute features internally; skip canonical engine.
             try:
                 from agent.core.mcp_orchestrator import mcp_orchestrator
-                from feature_store.transformer_btcusd.contract import FEATURE_COLS
+                from feature_store.transformer_btcusd.contract import (
+                    feature_cols_for_resolution,
+                )
 
                 registry = (
                     mcp_orchestrator.model_registry
@@ -122,7 +124,7 @@ class MCPFeatureServer:
                 )
                 if registry and registry.uses_transformer_internal_features():
                     requested = {str(n) for n in feature_names if n}
-                    transformer_cols = set(FEATURE_COLS)
+                    transformer_cols = set(feature_cols_for_resolution("5m"))
                     if not requested or requested.issubset(transformer_cols):
                         logger.info(
                             "feature_server_transformer_features_delegated",

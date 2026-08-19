@@ -12,6 +12,7 @@ from feature_store.transformer_btcusd.contract import (
     RESOLUTION_MINUTES,
     SUPPORTED_RESOLUTIONS,
     default_training_config,
+    feature_cols_for_resolution,
 )
 from feature_store.transformer_btcusd.features import (
     assemble_raw_frame,
@@ -92,13 +93,14 @@ def test_assemble_raw_frame_ffills_misaligned_derivatives() -> None:
 def test_inference_window_matches_window_dataset_zscore(resolution: str) -> None:
     minutes = RESOLUTION_MINUTES[resolution]
     freq = {"5m": "5min", "15m": "15min", "30m": "30min", "1h": "1h", "2h": "2h"}[resolution]
-    n = max(400, int(round(96 * minutes / 5)) + 200)
+    n = max(1000 if resolution == "5m" else 400, int(round(96 * minutes / 5)) + 200)
     ohlcv = _synthetic_ohlcv(n, freq=freq)
     funding_df, oi_df = _misaligned_derivatives(ohlcv)
     raw = assemble_raw_frame(ohlcv, funding_df=funding_df, oi_df=oi_df)
     feat_df = build_feature_matrix(raw, resolution_minutes=minutes, dropna=True)
     window_len = 128
-    values = feat_df[list(FEATURE_COLS)].values.astype(np.float32)
+    feature_cols = feature_cols_for_resolution(resolution)
+    values = feat_df[list(feature_cols)].values.astype(np.float32)
     inference_window = build_inference_window(values, window_len=window_len)
 
     tail = values[-window_len:]
@@ -111,6 +113,7 @@ def test_inference_window_matches_window_dataset_zscore(resolution: str) -> None
     np.testing.assert_array_equal(live_ids[0], train_ids[-window_len:])
     cont = build_continuous_window(values, window_len=window_len)
     np.testing.assert_allclose(cont, inference_window, rtol=1e-5, atol=1e-5)
+    assert inference_window.shape == (1, window_len, len(feature_cols))
 
 
 def test_closed_bar_row_is_second_to_last_after_dropna() -> None:
