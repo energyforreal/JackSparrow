@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_CARDINALITY,
+    CANDLE_CLASS_COL,
+    CANDLE_EMBED_DIM,
     CONTINUOUS_LABEL_COLS,
     EXPORT_QUALITY_DISCLAIMER,
     PROMOTION_REGIME_ACCURACY,
@@ -43,45 +46,54 @@ def build_windows(
     label_cols: Sequence[str],
     window_len: int,
     stride: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Stack overlapping feature windows and end-of-window labels."""
+    *,
+    class_col: str = CANDLE_CLASS_COL,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Stack overlapping continuous, candle-class, and label windows."""
     x_list: List[np.ndarray] = []
+    cat_list: List[np.ndarray] = []
     y_list: List[np.ndarray] = []
     values = df[list(feature_cols)].values.astype(np.float32)
+    class_ids = df[class_col].values.astype(np.int64)
     labels = df[list(label_cols)].values.astype(np.float64)
     for end in range(window_len, len(df), stride):
         start = end - window_len
         x_list.append(values[start:end])
+        cat_list.append(class_ids[start:end])
         y_list.append(labels[end - 1])
-    return np.array(x_list), np.array(y_list)
+    return np.array(x_list), np.array(cat_list, dtype=np.int64), np.array(y_list)
 
 
 def split_purged_windows(
-    x_all: np.ndarray,
-    y_all: np.ndarray,
+    arrays: Mapping[str, np.ndarray],
     *,
     train_frac: float,
     val_frac: float,
     embargo_bars: int,
-) -> Dict[str, np.ndarray]:
+) -> Dict[str, Dict[str, np.ndarray]]:
     """Time-ordered train/val/test split with embargo gaps between segments."""
-    n = len(x_all)
+    if not arrays:
+        raise ValueError("split_purged_windows requires at least one array")
+    lengths = {k: len(v) for k, v in arrays.items()}
+    n = next(iter(lengths.values()))
+    if any(length != n for length in lengths.values()):
+        raise ValueError(f"Array length mismatch: {lengths}")
     train_end = int(n * train_frac)
     val_end = train_end + int(n * val_frac)
     embargo = embargo_bars
-
-    splits = {
-        "x_train": x_all[:train_end],
-        "y_train": y_all[:train_end],
-        "x_val": x_all[train_end + embargo : val_end],
-        "y_val": y_all[train_end + embargo : val_end],
-        "x_test": x_all[val_end + embargo : n],
-        "y_test": y_all[val_end + embargo : n],
+    slices = {
+        "train": slice(0, train_end),
+        "val": slice(train_end + embargo, val_end),
+        "test": slice(val_end + embargo, n),
     }
-    if len(splits["x_train"]) == 0 or len(splits["x_val"]) == 0:
+    splits = {
+        split: {k: v[sl] for k, v in arrays.items()} for split, sl in slices.items()
+    }
+    first_key = next(iter(arrays))
+    if len(splits["train"][first_key]) == 0 or len(splits["val"][first_key]) == 0:
         raise ValueError(
-            f"Insufficient windows after split: train={len(splits['x_train'])}, "
-            f"val={len(splits['x_val'])}, test={len(splits['x_test'])}"
+            f"Insufficient windows after split: train={len(splits['train'][first_key])}, "
+            f"val={len(splits['val'][first_key])}, test={len(splits['test'][first_key])}"
         )
     return splits
 
@@ -125,11 +137,13 @@ class WindowDataset(Dataset):
     def __init__(
         self,
         x: np.ndarray,
+        x_cat: np.ndarray,
         y_z: np.ndarray,
         mask: np.ndarray,
         regime: np.ndarray,
     ) -> None:
         self.x = x
+        self.x_cat = x_cat
         self.y_z = y_z
         self.mask = mask
         self.regime = regime
@@ -139,10 +153,11 @@ class WindowDataset(Dataset):
 
     def __getitem__(
         self, i: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         w = zscore_window(self.x[i])
         return (
             torch.tensor(w, dtype=torch.float32),
+            torch.tensor(self.x_cat[i], dtype=torch.long),
             torch.tensor(self.y_z[i], dtype=torch.float32),
             torch.tensor(self.mask[i], dtype=torch.float32),
             torch.tensor(self.regime[i], dtype=torch.long),
@@ -171,9 +186,12 @@ class MarketTransformer(nn.Module):
         max_len: int,
         n_continuous: int,
         n_regime_classes: int = 4,
+        n_candle_classes: int = CANDLE_CLASS_CARDINALITY,
+        candle_embed_dim: int = CANDLE_EMBED_DIM,
     ) -> None:
         super().__init__()
-        self.input_proj = nn.Linear(n_features, d_model)
+        self.candle_embed = nn.Embedding(n_candle_classes, candle_embed_dim)
+        self.input_proj = nn.Linear(n_features + candle_embed_dim, d_model)
         self.pos_enc = PositionalEncoding(d_model, max_len=max_len)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -194,7 +212,11 @@ class MarketTransformer(nn.Module):
         self.continuous_head = nn.Linear(shared_dim, n_continuous)
         self.regime_head = nn.Linear(shared_dim, n_regime_classes)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor, candle_class_ids: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        embed = self.candle_embed(candle_class_ids)
+        x = torch.cat([x, embed], dim=-1)
         h = self.input_proj(x)
         h = self.pos_enc(h)
         h = self.encoder(h)
@@ -288,15 +310,16 @@ def train_transformer(
     for epoch in range(config["epochs"]):
         model.train()
         train_loss = 0.0
-        for xb, yb_z, mb, rb in train_loader:
-            xb, yb_z, mb, rb = (
+        for xb, xcat, yb_z, mb, rb in train_loader:
+            xb, xcat, yb_z, mb, rb = (
                 xb.to(device),
+                xcat.to(device),
                 yb_z.to(device),
                 mb.to(device),
                 rb.to(device),
             )
             optimizer.zero_grad()
-            cont, reg = model(xb)
+            cont, reg = model(xb, xcat)
             loss = compute_multitask_loss(
                 cont,
                 reg,
@@ -315,14 +338,15 @@ def train_transformer(
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for xb, yb_z, mb, rb in val_loader:
-                xb, yb_z, mb, rb = (
+            for xb, xcat, yb_z, mb, rb in val_loader:
+                xb, xcat, yb_z, mb, rb = (
                     xb.to(device),
+                    xcat.to(device),
                     yb_z.to(device),
                     mb.to(device),
                     rb.to(device),
                 )
-                cont, reg = model(xb)
+                cont, reg = model(xb, xcat)
                 val_loss += float(
                     compute_multitask_loss(
                         cont,
@@ -409,9 +433,10 @@ def evaluate_continuous_targets(
     mask_list: List[np.ndarray] = []
 
     with torch.no_grad():
-        for xb, yb_z, mb, _rb in loader:
+        for xb, xcat, yb_z, mb, _rb in loader:
             xb = xb.to(device)
-            cont, _ = model(xb)
+            xcat = xcat.to(device)
+            cont, _ = model(xb, xcat)
             pred_z_list.append(cont.cpu().numpy())
             true_z_list.append(yb_z.numpy())
             mask_list.append(mb.numpy())
@@ -475,9 +500,10 @@ def evaluate_regime_head(
     pred_list: List[int] = []
     true_list: List[int] = []
     with torch.no_grad():
-        for xb, _yb_z, _mb, rb in loader:
+        for xb, xcat, _yb_z, _mb, rb in loader:
             xb = xb.to(device)
-            _, regime_logits = model(xb)
+            xcat = xcat.to(device)
+            _, regime_logits = model(xb, xcat)
             pred_list.extend(torch.argmax(regime_logits, dim=1).cpu().numpy().tolist())
             true_list.extend(rb.numpy().tolist())
     return np.array(pred_list), np.array(true_list)
@@ -644,28 +670,31 @@ def export_transformer_bundle(
     cfg_path = export_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME
     meta_path = export_dir / TRANSFORMER_METADATA_FILENAME
 
-    dummy = torch.randn(1, window_len, n_features, device=device)
+    dummy_cont = torch.randn(1, window_len, n_features, device=device)
+    dummy_cat = torch.zeros(1, window_len, dtype=torch.long, device=device)
     export_kwargs: Dict[str, Any] = {
-        "input_names": ["window"],
+        "input_names": ["continuous_features", "candle_class_ids"],
         "output_names": ["continuous_pred", "regime_logits"],
         "dynamic_axes": {
-            "window": {0: "batch"},
+            "continuous_features": {0: "batch"},
+            "candle_class_ids": {0: "batch"},
             "continuous_pred": {0: "batch"},
             "regime_logits": {0: "batch"},
         },
         "opset_version": 17,
         "export_params": True,
     }
+    dummy_inputs = (dummy_cont, dummy_cat)
     try:
         torch.onnx.export(
             model,
-            dummy,
+            dummy_inputs,
             str(onnx_path),
             dynamo=False,
             **export_kwargs,
         )
     except TypeError:
-        torch.onnx.export(model, dummy, str(onnx_path), **export_kwargs)
+        torch.onnx.export(model, dummy_inputs, str(onnx_path), **export_kwargs)
 
     if verify:
         import onnx as onnx_lib
@@ -682,9 +711,15 @@ def export_transformer_bundle(
             )
 
         sess = ort.InferenceSession(str(onnx_path))
-        onnx_cont, onnx_reg = sess.run(None, {"window": dummy.cpu().numpy()})
+        onnx_cont, onnx_reg = sess.run(
+            None,
+            {
+                "continuous_features": dummy_cont.cpu().numpy(),
+                "candle_class_ids": dummy_cat.cpu().numpy(),
+            },
+        )
         with torch.no_grad():
-            torch_cont, torch_reg = model(dummy)
+            torch_cont, torch_reg = model(dummy_cont, dummy_cat)
         diff_cont = np.abs(onnx_cont - torch_cont.cpu().numpy()).max()
         diff_reg = np.abs(onnx_reg - torch_reg.cpu().numpy()).max()
         print(f"ONNX verify continuous_pred max diff: {diff_cont:.2e}")

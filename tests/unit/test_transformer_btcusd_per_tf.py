@@ -14,7 +14,11 @@ from feature_store.transformer_btcusd.contract import (
     max_label_horizon_bars,
 )
 from feature_store.transformer_btcusd.features import add_features, build_feature_matrix
-from feature_store.transformer_btcusd.inference import build_inference_window, unstandardize_continuous
+from feature_store.transformer_btcusd.inference import (
+    build_candle_class_window,
+    build_inference_window,
+    unstandardize_continuous,
+)
 from feature_store.transformer_btcusd.labels import compute_market_labels, trim_label_tail
 
 
@@ -57,6 +61,8 @@ def test_add_features_produces_all_feature_cols(resolution: str) -> None:
     )
     for col in FEATURE_COLS:
         assert col in feat_df.columns
+    assert "candle_class_id" in feat_df.columns
+    assert ((feat_df["candle_class_id"] >= 0) & (feat_df["candle_class_id"] <= 12)).all()
     assert len(feat_df) >= 128
 
 
@@ -73,6 +79,10 @@ def test_build_inference_window_shape(resolution: str) -> None:
     window = build_inference_window(values, window_len=128)
     assert window.shape == (1, 128, len(FEATURE_COLS))
     assert np.isfinite(window).all()
+    cat = build_candle_class_window(feat_df["candle_class_id"].values, window_len=128)
+    assert cat.shape == (1, 128)
+    assert cat.dtype == np.int64
+    assert ((cat >= 0) & (cat <= 12)).all()
 
 
 def test_path_labels_trim_tail() -> None:

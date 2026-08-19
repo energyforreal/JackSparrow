@@ -1082,9 +1082,12 @@ class Settings(BaseSettings):
         description="When True, persist closed positions to trade_outcomes (PostgreSQL).",
     )
     threshold_adapter_enabled: bool = Field(
-        default=True,
+        default=False,
         env="THRESHOLD_ADAPTER_ENABLED",
-        description="When True, periodically adjust Redis-backed learning thresholds from trade_outcomes.",
+        description=(
+            "When True, periodically adjust Redis-backed learning thresholds from "
+            "trade_outcomes. Default False: agent.learning.threshold_adapter is not wired."
+        ),
     )
     threshold_adapter_interval_seconds: int = Field(
         default=3600,

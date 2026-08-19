@@ -37,6 +37,16 @@ class TestAgentCommunicationLoggerSettings:
         assert out["custom_secret"] == "***REDACTED***"
         assert out["ok"] == 1
 
+    def test_sanitize_payload_non_string_keys(
+        self, monkeypatch: pytest.MonkeyPatch, mock_comm_settings: MagicMock
+    ) -> None:
+        import agent.core.communication_logger as cl
+
+        monkeypatch.setattr(cl, "settings", mock_comm_settings)
+        out = cl._sanitize_payload({84: {"token": "secret-value"}, "ok": 1})
+        assert out[84]["token"] == "***REDACTED***"
+        assert out["ok"] == 1
+
     def test_max_log_payload_size_field(self, monkeypatch: pytest.MonkeyPatch, mock_comm_settings: MagicMock) -> None:
         import agent.core.communication_logger as cl
 
@@ -65,6 +75,16 @@ class TestBackendCommunicationLoggerSettings:
         monkeypatch.setattr(cl, "settings", mock_comm_settings)
         out = cl._sanitize_payload({"custom_secret": "x", "ok": 1})
         assert out["custom_secret"] == "***REDACTED***"
+        assert out["ok"] == 1
+
+    def test_sanitize_payload_non_string_keys(
+        self, monkeypatch: pytest.MonkeyPatch, mock_comm_settings: MagicMock
+    ) -> None:
+        import backend.core.communication_logger as cl
+
+        monkeypatch.setattr(cl, "settings", mock_comm_settings)
+        out = cl._sanitize_payload({84: {"token": "secret-value"}, "ok": 1})
+        assert out[84]["token"] == "***REDACTED***"
         assert out["ok"] == 1
 
     def test_max_log_payload_size_field(self, monkeypatch: pytest.MonkeyPatch, mock_comm_settings: MagicMock) -> None:

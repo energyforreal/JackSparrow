@@ -18,7 +18,7 @@ from feature_store.transformer_btcusd.contract import (
     bundle_dir_name,
     default_training_config,
 )
-from feature_store.transformer_btcusd.features import add_features
+from feature_store.transformer_btcusd.features import add_features, summarize_candle_class_distribution
 from feature_store.transformer_btcusd.labels import (
     compute_market_labels,
     label_nan_summary,
@@ -118,8 +118,11 @@ def run_training(
     print(f"raw bars: {len(raw_df)}, feature rows: {len(feat_df)}")
     nan_rates = label_nan_summary(feat_df)
     print("label NaN rates:", nan_rates)
+    class_frac = summarize_candle_class_distribution(feat_df)
+    print("candle_class_id distribution:")
+    print(class_frac.to_string())
 
-    x_all, y_all = build_windows(
+    x_all, x_cat_all, y_all = build_windows(
         feat_df,
         FEATURE_COLS,
         CONTINUOUS_LABEL_COLS,
@@ -127,36 +130,41 @@ def run_training(
         config["stride"],
     )
     splits = split_purged_windows(
-        x_all,
-        y_all,
+        {"x": x_all, "x_cat": x_cat_all, "y": y_all},
         train_frac=config["train_frac"],
         val_frac=config["val_frac"],
         embargo_bars=config["embargo_bars"],
     )
 
-    label_mean, label_std = fit_label_stats(splits["y_train"])
-    y_train_z, m_train = standardize_labels(splits["y_train"], label_mean, label_std)
-    y_val_z, m_val = standardize_labels(splits["y_val"], label_mean, label_std)
-    y_test_z, m_test = standardize_labels(splits["y_test"], label_mean, label_std)
+    label_mean, label_std = fit_label_stats(splits["train"]["y"])
+    y_train_z, m_train = standardize_labels(splits["train"]["y"], label_mean, label_std)
+    y_val_z, m_val = standardize_labels(splits["val"]["y"], label_mean, label_std)
+    y_test_z, m_test = standardize_labels(splits["test"]["y"], label_mean, label_std)
 
-    q_edges = fit_vol_regime_edges(splits["y_train"], config["vol_regime_quantiles"])
-    r_train = to_vol_regime(splits["y_train"], q_edges)
-    r_val = to_vol_regime(splits["y_val"], q_edges)
-    r_test = to_vol_regime(splits["y_test"], q_edges)
+    q_edges = fit_vol_regime_edges(splits["train"]["y"], config["vol_regime_quantiles"])
+    r_train = to_vol_regime(splits["train"]["y"], q_edges)
+    r_val = to_vol_regime(splits["val"]["y"], q_edges)
+    r_test = to_vol_regime(splits["test"]["y"], q_edges)
 
     train_loader = DataLoader(
-        WindowDataset(splits["x_train"], y_train_z, m_train, r_train),
+        WindowDataset(
+            splits["train"]["x"], splits["train"]["x_cat"], y_train_z, m_train, r_train
+        ),
         batch_size=config["batch_size"],
         shuffle=True,
         drop_last=True,
     )
     val_loader = DataLoader(
-        WindowDataset(splits["x_val"], y_val_z, m_val, r_val),
+        WindowDataset(
+            splits["val"]["x"], splits["val"]["x_cat"], y_val_z, m_val, r_val
+        ),
         batch_size=config["batch_size"],
         shuffle=False,
     )
     test_loader = DataLoader(
-        WindowDataset(splits["x_test"], y_test_z, m_test, r_test),
+        WindowDataset(
+            splits["test"]["x"], splits["test"]["x_cat"], y_test_z, m_test, r_test
+        ),
         batch_size=config["batch_size"],
         shuffle=False,
     )

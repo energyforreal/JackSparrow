@@ -101,7 +101,6 @@ def _async_exception_handler(loop: asyncio.AbstractEventLoop, context: dict):
         log_exception(
             "unhandled_async_exception",
             error=exception,
-            component="async_task",
             message=message,
             **log_context
         )

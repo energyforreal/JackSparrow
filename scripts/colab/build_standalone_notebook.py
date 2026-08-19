@@ -39,6 +39,9 @@ REQUIRED_SYMBOLS: tuple[str, ...] = (
     "fetch_candles",
     "MarketTransformer",
     "run_all_training",
+    "classify_candle_shape",
+    "candle_class_ids",
+    "CANDLE_CLASS_NAMES",
 )
 
 FORBIDDEN_PATTERNS: tuple[str, ...] = (
@@ -64,7 +67,7 @@ OHLCV, funding, and OI are pulled from the **Delta Exchange India public API** a
 |---------|-----------------|
 | Feature contract | `FEATURE_COLS`, `CONTINUOUS_LABEL_COLS`, horizons |
 | Derivatives | Funding/OI z-scores |
-| Feature engineering | `add_features` |
+| Feature engineering | `add_features`, `classify_candle_shape` |
 | Labels / targets | `compute_market_labels` |
 | Inference helpers | `feature_config.json` builders |
 | Delta data | `fetch_candles`, `fetch_history_bundle` |
@@ -166,6 +169,48 @@ TRAIN_CELL = """results = run_all_training(
 
 for result in results:
     print(result)
+"""
+
+DIAGNOSTICS_CELL = """from pathlib import Path
+
+cache_root = cache_dir if "cache_dir" in globals() else Path("/content/cache")
+found = False
+for res in list(SUPPORTED_RESOLUTIONS):
+    parquet = cache_root / f"btcusd_{res}_raw.parquet"
+    if not parquet.is_file():
+        continue
+    found = True
+    raw_df = pd.read_parquet(parquet)
+    feat_df = add_features(raw_df, resolution_minutes=RESOLUTION_MINUTES[res])
+    counts = summarize_candle_class_distribution(feat_df)
+    print(f"\\n{res} candle_class_id distribution ({len(feat_df)} rows):")
+    for cid, frac in counts.items():
+        name = CANDLE_CLASS_NAMES.get(int(cid), str(cid))
+        print(f"  {int(cid):2d} {name:18s} {float(frac):6.2%}")
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        continue
+    sample_ids = [int(c) for c in counts.index[:6]]
+    n_axes = len(sample_ids)
+    fig, axes = plt.subplots(1, n_axes, figsize=(3 * n_axes, 3), squeeze=False)
+    for ax, cid in zip(axes[0], sample_ids):
+        rows = feat_df[feat_df[CANDLE_CLASS_COL] == cid]
+        if rows.empty:
+            ax.set_title(f"{cid} empty")
+            continue
+        row = rows.sample(1, random_state=0).iloc[0]
+        color = "green" if row["close"] >= row["open"] else "red"
+        ax.plot([0, 0], [row["low"], row["high"]], color="black", lw=0.8)
+        ax.plot([0, 0], [row["open"], row["close"]], color=color, lw=4)
+        name = CANDLE_CLASS_NAMES.get(cid, str(cid))
+        ax.set_title(f"{cid} {name}", fontsize=8)
+        ax.set_xticks([])
+    fig.suptitle(f"{res} sample candles")
+    plt.tight_layout()
+    plt.show()
+if not found:
+    print("No cached parquet yet — run training first, then re-run this cell.")
 """
 
 SUMMARY_CELL = """import json
@@ -330,6 +375,8 @@ def build_notebook() -> dict[str, Any]:
         _markdown_cell("## Configure and train"),
         _code_cell(CONFIG_PREVIEW_CELL),
         _code_cell(CONFIG_CELL),
+        _markdown_cell("## Candle class diagnostics"),
+        _code_cell(DIAGNOSTICS_CELL),
         _markdown_cell("## Train all resolutions"),
         _code_cell(TRAIN_CELL),
         _markdown_cell("## Results summary"),

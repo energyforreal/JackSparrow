@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_COL,
     FEATURE_COLS,
     RESOLUTION_MINUTES,
     SUPPORTED_RESOLUTIONS,
@@ -19,7 +20,12 @@ from feature_store.transformer_btcusd.features import (
     prepare_raw_frame,
     validate_feature_columns,
 )
-from feature_store.transformer_btcusd.inference import build_inference_window, zscore_window
+from feature_store.transformer_btcusd.inference import (
+    build_candle_class_window,
+    build_continuous_window,
+    build_inference_window,
+    zscore_window,
+)
 
 
 def _synthetic_ohlcv(n: int = 300, *, freq: str = "15min") -> pd.DataFrame:
@@ -99,6 +105,13 @@ def test_inference_window_matches_window_dataset_zscore(resolution: str) -> None
     dataset_window = zscore_window(tail)
     np.testing.assert_allclose(inference_window[0], dataset_window, rtol=1e-5, atol=1e-5)
 
+    train_ids = feat_df[CANDLE_CLASS_COL].values.astype(np.int64)
+    live_ids = build_candle_class_window(train_ids, window_len=window_len)
+    assert live_ids.shape == (1, window_len)
+    np.testing.assert_array_equal(live_ids[0], train_ids[-window_len:])
+    cont = build_continuous_window(values, window_len=window_len)
+    np.testing.assert_allclose(cont, inference_window, rtol=1e-5, atol=1e-5)
+
 
 def test_closed_bar_row_is_second_to_last_after_dropna() -> None:
     raw = _synthetic_ohlcv(400, freq="15min")
@@ -132,6 +145,10 @@ def test_train_runner_feature_path_matches_node_pipeline() -> None:
     node_feat = build_feature_matrix(node_raw, resolution_minutes=15, dropna=True)
     train_feat = build_feature_matrix(train_raw, resolution_minutes=15, dropna=True)
     assert len(node_feat) == len(train_feat)
+    np.testing.assert_array_equal(
+        node_feat[CANDLE_CLASS_COL].values,
+        train_feat[CANDLE_CLASS_COL].values,
+    )
     for col in FEATURE_COLS:
         np.testing.assert_allclose(
             node_feat[col].values,

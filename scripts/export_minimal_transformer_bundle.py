@@ -91,7 +91,7 @@ def main() -> None:
         path_label_horizon_bars=config["path_label_horizon_bars"],
     )
 
-    x_all, y_all = build_windows(
+    x_all, x_cat_all, y_all = build_windows(
         feat_df,
         FEATURE_COLS,
         CONTINUOUS_LABEL_COLS,
@@ -99,14 +99,21 @@ def main() -> None:
         config["stride"],
     )
     splits = split_purged_windows(
-        x_all,
-        y_all,
+        {"x": x_all, "x_cat": x_cat_all, "y": y_all},
         train_frac=config["train_frac"],
         val_frac=config["val_frac"],
         embargo_bars=config["embargo_bars"],
     )
-    x_train, y_train = splits["x_train"], splits["y_train"]
-    x_val, y_val = splits["x_val"], splits["y_val"]
+    x_train, x_cat_train, y_train = (
+        splits["train"]["x"],
+        splits["train"]["x_cat"],
+        splits["train"]["y"],
+    )
+    x_val, x_cat_val, y_val = (
+        splits["val"]["x"],
+        splits["val"]["x_cat"],
+        splits["val"]["y"],
+    )
 
     label_mean, label_std = fit_label_stats(y_train)
     y_train_z, m_train = standardize_labels(y_train, label_mean, label_std)
@@ -116,13 +123,13 @@ def main() -> None:
     r_val = to_vol_regime(y_val, q_edges)
 
     train_loader = DataLoader(
-        WindowDataset(x_train, y_train_z, m_train, r_train),
+        WindowDataset(x_train, x_cat_train, y_train_z, m_train, r_train),
         batch_size=config["batch_size"],
         shuffle=True,
         drop_last=True,
     )
     val_loader = DataLoader(
-        WindowDataset(x_val, y_val_z, m_val, r_val),
+        WindowDataset(x_val, x_cat_val, y_val_z, m_val, r_val),
         batch_size=config["batch_size"],
         shuffle=False,
     )
@@ -143,7 +150,7 @@ def main() -> None:
     model.eval()
 
     BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
-    onnx_path, cfg_path = export_transformer_bundle(
+    onnx_path, cfg_path, _meta_path = export_transformer_bundle(
         model,
         BUNDLE_DIR,
         device=device,

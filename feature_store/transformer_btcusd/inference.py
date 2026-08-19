@@ -9,6 +9,9 @@ from typing import Any, Dict, Mapping, Sequence, Tuple
 import numpy as np
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_CARDINALITY,
+    CANDLE_CLASS_COL,
+    CANDLE_CLASS_NAMES,
     CONTINUOUS_LABEL_COLS,
     FEATURE_COLS,
     FEATURE_CONTRACT_VERSION,
@@ -42,13 +45,13 @@ def zscore_window(window: np.ndarray) -> np.ndarray:
     return ((window - mu) / sd).astype(np.float32)
 
 
-def build_inference_window(
+def build_continuous_window(
     feat_values: np.ndarray,
     *,
     window_len: int,
     feature_cols: Sequence[str] = FEATURE_COLS,
 ) -> np.ndarray:
-    """Build a single (1, window_len, n_features) tensor from feature matrix values."""
+    """Build a z-scored (1, window_len, n_features) tensor from continuous cols."""
     if feat_values.shape[0] < window_len:
         raise ValueError(
             f"Need at least {window_len} feature rows, got {feat_values.shape[0]}"
@@ -58,6 +61,38 @@ def build_inference_window(
         raise ValueError("Feature window contains non-finite values")
     normed = zscore_window(window)
     return normed[np.newaxis, :, :]
+
+
+def build_candle_class_window(
+    class_ids: np.ndarray,
+    *,
+    window_len: int,
+    max_class_id: int = CANDLE_CLASS_CARDINALITY - 1,
+) -> np.ndarray:
+    """Build a raw (1, window_len) int64 tensor of candle class ids."""
+    ids = np.asarray(class_ids).reshape(-1)
+    if ids.shape[0] < window_len:
+        raise ValueError(
+            f"Need at least {window_len} candle class rows, got {ids.shape[0]}"
+        )
+    window = ids[-window_len:].astype(np.int64)
+    if np.any((window < 0) | (window > max_class_id)):
+        raise ValueError(
+            f"{CANDLE_CLASS_COL} out of range [0, {max_class_id}]"
+        )
+    return window[np.newaxis, :]
+
+
+def build_inference_window(
+    feat_values: np.ndarray,
+    *,
+    window_len: int,
+    feature_cols: Sequence[str] = FEATURE_COLS,
+) -> np.ndarray:
+    """Build a single (1, window_len, n_features) tensor from feature matrix values."""
+    return build_continuous_window(
+        feat_values, window_len=window_len, feature_cols=feature_cols
+    )
 
 
 def unstandardize_continuous(
@@ -113,6 +148,9 @@ def feature_config_from_training_export(
     return {
         "feature_contract_version": FEATURE_CONTRACT_VERSION,
         "feature_cols": list(feature_cols),
+        "categorical_cols": [CANDLE_CLASS_COL],
+        "categorical_cardinality": {CANDLE_CLASS_COL: CANDLE_CLASS_CARDINALITY},
+        "candle_class_names": {str(k): v for k, v in CANDLE_CLASS_NAMES.items()},
         "window_len": int(window_len),
         "continuous_label_cols": list(CONTINUOUS_LABEL_COLS),
         "label_mean": [float(x) for x in label_mean],

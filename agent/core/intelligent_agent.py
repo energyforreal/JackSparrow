@@ -215,7 +215,7 @@ class IntelligentAgent:
             trade_outcomes_writes_enabled=getattr(
                 settings, "trade_outcomes_writes_enabled", True
             ),
-            threshold_adapter_enabled=getattr(settings, "threshold_adapter_enabled", True),
+            threshold_adapter_enabled=getattr(settings, "threshold_adapter_enabled", False),
             database_url_configured=bool(getattr(settings, "database_url", None)),
             message=(
                 "Persistence flags loaded. If prediction_audit remains empty, "
@@ -497,7 +497,16 @@ class IntelligentAgent:
 
     async def _threshold_adapter_loop(self) -> None:
         """Periodically nudge Redis thresholds from trade_outcomes (bounded)."""
-        from agent.learning.threshold_adapter import ThresholdAdapter
+        try:
+            from agent.learning.threshold_adapter import ThresholdAdapter
+        except ImportError as e:
+            logger.warning(
+                "threshold_adapter_unavailable",
+                service="agent",
+                error=str(e),
+                message="agent.learning.threshold_adapter is not installed; loop disabled",
+            )
+            return
 
         adapter = ThresholdAdapter()
         interval = float(getattr(settings, "threshold_adapter_interval_seconds", 3600) or 3600)
@@ -676,7 +685,7 @@ class IntelligentAgent:
             self._threshold_adapter_task.cancel()
             try:
                 await self._threshold_adapter_task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 pass
             self._threshold_adapter_task = None
 
@@ -893,7 +902,7 @@ class IntelligentAgent:
             message="Position monitoring loop started for stop loss / take profit",
         )
 
-        if getattr(settings, "threshold_adapter_enabled", True):
+        if getattr(settings, "threshold_adapter_enabled", False):
             self._threshold_adapter_task = asyncio.create_task(self._threshold_adapter_loop())
             logger.info(
                 "agent_threshold_adapter_started",

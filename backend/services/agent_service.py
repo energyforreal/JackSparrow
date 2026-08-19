@@ -112,7 +112,7 @@ class AgentService:
                 await self._schedule_reconnect()
 
     async def warmup_outbound_websocket(
-        self, attempts: int = 8, delay_s: float = 1.25
+        self, attempts: int = 20, delay_s: float = 2.0
     ) -> None:
         """Best-effort first connect to the agent command WebSocket after backend startup.
 

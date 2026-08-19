@@ -43,7 +43,7 @@ def _sanitize_payload(payload: Any, sensitive_fields: set = None) -> Any:
     if isinstance(payload, dict):
         sanitized = {}
         for key, value in payload.items():
-            if key.lower() in sensitive_fields:
+            if str(key).lower() in sensitive_fields:
                 sanitized[key] = "***REDACTED***"
             else:
                 sanitized[key] = _sanitize_payload(value, sensitive_fields)

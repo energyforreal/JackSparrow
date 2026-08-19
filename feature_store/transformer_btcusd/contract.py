@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 # Bump when FEATURE_COLS or semantics change (requires retrain + re-export).
-FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v2"
+FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v3"
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
 
@@ -91,6 +91,26 @@ REGIME_NAMES: Dict[int, str] = {
     1: "NORMAL",
     2: "HIGH",
     3: "EXTREME",
+}
+
+CANDLE_CLASS_COL = "candle_class_id"
+CANDLE_CLASS_CARDINALITY = 13
+CANDLE_EMBED_DIM = 8
+
+CANDLE_CLASS_NAMES: Dict[int, str] = {
+    0: "FLAT_ZERO_RANGE",
+    1: "DOJI_DRAGONFLY",
+    2: "DOJI_GRAVESTONE",
+    3: "DOJI_STANDARD",
+    4: "MARUBOZU_BULL",
+    5: "MARUBOZU_BEAR",
+    6: "HAMMER_SHAPE",
+    7: "INV_HAMMER_SHAPE",
+    8: "SPINNING_TOP",
+    9: "BELT_HOLD_BULL",
+    10: "BELT_HOLD_BEAR",
+    11: "STANDARD_BULL",
+    12: "STANDARD_BEAR",
 }
 
 # Minimum test-set correlation for future_volatility before ONNX export.

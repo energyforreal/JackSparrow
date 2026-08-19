@@ -24,35 +24,43 @@ def _synthetic_feat_df(n: int = 400) -> pd.DataFrame:
     data = {col: rng.normal(size=n) for col in FEATURE_COLS}
     for col in CONTINUOUS_LABEL_COLS:
         data[col] = rng.normal(size=n)
+    data["candle_class_id"] = rng.integers(0, 13, size=n)
     return pd.DataFrame(data)
 
 
 def test_build_windows_shape() -> None:
     feat_df = _synthetic_feat_df(300)
-    x, y = build_windows(feat_df, FEATURE_COLS, CONTINUOUS_LABEL_COLS, window_len=64, stride=8)
+    x, x_cat, y = build_windows(
+        feat_df, FEATURE_COLS, CONTINUOUS_LABEL_COLS, window_len=64, stride=8
+    )
     assert x.shape[1:] == (64, len(FEATURE_COLS))
+    assert x_cat.shape[1:] == (64,)
+    assert x_cat.dtype == np.int64
     assert y.shape[1] == len(CONTINUOUS_LABEL_COLS)
-    assert len(x) == len(y)
+    assert len(x) == len(x_cat) == len(y)
     assert len(x) > 0
 
 
 def test_split_purged_windows_reserves_test() -> None:
     n = 100
-    x_all = np.zeros((n, 8, 4), dtype=np.float32)
-    y_all = np.zeros((n, len(CONTINUOUS_LABEL_COLS)), dtype=np.float64)
+    arrays = {
+        "x": np.zeros((n, 8, 4), dtype=np.float32),
+        "x_cat": np.zeros((n, 8), dtype=np.int64),
+        "y": np.zeros((n, len(CONTINUOUS_LABEL_COLS)), dtype=np.float64),
+    }
     train_frac, val_frac, embargo = 0.65, 0.15, 2
     splits = split_purged_windows(
-        x_all,
-        y_all,
+        arrays,
         train_frac=train_frac,
         val_frac=val_frac,
         embargo_bars=embargo,
     )
     train_end = int(n * train_frac)
     val_end = train_end + int(n * val_frac)
-    assert len(splits["x_train"]) == train_end
-    assert len(splits["x_val"]) == val_end - train_end - embargo
-    assert len(splits["x_test"]) == n - val_end - embargo
+    assert len(splits["train"]["x"]) == train_end
+    assert len(splits["val"]["x"]) == val_end - train_end - embargo
+    assert len(splits["test"]["x"]) == n - val_end - embargo
+    assert splits["train"]["x_cat"].shape[0] == train_end
 
 
 def test_standardize_labels_masks_nan() -> None:

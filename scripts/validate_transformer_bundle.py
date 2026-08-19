@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_COL,
     FEATURE_COLS,
     FEATURE_CONTRACT_VERSION,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
@@ -24,7 +25,8 @@ from feature_store.transformer_btcusd.features import (
     validate_feature_columns,
 )
 from feature_store.transformer_btcusd.inference import (
-    build_inference_window,
+    build_candle_class_window,
+    build_continuous_window,
     resolve_feature_config,
 )
 
@@ -78,12 +80,21 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
     )
     validate_feature_columns(feat_df, require_finite_closed_bar=True)
     values = feat_df[list(FEATURE_COLS)].values.astype(np.float32)
-    window = build_inference_window(values, window_len=window_len)
+    cont_window = build_continuous_window(values, window_len=window_len)
+    cat_window = build_candle_class_window(
+        feat_df[CANDLE_CLASS_COL].values, window_len=window_len
+    )
 
     import onnxruntime as ort
 
     sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
-    outputs = sess.run(None, {"window": window})
+    outputs = sess.run(
+        None,
+        {
+            "continuous_features": cont_window,
+            "candle_class_ids": cat_window,
+        },
+    )
     continuous, regime = outputs[0], outputs[1]
     label_cols = feature_config.get("continuous_label_cols") or []
     export_quality = meta.get("export_quality") or {}

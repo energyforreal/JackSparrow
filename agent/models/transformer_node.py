@@ -18,6 +18,7 @@ from agent.core.market_frames import closed_5m_bar_index
 from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
 from agent.models.transformer_context_builder import build_transformer_prediction_context
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_COL,
     FEATURE_COLS,
     FEATURE_CONTRACT_VERSION,
     RESOLUTION_MINUTES,
@@ -32,7 +33,8 @@ from feature_store.transformer_btcusd.features import (
     validate_feature_columns,
 )
 from feature_store.transformer_btcusd.inference import (
-    build_inference_window,
+    build_candle_class_window,
+    build_continuous_window,
     parse_regime_prediction,
     resolve_feature_config,
     unstandardize_continuous,
@@ -286,9 +288,20 @@ class TransformerModelNode(MCPModelNode):
                 f"Need at least {window_len} feature rows, got {finite_feature_rows} "
                 f"(fetched_bars={fetched_bars}, resolution={self._resolution})"
             )
-        window = build_inference_window(values, window_len=window_len, feature_cols=feature_cols)
+        cont_window = build_continuous_window(
+            values, window_len=window_len, feature_cols=feature_cols
+        )
+        cat_window = build_candle_class_window(
+            feat_df[CANDLE_CLASS_COL].values, window_len=window_len
+        )
 
-        continuous_z, regime_logits = self._session.run(None, {"window": window})
+        continuous_z, regime_logits = self._session.run(
+            None,
+            {
+                "continuous_features": cont_window,
+                "candle_class_ids": cat_window,
+            },
+        )
         continuous_preds = unstandardize_continuous(
             continuous_z[0],
             self._feature_config["label_mean"],
@@ -313,6 +326,8 @@ class TransformerModelNode(MCPModelNode):
             for k in feature_cols
             if k in closed_row.index and pd.notna(closed_row[k]) and np.isfinite(closed_row[k])
         }
+        if CANDLE_CLASS_COL in closed_row.index and pd.notna(closed_row[CANDLE_CLASS_COL]):
+            closed_feats[CANDLE_CLASS_COL] = int(closed_row[CANDLE_CLASS_COL])
 
         out_ctx, pred_val, conf = build_transformer_prediction_context(
             bundle_metadata=self._bundle_meta,

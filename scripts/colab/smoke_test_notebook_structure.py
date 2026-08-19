@@ -21,6 +21,9 @@ REQUIRED_SYMBOLS = (
     "fetch_candles",
     "MarketTransformer",
     "run_all_training",
+    "classify_candle_shape",
+    "candle_class_ids",
+    "CANDLE_CLASS_NAMES",
 )
 
 MODULE_HEADINGS = (
@@ -32,6 +35,7 @@ MODULE_HEADINGS = (
     "## Delta Exchange India data",
     "## Training pipeline",
     "## Training runner",
+    "## Candle class diagnostics",
 )
 
 

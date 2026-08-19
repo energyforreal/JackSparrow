@@ -142,7 +142,7 @@ services:
     healthcheck:
       test: ["CMD", "python", "-m", "agent.healthcheck"]
       interval: 30s
-      timeout: 10s
+      timeout: 25s
       retries: 3
       start_period: 90s
     restart: unless-stopped

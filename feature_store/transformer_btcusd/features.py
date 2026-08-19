@@ -7,11 +7,21 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from feature_store.transformer_btcusd.contract import FEATURE_COLS, scale_period
+from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_CARDINALITY,
+    CANDLE_CLASS_COL,
+    FEATURE_COLS,
+    scale_period,
+)
 from feature_store.transformer_btcusd.derivatives import (
     compute_funding_derivatives,
     compute_oi_derivatives,
 )
+
+WICK_NEGLIGIBLE = 0.05
+WICK_BALANCE_MAX = 0.25
+FLAT_ATR_MULT = 1e-4
+_RATIO_COLS = ("body_ratio", "upper_wick_ratio", "lower_wick_ratio")
 
 
 def assemble_raw_frame(
@@ -87,6 +97,145 @@ def prepare_raw_frame(
 ) -> pd.DataFrame:
     """Alias for assemble_raw_frame (agent inference entry point)."""
     return assemble_raw_frame(df, funding_df=funding_df, oi_df=oi_df)
+
+
+def classify_candle_shape(out: pd.DataFrame, *, sr_window: int) -> pd.Series:
+    """Assign mutually exclusive single-bar candle class ids 0..12.
+
+    Uses bar-i OHLC geometry plus rolling body-size quantiles up to bar i.
+    First matching ``np.select`` condition wins.
+
+    Args:
+        out: Frame with open/high/low/close, atr, and wick/body ratio columns.
+        sr_window: Rolling lookback for doji/marubozu quantiles.
+
+    Returns:
+        int64 Series of class ids aligned with ``out.index``.
+    """
+    rng_raw = (out["high"] - out["low"]).astype(float)
+    atr = out["atr"] if "atr" in out.columns else pd.Series(0.0, index=out.index)
+    is_flat = (rng_raw.fillna(0) <= 0) | (
+        rng_raw.fillna(0) < atr.fillna(0) * FLAT_ATR_MULT
+    )
+
+    body_abs = out["body_ratio"].abs()
+    upper = out["upper_wick_ratio"]
+    lower = out["lower_wick_ratio"]
+    doji_thresh = body_abs.rolling(sr_window, min_periods=20).quantile(0.15)
+    marubozu_thresh = body_abs.rolling(sr_window, min_periods=20).quantile(0.85)
+    body_median = body_abs.rolling(sr_window, min_periods=20).median()
+
+    wick_sum = upper + lower
+    wick_imbalance = (upper - lower).abs() / (wick_sum + 1e-9)
+    cond_wicks_balanced = (wick_sum > 2 * WICK_NEGLIGIBLE) & (
+        wick_imbalance < WICK_BALANCE_MAX
+    )
+
+    cond_doji = ~is_flat & (body_abs < doji_thresh)
+    cond_dragonfly = (
+        cond_doji
+        & (upper < WICK_NEGLIGIBLE)
+        & (lower > 2 * WICK_NEGLIGIBLE)
+    )
+    cond_gravestone = (
+        cond_doji
+        & (lower < WICK_NEGLIGIBLE)
+        & (upper > 2 * WICK_NEGLIGIBLE)
+    )
+    cond_doji_standard = cond_doji
+    cond_marubozu_bull = (
+        ~is_flat
+        & ~cond_doji
+        & (out["body_ratio"] > marubozu_thresh)
+        & (upper < WICK_NEGLIGIBLE)
+        & (lower < WICK_NEGLIGIBLE)
+    )
+    cond_marubozu_bear = (
+        ~is_flat
+        & ~cond_doji
+        & (-out["body_ratio"] > marubozu_thresh)
+        & (upper < WICK_NEGLIGIBLE)
+        & (lower < WICK_NEGLIGIBLE)
+    )
+    cond_hammer = (
+        ~is_flat
+        & ~cond_doji
+        & (lower > 2 * body_abs)
+        & (upper < body_abs)
+    )
+    cond_inv_hammer = (
+        ~is_flat
+        & ~cond_doji
+        & (upper > 2 * body_abs)
+        & (lower < body_abs)
+    )
+    cond_spinning = (
+        ~is_flat
+        & ~cond_doji
+        & (body_abs < body_median)
+        & cond_wicks_balanced
+    )
+    cond_belt_bull = (
+        ~is_flat
+        & ~cond_doji
+        & (out["close"] > out["open"])
+        & (lower < WICK_NEGLIGIBLE)
+        & (upper > WICK_NEGLIGIBLE)
+    )
+    cond_belt_bear = (
+        ~is_flat
+        & ~cond_doji
+        & (out["close"] < out["open"])
+        & (upper < WICK_NEGLIGIBLE)
+        & (lower > WICK_NEGLIGIBLE)
+    )
+    cond_standard_bull = ~is_flat & (out["close"] > out["open"])
+    cond_standard_bear = ~is_flat & (out["close"] < out["open"])
+
+    conditions = [
+        is_flat,
+        cond_dragonfly,
+        cond_gravestone,
+        cond_doji_standard,
+        cond_marubozu_bull,
+        cond_marubozu_bear,
+        cond_hammer,
+        cond_inv_hammer,
+        cond_spinning,
+        cond_belt_bull,
+        cond_belt_bear,
+        cond_standard_bull,
+        cond_standard_bear,
+    ]
+    choices = list(range(CANDLE_CLASS_CARDINALITY))
+    ids = np.select(conditions, choices, default=3).astype(np.int64)
+    return pd.Series(ids, index=out.index, dtype="int64")
+
+
+def summarize_candle_class_distribution(
+    feat_df: pd.DataFrame,
+    *,
+    high_frac: float = 0.40,
+    low_frac: float = 0.001,
+) -> pd.Series:
+    """Return class fractions and print warnings for extreme imbalance.
+
+    Args:
+        feat_df: Feature frame containing ``candle_class_id``.
+        high_frac: Warn if any class exceeds this share of bars.
+        low_frac: Warn if any present class is below this share.
+
+    Returns:
+        Normalized value counts indexed by class id.
+    """
+    counts = feat_df[CANDLE_CLASS_COL].value_counts(normalize=True).sort_index()
+    for cid, frac in counts.items():
+        if float(frac) > high_frac or float(frac) < low_frac:
+            print(
+                f"WARNING: candle class {int(cid)} fraction {float(frac):.4f} "
+                f"(thresholds {low_frac:.4f} / {high_frac:.2f})"
+            )
+    return counts
 
 
 def add_features(
@@ -172,7 +321,11 @@ def add_features(
         out["volume"].rolling(vol_window).std() + 1e-9
     )
 
-    rng = (out["high"] - out["low"]).replace(0, np.nan)
+    rng_raw = (out["high"] - out["low"]).astype(float)
+    is_flat = (rng_raw.fillna(0) <= 0) | (
+        rng_raw.fillna(0) < out["atr"].fillna(0) * FLAT_ATR_MULT
+    )
+    rng = rng_raw.replace(0, np.nan)
     out["body_ratio"] = (out["close"] - out["open"]) / rng
     out["upper_wick_ratio"] = (
         out["high"] - out[["open", "close"]].max(axis=1)
@@ -180,6 +333,8 @@ def add_features(
     out["lower_wick_ratio"] = (
         out[["open", "close"]].min(axis=1) - out["low"]
     ) / rng
+    out.loc[is_flat, list(_RATIO_COLS)] = 0.0
+    out[list(_RATIO_COLS)] = out[list(_RATIO_COLS)].fillna(0.0)
 
     out["hour"] = out["time"].dt.hour
     out["hour_sin"] = np.sin(2 * np.pi * out["hour"] / 24)
@@ -219,6 +374,8 @@ def add_features(
     out["oi_acceleration"] = oi_deriv["oi_acceleration"]
     out["funding_x_oi"] = out["funding_zscore"] * oi_deriv["oi_zscore"]
 
+    out[CANDLE_CLASS_COL] = classify_candle_shape(out, sr_window=sr_window)
+
     return out
 
 
@@ -251,9 +408,19 @@ def validate_feature_columns(
     missing = [c for c in FEATURE_COLS if c not in feat_df.columns]
     if missing:
         raise ValueError(f"Feature matrix missing columns: {missing}")
+    if CANDLE_CLASS_COL not in feat_df.columns:
+        raise ValueError(f"Feature matrix missing {CANDLE_CLASS_COL}")
+    ids = feat_df[CANDLE_CLASS_COL]
+    if ((ids < 0) | (ids > CANDLE_CLASS_CARDINALITY - 1)).any():
+        raise ValueError(
+            f"{CANDLE_CLASS_COL} out of range [0, {CANDLE_CLASS_CARDINALITY - 1}]"
+        )
     if require_finite_closed_bar and len(feat_df) >= 2:
         closed = latest_closed_feature_row(feat_df)
         for col in FEATURE_COLS:
             val = closed[col]
             if not np.isfinite(float(val)):
                 raise ValueError(f"Non-finite closed-bar value for {col}: {val}")
+        cid = int(closed[CANDLE_CLASS_COL])
+        if cid < 0 or cid > CANDLE_CLASS_CARDINALITY - 1:
+            raise ValueError(f"Closed-bar {CANDLE_CLASS_COL} out of range: {cid}")
