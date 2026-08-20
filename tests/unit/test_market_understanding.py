@@ -418,3 +418,62 @@ def test_synth_hold_preserves_15m_path_edge() -> None:
     assert state.wire_signal == "HOLD"
     assert state.path_edge != 0.0
     assert state.primary_tf == "tf_15m"
+
+
+def test_synth_chart_volume_gate_holds() -> None:
+    views = _views(timing_z=1.5)
+    views["tf_5m"].volume_confirms = 0.0
+    views["tf_5m"].pattern_validates = 0.0
+    state = synthesize_agent_decision(views)
+    assert state.wire_signal == "HOLD"
+    assert state.timing == "quiet"
+    assert "timing_chart_volume_gate" in state.reason_codes
+
+
+def test_synth_5m_horizon_fights_climate_holds() -> None:
+    views = _views(timing_z=1.5)
+    views["tf_5m"].horizon_t24_dir = 0  # bearish 2h-horizon vs long climate
+    state = synthesize_agent_decision(views)
+    assert state.wire_signal == "HOLD"
+    assert state.timing == "against"
+    assert "timing_horizon_fights_climate" in state.reason_codes
+
+
+def test_synth_v8_ladder_uses_5m_10m_not_h2h() -> None:
+    views = _views(timing_z=1.5)
+    views["tf_5m"].horizon_ladder = {
+        "h5m": {"dir": 2},
+        "h10m": {"dir": 2},
+        "h2h": {"dir": 0},
+    }
+    views["tf_5m"].horizon_t24_dir = 0
+    state = synthesize_agent_decision(views)
+    assert state.timing == "with"
+    assert "timing_horizon_fights_climate" not in state.reason_codes
+    assert state.wire_signal in ("BUY", "STRONG_BUY")
+    assert state.primary_tf == "tf_15m"
+
+
+def test_synth_v8_ladder_against_on_h10m() -> None:
+    views = _views(timing_z=1.5)
+    views["tf_5m"].horizon_ladder = {
+        "h5m": {"dir": 2},
+        "h10m": {"dir": 0},
+    }
+    state = synthesize_agent_decision(views)
+    assert state.timing == "against"
+    assert state.wire_signal == "HOLD"
+    assert "timing_against_flat" in state.reason_codes
+
+
+def test_synth_v8_ladder_cannot_make_5m_the_entry_tf() -> None:
+    views = _views(setup_15="flat", timing_z=2.0)
+    views["tf_5m"].horizon_ladder = {
+        "h5m": {"dir": 2},
+        "h10m": {"dir": 2},
+        "h2h": {"dir": 2},
+    }
+    state = synthesize_agent_decision(views)
+    assert state.thesis == "flat"
+    assert state.wire_signal == "HOLD"
+    assert state.primary_tf != "tf_5m"

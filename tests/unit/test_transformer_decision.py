@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from agent.models.transformer_context_builder import map_prediction_to_signal
+from agent.models.transformer_context_builder import (
+    build_transformer_prediction_context,
+    map_prediction_to_signal,
+)
 from feature_store.transformer_btcusd.contract import (
     compute_long_edge,
     compute_short_edge,
@@ -105,3 +108,25 @@ def test_path_edge_helpers() -> None:
     fav_s, adv_s = path_favorable_adverse(0.02, 0.008, side="SELL")
     assert fav_s == pytest.approx(0.008)
     assert adv_s == pytest.approx(0.02)
+
+
+def test_context_stores_horizon_ladder_and_h5m_path_stats() -> None:
+    ctx, _pred, _conf = build_transformer_prediction_context(
+        bundle_metadata={"resolution": "5m"},
+        continuous_preds={
+            "h5m_mfe": 0.02,
+            "h5m_mae": 0.005,
+            "h5m_vol": 0.01,
+            "h5m_trend_strength": 1.2,
+        },
+        vol_regime="NORMAL",
+        regime_probs={"NORMAL": 0.8},
+        bar_index_hint=0,
+        resolution_minutes=5,
+        future_candle_class=-1,
+        future_candle_name="",
+        horizon_ladder={"h5m": {"dir": 2}, "h10m": {"dir": 2}},
+    )
+    assert ctx["horizon_ladder"]["h5m"]["dir"] == 2
+    assert ctx["transformer_future_candle_class"] == -1
+    assert ctx["path_edge"] == pytest.approx(0.015)

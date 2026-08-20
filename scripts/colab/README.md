@@ -21,6 +21,21 @@ python scripts/validate_transformer_bundle.py agent/model_storage/JackSparrow_Tr
 
 Parity tests: `pytest tests/unit/test_transformer_btcusd_feature_parity.py`
 
+## Research Colab (v8 multi-horizon 5m)
+
+Primary research trainer: **`transformer_btcusd_next_candle_research.ipynb`**.
+It trains a 5m Transformer on wall-clock path behavior at 5m/10m/15m/30m/1h/2h.
+Candle/chart geometry is the input; named patterns are secondary. Do not hand-edit
+the `.ipynb`.
+
+```bash
+python scripts/colab/build_next_candle_research_notebook.py
+python scripts/colab/smoke_test_next_candle_notebook.py
+```
+
+Sources: `scripts/colab/next_candle_research.py`, `scripts/colab/next_candle_model.py`.
+The production all-TF v6 notebook above stays until a v7 export is validated.
+
 **Retrain after horizon/loss changes:** set `refresh_data = True` in the Colab config cell so
 cached parquet is rebuilt with new label horizons (or delete `/content/cache/*.parquet`).
 

@@ -15,10 +15,14 @@ from feature_store.transformer_btcusd.contract import (
     CANDLE_CLASS_COL,
     CONTINUOUS_LABEL_COLS,
     FEATURE_CONTRACT_VERSION,
+    FEATURE_CONTRACT_VERSION_V6,
+    FEATURE_CONTRACT_VERSION_V7,
     ONNX_OUTPUT_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
+    V8_CONTINUOUS_LABEL_COLS,
     feature_cols_for_resolution,
+    onnx_output_names_for_contract,
     scale_period,
 )
 from feature_store.transformer_btcusd.features import (
@@ -49,7 +53,11 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
         raise FileNotFoundError(f"Missing ONNX file: {onnx_path}")
 
     bundle_contract = str(feature_config.get("feature_contract_version") or "")
-    contract_ok = bundle_contract == FEATURE_CONTRACT_VERSION
+    contract_ok = bundle_contract in {
+        FEATURE_CONTRACT_VERSION,
+        FEATURE_CONTRACT_VERSION_V7,
+        FEATURE_CONTRACT_VERSION_V6,
+    }
     window_len = int(feature_config.get("window_len") or 128)
     resolution_minutes = int(meta.get("resolution_minutes") or 15)
 
@@ -98,7 +106,11 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
 
     sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     output_names = [o.name for o in sess.get_outputs()]
-    require_onnx_output_names(output_names)
+    require_onnx_output_names(
+        output_names,
+        contract_version=bundle_contract or FEATURE_CONTRACT_VERSION_V6,
+        resolution=resolution,
+    )
     named = {
         name: arr
         for name, arr in zip(
@@ -113,34 +125,49 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
         )
     }
     continuous = named["continuous_pred"]
-    regime = named["regime_logits"]
     label_cols = list(feature_config.get("continuous_label_cols") or [])
-    if list(label_cols) != list(CONTINUOUS_LABEL_COLS):
+    expected_labels = list(CONTINUOUS_LABEL_COLS)
+    if bundle_contract == FEATURE_CONTRACT_VERSION and resolution == "5m":
+        expected_labels = list(V8_CONTINUOUS_LABEL_COLS)
+    if label_cols and list(label_cols) != expected_labels:
         raise RuntimeError(
             f"continuous_label_cols mismatch: bundle={label_cols} "
-            f"runtime={list(CONTINUOUS_LABEL_COLS)}"
+            f"runtime={expected_labels}"
         )
-    if continuous.shape[-1] != len(CONTINUOUS_LABEL_COLS):
+    if continuous.shape[-1] != len(expected_labels):
         raise RuntimeError(
             f"ONNX continuous_pred last dim {continuous.shape[-1]} != "
-            f"{len(CONTINUOUS_LABEL_COLS)}"
+            f"{len(expected_labels)}"
         )
     export_quality = meta.get("export_quality") or {}
-
-    return {
+    expected_names = list(
+        onnx_output_names_for_contract(
+            bundle_contract or FEATURE_CONTRACT_VERSION_V6, resolution=resolution
+        )
+    )
+    report: dict[str, object] = {
         "bundle_dir": str(bundle_dir),
         "contract_ok": contract_ok,
         "bundle_contract_version": bundle_contract,
         "runtime_contract_version": FEATURE_CONTRACT_VERSION,
-        "onnx_output_names": list(ONNX_OUTPUT_NAMES),
+        "onnx_output_names": expected_names,
         "onnx_continuous_shape": list(continuous.shape),
-        "onnx_regime_shape": list(regime.shape),
-        "onnx_structure_shape": list(named["structure_outcome_logits"].shape),
-        "onnx_future_candle_shape": list(named["future_candle_logits"].shape),
-        "expected_continuous_outputs": len(CONTINUOUS_LABEL_COLS),
+        "expected_continuous_outputs": len(expected_labels),
         "export_quality_tier": export_quality.get("tier"),
         "export_quality_warnings": export_quality.get("warnings") or [],
     }
+    if bundle_contract == FEATURE_CONTRACT_VERSION and resolution == "5m":
+        report["onnx_direction_shape"] = list(named["h5m_dir_logits"].shape)
+        report["onnx_path_shape"] = list(continuous.shape)
+    elif bundle_contract == FEATURE_CONTRACT_VERSION_V7:
+        report["onnx_direction_shape"] = list(named["next_direction_logits"].shape)
+        report["onnx_path_shape"] = list(continuous.shape)
+    else:
+        report["onnx_regime_shape"] = list(named["regime_logits"].shape)
+        report["onnx_structure_shape"] = list(named["structure_outcome_logits"].shape)
+        report["onnx_future_candle_shape"] = list(named["future_candle_logits"].shape)
+        report["onnx_output_names"] = list(ONNX_OUTPUT_NAMES)
+    return report
 
 
 def main() -> None:

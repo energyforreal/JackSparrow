@@ -88,9 +88,9 @@ def assemble_raw_frame(
         out["open_interest"] = np.nan
 
     if "funding_rate" in out.columns:
-        out["funding_rate"] = out["funding_rate"].ffill().bfill()
+        out["funding_rate"] = out["funding_rate"].ffill()
     if "open_interest" in out.columns:
-        out["open_interest"] = out["open_interest"].ffill().bfill()
+        out["open_interest"] = out["open_interest"].ffill()
 
     return out
 

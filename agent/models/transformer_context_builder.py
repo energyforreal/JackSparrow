@@ -208,12 +208,27 @@ def build_transformer_prediction_context(
     future_candle_class: int = -1,
     future_candle_name: str = "",
     future_candle_probs: Optional[Mapping[str, float]] = None,
+    next_direction: int = -1,
+    next_wick: int = -1,
+    volume_state: int = -1,
+    pattern_validates: float = 1.0,
+    volume_confirms: float = 1.0,
+    horizon_t24_dir: int = -1,
+    horizon_ladder: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], float, float]:
     """Return (out_ctx, primary_prediction, primary_confidence) for one TF model."""
-    future_vol = float(continuous_preds.get("future_volatility", 0.0))
-    mae = float(continuous_preds.get("mae", 0.0))
-    mfe = float(continuous_preds.get("mfe", 0.0))
-    trend_strength = float(continuous_preds.get("trend_strength", 0.0))
+    future_vol = float(
+        continuous_preds.get("future_volatility", continuous_preds.get("h5m_vol", 0.0))
+        or 0.0
+    )
+    mae = float(continuous_preds.get("mae", continuous_preds.get("h5m_mae", 0.0)) or 0.0)
+    mfe = float(continuous_preds.get("mfe", continuous_preds.get("h5m_mfe", 0.0)) or 0.0)
+    trend_strength = float(
+        continuous_preds.get(
+            "trend_strength", continuous_preds.get("h5m_trend_strength", 0.0)
+        )
+        or 0.0
+    )
     follow = float(continuous_preds.get("candle_follow_through_atr", 0.0) or 0.0)
     struct_delta = float(continuous_preds.get("structure_delta", 0.0) or 0.0)
     long_edge = compute_long_edge(mfe, mae)
@@ -281,6 +296,13 @@ def build_transformer_prediction_context(
         "transformer_future_candle_class": int(future_candle_class),
         "transformer_future_candle_name": str(future_candle_name or ""),
         "transformer_future_candle_probs": dict(future_candle_probs or {}),
+        "next_direction": int(next_direction),
+        "next_wick": int(next_wick),
+        "volume_state": int(volume_state),
+        "pattern_validates": float(pattern_validates),
+        "volume_confirms": float(volume_confirms),
+        "horizon_t24_dir": int(horizon_t24_dir),
+        "horizon_ladder": dict(horizon_ladder or {}),
         "p_regime_favorable": 1.0 - unc if regime == "trending" else max(0.0, 0.5 - unc),
         "p_setup_quality": setup_quality,
         "p_vol_expansion": float(np.clip(future_vol / 0.01, 0.0, 1.0)),

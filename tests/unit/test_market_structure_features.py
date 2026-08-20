@@ -5,9 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from feature_store.transformer_btcusd.contract import NATIVE_STRUCTURE_COLS
+from feature_store.transformer_btcusd.contract import NATIVE_STRUCTURE_COLS, CHART_PATTERN_COL
 from feature_store.transformer_btcusd.features import add_features
-from feature_store.transformer_btcusd.structure import add_market_structure_features
+from feature_store.transformer_btcusd.structure import (
+    add_market_structure_features,
+    _chart_pattern_ids,
+)
 
 
 STRUCTURE_SAMPLE_COLS = (
@@ -179,3 +182,40 @@ def test_native_structure_cols_finite() -> None:
     for col in NATIVE_STRUCTURE_COLS:
         assert col in feat.columns
         assert np.isfinite(feat[col].to_numpy()).all(), col
+    assert CHART_PATTERN_COL in feat.columns
+    assert feat[CHART_PATTERN_COL].between(0, 8).all()
+
+
+def test_stale_failed_break_does_not_set_pattern_8() -> None:
+    n = 4
+    z = np.zeros(n, dtype=np.float64)
+    ids = _chart_pattern_ids(
+        failed_break=np.array([1.0, 1.0, 0.0, 1.0]),
+        bars_since_breakout=np.array([2.0, 3.0, 2.0, 8.0]),
+        breakout_size_atr=z,
+        peak_diff_atr=z,
+        trough_diff_atr=z,
+        peak_sep_bars=z,
+        trough_sep_bars=z,
+        dist_neck_atr=z,
+        high_slope_atr=z,
+        low_slope_atr=z,
+        convergence=z,
+        width_now_atr=z,
+        pole_disp_atr=z,
+        flag_width_atr=z,
+        flag_slope_atr=z,
+        structure_bias=z,
+    )
+    assert int(ids[0]) == 8
+    assert int(ids[1]) == 0
+    assert int(ids[2]) == 0
+    assert int(ids[3]) == 8
+
+
+def test_chart_pattern_failed_break_is_not_majority() -> None:
+    feat = add_features(_base_ohlcv(400, seed=1), resolution_minutes=5)
+    ids = feat[CHART_PATTERN_COL].to_numpy()
+    assert float((ids == 8).mean()) < 0.50
+    assert int((ids == 0).sum()) > 0
+    assert bool(np.isin(ids, [1, 2, 3, 4, 5, 6, 7]).any())

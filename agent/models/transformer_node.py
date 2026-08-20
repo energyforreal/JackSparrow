@@ -21,12 +21,20 @@ from feature_store.transformer_btcusd.contract import (
     CANDLE_CLASS_COL,
     CANDLE_CLASS_NAMES,
     FEATURE_CONTRACT_VERSION,
+    FEATURE_CONTRACT_VERSION_V6,
+    FEATURE_CONTRACT_VERSION_V7,
+    HORIZON_KEYS,
+    NEXT_DIRECTION_NAMES,
+    NEXT_WICK_NAMES,
     RESOLUTION_MINUTES,
     STRUCTURE_OUTCOME_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
+    V8_CONTINUOUS_LABEL_COLS,
+    VOLUME_STATE_NAMES,
     feature_cols_for_resolution,
     onnx_filename_for_resolution,
+    v7_feature_cols_for_resolution,
 )
 from feature_store.transformer_btcusd.features import (
     build_feature_matrix,
@@ -143,10 +151,16 @@ class TransformerModelNode(MCPModelNode):
         bundle_dir = meta_path.parent
         feature_config = resolve_feature_config(bundle_dir)
         bundle_contract = str(feature_config.get("feature_contract_version") or "")
-        if bundle_contract and bundle_contract != FEATURE_CONTRACT_VERSION:
+        allowed = {
+            FEATURE_CONTRACT_VERSION,
+            FEATURE_CONTRACT_VERSION_V7,
+            FEATURE_CONTRACT_VERSION_V6,
+        }
+        if bundle_contract and bundle_contract not in allowed:
             raise RuntimeError(
                 f"Transformer bundle contract {bundle_contract!r} is not "
-                f"{FEATURE_CONTRACT_VERSION}. Retrain all TFs."
+                f"{FEATURE_CONTRACT_VERSION}, {FEATURE_CONTRACT_VERSION_V7}, "
+                f"or {FEATURE_CONTRACT_VERSION_V6}. Retrain all TFs."
             )
         resolution = str(raw.get("resolution") or "15m")
         onnx_name = str(
@@ -173,7 +187,14 @@ class TransformerModelNode(MCPModelNode):
             str(self._onnx_path),
             providers=["CPUExecutionProvider"],
         )
-        require_onnx_output_names([o.name for o in self._session.get_outputs()])
+        require_onnx_output_names(
+            [o.name for o in self._session.get_outputs()],
+            contract_version=str(
+                self._feature_config.get("feature_contract_version")
+                or FEATURE_CONTRACT_VERSION_V6
+            ),
+            resolution=self._resolution,
+        )
         self._initialized = True
         self._health = "healthy"
         logger.info(
@@ -261,6 +282,155 @@ class TransformerModelNode(MCPModelNode):
             )
         return df
 
+    def _decode_v8(
+        self, named: Dict[str, Any]
+    ) -> Tuple[
+        Dict[str, float],
+        str,
+        Dict[str, float],
+        str,
+        int,
+        Dict[str, float],
+        int,
+        str,
+        Dict[str, float],
+        Dict[str, Any],
+    ]:
+        label_cols = list(
+            self._feature_config.get("continuous_label_cols") or V8_CONTINUOUS_LABEL_COLS
+        )
+        continuous_preds = unstandardize_continuous(
+            named["continuous_pred"][0],
+            self._feature_config["label_mean"],
+            self._feature_config["label_std"],
+            label_cols=label_cols,
+        )
+        vol_idx, vol_name, vol_probs = parse_regime_prediction(
+            named["volume_state_logits"][0],
+            {str(k): v for k, v in VOLUME_STATE_NAMES.items()},
+        )
+        dir_names = {str(k): v for k, v in NEXT_DIRECTION_NAMES.items()}
+        struct_names = {str(k): v for k, v in STRUCTURE_OUTCOME_NAMES.items()}
+        ladder: Dict[str, Any] = {}
+        for key in HORIZON_KEYS:
+            d_idx, d_name, _d_probs = parse_regime_prediction(
+                named[f"{key}_dir_logits"][0], dir_names
+            )
+            s_idx, s_name, _s_probs = parse_regime_prediction(
+                named[f"{key}_structure_logits"][0], struct_names
+            )
+            ladder[key] = {
+                "dir": int(d_idx),
+                "dir_name": d_name,
+                "structure": int(s_idx),
+                "structure_name": s_name,
+                "mfe": float(continuous_preds.get(f"{key}_mfe", 0.0) or 0.0),
+                "mae": float(continuous_preds.get(f"{key}_mae", 0.0) or 0.0),
+                "vol": float(continuous_preds.get(f"{key}_vol", 0.0) or 0.0),
+                "trend_strength": float(
+                    continuous_preds.get(f"{key}_trend_strength", 0.0) or 0.0
+                ),
+            }
+        extra = {
+            "volume_state": vol_idx,
+            "volume_state_name": vol_name,
+            "volume_state_probs": vol_probs,
+            "horizon_ladder": ladder,
+            "next_direction": int(ladder["h5m"]["dir"]),
+            "horizon_t24_dir": int(ladder["h2h"]["dir"]),
+            "volume_confirms": 1.0,
+            "pattern_validates": 1.0,
+        }
+        regime_map = {0: "LOW", 1: "NORMAL", 2: "HIGH"}
+        vol_regime = regime_map.get(int(vol_idx), "NORMAL")
+        struct_name = str(ladder["h5m"]["structure_name"])
+        struct_idx = int(ladder["h5m"]["structure"])
+        return (
+            continuous_preds,
+            str(vol_regime),
+            vol_probs,
+            struct_name,
+            struct_idx,
+            {},
+            -1,
+            "",
+            {},
+            extra,
+        )
+
+    def _decode_v7(
+        self, named: Dict[str, Any]
+    ) -> Tuple[
+        Dict[str, float],
+        str,
+        Dict[str, float],
+        str,
+        int,
+        Dict[str, float],
+        int,
+        str,
+        Dict[str, float],
+        Dict[str, Any],
+    ]:
+        continuous_preds = unstandardize_continuous(
+            named["continuous_pred"][0],
+            self._feature_config["label_mean"],
+            self._feature_config["label_std"],
+            label_cols=self._feature_config.get("continuous_label_cols") or [],
+        )
+        dir_idx, dir_name, dir_probs = parse_regime_prediction(
+            named["next_direction_logits"][0],
+            {str(k): v for k, v in NEXT_DIRECTION_NAMES.items()},
+        )
+        wick_idx, wick_name, wick_probs = parse_regime_prediction(
+            named["next_wick_logits"][0],
+            {str(k): v for k, v in NEXT_WICK_NAMES.items()},
+        )
+        vol_idx, vol_name, vol_probs = parse_regime_prediction(
+            named["volume_state_logits"][0],
+            {str(k): v for k, v in VOLUME_STATE_NAMES.items()},
+        )
+        val_logit = float(np.asarray(named["pattern_validates_logit"]).reshape(-1)[0])
+        validates = float(1.0 / (1.0 + np.exp(-val_logit)))
+        hz24 = -1
+        if "horizon_t24_dir_logits" in named:
+            hz24, _, _ = parse_regime_prediction(
+                named["horizon_t24_dir_logits"][0],
+                {str(k): v for k, v in NEXT_DIRECTION_NAMES.items()},
+            )
+        extra = {
+            "next_direction": dir_idx,
+            "next_direction_name": dir_name,
+            "next_direction_probs": dir_probs,
+            "next_wick": wick_idx,
+            "next_wick_name": wick_name,
+            "next_wick_probs": wick_probs,
+            "volume_state": vol_idx,
+            "volume_state_name": vol_name,
+            "volume_state_probs": vol_probs,
+            "pattern_validates": validates,
+            "horizon_t24_dir": hz24,
+            "volume_confirms": 1.0 if vol_idx != 0 and validates >= 0.5 else 0.0,
+        }
+        family = "doji"
+        if dir_idx == 2 or wick_idx == 2:
+            family = "bull"
+        elif dir_idx == 0 or wick_idx == 1:
+            family = "bear"
+        fut_cid = 11 if family == "bull" else 12 if family == "bear" else 3
+        return (
+            continuous_preds,
+            str(vol_name),
+            vol_probs,
+            "",
+            -1,
+            {},
+            fut_cid,
+            family,
+            {},
+            extra,
+        )
+
     def _sync_predict_impl(self, ctx: Dict[str, Any]) -> MCPModelPrediction:
         t0 = time.perf_counter()
         if self._session is None:
@@ -283,10 +453,16 @@ class TransformerModelNode(MCPModelNode):
             atr_period=atr_period,
             dropna=True,
         )
-        feature_cols = list(
-            self._feature_config.get("feature_cols")
-            or feature_cols_for_resolution(self._resolution)
+        contract_hint = str(
+            self._feature_config.get("feature_contract_version")
+            or FEATURE_CONTRACT_VERSION_V6
         )
+        default_cols = (
+            v7_feature_cols_for_resolution(self._resolution)
+            if contract_hint in (FEATURE_CONTRACT_VERSION, FEATURE_CONTRACT_VERSION_V7)
+            else feature_cols_for_resolution(self._resolution)
+        )
+        feature_cols = list(self._feature_config.get("feature_cols") or default_cols)
         validate_feature_columns(
             feat_df,
             require_finite_closed_bar=True,
@@ -301,9 +477,17 @@ class TransformerModelNode(MCPModelNode):
                 f"Need at least {window_len} feature rows, got {finite_feature_rows} "
                 f"(fetched_bars={fetched_bars}, resolution={self._resolution})"
             )
-        cont_window = build_continuous_window(
-            values, window_len=window_len, feature_cols=feature_cols
-        )
+        scaler_mean = self._feature_config.get("scaler_mean")
+        scaler_std = self._feature_config.get("scaler_std")
+        if scaler_mean is not None and scaler_std is not None:
+            mean = np.asarray(scaler_mean, dtype=np.float32)
+            std = np.asarray(scaler_std, dtype=np.float32)
+            window = values[-window_len:, :]
+            cont_window = ((window - mean) / (std + 1e-6)).astype(np.float32)[np.newaxis, :, :]
+        else:
+            cont_window = build_continuous_window(
+                values, window_len=window_len, feature_cols=feature_cols
+            )
         cat_window = build_candle_class_window(
             feat_df[CANDLE_CLASS_COL].values, window_len=window_len
         )
@@ -319,36 +503,56 @@ class TransformerModelNode(MCPModelNode):
             out_meta.name: arr
             for out_meta, arr in zip(self._session.get_outputs(), raw_outs)
         }
-        require_onnx_output_names(named.keys())
-        continuous_z = named["continuous_pred"]
-        regime_logits = named["regime_logits"]
-        structure_logits = named["structure_outcome_logits"]
-        future_candle_logits = named["future_candle_logits"]
-        continuous_preds = unstandardize_continuous(
-            continuous_z[0],
-            self._feature_config["label_mean"],
-            self._feature_config["label_std"],
-            label_cols=self._feature_config.get("continuous_label_cols") or [],
+        contract = str(
+            self._feature_config.get("feature_contract_version")
+            or FEATURE_CONTRACT_VERSION_V6
         )
-        regime_names = self._feature_config.get("regime_names") or {
-            "0": "LOW",
-            "1": "NORMAL",
-            "2": "HIGH",
-            "3": "EXTREME",
-        }
-        _, vol_regime, regime_probs = parse_regime_prediction(regime_logits[0], regime_names)
-        structure_names = self._feature_config.get("structure_outcome_names") or {
-            str(k): v for k, v in STRUCTURE_OUTCOME_NAMES.items()
-        }
-        struct_idx, struct_name, struct_probs = parse_regime_prediction(
-            structure_logits[0], structure_names
+        require_onnx_output_names(
+            named.keys(), contract_version=contract, resolution=self._resolution
         )
-        candle_names = self._feature_config.get("candle_class_names") or {
-            str(k): v for k, v in CANDLE_CLASS_NAMES.items()
-        }
-        fut_cid, fut_cname, fut_cprobs = parse_regime_prediction(
-            future_candle_logits[0], candle_names
-        )
+        if contract == FEATURE_CONTRACT_VERSION:
+            (
+                continuous_preds, vol_regime, regime_probs, struct_name, struct_idx,
+                struct_probs, fut_cid, fut_cname, fut_cprobs, v7_extra,
+            ) = self._decode_v8(named)
+        elif contract == FEATURE_CONTRACT_VERSION_V7:
+            (
+                continuous_preds, vol_regime, regime_probs, struct_name, struct_idx,
+                struct_probs, fut_cid, fut_cname, fut_cprobs, v7_extra,
+            ) = self._decode_v7(named)
+        else:
+            v7_extra = {}
+            continuous_z = named["continuous_pred"]
+            regime_logits = named["regime_logits"]
+            structure_logits = named["structure_outcome_logits"]
+            future_candle_logits = named["future_candle_logits"]
+            continuous_preds = unstandardize_continuous(
+                continuous_z[0],
+                self._feature_config["label_mean"],
+                self._feature_config["label_std"],
+                label_cols=self._feature_config.get("continuous_label_cols") or [],
+            )
+            regime_names = self._feature_config.get("regime_names") or {
+                "0": "LOW",
+                "1": "NORMAL",
+                "2": "HIGH",
+                "3": "EXTREME",
+            }
+            _, vol_regime, regime_probs = parse_regime_prediction(
+                regime_logits[0], regime_names
+            )
+            structure_names = self._feature_config.get("structure_outcome_names") or {
+                str(k): v for k, v in STRUCTURE_OUTCOME_NAMES.items()
+            }
+            struct_idx, struct_name, struct_probs = parse_regime_prediction(
+                structure_logits[0], structure_names
+            )
+            candle_names = self._feature_config.get("candle_class_names") or {
+                str(k): v for k, v in CANDLE_CLASS_NAMES.items()
+            }
+            fut_cid, fut_cname, fut_cprobs = parse_regime_prediction(
+                future_candle_logits[0], candle_names
+            )
 
         bar_hint = 0
         if isinstance(df5, pd.DataFrame) and not df5.empty:
@@ -376,6 +580,13 @@ class TransformerModelNode(MCPModelNode):
             future_candle_class=fut_cid,
             future_candle_name=fut_cname,
             future_candle_probs=fut_cprobs,
+            next_direction=int(v7_extra.get("next_direction", -1)),
+            next_wick=int(v7_extra.get("next_wick", -1)),
+            volume_state=int(v7_extra.get("volume_state", -1)),
+            pattern_validates=float(v7_extra.get("pattern_validates", 1.0)),
+            volume_confirms=float(v7_extra.get("volume_confirms", 1.0)),
+            horizon_t24_dir=int(v7_extra.get("horizon_t24_dir", -1)),
+            horizon_ladder=v7_extra.get("horizon_ladder") or {},
         )
         out_ctx["closed_bar_features"] = closed_feats
         out_ctx["tf_key"] = self.tf_key

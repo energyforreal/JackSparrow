@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from feature_store.transformer_btcusd.contract import (
+    CHART_PATTERN_COL,
     HTF_FEATURE_FIELDS,
     HTF_SOURCE_TFS,
     HTF_STRUCTURE_COLS,
@@ -37,6 +38,7 @@ _SR_DELTA_ATR = 0.5
 _POLE_BARS = 12
 _FLAG_BARS = 16
 _BREAKOUT_THRESH = 0.25
+_FAILED_BREAK_BARS = 8
 _CHANNEL_K = 3
 _ATR_SHORT = 14
 _ATR_LONG = 56
@@ -422,7 +424,113 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
     out["low_slope_atr"] = low_slope_atr
     out["convergence"] = convergence
     out["width_now_atr"] = width_now_atr
+    out[CHART_PATTERN_COL] = _chart_pattern_ids(
+        failed_break=failed_break,
+        bars_since_breakout=bars_since_breakout,
+        breakout_size_atr=(
+            out["breakout_size_atr"].to_numpy(dtype=np.float64)
+            if "breakout_size_atr" in out.columns
+            else np.zeros(n)
+        ),
+        peak_diff_atr=peak_diff_atr,
+        trough_diff_atr=trough_diff_atr,
+        peak_sep_bars=peak_sep_bars,
+        trough_sep_bars=trough_sep_bars,
+        dist_neck_atr=dist_neck_atr,
+        high_slope_atr=high_slope_atr,
+        low_slope_atr=low_slope_atr,
+        convergence=convergence,
+        width_now_atr=width_now_atr,
+        pole_disp_atr=(
+            out["pole_disp_atr"].to_numpy(dtype=np.float64)
+            if "pole_disp_atr" in out.columns
+            else np.zeros(n)
+        ),
+        flag_width_atr=(
+            out["flag_width_atr"].to_numpy(dtype=np.float64)
+            if "flag_width_atr" in out.columns
+            else np.zeros(n)
+        ),
+        flag_slope_atr=(
+            out["flag_slope_atr"].to_numpy(dtype=np.float64)
+            if "flag_slope_atr" in out.columns
+            else np.zeros(n)
+        ),
+        structure_bias=structure_bias,
+    )
     return out
+
+
+def _chart_pattern_ids(
+    *,
+    failed_break: np.ndarray,
+    bars_since_breakout: np.ndarray,
+    breakout_size_atr: np.ndarray,
+    peak_diff_atr: np.ndarray,
+    trough_diff_atr: np.ndarray,
+    peak_sep_bars: np.ndarray,
+    trough_sep_bars: np.ndarray,
+    dist_neck_atr: np.ndarray,
+    high_slope_atr: np.ndarray,
+    low_slope_atr: np.ndarray,
+    convergence: np.ndarray,
+    width_now_atr: np.ndarray,
+    pole_disp_atr: np.ndarray,
+    flag_width_atr: np.ndarray,
+    flag_slope_atr: np.ndarray,
+    structure_bias: np.ndarray,
+) -> np.ndarray:
+    """Causal discrete chart-pattern id at bar t (0=NONE ... 8=FAILED_BREAK).
+
+    FAILED_BREAK is a rising-edge event inside ``_FAILED_BREAK_BARS`` of the
+    last Donchian breakout. It does not overwrite FLAG/TRIANGLE/DOUBLE/CHANNEL
+    and does not stay on for the whole post-breakout regime.
+    """
+    n = int(failed_break.shape[0])
+    ids = np.zeros(n, dtype=np.int64)
+    channel = (np.abs(high_slope_atr - low_slope_atr) < 0.15) & (width_now_atr > 0.6)
+    triangle = (np.abs(convergence) >= 0.08) & (width_now_atr < 2.5)
+    double_top = (
+        (np.abs(peak_diff_atr) < 0.45)
+        & (peak_sep_bars >= 4)
+        & (dist_neck_atr > 0.15)
+    )
+    double_bottom = (
+        (np.abs(trough_diff_atr) < 0.45)
+        & (trough_sep_bars >= 4)
+        & (dist_neck_atr < -0.15)
+    )
+    flag_bull = (
+        (pole_disp_atr > 1.0)
+        & (flag_width_atr < 2.0)
+        & (flag_slope_atr < 0.0)
+        & (structure_bias > 0.15)
+    )
+    flag_bear = (
+        (pole_disp_atr < -1.0)
+        & (flag_width_atr < 2.0)
+        & (flag_slope_atr > 0.0)
+        & (structure_bias < -0.15)
+    )
+    breakout = (bars_since_breakout <= 2.0) & (np.abs(breakout_size_atr) >= 0.25)
+    failed_now = (failed_break >= 0.5) & (
+        bars_since_breakout <= float(_FAILED_BREAK_BARS)
+    )
+    failed_prev = np.empty_like(failed_now)
+    failed_prev[0] = False
+    if n > 1:
+        failed_prev[1:] = failed_now[:-1]
+    failed_pulse = failed_now & ~failed_prev
+    ids = np.where(channel, 6, ids)
+    ids = np.where(triangle, 3, ids)
+    ids = np.where(flag_bull, 1, ids)
+    ids = np.where(flag_bear, 2, ids)
+    ids = np.where(double_bottom, 5, ids)
+    ids = np.where(double_top, 4, ids)
+    ids = np.where(breakout, 7, ids)
+    named = np.isin(ids, [1, 2, 3, 4, 5, 6])
+    ids = np.where(failed_pulse & ~named, 8, ids)
+    return ids
 
 
 def add_market_structure_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -441,6 +549,11 @@ def add_market_structure_features(df: pd.DataFrame) -> pd.DataFrame:
         if col not in out.columns:
             out[col] = 0.0
         out[col] = out[col].astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if CHART_PATTERN_COL not in out.columns:
+        out[CHART_PATTERN_COL] = 0
+    out[CHART_PATTERN_COL] = (
+        pd.to_numeric(out[CHART_PATTERN_COL], errors="coerce").fillna(0).astype(np.int64)
+    )
     return out
 
 

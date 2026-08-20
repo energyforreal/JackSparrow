@@ -85,8 +85,13 @@ def test_assemble_raw_frame_ffills_misaligned_derivatives() -> None:
     assembled = assemble_raw_frame(ohlcv, funding_df=funding_df, oi_df=oi_df)
     exact = ohlcv.merge(funding_df, on="time", how="left")
     assert exact["funding_rate"].isna().sum() > 0
+    # Causal ffill: no future values. Leading NaN is allowed until the first print.
     assert assembled["funding_rate"].isna().sum() == 0
-    assert assembled["open_interest"].isna().sum() == 0
+    first_oi = assembled["open_interest"].first_valid_index()
+    assert first_oi is not None
+    assert assembled["open_interest"].iloc[int(first_oi) :].notna().all()
+    if int(first_oi) > 0:
+        assert assembled["open_interest"].iloc[: int(first_oi)].isna().all()
 
 
 @pytest.mark.parametrize("resolution", SUPPORTED_RESOLUTIONS)

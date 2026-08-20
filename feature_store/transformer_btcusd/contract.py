@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 # Bump when FEATURE_COLS, label heads, or ONNX outputs change (requires retrain).
-FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v6"
+FEATURE_CONTRACT_VERSION_V6 = "transformer_btcusd_per_tf_features_v6"
+FEATURE_CONTRACT_VERSION_V7 = "transformer_btcusd_per_tf_features_v7"
+FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v8"
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
 
@@ -196,6 +198,113 @@ FUTURE_CANDLE_COL = "future_candle_class"
 STRUCTURE_OUTCOME_CARDINALITY = 6
 N_AUX_CLASS_HEADS = 3  # vol regime + structure outcome + next-bar candle
 
+# v7 next-candle structure (kept for legacy 5m ONNX decode).
+NEXT_DIRECTION_COL = "next_direction"
+NEXT_BODY_COL = "next_body"
+NEXT_WICK_COL = "next_wick"
+NEXT_RANGE_COL = "next_range"
+CHART_PATTERN_COL = "chart_pattern_id"
+VOLUME_STATE_COL = "volume_state"
+VOLUME_CONFIRMS_COL = "volume_confirms"
+PATTERN_ACTIVE_COL = "pattern_active"
+SAMPLE_WEIGHT_COL = "sample_weight"
+
+# v8 wall-clock behavior packets on the 5m grid (bars).
+HORIZON_SPECS: Tuple[Tuple[str, int], ...] = (
+    ("h5m", 1),
+    ("h10m", 2),
+    ("h15m", 3),
+    ("h30m", 6),
+    ("h1h", 12),
+    ("h2h", 24),
+)
+HORIZON_KEYS: Tuple[str, ...] = tuple(key for key, _ in HORIZON_SPECS)
+HORIZON_BARS_5M: Tuple[int, ...] = tuple(bars for _, bars in HORIZON_SPECS)
+N_HORIZONS: int = len(HORIZON_SPECS)
+MAX_V8_HORIZON_BARS: int = max(HORIZON_BARS_5M)
+HORIZON_CONTINUOUS_FIELDS: Tuple[str, ...] = ("mfe", "mae", "vol", "trend_strength")
+HORIZON_DIR_COLS: Tuple[str, ...] = tuple(f"{key}_dir" for key in HORIZON_KEYS)
+HORIZON_STRUCTURE_COLS: Tuple[str, ...] = tuple(
+    f"{key}_structure" for key in HORIZON_KEYS
+)
+V8_CONTINUOUS_LABEL_COLS: Tuple[str, ...] = tuple(
+    f"{key}_{field}"
+    for key in HORIZON_KEYS
+    for field in HORIZON_CONTINUOUS_FIELDS
+)
+HORIZON_DIR_COLS_V7: Tuple[str, ...] = (
+    "horizon_t1_dir",
+    "horizon_t3_dir",
+    "horizon_t6_dir",
+    "horizon_t12_dir",
+    "horizon_t24_dir",
+)
+
+NEXT_DIRECTION_CARDINALITY = 3
+NEXT_BODY_CARDINALITY = 3
+NEXT_WICK_CARDINALITY = 4
+NEXT_RANGE_CARDINALITY = 3
+VOLUME_STATE_CARDINALITY = 3
+CHART_PATTERN_CARDINALITY = 9
+
+NEXT_DIRECTION_NAMES: Dict[int, str] = {0: "BEARISH", 1: "NEUTRAL", 2: "BULLISH"}
+NEXT_BODY_NAMES: Dict[int, str] = {0: "SMALL", 1: "MEDIUM", 2: "LARGE"}
+NEXT_WICK_NAMES: Dict[int, str] = {
+    0: "BALANCED",
+    1: "UPPER_REJECTION",
+    2: "LOWER_REJECTION",
+    3: "BOTH_REJECTION",
+}
+NEXT_RANGE_NAMES: Dict[int, str] = {0: "COMPRESSED", 1: "NORMAL", 2: "EXPANDED"}
+VOLUME_STATE_NAMES: Dict[int, str] = {0: "DRY", 1: "NORMAL", 2: "EXPANSION"}
+CHART_PATTERN_NAMES: Dict[int, str] = {
+    0: "NONE",
+    1: "FLAG_BULL",
+    2: "FLAG_BEAR",
+    3: "TRIANGLE",
+    4: "DOUBLE_TOP",
+    5: "DOUBLE_BOTTOM",
+    6: "CHANNEL",
+    7: "BREAKOUT",
+    8: "FAILED_BREAK",
+}
+
+VOL_Z_EXPANSION = 0.5
+VOL_Z_DRY = -0.5
+BREAKOUT_VOL_CONFIRM = 1.2
+HORIZON_DIR_ATR_DEADZONE = 0.25
+
+V7_STRUCTURE_LOSS_WEIGHTS: Dict[str, float] = {
+    "direction": 1.0,
+    "body": 0.5,
+    "wick": 0.5,
+    "range": 0.5,
+    "pattern": 0.5,
+    "path": 1.0,
+    "volume_state": 0.25,
+    "pattern_validates": 0.25,
+    "horizon": 0.35,
+}
+
+V8_STRUCTURE_LOSS_WEIGHTS: Dict[str, float] = {
+    "path": 1.0,
+    "direction": 1.0,
+    "structure": 0.5,
+    "volume_state": 0.25,
+}
+
+V7_CONTINUOUS_LOSS_WEIGHTS: Dict[str, float] = {
+    "mfe": 0.5,
+    "mae": 0.5,
+    "future_volatility": 1.0,
+    "trend_strength": 0.5,
+    "drawdown_before_mfe": 0.5,
+    "future_oi_change_pct": 0.25,
+    "future_volume_change_pct": 0.25,
+    "candle_follow_through_atr": 0.5,
+    "structure_delta": 0.5,
+}
+
 STRUCTURE_OUTCOME_NAMES: Dict[int, str] = {
     0: "RANGE",
     1: "CONTINUATION_LONG",
@@ -205,11 +314,44 @@ STRUCTURE_OUTCOME_NAMES: Dict[int, str] = {
     5: "REVERSAL",
 }
 
-ONNX_OUTPUT_NAMES: Tuple[str, ...] = (
+ONNX_OUTPUT_NAMES_V6: Tuple[str, ...] = (
     "continuous_pred",
     "regime_logits",
     "structure_outcome_logits",
     "future_candle_logits",
+)
+# Live 15m–2h bundles still export v6 heads. 5m research is v8.
+ONNX_OUTPUT_NAMES: Tuple[str, ...] = ONNX_OUTPUT_NAMES_V6
+
+ONNX_OUTPUT_NAMES_V7_BASE: Tuple[str, ...] = (
+    "next_direction_logits",
+    "next_body_logits",
+    "next_wick_logits",
+    "next_range_logits",
+    "next_pattern_logits",
+    "continuous_pred",
+    "volume_state_logits",
+    "pattern_validates_logit",
+)
+ONNX_OUTPUT_NAMES_V7_HORIZONS: Tuple[str, ...] = (
+    "horizon_t3_dir_logits",
+    "horizon_t6_dir_logits",
+    "horizon_t12_dir_logits",
+    "horizon_t24_dir_logits",
+)
+ONNX_OUTPUT_NAMES_V7: Tuple[str, ...] = (
+    ONNX_OUTPUT_NAMES_V7_BASE + ONNX_OUTPUT_NAMES_V7_HORIZONS
+)
+ONNX_OUTPUT_NAMES_V8_DIR: Tuple[str, ...] = tuple(
+    f"{key}_dir_logits" for key in HORIZON_KEYS
+)
+ONNX_OUTPUT_NAMES_V8_STRUCTURE: Tuple[str, ...] = tuple(
+    f"{key}_structure_logits" for key in HORIZON_KEYS
+)
+ONNX_OUTPUT_NAMES_V8: Tuple[str, ...] = (
+    ONNX_OUTPUT_NAMES_V8_DIR
+    + ONNX_OUTPUT_NAMES_V8_STRUCTURE
+    + ("continuous_pred", "volume_state_logits")
 )
 
 # Next-bar candle families for 5m timing (not model classes).
@@ -393,3 +535,190 @@ def feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
     if res == "5m":
         return FEATURE_COLS + HTF_STRUCTURE_COLS
     return FEATURE_COLS
+
+
+def v7_feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
+    """Input columns: native features plus causal chart_pattern_id."""
+    return feature_cols_for_resolution(resolution) + (CHART_PATTERN_COL,)
+
+
+def v8_feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
+    """v8 5m input columns (same causal feature set as v7)."""
+    return v7_feature_cols_for_resolution(resolution)
+
+
+def onnx_output_names_for_contract(
+    contract_version: str,
+    *,
+    resolution: str = "5m",
+) -> Tuple[str, ...]:
+    """ONNX head names for a bundle contract."""
+    ver = str(contract_version or "").strip()
+    res = resolution.strip().lower()
+    if ver == FEATURE_CONTRACT_VERSION:
+        if res == "5m":
+            return ONNX_OUTPUT_NAMES_V8
+        return ONNX_OUTPUT_NAMES_V6
+    if ver == FEATURE_CONTRACT_VERSION_V7:
+        if res == "5m":
+            return ONNX_OUTPUT_NAMES_V7
+        return ONNX_OUTPUT_NAMES_V7_BASE
+    return ONNX_OUTPUT_NAMES_V6
+
+
+def v8_future_leak_cols() -> frozenset:
+    """Label/target columns that must never appear in 5m v8 model inputs."""
+    leaked = set(V8_CONTINUOUS_LABEL_COLS)
+    leaked.update(HORIZON_DIR_COLS)
+    leaked.update(HORIZON_STRUCTURE_COLS)
+    leaked.update(
+        {
+            VOLUME_STATE_COL,
+            NEXT_DIRECTION_COL,
+            NEXT_BODY_COL,
+            NEXT_WICK_COL,
+            NEXT_RANGE_COL,
+            FUTURE_CANDLE_COL,
+            "mfe",
+            "mae",
+            "future_volatility",
+            "pattern_validates",
+            *HORIZON_DIR_COLS_V7,
+        }
+    )
+    return frozenset(leaked)
+
+
+def expected_direction_from_chart_pattern(pattern_id: int) -> int:
+    """Map chart pattern to expected next-candle direction (0/1/2). Neutral if none."""
+    pid = int(pattern_id)
+    if pid in (1, 5, 7):  # FLAG_BULL, DOUBLE_BOTTOM, BREAKOUT (unsigned handled elsewhere)
+        return 2
+    if pid in (2, 4, 8):  # FLAG_BEAR, DOUBLE_TOP, FAILED_BREAK
+        return 0
+    return 1
+
+
+def default_research_config() -> Dict[str, Any]:
+    """Colab research-pipeline defaults (5m multi-horizon path)."""
+    return {
+        "symbol": "BTCUSD",
+        "resolution": "5m",
+        "resolution_minutes": 5,
+        "base_timeframe": "5m",
+        "context_timeframes": ["15m", "30m", "1h", "2h"],
+        "sequence_length": 64,
+        "prediction_horizon": 1,
+        "horizon_bars": list(HORIZON_BARS_5M),
+        "train_ratio": 0.70,
+        "validation_ratio": 0.15,
+        "test_ratio": 0.15,
+        "batch_size": 256,
+        "epochs": 50,
+        "learning_rate": 1e-4,
+        "weight_decay": 1e-4,
+        "dropout": 0.15,
+        "early_stopping_patience": 8,
+        "seed": 42,
+        "d_model": 64,
+        "nhead": 4,
+        "num_layers": 2,
+        "stride": 4,
+        "scaler_mode": "train_fit",
+        "gate_chart_volume": False,
+        "path_label_horizon_bars": MAX_V8_HORIZON_BARS,
+        "embargo_bars": MAX_V8_HORIZON_BARS,
+        "mae_floor_atr_mult": 0.25,
+        "atr_period": 14,
+        "history_days": 900,
+        "base_url": "https://api.india.delta.exchange",
+        "loss_weights": dict(V8_STRUCTURE_LOSS_WEIGHTS),
+        "run_optuna": False,
+        "optuna_trials": 0,
+        "run_shap": False,
+        "run_ablations": False,
+        "run_walk_forward": False,
+        "walk_forward_folds": 3,
+    }
+
+
+def ablation_feature_groups(resolution: str = "5m") -> Dict[str, Tuple[str, ...]]:
+    """Nested feature sets A-F for out-of-sample ablation."""
+    all_cols = v7_feature_cols_for_resolution(resolution)
+    ohlcv = ("ret_1", "rv_16", "rv_96", "hour_sin", "hour_cos", "dow_sin", "dow_cos")
+    geometry = ohlcv + (
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_loc",
+        "range_atr",
+        "body_atr",
+        "gap_atr",
+        "inside_bar",
+        "outside_bar",
+        "engulf_score",
+    )
+    trend = geometry + (
+        "ema50_dist_pct",
+        "macd_hist",
+        "rsi_14",
+        "adx_14",
+        "price_vs_ema9_atr",
+        "price_vs_ema21_atr",
+        "price_vs_ema50_atr",
+        "price_vs_ema200_atr",
+        "ema9_vs_21_atr",
+        "ema21_vs_50_atr",
+        "ema50_vs_200_atr",
+        "ema21_slope_atr",
+        "ema50_slope_atr",
+        "trend_efficiency",
+        "displacement_atr",
+        "pct_with_trend",
+    )
+    structure = trend + (
+        "hh_count",
+        "hl_count",
+        "lh_count",
+        "ll_count",
+        "structure_bias",
+        "last_swing_dir",
+        "bars_since_swing",
+        "swing_amp_atr",
+        "dist_to_support_atr",
+        "dist_to_resistance_atr",
+        "support_touch_count",
+        "resistance_touch_count",
+        "range_width_atr",
+        "dist_to_resistance_pct",
+        "dist_to_support_pct",
+    )
+    chart = structure + (
+        "peak_diff_atr",
+        "trough_diff_atr",
+        "peak_sep_bars",
+        "trough_sep_bars",
+        "dist_neck_atr",
+        "high_slope_atr",
+        "low_slope_atr",
+        "convergence",
+        "width_now_atr",
+        "pole_disp_atr",
+        "flag_width_atr",
+        "flag_slope_atr",
+        "breakout_size_atr",
+        "breakout_vol_ratio",
+        "pre_breakout_comp",
+        "bars_since_breakout",
+        "retest_dist_atr",
+        "failed_break",
+        CHART_PATTERN_COL,
+    )
+    return {
+        "A": tuple(c for c in ohlcv if c in all_cols),
+        "B": tuple(c for c in geometry if c in all_cols),
+        "C": tuple(c for c in trend if c in all_cols),
+        "D": tuple(c for c in structure if c in all_cols),
+        "E": tuple(c for c in chart if c in all_cols),
+        "F": all_cols,
+    }

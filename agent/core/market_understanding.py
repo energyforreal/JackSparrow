@@ -93,6 +93,12 @@ class TfMarketView:
     future_candle_name: str = ""
     candle_follow_through_atr: float = 0.0
     structure_delta: float = 0.0
+    next_direction: int = -1
+    next_wick: int = -1
+    volume_confirms: float = 1.0
+    pattern_validates: float = 1.0
+    horizon_t24_dir: int = -1
+    horizon_ladder: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -270,14 +276,51 @@ def _apply_setup_filters(
     return setup_stance, codes
 
 
+def _timing_from_short_horizons(
+    *,
+    setup_direction: Optional[str],
+    h5m_dir: int,
+    h10m_dir: int,
+    imbalance_z: float,
+) -> str:
+    """5m timing from 5m+10m direction packets (v8). Never uses 15m–2h heads."""
+    if setup_direction not in ("long", "short"):
+        return "quiet"
+
+    def _align(direction: int) -> str:
+        if int(direction) < 0 or int(direction) == 1:
+            return "quiet"
+        if setup_direction == "long":
+            return "with" if int(direction) == 2 else "against"
+        return "with" if int(direction) == 0 else "against"
+
+    t5 = _align(int(h5m_dir))
+    t10 = _align(int(h10m_dir))
+    if t5 == "against" or t10 == "against":
+        return "against"
+    if t5 == "with" or t10 == "with":
+        return "with"
+    if abs(imbalance_z) < _TIMING_LEAN_Z:
+        return "quiet"
+    if setup_direction == "long":
+        return "with" if imbalance_z > 0 else "against"
+    return "with" if imbalance_z < 0 else "against"
+
+
 def _timing_from_z_and_candle(
     *,
     setup_direction: Optional[str],
     imbalance_z: float,
     future_candle_class: int,
+    next_direction: int = -1,
+    next_wick: int = -1,
+    volume_confirms: float = 1.0,
+    pattern_validates: float = 1.0,
 ) -> str:
-    """5m timing from path z, optionally shifted by next-bar candle family."""
+    """5m timing from path z, next-candle structure, and volume/chart gates."""
     if setup_direction not in ("long", "short"):
+        return "quiet"
+    if float(volume_confirms) < 0.5 or float(pattern_validates) < 0.5:
         return "quiet"
     if abs(imbalance_z) < _TIMING_LEAN_Z:
         timing = "quiet"
@@ -285,6 +328,16 @@ def _timing_from_z_and_candle(
         timing = "with" if imbalance_z > 0 else "against"
     else:
         timing = "with" if imbalance_z < 0 else "against"
+    if int(next_direction) >= 0:
+        if int(next_direction) == 1:
+            if int(next_wick) == 2 and setup_direction == "long":
+                return "with"
+            if int(next_wick) == 1 and setup_direction == "short":
+                return "with"
+            return "quiet"
+        if setup_direction == "long":
+            return "with" if int(next_direction) == 2 else "against"
+        return "with" if int(next_direction) == 0 else "against"
     if int(future_candle_class) < 0:
         return timing
     family = candle_family_from_class(int(future_candle_class))
@@ -310,8 +363,14 @@ def build_tf_market_view(
     """
     resolution = _resolution_from_tf_key(tf_key)
     continuous = prediction_context.get("transformer_continuous_preds") or {}
-    mfe = float(continuous.get("mfe", prediction_context.get("mfe", 0.0)) or 0.0)
-    mae = float(continuous.get("mae", prediction_context.get("mae", 0.0)) or 0.0)
+    mfe = float(
+        continuous.get("mfe", continuous.get("h5m_mfe", prediction_context.get("mfe", 0.0)))
+        or 0.0
+    )
+    mae = float(
+        continuous.get("mae", continuous.get("h5m_mae", prediction_context.get("mae", 0.0)))
+        or 0.0
+    )
     long_edge = float(
         prediction_context.get("long_edge")
         if prediction_context.get("long_edge") is not None
@@ -332,8 +391,12 @@ def build_tf_market_view(
         or prediction_context.get("vol_regime")
         or "NORMAL"
     ).upper()
-    future_vol = float(continuous.get("future_volatility", 0.0) or 0.0)
-    trend_strength = float(continuous.get("trend_strength", 0.0) or 0.0)
+    future_vol = float(
+        continuous.get("future_volatility", continuous.get("h5m_vol", 0.0)) or 0.0
+    )
+    trend_strength = float(
+        continuous.get("trend_strength", continuous.get("h5m_trend_strength", 0.0)) or 0.0
+    )
     drawdown_before_mfe = float(
         continuous.get("drawdown_before_mfe", 0.0) or 0.0
     )
@@ -351,6 +414,13 @@ def build_tf_market_view(
     future_candle_name = str(
         prediction_context.get("transformer_future_candle_name") or ""
     )
+    next_direction = int(prediction_context.get("next_direction", -1) or -1)
+    next_wick = int(prediction_context.get("next_wick", -1) or -1)
+    volume_confirms = float(prediction_context.get("volume_confirms", 1.0) or 0.0)
+    pattern_validates = float(prediction_context.get("pattern_validates", 1.0) or 0.0)
+    horizon_t24_dir = int(prediction_context.get("horizon_t24_dir", -1) or -1)
+    raw_ladder = prediction_context.get("horizon_ladder") or {}
+    horizon_ladder: Dict[str, Any] = dict(raw_ladder) if isinstance(raw_ladder, Mapping) else {}
     typical = typical_abs_edge_from_metadata(bundle_metadata)
     imbalance_z = float(path_edge) / typical
     imbalance_ratio = _imbalance_ratio(mfe, mae)
@@ -385,11 +455,23 @@ def build_tf_market_view(
             structure_outcome=structure_outcome,
         )
     elif tf_key in _TIMING_TFS:
-        timing_stance = _timing_from_z_and_candle(
-            setup_direction=setup_direction,
-            imbalance_z=imbalance_z,
-            future_candle_class=future_candle_class,
-        )
+        if horizon_ladder:
+            timing_stance = _timing_from_short_horizons(
+                setup_direction=setup_direction,
+                h5m_dir=int((horizon_ladder.get("h5m") or {}).get("dir", -1)),
+                h10m_dir=int((horizon_ladder.get("h10m") or {}).get("dir", -1)),
+                imbalance_z=imbalance_z,
+            )
+        else:
+            timing_stance = _timing_from_z_and_candle(
+                setup_direction=setup_direction,
+                imbalance_z=imbalance_z,
+                future_candle_class=future_candle_class,
+                next_direction=next_direction,
+                next_wick=next_wick,
+                volume_confirms=volume_confirms,
+                pattern_validates=pattern_validates,
+            )
 
     conf = float(min(1.0, abs(imbalance_z) / max(_SETUP_STRONG_Z, 1e-6)))
     return TfMarketView(
@@ -427,6 +509,12 @@ def build_tf_market_view(
         future_candle_name=future_candle_name,
         candle_follow_through_atr=follow_through,
         structure_delta=structure_delta,
+        next_direction=next_direction,
+        next_wick=next_wick,
+        volume_confirms=volume_confirms,
+        pattern_validates=pattern_validates,
+        horizon_t24_dir=horizon_t24_dir,
+        horizon_ladder=horizon_ladder,
     )
 
 
@@ -594,11 +682,42 @@ def synthesize_agent_decision(
     timing_view = view_map.get("tf_5m")
     timing = "quiet"
     if timing_view is not None:
-        timing = _timing_from_z_and_candle(
-            setup_direction=setup_dir,
-            imbalance_z=timing_view.path_imbalance_z,
-            future_candle_class=timing_view.future_candle_class,
-        )
+        ladder = dict(timing_view.horizon_ladder or {})
+        if not ladder:
+            if float(timing_view.volume_confirms) < 0.5 or float(
+                timing_view.pattern_validates
+            ) < 0.5:
+                reason_codes.append("timing_chart_volume_gate")
+                empty.setup = setup
+                empty.timing = "quiet"
+                empty.reason_codes = reason_codes
+                return empty
+            hz24 = int(timing_view.horizon_t24_dir)
+            if hz24 >= 0 and climate in ("long", "short"):
+                hz_long = hz24 == 2
+                hz_short = hz24 == 0
+                if (climate == "long" and hz_short) or (climate == "short" and hz_long):
+                    reason_codes.append("timing_horizon_fights_climate")
+                    empty.setup = setup
+                    empty.timing = "against"
+                    empty.reason_codes = reason_codes
+                    return empty
+            timing = _timing_from_z_and_candle(
+                setup_direction=setup_dir,
+                imbalance_z=timing_view.path_imbalance_z,
+                future_candle_class=timing_view.future_candle_class,
+                next_direction=timing_view.next_direction,
+                next_wick=timing_view.next_wick,
+                volume_confirms=timing_view.volume_confirms,
+                pattern_validates=timing_view.pattern_validates,
+            )
+        else:
+            timing = _timing_from_short_horizons(
+                setup_direction=setup_dir,
+                h5m_dir=int((ladder.get("h5m") or {}).get("dir", -1)),
+                h10m_dir=int((ladder.get("h10m") or {}).get("dir", -1)),
+                imbalance_z=timing_view.path_imbalance_z,
+            )
         timing_view.timing_stance = timing
         reason_codes.append(f"timing_{timing}")
     else:

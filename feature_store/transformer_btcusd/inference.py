@@ -15,12 +15,19 @@ from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     FEATURE_COLS,
     FEATURE_CONTRACT_VERSION,
+    FEATURE_CONTRACT_VERSION_V6,
+    FEATURE_CONTRACT_VERSION_V7,
     ONNX_OUTPUT_NAMES,
+    ONNX_OUTPUT_NAMES_V6,
+    ONNX_OUTPUT_NAMES_V7,
+    ONNX_OUTPUT_NAMES_V8,
     STRUCTURE_OUTCOME_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
+    V8_CONTINUOUS_LABEL_COLS,
     default_training_config,
     model_family_for_resolution,
     onnx_filename_for_resolution,
+    onnx_output_names_for_contract,
 )
 
 
@@ -137,14 +144,27 @@ def parse_regime_prediction(
     return idx, str(name), prob_map
 
 
-def require_onnx_output_names(output_names: Sequence[str]) -> None:
-    """Reject v5 (or other) bundles that lack the v6 ONNX heads."""
+def require_onnx_output_names(
+    output_names: Sequence[str],
+    *,
+    contract_version: str | None = None,
+    resolution: str = "15m",
+) -> None:
+    """Reject bundles that lack the heads required by the given contract."""
     have = {str(name) for name in output_names}
-    missing = [name for name in ONNX_OUTPUT_NAMES if name not in have]
+    ver = str(contract_version or FEATURE_CONTRACT_VERSION_V6)
+    required = onnx_output_names_for_contract(ver, resolution=resolution)
+    known = (
+        FEATURE_CONTRACT_VERSION,
+        FEATURE_CONTRACT_VERSION_V7,
+        FEATURE_CONTRACT_VERSION_V6,
+    )
+    if ver not in known and not required:
+        required = ONNX_OUTPUT_NAMES_V6
+    missing = [name for name in required if name not in have]
     if missing:
         raise RuntimeError(
-            f"ONNX bundle is not {FEATURE_CONTRACT_VERSION}: missing outputs "
-            f"{missing}. Retrain all TFs."
+            f"ONNX bundle is not {ver}: missing outputs {missing}. Retrain all TFs."
         )
 
 
@@ -156,23 +176,41 @@ def feature_config_from_training_export(
     label_std: Sequence[float],
     q_edges: Sequence[float],
     config: Mapping[str, Any],
+    contract_version: str | None = None,
+    onnx_output_names: Sequence[str] | None = None,
+    continuous_label_cols: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """Build feature_config.json payload written by Colab export cell."""
+    version = str(contract_version or FEATURE_CONTRACT_VERSION_V6)
+    if onnx_output_names is not None:
+        names = list(onnx_output_names)
+    elif version == FEATURE_CONTRACT_VERSION:
+        names = list(ONNX_OUTPUT_NAMES_V8)
+    elif version == FEATURE_CONTRACT_VERSION_V7:
+        names = list(ONNX_OUTPUT_NAMES_V7)
+    else:
+        names = list(ONNX_OUTPUT_NAMES)
+    if continuous_label_cols is not None:
+        label_cols = list(continuous_label_cols)
+    elif version == FEATURE_CONTRACT_VERSION:
+        label_cols = list(V8_CONTINUOUS_LABEL_COLS)
+    else:
+        label_cols = list(CONTINUOUS_LABEL_COLS)
     return {
-        "feature_contract_version": FEATURE_CONTRACT_VERSION,
+        "feature_contract_version": version,
         "feature_cols": list(feature_cols),
         "categorical_cols": [CANDLE_CLASS_COL],
         "categorical_cardinality": {CANDLE_CLASS_COL: CANDLE_CLASS_CARDINALITY},
         "candle_class_names": {str(k): v for k, v in CANDLE_CLASS_NAMES.items()},
         "window_len": int(window_len),
-        "continuous_label_cols": list(CONTINUOUS_LABEL_COLS),
+        "continuous_label_cols": label_cols,
         "label_mean": [float(x) for x in label_mean],
         "label_std": [float(x) for x in label_std],
         "regime_names": {"0": "LOW", "1": "NORMAL", "2": "HIGH", "3": "EXTREME"},
         "structure_outcome_names": {
             str(k): v for k, v in STRUCTURE_OUTCOME_NAMES.items()
         },
-        "onnx_output_names": list(ONNX_OUTPUT_NAMES),
+        "onnx_output_names": names,
         "vol_regime_quantile_edges": [float(x) for x in q_edges],
         "config": dict(config),
     }
@@ -186,10 +224,12 @@ def metadata_from_training_export(
     config: Mapping[str, Any],
     test_metrics: Mapping[str, Any] | None = None,
     export_quality: Mapping[str, Any] | None = None,
+    onnx_output_names: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     """Build metadata_transformer.json for a per-TF bundle."""
     res = resolution.strip().lower()
     cfg = dict(config)
+    names = list(onnx_output_names or ONNX_OUTPUT_NAMES)
     meta: Dict[str, Any] = {
         "version": "transformer_per_tf_v1",
         "model_name": f"jacksparrow_transformer_BTCUSD_{res}",
@@ -203,7 +243,7 @@ def metadata_from_training_export(
         "atr_period": int(cfg.get("atr_period") or 14),
         "default_threshold": float(cfg.get("default_threshold") or 0.005),
         "primary_signal_mode": "path_edge",
-        "onnx_output_names": list(ONNX_OUTPUT_NAMES),
+        "onnx_output_names": names,
         "label_mean": [float(x) for x in label_mean],
         "label_std": [float(x) for x in label_std],
         "test_metrics": dict(test_metrics or {}),

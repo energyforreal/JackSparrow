@@ -69,13 +69,13 @@ def compute_oi_derivatives(
     )
     oi_zscore = ((oi_s - oi_mu) / oi_std).fillna(0.0).clip(-4.0, 4.0)
 
-    oi_lagged = oi_s.shift(change_window).bfill().fillna(oi_s)
+    oi_lagged = oi_s.shift(change_window)
     oi_change_2 = (
         ((oi_s - oi_lagged) / (oi_lagged.abs() + _EPS)).fillna(0.0).clip(-0.05, 0.05)
     )
 
     close_s = primary["close"].astype(float)
-    close_lagged = close_s.shift(change_window).bfill().fillna(close_s)
+    close_lagged = close_s.shift(change_window)
     ret_2 = ((close_s - close_lagged) / (close_lagged.abs() + _EPS)).fillna(0.0)
     oi_price_divergence = (
         np.sign(oi_change_2.values) * -np.sign(ret_2.values)
