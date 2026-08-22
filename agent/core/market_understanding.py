@@ -44,6 +44,14 @@ _SETUP_MIN_TREND_STRENGTH = 0.8
 # Same-side OI rise can allow STRONG; opposing OI never flips thesis
 _OI_CONFIRM_MIN = 0.01
 _HIGH_VOL_SIZE_CAP = 0.70
+# Signed P(up)-P(down) margin before 5m/10m timing is with/against
+_TIMING_DIR_EVIDENCE = 0.15
+
+_BULLISH_PROB_KEYS = ("STRONG_UP", "UP", "BULLISH")
+_BEARISH_PROB_KEYS = ("STRONG_DOWN", "DOWN", "BEARISH")
+_BULLISH_DIR_NAMES = frozenset({"UP", "STRONG_UP", "BULLISH"})
+_BEARISH_DIR_NAMES = frozenset({"DOWN", "STRONG_DOWN", "BEARISH"})
+_NEUTRAL_DIR_NAMES = frozenset({"NEUTRAL"})
 
 _MFE_IDX = CONTINUOUS_LABEL_COLS.index("mfe")
 _MAE_IDX = CONTINUOUS_LABEL_COLS.index("mae")
@@ -276,26 +284,86 @@ def _apply_setup_filters(
     return setup_stance, codes
 
 
+def _prob_mass(probs: Mapping[str, Any], keys: Sequence[str]) -> float:
+    """Sum probability mass for aliases (case-insensitive)."""
+    lookup = {str(k).strip().upper(): float(v or 0.0) for k, v in probs.items()}
+    return float(sum(lookup.get(str(k).upper(), 0.0) for k in keys))
+
+
+def direction_evidence(rung: Mapping[str, Any] | None) -> float:
+    """Signed bullish evidence in ``[-1, 1]`` from a horizon ladder rung.
+
+    Prefers softmax ``dir_probs``. Without probs, uses ``dir_name``. Bare
+    integer ``dir`` keeps 3-class meaning for 0/1/2 (2=bullish) so older
+    tests still pass; ids 3/4 are 5-class UP/STRONG_UP.
+    """
+    if not isinstance(rung, Mapping):
+        return 0.0
+    probs = rung.get("dir_probs")
+    if isinstance(probs, Mapping) and probs:
+        up = _prob_mass(probs, _BULLISH_PROB_KEYS)
+        down = _prob_mass(probs, _BEARISH_PROB_KEYS)
+        return float(up - down)
+    name = str(rung.get("dir_name") or "").strip().upper()
+    if name in _BULLISH_DIR_NAMES:
+        return 1.0
+    if name in _BEARISH_DIR_NAMES:
+        return -1.0
+    if name in _NEUTRAL_DIR_NAMES:
+        return 0.0
+    try:
+        raw_dir = rung.get("dir", -1)
+        d = -1 if raw_dir is None else int(raw_dir)
+    except (TypeError, ValueError):
+        return 0.0
+    if d in (3, 4) or d == 2:
+        return 1.0
+    if d == 0:
+        return -1.0
+    return 0.0
+
+
 def _timing_from_short_horizons(
     *,
     setup_direction: Optional[str],
-    h5m_dir: int,
-    h10m_dir: int,
+    h5m_rung: Mapping[str, Any] | None = None,
+    h10m_rung: Mapping[str, Any] | None = None,
     imbalance_z: float,
+    h5m_dir: int = -1,
+    h10m_dir: int = -1,
+    evidence_margin: float = _TIMING_DIR_EVIDENCE,
 ) -> str:
-    """5m timing from 5m+10m direction packets (v8). Never uses 15m–2h heads."""
+    """5m timing from 5m+10m direction packets. Never uses 15m–2h heads.
+
+    ``h5m_dir`` / ``h10m_dir`` remain as a fallback when rungs are omitted.
+    """
     if setup_direction not in ("long", "short"):
         return "quiet"
 
-    def _align(direction: int) -> str:
-        if int(direction) < 0 or int(direction) == 1:
-            return "quiet"
-        if setup_direction == "long":
-            return "with" if int(direction) == 2 else "against"
-        return "with" if int(direction) == 0 else "against"
+    def _rung_or_dir(rung: Mapping[str, Any] | None, raw_dir: int) -> Mapping[str, Any]:
+        if isinstance(rung, Mapping) and rung:
+            return rung
+        return {"dir": int(raw_dir)}
 
-    t5 = _align(int(h5m_dir))
-    t10 = _align(int(h10m_dir))
+    e5 = direction_evidence(_rung_or_dir(h5m_rung, h5m_dir))
+    e10 = direction_evidence(_rung_or_dir(h10m_rung, h10m_dir))
+    margin = float(evidence_margin)
+
+    def _side(evidence: float) -> str:
+        if setup_direction == "long":
+            if evidence <= -margin:
+                return "against"
+            if evidence >= margin:
+                return "with"
+            return "quiet"
+        if evidence >= margin:
+            return "against"
+        if evidence <= -margin:
+            return "with"
+        return "quiet"
+
+    t5 = _side(e5)
+    t10 = _side(e10)
     if t5 == "against" or t10 == "against":
         return "against"
     if t5 == "with" or t10 == "with":
@@ -458,8 +526,8 @@ def build_tf_market_view(
         if horizon_ladder:
             timing_stance = _timing_from_short_horizons(
                 setup_direction=setup_direction,
-                h5m_dir=int((horizon_ladder.get("h5m") or {}).get("dir", -1)),
-                h10m_dir=int((horizon_ladder.get("h10m") or {}).get("dir", -1)),
+                h5m_rung=horizon_ladder.get("h5m"),
+                h10m_rung=horizon_ladder.get("h10m"),
                 imbalance_z=imbalance_z,
             )
         else:
@@ -714,8 +782,8 @@ def synthesize_agent_decision(
         else:
             timing = _timing_from_short_horizons(
                 setup_direction=setup_dir,
-                h5m_dir=int((ladder.get("h5m") or {}).get("dir", -1)),
-                h10m_dir=int((ladder.get("h10m") or {}).get("dir", -1)),
+                h5m_rung=ladder.get("h5m"),
+                h10m_rung=ladder.get("h10m"),
                 imbalance_z=timing_view.path_imbalance_z,
             )
         timing_view.timing_stance = timing

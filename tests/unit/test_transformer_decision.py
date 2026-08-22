@@ -130,3 +130,4 @@ def test_context_stores_horizon_ladder_and_h5m_path_stats() -> None:
     assert ctx["horizon_ladder"]["h5m"]["dir"] == 2
     assert ctx["transformer_future_candle_class"] == -1
     assert ctx["path_edge"] == pytest.approx(0.015)
+    assert ctx["chart_pattern"] == -1

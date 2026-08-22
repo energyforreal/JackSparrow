@@ -1,4 +1,4 @@
-"""v8 multi-horizon 5m research: leakage, quality, labels, scaler, ablation hook."""
+"""v9 multi-horizon 5m research: leakage, quality, labels, scaler, ablation hook."""
 
 from __future__ import annotations
 
@@ -13,21 +13,24 @@ from feature_store.transformer_btcusd.contract import (
     CHART_PATTERN_COL,
     FEATURE_CONTRACT_VERSION,
     FEATURE_CONTRACT_VERSION_V6,
+    FEATURE_CONTRACT_VERSION_V8,
     HORIZON_BARS_5M,
     HORIZON_DIR_COLS,
     HORIZON_STRUCTURE_COLS,
     NEXT_BODY_COL,
     NEXT_DIRECTION_COL,
+    NEXT_DIRECTION_NAMES,
     NEXT_RANGE_COL,
     NEXT_WICK_COL,
     ONNX_OUTPUT_NAMES,
     ONNX_OUTPUT_NAMES_V6,
     ONNX_OUTPUT_NAMES_V8,
+    ONNX_OUTPUT_NAMES_V9,
     V8_CONTINUOUS_LABEL_COLS,
     ablation_feature_groups,
     default_research_config,
     onnx_output_names_for_contract,
-    v8_feature_cols_for_resolution,
+    v9_feature_cols_for_resolution,
 )
 from feature_store.transformer_btcusd.features import add_features, assemble_raw_frame
 from feature_store.transformer_btcusd.inference import (
@@ -102,10 +105,11 @@ def test_funding_ffill_does_not_backfill_future() -> None:
 
 
 def test_leakage_audit_rejects_horizon_targets() -> None:
-    cols = list(v8_feature_cols_for_resolution("5m"))
+    cols = list(v9_feature_cols_for_resolution("5m"))
     leakage_audit(cols)
     assert "h10m_dir" not in cols
     assert "h5m_mfe" not in cols
+    assert CHART_PATTERN_COL not in cols
     with pytest.raises(RuntimeError, match="Future/target"):
         leakage_audit(cols + ["h10m_dir"])
 
@@ -172,10 +176,14 @@ def test_v6_onnx_names_unchanged_for_all_tf_trainer() -> None:
     )
     assert v6_15m == ONNX_OUTPUT_NAMES_V6
     assert v6_5m == ONNX_OUTPUT_NAMES_V6
-    v8_5m = onnx_output_names_for_contract(FEATURE_CONTRACT_VERSION, resolution="5m")
+    v8_5m = onnx_output_names_for_contract(FEATURE_CONTRACT_VERSION_V8, resolution="5m")
     assert v8_5m == ONNX_OUTPUT_NAMES_V8
     assert "h10m_dir_logits" in v8_5m
-    assert "next_direction_logits" not in v8_5m
+    assert "chart_pattern_logits" not in v8_5m
+    v9_5m = onnx_output_names_for_contract(FEATURE_CONTRACT_VERSION, resolution="5m")
+    assert v9_5m == ONNX_OUTPUT_NAMES_V9
+    assert "chart_pattern_logits" in v9_5m
+    assert "next_direction_logits" not in v9_5m
     assert onnx_output_names_for_contract(
         FEATURE_CONTRACT_VERSION, resolution="15m"
     ) == ONNX_OUTPUT_NAMES_V6
@@ -184,8 +192,9 @@ def test_v6_onnx_names_unchanged_for_all_tf_trainer() -> None:
 def test_ablation_groups_keep_candle_chart_as_inputs() -> None:
     groups = ablation_feature_groups("5m")
     assert "body_ratio" in groups["B"]
-    assert CHART_PATTERN_COL in groups["E"]
-    assert CHART_PATTERN_COL in groups["F"]
+    assert CHART_PATTERN_COL not in groups["E"]
+    assert CHART_PATTERN_COL not in groups["F"]
+    assert "peak_diff_atr" in groups["E"]
     assert "h10m_dir" not in groups["F"]
     assert "h5m_mfe" not in groups["F"]
 
@@ -208,19 +217,98 @@ def test_horizon_labels_depend_on_t_plus_1_to_k_only() -> None:
         }
     )
     labeled = compute_horizon_behavior_labels(df)
-    assert int(labeled.loc[40, "h10m_dir"]) == 1
+    assert NEXT_DIRECTION_NAMES[int(labeled.loc[40, "h10m_dir"])] == "NEUTRAL"
 
     beyond = df.copy()
     beyond.loc[43, "close"] = 53000.0
     beyond.loc[43, "high"] = 53020.0
     labeled_beyond = compute_horizon_behavior_labels(beyond)
-    assert int(labeled_beyond.loc[40, "h10m_dir"]) == 1
+    assert NEXT_DIRECTION_NAMES[int(labeled_beyond.loc[40, "h10m_dir"])] == "NEUTRAL"
 
     inside = df.copy()
     inside.loc[42, "close"] = 53000.0
     inside.loc[42, "high"] = 53020.0
     labeled_inside = compute_horizon_behavior_labels(inside)
-    assert int(labeled_inside.loc[40, "h10m_dir"]) == 2
+    assert NEXT_DIRECTION_NAMES[int(labeled_inside.loc[40, "h10m_dir"])] == "STRONG_UP"
+
+
+def test_horizon_direction_bins_weak_and_strong_atr() -> None:
+    n = 80
+    close = np.full(n, 50000.0)
+    atr = np.full(n, 20.0)
+    df = pd.DataFrame(
+        {
+            "open": close - 5.0,
+            "high": close + 10.0,
+            "low": close - 10.0,
+            "close": close,
+            "atr": atr,
+            "structure_bias": np.zeros(n),
+            "failed_break": np.zeros(n),
+            "bars_since_breakout": np.full(n, 99.0),
+            "vol_z": np.zeros(n),
+            "breakout_vol_ratio": np.ones(n),
+        }
+    )
+    up = df.copy()
+    up.loc[42, "close"] = 50000.0 + 20.0  # 1 ATR → UP
+    labeled_up = compute_horizon_behavior_labels(up)
+    assert NEXT_DIRECTION_NAMES[int(labeled_up.loc[40, "h10m_dir"])] == "UP"
+    down = df.copy()
+    down.loc[42, "close"] = 50000.0 - 20.0
+    labeled_down = compute_horizon_behavior_labels(down)
+    assert NEXT_DIRECTION_NAMES[int(labeled_down.loc[40, "h10m_dir"])] == "DOWN"
+
+
+def test_h5m_vol_is_abs_log_return() -> None:
+    n = 80
+    close = np.full(n, 50000.0)
+    close[41] = 50500.0
+    df = pd.DataFrame(
+        {
+            "open": close - 5.0,
+            "high": close + 10.0,
+            "low": close - 10.0,
+            "close": close,
+            "atr": np.full(n, 20.0),
+            "structure_bias": np.zeros(n),
+            "failed_break": np.zeros(n),
+            "bars_since_breakout": np.full(n, 99.0),
+            "vol_z": np.zeros(n),
+            "breakout_vol_ratio": np.ones(n),
+        }
+    )
+    labeled = compute_horizon_behavior_labels(df)
+    expected = abs(np.log(50500.0 / 50000.0))
+    assert float(labeled.loc[40, "h5m_vol"]) == pytest.approx(expected)
+    assert float(labeled.loc[42, "h5m_vol"]) != pytest.approx(expected)
+
+
+def test_h2h_structure_ignores_mid_window_breakout() -> None:
+    n = 80
+    close = np.full(n, 50000.0)
+    bars_bo = np.full(n, 99.0)
+    bars_bo[50] = 0.0
+    df = pd.DataFrame(
+        {
+            "open": close - 5.0,
+            "high": close + 10.0,
+            "low": close - 10.0,
+            "close": close,
+            "atr": np.full(n, 20.0),
+            "structure_bias": np.zeros(n),
+            "failed_break": np.zeros(n),
+            "bars_since_breakout": bars_bo,
+            "vol_z": np.zeros(n),
+            "breakout_vol_ratio": np.ones(n),
+        }
+    )
+    labeled = compute_horizon_behavior_labels(df)
+    assert int(labeled.loc[40, "h2h_structure"]) != 3
+    terminal = df.copy()
+    terminal.loc[64, "bars_since_breakout"] = 0.0
+    labeled_end = compute_horizon_behavior_labels(terminal)
+    assert int(labeled_end.loc[40, "h2h_structure"]) == 3
 
 
 def test_donchian_features_stay_causal_when_future_bar_moves() -> None:
@@ -265,17 +353,18 @@ def test_horizon_h1h_uses_close_t_plus_12() -> None:
     )
     labeled = compute_horizon_behavior_labels(df)
     assert HORIZON_DIR_COLS[4] == "h1h_dir"
-    assert int(labeled.loc[40, "h1h_dir"]) == 2
-    assert int(labeled.loc[40, "h10m_dir"]) == 1
+    assert NEXT_DIRECTION_NAMES[int(labeled.loc[40, "h1h_dir"])] == "STRONG_UP"
+    assert NEXT_DIRECTION_NAMES[int(labeled.loc[40, "h10m_dir"])] == "NEUTRAL"
 
 
 def test_horizon_labels_absent_from_features() -> None:
     raw = _ohlcv(220)
     labeled = build_labeled_frame(raw, config=default_research_config())
     feature_cols = [
-        c for c in v8_feature_cols_for_resolution("5m") if c in labeled.columns
+        c for c in v9_feature_cols_for_resolution("5m") if c in labeled.columns
     ]
     leakage_audit(feature_cols)
+    assert CHART_PATTERN_COL not in feature_cols
     for col in list(HORIZON_DIR_COLS) + list(HORIZON_STRUCTURE_COLS):
         assert col in labeled.columns
         assert col not in feature_cols
@@ -295,8 +384,13 @@ def test_chart_pattern_id_present_after_structure() -> None:
 def test_require_onnx_output_names_v6_default_and_v8() -> None:
     require_onnx_output_names(ONNX_OUTPUT_NAMES)
     require_onnx_output_names(
-        ONNX_OUTPUT_NAMES_V8,
+        ONNX_OUTPUT_NAMES_V9,
         contract_version=FEATURE_CONTRACT_VERSION,
+        resolution="5m",
+    )
+    require_onnx_output_names(
+        ONNX_OUTPUT_NAMES_V8,
+        contract_version=FEATURE_CONTRACT_VERSION_V8,
         resolution="5m",
     )
     with pytest.raises(RuntimeError, match="missing outputs"):
@@ -331,7 +425,7 @@ def test_ablation_a_vs_f_tiny_synthetic() -> None:
     feat = add_features(assemble_raw_frame(raw), resolution_minutes=5)
     labeled = compute_horizon_behavior_labels(feat)
     labeled = labeled.iloc[:-25].reset_index(drop=True)
-    feature_cols = [c for c in v8_feature_cols_for_resolution("5m") if c in labeled.columns]
+    feature_cols = [c for c in v9_feature_cols_for_resolution("5m") if c in labeled.columns]
     labeled[feature_cols] = (
         labeled[feature_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     )
@@ -376,7 +470,7 @@ def test_default_research_config_does_not_gate_structure_loss() -> None:
 def test_scaler_and_windows_sanitize_inf_nan() -> None:
     raw = _ohlcv(80)
     feat = add_features(assemble_raw_frame(raw), resolution_minutes=5)
-    cols = [c for c in v8_feature_cols_for_resolution("5m") if c in feat.columns][:8]
+    cols = [c for c in v9_feature_cols_for_resolution("5m") if c in feat.columns][:8]
     work = feat.copy()
     work.loc[10, cols[0]] = np.inf
     work.loc[11, cols[1]] = np.nan
@@ -433,6 +527,7 @@ def _tiny_structure_batch(
         torch.ones(n, dtype=torch.long),
         torch.ones(n, n_h, dtype=torch.long),
         torch.zeros(n, n_h, dtype=torch.long),
+        torch.zeros(n, dtype=torch.long),
     )
     return model, batch
 
@@ -454,10 +549,13 @@ def test_v8_model_outputs_match_onnx_names() -> None:
     model.eval()
     with torch.no_grad():
         outs = model(batch[0], batch[1])
-    assert len(outs) == len(ONNX_OUTPUT_NAMES_V8)
-    assert outs[-2].shape[-1] == len(V8_CONTINUOUS_LABEL_COLS)
-    assert ONNX_OUTPUT_NAMES_V8[-2] == "continuous_pred"
-    assert ONNX_OUTPUT_NAMES_V8[1] == "h10m_dir_logits"
+    assert len(outs) == len(ONNX_OUTPUT_NAMES_V9)
+    assert outs[-3].shape[-1] == len(V8_CONTINUOUS_LABEL_COLS)
+    assert ONNX_OUTPUT_NAMES_V9[-3] == "continuous_pred"
+    assert ONNX_OUTPUT_NAMES_V9[-1] == "chart_pattern_logits"
+    assert ONNX_OUTPUT_NAMES_V9[1] == "h10m_dir_logits"
+    assert outs[0].shape[-1] == 5
+    assert outs[-1].shape[-1] == 9
 
 
 def test_windows_pack_six_horizons_and_24_path_cols() -> None:
@@ -465,13 +563,15 @@ def test_windows_pack_six_horizons_and_24_path_cols() -> None:
     feat = add_features(assemble_raw_frame(raw), resolution_minutes=5)
     labeled = compute_horizon_behavior_labels(feat)
     feature_cols = [
-        c for c in v8_feature_cols_for_resolution("5m") if c in labeled.columns
+        c for c in v9_feature_cols_for_resolution("5m") if c in labeled.columns
     ][:8]
     packed = windows_from_frame(
         labeled, feature_cols=feature_cols, window_len=16, stride=8
     )
     assert packed["horizon_dirs"].shape[1] == 6
     assert packed["horizon_structs"].shape[1] == 6
+    assert packed["pattern_ids"].shape[0] == packed["x"].shape[0]
+    assert packed["horizon_dirs"].max() <= 4
     assert packed["y_path"].shape[1] == len(V8_CONTINUOUS_LABEL_COLS)
 
 

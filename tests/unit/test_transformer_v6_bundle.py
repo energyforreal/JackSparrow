@@ -12,6 +12,7 @@ from feature_store.transformer_btcusd.contract import (
     FEATURE_CONTRACT_VERSION,
     FEATURE_CONTRACT_VERSION_V6,
     FEATURE_CONTRACT_VERSION_V7,
+    FEATURE_CONTRACT_VERSION_V8,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
     model_family_for_resolution,
@@ -87,6 +88,13 @@ def test_from_metadata_path_accepts_v7_contract(tmp_path: Path) -> None:
 
 
 def test_from_metadata_path_accepts_v8_contract(tmp_path: Path) -> None:
+    node = TransformerModelNode.from_metadata_path(
+        _write_bundle(tmp_path, FEATURE_CONTRACT_VERSION_V8)
+    )
+    assert node.resolution == "15m"
+
+
+def test_from_metadata_path_accepts_current_contract(tmp_path: Path) -> None:
     node = TransformerModelNode.from_metadata_path(
         _write_bundle(tmp_path, FEATURE_CONTRACT_VERSION)
     )

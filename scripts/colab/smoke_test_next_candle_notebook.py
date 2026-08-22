@@ -23,9 +23,10 @@ REQUIRED_SYMBOLS = (
     "compute_horizon_behavior_labels",
     "fit_train_scaler",
     "sanitize_feature_values",
-    "export_v8_bundle",
+    "export_v9_bundle",
     "FEATURE_CONTRACT_VERSION",
     "chart_pattern_id",
+    "direction_class_mix_report",
     "walk_forward_slices",
     "ablation_feature_groups",
 )

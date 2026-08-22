@@ -215,6 +215,9 @@ def build_transformer_prediction_context(
     volume_confirms: float = 1.0,
     horizon_t24_dir: int = -1,
     horizon_ladder: Optional[Mapping[str, Any]] = None,
+    chart_pattern: int = -1,
+    chart_pattern_name: str = "",
+    chart_pattern_probs: Optional[Mapping[str, float]] = None,
 ) -> Tuple[Dict[str, Any], float, float]:
     """Return (out_ctx, primary_prediction, primary_confidence) for one TF model."""
     future_vol = float(
@@ -303,6 +306,9 @@ def build_transformer_prediction_context(
         "volume_confirms": float(volume_confirms),
         "horizon_t24_dir": int(horizon_t24_dir),
         "horizon_ladder": dict(horizon_ladder or {}),
+        "chart_pattern": int(chart_pattern),
+        "chart_pattern_name": str(chart_pattern_name or ""),
+        "chart_pattern_probs": dict(chart_pattern_probs or {}),
         "p_regime_favorable": 1.0 - unc if regime == "trending" else max(0.0, 0.5 - unc),
         "p_setup_quality": setup_quality,
         "p_vol_expansion": float(np.clip(future_vol / 0.01, 0.0, 1.0)),

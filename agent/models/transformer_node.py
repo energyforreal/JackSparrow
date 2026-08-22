@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -20,11 +20,14 @@ from agent.models.transformer_context_builder import build_transformer_predictio
 from feature_store.transformer_btcusd.contract import (
     CANDLE_CLASS_COL,
     CANDLE_CLASS_NAMES,
+    CHART_PATTERN_NAMES,
     FEATURE_CONTRACT_VERSION,
     FEATURE_CONTRACT_VERSION_V6,
     FEATURE_CONTRACT_VERSION_V7,
+    FEATURE_CONTRACT_VERSION_V8,
     HORIZON_KEYS,
     NEXT_DIRECTION_NAMES,
+    NEXT_DIRECTION_NAMES_V8,
     NEXT_WICK_NAMES,
     RESOLUTION_MINUTES,
     STRUCTURE_OUTCOME_NAMES,
@@ -35,6 +38,7 @@ from feature_store.transformer_btcusd.contract import (
     feature_cols_for_resolution,
     onnx_filename_for_resolution,
     v7_feature_cols_for_resolution,
+    v9_feature_cols_for_resolution,
 )
 from feature_store.transformer_btcusd.features import (
     build_feature_matrix,
@@ -153,14 +157,16 @@ class TransformerModelNode(MCPModelNode):
         bundle_contract = str(feature_config.get("feature_contract_version") or "")
         allowed = {
             FEATURE_CONTRACT_VERSION,
+            FEATURE_CONTRACT_VERSION_V8,
             FEATURE_CONTRACT_VERSION_V7,
             FEATURE_CONTRACT_VERSION_V6,
         }
         if bundle_contract and bundle_contract not in allowed:
             raise RuntimeError(
                 f"Transformer bundle contract {bundle_contract!r} is not "
-                f"{FEATURE_CONTRACT_VERSION}, {FEATURE_CONTRACT_VERSION_V7}, "
-                f"or {FEATURE_CONTRACT_VERSION_V6}. Retrain all TFs."
+                f"{FEATURE_CONTRACT_VERSION}, {FEATURE_CONTRACT_VERSION_V8}, "
+                f"{FEATURE_CONTRACT_VERSION_V7}, or {FEATURE_CONTRACT_VERSION_V6}. "
+                "Retrain all TFs."
             )
         resolution = str(raw.get("resolution") or "15m")
         onnx_name = str(
@@ -282,8 +288,12 @@ class TransformerModelNode(MCPModelNode):
             )
         return df
 
-    def _decode_v8(
-        self, named: Dict[str, Any]
+    def _decode_horizon_outputs(
+        self,
+        named: Dict[str, Any],
+        *,
+        dir_names: Dict[str, str],
+        include_pattern: bool = False,
     ) -> Tuple[
         Dict[str, float],
         str,
@@ -309,21 +319,22 @@ class TransformerModelNode(MCPModelNode):
             named["volume_state_logits"][0],
             {str(k): v for k, v in VOLUME_STATE_NAMES.items()},
         )
-        dir_names = {str(k): v for k, v in NEXT_DIRECTION_NAMES.items()}
         struct_names = {str(k): v for k, v in STRUCTURE_OUTCOME_NAMES.items()}
         ladder: Dict[str, Any] = {}
         for key in HORIZON_KEYS:
-            d_idx, d_name, _d_probs = parse_regime_prediction(
+            d_idx, d_name, d_probs = parse_regime_prediction(
                 named[f"{key}_dir_logits"][0], dir_names
             )
-            s_idx, s_name, _s_probs = parse_regime_prediction(
+            s_idx, s_name, s_probs = parse_regime_prediction(
                 named[f"{key}_structure_logits"][0], struct_names
             )
             ladder[key] = {
                 "dir": int(d_idx),
                 "dir_name": d_name,
+                "dir_probs": d_probs,
                 "structure": int(s_idx),
                 "structure_name": s_name,
+                "structure_probs": s_probs,
                 "mfe": float(continuous_preds.get(f"{key}_mfe", 0.0) or 0.0),
                 "mae": float(continuous_preds.get(f"{key}_mae", 0.0) or 0.0),
                 "vol": float(continuous_preds.get(f"{key}_vol", 0.0) or 0.0),
@@ -331,7 +342,7 @@ class TransformerModelNode(MCPModelNode):
                     continuous_preds.get(f"{key}_trend_strength", 0.0) or 0.0
                 ),
             }
-        extra = {
+        extra: Dict[str, Any] = {
             "volume_state": vol_idx,
             "volume_state_name": vol_name,
             "volume_state_probs": vol_probs,
@@ -341,21 +352,70 @@ class TransformerModelNode(MCPModelNode):
             "volume_confirms": 1.0,
             "pattern_validates": 1.0,
         }
+        if include_pattern and "chart_pattern_logits" in named:
+            pat_idx, pat_name, pat_probs = parse_regime_prediction(
+                named["chart_pattern_logits"][0],
+                {str(k): v for k, v in CHART_PATTERN_NAMES.items()},
+            )
+            extra["chart_pattern"] = int(pat_idx)
+            extra["chart_pattern_name"] = pat_name
+            extra["chart_pattern_probs"] = pat_probs
         regime_map = {0: "LOW", 1: "NORMAL", 2: "HIGH"}
         vol_regime = regime_map.get(int(vol_idx), "NORMAL")
         struct_name = str(ladder["h5m"]["structure_name"])
         struct_idx = int(ladder["h5m"]["structure"])
+        struct_probs = dict(ladder["h5m"].get("structure_probs") or {})
         return (
             continuous_preds,
             str(vol_regime),
             vol_probs,
             struct_name,
             struct_idx,
-            {},
+            struct_probs,
             -1,
             "",
             {},
             extra,
+        )
+
+    def _decode_v8(
+        self, named: Dict[str, Any]
+    ) -> Tuple[
+        Dict[str, float],
+        str,
+        Dict[str, float],
+        str,
+        int,
+        Dict[str, float],
+        int,
+        str,
+        Dict[str, float],
+        Dict[str, Any],
+    ]:
+        return self._decode_horizon_outputs(
+            named,
+            dir_names={str(k): v for k, v in NEXT_DIRECTION_NAMES_V8.items()},
+            include_pattern=False,
+        )
+
+    def _decode_v9(
+        self, named: Dict[str, Any]
+    ) -> Tuple[
+        Dict[str, float],
+        str,
+        Dict[str, float],
+        str,
+        int,
+        Dict[str, float],
+        int,
+        str,
+        Dict[str, float],
+        Dict[str, Any],
+    ]:
+        return self._decode_horizon_outputs(
+            named,
+            dir_names={str(k): v for k, v in NEXT_DIRECTION_NAMES.items()},
+            include_pattern=True,
         )
 
     def _decode_v7(
@@ -457,11 +517,12 @@ class TransformerModelNode(MCPModelNode):
             self._feature_config.get("feature_contract_version")
             or FEATURE_CONTRACT_VERSION_V6
         )
-        default_cols = (
-            v7_feature_cols_for_resolution(self._resolution)
-            if contract_hint in (FEATURE_CONTRACT_VERSION, FEATURE_CONTRACT_VERSION_V7)
-            else feature_cols_for_resolution(self._resolution)
-        )
+        if contract_hint == FEATURE_CONTRACT_VERSION:
+            default_cols = v9_feature_cols_for_resolution(self._resolution)
+        elif contract_hint in (FEATURE_CONTRACT_VERSION_V8, FEATURE_CONTRACT_VERSION_V7):
+            default_cols = v7_feature_cols_for_resolution(self._resolution)
+        else:
+            default_cols = feature_cols_for_resolution(self._resolution)
         feature_cols = list(self._feature_config.get("feature_cols") or default_cols)
         validate_feature_columns(
             feat_df,
@@ -511,6 +572,11 @@ class TransformerModelNode(MCPModelNode):
             named.keys(), contract_version=contract, resolution=self._resolution
         )
         if contract == FEATURE_CONTRACT_VERSION:
+            (
+                continuous_preds, vol_regime, regime_probs, struct_name, struct_idx,
+                struct_probs, fut_cid, fut_cname, fut_cprobs, v7_extra,
+            ) = self._decode_v9(named)
+        elif contract == FEATURE_CONTRACT_VERSION_V8:
             (
                 continuous_preds, vol_regime, regime_probs, struct_name, struct_idx,
                 struct_probs, fut_cid, fut_cname, fut_cprobs, v7_extra,
@@ -587,6 +653,9 @@ class TransformerModelNode(MCPModelNode):
             volume_confirms=float(v7_extra.get("volume_confirms", 1.0)),
             horizon_t24_dir=int(v7_extra.get("horizon_t24_dir", -1)),
             horizon_ladder=v7_extra.get("horizon_ladder") or {},
+            chart_pattern=int(v7_extra.get("chart_pattern", -1)),
+            chart_pattern_name=str(v7_extra.get("chart_pattern_name") or ""),
+            chart_pattern_probs=v7_extra.get("chart_pattern_probs") or {},
         )
         out_ctx["closed_bar_features"] = closed_feats
         out_ctx["tf_key"] = self.tf_key

@@ -15,7 +15,8 @@ from feature_store.transformer_btcusd.contract import (
     CONTINUOUS_LABEL_COLS,
     FUTURE_CANDLE_COL,
     HORIZON_BARS_5M,
-    HORIZON_DIR_ATR_DEADZONE,
+    HORIZON_DIR_ATR_STRONG,
+    HORIZON_DIR_ATR_WEAK,
     HORIZON_DIR_COLS,
     HORIZON_SPECS,
     HORIZON_STRUCTURE_COLS,
@@ -60,11 +61,29 @@ def _structure_outcome_id(
     mae: float,
     fwd_failed: np.ndarray,
     fwd_bars_since_breakout: np.ndarray,
+    event_scope: str = "window",
 ) -> int:
-    """Priority: failed break, breakout, reversal, continuation, else range."""
-    if fwd_failed.size and np.any(fwd_failed >= 0.5):
+    """Priority: failed break, breakout, reversal, continuation, else range.
+
+    ``event_scope="window"`` (v6) ORs event flags over the whole path.
+    ``event_scope="terminal"`` (v8) uses only the last bar so 1h/2h windows
+    do not collapse to BREAKOUT whenever a Donchian print occurs anywhere.
+    """
+    if event_scope == "terminal":
+        failed_hit = bool(fwd_failed.size) and float(fwd_failed[-1]) >= 0.5
+        breakout_hit = (
+            bool(fwd_bars_since_breakout.size)
+            and float(fwd_bars_since_breakout[-1]) <= 0.5
+        )
+    else:
+        failed_hit = bool(fwd_failed.size) and bool(np.any(fwd_failed >= 0.5))
+        breakout_hit = (
+            bool(fwd_bars_since_breakout.size)
+            and bool(np.any(fwd_bars_since_breakout <= 0.5))
+        )
+    if failed_hit:
         return _STRUCTURE_OUTCOME_FAILED_BREAK
-    if fwd_bars_since_breakout.size and np.any(fwd_bars_since_breakout <= 0.5):
+    if breakout_hit:
         return _STRUCTURE_OUTCOME_BREAKOUT
     s0 = _sign_nonzero(bias_now)
     s1 = _sign_nonzero(bias_end)
@@ -75,6 +94,13 @@ def _structure_outcome_id(
     if bias_end < 0.0 and float(mae) > float(mfe):
         return _STRUCTURE_OUTCOME_CONT_SHORT
     return _STRUCTURE_OUTCOME_RANGE
+
+
+def _realized_path_vol(fwd_rets: np.ndarray) -> float:
+    """RMS log-return. For k=1 this is |r| instead of a degenerate std of one sample."""
+    if fwd_rets.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(np.square(fwd_rets))))
 
 
 def compute_market_labels(
@@ -244,10 +270,17 @@ def _wick_class(upper: float, lower: float) -> int:
 
 
 def _horizon_direction(move: float, atr: float) -> int:
-    dead = HORIZON_DIR_ATR_DEADZONE * max(float(atr), 1e-9)
-    if abs(float(move)) < dead:
+    """5-class ATR-normalized direction: STRONG_DOWN..STRONG_UP."""
+    ratio = float(move) / max(float(atr), 1e-9)
+    if ratio > HORIZON_DIR_ATR_STRONG:
+        return 4
+    if ratio >= HORIZON_DIR_ATR_WEAK:
+        return 3
+    if ratio < -HORIZON_DIR_ATR_STRONG:
+        return 0
+    if ratio <= -HORIZON_DIR_ATR_WEAK:
         return 1
-    return 2 if float(move) > 0.0 else 0
+    return 2
 
 
 def compute_horizon_behavior_labels(df: pd.DataFrame) -> pd.DataFrame:
@@ -315,7 +348,7 @@ def compute_horizon_behavior_labels(df: pd.DataFrame) -> pd.DataFrame:
             fwd_rets = np.log(
                 np.maximum(fwd_close, _EPS) / np.maximum(log_base, _EPS)
             )
-            cont_out[f"{key}_vol"][i] = float(fwd_rets.std())
+            cont_out[f"{key}_vol"][i] = _realized_path_vol(fwd_rets)
             scale = max(abs(entry), _EPS)
             favorable = (fwd_high - entry) / scale
             adverse = (entry - fwd_low) / scale
@@ -333,6 +366,7 @@ def compute_horizon_behavior_labels(df: pd.DataFrame) -> pd.DataFrame:
                     mae=float(cont_out[f"{key}_mae"][i]),
                     fwd_failed=failed[i + 1 : i + kk + 1],
                     fwd_bars_since_breakout=bars_bo[i + 1 : i + kk + 1],
+                    event_scope="terminal",
                 )
             )
 

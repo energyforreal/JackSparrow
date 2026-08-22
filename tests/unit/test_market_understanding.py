@@ -9,6 +9,7 @@ import pytest
 from agent.core.market_understanding import (
     TfMarketView,
     build_tf_market_view,
+    direction_evidence,
     synthesize_agent_decision,
     typical_abs_edge_from_metadata,
 )
@@ -464,6 +465,47 @@ def test_synth_v8_ladder_against_on_h10m() -> None:
     assert state.timing == "against"
     assert state.wire_signal == "HOLD"
     assert "timing_against_flat" in state.reason_codes
+
+
+def test_direction_evidence_uses_probs_over_argmax() -> None:
+    weak = direction_evidence(
+        {"dir": 2, "dir_name": "UP", "dir_probs": {"UP": 0.55, "NEUTRAL": 0.0, "DOWN": 0.45}}
+    )
+    assert weak == pytest.approx(0.10)
+    named = direction_evidence({"dir": 2, "dir_name": "NEUTRAL"})
+    assert named == pytest.approx(0.0)
+    five_class_up = direction_evidence({"dir": 3, "dir_name": "UP"})
+    assert five_class_up == pytest.approx(1.0)
+
+
+def test_synth_v9_ladder_dir3_is_bullish() -> None:
+    views = _views(timing_z=1.5)
+    views["tf_5m"].horizon_ladder = {
+        "h5m": {"dir": 3, "dir_name": "UP"},
+        "h10m": {"dir": 3, "dir_name": "UP"},
+        "h2h": {"dir": 0, "dir_name": "STRONG_DOWN"},
+    }
+    state = synthesize_agent_decision(views)
+    assert state.timing == "with"
+    assert "timing_horizon_fights_climate" not in state.reason_codes
+
+
+def test_synth_weak_dir_probs_do_not_force_with() -> None:
+    views = _views(timing_z=0.2)
+    views["tf_5m"].horizon_ladder = {
+        "h5m": {
+            "dir": 3,
+            "dir_name": "UP",
+            "dir_probs": {"UP": 0.55, "NEUTRAL": 0.0, "DOWN": 0.45},
+        },
+        "h10m": {
+            "dir": 3,
+            "dir_name": "UP",
+            "dir_probs": {"UP": 0.55, "NEUTRAL": 0.0, "DOWN": 0.45},
+        },
+    }
+    state = synthesize_agent_decision(views)
+    assert state.timing == "quiet"
 
 
 def test_synth_v8_ladder_cannot_make_5m_the_entry_tf() -> None:

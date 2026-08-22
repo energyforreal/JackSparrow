@@ -7,7 +7,8 @@ from typing import Any, Dict, Tuple
 # Bump when FEATURE_COLS, label heads, or ONNX outputs change (requires retrain).
 FEATURE_CONTRACT_VERSION_V6 = "transformer_btcusd_per_tf_features_v6"
 FEATURE_CONTRACT_VERSION_V7 = "transformer_btcusd_per_tf_features_v7"
-FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v8"
+FEATURE_CONTRACT_VERSION_V8 = "transformer_btcusd_per_tf_features_v8"
+FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v9"
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
 
@@ -240,14 +241,25 @@ HORIZON_DIR_COLS_V7: Tuple[str, ...] = (
     "horizon_t24_dir",
 )
 
-NEXT_DIRECTION_CARDINALITY = 3
+NEXT_DIRECTION_CARDINALITY_V8 = 3
+NEXT_DIRECTION_CARDINALITY = 5
 NEXT_BODY_CARDINALITY = 3
 NEXT_WICK_CARDINALITY = 4
 NEXT_RANGE_CARDINALITY = 3
 VOLUME_STATE_CARDINALITY = 3
 CHART_PATTERN_CARDINALITY = 9
 
-NEXT_DIRECTION_NAMES: Dict[int, str] = {0: "BEARISH", 1: "NEUTRAL", 2: "BULLISH"}
+NEXT_DIRECTION_NAMES_V8: Dict[int, str] = {0: "BEARISH", 1: "NEUTRAL", 2: "BULLISH"}
+NEXT_DIRECTION_NAMES: Dict[int, str] = {
+    0: "STRONG_DOWN",
+    1: "DOWN",
+    2: "NEUTRAL",
+    3: "UP",
+    4: "STRONG_UP",
+}
+BULLISH_DIRECTION_NAMES = frozenset({"UP", "STRONG_UP", "BULLISH"})
+BEARISH_DIRECTION_NAMES = frozenset({"DOWN", "STRONG_DOWN", "BEARISH"})
+NEUTRAL_DIRECTION_NAMES = frozenset({"NEUTRAL"})
 NEXT_BODY_NAMES: Dict[int, str] = {0: "SMALL", 1: "MEDIUM", 2: "LARGE"}
 NEXT_WICK_NAMES: Dict[int, str] = {
     0: "BALANCED",
@@ -272,7 +284,9 @@ CHART_PATTERN_NAMES: Dict[int, str] = {
 VOL_Z_EXPANSION = 0.5
 VOL_Z_DRY = -0.5
 BREAKOUT_VOL_CONFIRM = 1.2
-HORIZON_DIR_ATR_DEADZONE = 0.25
+HORIZON_DIR_ATR_WEAK = 0.5
+HORIZON_DIR_ATR_STRONG = 2.0
+HORIZON_DIR_ATR_DEADZONE = HORIZON_DIR_ATR_WEAK
 
 V7_STRUCTURE_LOSS_WEIGHTS: Dict[str, float] = {
     "direction": 1.0,
@@ -291,6 +305,13 @@ V8_STRUCTURE_LOSS_WEIGHTS: Dict[str, float] = {
     "direction": 1.0,
     "structure": 0.5,
     "volume_state": 0.25,
+}
+V9_STRUCTURE_LOSS_WEIGHTS: Dict[str, float] = {
+    "path": 1.0,
+    "direction": 1.0,
+    "structure": 0.5,
+    "volume_state": 0.25,
+    "pattern": 0.25,
 }
 
 V7_CONTINUOUS_LOSS_WEIGHTS: Dict[str, float] = {
@@ -353,6 +374,7 @@ ONNX_OUTPUT_NAMES_V8: Tuple[str, ...] = (
     + ONNX_OUTPUT_NAMES_V8_STRUCTURE
     + ("continuous_pred", "volume_state_logits")
 )
+ONNX_OUTPUT_NAMES_V9: Tuple[str, ...] = ONNX_OUTPUT_NAMES_V8 + ("chart_pattern_logits",)
 
 # Next-bar candle families for 5m timing (not model classes).
 CANDLE_FAMILY_DOJI = frozenset({0, 1, 2, 3, 8})
@@ -543,8 +565,13 @@ def v7_feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
 
 
 def v8_feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
-    """v8 5m input columns (same causal feature set as v7)."""
+    """v8 5m input columns (native features plus causal chart_pattern_id)."""
     return v7_feature_cols_for_resolution(resolution)
+
+
+def v9_feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
+    """v9 5m input columns: geometry only; chart_pattern_id is a target head."""
+    return feature_cols_for_resolution(resolution)
 
 
 def onnx_output_names_for_contract(
@@ -556,6 +583,10 @@ def onnx_output_names_for_contract(
     ver = str(contract_version or "").strip()
     res = resolution.strip().lower()
     if ver == FEATURE_CONTRACT_VERSION:
+        if res == "5m":
+            return ONNX_OUTPUT_NAMES_V9
+        return ONNX_OUTPUT_NAMES_V6
+    if ver == FEATURE_CONTRACT_VERSION_V8:
         if res == "5m":
             return ONNX_OUTPUT_NAMES_V8
         return ONNX_OUTPUT_NAMES_V6
@@ -632,7 +663,7 @@ def default_research_config() -> Dict[str, Any]:
         "atr_period": 14,
         "history_days": 900,
         "base_url": "https://api.india.delta.exchange",
-        "loss_weights": dict(V8_STRUCTURE_LOSS_WEIGHTS),
+        "loss_weights": dict(V9_STRUCTURE_LOSS_WEIGHTS),
         "run_optuna": False,
         "optuna_trials": 0,
         "run_shap": False,
@@ -644,7 +675,7 @@ def default_research_config() -> Dict[str, Any]:
 
 def ablation_feature_groups(resolution: str = "5m") -> Dict[str, Tuple[str, ...]]:
     """Nested feature sets A-F for out-of-sample ablation."""
-    all_cols = v7_feature_cols_for_resolution(resolution)
+    all_cols = v9_feature_cols_for_resolution(resolution)
     ohlcv = ("ret_1", "rv_16", "rv_96", "hour_sin", "hour_cos", "dow_sin", "dow_cos")
     geometry = ohlcv + (
         "body_ratio",
@@ -712,7 +743,6 @@ def ablation_feature_groups(resolution: str = "5m") -> Dict[str, Tuple[str, ...]
         "bars_since_breakout",
         "retest_dist_atr",
         "failed_break",
-        CHART_PATTERN_COL,
     )
     return {
         "A": tuple(c for c in ohlcv if c in all_cols),

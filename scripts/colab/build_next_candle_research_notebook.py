@@ -1,4 +1,4 @@
-"""Build the v8 multi-horizon 5m research Colab (standalone, no GitHub clone).
+"""Build the v9 multi-horizon 5m research Colab (standalone, no GitHub clone).
 
 Run from repo root::
 
@@ -71,14 +71,16 @@ RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
     "## 26 JackSparrow export",
 )
 
-INTRO_MARKDOWN = """# BTCUSD 5m multi-horizon path research (v8)
+INTRO_MARKDOWN = """# BTCUSD 5m multi-horizon path research (v9)
 
 Research Colab: learn the causal relationship between historical OHLCV-derived
 candle/chart structure and **how the path will behave** at 5m, 10m, 15m, 30m,
-1h, and 2h. Continuous geometry is the input; named patterns are secondary.
+1h, and 2h. Continuous geometry is the input; named patterns are an auxiliary
+head (not a trading target). Direction is 5-class ATR-normalized
+(STRONG_DOWN / DOWN / NEUTRAL / UP / STRONG_UP).
 
 This is **not** next-OHLC prediction, not a live agent, and not a replacement for
-the production v6 all-TF trainer until a v8 5m export is validated.
+the production v6 all-TF trainer until a v9 5m export is validated.
 
 Upload **this notebook only** to Google Colab. Historical OHLCV comes from the
 Delta Exchange India public API. Edit repo `.py` files and regenerate:
@@ -153,9 +155,12 @@ print(json.dumps(quality, indent=2, default=str))
 """
 
 FEATURES_CELL = """labeled = build_labeled_frame(raw_5m, config=CONFIG)
-feature_cols = [c for c in v8_feature_cols_for_resolution("5m") if c in labeled.columns]
+feature_cols = [c for c in v9_feature_cols_for_resolution("5m") if c in labeled.columns]
 print(f"labeled rows={len(labeled)} n_features={len(feature_cols)}")
-print("chart_pattern_id in frame:", CHART_PATTERN_COL in labeled.columns)
+print("chart_pattern_id in frame (target only):", CHART_PATTERN_COL in labeled.columns)
+print("chart_pattern_id in model inputs:", CHART_PATTERN_COL in feature_cols)
+print("chart_pattern_id mix:")
+print(labeled[CHART_PATTERN_COL].value_counts().sort_index().to_dict())
 print(labeled[feature_cols[:8]].tail(2))
 """
 
@@ -172,7 +177,18 @@ TARGETS_CELL = """target_cols = [
 present = [c for c in target_cols if c in labeled.columns]
 for col in present:
     series = labeled[col].dropna()
-    print(f"{col}: n={len(series)} unique={series.nunique() if series.dtype != float or series.nunique() < 20 else 'cont'}")
+    n_unique = int(series.nunique())
+    kind = "cont" if n_unique >= 20 else n_unique
+    print(f"{col}: n={len(series)} unique={kind}")
+
+print("Direction class mix / |move|/ATR (thresholds 0.5 and 2.0 ATR):")
+direction_class_mix_report(labeled)
+print("Structure class mix:")
+for col in HORIZON_STRUCTURE_COLS:
+    if col in labeled.columns:
+        print(col, labeled[col].value_counts(dropna=True).sort_index().to_dict())
+if "h5m_vol" in labeled.columns:
+    print("h5m_vol nunique", int(labeled["h5m_vol"].nunique(dropna=True)))
 """
 
 SPLIT_CELL = """window_len = int(CONFIG["sequence_length"])
@@ -217,6 +233,13 @@ win_slices = chronological_split(
 splits = split_window_dict(packed_all, win_slices)
 y_mean, y_std = fit_label_stats(splits["train"]["y_path"])
 print("windows", {k: len(v["x"]) for k, v in splits.items()})
+dir_class_w = inverse_frequency_class_weights(
+    splits["train"]["horizon_dirs"].reshape(-1), NEXT_DIRECTION_CARDINALITY
+)
+pat_class_w = inverse_frequency_class_weights(
+    splits["train"]["pattern_ids"], CHART_PATTERN_CARDINALITY
+)
+print("dir class weights", dir_class_w.round(3).tolist())
 """
 
 MODEL_CELL = """device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -235,7 +258,7 @@ print("device", device)
 
 LOSS_CELL = """print("Loss lambdas (structure cannot be zeroed):")
 print(json.dumps(CONFIG.get("loss_weights") or {}, indent=2))
-print("Heads: 6x direction, 6x structure, 24-d path (mfe/mae/vol/trend), volume.")
+print("Heads: 6x 5-class direction, 6x structure, 24-d path, volume, pattern.")
 """
 
 TRAIN_CELL = """loaders = {}
@@ -259,6 +282,8 @@ train_hist = train_next_candle(
     weight_decay=float(CONFIG["weight_decay"]),
     patience=int(CONFIG["early_stopping_patience"]),
     loss_weights=CONFIG.get("loss_weights"),
+    dir_class_weights=torch.tensor(dir_class_w, dtype=torch.float32),
+    pattern_class_weights=torch.tensor(pat_class_w, dtype=torch.float32),
 )
 print(train_hist)
 if not train_hist.get("ok"):
@@ -292,11 +317,11 @@ with torch.no_grad():
 pred_dir = outs[0].argmax(dim=1).cpu().numpy()
 true_dir = splits["val"]["horizon_dirs"][: len(pred_dir), 0]
 print("h5m direction confusion (true x pred):")
-print(confusion_counts(pred_dir, true_dir, 3))
+print(confusion_counts(pred_dir, true_dir, NEXT_DIRECTION_CARDINALITY))
 pred_h10 = outs[1].argmax(dim=1).cpu().numpy()
 true_h10 = splits["val"]["horizon_dirs"][: len(pred_h10), 1]
 print("h10m direction confusion (true x pred):")
-print(confusion_counts(pred_h10, true_h10, 3))
+print(confusion_counts(pred_h10, true_h10, NEXT_DIRECTION_CARDINALITY))
 """
 
 CONTEXT_CELL = """pattern_context_table(labeled)
@@ -357,7 +382,7 @@ else:
 EXPORT_CELL = """if not train_hist.get("ok"):
     print("Skip ONNX export: training did not succeed", train_hist)
 else:
-    onnx_path, cfg_path, meta_path = export_v8_bundle(
+    onnx_path, cfg_path, meta_path = export_v9_bundle(
         model,
         export_dir,
         device=device,
@@ -381,11 +406,15 @@ NOTES_MARKDOWN = """## Notes
 - Historical OHLCV is **immutable**. Training updates **weights only**.
 - Scaler is fit on **train windows/rows only**. Optuna/walk-forward never see the final test set.
 - Named candlestick class is an **input embedding**. Movement value is per-horizon
-  **MFE/MAE / path_edge** at 5m through 2h.
-- Production v6 all-TF notebook remains the live 15m–2h trainer until this v8
+  **MFE/MAE / path_edge** at 5m through 2h. ``h5m_vol`` is RMS |log return|
+  (not std of a 1-sample window). Structure labels use the **terminal** bar
+  of each horizon so 1h/2h do not collapse to BREAKOUT.
+- Production v6 all-TF notebook remains the live 15m–2h trainer until this v9
   5m export is proven.
-- Agent follow-on: 15m still owns setup SL/TP; 5m timing from 5m+10m direction;
-  15m–2h packets on the 5m model are telemetry only.
+- Agent follow-on: 15m still owns setup SL/TP; 5m timing from 5m+10m
+  P(UP)-P(DOWN); 15m–2h packets on the 5m model are telemetry only.
+- Promote only if test balanced direction is above chance at 5m and 10m and
+  path_vol_corr stays above 0.15. Raw accuracy climbing with horizon is not enough.
 """
 
 

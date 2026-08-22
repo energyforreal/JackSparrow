@@ -350,11 +350,16 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
         if high[t] >= resistance - delta and close[t] <= resistance + delta:
             resistance_touch[t] = 1.0
 
-        bo_size = (close[t] - donch_h[t]) / atr_t
-        if abs(bo_size) >= _BREAKOUT_THRESH:
+        up_ext = (close[t] - donch_h[t]) / atr_t
+        dn_ext = (donch_l[t] - close[t]) / atr_t
+        if up_ext >= _BREAKOUT_THRESH:
             last_bo_idx = t
-            last_bo_level = float(donch_h[t] if bo_size > 0 else donch_l[t])
-            last_bo_side = 1 if bo_size > 0 else -1
+            last_bo_level = float(donch_h[t])
+            last_bo_side = 1
+        elif dn_ext >= _BREAKOUT_THRESH:
+            last_bo_idx = t
+            last_bo_level = float(donch_l[t])
+            last_bo_side = -1
         if last_bo_idx >= 0:
             bars_since_breakout[t] = float(t - last_bo_idx)
             retest_dist_atr[t] = _clip_atr((close[t] - last_bo_level) / atr_t)
@@ -484,8 +489,10 @@ def _chart_pattern_ids(
 
     FAILED_BREAK is a rising-edge event inside ``_FAILED_BREAK_BARS`` of the
     last Donchian breakout. It does not overwrite FLAG/TRIANGLE/DOUBLE/CHANNEL
-    and does not stay on for the whole post-breakout regime.
+    and does not stay on for the whole post-breakout regime. BREAKOUT is the
+    event bar only and also does not overwrite those named geometries.
     """
+    _ = breakout_size_atr
     n = int(failed_break.shape[0])
     ids = np.zeros(n, dtype=np.int64)
     channel = (np.abs(high_slope_atr - low_slope_atr) < 0.15) & (width_now_atr > 0.6)
@@ -512,7 +519,9 @@ def _chart_pattern_ids(
         & (flag_slope_atr > 0.0)
         & (structure_bias < -0.15)
     )
-    breakout = (bars_since_breakout <= 2.0) & (np.abs(breakout_size_atr) >= 0.25)
+    # Event bar only. abs(size vs Donchian high) is not a two-sided breakout
+    # and was tagging most 5m bars as BREAKOUT.
+    fresh_break = bars_since_breakout <= 0.5
     failed_now = (failed_break >= 0.5) & (
         bars_since_breakout <= float(_FAILED_BREAK_BARS)
     )
@@ -527,8 +536,8 @@ def _chart_pattern_ids(
     ids = np.where(flag_bear, 2, ids)
     ids = np.where(double_bottom, 5, ids)
     ids = np.where(double_top, 4, ids)
-    ids = np.where(breakout, 7, ids)
     named = np.isin(ids, [1, 2, 3, 4, 5, 6])
+    ids = np.where(fresh_break & ~named, 7, ids)
     ids = np.where(failed_pulse & ~named, 8, ids)
     return ids
 

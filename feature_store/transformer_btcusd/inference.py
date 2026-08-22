@@ -17,10 +17,12 @@ from feature_store.transformer_btcusd.contract import (
     FEATURE_CONTRACT_VERSION,
     FEATURE_CONTRACT_VERSION_V6,
     FEATURE_CONTRACT_VERSION_V7,
+    FEATURE_CONTRACT_VERSION_V8,
     ONNX_OUTPUT_NAMES,
     ONNX_OUTPUT_NAMES_V6,
     ONNX_OUTPUT_NAMES_V7,
     ONNX_OUTPUT_NAMES_V8,
+    ONNX_OUTPUT_NAMES_V9,
     STRUCTURE_OUTCOME_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     V8_CONTINUOUS_LABEL_COLS,
@@ -156,6 +158,7 @@ def require_onnx_output_names(
     required = onnx_output_names_for_contract(ver, resolution=resolution)
     known = (
         FEATURE_CONTRACT_VERSION,
+        FEATURE_CONTRACT_VERSION_V8,
         FEATURE_CONTRACT_VERSION_V7,
         FEATURE_CONTRACT_VERSION_V6,
     )
@@ -185,6 +188,8 @@ def feature_config_from_training_export(
     if onnx_output_names is not None:
         names = list(onnx_output_names)
     elif version == FEATURE_CONTRACT_VERSION:
+        names = list(ONNX_OUTPUT_NAMES_V9)
+    elif version == FEATURE_CONTRACT_VERSION_V8:
         names = list(ONNX_OUTPUT_NAMES_V8)
     elif version == FEATURE_CONTRACT_VERSION_V7:
         names = list(ONNX_OUTPUT_NAMES_V7)
@@ -192,7 +197,7 @@ def feature_config_from_training_export(
         names = list(ONNX_OUTPUT_NAMES)
     if continuous_label_cols is not None:
         label_cols = list(continuous_label_cols)
-    elif version == FEATURE_CONTRACT_VERSION:
+    elif version in (FEATURE_CONTRACT_VERSION, FEATURE_CONTRACT_VERSION_V8):
         label_cols = list(V8_CONTINUOUS_LABEL_COLS)
     else:
         label_cols = list(CONTINUOUS_LABEL_COLS)

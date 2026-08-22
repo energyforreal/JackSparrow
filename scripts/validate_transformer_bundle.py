@@ -17,6 +17,7 @@ from feature_store.transformer_btcusd.contract import (
     FEATURE_CONTRACT_VERSION,
     FEATURE_CONTRACT_VERSION_V6,
     FEATURE_CONTRACT_VERSION_V7,
+    FEATURE_CONTRACT_VERSION_V8,
     ONNX_OUTPUT_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
@@ -55,6 +56,7 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
     bundle_contract = str(feature_config.get("feature_contract_version") or "")
     contract_ok = bundle_contract in {
         FEATURE_CONTRACT_VERSION,
+        FEATURE_CONTRACT_VERSION_V8,
         FEATURE_CONTRACT_VERSION_V7,
         FEATURE_CONTRACT_VERSION_V6,
     }
@@ -127,7 +129,7 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
     continuous = named["continuous_pred"]
     label_cols = list(feature_config.get("continuous_label_cols") or [])
     expected_labels = list(CONTINUOUS_LABEL_COLS)
-    if bundle_contract == FEATURE_CONTRACT_VERSION and resolution == "5m":
+    if bundle_contract in (FEATURE_CONTRACT_VERSION, FEATURE_CONTRACT_VERSION_V8) and resolution == "5m":
         expected_labels = list(V8_CONTINUOUS_LABEL_COLS)
     if label_cols and list(label_cols) != expected_labels:
         raise RuntimeError(
@@ -156,9 +158,11 @@ def validate_bundle(bundle_dir: Path) -> dict[str, object]:
         "export_quality_tier": export_quality.get("tier"),
         "export_quality_warnings": export_quality.get("warnings") or [],
     }
-    if bundle_contract == FEATURE_CONTRACT_VERSION and resolution == "5m":
+    if bundle_contract in (FEATURE_CONTRACT_VERSION, FEATURE_CONTRACT_VERSION_V8) and resolution == "5m":
         report["onnx_direction_shape"] = list(named["h5m_dir_logits"].shape)
         report["onnx_path_shape"] = list(continuous.shape)
+        if "chart_pattern_logits" in named:
+            report["onnx_pattern_shape"] = list(named["chart_pattern_logits"].shape)
     elif bundle_contract == FEATURE_CONTRACT_VERSION_V7:
         report["onnx_direction_shape"] = list(named["next_direction_logits"].shape)
         report["onnx_path_shape"] = list(continuous.shape)

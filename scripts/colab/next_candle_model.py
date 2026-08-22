@@ -1,9 +1,9 @@
-"""v8 multi-horizon 5m Transformer (research Colab; not the v6 path trainer)."""
+"""v9 multi-horizon 5m Transformer (research Colab; not the v6 path trainer)."""
 
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -13,18 +13,33 @@ from torch.utils.data import Dataset
 from feature_store.transformer_btcusd.contract import (
     CANDLE_CLASS_CARDINALITY,
     CANDLE_EMBED_DIM,
+    CHART_PATTERN_CARDINALITY,
     N_HORIZONS,
     NEXT_DIRECTION_CARDINALITY,
     STRUCTURE_OUTCOME_CARDINALITY,
     V8_CONTINUOUS_LABEL_COLS,
-    V8_STRUCTURE_LOSS_WEIGHTS,
+    V9_STRUCTURE_LOSS_WEIGHTS,
     VOLUME_STATE_CARDINALITY,
 )
 from feature_store.transformer_btcusd.inference import zscore_window
 
 
+def inverse_frequency_class_weights(
+    class_ids: np.ndarray,
+    n_classes: int,
+) -> np.ndarray:
+    """Inverse-frequency weights (mean-normalized) for imbalanced CE heads."""
+    counts = np.bincount(
+        np.asarray(class_ids, dtype=np.int64), minlength=int(n_classes)
+    ).astype(np.float64)
+    counts = np.maximum(counts, 1.0)
+    weights = 1.0 / counts
+    weights = weights * (float(n_classes) / weights.sum())
+    return weights.astype(np.float32)
+
+
 class NextCandleDataset(Dataset):
-    """Windows of continuous features + candle ids with v8 horizon labels."""
+    """Windows of continuous features + candle ids with v9 horizon labels."""
 
     def __init__(
         self,
@@ -35,6 +50,7 @@ class NextCandleDataset(Dataset):
         volume_state: np.ndarray,
         horizon_dirs: np.ndarray,
         horizon_structs: np.ndarray,
+        pattern_ids: np.ndarray | None = None,
         *,
         per_window_zscore: bool = False,
     ) -> None:
@@ -45,6 +61,9 @@ class NextCandleDataset(Dataset):
         self.volume_state = volume_state.astype(np.int64)
         self.horizon_dirs = horizon_dirs.astype(np.int64)
         self.horizon_structs = horizon_structs.astype(np.int64)
+        if pattern_ids is None:
+            pattern_ids = np.zeros(len(x), dtype=np.int64)
+        self.pattern_ids = np.asarray(pattern_ids, dtype=np.int64)
         self.per_window_zscore = bool(per_window_zscore)
 
     def __len__(self) -> int:
@@ -62,6 +81,7 @@ class NextCandleDataset(Dataset):
             torch.tensor(self.volume_state[i], dtype=torch.long),
             torch.tensor(self.horizon_dirs[i], dtype=torch.long),
             torch.tensor(self.horizon_structs[i], dtype=torch.long),
+            torch.tensor(self.pattern_ids[i], dtype=torch.long),
         )
 
 
@@ -75,7 +95,7 @@ class PositionalEncoding(nn.Module):
 
 
 class NextCandleTransformer(nn.Module):
-    """Shared encoder with per-horizon direction, structure, and path heads."""
+    """Shared encoder with per-horizon direction, structure, path, and pattern heads."""
 
     def __init__(
         self,
@@ -124,6 +144,7 @@ class NextCandleTransformer(nn.Module):
         )
         self.continuous_head = nn.Linear(shared_dim, n_continuous)
         self.volume_state_head = nn.Linear(shared_dim, VOLUME_STATE_CARDINALITY)
+        self.pattern_head = nn.Linear(shared_dim, CHART_PATTERN_CARDINALITY)
 
     def forward(
         self, x: torch.Tensor, candle_class_ids: torch.Tensor
@@ -141,36 +162,44 @@ class NextCandleTransformer(nn.Module):
             *struct_outs,
             self.continuous_head(shared),
             self.volume_state_head(shared),
+            self.pattern_head(shared),
         )
 
 
-def compute_v8_loss(
+def compute_v9_loss(
     outputs: Sequence[torch.Tensor],
     batch: Sequence[torch.Tensor],
     *,
     loss_weights: Dict[str, float] | None = None,
+    dir_class_weights: Optional[torch.Tensor] = None,
+    pattern_class_weights: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Per-horizon path MSE + direction/structure CE + volume CE."""
-    weights = dict(V8_STRUCTURE_LOSS_WEIGHTS)
+    """Per-horizon path MSE + direction/structure CE + volume/pattern CE."""
+    weights = dict(V9_STRUCTURE_LOSS_WEIGHTS)
     if loss_weights:
         weights.update({str(k): float(v) for k, v in loss_weights.items()})
-    (
-        _xb,
-        _xcat,
-        y_path,
-        path_mask,
-        volume_y,
-        horizon_dirs,
-        horizon_structs,
-    ) = batch
+    volume_y = batch[4]
+    horizon_dirs = batch[5]
+    horizon_structs = batch[6]
+    pattern_y = batch[7] if len(batch) > 7 else None
+    y_path = batch[2]
+    path_mask = batch[3]
     n_h = int(horizon_dirs.size(1))
     dir_logits = outputs[:n_h]
     struct_logits = outputs[n_h : 2 * n_h]
     cont_pred = outputs[2 * n_h]
     vol_logits = outputs[2 * n_h + 1]
+    pattern_logits = outputs[2 * n_h + 2] if len(outputs) > 2 * n_h + 2 else None
 
-    def _ce_mean(logits: torch.Tensor, target: torch.Tensor, w: float) -> torch.Tensor:
-        return w * nn.functional.cross_entropy(logits, target, reduction="mean")
+    def _ce_mean(
+        logits: torch.Tensor,
+        target: torch.Tensor,
+        w: float,
+        class_w: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        return w * nn.functional.cross_entropy(
+            logits, target, weight=class_w, reduction="mean"
+        )
 
     n_cont = min(
         cont_pred.size(1), y_path.size(1), len(V8_CONTINUOUS_LABEL_COLS)
@@ -185,9 +214,36 @@ def compute_v8_loss(
     dir_w = float(weights["direction"]) / max(n_h, 1)
     struct_w = float(weights["structure"]) / max(n_h, 1)
     for j in range(n_h):
-        loss = loss + _ce_mean(dir_logits[j], horizon_dirs[:, j], dir_w)
+        loss = loss + _ce_mean(
+            dir_logits[j], horizon_dirs[:, j], dir_w, dir_class_weights
+        )
         loss = loss + _ce_mean(struct_logits[j], horizon_structs[:, j], struct_w)
+    if pattern_logits is not None and pattern_y is not None:
+        loss = loss + _ce_mean(
+            pattern_logits,
+            pattern_y,
+            float(weights.get("pattern", 0.25)),
+            pattern_class_weights,
+        )
     return loss
+
+
+def compute_v8_loss(
+    outputs: Sequence[torch.Tensor],
+    batch: Sequence[torch.Tensor],
+    *,
+    loss_weights: Dict[str, float] | None = None,
+    dir_class_weights: Optional[torch.Tensor] = None,
+    pattern_class_weights: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Alias kept so older notebook cells/tests can import a loss name."""
+    return compute_v9_loss(
+        outputs,
+        batch,
+        loss_weights=loss_weights,
+        dir_class_weights=dir_class_weights,
+        pattern_class_weights=pattern_class_weights,
+    )
 
 
 def compute_v7_loss(
@@ -197,7 +253,7 @@ def compute_v7_loss(
     loss_weights: Dict[str, float] | None = None,
 ) -> torch.Tensor:
     """Alias kept so older notebook cells/tests can import a loss name."""
-    return compute_v8_loss(outputs, batch, loss_weights=loss_weights)
+    return compute_v9_loss(outputs, batch, loss_weights=loss_weights)
 
 
 def train_next_candle(
@@ -211,6 +267,8 @@ def train_next_candle(
     weight_decay: float,
     patience: int,
     loss_weights: Dict[str, float] | None = None,
+    dir_class_weights: Optional[torch.Tensor] = None,
+    pattern_class_weights: Optional[torch.Tensor] = None,
 ) -> Dict[str, Any]:
     """Train with AdamW and early stopping on validation loss."""
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -219,6 +277,16 @@ def train_next_candle(
     stale = 0
     history: List[Tuple[int, float, float]] = []
     aborted = False
+    dir_w = (
+        dir_class_weights.to(device)
+        if dir_class_weights is not None
+        else None
+    )
+    pat_w = (
+        pattern_class_weights.to(device)
+        if pattern_class_weights is not None
+        else None
+    )
     for epoch in range(int(epochs)):
         model.train()
         train_loss = 0.0
@@ -227,7 +295,13 @@ def train_next_candle(
             batch_d = tuple(t.to(device) for t in batch)
             opt.zero_grad(set_to_none=True)
             outs = model(batch_d[0], batch_d[1])
-            loss = compute_v8_loss(outs, batch_d, loss_weights=loss_weights)
+            loss = compute_v9_loss(
+                outs,
+                batch_d,
+                loss_weights=loss_weights,
+                dir_class_weights=dir_w,
+                pattern_class_weights=pat_w,
+            )
             loss_val = float(loss.detach().item())
             if not math.isfinite(loss_val):
                 print(f"Non-finite train loss at epoch {epoch + 1} — aborting")
@@ -252,7 +326,13 @@ def train_next_candle(
                 batch_d = tuple(t.to(device) for t in batch)
                 outs = model(batch_d[0], batch_d[1])
                 batch_val = float(
-                    compute_v8_loss(outs, batch_d, loss_weights=loss_weights).item()
+                    compute_v9_loss(
+                        outs,
+                        batch_d,
+                        loss_weights=loss_weights,
+                        dir_class_weights=dir_w,
+                        pattern_class_weights=pat_w,
+                    ).item()
                 )
                 if not math.isfinite(batch_val):
                     print(f"Non-finite val loss at epoch {epoch + 1} — aborting")

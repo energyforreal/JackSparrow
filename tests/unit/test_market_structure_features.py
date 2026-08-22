@@ -219,3 +219,10 @@ def test_chart_pattern_failed_break_is_not_majority() -> None:
     assert float((ids == 8).mean()) < 0.50
     assert int((ids == 0).sum()) > 0
     assert bool(np.isin(ids, [1, 2, 3, 4, 5, 6, 7]).any())
+
+
+def test_chart_pattern_breakout_is_not_majority() -> None:
+    feat = add_features(_base_ohlcv(400, seed=1), resolution_minutes=5)
+    ids = feat[CHART_PATTERN_COL].to_numpy()
+    assert float((ids == 7).mean()) < 0.25
+    assert int((ids != 7).sum()) > int((ids == 7).sum())

@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 
 from feature_store.transformer_btcusd.contract import (
     CANDLE_CLASS_COL,
+    CHART_PATTERN_CARDINALITY,
     CHART_PATTERN_COL,
     FEATURE_CONTRACT_VERSION,
     HORIZON_DIR_COLS,
@@ -20,13 +21,15 @@ from feature_store.transformer_btcusd.contract import (
     HORIZON_STRUCTURE_COLS,
     MAX_V8_HORIZON_BARS,
     N_HORIZONS,
-    ONNX_OUTPUT_NAMES_V8,
+    NEXT_DIRECTION_CARDINALITY,
+    NEXT_DIRECTION_NAMES,
+    ONNX_OUTPUT_NAMES_V9,
     V8_CONTINUOUS_LABEL_COLS,
     VOLUME_STATE_COL,
     ablation_feature_groups,
     default_research_config,
-    v8_feature_cols_for_resolution,
     v8_future_leak_cols,
+    v9_feature_cols_for_resolution,
 )
 from feature_store.transformer_btcusd.features import add_features, assemble_raw_frame
 from feature_store.transformer_btcusd.inference import (
@@ -40,6 +43,7 @@ from feature_store.transformer_btcusd.labels import (
 from scripts.colab.next_candle_model import (
     NextCandleDataset,
     NextCandleTransformer,
+    inverse_frequency_class_weights,
     train_next_candle,
 )
 from scripts.colab.transformer_data import (
@@ -317,19 +321,25 @@ def windows_from_frame(
         [_take(c, np.nan) for c in V8_CONTINUOUS_LABEL_COLS]
     ).astype(np.float64)
     horizon_dirs = np.column_stack(
-        [_take(c, 1.0) for c in HORIZON_DIR_COLS]
+        [_take(c, 2.0) for c in HORIZON_DIR_COLS]
     ).astype(np.int64)
     horizon_structs = np.column_stack(
         [_take(c, 0.0) for c in HORIZON_STRUCTURE_COLS]
     ).astype(np.int64)
+    pattern_ids = np.clip(
+        _take(CHART_PATTERN_COL, 0.0).astype(np.int64),
+        0,
+        CHART_PATTERN_CARDINALITY - 1,
+    )
     return {
         "x": x,
         "x_cat": x_cat,
         "idx": idx,
         "y_path": path,
         "volume_state": _take(VOLUME_STATE_COL, 1.0).astype(np.int64),
-        "horizon_dirs": np.clip(horizon_dirs, 0, 2),
+        "horizon_dirs": np.clip(horizon_dirs, 0, NEXT_DIRECTION_CARDINALITY - 1),
         "horizon_structs": np.clip(horizon_structs, 0, 5),
+        "pattern_ids": pattern_ids,
         "per_window_zscore": np.array([per_window_zscore], dtype=np.bool_),
     }
 
@@ -371,6 +381,7 @@ def make_loader(
         packed["volume_state"],
         packed["horizon_dirs"],
         packed["horizon_structs"],
+        packed.get("pattern_ids", np.zeros(len(packed["x"]), dtype=np.int64)),
         per_window_zscore=per_window_zscore,
     )
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, drop_last=shuffle)
@@ -490,6 +501,46 @@ def confusion_counts(pred: np.ndarray, true: np.ndarray, n_classes: int) -> np.n
         if 0 <= t < n_classes and 0 <= p < n_classes:
             mat[t, p] += 1
     return mat
+
+
+def direction_class_mix_report(df: pd.DataFrame) -> Dict[str, Any]:
+    """Print 5-class mix and |close[t+k]-close[t]| / ATR quantiles per horizon."""
+    from feature_store.transformer_btcusd.contract import HORIZON_SPECS
+
+    report: Dict[str, Any] = {}
+    print("Direction class mix (0=STRONG_DOWN ... 4=STRONG_UP):")
+    for col in HORIZON_DIR_COLS:
+        if col not in df.columns:
+            continue
+        counts = df[col].value_counts(dropna=True).sort_index().to_dict()
+        named = {
+            NEXT_DIRECTION_NAMES.get(int(k), str(k)): int(v) for k, v in counts.items()
+        }
+        report[col] = named
+        print(col, named)
+    if "close" in df.columns and "atr" in df.columns:
+        close = df["close"].to_numpy(dtype=np.float64)
+        atr = np.maximum(df["atr"].to_numpy(dtype=np.float64), 1e-9)
+        print("|move|/ATR quantiles:")
+        for key, k in HORIZON_SPECS:
+            ratios: List[float] = []
+            n = len(close)
+            kk = int(k)
+            for i in range(n - kk):
+                if not np.isfinite(close[i]) or not np.isfinite(close[i + kk]):
+                    continue
+                ratios.append(abs(float(close[i + kk] - close[i])) / float(atr[i]))
+            if not ratios:
+                continue
+            arr = np.asarray(ratios, dtype=np.float64)
+            qs = {
+                "p50": float(np.quantile(arr, 0.50)),
+                "p90": float(np.quantile(arr, 0.90)),
+                "p99": float(np.quantile(arr, 0.99)),
+            }
+            report[f"{key}_abs_move_atr"] = qs
+            print(f"  {key}: p50={qs['p50']:.3f} p90={qs['p90']:.3f} p99={qs['p99']:.3f}")
+    return report
 
 
 def pattern_context_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -660,7 +711,7 @@ def run_ablation_epoch(
     return float(metrics["direction"]["accuracy"])
 
 
-def export_v8_bundle(
+def export_v9_bundle(
     model: NextCandleTransformer,
     export_dir: Path,
     *,
@@ -674,13 +725,13 @@ def export_v8_bundle(
     scaler_mean: Optional[np.ndarray] = None,
     scaler_std: Optional[np.ndarray] = None,
 ) -> Tuple[Path, Path, Path]:
-    """Write ONNX + feature_config.json + metadata_transformer.json (v8)."""
+    """Write ONNX + feature_config.json + metadata_transformer.json (v9)."""
     export_dir.mkdir(parents=True, exist_ok=True)
     onnx_path = export_dir / "btcusd_5m_transformer.onnx"
     dummy_x = torch.zeros(1, window_len, n_features, device=device)
     dummy_c = torch.zeros(1, window_len, dtype=torch.long, device=device)
     model.eval()
-    output_names = list(ONNX_OUTPUT_NAMES_V8)
+    output_names = list(ONNX_OUTPUT_NAMES_V9)
     torch.onnx.export(
         model,
         (dummy_x, dummy_c),
@@ -723,6 +774,36 @@ def export_v8_bundle(
     meta_path = export_dir / "metadata_transformer.json"
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return onnx_path, cfg_path, meta_path
+
+
+def export_v8_bundle(
+    model: NextCandleTransformer,
+    export_dir: Path,
+    *,
+    device: torch.device,
+    window_len: int,
+    n_features: int,
+    feature_cols: Sequence[str],
+    label_mean: np.ndarray,
+    label_std: np.ndarray,
+    config: Mapping[str, Any],
+    scaler_mean: Optional[np.ndarray] = None,
+    scaler_std: Optional[np.ndarray] = None,
+) -> Tuple[Path, Path, Path]:
+    """Alias: research export is v9 (kept so older notebook cells still import)."""
+    return export_v9_bundle(
+        model,
+        export_dir,
+        device=device,
+        window_len=window_len,
+        n_features=n_features,
+        feature_cols=feature_cols,
+        label_mean=label_mean,
+        label_std=label_std,
+        config=config,
+        scaler_mean=scaler_mean,
+        scaler_std=scaler_std,
+    )
 
 
 def export_v7_bundle(
@@ -771,7 +852,7 @@ def run_research_training(
     assembled = assemble_raw_frame(raw_5m, funding_df=funding_df, oi_df=oi_df)
     ohlcv_quality_report(assembled, "5m", symbol=str(cfg.get("symbol") or "BTCUSD"))
     labeled = build_labeled_frame(assembled, config=cfg)
-    feature_cols = list(v8_feature_cols_for_resolution("5m"))
+    feature_cols = list(v9_feature_cols_for_resolution("5m"))
     feature_cols = [c for c in feature_cols if c in labeled.columns]
     leakage_audit(feature_cols)
 
@@ -811,6 +892,16 @@ def run_research_training(
     )
     splits = split_window_dict(packed_all, win_slices)
     y_mean, y_std = fit_label_stats(splits["train"]["y_path"])
+    dir_w = inverse_frequency_class_weights(
+        splits["train"]["horizon_dirs"].reshape(-1),
+        NEXT_DIRECTION_CARDINALITY,
+    )
+    pat_w = inverse_frequency_class_weights(
+        splits["train"].get(
+            "pattern_ids", np.zeros(len(splits["train"]["x"]), dtype=np.int64)
+        ),
+        CHART_PATTERN_CARDINALITY,
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}  windows train/val/test="
           f"{len(splits['train']['x'])}/{len(splits['val']['x'])}/{len(splits['test']['x'])}")
@@ -846,6 +937,8 @@ def run_research_training(
         weight_decay=float(cfg["weight_decay"]),
         patience=int(cfg["early_stopping_patience"]),
         loss_weights=cfg.get("loss_weights"),
+        dir_class_weights=torch.tensor(dir_w, dtype=torch.float32),
+        pattern_class_weights=torch.tensor(pat_w, dtype=torch.float32),
     )
     if not train_hist.get("ok"):
         raise RuntimeError(f"Training aborted with non-finite loss: {train_hist}")
@@ -875,7 +968,7 @@ def run_research_training(
             )
             print(f"  {key}: {acc:.3f}  n_features={len(idx)}")
 
-    onnx_path, cfg_path, meta_path = export_v8_bundle(
+    onnx_path, cfg_path, meta_path = export_v9_bundle(
         model,
         export_dir,
         device=device,
