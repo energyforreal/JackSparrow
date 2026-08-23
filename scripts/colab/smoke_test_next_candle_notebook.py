@@ -30,6 +30,7 @@ REQUIRED_SYMBOLS = (
     "FUSION_INPUT_RESOLUTIONS",
     "precompute_featured_frames",
     "build_dataset_from_ohlcv",
+    "memmap_dir",
 )
 
 RESEARCH_SECTION_HEADINGS = (
@@ -92,6 +93,28 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
         raise AssertionError("CLI argparse import leaked into notebook cells")
     if re.search(r"^def main\(", full_text, re.MULTILINE):
         raise AssertionError("CLI main() leaked into notebook cells")
+
+    audit = re.search(r"def leakage_audit\([\s\S]+?\n\ndef ", full_text)
+    if audit is None:
+        raise AssertionError("leakage_audit definition missing from notebook")
+    if "endswith(\"_dir\")" in audit.group(0):
+        raise AssertionError(
+            "leakage_audit must not treat every *_dir column as leakage"
+        )
+    if "last_swing_dir" not in full_text:
+        raise AssertionError("notebook should document last_swing_dir as causal")
+
+    # Colab inlines every module into one global namespace. Duplicate helper
+    # names silently overwrite (e.g. two `_safe_atr` signatures).
+    def_names = re.findall(r"^def ([A-Za-z_][A-Za-z0-9_]*)\(", full_text, re.MULTILINE)
+    seen: dict[str, int] = {}
+    for name in def_names:
+        seen[name] = seen.get(name, 0) + 1
+    dups = sorted(name for name, count in seen.items() if count > 1)
+    if dups:
+        raise AssertionError(
+            "duplicate top-level defs would collide in Colab: " + ", ".join(dups)
+        )
 
 
 def main() -> None:

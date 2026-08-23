@@ -51,7 +51,9 @@ class MtfFusionDataset(Dataset):
         n = None
         self.windows: Dict[str, np.ndarray] = {}
         for res in self.resolutions:
-            arr = np.asarray(windows[res], dtype=np.float32)
+            arr = windows[res]
+            if not isinstance(arr, np.ndarray) or arr.dtype != np.float32:
+                arr = np.asarray(arr, dtype=np.float32)
             self.windows[res] = arr
             if n is None:
                 n = len(arr)
@@ -68,11 +70,13 @@ class MtfFusionDataset(Dataset):
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, ...]:
         tensors: List[torch.Tensor] = []
         for res in self.resolutions:
-            window = self.windows[res][i]
+            window = np.ascontiguousarray(self.windows[res][i], dtype=np.float32)
+            if not window.flags.writeable:
+                window = np.array(window, dtype=np.float32, copy=True)
             if self.per_window_zscore:
                 window = zscore_window(window)
-            tensors.append(torch.tensor(window, dtype=torch.float32))
-        tensors.append(torch.tensor(self.labels[i], dtype=torch.long))
+            tensors.append(torch.from_numpy(window))
+        tensors.append(torch.as_tensor(self.labels[i], dtype=torch.long))
         return tuple(tensors)
 
 

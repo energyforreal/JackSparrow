@@ -47,6 +47,18 @@ CHART_PATTERN_FEATURES = [
 ]
 
 
+
+def _chart_safe_atr(atr_value: object, price: float) -> float:
+    """Positive ATR for ratios. Zero ATR appears on flat / warmup bars."""
+    try:
+        a = float(atr_value)
+    except (TypeError, ValueError):
+        a = float("nan")
+    if not np.isfinite(a) or a <= 0.0:
+        return max(abs(float(price)) * 0.01, 1e-9)
+    return a
+
+
 class ChartPatternEngine:
     """
     Detects chart patterns and computes structural market features.
@@ -76,7 +88,7 @@ class ChartPatternEngine:
         bo = self._compute_breakouts(df, atr)
         out = pd.concat([out, bo], axis=1)
 
-        return out.fillna(0)
+        return out.replace([np.inf, -np.inf], 0).fillna(0)
 
     def _compute_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
         high_low = df["high"] - df["low"]
@@ -110,9 +122,7 @@ class ChartPatternEngine:
 
         for i in range(lookback, len(df)):
             current_price = closes[i]
-            current_atr = (
-                atr.iloc[i] if not np.isnan(atr.iloc[i]) else current_price * 0.01
-            )
+            current_atr = _chart_safe_atr(atr.iloc[i], float(current_price))
 
             recent_highs_idx = high_idx[(high_idx >= i - lookback) & (high_idx < i)]
             recent_lows_idx = low_idx[(low_idx >= i - lookback) & (low_idx < i)]
@@ -187,9 +197,7 @@ class ChartPatternEngine:
         tl_break_down = np.zeros(len(df))
 
         for i in range(lookback, len(df)):
-            current_atr = (
-                float(atr.iloc[i]) if not np.isnan(atr.iloc[i]) else closes[i] * 0.01
-            )
+            current_atr = _chart_safe_atr(atr.iloc[i], float(closes[i]))
 
             ul_idx = low_idx[(low_idx >= i - lookback) & (low_idx < i)]
             if len(ul_idx) >= min_touches:
@@ -248,9 +256,7 @@ class ChartPatternEngine:
         bear_flag_strength = np.zeros(n)
 
         for i in range(pole_bars + flag_bars, n):
-            current_atr = (
-                float(atr.iloc[i]) if not np.isnan(atr.iloc[i]) else closes[i] * 0.01
-            )
+            current_atr = _chart_safe_atr(atr.iloc[i], float(closes[i]))
 
             pole_start = i - pole_bars - flag_bars
             pole_end = i - flag_bars
@@ -302,7 +308,7 @@ class ChartPatternEngine:
             slope_h, _, _, _, _ = linregress(x, window_highs)
             slope_l, _, _, _, _ = linregress(x, window_lows)
 
-            atr_val = float(atr.iloc[i]) if not np.isnan(atr.iloc[i]) else highs[i] * 0.01
+            atr_val = _chart_safe_atr(atr.iloc[i], float(highs[i]))
 
             if abs(slope_h) < 0.1 * atr_val and slope_l > 0:
                 asc_tri[i] = 1
@@ -345,9 +351,7 @@ class ChartPatternEngine:
         low_idx = argrelextrema(lows, np.less, order=5)[0]
 
         for i in range(lookback, n):
-            current_atr = (
-                float(atr.iloc[i]) if not np.isnan(atr.iloc[i]) else closes[i] * 0.01
-            )
+            current_atr = _chart_safe_atr(atr.iloc[i], float(closes[i]))
 
             recent_hi = high_idx[(high_idx >= i - lookback) & (high_idx < i)]
             if len(recent_hi) >= 2:
@@ -412,9 +416,7 @@ class ChartPatternEngine:
             range_high = np.max(window_closes)
             range_low = np.min(window_closes)
             current = closes[i]
-            current_atr = (
-                float(atr.iloc[i]) if not np.isnan(atr.iloc[i]) else current * 0.01
-            )
+            current_atr = _chart_safe_atr(atr.iloc[i], float(current))
 
             if current >= range_high - current_atr * 0.3:
                 bo_at_high[i] = 1

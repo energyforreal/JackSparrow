@@ -54,7 +54,7 @@ _HTF_NATIVE_MAP = {
 }
 
 
-def _safe_atr(atr: np.ndarray, close: np.ndarray, i: int) -> float:
+def _structure_safe_atr(atr: np.ndarray, close: np.ndarray, i: int) -> float:
     val = float(atr[i]) if np.isfinite(atr[i]) else float("nan")
     if not np.isfinite(val) or val <= 0:
         c = float(close[i]) if np.isfinite(close[i]) else 0.0
@@ -277,7 +277,7 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
     last_bo_side = 0
 
     for t in range(n):
-        atr_t = _safe_atr(atr, close, t)
+        atr_t = _structure_safe_atr(atr, close, t)
         thresh = _ZZ_TAU * atr_t
         eps = _ZZ_EPS_ATR * atr_t
 

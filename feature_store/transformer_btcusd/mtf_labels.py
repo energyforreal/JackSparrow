@@ -65,16 +65,22 @@ def compute_fusion_horizon_labels(df5m: pd.DataFrame) -> pd.DataFrame:
             np.maximum(np.abs(out["high"].to_numpy() - prev), np.abs(out["low"].to_numpy() - prev)),
         )
         atr = pd.Series(tr).rolling(14, min_periods=1).mean().to_numpy(dtype=np.float64)
-    for col in FUSION_DIR_COLS:
-        out[col] = np.nan
     max_k = int(MAX_FUSION_HORIZON_BARS)
-    for i in range(n):
-        if i + max_k >= n:
-            break
-        a = float(atr[i]) if np.isfinite(atr[i]) else 0.0
-        for col, k in zip(FUSION_DIR_COLS, FUSION_HORIZON_BARS_5M):
-            move = float(close[i + int(k)] - close[i])
-            out.iat[i, out.columns.get_loc(col)] = float(three_class_direction(move, a))
+    n_valid = max(n - max_k, 0)
+    atr_valid = atr[:n_valid].copy()
+    atr_valid = np.where(np.isfinite(atr_valid), atr_valid, 0.0)
+    denom = np.maximum(atr_valid, 1e-9)
+    weak = float(HORIZON_DIR_ATR_WEAK)
+    for col, k in zip(FUSION_DIR_COLS, FUSION_HORIZON_BARS_5M):
+        labels = np.full(n, np.nan, dtype=np.float64)
+        if n_valid > 0:
+            move = close[int(k) : int(k) + n_valid] - close[:n_valid]
+            ratio = move / denom
+            cls = np.ones(n_valid, dtype=np.float64)
+            cls[ratio >= weak] = 2.0
+            cls[ratio <= -weak] = 0.0
+            labels[:n_valid] = cls
+        out[col] = labels
     return out
 
 

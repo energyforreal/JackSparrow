@@ -50,3 +50,20 @@ def test_compute_all_no_nan():
     engine = ChartPatternEngine()
     out = engine.compute_all(df)
     assert not out.isna().any().any()
+
+
+def test_flat_ohlc_features_are_finite():
+    """Zero ATR (identical OHLC) must not emit inf chart features."""
+    n = 160
+    px = 50000.0
+    df = pd.DataFrame(
+        {
+            "open": np.full(n, px),
+            "high": np.full(n, px),
+            "low": np.full(n, px),
+            "close": np.full(n, px),
+            "volume": np.ones(n),
+        }
+    )
+    out = ChartPatternEngine().compute_all(df)
+    assert np.isfinite(out.to_numpy(dtype=np.float64)).all()

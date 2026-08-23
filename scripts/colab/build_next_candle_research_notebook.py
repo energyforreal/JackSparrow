@@ -132,6 +132,7 @@ export_dir = _root / "export" / FUSION_BUNDLE_DIR_NAME
 export_dir.mkdir(parents=True, exist_ok=True)
 cache_dir = _root / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
+# Section 11 writes TF window memmaps under cache_dir/fusion_windows.
 print(json.dumps(CONFIG, indent=2, default=str))
 print("contract", FEATURE_CONTRACT_VERSION_V10)
 print("input TFs", list(FUSION_INPUT_RESOLUTIONS))
@@ -196,6 +197,7 @@ print(preview[feature_cols[:8]].tail(2))
 
 LEAKAGE_CELL = """leakage_audit(feature_cols)
 print("Leakage audit passed: no t+1 / horizon dir / resampled HTF columns in X.")
+print("last_swing_dir is a causal structure input, not a horizon target.")
 """
 
 TARGETS_CELL = """labeled_5m = compute_fusion_horizon_labels(frames["5m"])
@@ -220,7 +222,10 @@ per_window = True
 """
 
 SEQUENCES_CELL = """windows, labels, decision_times = build_dataset_from_ohlcv(
-    frames, window_len=window_len, stride=stride
+    frames,
+    window_len=window_len,
+    stride=stride,
+    memmap_dir=cache_dir / "fusion_windows",
 )
 print("windows", {k: v.shape for k, v in windows.items()})
 print("labels", labels.shape, "decisions", len(decision_times))

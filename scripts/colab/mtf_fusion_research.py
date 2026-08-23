@@ -6,6 +6,7 @@ test split is scored once after freeze.
 
 from __future__ import annotations
 
+import gc
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -25,6 +26,7 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_HIGH_BALANCED_ACC,
     FUSION_HIGH_MAX_ECE,
     FUSION_HORIZON_KEYS,
+    FUSION_DIR_COLS,
     FUSION_INPUT_RESOLUTIONS,
     FUSION_MEDIUM_BALANCED_ACC,
     FUSION_MIN_PROBABILITY,
@@ -122,13 +124,22 @@ def split_purged_windows(
 
 
 def leakage_audit(feature_cols: Sequence[str]) -> None:
-    """Raise if any target or future column leaked into the input feature list."""
+    """Raise if any target or future column leaked into the input feature list.
+
+    Causal structure fields such as ``last_swing_dir`` are valid inputs. Only
+    horizon targets, resampled HTF columns, and explicit future_* names are banned.
+    """
     banned = set(fusion_future_leak_cols())
-    leaked = [
-        c
-        for c in feature_cols
-        if c in banned or str(c).startswith("htf_") or str(c).endswith("_dir")
-    ]
+    leaked: List[str] = []
+    for col in feature_cols:
+        name = str(col)
+        if (
+            name in banned
+            or name.startswith("htf_")
+            or name.startswith("future_")
+            or name.startswith("horizon_")
+        ):
+            leaked.append(name)
     if leaked:
         raise RuntimeError(f"Future/HTF/target columns in inputs: {leaked}")
     print("Leakage audit passed: no horizon dirs, no resampled HTF structure in X.")
@@ -210,16 +221,17 @@ def build_dataset_from_ohlcv(
     *,
     window_len: int = FUSION_WINDOW_LEN,
     stride: int = 4,
+    memmap_dir: Optional[Path] = None,
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray, pd.Series]:
     """Native TF windows + 3-class labels aligned on the 5m decision clock."""
     labeled = compute_fusion_horizon_labels(frames["5m"])
     labeled = trim_fusion_label_tail(labeled)
     featured = precompute_featured_frames(frames)
-    feat5 = featured["5m"].copy()
-    feat5["time"] = pd.to_datetime(feat5["time"], utc=True)
+    feat5_time = featured["5m"][["time"]].copy()
+    feat5_time["time"] = pd.to_datetime(feat5_time["time"], utc=True)
     labeled["time"] = pd.to_datetime(labeled["time"], utc=True)
-    dir_cols = [c for c in labeled.columns if str(c).endswith("_dir")]
-    merged = feat5.merge(labeled[["time", *dir_cols]], on="time", how="inner")
+    dir_cols = [c for c in FUSION_DIR_COLS if c in labeled.columns]
+    merged = feat5_time.merge(labeled[["time", *dir_cols]], on="time", how="inner")
     merged = merged.iloc[int(window_len) :].reset_index(drop=True)
     if stride > 1:
         merged = merged.iloc[:: int(stride)].reset_index(drop=True)
@@ -229,9 +241,16 @@ def build_dataset_from_ohlcv(
     y = y[mask]
     decision_close = bar_close_time(merged["time"], 5)
     windows = collect_training_windows(
-        featured, list(decision_close), window_len=window_len, zscore=True
+        featured,
+        list(decision_close),
+        window_len=window_len,
+        zscore=True,
+        memmap_dir=memmap_dir,
     )
-    return windows, y, merged["time"]
+    decision_times = merged["time"].copy()
+    del featured, labeled, merged, feat5_time
+    gc.collect()
+    return windows, y, decision_times
 
 
 def softmax_np(logits: np.ndarray) -> np.ndarray:
@@ -534,12 +553,37 @@ def export_fusion_bundle(
         "opset_version": 17,
         "export_params": True,
     }
+    last_error: Optional[BaseException] = None
+    exported = False
+    for opset in (17, 14):
+        export_kwargs["opset_version"] = int(opset)
+        try:
+            try:
+                torch.onnx.export(
+                    model,
+                    tuple(dummy),
+                    str(onnx_path),
+                    dynamo=False,
+                    **export_kwargs,
+                )
+            except TypeError:
+                torch.onnx.export(
+                    model, tuple(dummy), str(onnx_path), **export_kwargs
+                )
+            exported = True
+            break
+        except (TypeError, RuntimeError, ValueError) as exc:
+            last_error = exc
+    if not exported:
+        raise RuntimeError(
+            f"ONNX export failed for opset 17 and 14: {last_error}"
+        ) from last_error
     try:
-        torch.onnx.export(
-            model, tuple(dummy), str(onnx_path), dynamo=False, **export_kwargs
-        )
-    except TypeError:
-        torch.onnx.export(model, tuple(dummy), str(onnx_path), **export_kwargs)
+        import onnx
+
+        onnx.checker.check_model(onnx.load(str(onnx_path)))
+    except ImportError:
+        pass
 
     feature_config = {
         "feature_contract_version": FEATURE_CONTRACT_VERSION_V10,
@@ -554,7 +598,9 @@ def export_fusion_bundle(
         "horizon_gates": dict(gates),
         "tf_fusion_weights": [float(x) for x in fusion_weights],
     }
-    cfg_path.write_text(json.dumps(feature_config, indent=2), encoding="utf-8")
+    cfg_path.write_text(
+        json.dumps(feature_config, indent=2, default=str), encoding="utf-8"
+    )
     meta = {
         "version": "transformer_mtf_fusion_v10",
         "model_name": "jacksparrow_transformer_BTCUSD_mtf_fusion",
@@ -570,7 +616,7 @@ def export_fusion_bundle(
         "training_config": dict(config),
         "primary_signal_mode": "multi_horizon_position",
     }
-    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    meta_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
     return onnx_path, cfg_path, meta_path
 
 

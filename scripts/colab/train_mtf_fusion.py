@@ -79,10 +79,13 @@ def main() -> None:
         base_url=str(cfg["base_url"]),
     )
     frames = fusion_frames_from_fetch(df5, df30, df1h, df2h)
+    memmap_dir = Path(args.export_dir) / "fusion_windows"
+    memmap_dir.mkdir(parents=True, exist_ok=True)
     windows, labels, _times = build_dataset_from_ohlcv(
         frames,
         window_len=int(cfg["window_len"]),
         stride=int(cfg.get("stride") or 4),
+        memmap_dir=memmap_dir,
     )
     splits = purged_dev_test_split(
         windows,
@@ -93,20 +96,23 @@ def main() -> None:
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_features = len(fusion_feature_cols())
-    dev_windows = {
-        res: np.concatenate(
-            [splits["train"]["windows"][res], splits["val"]["windows"][res]], axis=0
-        )
-        for res in FUSION_INPUT_RESOLUTIONS
-    }
-    dev_labels = np.concatenate([splits["train"]["labels"], splits["val"]["labels"]], axis=0)
-
     wf: Dict[str, Any] = {"folds": [], "mean": {}, "std": {}}
     if not args.skip_walk_forward:
         print("Walk-forward on development span (test excluded)...")
+        dev_windows = {
+            res: np.concatenate(
+                [splits["train"]["windows"][res], splits["val"]["windows"][res]],
+                axis=0,
+            )
+            for res in FUSION_INPUT_RESOLUTIONS
+        }
+        dev_labels = np.concatenate(
+            [splits["train"]["labels"], splits["val"]["labels"]], axis=0
+        )
         wf = run_walk_forward(
             dev_windows, dev_labels, n_features=n_features, config=cfg, device=device
         )
+        del dev_windows, dev_labels
 
     train_ds = MtfFusionDataset(splits["train"]["windows"], splits["train"]["labels"])
     val_ds = MtfFusionDataset(splits["val"]["windows"], splits["val"]["labels"])
