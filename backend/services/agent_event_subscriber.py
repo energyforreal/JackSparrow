@@ -139,6 +139,8 @@ _TRANSFORMER_PLAN_OBJECT_KEYS = (
     "execution_plan",
     "multi_tf_predictions",
     "cross_tf_summary",
+    "horizon_forecast",
+    "tf_fusion_weights",
 )
 _MARKET_CONTEXT_EXCERPT_KEYS = (
     "trade_score",
@@ -154,6 +156,8 @@ _MARKET_CONTEXT_EXCERPT_KEYS = (
     "decision_path",
     "multi_tf_predictions",
     "cross_tf_summary",
+    "horizon_forecast",
+    "tf_fusion_weights",
     "path_edge",
     "threshold",
 )

@@ -1,8 +1,15 @@
 # Colab notebook helpers (non-production)
 
-Per-TF transformer training for BTCUSD. Each timeframe is trained **independently**;
-the agent integrates outputs at decision time via climate/setup/timing synthesis
-(`agent/core/market_understanding.py`).
+## Fused multi-TF trainer (live path)
+
+```bash
+python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion
+```
+
+Sources: `scripts/colab/mtf_fusion_model.py`, `scripts/colab/mtf_fusion_research.py`.
+10m OHLCV is built from two closed 5m bars outside the model. Walk-forward never sees the final test split.
+
+## Per-TF transformer training (rollback only)
 
 ## Shared modules (repo source of truth)
 
@@ -21,31 +28,28 @@ python scripts/validate_transformer_bundle.py agent/model_storage/JackSparrow_Tr
 
 Parity tests: `pytest tests/unit/test_transformer_btcusd_feature_parity.py`
 
-## Research Colab (v8 multi-horizon 5m)
+## Research Colab (v10 fused multi-TF)
 
 Primary research trainer: **`transformer_btcusd_next_candle_research.ipynb`**.
-It trains a 5m Transformer on wall-clock path behavior at 5m/10m/15m/30m/1h/2h.
-Candle/chart geometry is the input; named patterns are secondary. Do not hand-edit
-the `.ipynb`.
+It trains the live fused model: independent 5m/10m/30m/1h/2h OHLCV, shared encoder,
+softmax TF weights, and four 3-class heads (+10m/+30m/+1h/+2h). 10m is two closed
+5m bars built outside the encoder. Walk-forward, Optuna, and temperature fitting
+never see the final test split. Do not hand-edit the `.ipynb`.
+
+Training-logic changes belong in the `.py` sources. Regenerate the notebook after
+every fusion training or contract change:
 
 ```bash
 python scripts/colab/build_next_candle_research_notebook.py
 python scripts/colab/smoke_test_next_candle_notebook.py
 ```
 
-Sources: `scripts/colab/next_candle_research.py`, `scripts/colab/next_candle_model.py`.
-The production all-TF v6 notebook above stays until a v7 export is validated.
+Sources: `scripts/colab/mtf_fusion_model.py`, `scripts/colab/mtf_fusion_research.py`,
+`feature_store/transformer_btcusd/mtf_*.py`. Local CLI equivalent:
+`python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion`.
 
-**Retrain after horizon/loss changes:** set `refresh_data = True` in the Colab config cell so
-cached parquet is rebuilt with new label horizons (or delete `/content/cache/*.parquet`).
-
-Per-TF defaults: path labels (no `future_return` head) plus v6 pattern heads
-(`future_structure_outcome`, next-bar `future_candle_class`) and
-`candle_follow_through_atr` / `structure_delta`. Export sanity gate uses
-`future_volatility` test correlation. `continuous_loss_weights` zeros out
-`future_volume_change_pct` loss (it dominated the shared encoder). Agent uses
-`path_edge = mfe - mae` for directional signals; pattern heads only modulate
-setup/timing.
+**Retrain after horizon/label changes:** set `refresh_data = True` in the Colab load
+cell so cached parquet is rebuilt (or delete `/content/cache/*.parquet`).
 
 ## Notebook
 

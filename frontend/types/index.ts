@@ -256,9 +256,12 @@ export interface Signal {
   decision_path?: string
   /** Path SL/TP + sizing plan from transformer_mtf. */
   execution_plan?: ExecutionPlan
-  /** Per-TF stances keyed by tf_5m … tf_2h. */
+  /** Per-horizon or per-TF stances (fusion uses h10m/h30m/h1h/h2h). */
   multi_tf_predictions?: Record<string, TfStance>
   cross_tf_summary?: Record<string, unknown>
+  /** Validated multi-horizon forecast from the fused model. */
+  horizon_forecast?: Record<string, unknown>
+  tf_fusion_weights?: Record<string, number>
   /** v43: decision threshold. */
   threshold?: number
   /** v43: orchestrator/post-threshold gate reason when HOLD. */

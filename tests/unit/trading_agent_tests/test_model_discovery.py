@@ -61,6 +61,51 @@ def _write_transformer_bundle(model_dir: Path, name: str = "test_transformer") -
 
 
 @pytest.mark.asyncio
+async def test_discover_prefers_fusion_bundle_over_per_tf(
+    temp_model_dir: Path, model_registry: MCPModelRegistry
+) -> None:
+    from agent.models.fusion_node import FusionModelNode
+    from feature_store.transformer_btcusd.contract import FUSION_BUNDLE_DIR_NAME
+
+    fusion_dir = temp_model_dir / FUSION_BUNDLE_DIR_NAME
+    fusion_dir.mkdir(parents=True)
+    (fusion_dir / TRANSFORMER_METADATA_FILENAME).write_text(
+        json.dumps(
+            {
+                "model_name": "fusion_model",
+                "model_family": "jacksparrow_transformer_btcusd_mtf_fusion",
+                "resolution": "mtf_fusion",
+                "onnx_filename": "btcusd_mtf_fusion.onnx",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (fusion_dir / "btcusd_mtf_fusion.onnx").write_bytes(b"onnx")
+    (fusion_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME).write_text("{}", encoding="utf-8")
+    tf_dir = temp_model_dir / bundle_dir_name("15m")
+    tf_dir.mkdir(parents=True)
+    _write_transformer_bundle(tf_dir)
+
+    mock_fusion = MagicMock(spec=FusionModelNode)
+    mock_fusion.model_name = "fusion_model"
+    mock_fusion.model_type = "transformer_mtf_fusion"
+    mock_fusion.resolution = "mtf_fusion"
+    mock_fusion.initialize = AsyncMock()
+
+    with patch("agent.models.model_discovery.settings") as mock_settings:
+        mock_settings.model_dir = str(temp_model_dir)
+        mock_settings.model_path = None
+        mock_settings.model_auto_register = True
+        mock_settings.transformer_decision_path = "mtf_fusion"
+        with patch.object(FusionModelNode, "from_metadata_path", return_value=mock_fusion):
+            discovery = ModelDiscovery(model_registry)
+            discovered = await discovery.discover_models()
+
+    assert discovered == ["fusion_model"]
+    assert model_registry.get_model("fusion_model") is mock_fusion
+
+
+@pytest.mark.asyncio
 async def test_discover_transformer_registers_when_auto_register(
     temp_model_dir: Path, model_registry: MCPModelRegistry
 ) -> None:

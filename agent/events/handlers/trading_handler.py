@@ -888,18 +888,65 @@ class TradingEventHandler:
             if not gates_on:
                 self._last_risk_approved[self._debounce_key(symbol, side)] = time.time()
 
-            # Path-pred / ATR / fixed SL/TP
-            atr = features.get("atr_14")
-            sl_tp_mode = str(getattr(settings, "sl_tp_mode", "path_pred") or "path_pred").lower()
+            sl_tp_mode = str(getattr(settings, "sl_tp_mode", "atr") or "atr").lower()
             use_atr_sl_tp = bool(getattr(settings, "use_atr_scaled_sl_tp", False))
             stop_loss_price = None
             take_profit_price = None
             stop_pct = settings.stop_loss_percentage
             take_pct = settings.take_profit_percentage
             sl_tp_source: Optional[str] = None
+            atr = features.get("atr_14")
+            if atr is None and isinstance(mc, dict):
+                tf_feats = mc.get("transformer_features") or {}
+                if isinstance(tf_feats, dict):
+                    atr = tf_feats.get("atr_14")
+                if atr is None:
+                    atr = execution_plan.get("atr_14")
+            decision_path = str(
+                (mc.get("decision_path") if isinstance(mc, dict) else "") or ""
+            )
+            plan_sl_source = str(execution_plan.get("sl_tp_source") or "")
+
+            fusion_atr = (
+                plan_sl_source == "atr"
+                or decision_path == "mtf_fusion"
+                or sl_tp_mode == "atr"
+            )
+            if fusion_atr and (execution_plan.get("atr_14") is not None or atr is not None):
+                try:
+                    atr_f = float(execution_plan.get("atr_14") or atr or 0.0)
+                    sl_mult = float(
+                        execution_plan.get("sl_atr_mult")
+                        or getattr(settings, "atr_sl_distance_mult", 1.0)
+                        or 1.0
+                    )
+                    tp_mult = float(
+                        execution_plan.get("tp_atr_mult")
+                        or getattr(settings, "atr_tp_distance_mult", 1.5)
+                        or 1.5
+                    )
+                    if atr_f > 0:
+                        stop_loss_price, take_profit_price = compute_stop_take_prices(
+                            entry_price,
+                            side,
+                            stop_pct,
+                            take_pct,
+                            use_atr_scaled=True,
+                            atr_14=atr_f,
+                            atr_sl_mult=sl_mult,
+                            atr_tp_mult=tp_mult,
+                            tick_size=tick_sz,
+                        )
+                        if stop_loss_price is not None or take_profit_price is not None:
+                            sl_tp_source = "atr"
+                            use_atr_sl_tp = True
+                except (TypeError, ValueError):
+                    stop_loss_price = None
+                    take_profit_price = None
 
             if (
-                sl_tp_mode == "path_pred"
+                stop_loss_price is None
+                and sl_tp_mode == "path_pred"
                 and execution_plan.get("mfe") is not None
             ):
                 try:

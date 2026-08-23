@@ -218,12 +218,21 @@ class Settings(BaseSettings):
             "in the trading handler. Default off."
         ),
     )
+    transformer_decision_path: str = Field(
+        default="mtf_fusion",
+        env="TRANSFORMER_DECISION_PATH",
+        description=(
+            "Live decision path: 'mtf_fusion' (single fused model) or "
+            "'transformer_agent_synthesis' (emergency five-bundle rollback)."
+        ),
+    )
     sl_tp_mode: str = Field(
-        default="path_pred",
+        default="atr",
         env="SL_TP_MODE",
         description=(
-            "Stop/take mode: 'path_pred' uses transformer MFE/MAE; "
-            "'atr' / 'fixed' fall back to legacy ATR or percentage brackets."
+            "Stop/take mode: 'atr' uses ATR-scaled brackets (fusion default); "
+            "'path_pred' uses transformer MFE/MAE (legacy synthesis); "
+            "'fixed' uses percentage brackets."
         ),
     )
     path_sl_adverse_mult: float = Field(

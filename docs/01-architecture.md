@@ -71,16 +71,17 @@ The Data Layer is responsible for:
 
 The Intelligence Layer contains the "brain" of the trading agent:
 
-**Signal Generation Engine (Transformer ONNX — default)**
-- **`TransformerModelNode`** (`agent/models/transformer_node.py`) — loads per-TF `btcusd_{tf}_transformer.onnx` via `onnxruntime`
-- Feature contract: [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/)
-- Discovery via **`metadata_transformer.json`** in **`MODEL_DIR/JackSparrow_Transformer_BTCUSD_{tf}/`**
-- Decision path: [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py) + [`agent/core/market_understanding.py`](../agent/core/market_understanding.py)
+**Signal Generation Engine (fused multi-TF Transformer — default)**
+- **`FusionModelNode`** (`agent/models/fusion_node.py`) — loads `btcusd_mtf_fusion.onnx`
+- Feature contract v10: [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/) (`mtf_frames.py`, `mtf_features.py`, `mtf_labels.py`)
+- Discovery via **`metadata_transformer.json`** in **`MODEL_DIR/JackSparrow_Transformer_BTCUSD_mtf_fusion/`**
+- Decision path: [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) via `evaluate_transformer_prediction` in [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py)
+- Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` reloads five per-TF bundles + climate/setup/timing
 - See [ML models – Runtime discovery](03-ml-models.md#runtime-discovery-transformer-onnx)
 
 **Decision Engine (Transformer decision path)**
 - **`evaluate_transformer_prediction`** in `agent/core/transformer_decision.py`
-- Maps ONNX output → signal (BUY/SELL/HOLD), confidence, reasoning chain payload
+- Default: fused multi-horizon forecast → duration + ATR SL/TP → `BUY`/`SELL`/`HOLD`
 - Emits **`DECISION_READY`** via MCP orchestrator (`source=transformer_decision`)
 
 **Risk Manager**
@@ -95,12 +96,12 @@ Trade *intent* on the event bus is issued as **`DECISION_READY`** after transfor
 
 **Transformer pipeline (default)**
 
-1. **Market frames** — multi-timeframe OHLCV + funding (`fetch_v43_market_frames`).
-2. **Feature build** — each `TransformerModelNode` builds its native TF matrix from `feature_store/transformer_btcusd`
-3. **ONNX inference** — five independent models (5m, 15m, 30m, 1h, 2h) via `TransformerModelNode.predict()`
-4. **Decision** — `synthesize_agent_decision` (climate × setup × timing) + `evaluate_transformer_prediction` build `execution_plan` (path SL/TP + size from 15m)
+1. **Market frames** — independent 5m/10m/30m/1h/2h OHLCV (10m built from two closed 5m bars; not resampled inside the encoder)
+2. **Feature build** — `FusionModelNode` runs candle/chart/structure engines on each native TF, as-of joined at the 5m close
+3. **ONNX inference** — one fused model (shared encoder + learned TF weights + four 3-class heads)
+4. **Decision** — per-horizon gates (probability + frozen OOS grade); duration = longest accepted same-side horizon; ATR SL/TP
 5. **DECISION_READY** — trading handler uses **transformer safety gates** (`TRANSFORMER_ENTRY_GATES`); legacy feature-dict filters are off unless `LEGACY_FEATURE_ENTRY_GATES=true`
-5. **Risk & execution** — trading handler + risk manager before Delta testnet order placement
+6. **Risk & execution** — trading handler + risk manager before Delta testnet order placement
 
 **Vector Memory Store**
 - Stores decision contexts as embeddings (canonical `FEATURE_LIST` + market-context factors)
@@ -339,7 +340,7 @@ For detailed Reasoning Protocol documentation, see [MCP Layer Documentation - Re
 ### Intelligence Layer Components
 
 #### MCP Model Registry
-- **Responsibility**: Register per-TF `TransformerModelNode` instances discovered from **`MODEL_DIR`** subdirs (`JackSparrow_Transformer_BTCUSD_{tf}/metadata_transformer.json`)
+- **Responsibility**: Register `FusionModelNode` from **`MODEL_DIR/JackSparrow_Transformer_BTCUSD_mtf_fusion/`** (per-TF nodes only when `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis`)
 - **Protocol**: MCP Model Protocol
 - **Dependencies**: Model discovery, feature server, performance tracker
 - **Output**: Model predictions packaged as MCP evidence for policy + reasoning (archived v43 XGBoost / MSO paths documented in [ML models](03-ml-models.md))

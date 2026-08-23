@@ -313,8 +313,15 @@ def add_features(
     macd_fast: int = 12,
     macd_slow: int = 26,
     macd_signal: int = 9,
+    include_htf: bool = True,
 ) -> pd.DataFrame:
-    """Compute causal features on a native TF grid."""
+    """Compute causal features on a native TF grid.
+
+    Args:
+        include_htf: When True (default), 5m frames also merge resampled HTF
+            structure. The fused multi-TF model passes False and encodes each
+            timeframe from independently sampled OHLCV instead.
+    """
     out = df.copy()
     rv_short = scale_period(16, resolution_minutes)
     rv_long = scale_period(96, resolution_minutes)
@@ -441,7 +448,7 @@ def add_features(
     out = add_candle_structure_features(out)
     out[CANDLE_CLASS_COL] = classify_candle_shape(out, sr_window=sr_window)
     out = add_market_structure_features(out)
-    if int(resolution_minutes) == 5:
+    if include_htf and int(resolution_minutes) == 5:
         out = add_htf_structure_features(out)
 
     return out

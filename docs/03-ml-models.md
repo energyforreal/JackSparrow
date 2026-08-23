@@ -2,9 +2,9 @@
 
 ## Overview
 
-On branch **Transformers**, JackSparrow loads **per-timeframe ONNX Transformer bundles** (5m, 15m, 30m, 1h, 2h). `ModelDiscovery` registers one `TransformerModelNode` per bundle; the MCP orchestrator runs all models and applies **climate / setup / timing agent synthesis** in [`agent/core/market_understanding.py`](../agent/core/market_understanding.py) via `evaluate_transformer_prediction` in [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py) to produce `DECISION_READY` events with an **`execution_plan`** (long_edge/short_edge, path SL/TP pcts, soft R:R, size_fraction) from the **15m** path heads.
+JackSparrow’s live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then four 3-class heads forecast **+10m / +30m / +1h / +2h** as BULL / NEUTRAL / BEAR. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration.
 
-Models are sensors (MFE/MAE/vol/trend/OI). The agent owns long/short/flat → wire `BUY`/`SELL`/`HOLD`. There is no MTF BUY/SELL map and no `TRANSFORMER_AGENT_SYNTHESIS` flag.
+Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` reloads the five per-TF ONNX bundles and climate/setup/timing synthesis. That path is not dual-running by default.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -27,17 +27,23 @@ Models are sensors (MFE/MAE/vol/trend/OI). The agent owns long/short/flat → wi
 
 ## Runtime discovery (Transformer ONNX)
 
-Point **`MODEL_DIR`** at **`agent/model_storage/`** (parent directory). Each per-TF bundle lives in a subdirectory:
+Point **`MODEL_DIR`** at **`agent/model_storage/`** (parent directory). The live fused bundle is:
 
-`JackSparrow_Transformer_BTCUSD_{5m,15m,30m,1h,2h}/`
+`JackSparrow_Transformer_BTCUSD_mtf_fusion/`
 
-Required artifacts per bundle:
+Required artifacts:
 
 | File | Purpose |
 |------|---------|
-| `metadata_transformer.json` | Bundle manifest (resolution, thresholds, ONNX filename) |
-| `btcusd_{tf}_transformer.onnx` | ONNX model (loaded via `onnxruntime`) |
-| `feature_config.json` | Feature names and train/serve parity config |
+| `metadata_transformer.json` | Bundle manifest (gates, fusion weights, ONNX filename) |
+| `btcusd_mtf_fusion.onnx` | ONNX model (loaded via `onnxruntime`) |
+| `feature_config.json` | Feature names, window length, horizon gates |
+
+`ModelDiscovery.discover_models()` in [`agent/models/model_discovery.py`](../agent/models/model_discovery.py):
+
+1. Scans `MODEL_DIR` for `JackSparrow_Transformer_BTCUSD_*`
+2. If `TRANSFORMER_DECISION_PATH=mtf_fusion` (default) and the fused bundle exists, registers **only** `FusionModelNode`
+3. Per-TF bundles remain on disk for emergency rollback and are ignored while the fused bundle is present
 
 `ModelDiscovery.discover_models()` in [`agent/models/model_discovery.py`](../agent/models/model_discovery.py):
 
@@ -55,12 +61,13 @@ Required artifacts per bundle:
 
 ```
 agent/model_storage/
-├── JackSparrow_Transformer_BTCUSD_5m/
-├── JackSparrow_Transformer_BTCUSD_15m/
-├── JackSparrow_Transformer_BTCUSD_30m/
-├── JackSparrow_Transformer_BTCUSD_1h/
-└── JackSparrow_Transformer_BTCUSD_2h/
+└── JackSparrow_Transformer_BTCUSD_mtf_fusion/
+    ├── metadata_transformer.json
+    ├── btcusd_mtf_fusion.onnx
+    └── feature_config.json
 ```
+
+Older per-TF folders (`JackSparrow_Transformer_BTCUSD_{5m,15m,30m,1h,2h}/`) may remain unused.
 
 Each subdirectory contains `metadata_transformer.json`, `btcusd_{tf}_transformer.onnx`, and `feature_config.json`.
 
@@ -89,14 +96,16 @@ Each `TransformerModelNode` builds features on its native TF grid only.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_DIR` | `./agent/model_storage` | Parent directory for per-TF bundles |
-| `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Full-size confidence band floor (sizing) |
+| `MODEL_DIR` | `./agent/model_storage` | Parent directory for model bundles |
+| `TRANSFORMER_DECISION_PATH` | `mtf_fusion` | Live path; `transformer_agent_synthesis` is emergency rollback |
+| `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Per-horizon probability floor |
+| `SL_TP_MODE` | `atr` | Duration-scaled ATR brackets (fusion default) |
 | `TRANSFORMER_CONFIDENCE_HOLD_FLOOR` | `0.40` | Soft confidence floor used in size bands |
 | `TRANSFORMER_STRONG_EDGE_MULTIPLIER` | `1.5` | Legacy edge multiplier (execution plan STRONG sizing) |
 | `TRANSFORMER_EXTREME_REGIME_VETO` | `true` | Climate EXTREME → crisis HOLD in synthesis |
 | `TRANSFORMER_ENTRY_GATES` | `true` | Safety-only trading handler (no legacy feature vetoes) |
 | `LEGACY_FEATURE_ENTRY_GATES` | `false` | Emergency rollback for ADX/EMA/BB/SR filters |
-| `SL_TP_MODE` | `path_pred` | Use MFE/MAE path brackets (`path_pred`) |
+| `SL_TP_MODE` | `atr` | Duration-scaled ATR (fusion); `path_pred` for synthesis rollback |
 | `PATH_SL_ADVERSE_MULT` | `1.0` | Stop distance × adverse excursion |
 | `PATH_TP_FAVORABLE_MULT` | `1.0` | Take-profit × favorable excursion |
 | `PATH_RR_SIZE_FACTOR` | `0.7` | Soft R:R size cut (never hard-rejects) |
@@ -111,18 +120,20 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 
 ## Training and export
 
-Train each TF **independently** (no cross-TF fusion). Use the unified Colab notebook:
-
-- `scripts/colab/transformer_btcusd_all_tf_train_standalone.ipynb` — trains 5m, 15m, 30m, 1h, 2h sequentially
-
-Or via CLI:
+Train the **single fused model** (independent 5m/10m/30m/1h/2h encodings, walk-forward on the development span, untouched test):
 
 ```bash
-# All TFs
-python scripts/colab/train_transformer_resolution.py --all --export-dir export --continue-on-error
+python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion
+```
 
-# Single TF
-python scripts/colab/train_transformer_resolution.py --resolution 15m --export-dir export/15m
+Copy `export/mtf_fusion/JackSparrow_Transformer_BTCUSD_mtf_fusion/` into `agent/model_storage/`.
+
+Walk-forward and Optuna (if enabled) never see the final test split. Per-horizon HIGH/MEDIUM/LOW grades are frozen in `feature_config.json`.
+
+The legacy per-TF trainer remains for rollback bundles only:
+
+```bash
+python scripts/colab/train_transformer_resolution.py --all --export-dir export --continue-on-error
 ```
 
 Exports auto-generate `metadata_transformer.json`, `btcusd_{tf}_transformer.onnx`, and `feature_config.json`.
@@ -130,12 +141,14 @@ Exports auto-generate `metadata_transformer.json`, `btcusd_{tf}_transformer.onnx
 **Tests before deploy:**
 
 ```bash
-pytest tests/unit/test_transformer_btcusd_per_tf.py \
-       tests/unit/test_market_understanding.py \
+pytest tests/unit/test_mtf_asof_alignment.py \
+       tests/unit/test_mtf_fusion_labels.py \
+       tests/unit/test_mtf_fusion_model.py \
+       tests/unit/test_mtf_fusion_decision.py \
+       tests/unit/test_mtf_fusion_features.py \
        tests/unit/test_transformer_decision.py \
        tests/integration/test_agent_synthesis_decision.py \
-       tests/integration/test_mtf_transformer_decision.py \
-       tests/unit/test_transformer_model_discovery.py -q
+       tests/integration/test_mtf_transformer_decision.py -q
 ```
 
 ---
@@ -146,23 +159,22 @@ Runtime-critical modules:
 
 | Path | Role |
 |------|------|
-| `agent/models/model_discovery.py` | Transformer-only discovery |
-| `agent/models/transformer_node.py` | `TransformerModelNode` (ONNX via onnxruntime) |
-| `agent/models/transformer_context_builder.py` | Maps prediction → signal context |
-| `agent/models/mcp_model_registry.py` | MCP model registry |
-| `agent/core/market_understanding.py` | Climate/setup/timing views + agent synthesis |
+| `agent/models/model_discovery.py` | Prefers fused bundle; per-TF only on rollback |
+| `agent/models/fusion_node.py` | `FusionModelNode` (ONNX via onnxruntime) |
+| `agent/models/transformer_node.py` | Per-TF node (emergency synthesis only) |
+| `agent/core/fusion_policy.py` | Per-horizon gates + duration |
 | `agent/core/transformer_decision.py` | Slim decision path → `PolicyVerdict` / `DECISION_READY` |
 | `agent/core/mcp_orchestrator.py` | Orchestrates features → model → decision |
 
 Decision flow:
 
-1. `CANDLE_CLOSED` / price trigger → fetch 5m/15m/30m/1h/2h frames
-2. Each `TransformerModelNode.predict()` runs ONNX on its native TF
-3. `build_views_from_predictions` → `synthesize_agent_decision()` (climate × setup × timing)
-4. `evaluate_transformer_prediction()` emits BUY/SELL/HOLD + confidence + `market_state`
+1. `CANDLE_CLOSED` (5m) → fetch independent 5m/10m/30m/1h/2h frames
+2. `FusionModelNode.predict()` runs the fused ONNX graph
+3. `evaluate_horizon_forecast()` drops NEUTRAL / LOW-grade / low-probability heads
+4. Duration = longest accepted same-side horizon; ATR SL/TP; `decision_path=mtf_fusion`
 5. `DECISION_READY` → trading handler → risk → execution
 
-Role contract: 1h/2h = climate; 15m = setup (only TF that opens risk); 30m = confirm STRONG; 5m = timing. Statistic is per-TF `path_imbalance_z` (edge / typical label scale), not a shared 0.5% BUY cliff.
+5m never trades alone; it only contributes `Z_5`. A LOW 2h head emits HOLD for that horizon.
 
 See [Logic & reasoning](05-logic-reasoning.md) and [Architecture](01-architecture.md).
 

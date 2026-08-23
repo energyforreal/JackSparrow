@@ -1,4 +1,4 @@
-"""Build the v9 multi-horizon 5m research Colab (standalone, no GitHub clone).
+"""Build the v10 multi-TF fusion research Colab (standalone, no GitHub clone).
 
 Run from repo root::
 
@@ -35,11 +35,16 @@ INLINE_MODULE_ORDER: tuple[tuple[str, str], ...] = (
     ("## Derivatives features", "feature_store/transformer_btcusd/derivatives.py"),
     ("## Market structure", "feature_store/transformer_btcusd/structure.py"),
     ("## Feature engineering", "feature_store/transformer_btcusd/features.py"),
-    ("## Labels / targets", "feature_store/transformer_btcusd/labels.py"),
-    ("## Inference and export helpers", "feature_store/transformer_btcusd/inference.py"),
+    ("## Inference helpers", "feature_store/transformer_btcusd/inference.py"),
     ("## Delta Exchange India data", "scripts/colab/transformer_data.py"),
-    ("## Multi-horizon model", "scripts/colab/next_candle_model.py"),
-    ("## Multi-horizon research pipeline", "scripts/colab/next_candle_research.py"),
+    ("## Pattern geometry utils", "feature_store/pattern_features/pattern_utils.py"),
+    ("## Native candlestick encodings", "feature_store/pattern_features/candlestick_patterns.py"),
+    ("## Native chart encodings", "feature_store/pattern_features/chart_patterns.py"),
+    ("## Independent MTF frames", "feature_store/transformer_btcusd/mtf_frames.py"),
+    ("## Fusion 3-class labels", "feature_store/transformer_btcusd/mtf_labels.py"),
+    ("## Per-TF native features", "feature_store/transformer_btcusd/mtf_features.py"),
+    ("## Fused transformer", "scripts/colab/mtf_fusion_model.py"),
+    ("## Fusion research pipeline", "scripts/colab/mtf_fusion_research.py"),
 )
 
 RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
@@ -48,22 +53,22 @@ RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
     "## 03 Seeds",
     "## 04 Load OHLCV",
     "## 05 Data quality",
-    "## 06 Causal features",
+    "## 06 Native TF encodings",
     "## 07 Leakage audit",
-    "## 08 Multi-horizon path labels",
+    "## 08 Fusion horizon labels",
     "## 09 Temporal split",
     "## 10 Scaler",
     "## 11 Sequence datasets",
-    "## 12 Transformer",
-    "## 13 Multi-task loss",
+    "## 12 Fusion transformer",
+    "## 13 Cross-entropy loss",
     "## 14 Train + early stopping",
     "## 15 Validation metrics",
-    "## 16 Test",
+    "## 16 Test hold",
     "## 17 Walk-forward",
     "## 18 Horizon confusion",
-    "## 19 Pattern × context",
-    "## 20 SHAP",
-    "## 21 Ablations A–F",
+    "## 19 Fusion weights",
+    "## 20 Temperature calibration",
+    "## 21 Horizon grades",
     "## 22 Optuna",
     "## 23 Re-train",
     "## 24 Final untouched test",
@@ -71,19 +76,20 @@ RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
     "## 26 JackSparrow export",
 )
 
-INTRO_MARKDOWN = """# BTCUSD 5m multi-horizon path research (v9)
+INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v10)
 
-Research Colab: learn the causal relationship between historical OHLCV-derived
-candle/chart structure and **how the path will behave** at 5m, 10m, 15m, 30m,
-1h, and 2h. Continuous geometry is the input; named patterns are an auxiliary
-head (not a trading target). Direction is 5-class ATR-normalized
-(STRONG_DOWN / DOWN / NEUTRAL / UP / STRONG_UP).
+One shared encoder, five **independent** OHLCV streams (5m / 10m / 30m / 1h / 2h),
+softmax TF fusion weights, and four 3-class heads: **+10m / +30m / +1h / +2h**.
+Labels are BEAR / NEUTRAL / BULL from ATR-normalized close-to-close. There are
+**no MFE/MAE path heads**. 5m is an input timeframe, not a forecast head.
+10m is two closed 5m bars built **outside** the encoder — the model never
+resamples HTF structure from 5m.
 
-This is **not** next-OHLC prediction, not a live agent, and not a replacement for
-the production v6 all-TF trainer until a v9 5m export is validated.
+This notebook is the Colab trainer for the live fused bundle
+(`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Upload **this notebook only**.
+Historical OHLCV comes from the Delta Exchange India public API.
 
-Upload **this notebook only** to Google Colab. Historical OHLCV comes from the
-Delta Exchange India public API. Edit repo `.py` files and regenerate:
+Edit repo `.py` files and regenerate:
 
     python scripts/colab/build_next_candle_research_notebook.py
 
@@ -93,10 +99,16 @@ Delta Exchange India public API. Edit repo `.py` files and regenerate:
 PIP_CELL = (
     "# Colab ships torch/pandas/numpy; install research extras.\n"
     "!pip install -q --upgrade-strategy only-if-needed "
-    "pyarrow onnx onnxruntime requests scikit-learn optuna shap matplotlib seaborn\n"
+    "pyarrow onnx onnxruntime requests scikit-learn optuna shap "
+    "matplotlib seaborn scipy\n"
 )
 
-GPU_CHECK_CELL = """import torch
+GPU_CHECK_CELL = """import json
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import torch
 
 print(f"PyTorch: {torch.__version__}")
 if torch.cuda.is_available():
@@ -106,258 +118,272 @@ else:
     print("Runtime -> Change runtime type -> select a GPU (T4), then re-run this cell.")
 """
 
-CONFIG_CELL = """from pathlib import Path
-import json
-
-CONFIG = default_research_config()
+CONFIG_CELL = """CONFIG = default_fusion_training_config()
 # Smoke overrides (comment out for a full research run):
 # CONFIG["epochs"] = 2
 # CONFIG["history_days"] = 120
-# CONFIG["sequence_length"] = 64
 CONFIG["run_optuna"] = False
 CONFIG["run_shap"] = False
-CONFIG["run_ablations"] = False
 CONFIG["run_walk_forward"] = False
 
 _content = Path("/content")
 _root = _content if _content.is_dir() else Path(".")
-export_dir = _root / "export" / "JackSparrow_Transformer_BTCUSD_5m"
+export_dir = _root / "export" / FUSION_BUNDLE_DIR_NAME
 export_dir.mkdir(parents=True, exist_ok=True)
 cache_dir = _root / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
 print(json.dumps(CONFIG, indent=2, default=str))
+print("contract", FEATURE_CONTRACT_VERSION_V10)
+print("input TFs", list(FUSION_INPUT_RESOLUTIONS))
+print("horizons", list(FUSION_HORIZON_KEYS))
 """
 
-SEEDS_CELL = """set_research_seed(int(CONFIG["seed"]))
-print("seed", CONFIG["seed"])
+SEEDS_CELL = """set_research_seed(int(CONFIG.get("seed") or 42))
+print("seed", CONFIG.get("seed") or 42)
 """
 
-LOAD_CELL = """parquet = cache_dir / "btcusd_5m_raw.parquet"
-refresh_data = False
-if parquet.is_file() and not refresh_data:
-    raw_5m = pd.read_parquet(parquet)
-    print(f"Loaded cache {parquet} rows={len(raw_5m)}")
-else:
-    raw_5m = fetch_history_bundle(
-        symbol=str(CONFIG["symbol"]),
-        resolution="5m",
+LOAD_CELL = """refresh_data = False
+native_tfs = ("5m", "30m", "1h", "2h")
+raw_frames = {}
+for res in native_tfs:
+    parquet = cache_dir / f"btcusd_{res}_raw.parquet"
+    if parquet.is_file() and not refresh_data:
+        raw_frames[res] = pd.read_parquet(parquet)
+        print(f"Loaded cache {parquet} rows={len(raw_frames[res])}")
+        continue
+    raw_frames[res] = fetch_history_bundle(
+        symbol=str(CONFIG.get("symbol") or "BTCUSD"),
+        resolution=res,
         history_days=int(CONFIG.get("history_days") or 900),
         base_url=str(CONFIG.get("base_url") or "https://api.india.delta.exchange"),
     )
-    raw_5m.to_parquet(parquet, index=False)
-    print(f"Fetched and cached {parquet} rows={len(raw_5m)}")
-assert list(raw_5m.columns)
-print(raw_5m.head(3))
+    raw_frames[res].to_parquet(parquet, index=False)
+    print(f"Fetched and cached {parquet} rows={len(raw_frames[res])}")
+
+frames = fusion_frames_from_fetch(
+    raw_frames["5m"], raw_frames["30m"], raw_frames["1h"], raw_frames["2h"]
+)
+print("fusion frames", {k: len(v) for k, v in frames.items()})
+print("10m is two closed 5m bars, not a model-side resample.")
+assert set(FUSION_INPUT_RESOLUTIONS) <= set(frames)
+assert "15m" not in frames
 """
 
-QUALITY_CELL = """quality = ohlcv_quality_report(raw_5m, "5m", symbol=str(CONFIG["symbol"]))
-print(json.dumps(quality, indent=2, default=str))
+QUALITY_CELL = """quality = {}
+for res, df in frames.items():
+    quality[res] = validate_ohlcv_completeness(
+        df, res, symbol=str(CONFIG.get("symbol") or "BTCUSD")
+    )
+    print(res, json.dumps(quality[res], indent=2, default=str))
+sample_t = pd.to_datetime(frames["5m"]["time"].iloc[-2], utc=True)
+assert_no_lookahead(frames["30m"], sample_t, resolution_minutes=30)
+assert_no_lookahead(frames["1h"], sample_t, resolution_minutes=60)
+print("as-of join uses closed bars only; sample lookahead check passed.")
 """
 
-FEATURES_CELL = """labeled = build_labeled_frame(raw_5m, config=CONFIG)
-feature_cols = [c for c in v9_feature_cols_for_resolution("5m") if c in labeled.columns]
-print(f"labeled rows={len(labeled)} n_features={len(feature_cols)}")
-print("chart_pattern_id in frame (target only):", CHART_PATTERN_COL in labeled.columns)
-print("chart_pattern_id in model inputs:", CHART_PATTERN_COL in feature_cols)
-print("chart_pattern_id mix:")
-print(labeled[CHART_PATTERN_COL].value_counts().sort_index().to_dict())
-print(labeled[feature_cols[:8]].tail(2))
+FEATURES_CELL = """preview = add_native_tf_features(
+    frames["5m"].tail(400).reset_index(drop=True), resolution="5m"
+)
+feature_cols = list(fusion_feature_cols())
+htf_cols = [c for c in preview.columns if str(c).startswith("htf_")]
+print(f"preview rows={len(preview)} n_features={len(feature_cols)}")
+print("htf_ resampled columns (must be empty):", htf_cols)
+if htf_cols:
+    raise RuntimeError("Fusion encodings must not resample HTF structure from 5m")
+print("native TFs", list(FUSION_INPUT_RESOLUTIONS))
+print(preview[feature_cols[:8]].tail(2))
 """
 
 LEAKAGE_CELL = """leakage_audit(feature_cols)
-print("Leakage audit passed: no t+1 / path / horizon target columns in X.")
+print("Leakage audit passed: no t+1 / horizon dir / resampled HTF columns in X.")
 """
 
-TARGETS_CELL = """target_cols = [
-    *HORIZON_DIR_COLS,
-    *HORIZON_STRUCTURE_COLS,
-    *V8_CONTINUOUS_LABEL_COLS,
-    VOLUME_STATE_COL,
-]
-present = [c for c in target_cols if c in labeled.columns]
-for col in present:
-    series = labeled[col].dropna()
-    n_unique = int(series.nunique())
-    kind = "cont" if n_unique >= 20 else n_unique
-    print(f"{col}: n={len(series)} unique={kind}")
-
-print("Direction class mix / |move|/ATR (thresholds 0.5 and 2.0 ATR):")
-direction_class_mix_report(labeled)
-print("Structure class mix:")
-for col in HORIZON_STRUCTURE_COLS:
-    if col in labeled.columns:
-        print(col, labeled[col].value_counts(dropna=True).sort_index().to_dict())
-if "h5m_vol" in labeled.columns:
-    print("h5m_vol nunique", int(labeled["h5m_vol"].nunique(dropna=True)))
+TARGETS_CELL = """labeled_5m = compute_fusion_horizon_labels(frames["5m"])
+labeled_5m = trim_fusion_label_tail(labeled_5m)
+y_preview = fusion_label_matrix(labeled_5m)
+print("label rows", len(labeled_5m), "shape", y_preview.shape)
+print("3-class mix BEAR/NEUTRAL/BULL per horizon:")
+print(json.dumps(label_class_mix(y_preview), indent=2))
+print("dead zone is 0.5 ATR; no MFE/MAE path heads.")
 """
 
-SPLIT_CELL = """window_len = int(CONFIG["sequence_length"])
+SPLIT_CELL = """window_len = int(CONFIG.get("window_len") or FUSION_WINDOW_LEN)
 stride = int(CONFIG.get("stride") or 4)
-embargo = int(
-    CONFIG.get("embargo_bars")
-    or CONFIG.get("path_label_horizon_bars")
-    or MAX_V8_HORIZON_BARS
-)
-bar_slices = chronological_split(
-    len(labeled),
-    train_ratio=float(CONFIG["train_ratio"]),
-    validation_ratio=float(CONFIG["validation_ratio"]),
-    embargo=embargo,
-)
-print({k: (v.start, v.stop) for k, v in bar_slices.items()})
+embargo = int(CONFIG.get("embargo_bars") or FUSION_EMBARGO_BARS)
+print("window_len", window_len, "stride", stride, "embargo", embargo)
+print("Test is the final untouched tail after a purged embargo.")
 """
 
-SCALER_CELL = """train_df = labeled.iloc[bar_slices["train"]].reset_index(drop=True)
-train_x = train_df[feature_cols].to_numpy(dtype=np.float64)
-feature_finite_report(train_x, feature_cols)
-scaler_mean, scaler_std = fit_train_scaler(train_x)
-print("scaler fitted on TRAIN rows only", scaler_mean.shape)
-per_window = str(CONFIG.get("scaler_mode") or "train_fit") == "per_window"
+SCALER_CELL = """print("Scaler: per-window z-score inside collect_training_windows (zscore=True).")
+print("No global scaler is fit on val or test.")
+per_window = True
 """
 
-SEQUENCES_CELL = """packed_all = windows_from_frame(
-    labeled,
-    feature_cols=feature_cols,
-    window_len=window_len,
-    stride=stride,
-    scaler_mean=None if per_window else scaler_mean,
-    scaler_std=None if per_window else scaler_std,
-    per_window_zscore=per_window,
+SEQUENCES_CELL = """windows, labels, decision_times = build_dataset_from_ohlcv(
+    frames, window_len=window_len, stride=stride
 )
-win_slices = chronological_split(
-    len(packed_all["x"]),
-    train_ratio=float(CONFIG["train_ratio"]),
-    validation_ratio=float(CONFIG["validation_ratio"]),
-    embargo=max(1, min(4, embargo // max(stride, 1))),
+print("windows", {k: v.shape for k, v in windows.items()})
+print("labels", labels.shape, "decisions", len(decision_times))
+splits = purged_dev_test_split(
+    windows,
+    labels,
+    train_frac=float(CONFIG.get("train_frac") or 0.70),
+    val_frac=float(CONFIG.get("val_frac") or 0.15),
+    embargo_bars=embargo,
 )
-splits = split_window_dict(packed_all, win_slices)
-y_mean, y_std = fit_label_stats(splits["train"]["y_path"])
-print("windows", {k: len(v["x"]) for k, v in splits.items()})
-dir_class_w = inverse_frequency_class_weights(
-    splits["train"]["horizon_dirs"].reshape(-1), NEXT_DIRECTION_CARDINALITY
+print("split sizes", {k: len(v["labels"]) for k, v in splits.items()})
+n_features = len(fusion_feature_cols())
+feature_finite_report(splits["train"]["windows"]["5m"], feature_cols)
+class_w = inverse_frequency_class_weights(
+    splits["train"]["labels"], FUSION_DIRECTION_CARDINALITY
 )
-pat_class_w = inverse_frequency_class_weights(
-    splits["train"]["pattern_ids"], CHART_PATTERN_CARDINALITY
-)
-print("dir class weights", dir_class_w.round(3).tolist())
+print("dir class weights", np.round(class_w, 3).tolist())
 """
 
 MODEL_CELL = """device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = NextCandleTransformer(
-    n_features=len(feature_cols),
-    d_model=int(CONFIG.get("d_model") or 64),
-    nhead=int(CONFIG.get("nhead") or 4),
-    num_layers=int(CONFIG.get("num_layers") or 2),
-    dropout=float(CONFIG["dropout"]),
-    max_len=window_len,
-    n_continuous=len(V8_CONTINUOUS_LABEL_COLS),
-).to(device)
+model = MtfFusionTransformer(n_features=n_features).to(device)
 print(model)
 print("device", device)
+print("heads", list(FUSION_HORIZON_KEYS), "classes BEAR/NEUTRAL/BULL")
 """
 
-LOSS_CELL = """print("Loss lambdas (structure cannot be zeroed):")
-print(json.dumps(CONFIG.get("loss_weights") or {}, indent=2))
-print("Heads: 6x 5-class direction, 6x structure, 24-d path, volume, pattern.")
+LOSS_CELL = """print("Loss is mean cross-entropy across four 3-class horizon heads.")
+print("No PnL loss. Invalid labels (<0) are ignored.")
+print("class weights", np.round(class_w, 3).tolist())
 """
 
-TRAIN_CELL = """loaders = {}
-for name, shuffle in (("train", True), ("val", False), ("test", False)):
-    yz, mask = standardize_labels(splits[name]["y_path"], y_mean, y_std)
-    loaders[name] = make_loader(
-        splits[name],
-        y_path_z=yz,
-        path_mask=mask,
-        batch_size=int(CONFIG["batch_size"]),
-        shuffle=shuffle,
-        per_window_zscore=per_window,
-    )
-train_hist = train_next_candle(
+TRAIN_CELL = """train_loader = make_loader(
+    splits["train"]["windows"],
+    splits["train"]["labels"],
+    batch_size=int(CONFIG.get("batch_size") or 64),
+    shuffle=True,
+)
+val_loader = make_loader(
+    splits["val"]["windows"],
+    splits["val"]["labels"],
+    batch_size=int(CONFIG.get("batch_size") or 64),
+    shuffle=False,
+)
+test_loader = make_loader(
+    splits["test"]["windows"],
+    splits["test"]["labels"],
+    batch_size=int(CONFIG.get("batch_size") or 64),
+    shuffle=False,
+)
+train_hist = train_mtf_fusion(
     model,
-    loaders["train"],
-    loaders["val"],
+    train_loader,
+    val_loader,
     device=device,
-    epochs=int(CONFIG["epochs"]),
-    lr=float(CONFIG["learning_rate"]),
-    weight_decay=float(CONFIG["weight_decay"]),
-    patience=int(CONFIG["early_stopping_patience"]),
-    loss_weights=CONFIG.get("loss_weights"),
-    dir_class_weights=torch.tensor(dir_class_w, dtype=torch.float32),
-    pattern_class_weights=torch.tensor(pat_class_w, dtype=torch.float32),
+    epochs=int(CONFIG.get("epochs") or 40),
+    lr=float(CONFIG.get("lr") or 1e-4),
+    weight_decay=float(CONFIG.get("weight_decay") or 1e-4),
+    patience=int(CONFIG.get("early_stop_patience") or 8),
+    class_weights=torch.tensor(class_w, dtype=torch.float32),
 )
 print(train_hist)
 if not train_hist.get("ok"):
     raise RuntimeError(f"Training aborted with non-finite loss: {train_hist}")
 """
 
-VAL_CELL = """print("Validation:")
-val_metrics = evaluate_structure_heads(model, loaders["val"], device=device)
-"""
-
-TEST_CELL = """print("Test (untouched, one run of the frozen model):")
-test_metrics = evaluate_structure_heads(model, loaders["test"], device=device)
-"""
-
-WALK_CELL = """if CONFIG.get("run_walk_forward"):
-    run_walk_forward_eval(
-        packed_all, config=CONFIG, device=device, y_mean=y_mean, y_std=y_std
+VAL_CELL = """print("Validation (used for early stopping, temperature, and grades):")
+val_logits, val_y = predict_logits(model, val_loader, device)
+val_metrics = {}
+for j, key in enumerate(FUSION_HORIZON_KEYS):
+    val_metrics[key] = horizon_metrics(val_logits[:, j, :], val_y[:, j])
+    m = val_metrics[key]
+    print(
+        f"  {key}: acc={m['balanced_acc']:.3f} f1={m['macro_f1']:.3f} "
+        f"ece={m['ece']:.3f} n={int(m['n'])}"
     )
+"""
+
+TEST_CELL = """print("Test split is frozen until section 24. Do not score it during search.")
+print("test windows", {k: v.shape for k, v in splits["test"]["windows"].items()})
+"""
+
+WALK_CELL = """dev_windows = {
+    res: np.concatenate(
+        [splits["train"]["windows"][res], splits["val"]["windows"][res]], axis=0
+    )
+    for res in FUSION_INPUT_RESOLUTIONS
+}
+dev_labels = np.concatenate(
+    [splits["train"]["labels"], splits["val"]["labels"]], axis=0
+)
+if CONFIG.get("run_walk_forward"):
+    walk_forward = run_walk_forward(
+        dev_windows, dev_labels, n_features=n_features, config=CONFIG, device=device
+    )
+    print(json.dumps(walk_forward["mean"], indent=2))
 else:
-    n_folds = int(CONFIG.get("walk_forward_folds") or 3)
-    folds = walk_forward_slices(len(packed_all["x"]), folds=n_folds, embargo=1)
+    folds = walk_forward_slices(
+        len(dev_labels),
+        folds=int(
+            CONFIG.get("walk_forward_folds") or CONFIG.get("walk_forward_folds") or 3
+        ),
+        embargo=int(
+            CONFIG.get("walk_forward_embargo")
+            or CONFIG.get("walk_forward_embargo")
+            or embargo
+        ),
+    )
     fold_spans = [(s.start, s.stop, v.start, v.stop) for s, v in folds]
     print(f"Walk-forward folds (not executed): {fold_spans}")
+    walk_forward = {"folds": [], "mean": {}, "std": {}}
 """
 
-CONFUSION_CELL = """model.eval()
-xb = torch.tensor(splits["val"]["x"][:256], dtype=torch.float32, device=device)
-xc = torch.tensor(splits["val"]["x_cat"][:256], dtype=torch.long, device=device)
-with torch.no_grad():
-    outs = model(xb, xc)
-pred_dir = outs[0].argmax(dim=1).cpu().numpy()
-true_dir = splits["val"]["horizon_dirs"][: len(pred_dir), 0]
-print("h5m direction confusion (true x pred):")
-print(confusion_counts(pred_dir, true_dir, NEXT_DIRECTION_CARDINALITY))
-pred_h10 = outs[1].argmax(dim=1).cpu().numpy()
-true_h10 = splits["val"]["horizon_dirs"][: len(pred_h10), 1]
-print("h10m direction confusion (true x pred):")
-print(confusion_counts(pred_h10, true_h10, NEXT_DIRECTION_CARDINALITY))
+CONFUSION_CELL = """print("Validation confusion (true x pred) per horizon, 0=BEAR 1=NEUTRAL 2=BULL:")
+for j, key in enumerate(FUSION_HORIZON_KEYS):
+    pred = val_logits[:, j, :].argmax(axis=-1)
+    mat = confusion_counts(pred, val_y[:, j], FUSION_DIRECTION_CARDINALITY)
+    print(key)
+    print(mat)
 """
 
-CONTEXT_CELL = """pattern_context_table(labeled)
+WEIGHTS_CELL = """fusion_w = model.fusion_weights().detach().cpu().numpy()
+print("softmax TF fusion weights (5m, 10m, 30m, 1h, 2h):")
+for res, w in zip(FUSION_INPUT_RESOLUTIONS, fusion_w):
+    print(f"  {res}: {float(w):.4f}")
 """
 
-SHAP_CELL = """shap_grouped_stub(feature_cols, enabled=bool(CONFIG.get("run_shap")))
+CALIBRATION_CELL = """print("Fit one temperature per horizon on validation logits. Never uses test.")
+gates = freeze_horizon_gates(val_logits, val_y, walk_forward, config=CONFIG)
+for key, row in gates["horizons"].items():
+    print(
+        f"  {key}: T={row['temperature']:.3f} grade={row['validation_confidence']} "
+        f"acc={row['balanced_acc']:.3f} ece={row['ece']:.3f}"
+    )
 """
 
-ABLATION_CELL = """if CONFIG.get("run_ablations"):
-    groups = ablation_feature_groups("5m")
-    print("Ablation direction accuracy (val, 1 epoch, out-of-sample splits):")
-    for key, cols in groups.items():
-        idx = np.array([feature_cols.index(c) for c in cols if c in feature_cols], dtype=np.int64)
-        if len(idx) < 3:
-            continue
-        acc = run_ablation_epoch(
-            splits["train"], splits["val"], feature_index=idx,
-            config=CONFIG, device=device, y_mean=y_mean, y_std=y_std,
-        )
-        print(f"  {key}: {acc:.3f}  n_features={len(idx)}")
-    print("If F wins only on train, call overfitting — report val/test only.")
-else:
-    print("Ablations skipped (CONFIG run_ablations=False). Groups A–F: OHLCV → +geometry → +trend → +structure → +chart → +HTF.")
+GRADES_CELL = """print("HIGH / MEDIUM may trade; LOW is telemetry-only.")
+print("Each head is gated independently. Do not pick max-prob across horizons.")
+print("Duration = longest accepted same-side horizon; SL/TP = ATR at that duration.")
+for key, row in gates["horizons"].items():
+    print(key, row["validation_confidence"], "min_p", row["min_probability"])
 """
 
 OPTUNA_CELL = """CONFIG = optuna_search_stub(CONFIG)
 """
 
-RETRAIN_CELL = """print("Best CONFIG already trained on the research train split with val early stopping.")
-print("To re-train on train+val after Optuna, concatenate those loaders and call train_next_candle again.")
-print("Never peek at the final test split during search.")
+RETRAIN_CELL = """print("Best CONFIG was trained on the research train split with val early stopping.")
+print("To re-train on train+val after Optuna, concatenate those windows and call")
+print("train_mtf_fusion again. Never peek at the final test split during search.")
 """
 
-FINAL_TEST_CELL = """print("Final untouched test (frozen weights):")
-final_test = evaluate_structure_heads(model, loaders["test"], device=device)
-print(final_test)
+FINAL_TEST_CELL = """print("Final untouched test (frozen weights + frozen gates):")
+test_logits, test_y = predict_logits(model, test_loader, device)
+final_test = {}
+for j, key in enumerate(FUSION_HORIZON_KEYS):
+    temp = float(gates["horizons"][key]["temperature"])
+    final_test[key] = horizon_metrics(
+        test_logits[:, j, :], test_y[:, j], temperature=temp
+    )
+    m = final_test[key]
+    print(
+        f"  {key}: acc={m['balanced_acc']:.3f} f1={m['macro_f1']:.3f} "
+        f"ece={m['ece']:.3f} pnl={m['paper_pnl']:.3f}"
+    )
 """
 
 SAVE_CELL = """if not train_hist.get("ok"):
@@ -365,12 +391,14 @@ SAVE_CELL = """if not train_hist.get("ok"):
 else:
     artifact = {
         "feature_cols": list(feature_cols),
-        "loss_weights": CONFIG.get("loss_weights"),
         "seed": CONFIG.get("seed"),
-        "sequence_length": window_len,
-        "scaler_mode": CONFIG.get("scaler_mode"),
-        "feature_contract_version": FEATURE_CONTRACT_VERSION,
+        "window_len": window_len,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V10,
+        "resolutions": list(FUSION_INPUT_RESOLUTIONS),
+        "horizon_keys": list(FUSION_HORIZON_KEYS),
+        "tf_fusion_weights": [float(x) for x in fusion_w],
         "val_metrics": val_metrics,
+        "horizon_gates": gates,
         "test_metrics": final_test,
     }
     (export_dir / "research_run.json").write_text(
@@ -382,39 +410,33 @@ else:
 EXPORT_CELL = """if not train_hist.get("ok"):
     print("Skip ONNX export: training did not succeed", train_hist)
 else:
-    onnx_path, cfg_path, meta_path = export_v9_bundle(
+    shap_grouped_stub(feature_cols, enabled=bool(CONFIG.get("run_shap")))
+    onnx_path, cfg_path, meta_path = export_fusion_bundle(
         model,
         export_dir,
-        device=device,
+        n_features=n_features,
         window_len=window_len,
-        n_features=len(feature_cols),
-        feature_cols=feature_cols,
-        label_mean=y_mean,
-        label_std=y_std,
         config=CONFIG,
-        scaler_mean=None if per_window else scaler_mean,
-        scaler_std=None if per_window else scaler_std,
+        gates=gates,
+        fusion_weights=fusion_w.tolist(),
+        test_metrics=final_test,
     )
     print("Exported", onnx_path)
     print("feature_config", cfg_path)
     print("metadata", meta_path)
-    print("Copy this directory into agent/model_storage/ after validate_transformer_bundle.py")
+    print("Copy this directory into agent/model_storage/ after validation.")
 """
 
 NOTES_MARKDOWN = """## Notes
 
 - Historical OHLCV is **immutable**. Training updates **weights only**.
-- Scaler is fit on **train windows/rows only**. Optuna/walk-forward never see the final test set.
-- Named candlestick class is an **input embedding**. Movement value is per-horizon
-  **MFE/MAE / path_edge** at 5m through 2h. ``h5m_vol`` is RMS |log return|
-  (not std of a 1-sample window). Structure labels use the **terminal** bar
-  of each horizon so 1h/2h do not collapse to BREAKOUT.
-- Production v6 all-TF notebook remains the live 15m–2h trainer until this v9
-  5m export is proven.
-- Agent follow-on: 15m still owns setup SL/TP; 5m timing from 5m+10m
-  P(UP)-P(DOWN); 15m–2h packets on the 5m model are telemetry only.
-- Promote only if test balanced direction is above chance at 5m and 10m and
-  path_vol_corr stays above 0.15. Raw accuracy climbing with horizon is not enough.
+- 10m is assembled from two closed 5m bars **outside** the model.
+- Each TF runs candle/chart/structure engines on its **native** grid. No HTF resample.
+- Walk-forward, Optuna, and temperature fitting never see the final test split.
+- Gate each horizon independently. Duration is the longest accepted same-side head.
+- SL/TP are ATR scaled to that duration (path heads were dropped).
+- Promote only if validation grades are HIGH/MEDIUM and test stays above chance
+  after temperature. Paper PnL is a secondary diagnostic, not the training loss.
 """
 
 
@@ -440,22 +462,22 @@ def build_notebook() -> dict[str, Any]:
         *_section("## 03 Seeds", SEEDS_CELL),
         *_section("## 04 Load OHLCV", LOAD_CELL),
         *_section("## 05 Data quality", QUALITY_CELL),
-        *_section("## 06 Causal features", FEATURES_CELL),
+        *_section("## 06 Native TF encodings", FEATURES_CELL),
         *_section("## 07 Leakage audit", LEAKAGE_CELL),
-        *_section("## 08 Multi-horizon path labels", TARGETS_CELL),
+        *_section("## 08 Fusion horizon labels", TARGETS_CELL),
         *_section("## 09 Temporal split", SPLIT_CELL),
         *_section("## 10 Scaler", SCALER_CELL),
         *_section("## 11 Sequence datasets", SEQUENCES_CELL),
-        *_section("## 12 Transformer", MODEL_CELL),
-        *_section("## 13 Multi-task loss", LOSS_CELL),
+        *_section("## 12 Fusion transformer", MODEL_CELL),
+        *_section("## 13 Cross-entropy loss", LOSS_CELL),
         *_section("## 14 Train + early stopping", TRAIN_CELL),
         *_section("## 15 Validation metrics", VAL_CELL),
-        *_section("## 16 Test", TEST_CELL),
+        *_section("## 16 Test hold", TEST_CELL),
         *_section("## 17 Walk-forward", WALK_CELL),
         *_section("## 18 Horizon confusion", CONFUSION_CELL),
-        *_section("## 19 Pattern × context", CONTEXT_CELL),
-        *_section("## 20 SHAP", SHAP_CELL),
-        *_section("## 21 Ablations A–F", ABLATION_CELL),
+        *_section("## 19 Fusion weights", WEIGHTS_CELL),
+        *_section("## 20 Temperature calibration", CALIBRATION_CELL),
+        *_section("## 21 Horizon grades", GRADES_CELL),
         *_section("## 22 Optuna", OPTUNA_CELL),
         *_section("## 23 Re-train", RETRAIN_CELL),
         *_section("## 24 Final untouched test", FINAL_TEST_CELL),
@@ -513,7 +535,7 @@ def validate_notebook(notebook: dict[str, Any]) -> None:
     internal_import_re = re.compile(r"^\s*from (feature_store|scripts)\.")
     for cell in cells:
         text = _cell_text(cell)
-        if "export_v8_bundle(" in text and "def export_v8_bundle" not in text:
+        if "export_fusion_bundle(" in text and "def export_fusion_bundle" not in text:
             for line in text.splitlines():
                 if internal_import_re.match(line):
                     raise RuntimeError(

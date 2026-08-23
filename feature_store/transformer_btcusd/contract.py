@@ -8,12 +8,22 @@ from typing import Any, Dict, Tuple
 FEATURE_CONTRACT_VERSION_V6 = "transformer_btcusd_per_tf_features_v6"
 FEATURE_CONTRACT_VERSION_V7 = "transformer_btcusd_per_tf_features_v7"
 FEATURE_CONTRACT_VERSION_V8 = "transformer_btcusd_per_tf_features_v8"
-FEATURE_CONTRACT_VERSION = "transformer_btcusd_per_tf_features_v9"
+FEATURE_CONTRACT_VERSION_V9 = "transformer_btcusd_per_tf_features_v9"
+FEATURE_CONTRACT_VERSION_V10 = "transformer_btcusd_mtf_fusion_v10"
+# Live per-TF bundles remain v9. The fused model uses V10.
+FEATURE_CONTRACT_VERSION = FEATURE_CONTRACT_VERSION_V9
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
+FUSION_INPUT_RESOLUTIONS: Tuple[str, ...] = ("5m", "10m", "30m", "1h", "2h")
+FUSION_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion"
+FUSION_MODEL_FAMILY = "jacksparrow_transformer_btcusd_mtf_fusion"
+FUSION_ONNX_FILENAME = "btcusd_mtf_fusion.onnx"
+FUSION_WINDOW_LEN: int = 64
+FUSION_EMBARGO_BARS: int = 24
 
 RESOLUTION_MINUTES: Dict[str, int] = {
     "5m": 5,
+    "10m": 10,
     "15m": 15,
     "30m": 30,
     "1h": 60,
@@ -376,6 +386,46 @@ ONNX_OUTPUT_NAMES_V8: Tuple[str, ...] = (
 )
 ONNX_OUTPUT_NAMES_V9: Tuple[str, ...] = ONNX_OUTPUT_NAMES_V8 + ("chart_pattern_logits",)
 
+# v10 fused multi-TF model: 3-class position heads, no MFE/MAE.
+FUSION_HORIZON_SPECS: Tuple[Tuple[str, int], ...] = (
+    ("h10m", 2),
+    ("h30m", 6),
+    ("h1h", 12),
+    ("h2h", 24),
+)
+FUSION_HORIZON_KEYS: Tuple[str, ...] = tuple(key for key, _ in FUSION_HORIZON_SPECS)
+FUSION_HORIZON_BARS_5M: Tuple[int, ...] = tuple(bars for _, bars in FUSION_HORIZON_SPECS)
+N_FUSION_HORIZONS: int = len(FUSION_HORIZON_SPECS)
+MAX_FUSION_HORIZON_BARS: int = max(FUSION_HORIZON_BARS_5M)
+FUSION_DIR_COLS: Tuple[str, ...] = tuple(f"{key}_dir" for key in FUSION_HORIZON_KEYS)
+FUSION_DIRECTION_CARDINALITY = 3
+FUSION_DIRECTION_NAMES: Dict[int, str] = {0: "BEAR", 1: "NEUTRAL", 2: "BULL"}
+FUSION_POSITION_LONG = "LONG"
+FUSION_POSITION_SHORT = "SHORT"
+FUSION_POSITION_HOLD = "HOLD"
+FUSION_GRADE_HIGH = "HIGH"
+FUSION_GRADE_MEDIUM = "MEDIUM"
+FUSION_GRADE_LOW = "LOW"
+FUSION_HIGH_BALANCED_ACC = 0.45
+FUSION_HIGH_MAX_ECE = 0.08
+FUSION_MEDIUM_BALANCED_ACC = 0.40
+FUSION_MIN_PROBABILITY = 0.55
+ONNX_OUTPUT_NAMES_V10: Tuple[str, ...] = tuple(
+    f"{key}_dir_logits" for key in FUSION_HORIZON_KEYS
+) + ("tf_fusion_logits",)
+FUSION_DURATION_ATR_MULT: Dict[str, Tuple[float, float]] = {
+    "h10m": (0.75, 1.0),
+    "h30m": (1.0, 1.5),
+    "h1h": (1.5, 2.25),
+    "h2h": (2.0, 3.0),
+}
+FUSION_HORIZON_MINUTES: Dict[str, int] = {
+    "h10m": 10,
+    "h30m": 30,
+    "h1h": 60,
+    "h2h": 120,
+}
+
 # Next-bar candle families for 5m timing (not model classes).
 CANDLE_FAMILY_DOJI = frozenset({0, 1, 2, 3, 8})
 CANDLE_FAMILY_BULL = frozenset({4, 6, 9, 11})
@@ -450,6 +500,8 @@ def path_favorable_adverse(
 def model_family_for_resolution(resolution: str) -> str:
     """Canonical model_family string for a TF bundle."""
     res = resolution.strip().lower()
+    if res == "mtf_fusion":
+        return FUSION_MODEL_FAMILY
     if res not in RESOLUTION_MINUTES:
         raise ValueError(f"Unsupported resolution: {resolution!r}")
     return f"jacksparrow_transformer_btcusd_{res}"
@@ -457,6 +509,8 @@ def model_family_for_resolution(resolution: str) -> str:
 
 def onnx_filename_for_resolution(resolution: str) -> str:
     res = resolution.strip().lower()
+    if res == "mtf_fusion":
+        return FUSION_ONNX_FILENAME
     if res not in RESOLUTION_MINUTES:
         raise ValueError(f"Unsupported resolution: {resolution!r}")
     return f"btcusd_{res}_transformer.onnx"
@@ -464,6 +518,8 @@ def onnx_filename_for_resolution(resolution: str) -> str:
 
 def bundle_dir_name(resolution: str) -> str:
     res = resolution.strip().lower()
+    if res == "mtf_fusion":
+        return FUSION_BUNDLE_DIR_NAME
     return f"JackSparrow_Transformer_BTCUSD_{res}"
 
 
@@ -559,6 +615,11 @@ def feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
     return FEATURE_COLS
 
 
+def fusion_native_feature_cols() -> Tuple[str, ...]:
+    """Native-TF columns for the fused model (no resampled HTF context)."""
+    return FEATURE_COLS
+
+
 def v7_feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
     """Input columns: native features plus causal chart_pattern_id."""
     return feature_cols_for_resolution(resolution) + (CHART_PATTERN_COL,)
@@ -582,7 +643,9 @@ def onnx_output_names_for_contract(
     """ONNX head names for a bundle contract."""
     ver = str(contract_version or "").strip()
     res = resolution.strip().lower()
-    if ver == FEATURE_CONTRACT_VERSION:
+    if ver == FEATURE_CONTRACT_VERSION_V10 or res == "mtf_fusion":
+        return ONNX_OUTPUT_NAMES_V10
+    if ver in (FEATURE_CONTRACT_VERSION, FEATURE_CONTRACT_VERSION_V9):
         if res == "5m":
             return ONNX_OUTPUT_NAMES_V9
         return ONNX_OUTPUT_NAMES_V6
@@ -670,6 +733,42 @@ def default_research_config() -> Dict[str, Any]:
         "run_ablations": False,
         "run_walk_forward": False,
         "walk_forward_folds": 3,
+    }
+
+
+def default_fusion_training_config() -> Dict[str, Any]:
+    """Defaults for the single multi-TF fusion trainer."""
+    return {
+        "symbol": "BTCUSD",
+        "resolutions": list(FUSION_INPUT_RESOLUTIONS),
+        "horizon_keys": list(FUSION_HORIZON_KEYS),
+        "horizon_bars": list(FUSION_HORIZON_BARS_5M),
+        "window_len": FUSION_WINDOW_LEN,
+        "stride": 4,
+        "train_frac": 0.70,
+        "val_frac": 0.15,
+        "embargo_bars": FUSION_EMBARGO_BARS,
+        "batch_size": 64,
+        "epochs": 40,
+        "lr": 1e-4,
+        "weight_decay": 1e-4,
+        "dropout": 0.15,
+        "d_model": 64,
+        "nhead": 4,
+        "num_layers": 2,
+        "early_stop_patience": 8,
+        "seed": 42,
+        "history_days": 900,
+        "base_url": "https://api.india.delta.exchange",
+        "atr_period": 14,
+        "run_optuna": False,
+        "optuna_trials": 0,
+        "walk_forward_folds": 3,
+        "walk_forward_embargo": FUSION_EMBARGO_BARS,
+        "min_probability": FUSION_MIN_PROBABILITY,
+        "high_balanced_acc": FUSION_HIGH_BALANCED_ACC,
+        "high_max_ece": FUSION_HIGH_MAX_ECE,
+        "medium_balanced_acc": FUSION_MEDIUM_BALANCED_ACC,
     }
 
 

@@ -18,6 +18,8 @@ const TRANSFORMER_PLAN_KEYS = [
   'decision_path',
   'multi_tf_predictions',
   'cross_tf_summary',
+  'horizon_forecast',
+  'tf_fusion_weights',
 ] as const
 
 /** Merge WS signal payloads without retaining omitted confidence keys (BUG 2). */

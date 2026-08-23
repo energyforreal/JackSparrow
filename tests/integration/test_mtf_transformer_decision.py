@@ -15,6 +15,13 @@ from agent.models.mcp_model_node import MCPModelPrediction
 from agent.models.mcp_model_registry import MCPModelRegistry, MCPModelResponse
 
 
+@pytest.fixture(autouse=True)
+def _synthesis_decision_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent.core.config import settings
+
+    monkeypatch.setattr(settings, "transformer_decision_path", "transformer_agent_synthesis")
+
+
 def _ohlcv_df(n: int = 200) -> pd.DataFrame:
     idx = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
     return pd.DataFrame(

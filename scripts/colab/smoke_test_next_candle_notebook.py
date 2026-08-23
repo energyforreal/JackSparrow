@@ -1,4 +1,4 @@
-"""Validate next-candle research Colab structure (26 sections, no blobs)."""
+"""Validate fused multi-TF research Colab structure (26 sections, no blobs)."""
 
 from __future__ import annotations
 
@@ -18,17 +18,18 @@ FORBIDDEN_PATTERNS = (
 )
 
 REQUIRED_SYMBOLS = (
-    "default_research_config",
-    "NextCandleTransformer",
-    "compute_horizon_behavior_labels",
-    "fit_train_scaler",
-    "sanitize_feature_values",
-    "export_v9_bundle",
-    "FEATURE_CONTRACT_VERSION",
-    "chart_pattern_id",
-    "direction_class_mix_report",
+    "default_fusion_training_config",
+    "MtfFusionTransformer",
+    "compute_fusion_horizon_labels",
+    "build_10m_ohlcv_from_5m",
+    "fusion_frames_from_fetch",
+    "export_fusion_bundle",
+    "FEATURE_CONTRACT_VERSION_V10",
     "walk_forward_slices",
-    "ablation_feature_groups",
+    "freeze_horizon_gates",
+    "FUSION_INPUT_RESOLUTIONS",
+    "precompute_featured_frames",
+    "build_dataset_from_ohlcv",
 )
 
 RESEARCH_SECTION_HEADINGS = (
@@ -37,22 +38,22 @@ RESEARCH_SECTION_HEADINGS = (
     "## 03 Seeds",
     "## 04 Load OHLCV",
     "## 05 Data quality",
-    "## 06 Causal features",
+    "## 06 Native TF encodings",
     "## 07 Leakage audit",
-    "## 08 Multi-horizon path labels",
+    "## 08 Fusion horizon labels",
     "## 09 Temporal split",
     "## 10 Scaler",
     "## 11 Sequence datasets",
-    "## 12 Transformer",
-    "## 13 Multi-task loss",
+    "## 12 Fusion transformer",
+    "## 13 Cross-entropy loss",
     "## 14 Train + early stopping",
     "## 15 Validation metrics",
-    "## 16 Test",
+    "## 16 Test hold",
     "## 17 Walk-forward",
     "## 18 Horizon confusion",
-    "## 19 Pattern × context",
-    "## 20 SHAP",
-    "## 21 Ablations A–F",
+    "## 19 Fusion weights",
+    "## 20 Temperature calibration",
+    "## 21 Horizon grades",
     "## 22 Optuna",
     "## 23 Re-train",
     "## 24 Final untouched test",

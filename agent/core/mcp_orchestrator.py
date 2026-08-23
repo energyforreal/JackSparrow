@@ -53,10 +53,14 @@ def _build_transformer_dry_run_context(symbol: str) -> Dict[str, Any]:
     """Synthetic MTF OHLCV context for transformer dry-run validation."""
     import pandas as pd
 
-    from feature_store.transformer_btcusd.contract import SUPPORTED_RESOLUTIONS
+    from feature_store.transformer_btcusd.contract import (
+        FUSION_INPUT_RESOLUTIONS,
+        SUPPORTED_RESOLUTIONS,
+    )
 
     freq_map = {
         "5m": "5min",
+        "10m": "10min",
         "15m": "15min",
         "30m": "30min",
         "1h": "1h",
@@ -77,7 +81,11 @@ def _build_transformer_dry_run_context(symbol: str) -> Dict[str, Any]:
         )
 
     ctx: Dict[str, Any] = {"dry_run": True, "symbol": symbol}
-    for res in SUPPORTED_RESOLUTIONS:
+    seen = set()
+    for res in tuple(SUPPORTED_RESOLUTIONS) + tuple(FUSION_INPUT_RESOLUTIONS):
+        if res in seen:
+            continue
+        seen.add(res)
         ctx[f"v43_df{res}"] = _ohlcv_df(200, freq_map.get(res, "5min"))
     return ctx
 

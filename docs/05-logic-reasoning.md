@@ -2,13 +2,28 @@
 
 ## Overview
 
-This document describes **JackSparrow's** decision-making process on the **Transformers** branch. Runtime runs **five per-TF ONNX Transformers**. Models remain sensors; [`agent/core/market_understanding.py`](../agent/core/market_understanding.py) maps heads into climate / setup / timing views and the **agent** owns long/short/flat → wire `BUY`/`SELL`/`HOLD`. There is no MTF BUY/SELL fallback and no feature flag.
+This document describes **JackSparrow's** decision-making process. Runtime default is **one fused multi-TF Transformer**. Independent 5m/10m/30m/1h/2h encodings are fused with learned weights; Layer 2 forecasts BULL/NEUTRAL/BEAR at +10m/+30m/+1h/+2h. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades. Duration is the longest accepted same-side horizon. 5m never trades alone.
+
+Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` restores five per-TF models and climate/setup/timing.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
 ---
 
-## Agent market synthesis (only live path)
+## Fused multi-horizon forecast (only live path)
+
+1. Encode each TF independently (candle + chart/structure engines on native OHLCV; as-of join at 5m close).
+2. Softmax fusion weights produce `Z_combined`.
+3. Four heads emit calibrated BULL/NEUTRAL/BEAR probabilities.
+4. Drop NEUTRAL, below-floor probability, or LOW validation grade.
+5. Conflict (accepted LONG and SHORT) → HOLD. Else signal = that side; **duration = longest accepted horizon**.
+6. `execution_plan` — ATR SL/TP + `max_hold_minutes` + `size_fraction` from the duration head.
+
+Payload: `market_context.decision_path = "mtf_fusion"`, `horizon_forecast`, `tf_fusion_weights`.
+
+---
+
+## Agent market synthesis (emergency rollback only)
 
 ML models remain sensors. `build_tf_market_view` builds per-TF `TfMarketView`s using scaled `path_imbalance_z` (edge / typical abs edge from that bundle’s label stats), then `synthesize_agent_decision`:
 

@@ -2,36 +2,38 @@
 description: Transformer ONNX bundle and MCP protocol standards
 globs:
   - "agent/models/**/*.py"
-  - "feature_store/transformer_btcusd_15m/**/*.py"
+  - "feature_store/transformer_btcusd/**/*.py"
   - "agent/model_storage/**/*"
 alwaysApply: false
 ---
 
 # Transformer Model Standards
 
-## Model File Organization
+## Default runtime bundle
 
-- **Default runtime bundle**: `agent/model_storage/JackSparrow_Transformer_BTCUSD/`
-- Required artifacts: `metadata_transformer.json`, `btcusd_15m_transformer.onnx`, `feature_config.json`
-- **`MODEL_DIR`** / **`AGENT_MODEL_DIR`**: Must point at the transformer bundle directory.
-- **Feature contract**: `feature_store/transformer_btcusd_15m/` (train/serve parity with Colab).
+- **Fused model**: `agent/model_storage/JackSparrow_Transformer_BTCUSD_mtf_fusion/`
+- Required artifacts: `metadata_transformer.json`, `btcusd_mtf_fusion.onnx`, `feature_config.json`
+- **`MODEL_DIR`**: Parent of that bundle directory (`agent/model_storage`)
+- **Feature contract**: `feature_store/transformer_btcusd/` v10 (`FEATURE_CONTRACT_VERSION_V10`)
+- **Decision path**: `TRANSFORMER_DECISION_PATH=mtf_fusion` (rollback: `transformer_agent_synthesis`)
 
 ## Environment Variables
 
-- **`TRANSFORMER_MIN_CONFIDENCE`**: Minimum confidence for entry signals (default `0.55`).
-- **`TRANSFORMER_STRONG_EDGE_MULTIPLIER`**: Edge multiplier for STRONG_BUY/SELL (default `1.5`).
-- **`TRANSFORMER_EXTREME_REGIME_VETO`**: Force HOLD when vol regime is EXTREME (default `true`).
-- **Docker**: `docker-compose.yml` agent service sets `MODEL_DIR` to transformer bundle by default.
-
-## Model Implementation
-
-`TransformerModelNode` implements `MCPModelNode`:
-
-- Loads ONNX via `onnxruntime`
-- `predict()` emits transformer context consumed by `agent/core/transformer_decision.py`
+- **`TRANSFORMER_DECISION_PATH`**: `mtf_fusion` (default) or `transformer_agent_synthesis`
+- **`TRANSFORMER_MIN_CONFIDENCE`**: Per-horizon probability floor (default `0.55`)
+- **`SL_TP_MODE`**: `atr` (fusion default); `path_pred` only for synthesis rollback
 
 ## Tests
 
-- `pytest tests/unit/test_transformer_btcusd_15m.py`
-- `pytest tests/unit/test_transformer_decision.py`
-- `pytest tests/unit/test_transformer_model_discovery.py`
+- `pytest tests/unit/test_mtf_fusion_decision.py tests/unit/test_mtf_fusion_labels.py tests/unit/test_mtf_asof_alignment.py`
+
+## Model Implementation
+
+`FusionModelNode` implements `MCPModelNode`:
+
+- Loads fused ONNX via `onnxruntime`
+- `predict()` emits per-horizon logits consumed by `agent/core/fusion_policy.py`
+
+## Tests
+
+- `pytest tests/unit/test_mtf_fusion_decision.py tests/unit/test_mtf_fusion_labels.py tests/unit/test_mtf_asof_alignment.py tests/unit/test_transformer_decision.py`
