@@ -31,6 +31,7 @@ REQUIRED_SYMBOLS = (
     "precompute_featured_frames",
     "build_dataset_from_ohlcv",
     "memmap_dir",
+    "files.download",
 )
 
 RESEARCH_SECTION_HEADINGS = (
@@ -103,6 +104,18 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
         )
     if "last_swing_dir" not in full_text:
         raise AssertionError("notebook should document last_swing_dir as causal")
+    if "Walk-forward skipped (CONFIG run_walk_forward=False)" not in full_text:
+        raise AssertionError("section 17 must skip walk-forward without concatenating windows")
+    walk = re.search(
+        r"tf_keys = tuple\(splits\[\"train\"\]\[\"windows\"\]\.keys\(\)\)[\s\S]+?"
+        r"walk_forward = \{\"folds\": \[\], \"mean\": \{\}, \"std\": \{\}\}",
+        full_text,
+    )
+    if walk is None:
+        raise AssertionError("section 17 walk-forward cell missing robust tf_keys path")
+    if "FUSION_INPUT_RESOLUTIONS" in walk.group(0):
+        raise AssertionError("section 17 must not depend on FUSION_INPUT_RESOLUTIONS")
+
 
     # Colab inlines every module into one global namespace. Duplicate helper
     # names silently overwrite (e.g. two `_safe_atr` signatures).

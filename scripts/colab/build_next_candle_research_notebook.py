@@ -86,7 +86,11 @@ Labels are BEAR / NEUTRAL / BULL from ATR-normalized close-to-close. There are
 resamples HTF structure from 5m.
 
 This notebook is the Colab trainer for the live fused bundle
-(`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Upload **this notebook only**.
+(`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Upload **this notebook only**,
+or run it from Windows via WSL:
+
+    powershell -File scripts/colab/run_colab_cli.ps1
+
 Historical OHLCV comes from the Delta Exchange India public API.
 
 Edit repo `.py` files and regenerate:
@@ -307,34 +311,37 @@ TEST_CELL = """print("Test split is frozen until section 24. Do not score it dur
 print("test windows", {k: v.shape for k, v in splits["test"]["windows"].items()})
 """
 
-WALK_CELL = """dev_windows = {
-    res: np.concatenate(
-        [splits["train"]["windows"][res], splits["val"]["windows"][res]], axis=0
-    )
-    for res in FUSION_INPUT_RESOLUTIONS
-}
-dev_labels = np.concatenate(
-    [splits["train"]["labels"], splits["val"]["labels"]], axis=0
-)
+WALK_CELL = """tf_keys = tuple(splits["train"]["windows"].keys())
+n_dev = int(len(splits["train"]["labels"]) + len(splits["val"]["labels"]))
+n_folds = int(CONFIG.get("walk_forward_folds") or 3)
+fold_embargo = int(CONFIG.get("walk_forward_embargo") or embargo)
+print("walk-forward TFs", tf_keys)
+print("dev samples (train+val)", n_dev, "folds", n_folds, "embargo", fold_embargo)
+print("test is excluded from walk-forward")
 if CONFIG.get("run_walk_forward"):
+    dev_windows = {
+        res: np.concatenate(
+            [splits["train"]["windows"][res], splits["val"]["windows"][res]],
+            axis=0,
+        )
+        for res in tf_keys
+    }
+    dev_labels = np.concatenate(
+        [splits["train"]["labels"], splits["val"]["labels"]], axis=0
+    )
     walk_forward = run_walk_forward(
-        dev_windows, dev_labels, n_features=n_features, config=CONFIG, device=device
+        dev_windows,
+        dev_labels,
+        n_features=n_features,
+        config=CONFIG,
+        device=device,
     )
-    print(json.dumps(walk_forward["mean"], indent=2))
+    print(json.dumps(walk_forward.get("mean") or {}, indent=2, default=str))
+    del dev_windows, dev_labels
 else:
-    folds = walk_forward_slices(
-        len(dev_labels),
-        folds=int(
-            CONFIG.get("walk_forward_folds") or CONFIG.get("walk_forward_folds") or 3
-        ),
-        embargo=int(
-            CONFIG.get("walk_forward_embargo")
-            or CONFIG.get("walk_forward_embargo")
-            or embargo
-        ),
-    )
+    folds = walk_forward_slices(n_dev, folds=n_folds, embargo=fold_embargo)
     fold_spans = [(s.start, s.stop, v.start, v.stop) for s, v in folds]
-    print(f"Walk-forward folds (not executed): {fold_spans}")
+    print("Walk-forward skipped (CONFIG run_walk_forward=False). Fold plan:", fold_spans)
     walk_forward = {"folds": [], "mean": {}, "std": {}}
 """
 
@@ -347,8 +354,9 @@ for j, key in enumerate(FUSION_HORIZON_KEYS):
 """
 
 WEIGHTS_CELL = """fusion_w = model.fusion_weights().detach().cpu().numpy()
-print("softmax TF fusion weights (5m, 10m, 30m, 1h, 2h):")
-for res, w in zip(FUSION_INPUT_RESOLUTIONS, fusion_w):
+tf_keys = tuple(splits["train"]["windows"].keys())
+print("softmax TF fusion weights:")
+for res, w in zip(tf_keys, fusion_w):
     print(f"  {res}: {float(w):.4f}")
 """
 
@@ -430,6 +438,16 @@ else:
     print("feature_config", cfg_path)
     print("metadata", meta_path)
     print("Copy this directory into agent/model_storage/ after validation.")
+    import shutil
+    zip_stem = export_dir.parent / FUSION_BUNDLE_DIR_NAME
+    zip_path = Path(shutil.make_archive(str(zip_stem), "zip", root_dir=export_dir))
+    print("Wrote zip", zip_path)
+    try:
+        from google.colab import files
+        files.download(str(zip_path))
+    except Exception as exc:
+        print("Browser download skipped:", exc)
+        print("Zip remains at", zip_path)
 """
 
 NOTES_MARKDOWN = """## Notes
@@ -442,6 +460,7 @@ NOTES_MARKDOWN = """## Notes
 - SL/TP are ATR scaled to that duration (path heads were dropped).
 - Promote only if validation grades are HIGH/MEDIUM and test stays above chance
   after temperature. Paper PnL is a secondary diagnostic, not the training loss.
+- Section 26 zips the export folder and starts a Colab download on success.
 """
 
 

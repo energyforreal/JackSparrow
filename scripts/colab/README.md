@@ -51,6 +51,32 @@ Sources: `scripts/colab/mtf_fusion_model.py`, `scripts/colab/mtf_fusion_research
 **Retrain after horizon/label changes:** set `refresh_data = True` in the Colab load
 cell so cached parquet is rebuilt (or delete `/content/cache/*.parquet`).
 
+## Colab CLI via WSL (Windows)
+
+The [Google Colab CLI](https://github.com/googlecolab/google-colab-cli) is
+Linux/macOS only. On this Windows machine it runs inside Ubuntu WSL.
+
+One-time setup (installs Ubuntu-24.04 if needed, then `google-colab-cli`):
+
+```powershell
+powershell -File scripts/colab/setup_wsl_colab_cli.ps1
+wsl -d Ubuntu-24.04 -- bash -lc "colab sessions"
+```
+
+The first `colab` command prints a Google URL. Sign in, paste the code back
+into the WSL prompt, then run the fused research notebook on a T4:
+
+```powershell
+powershell -File scripts/colab/run_colab_cli.ps1
+```
+
+Useful flags (forwarded into WSL): `--gpu A100`, `--keep`, `--stop-existing`,
+`--timeout 28800`. `colab exec` defaults to 30s; the wrapper raises that so
+training can finish. The runner downloads
+`export/JackSparrow_Transformer_BTCUSD_mtf_fusion.zip` and stops the VM unless
+`--keep` is set. Do not change the WSL default distro; Docker Desktop stays
+default and the scripts always pass `-d Ubuntu-24.04`.
+
 ## Notebook
 
 Upload **`transformer_btcusd_all_tf_train_standalone.ipynb`** to Google Colab (single file,
