@@ -1,0 +1,8 @@
+{
+  "cooldown_hours": 24,
+  "accounts": [
+    {"id": "account-1", "email": "you+colab1@gmail.com"},
+    {"id": "account-2", "email": "you+colab2@gmail.com"},
+    {"id": "account-3", "email": "you+colab3@gmail.com"}
+  ]
+}

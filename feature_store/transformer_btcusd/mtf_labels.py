@@ -1,7 +1,7 @@
-"""3-class BULL / NEUTRAL / BEAR labels for fused multi-horizon forecasts.
+"""Fusion labels: 0.5 ATR dead zone internally, 2-class BEAR/BULL for training.
 
 Labels live on the 5m decision clock. Features at t are causal. Targets use
-close[t+k] only. No MFE/MAE path heads.
+close[t+k] only. No MFE/MAE path heads. NEUTRAL is ignore_index (-1), not a class.
 """
 
 from __future__ import annotations
@@ -17,6 +17,8 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_EMBARGO_BARS,
     FUSION_HORIZON_BARS_5M,
     FUSION_HORIZON_KEYS,
+    FUSION_IGNORE_INDEX,
+    FUSION_RETIRED_DIR_COLS,
     HORIZON_DIR_ATR_WEAK,
     MAX_FUSION_HORIZON_BARS,
 )
@@ -47,11 +49,24 @@ def three_class_direction(move: float, atr: float) -> int:
     return 1
 
 
+def three_class_to_train_label(class_id: float) -> int:
+    """Map internal 3-class id to 2-class train id. NEUTRAL/NaN → ignore_index."""
+    if not np.isfinite(class_id):
+        return int(FUSION_IGNORE_INDEX)
+    cid = int(class_id)
+    if cid == 0:
+        return 0
+    if cid == 2:
+        return 1
+    return int(FUSION_IGNORE_INDEX)
+
+
 def compute_fusion_horizon_labels(df5m: pd.DataFrame) -> pd.DataFrame:
-    """Label +10m/+30m/+1h/+2h position on the 5m grid.
+    """Label +30m/+1h/+2h position on the 5m grid (internal 3-class 0/1/2).
 
     ``y_h`` at bar t uses ``close[t+k] - close[t]`` over ATR at t.
     The last ``MAX_FUSION_HORIZON_BARS`` rows are NaN (insufficient future).
+    Training maps NEUTRAL to ignore_index via ``fusion_label_matrix``.
     """
     out = _ensure_time(df5m)
     n = len(out)
@@ -92,18 +107,21 @@ def trim_fusion_label_tail(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fusion_label_matrix(df: pd.DataFrame) -> np.ndarray:
-    """(n, 4) int64 labels aligned with FUSION_HORIZON_KEYS. NaN → -1."""
+    """(n, 3) int64 train labels: BEAR=0, BULL=1, NEUTRAL/NaN=-1."""
     cols = list(FUSION_DIR_COLS)
     arr = df.loc[:, cols].to_numpy(dtype=np.float64)
-    out = np.full(arr.shape, -1, dtype=np.int64)
+    out = np.full(arr.shape, int(FUSION_IGNORE_INDEX), dtype=np.int64)
     finite = np.isfinite(arr)
-    out[finite] = arr[finite].astype(np.int64)
+    mapped = np.full(arr.shape, int(FUSION_IGNORE_INDEX), dtype=np.int64)
+    mapped[arr == 0] = 0
+    mapped[arr == 2] = 1
+    out[finite] = mapped[finite]
     return out
 
 
 def fusion_future_leak_cols() -> frozenset:
     """Columns that must never appear as model inputs."""
-    return frozenset(FUSION_DIR_COLS)
+    return frozenset(FUSION_DIR_COLS) | frozenset(FUSION_RETIRED_DIR_COLS)
 
 
 def embargo_bars() -> int:
@@ -111,30 +129,38 @@ def embargo_bars() -> int:
 
 
 def direction_name(class_id: int) -> str:
-    return FUSION_DIRECTION_NAMES.get(int(class_id), "NEUTRAL")
+    cid = int(class_id)
+    if cid < 0:
+        return "IGNORED"
+    return FUSION_DIRECTION_NAMES.get(cid, "IGNORED")
 
 
 def horizon_key_to_col() -> Dict[str, str]:
     return {key: f"{key}_dir" for key in FUSION_HORIZON_KEYS}
 
 
-def label_class_mix(y: np.ndarray) -> Dict[str, Dict[str, int]]:
-    """Per-horizon class counts for reports."""
-    report: Dict[str, Dict[str, int]] = {}
+def label_class_mix(y: np.ndarray) -> Dict[str, Dict[str, float]]:
+    """Per-horizon 2-class counts plus ignore rate for reports."""
+    report: Dict[str, Dict[str, float]] = {}
     for j, key in enumerate(FUSION_HORIZON_KEYS):
         col = y[:, j] if y.ndim == 2 else y
-        counts = {name: 0 for name in FUSION_DIRECTION_NAMES.values()}
-        for cid, name in FUSION_DIRECTION_NAMES.items():
-            counts[name] = int(np.sum(col == int(cid)))
+        n = int(len(col))
+        ignored = int(np.sum(col < 0))
+        counts: Dict[str, float] = {
+            "BEAR": float(np.sum(col == 0)),
+            "BULL": float(np.sum(col == 1)),
+            "IGNORED": float(ignored),
+            "ignore_rate": float(ignored) / float(max(n, 1)),
+        }
         report[key] = counts
     return report
 
 
 def valid_label_mask(y: np.ndarray) -> np.ndarray:
-    """True where every horizon label is in {0,1,2}."""
+    """True where at least one horizon is a 2-class BEAR/BULL label."""
     if y.ndim == 1:
-        return (y >= 0) & (y <= 2)
-    return np.all((y >= 0) & (y <= 2), axis=1)
+        return (y == 0) | (y == 1)
+    return np.any((y == 0) | (y == 1), axis=1)
 
 
 def split_hint() -> Tuple[int, int]:

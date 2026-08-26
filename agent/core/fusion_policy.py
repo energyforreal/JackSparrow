@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from feature_store.transformer_btcusd.contract import (
+    FUSION_DIRECTION_CARDINALITY,
     FUSION_DIRECTION_NAMES,
     FUSION_DURATION_ATR_MULT,
     FUSION_GRADE_HIGH,
@@ -83,11 +84,14 @@ def decode_dir_probs(logits: Sequence[float]) -> Dict[str, float]:
     import math
 
     xs = [float(x) for x in logits]
+    names = [FUSION_DIRECTION_NAMES[i] for i in range(int(FUSION_DIRECTION_CARDINALITY))]
+    if len(xs) != int(FUSION_DIRECTION_CARDINALITY):
+        return {name: 0.0 for name in names}
     m = max(xs) if xs else 0.0
     exps = [math.exp(x - m) for x in xs]
     s = sum(exps) or 1.0
     probs = [e / s for e in exps]
-    return {FUSION_DIRECTION_NAMES[i]: float(p) for i, p in enumerate(probs)}
+    return {names[i]: float(p) for i, p in enumerate(probs)}
 
 
 def apply_temperature(logits: Sequence[float], temperature: float) -> List[float]:
@@ -105,9 +109,20 @@ def rung_from_logits(
     accepted_grades: Sequence[str] | None = None,
 ) -> HorizonRung:
     scaled = apply_temperature(logits, temperature)
+    if len(scaled) != int(FUSION_DIRECTION_CARDINALITY):
+        return HorizonRung(
+            key=key,
+            position=FUSION_POSITION_HOLD,
+            probability=0.0,
+            validation_confidence=str(validation_confidence or FUSION_GRADE_LOW).upper(),
+            accepted=False,
+            dir_id=-1,
+            dir_name="HOLD",
+            probs=decode_dir_probs(scaled),
+        )
     probs = decode_dir_probs(scaled)
     dir_id = int(max(range(len(scaled)), key=lambda i: scaled[i]))
-    dir_name = FUSION_DIRECTION_NAMES.get(dir_id, "NEUTRAL")
+    dir_name = FUSION_DIRECTION_NAMES.get(dir_id, "HOLD")
     probability = float(probs.get(dir_name, 0.0))
     if dir_name == "BULL":
         position = FUSION_POSITION_LONG
@@ -150,7 +165,7 @@ def evaluate_horizon_forecast(
     gate_map = dict(gates.get("horizons") or gates)
     reasons: List[str] = []
     for key in FUSION_HORIZON_KEYS:
-        raw = horizon_logits.get(key) or [0.0, 1.0, 0.0]
+        raw = horizon_logits.get(key) or [0.0, 0.0]
         meta = dict(gate_map.get(key) or {})
         rung = rung_from_logits(
             key,

@@ -10,7 +10,8 @@ FEATURE_CONTRACT_VERSION_V7 = "transformer_btcusd_per_tf_features_v7"
 FEATURE_CONTRACT_VERSION_V8 = "transformer_btcusd_per_tf_features_v8"
 FEATURE_CONTRACT_VERSION_V9 = "transformer_btcusd_per_tf_features_v9"
 FEATURE_CONTRACT_VERSION_V10 = "transformer_btcusd_mtf_fusion_v10"
-# Live per-TF bundles remain v9. The fused model uses V10.
+FEATURE_CONTRACT_VERSION_V11 = "transformer_btcusd_mtf_fusion_v11"
+# Live per-TF bundles remain v9. The fused model uses V11 (2-class, no h10m head).
 FEATURE_CONTRACT_VERSION = FEATURE_CONTRACT_VERSION_V9
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
@@ -386,9 +387,9 @@ ONNX_OUTPUT_NAMES_V8: Tuple[str, ...] = (
 )
 ONNX_OUTPUT_NAMES_V9: Tuple[str, ...] = ONNX_OUTPUT_NAMES_V8 + ("chart_pattern_logits",)
 
-# v10 fused multi-TF model: 3-class position heads, no MFE/MAE.
+# v11 fused multi-TF model: 2-class BEAR/BULL heads, no MFE/MAE.
+# 5m/10m stay encoder inputs. h10m is not a trading head. HOLD is not a class.
 FUSION_HORIZON_SPECS: Tuple[Tuple[str, int], ...] = (
-    ("h10m", 2),
     ("h30m", 6),
     ("h1h", 12),
     ("h2h", 24),
@@ -398,29 +399,38 @@ FUSION_HORIZON_BARS_5M: Tuple[int, ...] = tuple(bars for _, bars in FUSION_HORIZ
 N_FUSION_HORIZONS: int = len(FUSION_HORIZON_SPECS)
 MAX_FUSION_HORIZON_BARS: int = max(FUSION_HORIZON_BARS_5M)
 FUSION_DIR_COLS: Tuple[str, ...] = tuple(f"{key}_dir" for key in FUSION_HORIZON_KEYS)
-FUSION_DIRECTION_CARDINALITY = 3
-FUSION_DIRECTION_NAMES: Dict[int, str] = {0: "BEAR", 1: "NEUTRAL", 2: "BULL"}
+FUSION_RETIRED_DIR_COLS: Tuple[str, ...] = ("h10m_dir",)
+FUSION_IGNORE_INDEX = -1
+FUSION_DIRECTION_CARDINALITY = 2
+FUSION_DIRECTION_NAMES: Dict[int, str] = {0: "BEAR", 1: "BULL"}
 FUSION_POSITION_LONG = "LONG"
 FUSION_POSITION_SHORT = "SHORT"
 FUSION_POSITION_HOLD = "HOLD"
 FUSION_GRADE_HIGH = "HIGH"
 FUSION_GRADE_MEDIUM = "MEDIUM"
 FUSION_GRADE_LOW = "LOW"
-FUSION_HIGH_BALANCED_ACC = 0.45
+# 2-class chance is 0.50; floors sit above noise (old 0.40/0.45 would auto-pass).
+FUSION_HIGH_BALANCED_ACC = 0.58
 FUSION_HIGH_MAX_ECE = 0.08
-FUSION_MEDIUM_BALANCED_ACC = 0.40
+FUSION_MEDIUM_BALANCED_ACC = 0.55
 FUSION_MIN_PROBABILITY = 0.55
-ONNX_OUTPUT_NAMES_V10: Tuple[str, ...] = tuple(
+# Frozen v10 4-head / 3-class names — live fusion must not load this layout.
+ONNX_OUTPUT_NAMES_V10: Tuple[str, ...] = (
+    "h10m_dir_logits",
+    "h30m_dir_logits",
+    "h1h_dir_logits",
+    "h2h_dir_logits",
+    "tf_fusion_logits",
+)
+ONNX_OUTPUT_NAMES_V11: Tuple[str, ...] = tuple(
     f"{key}_dir_logits" for key in FUSION_HORIZON_KEYS
 ) + ("tf_fusion_logits",)
 FUSION_DURATION_ATR_MULT: Dict[str, Tuple[float, float]] = {
-    "h10m": (0.75, 1.0),
     "h30m": (1.0, 1.5),
     "h1h": (1.5, 2.25),
     "h2h": (2.0, 3.0),
 }
 FUSION_HORIZON_MINUTES: Dict[str, int] = {
-    "h10m": 10,
     "h30m": 30,
     "h1h": 60,
     "h2h": 120,
@@ -643,7 +653,9 @@ def onnx_output_names_for_contract(
     """ONNX head names for a bundle contract."""
     ver = str(contract_version or "").strip()
     res = resolution.strip().lower()
-    if ver == FEATURE_CONTRACT_VERSION_V10 or res == "mtf_fusion":
+    if ver == FEATURE_CONTRACT_VERSION_V11 or res == "mtf_fusion":
+        return ONNX_OUTPUT_NAMES_V11
+    if ver == FEATURE_CONTRACT_VERSION_V10:
         return ONNX_OUTPUT_NAMES_V10
     if ver in (FEATURE_CONTRACT_VERSION, FEATURE_CONTRACT_VERSION_V9):
         if res == "5m":
@@ -763,12 +775,14 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "atr_period": 14,
         "run_optuna": False,
         "optuna_trials": 0,
+        "run_walk_forward": True,
         "walk_forward_folds": 3,
         "walk_forward_embargo": FUSION_EMBARGO_BARS,
         "min_probability": FUSION_MIN_PROBABILITY,
         "high_balanced_acc": FUSION_HIGH_BALANCED_ACC,
         "high_max_ece": FUSION_HIGH_MAX_ECE,
         "medium_balanced_acc": FUSION_MEDIUM_BALANCED_ACC,
+        "n_classes": FUSION_DIRECTION_CARDINALITY,
     }
 
 

@@ -33,8 +33,8 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_MODEL_FAMILY,
     FUSION_ONNX_FILENAME,
     FUSION_WINDOW_LEN,
-    FEATURE_CONTRACT_VERSION_V10,
-    ONNX_OUTPUT_NAMES_V10,
+    FEATURE_CONTRACT_VERSION_V11,
+    ONNX_OUTPUT_NAMES_V11,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
     default_fusion_training_config,
@@ -223,7 +223,7 @@ def build_dataset_from_ohlcv(
     stride: int = 4,
     memmap_dir: Optional[Path] = None,
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray, pd.Series]:
-    """Native TF windows + 3-class labels aligned on the 5m decision clock."""
+    """Native TF windows + 2-class train labels aligned on the 5m decision clock."""
     labeled = compute_fusion_horizon_labels(frames["5m"])
     labeled = trim_fusion_label_tail(labeled)
     featured = precompute_featured_frames(frames)
@@ -259,7 +259,11 @@ def softmax_np(logits: np.ndarray) -> np.ndarray:
     return exp / np.clip(exp.sum(axis=-1, keepdims=True), 1e-12, None)
 
 
-def balanced_accuracy(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int = 3) -> float:
+def balanced_accuracy(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    n_classes: int = FUSION_DIRECTION_CARDINALITY,
+) -> float:
     scores: List[float] = []
     for c in range(int(n_classes)):
         mask = y_true == c
@@ -271,7 +275,11 @@ def balanced_accuracy(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int = 3
     return float(np.mean(scores))
 
 
-def macro_f1(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int = 3) -> float:
+def macro_f1(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    n_classes: int = FUSION_DIRECTION_CARDINALITY,
+) -> float:
     f1s: List[float] = []
     for c in range(int(n_classes)):
         tp = float(np.sum((y_true == c) & (y_pred == c)))
@@ -309,17 +317,21 @@ def expected_calibration_error(
     return float(ece)
 
 
-def brier_score(probs: np.ndarray, y_true: np.ndarray, n_classes: int = 3) -> float:
+def brier_score(
+    probs: np.ndarray,
+    y_true: np.ndarray,
+    n_classes: int = FUSION_DIRECTION_CARDINALITY,
+) -> float:
     onehot = np.eye(int(n_classes), dtype=np.float64)[np.clip(y_true, 0, n_classes - 1)]
     return float(np.mean(np.sum((probs - onehot) ** 2, axis=-1)))
 
 
 def paper_pnl(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Secondary metric only. +1 correct directional, -1 wrong, 0 if either NEUTRAL."""
-    directional = (y_pred != 1) & (y_true != 1)
-    if not np.any(directional):
+    """Secondary metric only. +1 correct 2-class direction, -1 wrong. Skip < 0."""
+    valid = (y_true >= 0) & (y_pred >= 0)
+    if not np.any(valid):
         return 0.0
-    wins = y_pred[directional] == y_true[directional]
+    wins = y_pred[valid] == y_true[valid]
     return float(np.mean(np.where(wins, 1.0, -1.0)))
 
 
@@ -390,10 +402,10 @@ def horizon_metrics(
     pred = probs.argmax(axis=-1)
     yt = y_true[valid]
     return {
-        "balanced_acc": balanced_accuracy(yt, pred),
-        "macro_f1": macro_f1(yt, pred),
+        "balanced_acc": balanced_accuracy(yt, pred, FUSION_DIRECTION_CARDINALITY),
+        "macro_f1": macro_f1(yt, pred, FUSION_DIRECTION_CARDINALITY),
         "ece": expected_calibration_error(probs, yt),
-        "brier": brier_score(probs, yt),
+        "brier": brier_score(probs, yt, FUSION_DIRECTION_CARDINALITY),
         "paper_pnl": paper_pnl(yt, pred),
         "n": float(len(yt)),
     }
@@ -405,7 +417,7 @@ def predict_logits(
     loader: DataLoader,
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Return (n, n_horizons, 3) logits and (n, n_horizons) labels."""
+    """Return (n, n_horizons, 2) logits and (n, n_horizons) labels."""
     model.eval()
     logit_chunks: List[np.ndarray] = []
     label_chunks: List[np.ndarray] = []
@@ -543,7 +555,7 @@ def export_fusion_bundle(
         torch.randn(1, int(window_len), int(n_features)) for _ in FUSION_INPUT_RESOLUTIONS
     ]
     input_names = [f"features_{res}" for res in FUSION_INPUT_RESOLUTIONS]
-    output_names = list(ONNX_OUTPUT_NAMES_V10)
+    output_names = list(ONNX_OUTPUT_NAMES_V11)
     dynamic_axes = {name: {0: "batch"} for name in input_names + output_names}
     model.cpu().eval()
     export_kwargs: Dict[str, Any] = {
@@ -586,7 +598,7 @@ def export_fusion_bundle(
         pass
 
     feature_config = {
-        "feature_contract_version": FEATURE_CONTRACT_VERSION_V10,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
         "feature_cols": list(fusion_feature_cols()),
         "window_len": int(window_len),
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
@@ -602,7 +614,7 @@ def export_fusion_bundle(
         json.dumps(feature_config, indent=2, default=str), encoding="utf-8"
     )
     meta = {
-        "version": "transformer_mtf_fusion_v10",
+        "version": "transformer_mtf_fusion_v11",
         "model_name": "jacksparrow_transformer_BTCUSD_mtf_fusion",
         "model_family": FUSION_MODEL_FAMILY,
         "symbol": str(config.get("symbol") or "BTCUSD"),
@@ -640,6 +652,61 @@ def purged_dev_test_split(
             "labels": part["y"],
         }
     return out
+
+
+def fusion_ready_to_promote(
+    walk_forward: Mapping[str, Any],
+    test_metrics: Mapping[str, Any],
+    gates: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """True if at least one head is MEDIUM+ on walk-forward mean and frozen test.
+
+    HIGH still requires ECE and fold std via ``grade_horizon``. Live must not
+    load a bundle when this returns ready=False.
+    """
+    wf_mean = dict(walk_forward.get("mean") or {})
+    wf_std = dict(walk_forward.get("std") or {})
+    gate_map = dict(gates.get("horizons") or gates)
+    ready_heads: List[str] = []
+    detail: Dict[str, Any] = {}
+    for key in FUSION_HORIZON_KEYS:
+        test_m = dict(test_metrics.get(key) or {})
+        test_acc = float(test_m.get("balanced_acc") or 0.0)
+        test_ece = float(test_m.get("ece") or 1.0)
+        wf_acc = float(wf_mean.get(key) or 0.0)
+        fold_std = float(wf_std.get(key) or 0.0)
+        wf_grade = grade_horizon(
+            balanced_acc=wf_acc,
+            ece=test_ece,
+            fold_std=fold_std,
+        )
+        test_grade = str(
+            (gate_map.get(key) or {}).get("validation_confidence") or ""
+        )
+        if not test_grade:
+            test_grade = grade_horizon(balanced_acc=test_acc, ece=test_ece)
+        accepted = {FUSION_GRADE_HIGH, FUSION_GRADE_MEDIUM}
+        ok = wf_grade in accepted and test_grade in accepted
+        if ok:
+            ready_heads.append(key)
+        detail[key] = {
+            "walk_forward_mean_acc": wf_acc,
+            "walk_forward_grade": wf_grade,
+            "test_acc": test_acc,
+            "test_grade": test_grade,
+            "ok": ok,
+        }
+    ready = bool(ready_heads)
+    return {
+        "ready": ready,
+        "heads": ready_heads,
+        "detail": detail,
+        "reason": (
+            "at least one head MEDIUM+ on walk-forward mean and frozen test"
+            if ready
+            else "no head is MEDIUM on walk-forward mean and frozen test; do not promote"
+        ),
+    }
 
 
 def default_config() -> Dict[str, Any]:

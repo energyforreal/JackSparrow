@@ -1,4 +1,4 @@
-"""Build the v10 multi-TF fusion research Colab (standalone, no GitHub clone).
+"""Build the v11 multi-TF fusion research Colab (standalone, no GitHub clone).
 
 Run from repo root::
 
@@ -41,7 +41,7 @@ INLINE_MODULE_ORDER: tuple[tuple[str, str], ...] = (
     ("## Native candlestick encodings", "feature_store/pattern_features/candlestick_patterns.py"),
     ("## Native chart encodings", "feature_store/pattern_features/chart_patterns.py"),
     ("## Independent MTF frames", "feature_store/transformer_btcusd/mtf_frames.py"),
-    ("## Fusion 3-class labels", "feature_store/transformer_btcusd/mtf_labels.py"),
+    ("## Fusion 2-class labels", "feature_store/transformer_btcusd/mtf_labels.py"),
     ("## Per-TF native features", "feature_store/transformer_btcusd/mtf_features.py"),
     ("## Fused transformer", "scripts/colab/mtf_fusion_model.py"),
     ("## Fusion research pipeline", "scripts/colab/mtf_fusion_research.py"),
@@ -76,14 +76,15 @@ RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
     "## 26 JackSparrow export",
 )
 
-INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v10)
+INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v11)
 
 One shared encoder, five **independent** OHLCV streams (5m / 10m / 30m / 1h / 2h),
-softmax TF fusion weights, and four 3-class heads: **+10m / +30m / +1h / +2h**.
-Labels are BEAR / NEUTRAL / BULL from ATR-normalized close-to-close. There are
-**no MFE/MAE path heads**. 5m is an input timeframe, not a forecast head.
-10m is two closed 5m bars built **outside** the encoder — the model never
-resamples HTF structure from 5m.
+softmax TF fusion weights, and three 2-class heads: **+30m / +1h / +2h**.
+Training labels are BEAR / BULL; the 0.5 ATR NEUTRAL dead zone is **ignored** in
+cross-entropy (not a class). HOLD at live time comes from LOW grade or
+``min_probability``. There are **no MFE/MAE path heads**. 5m is an input
+timeframe, not a forecast head. 10m is two closed 5m bars built **outside** the
+encoder — it is an input TF, not a trading head.
 
 This notebook is the Colab trainer for the live fused bundle
 (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Upload **this notebook only**,
@@ -128,7 +129,7 @@ CONFIG_CELL = """CONFIG = default_fusion_training_config()
 # CONFIG["history_days"] = 120
 CONFIG["run_optuna"] = False
 CONFIG["run_shap"] = False
-CONFIG["run_walk_forward"] = False
+CONFIG["run_walk_forward"] = True
 
 _content = Path("/content")
 _root = _content if _content.is_dir() else Path(".")
@@ -138,7 +139,7 @@ cache_dir = _root / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
 # Section 11 writes TF window memmaps under cache_dir/fusion_windows.
 print(json.dumps(CONFIG, indent=2, default=str))
-print("contract", FEATURE_CONTRACT_VERSION_V10)
+print("contract", FEATURE_CONTRACT_VERSION_V11)
 print("input TFs", list(FUSION_INPUT_RESOLUTIONS))
 print("horizons", list(FUSION_HORIZON_KEYS))
 """
@@ -208,9 +209,9 @@ TARGETS_CELL = """labeled_5m = compute_fusion_horizon_labels(frames["5m"])
 labeled_5m = trim_fusion_label_tail(labeled_5m)
 y_preview = fusion_label_matrix(labeled_5m)
 print("label rows", len(labeled_5m), "shape", y_preview.shape)
-print("3-class mix BEAR/NEUTRAL/BULL per horizon:")
+print("2-class mix BEAR/BULL plus ignore_rate (NEUTRAL) per horizon:")
 print(json.dumps(label_class_mix(y_preview), indent=2))
-print("dead zone is 0.5 ATR; no MFE/MAE path heads.")
+print("dead zone is 0.5 ATR; NEUTRAL is ignore_index, not a class.")
 """
 
 SPLIT_CELL = """window_len = int(CONFIG.get("window_len") or FUSION_WINDOW_LEN)
@@ -253,11 +254,11 @@ MODEL_CELL = """device = torch.device("cuda" if torch.cuda.is_available() else "
 model = MtfFusionTransformer(n_features=n_features).to(device)
 print(model)
 print("device", device)
-print("heads", list(FUSION_HORIZON_KEYS), "classes BEAR/NEUTRAL/BULL")
+print("heads", list(FUSION_HORIZON_KEYS), "classes BEAR/BULL (NEUTRAL ignored)")
 """
 
-LOSS_CELL = """print("Loss is mean cross-entropy across four 3-class horizon heads.")
-print("No PnL loss. Invalid labels (<0) are ignored.")
+LOSS_CELL = """print("Loss is mean cross-entropy across three 2-class horizon heads.")
+print("No PnL loss. NEUTRAL labels (<0) are ignored in CE.")
 print("class weights", np.round(class_w, 3).tolist())
 """
 
@@ -345,7 +346,7 @@ else:
     walk_forward = {"folds": [], "mean": {}, "std": {}}
 """
 
-CONFUSION_CELL = """print("Validation confusion (true x pred) per horizon, 0=BEAR 1=NEUTRAL 2=BULL:")
+CONFUSION_CELL = """print("Validation confusion (true x pred) per horizon, 0=BEAR 1=BULL:")
 for j, key in enumerate(FUSION_HORIZON_KEYS):
     pred = val_logits[:, j, :].argmax(axis=-1)
     mat = confusion_counts(pred, val_y[:, j], FUSION_DIRECTION_CARDINALITY)
@@ -397,6 +398,10 @@ for j, key in enumerate(FUSION_HORIZON_KEYS):
         f"  {key}: acc={m['balanced_acc']:.3f} f1={m['macro_f1']:.3f} "
         f"ece={m['ece']:.3f} pnl={m['paper_pnl']:.3f}"
     )
+promo = fusion_ready_to_promote(walk_forward, final_test, gates)
+print(json.dumps(promo, indent=2, default=str))
+if not promo["ready"]:
+    print("DO NOT PROMOTE: no head is MEDIUM on walk-forward mean and frozen test.")
 """
 
 SAVE_CELL = """if not train_hist.get("ok"):
@@ -406,7 +411,7 @@ else:
         "feature_cols": list(feature_cols),
         "seed": CONFIG.get("seed"),
         "window_len": window_len,
-        "feature_contract_version": FEATURE_CONTRACT_VERSION_V10,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
         "horizon_keys": list(FUSION_HORIZON_KEYS),
         "tf_fusion_weights": [float(x) for x in fusion_w],
@@ -458,8 +463,9 @@ NOTES_MARKDOWN = """## Notes
 - Walk-forward, Optuna, and temperature fitting never see the final test split.
 - Gate each horizon independently. Duration is the longest accepted same-side head.
 - SL/TP are ATR scaled to that duration (path heads were dropped).
-- Promote only if validation grades are HIGH/MEDIUM and test stays above chance
-  after temperature. Paper PnL is a secondary diagnostic, not the training loss.
+- Promote **only** if at least one head is MEDIUM on walk-forward **mean** and
+  frozen test (HIGH still needs ECE and fold std). Until then live stays on the
+  current gated stack. Paper PnL is a secondary diagnostic, not the training loss.
 - Section 26 zips the export folder and starts a Colab download on success.
 """
 

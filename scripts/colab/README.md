@@ -66,6 +66,30 @@ wsl -d Ubuntu-24.04 -- bash -lc "colab sessions"
 The first `colab` command prints a Google URL. Sign in, paste the code back
 into the WSL prompt, then run the fused research notebook on a T4:
 
+## Rotate among 3 Google accounts (GPU quota)
+
+Colab GPU usage limits are per Google account. This repo does **not** log into
+Google for you. A local helper tracks which of your three emails is cooling
+down and tells you which account to sign into next.
+
+```powershell
+python scripts/colab/rotate_colab_accounts.py init
+# edit scripts/colab/colab_accounts.json with your three emails
+python scripts/colab/rotate_colab_accounts.py use you+colab1@gmail.com
+python scripts/colab/rotate_colab_accounts.py status
+```
+
+When a GPU quota message appears (or after `run_colab_cli` fails that way):
+
+```powershell
+python scripts/colab/rotate_colab_accounts.py mark-quota
+```
+
+Then sign into the printed Gmail in the browser, run
+`wsl -d Ubuntu-24.04 -- bash -lc "colab sessions"`, and paste the new OAuth
+code. High demand / 503 capacity is **not** quota — stay on the same account
+and retry. Cooldown defaults to 24 hours (`cooldown_hours` in the JSON).
+
 ```powershell
 powershell -File scripts/colab/run_colab_cli.ps1
 ```

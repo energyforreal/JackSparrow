@@ -31,6 +31,7 @@ from scripts.colab.mtf_fusion_research import (
     build_dataset_from_ohlcv,
     export_fusion_bundle,
     freeze_horizon_gates,
+    fusion_ready_to_promote,
     horizon_metrics,
     predict_logits,
     purged_dev_test_split,
@@ -40,7 +41,7 @@ from scripts.colab.transformer_data import fetch_history_bundle
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the v10 multi-TF fusion model")
+    parser = argparse.ArgumentParser(description="Train the v11 multi-TF fusion model")
     parser.add_argument("--export-dir", default="export/mtf_fusion")
     parser.add_argument("--history-days", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
@@ -153,6 +154,13 @@ def main() -> None:
         print(
             f"  {key}: acc={m['balanced_acc']:.3f} f1={m['macro_f1']:.3f} "
             f"ece={m['ece']:.3f} pnl={m['paper_pnl']:.3f}"
+        )
+
+    promo = fusion_ready_to_promote(wf, test_metrics, gates)
+    print("promotion", promo)
+    if not promo["ready"]:
+        print(
+            "DO NOT PROMOTE: no head is MEDIUM on walk-forward mean and frozen test."
         )
 
     weights = model.fusion_weights().detach().cpu().numpy().tolist()

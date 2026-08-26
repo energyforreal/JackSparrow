@@ -124,18 +124,67 @@ session_exists() {
   colab sessions 2>/dev/null | grep -Fq "${SESSION}"
 }
 
+colab_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  fi
+}
+
+classify_provision_text() {
+  local log_text="$1"
+  local py rotator
+  py="$(colab_python)"
+  rotator="${SCRIPT_DIR}/rotate_colab_accounts.py"
+  if [[ -z "${py}" || ! -f "${rotator}" ]]; then
+    echo "other"
+    return 0
+  fi
+  "${py}" "${rotator}" classify --text "${log_text}" 2>/dev/null || true
+}
+
+suggest_next_google_account() {
+  local log_text="$1"
+  local py rotator kind
+  py="$(colab_python)"
+  rotator="${SCRIPT_DIR}/rotate_colab_accounts.py"
+  if [[ -z "${py}" || ! -f "${rotator}" ]]; then
+    return 0
+  fi
+  kind="$(classify_provision_text "${log_text}")"
+  if [[ "${kind}" != "quota" ]]; then
+    return 0
+  fi
+  echo "GPU quota detected on the current Google account." >&2
+  if [[ -f "${SCRIPT_DIR}/colab_accounts.json" ]]; then
+    "${py}" "${rotator}" mark-quota >&2 || true
+  else
+    echo "Configure three emails, then this helper will pick the next account:" >&2
+    echo "  python scripts/colab/rotate_colab_accounts.py init" >&2
+  fi
+}
+
 echo "Provisioning Colab session ${SESSION} (gpu=${GPU})..."
 if session_exists; then
   echo "Reusing existing session ${SESSION}"
   SESSION_STARTED=1
 else
   provision_ok=0
+  provision_log=""
   for attempt in 1 2 3 4 5; do
     echo "Assign attempt ${attempt}/5..."
     new_out="$(colab "${new_args[@]}" 2>&1 || true)"
     printf '%s\n' "${new_out}"
+    provision_log="${provision_log}"$'\n'"${new_out}"
     if printf '%s\n' "${new_out}" | grep -Fq "Backend rejected accelerator"; then
       echo "This Google account cannot use gpu=${GPU}. Try --gpu T4 or --gpu none." >&2
+      exit 1
+    fi
+    kind="$(classify_provision_text "${new_out}")"
+    if [[ "${kind}" == "quota" ]]; then
+      echo "GPU usage limit on this Google account; retries will not help." >&2
+      suggest_next_google_account "${new_out}"
       exit 1
     fi
     if session_exists; then
@@ -148,6 +197,7 @@ else
   if [[ "${provision_ok}" -ne 1 ]]; then
     echo "Could not provision session ${SESSION} with gpu=${GPU}." >&2
     echo "Retry later, or try: powershell -File scripts/colab/run_colab_cli.ps1 --gpu L4" >&2
+    suggest_next_google_account "${provision_log}"
     exit 1
   fi
   SESSION_STARTED=1

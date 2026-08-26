@@ -1,7 +1,8 @@
-"""Shared-encoder multi-TF fusion Transformer (v10).
+"""Shared-encoder multi-TF fusion Transformer (v11).
 
 One parameter set applied independently to 5m/10m/30m/1h/2h windows, softmax
-fusion weights, four 3-class horizon heads. Cross-entropy only — no PnL loss.
+fusion weights, three 2-class horizon heads. Cross-entropy only — no PnL loss.
+NEUTRAL labels are ignore_index and never enter the loss.
 """
 
 from __future__ import annotations
@@ -27,10 +28,15 @@ def inverse_frequency_class_weights(
     class_ids: np.ndarray,
     n_classes: int,
 ) -> np.ndarray:
-    """Inverse-frequency weights (mean-normalized) for imbalanced CE heads."""
-    counts = np.bincount(
-        np.asarray(class_ids, dtype=np.int64).ravel(), minlength=int(n_classes)
-    ).astype(np.float64)
+    """Inverse-frequency weights (mean-normalized) for imbalanced CE heads.
+
+    Ignored labels (< 0) are excluded. Empty class counts are clipped to 1.
+    """
+    ids = np.asarray(class_ids, dtype=np.int64).ravel()
+    ids = ids[ids >= 0]
+    if ids.size == 0:
+        return np.ones(int(n_classes), dtype=np.float32)
+    counts = np.bincount(ids, minlength=int(n_classes)).astype(np.float64)
     counts = np.maximum(counts, 1.0)
     weights = 1.0 / counts
     weights = weights * (float(n_classes) / weights.sum())
@@ -38,7 +44,7 @@ def inverse_frequency_class_weights(
 
 
 class MtfFusionDataset(Dataset):
-    """Per-sample dict of TF windows plus (n_horizons,) 3-class labels."""
+    """Per-sample dict of TF windows plus (n_horizons,) 2-class labels."""
 
     def __init__(
         self,
@@ -90,7 +96,7 @@ class PositionalEncoding(nn.Module):
 
 
 class MtfFusionTransformer(nn.Module):
-    """Shared encoder E, softmax TF weights, four independent 3-class heads."""
+    """Shared encoder E, softmax TF weights, three independent 2-class heads."""
 
     def __init__(
         self,
@@ -171,7 +177,7 @@ def compute_fusion_loss(
     *,
     class_weights: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Mean CE across the four horizon heads. Ignores labels < 0."""
+    """Mean CE across the three 2-class horizon heads. Ignores labels < 0."""
     n_h = int(labels.size(1))
     loss = labels.new_zeros(())
     counted = 0

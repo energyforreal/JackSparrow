@@ -19,7 +19,9 @@ SETUP_PS1 = COLAB_DIR / "setup_wsl_colab_cli.ps1"
 
 
 def test_colab_cli_helper_files_exist() -> None:
-    for path in (RUN_SH, SETUP_SH, RUN_PS1, SETUP_PS1):
+    rotator = COLAB_DIR / "rotate_colab_accounts.py"
+    example = COLAB_DIR / "colab_accounts.example.json"
+    for path in (RUN_SH, SETUP_SH, RUN_PS1, SETUP_PS1, rotator, example):
         assert path.is_file(), path
 
 
@@ -35,6 +37,8 @@ def test_run_colab_cli_sh_uses_bundle_name_and_cli_verbs() -> None:
         "--gpu",
         "--timeout",
         "transformer_btcusd_next_candle_research.ipynb",
+        "rotate_colab_accounts.py",
+        "GPU quota",
     ):
         assert token in text, token
     assert "\r" not in text
@@ -61,6 +65,7 @@ def test_readme_documents_wsl_colab_cli() -> None:
     assert "setup_wsl_colab_cli.ps1" in readme
     assert "run_colab_cli.ps1" in readme
     assert "colab sessions" in readme
+    assert "rotate_colab_accounts.py" in readme
 
 
 def _wsl_ubuntu_available() -> bool:

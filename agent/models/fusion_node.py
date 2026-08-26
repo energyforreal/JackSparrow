@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -13,13 +13,14 @@ import structlog
 
 from agent.models.mcp_model_node import MCPModelNode, MCPModelPrediction, MCPModelRequest
 from feature_store.transformer_btcusd.contract import (
-    FEATURE_CONTRACT_VERSION_V10,
+    FEATURE_CONTRACT_VERSION_V11,
+    FUSION_DIRECTION_CARDINALITY,
     FUSION_HORIZON_KEYS,
     FUSION_INPUT_RESOLUTIONS,
     FUSION_MODEL_FAMILY,
     FUSION_ONNX_FILENAME,
     FUSION_WINDOW_LEN,
-    ONNX_OUTPUT_NAMES_V10,
+    ONNX_OUTPUT_NAMES_V11,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
 )
@@ -37,6 +38,40 @@ from feature_store.transformer_btcusd.mtf_frames import (
 logger = structlog.get_logger()
 
 
+def validate_fusion_v11_outputs(
+    output_names: Sequence[str],
+    output_shapes: Sequence[Sequence[Any]] | None = None,
+) -> None:
+    """Reject v10 4-head / 3-logit bundles. Live fusion requires v11 2-class heads."""
+    names = [str(n) for n in output_names]
+    if "h10m_dir_logits" in names:
+        raise RuntimeError(
+            "Rejected v10 h10m_dir_logits bundle; require "
+            f"{FEATURE_CONTRACT_VERSION_V11}"
+        )
+    require_onnx_output_names(
+        names,
+        contract_version=FEATURE_CONTRACT_VERSION_V11,
+        resolution="mtf_fusion",
+    )
+    if output_shapes is None:
+        return
+    for name, shape in zip(names, output_shapes):
+        if not str(name).endswith("_dir_logits") or not shape:
+            continue
+        last = shape[-1]
+        if last in (None, "N", "batch"):
+            continue
+        try:
+            dim = int(last)
+        except (TypeError, ValueError):
+            continue
+        if dim != int(FUSION_DIRECTION_CARDINALITY):
+            raise RuntimeError(
+                f"Rejected {name} last dim {dim}; v11 dir heads must be 2-logit"
+            )
+
+
 def _ctx_df(ctx: Dict[str, Any], *keys: str) -> Optional[pd.DataFrame]:
     for key in keys:
         value = ctx.get(key)
@@ -46,7 +81,7 @@ def _ctx_df(ctx: Dict[str, Any], *keys: str) -> Optional[pd.DataFrame]:
 
 
 class FusionModelNode(MCPModelNode):
-    """Loads the v10 fused ONNX bundle and emits per-horizon logits."""
+    """Loads the v11 fused ONNX bundle and emits per-horizon 2-class logits."""
 
     def __init__(
         self,
@@ -67,7 +102,7 @@ class FusionModelNode(MCPModelNode):
         self._model_name = str(
             bundle_metadata.get("model_name") or "jacksparrow_transformer_BTCUSD_mtf_fusion"
         )
-        self._model_version = str(bundle_metadata.get("version") or "transformer_mtf_fusion_v10")
+        self._model_version = str(bundle_metadata.get("version") or "transformer_mtf_fusion_v11")
         self._window_len = int(feature_config.get("window_len") or FUSION_WINDOW_LEN)
         self._input_names: List[str] = list(
             feature_config.get("input_names")
@@ -105,9 +140,9 @@ class FusionModelNode(MCPModelNode):
         cfg_path = bundle_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME
         feature_config = load_feature_config(cfg_path)
         contract = str(feature_config.get("feature_contract_version") or "")
-        if contract and contract != FEATURE_CONTRACT_VERSION_V10:
+        if contract and contract != FEATURE_CONTRACT_VERSION_V11:
             raise RuntimeError(
-                f"Fusion bundle contract {contract!r} is not {FEATURE_CONTRACT_VERSION_V10}"
+                f"Fusion bundle contract {contract!r} is not {FEATURE_CONTRACT_VERSION_V11}"
             )
         onnx_name = str(raw.get("onnx_filename") or FUSION_ONNX_FILENAME)
         onnx_path = bundle_dir / onnx_name
@@ -126,10 +161,10 @@ class FusionModelNode(MCPModelNode):
             str(self._onnx_path),
             providers=["CPUExecutionProvider"],
         )
-        require_onnx_output_names(
-            [o.name for o in self._session.get_outputs()],
-            contract_version=FEATURE_CONTRACT_VERSION_V10,
-            resolution="mtf_fusion",
+        out_meta = self._session.get_outputs()
+        validate_fusion_v11_outputs(
+            [o.name for o in out_meta],
+            [list(o.shape) for o in out_meta],
         )
         self._initialized = True
         self._health = "healthy"
@@ -157,7 +192,7 @@ class FusionModelNode(MCPModelNode):
             "resolution": self.resolution,
             "model_family": FUSION_MODEL_FAMILY,
             "window_len": self._window_len,
-            "onnx_output_names": list(ONNX_OUTPUT_NAMES_V10),
+            "onnx_output_names": list(ONNX_OUTPUT_NAMES_V11),
             "horizon_gates": dict(self._feature_config.get("horizon_gates") or {}),
         }
 
@@ -211,6 +246,11 @@ class FusionModelNode(MCPModelNode):
         horizon_logits: Dict[str, List[float]] = {}
         for key in FUSION_HORIZON_KEYS:
             arr = np.asarray(named[f"{key}_dir_logits"][0], dtype=np.float64)
+            if arr.shape[-1] != int(FUSION_DIRECTION_CARDINALITY):
+                raise RuntimeError(
+                    f"{key}_dir_logits last dim {arr.shape[-1]} is not 2; "
+                    "v10 3-class bundles cannot load"
+                )
             horizon_logits[key] = [float(x) for x in arr.tolist()]
         fusion_logits = [float(x) for x in np.asarray(named["tf_fusion_logits"][0]).tolist()]
         elapsed = (time.perf_counter() - t0) * 1000.0

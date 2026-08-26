@@ -19,12 +19,14 @@ from feature_store.transformer_btcusd.contract import (
     FEATURE_CONTRACT_VERSION_V7,
     FEATURE_CONTRACT_VERSION_V8,
     FEATURE_CONTRACT_VERSION_V10,
+    FEATURE_CONTRACT_VERSION_V11,
     ONNX_OUTPUT_NAMES,
     ONNX_OUTPUT_NAMES_V6,
     ONNX_OUTPUT_NAMES_V7,
     ONNX_OUTPUT_NAMES_V8,
     ONNX_OUTPUT_NAMES_V9,
     ONNX_OUTPUT_NAMES_V10,
+    ONNX_OUTPUT_NAMES_V11,
     STRUCTURE_OUTCOME_NAMES,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     V8_CONTINUOUS_LABEL_COLS,
@@ -160,6 +162,7 @@ def require_onnx_output_names(
     required = onnx_output_names_for_contract(ver, resolution=resolution)
     known = (
         FEATURE_CONTRACT_VERSION,
+        FEATURE_CONTRACT_VERSION_V11,
         FEATURE_CONTRACT_VERSION_V10,
         FEATURE_CONTRACT_VERSION_V8,
         FEATURE_CONTRACT_VERSION_V7,
@@ -190,6 +193,8 @@ def feature_config_from_training_export(
     version = str(contract_version or FEATURE_CONTRACT_VERSION_V6)
     if onnx_output_names is not None:
         names = list(onnx_output_names)
+    elif version == FEATURE_CONTRACT_VERSION_V11:
+        names = list(ONNX_OUTPUT_NAMES_V11)
     elif version == FEATURE_CONTRACT_VERSION_V10:
         names = list(ONNX_OUTPUT_NAMES_V10)
     elif version == FEATURE_CONTRACT_VERSION:

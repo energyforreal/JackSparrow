@@ -37,8 +37,8 @@ def test_leakage_audit_allows_causal_swing_dir() -> None:
 
 def test_leakage_audit_rejects_horizon_and_htf() -> None:
     cols = list(fusion_feature_cols())
-    with pytest.raises(RuntimeError, match="h10m_dir"):
-        leakage_audit(cols + ["h10m_dir"])
+    with pytest.raises(RuntimeError, match="h30m_dir"):
+        leakage_audit(cols + ["h30m_dir"])
     with pytest.raises(RuntimeError, match="htf_"):
         leakage_audit(cols + ["htf_structure_bias"])
 

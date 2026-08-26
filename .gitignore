@@ -45,6 +45,9 @@ colab_file_upload/delta_credentials.txt
 colab_file_upload/*credentials*
 scripts/colab/delta_credentials.txt
 scripts/colab/*credentials*
+scripts/colab/colab_accounts.json
+scripts/colab/colab_accounts_state.json
+scripts/colab/.accounts/
 
 # Accidental Cursor IDE screenshot placeholders
 assets/c__Users_*
