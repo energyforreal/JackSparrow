@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 
 from agent.models.fusion_node import validate_fusion_v11_outputs
@@ -19,6 +20,7 @@ from feature_store.transformer_btcusd.contract import (
 from scripts.colab.mtf_fusion_model import (
     MtfFusionTransformer,
     compute_fusion_loss,
+    fusion_model_from_config,
     inverse_frequency_class_weights,
 )
 from scripts.colab.mtf_fusion_research import (
@@ -56,6 +58,24 @@ def test_fusion_loss_ignores_neutral() -> None:
     all_ignored = torch.full((4, 3), -1, dtype=torch.long)
     ignored_loss = compute_fusion_loss(logits, all_ignored)
     assert float(ignored_loss) == 0.0
+    smooth = compute_fusion_loss(logits, labels, label_smoothing=0.05)
+    assert torch.isfinite(smooth)
+
+
+def test_fusion_loss_horizon_weights_downweight_h2h() -> None:
+    good = torch.tensor([[-4.0, 4.0], [-4.0, 4.0]])
+    bad = torch.tensor([[4.0, -4.0], [4.0, -4.0]])
+    logits = (good, good, bad, torch.zeros(2, 5))
+    labels = torch.ones(2, 3, dtype=torch.long)
+    equal = compute_fusion_loss(logits, labels)
+    down = compute_fusion_loss(logits, labels, horizon_weights=[1.0, 1.0, 0.1])
+    assert float(down) < float(equal)
+
+
+def test_fusion_model_from_config_passes_dropout() -> None:
+    cfg = {"d_model": 16, "nhead": 2, "num_layers": 1, "dropout": 0.4, "window_len": 8}
+    model = fusion_model_from_config(4, cfg)
+    assert model.shared[2].p == pytest.approx(0.4)
 
 
 def test_class_weights_skip_ignored() -> None:

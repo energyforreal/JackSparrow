@@ -59,17 +59,17 @@ RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
     "## 09 Temporal split",
     "## 10 Scaler",
     "## 11 Sequence datasets",
-    "## 12 Fusion transformer",
-    "## 13 Cross-entropy loss",
-    "## 14 Train + early stopping",
-    "## 15 Validation metrics",
-    "## 16 Test hold",
-    "## 17 Walk-forward",
-    "## 18 Horizon confusion",
-    "## 19 Fusion weights",
-    "## 20 Temperature calibration",
-    "## 21 Horizon grades",
-    "## 22 Optuna",
+    "## 12 Optuna",
+    "## 13 Fusion transformer",
+    "## 14 Cross-entropy loss",
+    "## 15 Train + early stopping",
+    "## 16 Validation metrics",
+    "## 17 Test hold",
+    "## 18 Walk-forward",
+    "## 19 Horizon confusion",
+    "## 20 Fusion weights",
+    "## 21 Temperature calibration",
+    "## 22 Horizon grades",
     "## 23 Re-train",
     "## 24 Final untouched test",
     "## 25 Save",
@@ -80,11 +80,12 @@ INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v11)
 
 One shared encoder, five **independent** OHLCV streams (5m / 10m / 30m / 1h / 2h),
 softmax TF fusion weights, and three 2-class heads: **+30m / +1h / +2h**.
-Training labels are BEAR / BULL; the 0.5 ATR NEUTRAL dead zone is **ignored** in
-cross-entropy (not a class). HOLD at live time comes from LOW grade or
-``min_probability``. There are **no MFE/MAE path heads**. 5m is an input
-timeframe, not a forecast head. 10m is two closed 5m bars built **outside** the
-encoder — it is an input TF, not a trading head.
+Training labels are BEAR / BULL; NEUTRAL (0.5 ATR on h30m/h1h, 0.75 ATR on
+h2h) is **ignored** in cross-entropy (not a class). HOLD at live time comes
+from LOW grade or ``min_probability``. There are **no MFE/MAE path heads**.
+Optuna searches dropout / weight_decay / lr on val CE **before** the main
+train. 5m is an input timeframe, not a forecast head. 10m is two closed 5m
+bars built **outside** the encoder — it is an input TF, not a trading head.
 
 This notebook is the Colab trainer for the live fused bundle
 (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Upload **this notebook only**,
@@ -127,8 +128,11 @@ CONFIG_CELL = """CONFIG = default_fusion_training_config()
 # Smoke overrides (comment out for a full research run):
 # CONFIG["epochs"] = 2
 # CONFIG["history_days"] = 120
-CONFIG["run_optuna"] = False
-CONFIG["run_shap"] = False
+CONFIG["run_optuna"] = True
+CONFIG["optuna_trials"] = 8
+CONFIG["run_shap"] = True
+CONFIG["shap_background"] = 32
+CONFIG["shap_explain_n"] = 64
 CONFIG["run_walk_forward"] = True
 
 _content = Path("/content")
@@ -211,7 +215,7 @@ y_preview = fusion_label_matrix(labeled_5m)
 print("label rows", len(labeled_5m), "shape", y_preview.shape)
 print("2-class mix BEAR/BULL plus ignore_rate (NEUTRAL) per horizon:")
 print(json.dumps(label_class_mix(y_preview), indent=2))
-print("dead zone is 0.5 ATR; NEUTRAL is ignore_index, not a class.")
+print("dead zone: h30m/h1h 0.5 ATR, h2h 0.75 ATR; NEUTRAL is ignore_index.")
 """
 
 SPLIT_CELL = """window_len = int(CONFIG.get("window_len") or FUSION_WINDOW_LEN)
@@ -251,45 +255,33 @@ print("dir class weights", np.round(class_w, 3).tolist())
 """
 
 MODEL_CELL = """device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = MtfFusionTransformer(n_features=n_features).to(device)
+model = fusion_model_from_config(n_features, CONFIG).to(device)
 print(model)
 print("device", device)
+print("dropout", CONFIG.get("dropout"), "lr", CONFIG.get("lr"))
 print("heads", list(FUSION_HORIZON_KEYS), "classes BEAR/BULL (NEUTRAL ignored)")
 """
 
-LOSS_CELL = """print("Loss is mean cross-entropy across three 2-class horizon heads.")
+LOSS_CELL = """print("Loss is weighted CE across three 2-class horizon heads.")
+print("horizon_loss_weights", CONFIG.get("horizon_loss_weights"))
+print("label_smoothing", CONFIG.get("label_smoothing"))
 print("No PnL loss. NEUTRAL labels (<0) are ignored in CE.")
 print("class weights", np.round(class_w, 3).tolist())
 """
 
-TRAIN_CELL = """train_loader = make_loader(
-    splits["train"]["windows"],
-    splits["train"]["labels"],
-    batch_size=int(CONFIG.get("batch_size") or 64),
-    shuffle=True,
-)
-val_loader = make_loader(
-    splits["val"]["windows"],
-    splits["val"]["labels"],
-    batch_size=int(CONFIG.get("batch_size") or 64),
-    shuffle=False,
-)
-test_loader = make_loader(
-    splits["test"]["windows"],
-    splits["test"]["labels"],
-    batch_size=int(CONFIG.get("batch_size") or 64),
-    shuffle=False,
-)
-train_hist = train_mtf_fusion(
+TRAIN_CELL = """train_hist = train_mtf_fusion(
     model,
     train_loader,
     val_loader,
     device=device,
     epochs=int(CONFIG.get("epochs") or 40),
     lr=float(CONFIG.get("lr") or 1e-4),
-    weight_decay=float(CONFIG.get("weight_decay") or 1e-4),
-    patience=int(CONFIG.get("early_stop_patience") or 8),
+    weight_decay=float(CONFIG.get("weight_decay") or 1e-3),
+    patience=int(CONFIG.get("early_stop_patience") or 5),
     class_weights=torch.tensor(class_w, dtype=torch.float32),
+    label_smoothing=float(CONFIG.get("label_smoothing") or 0.0),
+    horizon_weights=list(CONFIG.get("horizon_loss_weights") or [1.0, 0.8, 0.4]),
+    lr_schedule=str(CONFIG.get("lr_schedule") or "cosine"),
 )
 print(train_hist)
 if not train_hist.get("ok"):
@@ -377,12 +369,51 @@ for key, row in gates["horizons"].items():
     print(key, row["validation_confidence"], "min_p", row["min_probability"])
 """
 
-OPTUNA_CELL = """CONFIG = optuna_search_stub(CONFIG)
+OPTUNA_CELL = """device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+train_loader = make_loader(
+    splits["train"]["windows"],
+    splits["train"]["labels"],
+    batch_size=int(CONFIG.get("batch_size") or 64),
+    shuffle=True,
+)
+val_loader = make_loader(
+    splits["val"]["windows"],
+    splits["val"]["labels"],
+    batch_size=int(CONFIG.get("batch_size") or 64),
+    shuffle=False,
+)
+test_loader = make_loader(
+    splits["test"]["windows"],
+    splits["test"]["labels"],
+    batch_size=int(CONFIG.get("batch_size") or 64),
+    shuffle=False,
+)
+print("Loaders ready. Test is frozen until the final test section.")
+CONFIG = optuna_search(
+    CONFIG,
+    n_features=n_features,
+    train_loader=train_loader,
+    val_loader=val_loader,
+    device=device,
+    class_weights=torch.tensor(class_w, dtype=torch.float32),
+)
+print(
+    "post-optuna",
+    json.dumps(
+        {
+            "lr": CONFIG.get("lr"),
+            "dropout": CONFIG.get("dropout"),
+            "weight_decay": CONFIG.get("weight_decay"),
+            "optuna_best": CONFIG.get("optuna_best"),
+        },
+        indent=2,
+        default=str,
+    ),
+)
 """
 
-RETRAIN_CELL = """print("Best CONFIG was trained on the research train split with val early stopping.")
-print("To re-train on train+val after Optuna, concatenate those windows and call")
-print("train_mtf_fusion again. Never peek at the final test split during search.")
+RETRAIN_CELL = """print("Main train already uses Optuna winners when run_optuna=True.")
+print("No second fit on train+val. Test split stays frozen.")
 """
 
 FINAL_TEST_CELL = """print("Final untouched test (frozen weights + frozen gates):")
@@ -404,9 +435,27 @@ if not promo["ready"]:
     print("DO NOT PROMOTE: no head is MEDIUM on walk-forward mean and frozen test.")
 """
 
-SAVE_CELL = """if not train_hist.get("ok"):
+SAVE_CELL = """shap_report = {}
+if not train_hist.get("ok"):
     print("Skip save: training did not succeed", train_hist)
 else:
+    try:
+        shap_report = shap_grouped_stub(
+            feature_cols,
+            enabled=bool(CONFIG.get("run_shap")),
+            model=model,
+            val_windows=splits["val"]["windows"],
+            device=device,
+            config=CONFIG,
+        )
+    except Exception as exc:
+        print("SHAP failed; continuing export:", type(exc).__name__, exc)
+        shap_report = {
+            "ok": False,
+            "enabled": True,
+            "reason": f"{type(exc).__name__}: {exc}",
+            "horizons": {},
+        }
     artifact = {
         "feature_cols": list(feature_cols),
         "seed": CONFIG.get("seed"),
@@ -418,6 +467,8 @@ else:
         "val_metrics": val_metrics,
         "horizon_gates": gates,
         "test_metrics": final_test,
+        "shap_report": shap_report,
+        "optuna_best": CONFIG.get("optuna_best"),
     }
     (export_dir / "research_run.json").write_text(
         json.dumps(artifact, indent=2, default=str), encoding="utf-8"
@@ -428,7 +479,19 @@ else:
 EXPORT_CELL = """if not train_hist.get("ok"):
     print("Skip ONNX export: training did not succeed", train_hist)
 else:
-    shap_grouped_stub(feature_cols, enabled=bool(CONFIG.get("run_shap")))
+    if not shap_report:
+        try:
+            shap_report = shap_grouped_stub(
+                feature_cols,
+                enabled=bool(CONFIG.get("run_shap")),
+                model=model,
+                val_windows=splits["val"]["windows"],
+                device=device,
+                config=CONFIG,
+            )
+        except Exception as exc:
+            print("SHAP retry failed; exporting anyway:", type(exc).__name__, exc)
+            shap_report = {"ok": False, "reason": str(exc), "horizons": {}}
     onnx_path, cfg_path, meta_path = export_fusion_bundle(
         model,
         export_dir,
@@ -498,17 +561,17 @@ def build_notebook() -> dict[str, Any]:
         *_section("## 09 Temporal split", SPLIT_CELL),
         *_section("## 10 Scaler", SCALER_CELL),
         *_section("## 11 Sequence datasets", SEQUENCES_CELL),
-        *_section("## 12 Fusion transformer", MODEL_CELL),
-        *_section("## 13 Cross-entropy loss", LOSS_CELL),
-        *_section("## 14 Train + early stopping", TRAIN_CELL),
-        *_section("## 15 Validation metrics", VAL_CELL),
-        *_section("## 16 Test hold", TEST_CELL),
-        *_section("## 17 Walk-forward", WALK_CELL),
-        *_section("## 18 Horizon confusion", CONFUSION_CELL),
-        *_section("## 19 Fusion weights", WEIGHTS_CELL),
-        *_section("## 20 Temperature calibration", CALIBRATION_CELL),
-        *_section("## 21 Horizon grades", GRADES_CELL),
-        *_section("## 22 Optuna", OPTUNA_CELL),
+        *_section("## 12 Optuna", OPTUNA_CELL),
+        *_section("## 13 Fusion transformer", MODEL_CELL),
+        *_section("## 14 Cross-entropy loss", LOSS_CELL),
+        *_section("## 15 Train + early stopping", TRAIN_CELL),
+        *_section("## 16 Validation metrics", VAL_CELL),
+        *_section("## 17 Test hold", TEST_CELL),
+        *_section("## 18 Walk-forward", WALK_CELL),
+        *_section("## 19 Horizon confusion", CONFUSION_CELL),
+        *_section("## 20 Fusion weights", WEIGHTS_CELL),
+        *_section("## 21 Temperature calibration", CALIBRATION_CELL),
+        *_section("## 22 Horizon grades", GRADES_CELL),
         *_section("## 23 Re-train", RETRAIN_CELL),
         *_section("## 24 Final untouched test", FINAL_TEST_CELL),
         *_section("## 25 Save", SAVE_CELL),

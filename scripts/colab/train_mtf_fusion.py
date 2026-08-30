@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any, Dict
 
@@ -23,7 +24,7 @@ from feature_store.transformer_btcusd.mtf_features import fusion_feature_cols
 from feature_store.transformer_btcusd.mtf_frames import fusion_frames_from_fetch
 from scripts.colab.mtf_fusion_model import (
     MtfFusionDataset,
-    MtfFusionTransformer,
+    fusion_model_from_config,
     inverse_frequency_class_weights,
     train_mtf_fusion,
 )
@@ -36,6 +37,7 @@ from scripts.colab.mtf_fusion_research import (
     predict_logits,
     purged_dev_test_split,
     run_walk_forward,
+    shap_grouped_stub,
 )
 from scripts.colab.transformer_data import fetch_history_bundle
 
@@ -46,6 +48,11 @@ def main() -> None:
     parser.add_argument("--history-days", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--skip-walk-forward", action="store_true")
+    parser.add_argument(
+        "--shap",
+        action="store_true",
+        help="Run Gradient SHAP on the validation split after training.",
+    )
     args = parser.parse_args()
 
     cfg = default_fusion_training_config()
@@ -53,6 +60,8 @@ def main() -> None:
         cfg["history_days"] = int(args.history_days)
     if args.epochs is not None:
         cfg["epochs"] = int(args.epochs)
+    if args.shap:
+        cfg["run_shap"] = True
 
     print("Fetching native 5m/30m/1h/2h OHLCV (10m built from 5m)...")
     df5 = fetch_history_bundle(
@@ -123,7 +132,12 @@ def main() -> None:
         inverse_frequency_class_weights(splits["train"]["labels"], FUSION_DIRECTION_CARDINALITY),
         dtype=torch.float32,
     )
-    model = MtfFusionTransformer(n_features=n_features).to(device)
+    extra = {
+        "label_smoothing": float(cfg.get("label_smoothing") or 0.0),
+        "horizon_weights": list(cfg.get("horizon_loss_weights") or [1.0, 0.8, 0.4]),
+        "lr_schedule": str(cfg.get("lr_schedule") or "cosine"),
+    }
+    model = fusion_model_from_config(n_features, cfg).to(device)
     print("Training on train split; early-stop on val (test still frozen)...")
     train_mtf_fusion(
         model,
@@ -135,6 +149,7 @@ def main() -> None:
         weight_decay=float(cfg["weight_decay"]),
         patience=int(cfg["early_stop_patience"]),
         class_weights=class_w,
+        **extra,
     )
     val_logits, val_y = predict_logits(model, val_loader, device)
     gates = freeze_horizon_gates(val_logits, val_y, wf, config=cfg)
@@ -165,6 +180,14 @@ def main() -> None:
 
     weights = model.fusion_weights().detach().cpu().numpy().tolist()
     export_dir = Path(args.export_dir) / FUSION_BUNDLE_DIR_NAME
+    shap_report = shap_grouped_stub(
+        fusion_feature_cols(),
+        enabled=bool(cfg.get("run_shap")),
+        model=model,
+        val_windows=splits["val"]["windows"],
+        device=device,
+        config=cfg,
+    )
     export_fusion_bundle(
         model,
         export_dir,
@@ -174,6 +197,10 @@ def main() -> None:
         gates=gates,
         fusion_weights=weights,
         test_metrics=test_metrics,
+    )
+    (export_dir / "shap_report.json").write_text(
+        json.dumps(shap_report, indent=2, default=str),
+        encoding="utf-8",
     )
     print(f"Exported {export_dir}")
 

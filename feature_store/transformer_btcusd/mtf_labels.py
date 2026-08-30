@@ -1,7 +1,8 @@
-"""Fusion labels: 0.5 ATR dead zone internally, 2-class BEAR/BULL for training.
+"""Fusion labels: per-horizon ATR dead zone, 2-class BEAR/BULL for training.
 
 Labels live on the 5m decision clock. Features at t are causal. Targets use
 close[t+k] only. No MFE/MAE path heads. NEUTRAL is ignore_index (-1), not a class.
+h30m/h1h use 0.5 ATR; h2h uses 0.75 ATR so weak chop is ignored.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_DIR_COLS,
     FUSION_DIRECTION_NAMES,
     FUSION_EMBARGO_BARS,
+    FUSION_HORIZON_ATR_WEAK,
     FUSION_HORIZON_BARS_5M,
     FUSION_HORIZON_KEYS,
     FUSION_IGNORE_INDEX,
@@ -37,6 +39,11 @@ def _ensure_time(df: pd.DataFrame) -> pd.DataFrame:
     else:
         raise ValueError("Label frame requires time or timestamp")
     return out.sort_values("time").reset_index(drop=True)
+
+
+def horizon_atr_weak(horizon_key: str) -> float:
+    """Per-head ATR dead-zone width. Unknown keys fall back to 0.5 ATR."""
+    return float(FUSION_HORIZON_ATR_WEAK.get(str(horizon_key), HORIZON_DIR_ATR_WEAK))
 
 
 def three_class_direction(move: float, atr: float) -> int:
@@ -85,8 +92,8 @@ def compute_fusion_horizon_labels(df5m: pd.DataFrame) -> pd.DataFrame:
     atr_valid = atr[:n_valid].copy()
     atr_valid = np.where(np.isfinite(atr_valid), atr_valid, 0.0)
     denom = np.maximum(atr_valid, 1e-9)
-    weak = float(HORIZON_DIR_ATR_WEAK)
-    for col, k in zip(FUSION_DIR_COLS, FUSION_HORIZON_BARS_5M):
+    for key, col, k in zip(FUSION_HORIZON_KEYS, FUSION_DIR_COLS, FUSION_HORIZON_BARS_5M):
+        weak = horizon_atr_weak(str(key))
         labels = np.full(n, np.nan, dtype=np.float64)
         if n_valid > 0:
             move = close[int(k) : int(k) + n_valid] - close[:n_valid]

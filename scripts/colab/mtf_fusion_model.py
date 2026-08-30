@@ -8,7 +8,7 @@ NEUTRAL labels are ignore_index and never enter the loss.
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -104,7 +104,7 @@ class MtfFusionTransformer(nn.Module):
         d_model: int = 64,
         nhead: int = 4,
         num_layers: int = 2,
-        dropout: float = 0.15,
+        dropout: float = 0.30,
         max_len: int = FUSION_WINDOW_LEN,
         n_tfs: int = 5,
         n_horizons: int = N_FUSION_HORIZONS,
@@ -171,32 +171,58 @@ class MtfFusionTransformer(nn.Module):
         return (*dir_outs, fusion_logits)
 
 
+def fusion_model_from_config(
+    n_features: int,
+    config: Mapping[str, Any],
+) -> MtfFusionTransformer:
+    """Build the fused transformer from a training CONFIG mapping."""
+    return MtfFusionTransformer(
+        n_features=int(n_features),
+        d_model=int(config.get("d_model") or 64),
+        nhead=int(config.get("nhead") or 4),
+        num_layers=int(config.get("num_layers") or 2),
+        dropout=float(config.get("dropout") or 0.30),
+        max_len=int(config.get("window_len") or FUSION_WINDOW_LEN),
+    )
+
+
 def compute_fusion_loss(
     outputs: Sequence[torch.Tensor],
     labels: torch.Tensor,
     *,
     class_weights: Optional[torch.Tensor] = None,
+    label_smoothing: float = 0.0,
+    horizon_weights: Optional[Sequence[float]] = None,
 ) -> torch.Tensor:
-    """Mean CE across the three 2-class horizon heads. Ignores labels < 0."""
+    """Weighted mean CE across 2-class horizon heads. Ignores labels < 0."""
     n_h = int(labels.size(1))
     loss = labels.new_zeros(())
-    counted = 0
+    weight_sum = 0.0
+    last_logits = outputs[0]
+    smooth = float(label_smoothing)
     for j in range(n_h):
         logits = outputs[j]
+        last_logits = logits
         target = labels[:, j]
         valid = target >= 0
         if not bool(valid.any()):
             continue
-        loss = loss + nn.functional.cross_entropy(
+        head_w = 1.0
+        if horizon_weights is not None and j < len(horizon_weights):
+            head_w = float(horizon_weights[j])
+        if head_w <= 0.0:
+            continue
+        loss = loss + head_w * nn.functional.cross_entropy(
             logits[valid],
             target[valid],
             weight=class_weights,
             reduction="mean",
+            label_smoothing=smooth,
         )
-        counted += 1
-    if counted == 0:
-        return logits.sum() * 0.0
-    return loss / float(counted)
+        weight_sum += head_w
+    if weight_sum <= 0.0:
+        return last_logits.sum() * 0.0
+    return loss / float(weight_sum)
 
 
 def train_mtf_fusion(
@@ -210,21 +236,38 @@ def train_mtf_fusion(
     weight_decay: float,
     patience: int,
     class_weights: Optional[torch.Tensor] = None,
+    label_smoothing: float = 0.0,
+    horizon_weights: Optional[Sequence[float]] = None,
+    lr_schedule: str = "constant",
 ) -> Dict[str, Any]:
     """AdamW + early stopping on validation CE. Never sees the test loader."""
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = None
+    if str(lr_schedule).lower() == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt, T_max=max(int(epochs), 1)
+        )
     best_val = float("inf")
     best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
     stale = 0
     history: List[Tuple[int, float, float]] = []
     aborted = False
     cw = class_weights.to(device) if class_weights is not None else None
+    hw: Optional[Sequence[float]] = None
+    if horizon_weights is not None:
+        hw = [float(x) for x in horizon_weights]
 
     def _batch_loss(batch: Sequence[torch.Tensor]) -> torch.Tensor:
         windows = batch[:-1]
         labels = batch[-1]
         outs = model(*windows)
-        return compute_fusion_loss(outs, labels, class_weights=cw)
+        return compute_fusion_loss(
+            outs,
+            labels,
+            class_weights=cw,
+            label_smoothing=float(label_smoothing),
+            horizon_weights=hw,
+        )
 
     for epoch in range(int(epochs)):
         model.train()
@@ -263,6 +306,8 @@ def train_mtf_fusion(
         val_loss /= max(n_val, 1)
         history.append((epoch + 1, train_loss, val_loss))
         print(f"epoch {epoch + 1:03d}  train={train_loss:.4f}  val={val_loss:.4f}")
+        if scheduler is not None:
+            scheduler.step()
         if val_loss < best_val:
             best_val = val_loss
             stale = 0

@@ -33,6 +33,10 @@ REQUIRED_SYMBOLS = (
     "build_dataset_from_ohlcv",
     "memmap_dir",
     "files.download",
+    "run_gradient_shap",
+    "shap_report",
+    "optuna_search",
+    "fusion_model_from_config",
 )
 
 RESEARCH_SECTION_HEADINGS = (
@@ -47,17 +51,17 @@ RESEARCH_SECTION_HEADINGS = (
     "## 09 Temporal split",
     "## 10 Scaler",
     "## 11 Sequence datasets",
-    "## 12 Fusion transformer",
-    "## 13 Cross-entropy loss",
-    "## 14 Train + early stopping",
-    "## 15 Validation metrics",
-    "## 16 Test hold",
-    "## 17 Walk-forward",
-    "## 18 Horizon confusion",
-    "## 19 Fusion weights",
-    "## 20 Temperature calibration",
-    "## 21 Horizon grades",
-    "## 22 Optuna",
+    "## 12 Optuna",
+    "## 13 Fusion transformer",
+    "## 14 Cross-entropy loss",
+    "## 15 Train + early stopping",
+    "## 16 Validation metrics",
+    "## 17 Test hold",
+    "## 18 Walk-forward",
+    "## 19 Horizon confusion",
+    "## 20 Fusion weights",
+    "## 21 Temperature calibration",
+    "## 22 Horizon grades",
     "## 23 Re-train",
     "## 24 Final untouched test",
     "## 25 Save",
@@ -106,16 +110,29 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
     if "last_swing_dir" not in full_text:
         raise AssertionError("notebook should document last_swing_dir as causal")
     if "Walk-forward skipped (CONFIG run_walk_forward=False)" not in full_text:
-        raise AssertionError("section 17 must skip walk-forward without concatenating windows")
+        raise AssertionError("section 18 must skip walk-forward without concatenating windows")
     walk = re.search(
         r"tf_keys = tuple\(splits\[\"train\"\]\[\"windows\"\]\.keys\(\)\)[\s\S]+?"
         r"walk_forward = \{\"folds\": \[\], \"mean\": \{\}, \"std\": \{\}\}",
         full_text,
     )
     if walk is None:
-        raise AssertionError("section 17 walk-forward cell missing robust tf_keys path")
+        raise AssertionError("section 18 walk-forward cell missing robust tf_keys path")
     if "FUSION_INPUT_RESOLUTIONS" in walk.group(0):
-        raise AssertionError("section 17 must not depend on FUSION_INPUT_RESOLUTIONS")
+        raise AssertionError("section 18 must not depend on FUSION_INPUT_RESOLUTIONS")
+
+    if 'CONFIG["run_optuna"] = True' not in full_text:
+        raise AssertionError("research notebook must enable run_optuna")
+    search_pos = full_text.find("CONFIG = optuna_search(")
+    create_pos = full_text.find("optuna.create_study")
+    optimize_pos = full_text.find("study.optimize")
+    train_call = full_text.find("train_hist = train_mtf_fusion(")
+    if search_pos < 0 or train_call < 0 or search_pos > train_call:
+        raise AssertionError("optuna_search must run before the main train call")
+    if create_pos < 0 or optimize_pos < 0 or create_pos > train_call:
+        raise AssertionError("optuna.create_study must appear before the main train call")
+    if optimize_pos > train_call:
+        raise AssertionError("study.optimize must appear before the main train call")
 
 
     # Colab inlines every module into one global namespace. Duplicate helper

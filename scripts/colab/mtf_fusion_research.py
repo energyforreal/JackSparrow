@@ -9,11 +9,12 @@ from __future__ import annotations
 import gc
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from feature_store.transformer_btcusd.contract import (
@@ -56,6 +57,7 @@ from feature_store.transformer_btcusd.mtf_labels import (
 from scripts.colab.mtf_fusion_model import (
     MtfFusionDataset,
     MtfFusionTransformer,
+    fusion_model_from_config,
     inverse_frequency_class_weights,
     train_mtf_fusion,
 )
@@ -171,44 +173,406 @@ def feature_finite_report(
     return {"finite_rate": finite_rate, "inf": n_inf, "nan": n_nan}
 
 
-def shap_grouped_stub(
-    feature_cols: Sequence[str], *, enabled: bool
-) -> Dict[str, List[str]]:
-    """Grouped feature names for optional SHAP. Skip compute unless enabled."""
-    groups = {
-        "candle": [c for c in feature_cols if "cdl_" in c or "body" in c or "wick" in c],
-        "chart": [c for c in feature_cols if c.startswith(("sr_", "tl_", "chp_"))],
-        "trend": [c for c in feature_cols if "ema" in c or c in ("macd_hist", "adx_14", "rsi_14")],
-        "vol": [c for c in feature_cols if "atr" in c or c.startswith("rv_")],
-        "htf_resample": [c for c in feature_cols if str(c).startswith("htf_")],
+def fusion_feature_groups(feature_cols: Sequence[str]) -> Dict[str, List[str]]:
+    """Partition fusion columns into candle / chart / trend / vol / other.
+
+    ``htf_resample`` must stay empty — resampled HTF columns are leakage.
+    """
+    names = [str(c) for c in feature_cols]
+    assigned: set[str] = set()
+    groups: Dict[str, List[str]] = {
+        "candle": [],
+        "chart": [],
+        "trend": [],
+        "vol": [],
+        "other": [],
+        "htf_resample": [],
     }
-    if not enabled:
-        print("SHAP skipped (CONFIG run_shap=False). Fusion feature groups:")
-        for name, cols in groups.items():
-            print(f"  {name}: {len(cols)} cols")
-        if groups["htf_resample"]:
-            raise RuntimeError("htf_ columns must not appear in fusion inputs")
-        return groups
-    print("SHAP enabled — install shap in Colab and call shap.Explainer on a loader.")
+    trend_exact = {"macd_hist", "adx_14", "rsi_14"}
+    for col in names:
+        if col.startswith("htf_"):
+            groups["htf_resample"].append(col)
+            assigned.add(col)
+            continue
+        if "cdl_" in col or "body" in col or "wick" in col:
+            groups["candle"].append(col)
+            assigned.add(col)
+            continue
+        if col.startswith(("sr_", "tl_", "chp_")):
+            groups["chart"].append(col)
+            assigned.add(col)
+            continue
+        if "ema" in col or col in trend_exact:
+            groups["trend"].append(col)
+            assigned.add(col)
+            continue
+        if "atr" in col or col.startswith("rv_"):
+            groups["vol"].append(col)
+            assigned.add(col)
+            continue
+    groups["other"] = [c for c in names if c not in assigned]
+    if groups["htf_resample"]:
+        raise RuntimeError(
+            f"htf_ columns must not appear in fusion inputs: {groups['htf_resample']}"
+        )
     return groups
 
 
-def optuna_search_stub(config: Mapping[str, Any]) -> Dict[str, Any]:
-    """Optuna on walk-forward validation only. Never uses the final test split."""
+class StackedHorizonScorer(nn.Module):
+    """Map (B, n_tf, T, F) stacked windows to BULL−BEAR logit for one head."""
+
+    def __init__(self, model: MtfFusionTransformer, horizon_index: int) -> None:
+        super().__init__()
+        self.inner = model
+        self.horizon_index = int(horizon_index)
+
+    def forward(self, stacked: torch.Tensor) -> torch.Tensor:
+        n_tfs = int(stacked.size(1))
+        windows = [stacked[:, i, :, :].contiguous() for i in range(n_tfs)]
+        outputs = self.inner(*windows)
+        logits = outputs[self.horizon_index]
+        # (B, 1) so GradientExplainer can index outputs[:, idx].
+        return (logits[:, 1] - logits[:, 0]).reshape(-1, 1)
+
+
+def _windows_to_stacked(windows: Mapping[str, np.ndarray]) -> np.ndarray:
+    mats: List[np.ndarray] = []
+    n: Optional[int] = None
+    for res in FUSION_INPUT_RESOLUTIONS:
+        arr = np.asarray(windows[res], dtype=np.float32)
+        if n is None:
+            n = int(arr.shape[0])
+        elif int(arr.shape[0]) != n:
+            raise ValueError(f"val window length mismatch for {res}")
+        mats.append(arr)
+    return np.stack(mats, axis=1)
+
+
+def _print_shap_tables(
+    groups: Mapping[str, List[str]],
+    per_feature: Mapping[str, float],
+    group_totals: Mapping[str, float],
+    *,
+    horizon_key: str,
+    top_k: int = 20,
+) -> None:
+    total = float(sum(group_totals.values())) or 1.0
+    print(f"Gradient SHAP groups ({horizon_key}, mean |SHAP|):")
+    for name in ("candle", "chart", "trend", "vol", "other"):
+        val = float(group_totals.get(name) or 0.0)
+        share = val / total
+        n_cols = len(groups.get(name) or [])
+        print(f"  {name}: {val:.6f}  share={share:.3f}  n={n_cols}")
+    ranked = sorted(per_feature.items(), key=lambda kv: kv[1], reverse=True)
+    print(f"Top {min(int(top_k), len(ranked))} features ({horizon_key}):")
+    for name, val in ranked[: int(top_k)]:
+        print(f"  {name}: {float(val):.6f}")
+
+
+def _shap_values_to_array(raw: Any, expected_ndim: int = 4) -> np.ndarray:
+    """Coerce GradientExplainer output to (B, n_tf, T, F).
+
+    Some SHAP builds add a singleton output axis (rank 5) when the scorer
+    returns (B, 1) instead of (B,). Squeeze size-1 axes until rank matches.
+    """
+    if isinstance(raw, (list, tuple)):
+        raw = raw[0]
+    if torch.is_tensor(raw):
+        raw = raw.detach().cpu().tolist()
+    arr = np.asarray(raw, dtype=np.float64)
+    while arr.ndim > expected_ndim:
+        squeezed = False
+        for axis in range(arr.ndim):
+            if int(arr.shape[axis]) == 1:
+                arr = np.squeeze(arr, axis=axis)
+                squeezed = True
+                break
+        if not squeezed:
+            break
+    if arr.ndim != expected_ndim:
+        raise ValueError(f"SHAP values rank {arr.ndim} != {expected_ndim}")
+    return arr
+
+
+def run_gradient_shap(
+    feature_cols: Sequence[str],
+    *,
+    model: torch.nn.Module,
+    val_windows: Mapping[str, np.ndarray],
+    device: torch.device,
+    config: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Gradient SHAP on a validation subsample. Never reads the test split."""
+    cfg = dict(config or {})
+    cols = [str(c) for c in feature_cols]
+    groups = fusion_feature_groups(cols)
+    try:
+        import shap  # type: ignore[import-not-found]
+    except ImportError:
+        print("SHAP skipped: package 'shap' is not installed.")
+        return {
+            "ok": False,
+            "reason": "shap not installed",
+            "groups": {k: list(v) for k, v in groups.items() if k != "htf_resample"},
+            "horizons": {},
+        }
+
+    stacked = _windows_to_stacked(val_windows)
+    n = int(stacked.shape[0])
+    if n < 2:
+        print("SHAP skipped: need at least 2 validation windows.")
+        return {
+            "ok": False,
+            "reason": "insufficient val windows",
+            "groups": {k: list(v) for k, v in groups.items() if k != "htf_resample"},
+            "horizons": {},
+        }
+
+    seed = int(cfg.get("seed") or 42)
+    rng = np.random.default_rng(seed)
+    n_bg = max(2, min(int(cfg.get("shap_background") or 32), n))
+    n_ex = max(2, min(int(cfg.get("shap_explain_n") or 64), n))
+    bg_idx = rng.choice(n, size=n_bg, replace=False)
+    ex_idx = rng.choice(n, size=n_ex, replace=False)
+
+    model.eval()
+    n_horizons = int(getattr(model, "n_horizons", len(FUSION_HORIZON_KEYS)))
+    horizon_keys = list(FUSION_HORIZON_KEYS)[:n_horizons]
+    device_t = torch.device(device)
+    horizons_out: Dict[str, Any] = {}
+
+    explain_sizes = [n_ex]
+    halved = n_ex
+    while halved > 8:
+        halved = max(8, halved // 2)
+        if halved not in explain_sizes:
+            explain_sizes.append(halved)
+
+    for h_idx, key in enumerate(horizon_keys):
+        scorer = StackedHorizonScorer(model, h_idx).to(device_t)
+        scorer.eval()
+        shap_arr: Optional[np.ndarray] = None
+        used_ex = n_ex
+        used_bg = n_bg
+        last_err = ""
+        for try_ex in explain_sizes:
+            try_bg = min(used_bg, try_ex, n_bg)
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                bg = torch.as_tensor(
+                    stacked[bg_idx[:try_bg]], dtype=torch.float32, device=device_t
+                )
+                ex = torch.as_tensor(
+                    stacked[ex_idx[:try_ex]], dtype=torch.float32, device=device_t
+                )
+                explainer = shap.GradientExplainer(scorer, bg)
+                raw = explainer.shap_values(ex)
+                shap_arr = _shap_values_to_array(raw)
+                used_ex = try_ex
+                used_bg = try_bg
+                last_err = ""
+                break
+            except (RuntimeError, MemoryError, ValueError, IndexError) as exc:
+                last_err = str(exc)
+                print(
+                    f"SHAP {key} failed at explain_n={try_ex} "
+                    f"({type(exc).__name__}); retrying smaller subsample."
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+        if shap_arr is None:
+            print(f"SHAP skipped for {key}: {last_err}")
+            horizons_out[key] = {"ok": False, "reason": last_err}
+            continue
+        per_feat_arr = np.mean(np.abs(shap_arr), axis=(0, 1, 2))
+        if per_feat_arr.shape[0] != len(cols):
+            print(
+                f"SHAP {key}: feature dim {per_feat_arr.shape[0]} != {len(cols)}; skip."
+            )
+            horizons_out[key] = {"ok": False, "reason": "feature dim mismatch"}
+            continue
+        per_feature = {
+            cols[i]: float(per_feat_arr[i]) for i in range(len(cols))
+        }
+        group_totals = {
+            gname: float(sum(per_feature.get(c, 0.0) for c in gcols))
+            for gname, gcols in groups.items()
+            if gname != "htf_resample"
+        }
+        _print_shap_tables(
+            groups, per_feature, group_totals, horizon_key=key
+        )
+        ranked = sorted(per_feature.items(), key=lambda kv: kv[1], reverse=True)
+        horizons_out[key] = {
+            "ok": True,
+            "background_n": int(used_bg),
+            "explain_n": int(used_ex),
+            "features": per_feature,
+            "groups": group_totals,
+            "top_features": [
+                {"name": n, "mean_abs_shap": float(v)} for n, v in ranked[:20]
+            ],
+        }
+
+    any_ok = any(bool(row.get("ok")) for row in horizons_out.values())
+    report = {
+        "ok": bool(any_ok),
+        "reason": "gradient shap on val subsample" if any_ok else "all heads failed",
+        "groups": {k: list(v) for k, v in groups.items() if k != "htf_resample"},
+        "horizons": horizons_out,
+        "split": "val",
+    }
+    return report
+
+
+def shap_grouped_stub(
+    feature_cols: Sequence[str],
+    *,
+    enabled: bool,
+    model: Optional[torch.nn.Module] = None,
+    val_windows: Optional[Mapping[str, np.ndarray]] = None,
+    device: Optional[torch.device] = None,
+    config: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Grouped SHAP entry point. Computes Gradient SHAP only when enabled."""
+    groups = fusion_feature_groups(feature_cols)
+    group_lists = {k: list(v) for k, v in groups.items() if k != "htf_resample"}
+    if not enabled:
+        print("SHAP skipped (CONFIG run_shap=False). Fusion feature groups:")
+        for name, cols in group_lists.items():
+            print(f"  {name}: {len(cols)} cols")
+        return {
+            "ok": False,
+            "enabled": False,
+            "reason": "run_shap=False",
+            "groups": group_lists,
+            "horizons": {},
+        }
+    if model is None or val_windows is None:
+        print("SHAP enabled but model/val_windows missing; skip compute.")
+        return {
+            "ok": False,
+            "enabled": True,
+            "reason": "model or val_windows missing",
+            "groups": group_lists,
+            "horizons": {},
+        }
+    dev = device if device is not None else torch.device("cpu")
+    print("Gradient SHAP on validation subsample (test split unused).")
+    try:
+        report = run_gradient_shap(
+            feature_cols,
+            model=model,
+            val_windows=val_windows,
+            device=dev,
+            config=config,
+        )
+    except Exception as exc:
+        print(
+            f"SHAP failed (export continues): {type(exc).__name__}: {exc}"
+        )
+        return {
+            "ok": False,
+            "enabled": True,
+            "reason": f"{type(exc).__name__}: {exc}",
+            "groups": group_lists,
+            "horizons": {},
+        }
+    report["enabled"] = True
+    return report
+
+
+def _fusion_train_extra(config: Mapping[str, Any]) -> Dict[str, Any]:
+    raw_w = config.get("horizon_loss_weights") or [1.0, 0.8, 0.4]
+    return {
+        "label_smoothing": float(config.get("label_smoothing") or 0.0),
+        "horizon_weights": [float(x) for x in raw_w],
+        "lr_schedule": str(config.get("lr_schedule") or "cosine"),
+    }
+
+
+def optuna_search(
+    config: Mapping[str, Any],
+    *,
+    n_features: int,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    device: torch.device,
+    class_weights: Optional[torch.Tensor] = None,
+    train_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+    model_factory: Optional[Callable[..., MtfFusionTransformer]] = None,
+) -> Dict[str, Any]:
+    """Search dropout / weight_decay / lr on val CE. Never reads test."""
     cfg = dict(config)
     if not cfg.get("run_optuna"):
         print(
             "Optuna skipped (CONFIG run_optuna=False). "
-            "Search space: lr, weight_decay, dropout, layers, d_model, batch."
+            "Search space: lr, weight_decay, dropout."
         )
         return cfg
     try:
-        import optuna  # noqa: F401
+        import optuna
     except ImportError:
         print("Optuna not installed; leaving CONFIG unchanged.")
         return cfg
-    print("Optuna enabled — objective must be walk-forward val CE, never test.")
+
+    trainer = train_fn or train_mtf_fusion
+    factory = model_factory or fusion_model_from_config
+    extra = _fusion_train_extra(cfg)
+    n_trials = max(1, int(cfg.get("optuna_trials") or 8))
+    trial_epochs = max(1, int(cfg.get("optuna_trial_epochs") or 12))
+    patience = max(2, int(cfg.get("early_stop_patience") or 5))
+
+    def objective(trial: Any) -> float:
+        trial_cfg = dict(cfg)
+        trial_cfg["lr"] = float(trial.suggest_float("lr", 3e-5, 3e-4, log=True))
+        trial_cfg["weight_decay"] = float(
+            trial.suggest_float("weight_decay", 1e-4, 3e-3, log=True)
+        )
+        trial_cfg["dropout"] = float(trial.suggest_float("dropout", 0.20, 0.40))
+        model = factory(n_features, trial_cfg).to(device)
+        hist = trainer(
+            model,
+            train_loader,
+            val_loader,
+            device=device,
+            epochs=trial_epochs,
+            lr=float(trial_cfg["lr"]),
+            weight_decay=float(trial_cfg["weight_decay"]),
+            patience=patience,
+            class_weights=class_weights,
+            **extra,
+        )
+        if not hist.get("ok"):
+            return float("inf")
+        return float(hist["best_val_loss"])
+
+    print(f"Optuna: {n_trials} trials on val CE (test unused).")
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=n_trials)
+    best = dict(study.best_params)
+    cfg["lr"] = float(best["lr"])
+    cfg["weight_decay"] = float(best["weight_decay"])
+    cfg["dropout"] = float(best["dropout"])
+    cfg["optuna_best"] = {
+        "params": best,
+        "best_val_loss": float(study.best_value),
+        "n_trials": n_trials,
+    }
+    print("Optuna best", json.dumps(cfg["optuna_best"], indent=2, default=str))
     return cfg
+
+
+def optuna_search_stub(
+    config: Mapping[str, Any],
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Backward-compatible alias. Requires the same kwargs as optuna_search."""
+    if not kwargs:
+        print("optuna_search_stub needs loaders; leaving CONFIG unchanged.")
+        return dict(config)
+    return optuna_search(config, **kwargs)
 
 
 def _decision_times(featured_5m: pd.DataFrame, window_len: int) -> pd.Series:
@@ -474,9 +838,14 @@ def run_walk_forward(
     for train_sl, val_sl in walk_forward_slices(n, folds=folds, embargo=embargo):
         tw, ty = slice_windows(windows, labels, train_sl)
         vw, vy = slice_windows(windows, labels, val_sl)
-        model = MtfFusionTransformer(n_features=n_features).to(device)
-        train_loader = make_loader(tw, ty, batch_size=int(config.get("batch_size") or 64), shuffle=True)
-        val_loader = make_loader(vw, vy, batch_size=int(config.get("batch_size") or 64), shuffle=False)
+        model = fusion_model_from_config(n_features, config).to(device)
+        train_loader = make_loader(
+            tw, ty, batch_size=int(config.get("batch_size") or 64), shuffle=True
+        )
+        val_loader = make_loader(
+            vw, vy, batch_size=int(config.get("batch_size") or 64), shuffle=False
+        )
+        extra = _fusion_train_extra(config)
         train_mtf_fusion(
             model,
             train_loader,
@@ -484,8 +853,9 @@ def run_walk_forward(
             device=device,
             epochs=max(1, int(config.get("epochs") or 8) // 4),
             lr=float(config.get("lr") or 1e-4),
-            weight_decay=float(config.get("weight_decay") or 1e-4),
-            patience=max(2, int(config.get("early_stop_patience") or 8) // 2),
+            weight_decay=float(config.get("weight_decay") or 1e-3),
+            patience=max(2, int(config.get("early_stop_patience") or 5) // 2),
+            **extra,
         )
         logits, y = predict_logits(model, val_loader, device)
         row: Dict[str, Any] = {}

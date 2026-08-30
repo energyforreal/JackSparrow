@@ -16,6 +16,7 @@ from feature_store.transformer_btcusd.mtf_labels import (
     compute_fusion_horizon_labels,
     fusion_future_leak_cols,
     fusion_label_matrix,
+    horizon_atr_weak,
     label_class_mix,
     three_class_direction,
     three_class_to_train_label,
@@ -92,6 +93,29 @@ def test_fusion_label_matrix_ignores_neutral() -> None:
         assert row["ignore_rate"] > 0.5
         assert row["BEAR"] + row["BULL"] + row["IGNORED"] == y.shape[0]
     assert valid_label_mask(y).sum() == 0
+
+
+def test_h2h_dead_zone_wider_than_h30m() -> None:
+    n = 80
+    times = pd.date_range("2024-01-01", periods=n, freq="5min", tz="UTC")
+    close = np.full(n, 100.0)
+    close[6:] = 106.0
+    df = pd.DataFrame(
+        {
+            "time": times,
+            "open": close,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": 1.0,
+            "atr": 10.0,
+        }
+    )
+    labeled = compute_fusion_horizon_labels(df)
+    assert horizon_atr_weak("h30m") == 0.5
+    assert horizon_atr_weak("h2h") == 0.75
+    assert int(labeled.loc[0, "h30m_dir"]) == 2
+    assert int(labeled.loc[0, "h2h_dir"]) == 1
 
 
 def test_label_cols_are_leakage() -> None:

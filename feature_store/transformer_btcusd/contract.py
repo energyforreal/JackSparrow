@@ -298,6 +298,12 @@ BREAKOUT_VOL_CONFIRM = 1.2
 HORIZON_DIR_ATR_WEAK = 0.5
 HORIZON_DIR_ATR_STRONG = 2.0
 HORIZON_DIR_ATR_DEADZONE = HORIZON_DIR_ATR_WEAK
+# Fusion heads: h2h uses a wider ignore band so chop does not train the trunk.
+FUSION_HORIZON_ATR_WEAK: Dict[str, float] = {
+    "h30m": 0.5,
+    "h1h": 0.5,
+    "h2h": 0.75,
+}
 
 V7_STRUCTURE_LOSS_WEIGHTS: Dict[str, float] = {
     "direction": 1.0,
@@ -413,7 +419,7 @@ FUSION_GRADE_LOW = "LOW"
 FUSION_HIGH_BALANCED_ACC = 0.58
 FUSION_HIGH_MAX_ECE = 0.08
 FUSION_MEDIUM_BALANCED_ACC = 0.55
-FUSION_MIN_PROBABILITY = 0.55
+FUSION_MIN_PROBABILITY = 0.60
 # Frozen v10 4-head / 3-class names — live fusion must not load this layout.
 ONNX_OUTPUT_NAMES_V10: Tuple[str, ...] = (
     "h10m_dir_logits",
@@ -763,18 +769,22 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "batch_size": 64,
         "epochs": 40,
         "lr": 1e-4,
-        "weight_decay": 1e-4,
-        "dropout": 0.15,
+        "weight_decay": 1e-3,
+        "dropout": 0.30,
         "d_model": 64,
         "nhead": 4,
         "num_layers": 2,
-        "early_stop_patience": 8,
+        "early_stop_patience": 5,
+        "label_smoothing": 0.05,
+        "horizon_loss_weights": [1.0, 0.8, 0.4],
+        "lr_schedule": "cosine",
         "seed": 42,
         "history_days": 900,
         "base_url": "https://api.india.delta.exchange",
         "atr_period": 14,
         "run_optuna": False,
-        "optuna_trials": 0,
+        "optuna_trials": 8,
+        "optuna_trial_epochs": 12,
         "run_walk_forward": True,
         "walk_forward_folds": 3,
         "walk_forward_embargo": FUSION_EMBARGO_BARS,
@@ -783,6 +793,9 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "high_max_ece": FUSION_HIGH_MAX_ECE,
         "medium_balanced_acc": FUSION_MEDIUM_BALANCED_ACC,
         "n_classes": FUSION_DIRECTION_CARDINALITY,
+        "run_shap": False,
+        "shap_background": 32,
+        "shap_explain_n": 64,
     }
 
 
