@@ -11,12 +11,15 @@ FEATURE_CONTRACT_VERSION_V8 = "transformer_btcusd_per_tf_features_v8"
 FEATURE_CONTRACT_VERSION_V9 = "transformer_btcusd_per_tf_features_v9"
 FEATURE_CONTRACT_VERSION_V10 = "transformer_btcusd_mtf_fusion_v10"
 FEATURE_CONTRACT_VERSION_V11 = "transformer_btcusd_mtf_fusion_v11"
-# Live per-TF bundles remain v9. The fused model uses V11 (2-class, no h10m head).
+FEATURE_CONTRACT_VERSION_V12 = "transformer_btcusd_mtf_fusion_v12"
+# Live per-TF bundles remain v9. The fused live path uses V11 (2-class, no h10m head).
+# V12 is Label V2 research training only and must not load in FusionModelNode.
 FEATURE_CONTRACT_VERSION = FEATURE_CONTRACT_VERSION_V9
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
 FUSION_INPUT_RESOLUTIONS: Tuple[str, ...] = ("5m", "10m", "30m", "1h", "2h")
 FUSION_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion"
+FUSION_V12_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion_v12"
 FUSION_MODEL_FAMILY = "jacksparrow_transformer_btcusd_mtf_fusion"
 FUSION_ONNX_FILENAME = "btcusd_mtf_fusion.onnx"
 FUSION_TARGET_WINDOW_MINUTES: int = 10 * 60
@@ -442,6 +445,67 @@ FUSION_HORIZON_MINUTES: Dict[str, int] = {
     "h2h": 120,
 }
 
+# Label V2 research targets. Live v11 stays 2-class with ignore_index NEUTRAL.
+LABEL_V2_DIRECTION_CARDINALITY = 3
+LABEL_V2_DIRECTION_NAMES: Dict[int, str] = {0: "BEAR", 1: "NEUTRAL", 2: "BULL"}
+LABEL_V2_THETA_GRID: Tuple[float, ...] = (0.25, 0.40, 0.50, 0.60, 0.75, 1.00)
+LABEL_V2_TP_SL_GRID: Tuple[Tuple[float, float], ...] = (
+    (0.75, 1.25),
+    (1.0, 1.5),
+    (1.5, 2.25),
+    (2.0, 3.0),
+)
+LABEL_V2_TP_SL_TP_FIRST = 0
+LABEL_V2_TP_SL_SL_FIRST = 1
+LABEL_V2_TP_SL_NEITHER = 2
+LABEL_V2_TP_SL_AMBIGUOUS = 3
+LABEL_V2_TP_SL_NAMES: Dict[int, str] = {
+    LABEL_V2_TP_SL_TP_FIRST: "TP_FIRST",
+    LABEL_V2_TP_SL_SL_FIRST: "SL_FIRST",
+    LABEL_V2_TP_SL_NEITHER: "NEITHER",
+    LABEL_V2_TP_SL_AMBIGUOUS: "AMBIGUOUS",
+}
+LABEL_V2_PATH_FIELDS: Tuple[str, ...] = (
+    "ret",
+    "mfe",
+    "mae",
+    "persist",
+    "t_mfe",
+    "t_mae",
+)
+LABEL_V2_COLS: Tuple[str, ...] = tuple(
+    f"{key}_{field}"
+    for key in FUSION_HORIZON_KEYS
+    for field in LABEL_V2_PATH_FIELDS
+)
+LABEL_V2_MINORITY_RATE = 0.15
+LABEL_V2_DISAGREE_MIN = 0.02
+LABEL_V2_PERSIST_RANGE_MIN = 0.10
+LABEL_V2_THETA_FROZEN: Dict[str, float] = {
+    "h30m": 0.50,
+    "h1h": 0.50,
+    "h2h": 0.60,
+}
+LABEL_V2_REG_FIELDS: Tuple[str, ...] = ("ret", "mfe", "mae")
+LABEL_V2_PATH_LOSS_WEIGHTS: Dict[str, float] = {
+    "dir": 1.0,
+    "ret": 1.0,
+    "mfe": 0.5,
+    "mae": 0.5,
+}
+# 3-class chance is ~0.33; research grades only (not a live promote gate).
+LABEL_V2_HIGH_BALANCED_ACC = 0.45
+LABEL_V2_MEDIUM_BALANCED_ACC = 0.40
+ONNX_OUTPUT_NAMES_V12: Tuple[str, ...] = (
+    tuple(f"{key}_dir_logits" for key in FUSION_HORIZON_KEYS)
+    + tuple(
+        f"{key}_{field}"
+        for key in FUSION_HORIZON_KEYS
+        for field in LABEL_V2_REG_FIELDS
+    )
+    + ("tf_fusion_logits",)
+)
+
 # Next-bar candle families for 5m timing (not model classes).
 CANDLE_FAMILY_DOJI = frozenset({0, 1, 2, 3, 8})
 CANDLE_FAMILY_BULL = frozenset({4, 6, 9, 11})
@@ -709,6 +773,8 @@ def onnx_output_names_for_contract(
     """ONNX head names for a bundle contract."""
     ver = str(contract_version or "").strip()
     res = resolution.strip().lower()
+    if ver == FEATURE_CONTRACT_VERSION_V12:
+        return ONNX_OUTPUT_NAMES_V12
     if ver == FEATURE_CONTRACT_VERSION_V11 or res == "mtf_fusion":
         return ONNX_OUTPUT_NAMES_V11
     if ver == FEATURE_CONTRACT_VERSION_V10:
@@ -847,10 +913,13 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "walk_forward_folds": 3,
         "walk_forward_embargo": FUSION_EMBARGO_BARS,
         "min_probability": FUSION_MIN_PROBABILITY,
-        "high_balanced_acc": FUSION_HIGH_BALANCED_ACC,
+        "high_balanced_acc": LABEL_V2_HIGH_BALANCED_ACC,
         "high_max_ece": FUSION_HIGH_MAX_ECE,
-        "medium_balanced_acc": FUSION_MEDIUM_BALANCED_ACC,
-        "n_classes": FUSION_DIRECTION_CARDINALITY,
+        "medium_balanced_acc": LABEL_V2_MEDIUM_BALANCED_ACC,
+        "n_classes": LABEL_V2_DIRECTION_CARDINALITY,
+        "label_scheme": "label_v2",
+        "path_loss_weights": dict(LABEL_V2_PATH_LOSS_WEIGHTS),
+        "label_v2_theta": dict(LABEL_V2_THETA_FROZEN),
         "run_shap": False,
         "shap_background": 32,
         "shap_explain_n": 64,

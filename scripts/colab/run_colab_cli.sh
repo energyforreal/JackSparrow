@@ -9,7 +9,7 @@ export PATH="${HOME}/.local/bin:${PATH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEFAULT_NOTEBOOK="${SCRIPT_DIR}/transformer_btcusd_next_candle_research.ipynb"
-BUNDLE_DIR_NAME="JackSparrow_Transformer_BTCUSD_mtf_fusion"
+BUNDLE_DIR_NAME="JackSparrow_Transformer_BTCUSD_mtf_fusion_v12"
 REMOTE_EXPORT_DIR="/content/export/${BUNDLE_DIR_NAME}"
 REMOTE_ZIP="/content/export/${BUNDLE_DIR_NAME}.zip"
 
@@ -236,4 +236,4 @@ fi
 
 colab log -s "${SESSION}" -o "${LOCAL_LOG}" || true
 echo "Session log: ${LOCAL_LOG}"
-echo "Validate after unzip, then copy into agent/model_storage/${BUNDLE_DIR_NAME}/"
+echo "Validate the v12 zip for research only. Do not copy into agent/model_storage (live is v11)."

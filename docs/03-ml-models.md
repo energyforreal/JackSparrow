@@ -2,7 +2,7 @@
 
 ## Overview
 
-JackSparrow’s live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then three 2-class heads forecast **+30m / +1h / +2h** as BULL / BEAR. NEUTRAL is ignored in training (not a class); live HOLD comes from LOW grade or `min_probability`. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration.
+JackSparrow’s live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then three 2-class heads forecast **+30m / +1h / +2h** as BULL / BEAR. NEUTRAL is ignored in training (not a class); live HOLD comes from LOW grade or `min_probability`. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration. **Label V2** path targets (return / MFE / MAE / persistence) train the research v12 bundle only; see [`reference/label-v2-spec.md`](../reference/label-v2-spec.md). They are not consumed by the live fused v11 model.
 
 Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` reloads the five per-TF ONNX bundles and climate/setup/timing synthesis. That path is not dual-running by default.
 
@@ -83,8 +83,9 @@ MODEL_DIR=./agent/model_storage
 
 Train/serve parity lives in [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/):
 
-- `contract.py` — per-TF v9 plus fused v11 (`FEATURE_CONTRACT_VERSION_V11`); fusion heads are 2-class BEAR/BULL
-- `mtf_frames.py`, `mtf_features.py`, `mtf_labels.py` — independent TFs, native encodings, ignore_index NEUTRAL
+- `contract.py` — per-TF v9 plus fused live v11 (`FEATURE_CONTRACT_VERSION_V11`, 2-class BEAR/BULL) and research v12 (`FEATURE_CONTRACT_VERSION_V12`, 3-class + path heads)
+- `mtf_frames.py`, `mtf_features.py`, `mtf_labels.py` — independent TFs, native encodings, live ignore_index NEUTRAL
+- `mtf_labels_v2.py` — Label V2 path targets. Research trainer uses 3-class direction plus ret/MFE/MAE; persist/TP-SL stay diagnostics. Not loaded by the live fused model
 - `features.py`, `derivatives.py` — native TF feature matrix
 - `inference.py` — ONNX input assembly + metadata export
 - `labels.py` — legacy per-TF training label helpers (Colab)
@@ -121,15 +122,15 @@ See [Deployment – Agent environment variables](10-deployment.md#agent-environm
 
 ## Training and export
 
-Train the **single fused model** (independent 5m/10m/30m/1h/2h encodings, walk-forward on the development span, untouched test):
+Train the **live fused v11 model** is frozen. The research trainer now trains **Label V2 / v12** (3-class direction + ret/MFE/MAE) and must not be copied into `agent/model_storage/`:
 
 ```bash
-python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion
+python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion_v12
 ```
 
-Copy `export/mtf_fusion/JackSparrow_Transformer_BTCUSD_mtf_fusion/` into `agent/model_storage/`.
+Export lands in `export/mtf_fusion_v12/JackSparrow_Transformer_BTCUSD_mtf_fusion_v12/`. `fusion_ready_to_promote` is always `ready=false` (`research_v12_not_live`). Live remains `JackSparrow_Transformer_BTCUSD_mtf_fusion` (v11).
 
-Walk-forward and Optuna (if enabled) never see the final test split. Per-horizon HIGH/MEDIUM/LOW grades are frozen in `feature_config.json`.
+Walk-forward and Optuna (if enabled) never see the final test split. Per-horizon HIGH/MEDIUM/LOW grades are research telemetry only on v12.
 
 The legacy per-TF trainer remains for rollback bundles only:
 
@@ -232,3 +233,4 @@ Do **not** point `MODEL_DIR` at archived bundle folders expecting them to load �
 - [Deployment](10-deployment.md) — env vars and Docker
 - [Build guide](11-build-guide.md) — setup and tests
 - [`.cursor/rules/ml-model-management.mdc`](../.cursor/rules/ml-model-management.mdc) — Cursor rule for transformer standards
+- [Label V2 spec (research)](../reference/label-v2-spec.md) — path targets; live v11 2-class fusion is unchanged

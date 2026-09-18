@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from feature_store.transformer_btcusd.contract import FUSION_BUNDLE_DIR_NAME
+from feature_store.transformer_btcusd.contract import FUSION_V12_BUNDLE_DIR_NAME
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COLAB_DIR = REPO_ROOT / "scripts" / "colab"
@@ -27,7 +27,7 @@ def test_colab_cli_helper_files_exist() -> None:
 
 def test_run_colab_cli_sh_uses_bundle_name_and_cli_verbs() -> None:
     text = RUN_SH.read_text(encoding="utf-8")
-    assert FUSION_BUNDLE_DIR_NAME in text
+    assert FUSION_V12_BUNDLE_DIR_NAME in text
     for token in (
         "colab exec",
         "colab download",

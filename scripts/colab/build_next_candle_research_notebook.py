@@ -1,4 +1,4 @@
-"""Build the v11 multi-TF fusion research Colab (standalone, no GitHub clone).
+"""Build the v12 Label V2 multi-TF fusion research Colab (standalone, no GitHub clone).
 
 Run from repo root::
 
@@ -42,6 +42,7 @@ INLINE_MODULE_ORDER: tuple[tuple[str, str], ...] = (
     ("## Native chart encodings", "feature_store/pattern_features/chart_patterns.py"),
     ("## Independent MTF frames", "feature_store/transformer_btcusd/mtf_frames.py"),
     ("## Fusion 2-class labels", "feature_store/transformer_btcusd/mtf_labels.py"),
+    ("## Label V2 path targets (research only)", "feature_store/transformer_btcusd/mtf_labels_v2.py"),
     ("## Per-TF native features", "feature_store/transformer_btcusd/mtf_features.py"),
     ("## Fused transformer", "scripts/colab/mtf_fusion_model.py"),
     ("## Fusion research pipeline", "scripts/colab/mtf_fusion_research.py"),
@@ -76,24 +77,22 @@ RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
     "## 26 JackSparrow export",
 )
 
-INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v11)
+INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v12 Label V2)
 
 One shared encoder, five **independent** OHLCV streams (5m / 10m / 30m / 1h / 2h),
-softmax TF fusion weights, and three 2-class heads: **+30m / +1h / +2h**.
-Training labels are BEAR / BULL; NEUTRAL (0.5 ATR on h30m/h1h, 0.75 ATR on
-h2h) is **ignored** in cross-entropy (not a class). HOLD at live time comes
-from LOW grade or ``min_probability``. There are **no MFE/MAE path heads**.
-Optuna searches dropout / weight_decay / lr on val CE **before** the main
-train. 5m is an input timeframe, not a forecast head. 10m is two closed 5m
-bars built **outside** the encoder — it is an input TF, not a trading head.
+softmax TF fusion weights, three **3-class** direction heads (**+30m / +1h / +2h**)
+plus per-horizon **return / MFE / MAE** path heads. NEUTRAL is a trained class
+(frozen theta: h30m/h1h **0.50 ATR**, h2h **0.60 ATR**). Persistence and TP/SL
+path diagnostics stay off the loss. 5m is an input timeframe, not a forecast
+head. 10m is two closed 5m bars built **outside** the encoder.
 
-This notebook is the Colab trainer for the live fused bundle
-(`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Upload **this notebook only**,
-or run it from Windows via WSL:
+This notebook trains a **research-only** v12 bundle
+(`JackSparrow_Transformer_BTCUSD_mtf_fusion_v12`). **Do not** copy it into
+`agent/model_storage/`. Live remains v11 2-class ONNX loaded by FusionModelNode.
+`fusion_ready_to_promote` is always `ready=false` (`research_v12_not_live`).
 
-    powershell -File scripts/colab/run_colab_cli.ps1
-
-Historical OHLCV comes from the Delta Exchange India public API.
+Optuna searches dropout / weight_decay / lr on val loss **before** the main
+train. Historical OHLCV comes from the Delta Exchange India public API.
 
 Edit repo `.py` files and regenerate:
 
@@ -147,13 +146,14 @@ CONFIG["run_walk_forward"] = True
 
 _content = Path("/content")
 _root = _content if _content.is_dir() else Path(".")
-export_dir = _root / "export" / FUSION_BUNDLE_DIR_NAME
+export_dir = _root / "export" / FUSION_V12_BUNDLE_DIR_NAME
 export_dir.mkdir(parents=True, exist_ok=True)
 cache_dir = _root / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
 # Section 11 writes TF window memmaps under cache_dir/fusion_windows.
 print(json.dumps(CONFIG, indent=2, default=str))
-print("contract", FEATURE_CONTRACT_VERSION_V11)
+print("contract", FEATURE_CONTRACT_VERSION_V12)
+print("label scheme", CONFIG.get("label_scheme"), "theta", CONFIG.get("label_v2_theta"))
 print("input TFs", list(FUSION_INPUT_RESOLUTIONS))
 print("horizons", list(FUSION_HORIZON_KEYS))
 print("fusion window spans (target", FUSION_TARGET_WINDOW_MINUTES, "min):")
@@ -222,15 +222,27 @@ print(preview[feature_cols[:8]].tail(2))
 LEAKAGE_CELL = """leakage_audit(feature_cols)
 print("Leakage audit passed: no t+1 / horizon dir / resampled HTF columns in X.")
 print("last_swing_dir is a causal structure input, not a horizon target.")
+v2_leak = set(label_v2_future_leak_cols())
+overlap = sorted(set(feature_cols) & v2_leak)
+print("Label V2 path cols are leak-only; overlap with X:", overlap)
+if overlap:
+    raise RuntimeError(f"Label V2 targets leaked into features: {overlap}")
 """
 
-TARGETS_CELL = """labeled_5m = compute_fusion_horizon_labels(frames["5m"])
+TARGETS_CELL = """labeled_5m = compute_fusion_path_targets(frames["5m"])
 labeled_5m = trim_fusion_label_tail(labeled_5m)
-y_preview = fusion_label_matrix(labeled_5m)
-print("label rows", len(labeled_5m), "shape", y_preview.shape)
-print("2-class mix BEAR/BULL plus ignore_rate (NEUTRAL) per horizon:")
-print(json.dumps(label_class_mix(y_preview), indent=2))
-print("dead zone: h30m/h1h 0.5 ATR, h2h 0.75 ATR; NEUTRAL is ignore_index.")
+y_dir_preview, y_reg_preview = fusion_label_v2_matrices(labeled_5m)
+print("label rows", len(labeled_5m), "dir", y_dir_preview.shape, "path", y_reg_preview.shape)
+print("3-class mix BEAR/NEUTRAL/BULL (NEUTRAL is trained) per horizon:")
+print(json.dumps(label_v2_class_mix(y_dir_preview), indent=2))
+print("frozen theta", json.dumps(dict(LABEL_V2_THETA_FROZEN), indent=2))
+print("path fields", list(LABEL_V2_REG_FIELDS), "invalid dir code is -1")
+
+print("Label V2 distribution gate (diagnostics; training y is the matrices above):")
+v2_report = summarize_label_v2(frames["5m"])
+print(format_label_v2_table(v2_report))
+print("overall", v2_report.get("overall"))
+print("Training uses fusion_label_v2_matrices; persist/TP-SL stay off the loss.")
 """
 
 SPLIT_CELL = """window_lens = dict(CONFIG.get("window_lens") or fusion_window_lens())
@@ -255,7 +267,7 @@ SEQUENCES_CELL = """windows, labels, decision_times = build_dataset_from_ohlcv(
     memmap_dir=cache_dir / "fusion_windows",
 )
 print("windows", {k: v.shape for k, v in windows.items()})
-print("labels", labels.shape, "decisions", len(decision_times))
+print("labels dir", labels.direction.shape, "path", labels.path.shape, "decisions", len(decision_times))
 splits = purged_dev_test_split(
     windows,
     labels,
@@ -267,7 +279,7 @@ print("split sizes", {k: len(v["labels"]) for k, v in splits.items()})
 n_features = len(fusion_feature_cols())
 feature_finite_report(splits["train"]["windows"]["5m"], feature_cols)
 class_w = inverse_frequency_class_weights(
-    splits["train"]["labels"], FUSION_DIRECTION_CARDINALITY
+    splits["train"]["labels"], LABEL_V2_DIRECTION_CARDINALITY
 )
 print("dir class weights", np.round(class_w, 3).tolist())
 """
@@ -277,13 +289,14 @@ model = fusion_model_from_config(n_features, CONFIG).to(device)
 print(model)
 print("device", device)
 print("dropout", CONFIG.get("dropout"), "lr", CONFIG.get("lr"))
-print("heads", list(FUSION_HORIZON_KEYS), "classes BEAR/BULL (NEUTRAL ignored)")
+print("heads", list(FUSION_HORIZON_KEYS), "classes BEAR/NEUTRAL/BULL plus ret/mfe/mae")
 """
 
-LOSS_CELL = """print("Loss is weighted CE across three 2-class horizon heads.")
+LOSS_CELL = """print("Loss is 3-class CE (NEUTRAL trained) plus SmoothL1 on finite ret/MFE/MAE.")
 print("horizon_loss_weights", CONFIG.get("horizon_loss_weights"))
+print("path_loss_weights", CONFIG.get("path_loss_weights"))
 print("label_smoothing", CONFIG.get("label_smoothing"))
-print("No PnL loss. NEUTRAL labels (<0) are ignored in CE.")
+print("No PnL loss. Invalid dirs (<0) and non-finite path values are masked.")
 print("class weights", np.round(class_w, 3).tolist())
 """
 
@@ -301,6 +314,7 @@ TRAIN_CELL = """train_hist = train_mtf_fusion(
     horizon_weights=list(CONFIG.get("horizon_loss_weights") or [1.0, 0.8, 0.4]),
     lr_schedule=str(CONFIG.get("lr_schedule") or "cosine"),
     amp=bool(CONFIG.get("amp", True)),
+    path_task_weights=dict(CONFIG.get("path_loss_weights") or LABEL_V2_PATH_LOSS_WEIGHTS),
 )
 print(train_hist)
 if not train_hist.get("ok"):
@@ -360,10 +374,10 @@ else:
     walk_forward = {"folds": [], "mean": {}, "std": {}}
 """
 
-CONFUSION_CELL = """print("Validation confusion (true x pred) per horizon, 0=BEAR 1=BULL:")
+CONFUSION_CELL = """print("Validation confusion (true x pred) per horizon, 0=BEAR 1=NEUTRAL 2=BULL:")
 for j, key in enumerate(FUSION_HORIZON_KEYS):
     pred = val_logits[:, j, :].argmax(axis=-1)
-    mat = confusion_counts(pred, val_y[:, j], FUSION_DIRECTION_CARDINALITY)
+    mat = confusion_counts(pred, val_y[:, j], LABEL_V2_DIRECTION_CARDINALITY)
     print(key)
     print(mat)
 """
@@ -464,8 +478,8 @@ promo = fusion_ready_to_promote(walk_forward, final_test, gates)
 print(json.dumps(promo, indent=2, default=str))
 if not promo["ready"]:
     print(
-        "DO NOT PROMOTE: no head is MEDIUM on walk-forward mean, "
-        "frozen test, and val gate."
+        "DO NOT PROMOTE: v12 Label V2 research export is not live-compatible "
+        f"({promo.get('reason')}). Live stays on v11."
     )
 """
 
@@ -496,7 +510,7 @@ else:
         "window_len": window_len,
         "window_lens": window_lens,
         "target_window_minutes": CONFIG.get("target_window_minutes"),
-        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V12,
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
         "horizon_keys": list(FUSION_HORIZON_KEYS),
         "tf_fusion_weights": [float(x) for x in fusion_w],
@@ -542,9 +556,9 @@ else:
     print("Exported", onnx_path)
     print("feature_config", cfg_path)
     print("metadata", meta_path)
-    print("Copy this directory into agent/model_storage/ after validation.")
+    print("Do NOT copy this v12 bundle into agent/model_storage/. Live remains v11.")
     import shutil
-    zip_stem = export_dir.parent / FUSION_BUNDLE_DIR_NAME
+    zip_stem = export_dir.parent / FUSION_V12_BUNDLE_DIR_NAME
     zip_path = Path(shutil.make_archive(str(zip_stem), "zip", root_dir=export_dir))
     print("Wrote zip", zip_path)
     try:
@@ -561,12 +575,11 @@ NOTES_MARKDOWN = """## Notes
 - 10m is assembled from two closed 5m bars **outside** the model.
 - Each TF runs candle/chart/structure engines on its **native** grid. No HTF resample.
 - Walk-forward, Optuna, and temperature fitting never see the final test split.
-- Gate each horizon independently. Duration is the longest accepted same-side head.
-- SL/TP are ATR scaled to that duration (path heads were dropped).
-- Promote **only** if at least one head is MEDIUM on walk-forward **mean**,
-  frozen test, and the exported val gate (HIGH still needs ECE and fold std).
-  Until then live stays on the current gated stack. Paper PnL is a secondary
-  diagnostic, not the training loss.
+- Training ``y`` is Label V2: 3-class direction (NEUTRAL trained) plus ret/MFE/MAE.
+- Persistence and TP/SL first-touch stay diagnostics, not loss heads.
+- Export is v12 research-only. ``fusion_ready_to_promote`` is always false.
+  Do **not** copy the bundle into ``agent/model_storage/``. Live stays on v11.
+- Paper PnL is a secondary diagnostic, not the training loss.
 - Section 26 zips the export folder and starts a Colab download on success.
 """
 

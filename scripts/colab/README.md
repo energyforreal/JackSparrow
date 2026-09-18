@@ -1,9 +1,9 @@
 # Colab notebook helpers (non-production)
 
-## Fused multi-TF trainer (live path)
+## Fused multi-TF trainer (research v12)
 
 ```bash
-python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion
+python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion_v12
 ```
 
 Sources: `scripts/colab/mtf_fusion_model.py`, `scripts/colab/mtf_fusion_research.py`.
@@ -28,13 +28,13 @@ python scripts/validate_transformer_bundle.py agent/model_storage/JackSparrow_Tr
 
 Parity tests: `pytest tests/unit/test_transformer_btcusd_feature_parity.py`
 
-## Research Colab (v11 fused multi-TF)
+## Research Colab (v12 Label V2)
 
 Primary research trainer: **`transformer_btcusd_next_candle_research.ipynb`**.
-It trains the live fused model: independent 5m/10m/30m/1h/2h OHLCV, shared encoder,
-softmax TF weights, and three 2-class heads (+30m/+1h/+2h). NEUTRAL is ignore_index,
-not a class. 10m is two closed 5m bars built outside the encoder (input TF only).
-Walk-forward, Optuna, and temperature fitting never see the final test split.
+It trains a research-only fused model: independent 5m/10m/30m/1h/2h OHLCV,
+shared encoder, softmax TF weights, three 3-class heads (+30m/+1h/+2h), and
+per-horizon ret/MFE/MAE. NEUTRAL is a trained class (frozen theta 0.50/0.50/0.60).
+Do **not** copy the v12 export into `agent/model_storage/`. Live remains v11.
 Do not hand-edit the `.ipynb`.
 
 Training-logic changes belong in the `.py` sources. Regenerate the notebook after
@@ -47,10 +47,23 @@ python scripts/colab/smoke_test_next_candle_notebook.py
 
 Sources: `scripts/colab/mtf_fusion_model.py`, `scripts/colab/mtf_fusion_research.py`,
 `feature_store/transformer_btcusd/mtf_*.py`. Local CLI equivalent:
-`python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion`.
+`python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion_v12`.
 
 **Retrain after horizon/label changes:** set `refresh_data = True` in the Colab load
 cell so cached parquet is rebuilt (or delete `/content/cache/*.parquet`).
+
+## Label V2 distribution report (no training)
+
+Path-target research (`ret` / `MFE` / `MAE` / persistence) for +30m/+1h/+2h.
+Does **not** change live 2-class fusion labels or export a bundle.
+
+```bash
+python scripts/colab/report_label_v2.py --output export/label_v2/label_v2_report.json
+```
+
+Optional: `--parquet path/to/btcusd_5m.parquet`, `--history-days 365`,
+`--thetas 0.50,0.75`. Spec: [`reference/label-v2-spec.md`](../../reference/label-v2-spec.md).
+The research trainer uses frozen theta from this report; live v11 is unchanged.
 
 ## Colab CLI via WSL (Windows)
 

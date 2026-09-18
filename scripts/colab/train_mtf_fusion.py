@@ -10,8 +10,8 @@ from typing import Any, Dict
 import torch
 
 from feature_store.transformer_btcusd.contract import (
-    FUSION_BUNDLE_DIR_NAME,
-    FUSION_DIRECTION_CARDINALITY,
+    FUSION_V12_BUNDLE_DIR_NAME,
+    LABEL_V2_DIRECTION_CARDINALITY,
     FUSION_EMBARGO_BARS,
     default_fusion_training_config,
 )
@@ -41,8 +41,10 @@ from scripts.colab.transformer_data import fetch_history_bundle
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the v11 multi-TF fusion model")
-    parser.add_argument("--export-dir", default="export/mtf_fusion")
+    parser = argparse.ArgumentParser(
+        description="Train the v12 Label V2 multi-TF fusion research model"
+    )
+    parser.add_argument("--export-dir", default="export/mtf_fusion_v12")
     parser.add_argument("--history-days", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--skip-walk-forward", action="store_true")
@@ -130,7 +132,7 @@ def main() -> None:
     )
     class_w = torch.tensor(
         inverse_frequency_class_weights(
-            splits["train"]["labels"], FUSION_DIRECTION_CARDINALITY
+            splits["train"]["labels"], LABEL_V2_DIRECTION_CARDINALITY
         ),
         dtype=torch.float32,
     )
@@ -164,6 +166,9 @@ def main() -> None:
         "horizon_weights": list(cfg.get("horizon_loss_weights") or [1.0, 0.8, 0.4]),
         "lr_schedule": str(cfg.get("lr_schedule") or "cosine"),
         "amp": bool(cfg.get("amp", True)),
+        "path_task_weights": dict(
+            cfg.get("path_loss_weights") or {"dir": 1.0, "ret": 1.0, "mfe": 0.5, "mae": 0.5}
+        ),
     }
     model = fusion_model_from_config(n_features, cfg).to(device)
     print("Training on train split; early-stop on val (test still frozen)...")
@@ -205,12 +210,12 @@ def main() -> None:
     print("promotion", promo)
     if not promo["ready"]:
         print(
-            "DO NOT PROMOTE: no head is MEDIUM on walk-forward mean, "
-            "frozen test, and val gate."
+            "DO NOT PROMOTE: v12 Label V2 research export is not live-compatible "
+            f"({promo.get('reason')})."
         )
 
     weights = model.fusion_weights().detach().cpu().numpy().tolist()
-    export_dir = Path(args.export_dir) / FUSION_BUNDLE_DIR_NAME
+    export_dir = Path(args.export_dir) / FUSION_V12_BUNDLE_DIR_NAME
     shap_report = shap_grouped_stub(
         fusion_feature_cols(),
         enabled=bool(cfg.get("run_shap")),

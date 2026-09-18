@@ -10,7 +10,7 @@ import gc
 import json
 import math
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -19,16 +19,12 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from feature_store.transformer_btcusd.contract import (
-    FUSION_BUNDLE_DIR_NAME,
-    FUSION_DIRECTION_CARDINALITY,
-    FUSION_DIRECTION_NAMES,
     FUSION_GRADE_HIGH,
     FUSION_GRADE_LOW,
     FUSION_GRADE_MEDIUM,
     FUSION_HIGH_BALANCED_ACC,
     FUSION_HIGH_MAX_ECE,
     FUSION_HORIZON_KEYS,
-    FUSION_DIR_COLS,
     FUSION_INPUT_RESOLUTIONS,
     FUSION_MEDIUM_BALANCED_ACC,
     FUSION_MIN_PROBABILITY,
@@ -36,8 +32,13 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_ONNX_FILENAME,
     FUSION_TARGET_WINDOW_MINUTES,
     FUSION_WINDOW_LEN,
-    FEATURE_CONTRACT_VERSION_V11,
-    ONNX_OUTPUT_NAMES_V11,
+    FEATURE_CONTRACT_VERSION_V12,
+    LABEL_V2_DIRECTION_CARDINALITY,
+    LABEL_V2_DIRECTION_NAMES,
+    LABEL_V2_PATH_LOSS_WEIGHTS,
+    LABEL_V2_REG_FIELDS,
+    LABEL_V2_THETA_FROZEN,
+    ONNX_OUTPUT_NAMES_V12,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
     default_fusion_training_config,
@@ -53,19 +54,23 @@ from feature_store.transformer_btcusd.mtf_features import (
 )
 from feature_store.transformer_btcusd.mtf_frames import bar_close_time
 from feature_store.transformer_btcusd.mtf_labels import (
-    compute_fusion_horizon_labels,
     fusion_future_leak_cols,
-    fusion_label_matrix,
-    label_class_mix,
     trim_fusion_label_tail,
-    valid_label_mask,
+)
+from feature_store.transformer_btcusd.mtf_labels_v2 import (
+    compute_fusion_path_targets,
+    fusion_label_v2_matrices,
+    label_v2_future_leak_cols,
+    valid_label_v2_mask,
 )
 from scripts.colab.mtf_fusion_model import (
+    FusionTrainLabels,
     MtfFusionDataset,
     MtfFusionTransformer,
     fusion_model_from_config,
     inverse_frequency_class_weights,
     train_mtf_fusion,
+    unpack_fusion_batch,
 )
 
 
@@ -133,7 +138,7 @@ def split_purged_windows(
 
 def development_prefix(
     windows: Mapping[str, np.ndarray],
-    labels: np.ndarray,
+    labels: Union[np.ndarray, FusionTrainLabels],
     *,
     train_frac: float,
     val_frac: float,
@@ -163,7 +168,7 @@ def leakage_audit(feature_cols: Sequence[str]) -> None:
     Causal structure fields such as ``last_swing_dir`` are valid inputs. Only
     horizon targets, resampled HTF columns, and explicit future_* names are banned.
     """
-    banned = set(fusion_future_leak_cols())
+    banned = set(fusion_future_leak_cols()) | set(label_v2_future_leak_cols())
     leaked: List[str] = []
     for col in feature_cols:
         name = str(col)
@@ -263,8 +268,9 @@ class StackedHorizonScorer(nn.Module):
         windows = [stacked[:, i, :, :].contiguous() for i in range(n_tfs)]
         outputs = self.inner(*windows)
         logits = outputs[self.horizon_index]
+        bull_i = max(int(getattr(self.inner, "n_classes", 3)) - 1, 1)
         # (B, 1) so GradientExplainer can index outputs[:, idx].
-        return (logits[:, 1] - logits[:, 0]).reshape(-1, 1)
+        return (logits[:, bull_i] - logits[:, 0]).reshape(-1, 1)
 
 
 def _windows_to_stacked(windows: Mapping[str, np.ndarray]) -> np.ndarray:
@@ -517,17 +523,21 @@ def shap_grouped_stub(
 
 def _fusion_train_extra(config: Mapping[str, Any]) -> Dict[str, Any]:
     raw_w = config.get("horizon_loss_weights") or [1.0, 0.8, 0.4]
+    path_w = config.get("path_loss_weights") or dict(LABEL_V2_PATH_LOSS_WEIGHTS)
     return {
         "label_smoothing": float(config.get("label_smoothing") or 0.0),
         "horizon_weights": [float(x) for x in raw_w],
         "lr_schedule": str(config.get("lr_schedule") or "cosine"),
         "amp": bool(config.get("amp", True)),
+        "path_task_weights": {str(k): float(v) for k, v in dict(path_w).items()},
     }
 
 
 OPTUNA_BEST_FILENAME = "optuna_best.json"
 FUSION_WINDOW_MANIFEST = "manifest.json"
 FUSION_LABELS_FILENAME = "labels.npy"
+FUSION_LABELS_DIR_FILENAME = "labels_dir.npy"
+FUSION_LABELS_REG_FILENAME = "labels_reg.npy"
 FUSION_TIMES_FILENAME = "decision_times.parquet"
 
 
@@ -542,7 +552,11 @@ def window_cache_manifest(
     cols = list(fusion_feature_cols())
     lens = {res: int(window_lens[res]) for res in FUSION_INPUT_RESOLUTIONS}
     payload: Dict[str, Any] = {
-        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V12,
+        "label_scheme": "label_v2",
+        "label_v2_theta": {
+            str(k): float(v) for k, v in LABEL_V2_THETA_FROZEN.items()
+        },
         "window_lens": lens,
         "window_len": int(lens["5m"]),
         "target_window_minutes": int(
@@ -566,13 +580,19 @@ def try_load_fusion_dataset_cache(
     window_len: Optional[int] = None,
     window_lens: Optional[Mapping[str, int]] = None,
     target_window_minutes: Optional[int] = None,
-) -> Optional[Tuple[Dict[str, np.ndarray], np.ndarray, pd.Series]]:
-    """Load memmapped windows + labels when manifest matches."""
+) -> Optional[Tuple[Dict[str, np.ndarray], FusionTrainLabels, pd.Series]]:
+    """Load memmapped windows + Label V2 matrices when manifest matches."""
     root = Path(cache_dir)
     man_path = root / FUSION_WINDOW_MANIFEST
-    labels_path = root / FUSION_LABELS_FILENAME
+    labels_dir_path = root / FUSION_LABELS_DIR_FILENAME
+    labels_reg_path = root / FUSION_LABELS_REG_FILENAME
     times_path = root / FUSION_TIMES_FILENAME
-    if not man_path.is_file() or not labels_path.is_file() or not times_path.is_file():
+    if (
+        not man_path.is_file()
+        or not labels_dir_path.is_file()
+        or not labels_reg_path.is_file()
+        or not times_path.is_file()
+    ):
         return None
     try:
         stored = json.loads(man_path.read_text(encoding="utf-8"))
@@ -601,30 +621,42 @@ def try_load_fusion_dataset_cache(
         if tuple(arr.shape) != (n_samples, width, n_feat):
             return None
         windows[str(res)] = arr
-    labels = np.load(str(labels_path))
-    if len(labels) != n_samples:
+    y_dir = np.load(str(labels_dir_path))
+    y_reg = np.load(str(labels_reg_path))
+    if len(y_dir) != n_samples or len(y_reg) != n_samples:
         return None
     times_df = pd.read_parquet(times_path)
     if "time" not in times_df.columns or len(times_df) != n_samples:
         return None
     decision_times = pd.to_datetime(times_df["time"], utc=True)
-    return windows, labels, decision_times
+    return windows, FusionTrainLabels(y_dir, y_reg), decision_times
 
 
 def save_fusion_dataset_cache(
     cache_dir: Path,
     *,
-    labels: np.ndarray,
+    labels: Union[np.ndarray, FusionTrainLabels],
     decision_times: pd.Series,
     stride: int,
     window_len: Optional[int] = None,
     window_lens: Optional[Mapping[str, int]] = None,
     target_window_minutes: Optional[int] = None,
 ) -> None:
-    """Write labels, decision times, and window manifest (memmaps already on disk)."""
+    """Write Label V2 matrices, decision times, and window manifest."""
     root = Path(cache_dir)
     root.mkdir(parents=True, exist_ok=True)
-    np.save(root / FUSION_LABELS_FILENAME, np.asarray(labels))
+    if isinstance(labels, FusionTrainLabels):
+        y_dir = np.asarray(labels.direction)
+        y_reg = np.asarray(labels.path)
+        n_samples = len(labels)
+    else:
+        y_dir = np.asarray(labels)
+        y_reg = np.full(
+            (*y_dir.shape, len(LABEL_V2_REG_FIELDS)), np.nan, dtype=np.float32
+        )
+        n_samples = int(len(y_dir))
+    np.save(root / FUSION_LABELS_DIR_FILENAME, y_dir)
+    np.save(root / FUSION_LABELS_REG_FILENAME, y_reg)
     pd.DataFrame({"time": pd.to_datetime(decision_times, utc=True)}).to_parquet(
         root / FUSION_TIMES_FILENAME, index=False
     )
@@ -632,7 +664,7 @@ def save_fusion_dataset_cache(
     manifest = window_cache_manifest(
         window_lens=lens,
         stride=stride,
-        n_samples=len(labels),
+        n_samples=n_samples,
         target_window_minutes=target_window_minutes,
     )
     (root / FUSION_WINDOW_MANIFEST).write_text(
@@ -647,12 +679,13 @@ def _optuna_cache_path(cache_dir: Optional[Path]) -> Optional[Path]:
 
 
 def optuna_cache_identity() -> Dict[str, Any]:
-    """Contract fingerprint so stale Optuna HPs are not reused after a v11 change."""
+    """Contract fingerprint so stale Optuna HPs are not reused after a v12 change."""
     return {
-        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V12,
         "feature_fingerprint": fusion_feature_fingerprint(),
         "horizon_keys": list(FUSION_HORIZON_KEYS),
-        "n_classes": int(FUSION_DIRECTION_CARDINALITY),
+        "n_classes": int(LABEL_V2_DIRECTION_CARDINALITY),
+        "label_scheme": "label_v2",
     }
 
 
@@ -838,8 +871,8 @@ def build_dataset_from_ohlcv(
     window_lens: Optional[Mapping[str, int]] = None,
     stride: int = 4,
     memmap_dir: Optional[Path] = None,
-) -> Tuple[Dict[str, np.ndarray], np.ndarray, pd.Series]:
-    """Native TF windows + 2-class train labels aligned on the 5m decision clock."""
+) -> Tuple[Dict[str, np.ndarray], FusionTrainLabels, pd.Series]:
+    """Native TF windows + Label V2 dir/path targets on the 5m decision clock."""
     lens = resolve_fusion_window_lens(window_lens, window_len)
     warmup = int(lens["5m"])
     cache_root = Path(memmap_dir) if memmap_dir is not None else None
@@ -852,7 +885,7 @@ def build_dataset_from_ohlcv(
             return cached
         print(f"cache MISS {cache_root}")
 
-    labeled = compute_fusion_horizon_labels(frames["5m"])
+    labeled = compute_fusion_path_targets(frames["5m"])
     labeled = trim_fusion_label_tail(labeled)
     featured: Optional[Dict[str, pd.DataFrame]] = None
     if cache_root is not None:
@@ -867,15 +900,20 @@ def build_dataset_from_ohlcv(
     feat5_time = featured["5m"][["time"]].copy()
     feat5_time["time"] = pd.to_datetime(feat5_time["time"], utc=True)
     labeled["time"] = pd.to_datetime(labeled["time"], utc=True)
-    dir_cols = [c for c in FUSION_DIR_COLS if c in labeled.columns]
-    merged = feat5_time.merge(labeled[["time", *dir_cols]], on="time", how="inner")
+    path_cols = [
+        f"{key}_{field}"
+        for key in FUSION_HORIZON_KEYS
+        for field in LABEL_V2_REG_FIELDS
+        if f"{key}_{field}" in labeled.columns
+    ]
+    merged = feat5_time.merge(labeled[["time", *path_cols]], on="time", how="inner")
     merged = merged.iloc[int(warmup) :].reset_index(drop=True)
     if stride > 1:
         merged = merged.iloc[:: int(stride)].reset_index(drop=True)
-    y = fusion_label_matrix(merged)
-    mask = valid_label_mask(y)
+    y_dir, y_reg = fusion_label_v2_matrices(merged)
+    mask = valid_label_v2_mask(y_dir, y_reg)
     merged = merged.loc[mask].reset_index(drop=True)
-    y = y[mask]
+    y = FusionTrainLabels(y_dir[mask], y_reg[mask])
     decision_close = bar_close_time(merged["time"], 5)
     windows = collect_training_windows(
         featured,
@@ -908,7 +946,7 @@ def softmax_np(logits: np.ndarray) -> np.ndarray:
 def balanced_accuracy(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    n_classes: int = FUSION_DIRECTION_CARDINALITY,
+    n_classes: int = LABEL_V2_DIRECTION_CARDINALITY,
 ) -> float:
     scores: List[float] = []
     for c in range(int(n_classes)):
@@ -924,7 +962,7 @@ def balanced_accuracy(
 def macro_f1(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    n_classes: int = FUSION_DIRECTION_CARDINALITY,
+    n_classes: int = LABEL_V2_DIRECTION_CARDINALITY,
 ) -> float:
     f1s: List[float] = []
     for c in range(int(n_classes)):
@@ -966,7 +1004,7 @@ def expected_calibration_error(
 def brier_score(
     probs: np.ndarray,
     y_true: np.ndarray,
-    n_classes: int = FUSION_DIRECTION_CARDINALITY,
+    n_classes: int = LABEL_V2_DIRECTION_CARDINALITY,
 ) -> float:
     onehot = np.eye(int(n_classes), dtype=np.float64)[np.clip(y_true, 0, n_classes - 1)]
     return float(np.mean(np.sum((probs - onehot) ** 2, axis=-1)))
@@ -1047,11 +1085,12 @@ def horizon_metrics(
     probs = apply_temperature(logits[valid], temperature)
     pred = probs.argmax(axis=-1)
     yt = y_true[valid]
+    n_classes = int(logits.shape[-1]) if logits.ndim >= 2 else LABEL_V2_DIRECTION_CARDINALITY
     return {
-        "balanced_acc": balanced_accuracy(yt, pred, FUSION_DIRECTION_CARDINALITY),
-        "macro_f1": macro_f1(yt, pred, FUSION_DIRECTION_CARDINALITY),
+        "balanced_acc": balanced_accuracy(yt, pred, n_classes),
+        "macro_f1": macro_f1(yt, pred, n_classes),
         "ece": expected_calibration_error(probs, yt),
-        "brier": brier_score(probs, yt, FUSION_DIRECTION_CARDINALITY),
+        "brier": brier_score(probs, yt, n_classes),
         "paper_pnl": paper_pnl(yt, pred),
         "n": float(len(yt)),
     }
@@ -1063,7 +1102,7 @@ def predict_logits(
     loader: DataLoader,
     device: torch.device,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Return (n, n_horizons, 2) logits and (n, n_horizons) labels."""
+    """Return (n, n_horizons, C) direction logits and (n, n_horizons) labels."""
     model.eval()
     logit_chunks: List[np.ndarray] = []
     label_chunks: List[np.ndarray] = []
@@ -1071,11 +1110,12 @@ def predict_logits(
         batch_d = tuple(
             t.to(device, non_blocking=device.type == "cuda") for t in batch
         )
-        outs = model(*batch_d[:-1])
+        windows, y_dir, _path = unpack_fusion_batch(batch_d)
+        outs = model(*windows)
         dir_logits = [o.cpu().numpy() for o in outs[:N_HORIZONS_SAFE]]
         stacked = np.stack(dir_logits, axis=1)
         logit_chunks.append(stacked)
-        label_chunks.append(batch_d[-1].cpu().numpy())
+        label_chunks.append(y_dir.cpu().numpy())
     return np.concatenate(logit_chunks, axis=0), np.concatenate(label_chunks, axis=0)
 
 
@@ -1084,9 +1124,9 @@ N_HORIZONS_SAFE = len(FUSION_HORIZON_KEYS)
 
 def slice_windows(
     windows: Mapping[str, np.ndarray],
-    labels: np.ndarray,
+    labels: Union[np.ndarray, FusionTrainLabels],
     sl: slice,
-) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+) -> Tuple[Dict[str, np.ndarray], Union[np.ndarray, FusionTrainLabels]]:
     return {k: v[sl] for k, v in windows.items()}, labels[sl]
 
 
@@ -1153,7 +1193,7 @@ def materialize_windows_if_fits(
 
 def make_loader(
     windows: Mapping[str, Any],
-    labels: np.ndarray,
+    labels: Union[np.ndarray, FusionTrainLabels],
     *,
     batch_size: int,
     shuffle: bool,
@@ -1215,7 +1255,7 @@ def _loader_runtime_kwargs(
 
 def run_walk_forward(
     windows: Mapping[str, np.ndarray],
-    labels: np.ndarray,
+    labels: Union[np.ndarray, FusionTrainLabels],
     *,
     n_features: int,
     config: Mapping[str, Any],
@@ -1252,7 +1292,7 @@ def run_walk_forward(
         )
         extra = _fusion_train_extra(config)
         fold_cw = torch.tensor(
-            inverse_frequency_class_weights(ty, FUSION_DIRECTION_CARDINALITY),
+            inverse_frequency_class_weights(ty, LABEL_V2_DIRECTION_CARDINALITY),
             dtype=torch.float32,
         )
         train_mtf_fusion(
@@ -1346,7 +1386,7 @@ def export_fusion_bundle(
         for res in FUSION_INPUT_RESOLUTIONS
     ]
     input_names = [f"features_{res}" for res in FUSION_INPUT_RESOLUTIONS]
-    output_names = list(ONNX_OUTPUT_NAMES_V11)
+    output_names = list(ONNX_OUTPUT_NAMES_V12)
     dynamic_axes = {name: {0: "batch"} for name in input_names + output_names}
     model.cpu().eval()
     export_kwargs: Dict[str, Any] = {
@@ -1389,26 +1429,31 @@ def export_fusion_bundle(
         pass
 
     feature_config = {
-        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V12,
+        "label_scheme": "label_v2",
+        "label_v2_theta": {
+            str(k): float(v) for k, v in LABEL_V2_THETA_FROZEN.items()
+        },
         "feature_cols": list(fusion_feature_cols()),
         "window_len": int(max(lens.values())),
         "window_lens": {res: int(lens[res]) for res in FUSION_INPUT_RESOLUTIONS},
         "target_window_minutes": target_minutes,
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
         "horizon_keys": list(FUSION_HORIZON_KEYS),
-        "direction_names": {str(k): v for k, v in FUSION_DIRECTION_NAMES.items()},
+        "direction_names": {str(k): v for k, v in LABEL_V2_DIRECTION_NAMES.items()},
         "onnx_output_names": output_names,
         "input_names": input_names,
         "config": dict(config),
         "horizon_gates": dict(gates),
         "tf_fusion_weights": [float(x) for x in fusion_weights],
+        "ready_to_promote": False,
     }
     cfg_path.write_text(
         json.dumps(feature_config, indent=2, default=str), encoding="utf-8"
     )
     meta = {
-        "version": "transformer_mtf_fusion_v11",
-        "model_name": "jacksparrow_transformer_BTCUSD_mtf_fusion",
+        "version": "transformer_mtf_fusion_v12",
+        "model_name": "jacksparrow_transformer_BTCUSD_mtf_fusion_v12",
         "model_family": FUSION_MODEL_FAMILY,
         "symbol": str(config.get("symbol") or "BTCUSD"),
         "resolution": "mtf_fusion",
@@ -1420,6 +1465,8 @@ def export_fusion_bundle(
         "test_metrics": dict(test_metrics or {}),
         "training_config": dict(config),
         "primary_signal_mode": "multi_horizon_position",
+        "ready_to_promote": False,
+        "label_scheme": "label_v2",
     }
     meta_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
     return onnx_path, cfg_path, meta_path
@@ -1427,7 +1474,7 @@ def export_fusion_bundle(
 
 def purged_dev_test_split(
     windows: Mapping[str, np.ndarray],
-    labels: np.ndarray,
+    labels: Union[np.ndarray, FusionTrainLabels],
     *,
     train_frac: float,
     val_frac: float,
@@ -1452,11 +1499,9 @@ def fusion_ready_to_promote(
     test_metrics: Mapping[str, Any],
     gates: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    """True if at least one head is MEDIUM+ on WF mean, frozen test, and val gate.
+    """Always ``ready=false`` for v12 research. Live v11 is not replaced.
 
-    The exported ``validation_confidence`` is what live will trade. Frozen test
-    is graded from test metrics, not copied from validation. Walk-forward mean
-    has no ECE, so WF HIGH is not used; MEDIUM is enough on that axis.
+    Research grades still populate ``detail`` / ``research_heads`` for reports.
     """
     wf_mean = dict(walk_forward.get("mean") or {})
     wf_std = dict(walk_forward.get("std") or {})
@@ -1495,19 +1540,13 @@ def fusion_ready_to_promote(
             "validation_grade": val_grade,
             "ok": ok,
         }
-    ready = bool(ready_heads)
+    ready = False
     return {
         "ready": ready,
-        "heads": ready_heads,
+        "heads": [],
+        "research_heads": ready_heads,
         "detail": detail,
-        "reason": (
-            "at least one head MEDIUM+ on walk-forward mean, frozen test, and val gate"
-            if ready
-            else (
-                "no head is MEDIUM on walk-forward mean, frozen test, and val gate; "
-                "do not promote"
-            )
-        ),
+        "reason": "research_v12_not_live",
     }
 
 
@@ -1518,5 +1557,6 @@ def default_config() -> Dict[str, Any]:
     cfg["target_window_minutes"] = int(
         cfg.get("target_window_minutes") or FUSION_TARGET_WINDOW_MINUTES
     )
-    cfg["n_classes"] = FUSION_DIRECTION_CARDINALITY
+    cfg["n_classes"] = LABEL_V2_DIRECTION_CARDINALITY
+    cfg["label_scheme"] = "label_v2"
     return cfg

@@ -17,13 +17,16 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_INPUT_RESOLUTIONS,
     FUSION_TARGET_WINDOW_MINUTES,
     FUSION_WINDOW_LEN,
+    LABEL_V2_DIRECTION_CARDINALITY,
     N_FUSION_HORIZONS,
     ONNX_OUTPUT_NAMES_V11,
+    ONNX_OUTPUT_NAMES_V12,
     RESOLUTION_MINUTES,
     fusion_window_len,
     fusion_window_lens,
 )
 from scripts.colab.mtf_fusion_model import (
+    FusionTrainLabels,
     MtfFusionDataset,
     MtfFusionTransformer,
     compute_fusion_loss,
@@ -63,21 +66,24 @@ def test_fusion_forward_shapes() -> None:
         torch.randn(2, int(lens[res]), n_feat) for res in FUSION_INPUT_RESOLUTIONS
     ]
     outs = model(*windows)
-    assert len(outs) == N_FUSION_HORIZONS + 1
+    assert len(ONNX_OUTPUT_NAMES_V12) == 13
+    assert len(outs) == len(ONNX_OUTPUT_NAMES_V12)
     assert N_FUSION_HORIZONS == 3
     for i in range(N_FUSION_HORIZONS):
-        assert outs[i].shape == (2, FUSION_DIRECTION_CARDINALITY)
-        assert outs[i].shape[-1] == 2
+        assert outs[i].shape == (2, LABEL_V2_DIRECTION_CARDINALITY)
+        assert outs[i].shape[-1] == 3
+    for i in range(N_FUSION_HORIZONS, N_FUSION_HORIZONS + 9):
+        assert outs[i].shape == (2, 1)
     assert outs[-1].shape == (2, 5)
     weights = model.fusion_weights()
     assert torch.isclose(weights.sum(), torch.tensor(1.0), atol=1e-5)
     assert torch.all(weights >= 0)
 
 
-def test_fusion_loss_ignores_neutral() -> None:
-    logits = tuple(torch.zeros(4, 2) for _ in range(3)) + (torch.zeros(4, 5),)
+def test_fusion_loss_masks_invalid_dir() -> None:
+    logits = tuple(torch.zeros(4, 3) for _ in range(3)) + (torch.zeros(4, 5),)
     labels = torch.tensor(
-        [[1, 1, 0], [0, -1, 1], [-1, -1, -1], [1, 0, 0]], dtype=torch.long
+        [[1, 1, 0], [0, -1, 2], [-1, -1, -1], [2, 0, 0]], dtype=torch.long
     )
     loss = compute_fusion_loss(logits, labels)
     assert torch.isfinite(loss)
@@ -88,11 +94,35 @@ def test_fusion_loss_ignores_neutral() -> None:
     assert torch.isfinite(smooth)
 
 
-def test_fusion_loss_horizon_weights_downweight_h2h() -> None:
-    good = torch.tensor([[-4.0, 4.0], [-4.0, 4.0]])
-    bad = torch.tensor([[4.0, -4.0], [4.0, -4.0]])
-    logits = (good, good, bad, torch.zeros(2, 5))
+def test_fusion_loss_trains_neutral_class() -> None:
+    logits = tuple(torch.zeros(2, 3) for _ in range(3)) + (torch.zeros(2, 5),)
     labels = torch.ones(2, 3, dtype=torch.long)
+    loss = compute_fusion_loss(logits, labels)
+    assert torch.isfinite(loss)
+    assert float(loss) > 0.0
+
+
+def test_fusion_loss_masks_nan_path() -> None:
+    dir_logits = tuple(torch.zeros(2, 3) for _ in range(3))
+    path_outs = tuple(torch.zeros(2, 1) for _ in range(9))
+    outputs = dir_logits + path_outs + (torch.zeros(2, 5),)
+    labels = torch.ones(2, 3, dtype=torch.long)
+    y_reg = torch.full((2, 3, 3), float("nan"))
+    y_reg[0, 0, 0] = 1.5
+    loss = compute_fusion_loss(outputs, labels, path_labels=y_reg)
+    assert torch.isfinite(loss)
+    all_nan = torch.full((2, 3, 3), float("nan"))
+    ce_only = compute_fusion_loss(dir_logits + (torch.zeros(2, 5),), labels)
+    masked = compute_fusion_loss(outputs, labels, path_labels=all_nan)
+    assert torch.isfinite(masked)
+    assert float(masked) == pytest.approx(float(ce_only), rel=1e-5, abs=1e-5)
+
+
+def test_fusion_loss_horizon_weights_downweight_h2h() -> None:
+    good = torch.tensor([[-4.0, 0.0, 4.0], [-4.0, 0.0, 4.0]])
+    bad = torch.tensor([[4.0, 0.0, -4.0], [4.0, 0.0, -4.0]])
+    logits = (good, good, bad, torch.zeros(2, 5))
+    labels = torch.full((2, 3), 2, dtype=torch.long)
     equal = compute_fusion_loss(logits, labels)
     down = compute_fusion_loss(logits, labels, horizon_weights=[1.0, 1.0, 0.1])
     assert float(down) < float(equal)
@@ -149,6 +179,25 @@ def test_validate_fusion_v11_outputs_rejects_three_logits() -> None:
         assert "2-logit" in str(exc)
 
 
+def test_onnx_v12_names_are_research_only() -> None:
+    from feature_store.transformer_btcusd.contract import (
+        FEATURE_CONTRACT_VERSION_V12,
+        onnx_output_names_for_contract,
+    )
+
+    assert len(ONNX_OUTPUT_NAMES_V11) == 4
+    assert list(ONNX_OUTPUT_NAMES_V12[:3]) == list(ONNX_OUTPUT_NAMES_V11[:3])
+    assert "h30m_ret" in ONNX_OUTPUT_NAMES_V12
+    assert "h2h_mae" in ONNX_OUTPUT_NAMES_V12
+    assert ONNX_OUTPUT_NAMES_V12[-1] == "tf_fusion_logits"
+    assert onnx_output_names_for_contract(FEATURE_CONTRACT_VERSION_V12) == (
+        ONNX_OUTPUT_NAMES_V12
+    )
+    assert onnx_output_names_for_contract(
+        "transformer_btcusd_mtf_fusion_v11", resolution="mtf_fusion"
+    ) == ONNX_OUTPUT_NAMES_V11
+
+
 def test_fusion_ready_to_promote_requires_medium_on_wf_test_and_val() -> None:
     wf = {
         "mean": {"h30m": 0.56, "h1h": 0.51, "h2h": 0.50},
@@ -167,8 +216,10 @@ def test_fusion_ready_to_promote_requires_medium_on_wf_test_and_val() -> None:
         }
     }
     result = fusion_ready_to_promote(wf, test, gates)
-    assert result["ready"] is True
-    assert result["heads"] == ["h30m"]
+    assert result["ready"] is False
+    assert result["reason"] == "research_v12_not_live"
+    assert result["heads"] == []
+    assert result["research_heads"] == ["h30m"]
     assert result["detail"]["h30m"]["test_grade"] == FUSION_GRADE_MEDIUM
     assert result["detail"]["h30m"]["validation_grade"] == FUSION_GRADE_MEDIUM
     low_wf = fusion_ready_to_promote(
@@ -177,12 +228,13 @@ def test_fusion_ready_to_promote_requires_medium_on_wf_test_and_val() -> None:
         gates,
     )
     assert low_wf["ready"] is False
+    assert low_wf["research_heads"] == []
     weak_test = {
         "h30m": {"balanced_acc": 0.51, "ece": 0.10},
         "h1h": {"balanced_acc": 0.51, "ece": 0.10},
         "h2h": {"balanced_acc": 0.49, "ece": 0.10},
     }
-    assert fusion_ready_to_promote(wf, weak_test, gates)["ready"] is False
+    assert fusion_ready_to_promote(wf, weak_test, gates)["research_heads"] == []
     low_val = {
         "horizons": {
             "h30m": {"validation_confidence": FUSION_GRADE_LOW},
@@ -190,7 +242,7 @@ def test_fusion_ready_to_promote_requires_medium_on_wf_test_and_val() -> None:
             "h2h": {"validation_confidence": FUSION_GRADE_LOW},
         }
     }
-    assert fusion_ready_to_promote(wf, test, low_val)["ready"] is False
+    assert fusion_ready_to_promote(wf, test, low_val)["research_heads"] == []
 
 
 def test_development_prefix_keeps_embargo_rows() -> None:
@@ -208,31 +260,33 @@ def test_development_prefix_keeps_embargo_rows() -> None:
     assert float(dev_w["5m"][-1, 0, 0]) == 84.0
 
 
-def test_local_v11_smoke_train_and_policy_hold() -> None:
-    """Few-step smoke: ignore mask, 2-logit heads, HOLD on low probability."""
+def test_local_v12_smoke_train_and_v11_policy_hold() -> None:
+    """Few-step smoke: 3-class+path heads; live policy still 2-logit HOLD."""
     n_feat = 4
     n = 16
     model = MtfFusionTransformer(
         n_features=n_feat, d_model=16, nhead=2, num_layers=1, max_len=8
     )
     windows = [torch.randn(n, 8, n_feat) for _ in FUSION_INPUT_RESOLUTIONS]
-    labels = torch.randint(0, 2, (n, 3))
+    labels = torch.randint(0, 3, (n, 3))
     labels[:4, 0] = -1
+    path = torch.randn(n, 3, 3)
+    path[:2, 0, 0] = float("nan")
     opt = torch.optim.SGD(model.parameters(), lr=1e-3)
     model.train()
     for _ in range(2):
         opt.zero_grad()
         outs = model(*windows)
-        loss = compute_fusion_loss(outs, labels)
+        loss = compute_fusion_loss(outs, labels, path_labels=path)
         assert torch.isfinite(loss)
         loss.backward()
         opt.step()
     model.eval()
     with torch.no_grad():
         outs = model(*windows)
-    assert len(outs) == 4
+    assert len(outs) == 13
     for i in range(3):
-        assert outs[i].shape == (n, 2)
+        assert outs[i].shape == (n, 3)
     from agent.core.fusion_policy import evaluate_horizon_forecast, rung_from_logits
     from feature_store.transformer_btcusd.contract import FUSION_GRADE_HIGH
 
@@ -317,8 +371,9 @@ def test_dataset_forward_per_tf_shapes() -> None:
     for tensor, res in zip(batch, FUSION_INPUT_RESOLUTIONS):
         assert tensor.shape == (n, int(lens[res]), n_feat)
     outs = model(*batch)
-    assert outs[0].shape == (n, 2)
+    assert outs[0].shape == (n, 3)
     assert outs[-1].shape == (n, 5)
+    assert len(outs) == 13
 
 
 def test_export_fusion_bundle_per_tf_input_shapes(tmp_path) -> None:
@@ -357,6 +412,9 @@ def test_export_fusion_bundle_per_tf_input_shapes(tmp_path) -> None:
     feature_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert feature_cfg["window_lens"] == {res: int(lens[res]) for res in lens}
     assert feature_cfg["target_window_minutes"] == FUSION_TARGET_WINDOW_MINUTES
+    assert feature_cfg["feature_contract_version"].endswith("v12")
+    assert feature_cfg["onnx_output_names"] == list(ONNX_OUTPUT_NAMES_V12)
+    assert feature_cfg["ready_to_promote"] is False
     try:
         import onnxruntime as ort
     except ImportError:
@@ -423,6 +481,25 @@ def test_dataset_accepts_torch_windows() -> None:
     assert len(row) == len(FUSION_INPUT_RESOLUTIONS) + 1
     assert row[0].shape == (8, n_feat)
     assert row[0].dtype == torch.float32
+
+
+def test_dataset_appends_path_labels() -> None:
+    n_feat = 3
+    n = 4
+    windows = {
+        res: np.ones((n, 8, n_feat), dtype=np.float32)
+        for res in FUSION_INPUT_RESOLUTIONS
+    }
+    packed = FusionTrainLabels(
+        np.zeros((n, 3), dtype=np.int64),
+        np.ones((n, 3, 3), dtype=np.float32),
+    )
+    ds = MtfFusionDataset(windows, packed)
+    row = ds[0]
+    assert len(row) == len(FUSION_INPUT_RESOLUTIONS) + 2
+    assert row[-2].dtype == torch.long
+    assert row[-1].shape == (3, 3)
+    assert row[-1].dtype == torch.float32
 
 
 def test_loader_runtime_kwargs_cpu_disables_workers() -> None:

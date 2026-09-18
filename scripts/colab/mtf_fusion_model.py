@@ -1,8 +1,8 @@
-"""Shared-encoder multi-TF fusion Transformer (v11).
+"""Shared-encoder multi-TF fusion Transformer (v12 research).
 
 One parameter set applied independently to 5m/10m/30m/1h/2h windows, softmax
-fusion weights, three 2-class horizon heads. Cross-entropy only — no PnL loss.
-NEUTRAL labels are ignore_index and never enter the loss.
+fusion weights, three 3-class direction heads plus per-horizon ret/MFE/MAE.
+Live v11 remains 2-class ignore_index NEUTRAL in FusionModelNode.
 """
 
 from __future__ import annotations
@@ -17,15 +17,41 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 
 from feature_store.transformer_btcusd.contract import (
-    FUSION_DIRECTION_CARDINALITY,
     FUSION_INPUT_RESOLUTIONS,
     FUSION_TARGET_WINDOW_MINUTES,
     FUSION_WINDOW_LEN,
+    LABEL_V2_DIRECTION_CARDINALITY,
+    LABEL_V2_PATH_LOSS_WEIGHTS,
+    LABEL_V2_REG_FIELDS,
     N_FUSION_HORIZONS,
     RESOLUTION_MINUTES,
     resolve_fusion_window_lens,
 )
 from feature_store.transformer_btcusd.inference import zscore_window
+
+
+class FusionTrainLabels:
+    """Direction (n, H) int64 plus path (n, H, 3) float32 aligned on samples."""
+
+    __slots__ = ("direction", "path")
+
+    def __init__(self, direction: np.ndarray, path: np.ndarray) -> None:
+        self.direction = np.asarray(direction, dtype=np.int64)
+        self.path = np.asarray(path, dtype=np.float32)
+        if int(self.direction.shape[0]) != int(self.path.shape[0]):
+            raise ValueError("direction/path length mismatch")
+
+    def __len__(self) -> int:
+        return int(self.direction.shape[0])
+
+    def __getitem__(self, sl: Any) -> "FusionTrainLabels":
+        return FusionTrainLabels(self.direction[sl], self.path[sl])
+
+
+def _direction_array(class_ids: Any) -> np.ndarray:
+    if isinstance(class_ids, FusionTrainLabels):
+        return np.asarray(class_ids.direction, dtype=np.int64)
+    return np.asarray(class_ids, dtype=np.int64)
 
 
 def inverse_frequency_class_weights(
@@ -36,7 +62,7 @@ def inverse_frequency_class_weights(
 
     Ignored labels (< 0) are excluded. Empty class counts are clipped to 1.
     """
-    ids = np.asarray(class_ids, dtype=np.int64).ravel()
+    ids = _direction_array(class_ids).ravel()
     ids = ids[ids >= 0]
     if ids.size == 0:
         return np.ones(int(n_classes), dtype=np.float32)
@@ -74,7 +100,7 @@ def _window_row_to_tensor(window: WindowArray) -> torch.Tensor:
 
 
 class MtfFusionDataset(Dataset):
-    """Per-sample TF windows plus (n_horizons,) 2-class labels.
+    """Per-sample TF windows plus direction labels and optional path targets.
 
     Accepts numpy memmaps or CPU float32 tensors. Tensor storage avoids a
     numpy copy on each ``__getitem__`` when windows fit in RAM.
@@ -83,8 +109,9 @@ class MtfFusionDataset(Dataset):
     def __init__(
         self,
         windows: Mapping[str, WindowArray],
-        labels: Union[np.ndarray, torch.Tensor],
+        labels: Union[np.ndarray, torch.Tensor, FusionTrainLabels],
         *,
+        path_labels: Optional[Union[np.ndarray, torch.Tensor]] = None,
         per_window_zscore: bool = False,
     ) -> None:
         self.resolutions = tuple(FUSION_INPUT_RESOLUTIONS)
@@ -109,12 +136,28 @@ class MtfFusionDataset(Dataset):
                 n = n_i
             elif n_i != n:
                 raise ValueError(f"Window length mismatch for {res}")
-        if isinstance(labels, torch.Tensor):
-            self.labels: WindowArray = labels.detach().to(dtype=torch.long)
+        path_src: Optional[Union[np.ndarray, torch.Tensor]] = path_labels
+        if isinstance(labels, FusionTrainLabels):
+            dir_src: Union[np.ndarray, torch.Tensor] = labels.direction
+            path_src = labels.path if path_src is None else path_src
+        else:
+            dir_src = labels
+        if isinstance(dir_src, torch.Tensor):
+            self.labels: WindowArray = dir_src.detach().to(dtype=torch.long)
             n_y = int(self.labels.shape[0])
         else:
-            self.labels = np.asarray(labels, dtype=np.int64)
+            self.labels = np.asarray(dir_src, dtype=np.int64)
             n_y = int(len(self.labels))
+        self.path_labels: Optional[WindowArray] = None
+        if path_src is not None:
+            if isinstance(path_src, torch.Tensor):
+                self.path_labels = path_src.detach().to(dtype=torch.float32)
+                n_p = int(self.path_labels.shape[0])
+            else:
+                self.path_labels = np.asarray(path_src, dtype=np.float32)
+                n_p = int(len(self.path_labels))
+            if n_p != n_y:
+                raise ValueError("Path labels length does not match direction labels")
         if n is None or n_y != n:
             raise ValueError("Labels length does not match windows")
         self.per_window_zscore = bool(per_window_zscore)
@@ -134,6 +177,14 @@ class MtfFusionDataset(Dataset):
             tensors.append(label_row.to(dtype=torch.long))
         else:
             tensors.append(_ndarray_to_tensor(np.asarray(label_row), torch.long))
+        if self.path_labels is not None:
+            path_row = self.path_labels[i]
+            if isinstance(path_row, torch.Tensor):
+                tensors.append(path_row.to(dtype=torch.float32))
+            else:
+                tensors.append(
+                    _ndarray_to_tensor(np.asarray(path_row, dtype=np.float32), torch.float32)
+                )
         return tuple(tensors)
 
 
@@ -147,7 +198,7 @@ class PositionalEncoding(nn.Module):
 
 
 class MtfFusionTransformer(nn.Module):
-    """Shared encoder E, softmax TF weights, three independent 2-class heads."""
+    """Shared encoder E, softmax TF weights, 3-class dir + path heads."""
 
     def __init__(
         self,
@@ -159,12 +210,13 @@ class MtfFusionTransformer(nn.Module):
         max_len: int = FUSION_WINDOW_LEN,
         n_tfs: int = 5,
         n_horizons: int = N_FUSION_HORIZONS,
-        n_classes: int = FUSION_DIRECTION_CARDINALITY,
+        n_classes: int = LABEL_V2_DIRECTION_CARDINALITY,
     ) -> None:
         super().__init__()
         self.n_tfs = int(n_tfs)
         self.n_horizons = int(n_horizons)
         self.n_classes = int(n_classes)
+        self.n_path_fields = len(LABEL_V2_REG_FIELDS)
         self.tf_embed = nn.Embedding(self.n_tfs, d_model)
         self.input_proj = nn.Linear(n_features, d_model)
         self.scale_proj = nn.Linear(1, d_model, bias=False)
@@ -195,6 +247,9 @@ class MtfFusionTransformer(nn.Module):
         )
         self.dir_heads = nn.ModuleList(
             [nn.Linear(shared_dim, self.n_classes) for _ in range(self.n_horizons)]
+        )
+        self.path_heads = nn.ModuleList(
+            [nn.Linear(shared_dim, self.n_path_fields) for _ in range(self.n_horizons)]
         )
 
     def encode_tf(self, x: torch.Tensor, tf_index: int) -> torch.Tensor:
@@ -239,8 +294,12 @@ class MtfFusionTransformer(nn.Module):
         combined = (stacked * weights).sum(dim=1)
         shared = self.shared(combined)
         dir_outs = tuple(head(shared) for head in self.dir_heads)
+        path_vecs = [head(shared) for head in self.path_heads]
+        path_outs = tuple(
+            vec[:, k : k + 1] for vec in path_vecs for k in range(self.n_path_fields)
+        )
         fusion_logits = self.fusion_logits.unsqueeze(0).expand(shared.size(0), -1)
-        return (*dir_outs, fusion_logits)
+        return (*dir_outs, *path_outs, fusion_logits)
 
 
 def fusion_model_from_config(
@@ -262,19 +321,48 @@ def fusion_model_from_config(
         num_layers=int(config.get("num_layers") or 2),
         dropout=float(config.get("dropout") or 0.30),
         max_len=max_len,
+        n_classes=int(config.get("n_classes") or LABEL_V2_DIRECTION_CARDINALITY),
     )
+
+
+def _as_col(tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.ndim == 1:
+        return tensor.unsqueeze(-1)
+    return tensor
+
+
+def unpack_fusion_batch(
+    batch: Sequence[torch.Tensor],
+) -> Tuple[Tuple[torch.Tensor, ...], torch.Tensor, Optional[torch.Tensor]]:
+    """Split TF windows from y_dir and optional y_reg (last tensor if float)."""
+    if len(batch) < 2:
+        raise ValueError("fusion batch must include windows and labels")
+    if batch[-1].is_floating_point():
+        return tuple(batch[:-2]), batch[-2], batch[-1]
+    return tuple(batch[:-1]), batch[-1], None
 
 
 def compute_fusion_loss(
     outputs: Sequence[torch.Tensor],
     labels: torch.Tensor,
     *,
+    path_labels: Optional[torch.Tensor] = None,
     class_weights: Optional[torch.Tensor] = None,
     label_smoothing: float = 0.0,
     horizon_weights: Optional[Sequence[float]] = None,
+    path_task_weights: Optional[Mapping[str, float]] = None,
 ) -> torch.Tensor:
-    """Weighted mean CE across 2-class horizon heads. Ignores labels < 0."""
+    """3-class CE (trains NEUTRAL) plus SmoothL1 on finite ret/MFE/MAE."""
     n_h = int(labels.size(1))
+    weights = dict(LABEL_V2_PATH_LOSS_WEIGHTS)
+    if path_task_weights is not None:
+        weights.update({str(k): float(v) for k, v in path_task_weights.items()})
+    dir_w = float(weights.get("dir") or 0.0)
+    field_ws = (
+        float(weights.get("ret") or 0.0),
+        float(weights.get("mfe") or 0.0),
+        float(weights.get("mae") or 0.0),
+    )
     loss = torch.zeros((), device=labels.device, dtype=torch.float32)
     weight_sum = 0.0
     last_logits = outputs[0]
@@ -284,20 +372,47 @@ def compute_fusion_loss(
         last_logits = logits
         target = labels[:, j]
         valid = target >= 0
-        if not bool(valid.any()):
-            continue
         head_w = 1.0
         if horizon_weights is not None and j < len(horizon_weights):
             head_w = float(horizon_weights[j])
         if head_w <= 0.0:
             continue
-        loss = loss + head_w * nn.functional.cross_entropy(
-            logits[valid],
-            target[valid],
-            weight=class_weights,
-            reduction="mean",
-            label_smoothing=smooth,
-        )
+        head_loss = torch.zeros((), device=labels.device, dtype=loss.dtype)
+        parts = 0.0
+        if dir_w > 0.0 and bool(valid.any()):
+            head_loss = head_loss + dir_w * nn.functional.cross_entropy(
+                logits[valid],
+                target[valid],
+                weight=class_weights,
+                reduction="mean",
+                label_smoothing=smooth,
+            )
+            parts += dir_w
+        if path_labels is not None:
+            pred = torch.cat(
+                [
+                    _as_col(outputs[n_h + j * 3]),
+                    _as_col(outputs[n_h + j * 3 + 1]),
+                    _as_col(outputs[n_h + j * 3 + 2]),
+                ],
+                dim=-1,
+            )
+            y_path = path_labels[:, j, :]
+            for k, field_w in enumerate(field_ws):
+                if field_w <= 0.0:
+                    continue
+                mask = torch.isfinite(y_path[:, k])
+                if not bool(mask.any()):
+                    continue
+                head_loss = head_loss + field_w * nn.functional.smooth_l1_loss(
+                    pred[mask, k],
+                    y_path[mask, k],
+                    reduction="mean",
+                )
+                parts += field_w
+        if parts <= 0.0:
+            continue
+        loss = loss + head_w * (head_loss / float(parts))
         weight_sum += head_w
     if weight_sum <= 0.0:
         return last_logits.sum() * 0.0
@@ -319,6 +434,7 @@ def train_mtf_fusion(
     horizon_weights: Optional[Sequence[float]] = None,
     lr_schedule: str = "constant",
     amp: bool = False,
+    path_task_weights: Optional[Mapping[str, float]] = None,
 ) -> Dict[str, Any]:
     """AdamW + early stopping on validation CE. Never sees the test loader."""
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -356,15 +472,16 @@ def train_mtf_fusion(
             return torch.cuda.amp.autocast()
 
     def _batch_loss(batch: Sequence[torch.Tensor]) -> torch.Tensor:
-        windows = batch[:-1]
-        labels = batch[-1]
+        windows, labels, path_labels = unpack_fusion_batch(batch)
         outs = model(*windows)
         return compute_fusion_loss(
             outs,
             labels,
+            path_labels=path_labels,
             class_weights=cw,
             label_smoothing=float(label_smoothing),
             horizon_weights=hw,
+            path_task_weights=path_task_weights,
         )
 
     def _move(batch: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, ...]:

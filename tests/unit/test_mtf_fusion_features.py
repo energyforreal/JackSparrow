@@ -154,7 +154,10 @@ def test_window_dataset_cache_roundtrip(tmp_path) -> None:
     loaded = try_load_fusion_dataset_cache(tmp_path, window_len=8, stride=4)
     assert loaded is not None
     cached_w, cached_y, cached_t = loaded
-    np.testing.assert_array_equal(cached_y, labels)
+    from scripts.colab.mtf_fusion_model import FusionTrainLabels
+
+    assert isinstance(cached_y, FusionTrainLabels)
+    np.testing.assert_array_equal(cached_y.direction, labels)
     assert len(cached_t) == len(decisions)
     for res in FUSION_INPUT_RESOLUTIONS:
         np.testing.assert_allclose(cached_w[res], windows[res], rtol=1e-5, atol=1e-5)
@@ -196,7 +199,11 @@ def test_build_dataset_cache_hit_skips_featuring(tmp_path, monkeypatch) -> None:
         frames, window_len=8, stride=4, memmap_dir=tmp_path
     )
     assert calls["n"] == 1
-    np.testing.assert_array_equal(first[1], second[1])
+    from scripts.colab.mtf_fusion_model import FusionTrainLabels
+
+    assert isinstance(first[1], FusionTrainLabels)
+    np.testing.assert_array_equal(first[1].direction, second[1].direction)
+    np.testing.assert_allclose(first[1].path, second[1].path, equal_nan=True)
     assert len(first[2]) == len(second[2])
 
 

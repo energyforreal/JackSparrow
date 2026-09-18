@@ -21,10 +21,14 @@ REQUIRED_SYMBOLS = (
     "default_fusion_training_config",
     "MtfFusionTransformer",
     "compute_fusion_horizon_labels",
+    "summarize_label_v2",
+    "LABEL_V2_THETA_GRID",
+    "label_v2_future_leak_cols",
     "build_10m_ohlcv_from_5m",
     "fusion_frames_from_fetch",
     "export_fusion_bundle",
-    "FEATURE_CONTRACT_VERSION_V11",
+    "FEATURE_CONTRACT_VERSION_V12",
+    "fusion_label_v2_matrices",
     "fusion_ready_to_promote",
     "development_prefix",
     "walk_forward_slices",
@@ -108,6 +112,10 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
         raise AssertionError(
             "leakage_audit must not treat every *_dir column as leakage"
         )
+    if "Training uses fusion_label_v2_matrices; persist/TP-SL stay off the loss." not in full_text:
+        raise AssertionError("section 08 must train on fusion_label_v2_matrices")
+    if "Do NOT copy this v12 bundle into agent/model_storage/" not in full_text:
+        raise AssertionError("section 26 must refuse copying v12 into live model_storage")
     if "last_swing_dir" not in full_text:
         raise AssertionError("notebook should document last_swing_dir as causal")
     if "Walk-forward skipped (CONFIG run_walk_forward=False)" not in full_text:
