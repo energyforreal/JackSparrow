@@ -6,8 +6,10 @@ added; 10m/30m/1h/2h representations come from independently sampled OHLCV.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,10 +23,12 @@ from feature_store.pattern_features import (
 from feature_store.transformer_btcusd.contract import (
     CANDLE_CLASS_COL,
     FEATURE_COLS,
+    FEATURE_CONTRACT_VERSION_V11,
     FUSION_INPUT_RESOLUTIONS,
-    FUSION_WINDOW_LEN,
     RESOLUTION_MINUTES,
     fusion_native_feature_cols,
+    fusion_window_len,
+    resolve_fusion_window_lens,
 )
 from feature_store.transformer_btcusd.features import add_features, assemble_raw_frame
 from feature_store.transformer_btcusd.inference import zscore_window
@@ -39,6 +43,63 @@ def fusion_feature_cols() -> Tuple[str, ...]:
     """Continuous columns in each TF window (native TA + pattern engines)."""
     return fusion_native_feature_cols() + tuple(CANDLESTICK_FEATURES) + tuple(
         CHART_PATTERN_FEATURES
+    )
+
+
+def fusion_feature_fingerprint() -> str:
+    """Stable hash of fusion feature names for dataset-cache invalidation."""
+    blob = "\0".join(fusion_feature_cols()).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def featured_cache_manifest() -> Dict[str, Any]:
+    """Identity for cached native-TF featured frames (independent of stride)."""
+    cols = list(fusion_feature_cols())
+    return {
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
+        "n_features": len(cols),
+        "feature_fingerprint": fusion_feature_fingerprint(),
+    }
+
+
+def try_load_featured_frames(cache_dir: Path) -> Optional[Dict[str, pd.DataFrame]]:
+    """Load featured_{tf}.parquet when featured_manifest.json matches."""
+    root = Path(cache_dir)
+    man_path = root / "featured_manifest.json"
+    if not man_path.is_file():
+        return None
+    try:
+        stored = json.loads(man_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    expected = featured_cache_manifest()
+    for key, value in expected.items():
+        if stored.get(key) != value:
+            return None
+    out: Dict[str, pd.DataFrame] = {}
+    for res in FUSION_INPUT_RESOLUTIONS:
+        path = root / f"featured_{res}.parquet"
+        if not path.is_file():
+            return None
+        out[str(res)] = pd.read_parquet(path)
+    return out
+
+
+def save_featured_frames(
+    cache_dir: Path,
+    featured: Mapping[str, pd.DataFrame],
+) -> None:
+    """Write featured parquets plus featured_manifest.json."""
+    root = Path(cache_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    for res in FUSION_INPUT_RESOLUTIONS:
+        frame = featured.get(res)
+        if frame is None:
+            raise KeyError(f"Missing featured frame for {res}")
+        frame.to_parquet(root / f"featured_{res}.parquet", index=False)
+    (root / "featured_manifest.json").write_text(
+        json.dumps(featured_cache_manifest(), indent=2),
+        encoding="utf-8",
     )
 
 
@@ -101,20 +162,25 @@ def encode_tf_window(
     decision_time: pd.Timestamp,
     *,
     resolution: str,
-    window_len: int = FUSION_WINDOW_LEN,
+    window_len: Optional[int] = None,
     funding_df: Optional[pd.DataFrame] = None,
     oi_df: Optional[pd.DataFrame] = None,
     featured: Optional[pd.DataFrame] = None,
     zscore: bool = True,
 ) -> np.ndarray:
-    """64-bar native window for one TF at decision time T (closed bars only)."""
+    """Native closed-bar window for one TF at decision time T (closed bars only)."""
     minutes = int(RESOLUTION_MINUTES[str(resolution).strip().lower()])
+    width = (
+        int(window_len)
+        if window_len is not None
+        else fusion_window_len(str(resolution))
+    )
     if featured is None:
         closed = last_n_closed_bars(
             tf_df,
             decision_time,
             resolution_minutes=minutes,
-            window_len=max(int(window_len) * 4, 256),
+            window_len=max(int(width) * 4, 256),
         )
         featured = add_native_tf_features(
             closed,
@@ -126,17 +192,17 @@ def encode_tf_window(
             featured,
             decision_time,
             resolution_minutes=minutes,
-            window_len=int(window_len),
+            window_len=int(width),
         )
     else:
         featured = last_n_closed_bars(
             featured,
             decision_time,
             resolution_minutes=minutes,
-            window_len=int(window_len),
+            window_len=int(width),
         )
     cols = fusion_feature_cols()
-    window = _window_matrix(featured, cols=cols, window_len=int(window_len))
+    window = _window_matrix(featured, cols=cols, window_len=int(width))
     if zscore:
         window = zscore_window(window)
     return window
@@ -146,7 +212,8 @@ def encode_all_tf_windows(
     frames: Mapping[str, pd.DataFrame],
     decision_time: pd.Timestamp,
     *,
-    window_len: int = FUSION_WINDOW_LEN,
+    window_len: Optional[int] = None,
+    window_lens: Optional[Mapping[str, int]] = None,
     funding_df: Optional[pd.DataFrame] = None,
     oi_df: Optional[pd.DataFrame] = None,
     featured_by_tf: Optional[Mapping[str, pd.DataFrame]] = None,
@@ -154,6 +221,7 @@ def encode_all_tf_windows(
 ) -> Dict[str, np.ndarray]:
     """Independent Z-ready windows for 5m/10m/30m/1h/2h at time T."""
     normalized = normalize_mtf_frames(frames)
+    lens = resolve_fusion_window_lens(window_lens, window_len)
     out: Dict[str, np.ndarray] = {}
     for res in FUSION_INPUT_RESOLUTIONS:
         df = normalized.get(res)
@@ -164,7 +232,7 @@ def encode_all_tf_windows(
             df,
             decision_time,
             resolution=res,
-            window_len=window_len,
+            window_len=int(lens[res]),
             funding_df=funding_df,
             oi_df=oi_df,
             featured=feat,
@@ -198,12 +266,25 @@ def precompute_featured_frames(
 def stack_tf_windows(
     windows: Mapping[str, np.ndarray],
 ) -> np.ndarray:
-    """Stack TF windows as (n_tf, window_len, n_features) in fusion order."""
+    """Stack TF windows as (n_tf, window_len, n_features) in fusion order.
+
+    Requires equal (window, feat) shapes. Per-TF equal-span windows differ in
+    bar count, so callers should keep a dict or list instead of stacking.
+    """
     mats: List[np.ndarray] = []
     for res in FUSION_INPUT_RESOLUTIONS:
         if res not in windows:
             raise KeyError(f"Missing window for {res}")
         mats.append(np.asarray(windows[res], dtype=np.float32))
+    shapes = {tuple(mat.shape) for mat in mats}
+    if len(shapes) != 1:
+        raise ValueError(
+            "stack_tf_windows requires equal window shapes; got "
+            + ", ".join(
+                f"{res}={tuple(mat.shape)}"
+                for res, mat in zip(FUSION_INPUT_RESOLUTIONS, mats)
+            )
+        )
     return np.stack(mats, axis=0)
 
 
@@ -296,7 +377,8 @@ def collect_training_windows(
     featured_by_tf: Mapping[str, pd.DataFrame],
     decision_times: Sequence[pd.Timestamp],
     *,
-    window_len: int = FUSION_WINDOW_LEN,
+    window_len: Optional[int] = None,
+    window_lens: Optional[Mapping[str, int]] = None,
     zscore: bool = True,
     memmap_dir: Optional[Path] = None,
 ) -> Dict[str, np.ndarray]:
@@ -304,14 +386,15 @@ def collect_training_windows(
 
     Uses ``searchsorted`` on bar close times so each TF is scanned once.
     Semantics match ``encode_tf_window(..., featured=frame)``.
+    Each TF keeps its own ``window_lens[res]``; arrays are not padded to a
+    shared max length.
 
     When ``memmap_dir`` is set, each TF array is a float32 memmap on disk so
     Colab does not hold five full window tensors in RAM.
     """
     n = len(decision_times)
     cols = list(fusion_feature_cols())
-    width = int(window_len)
-    shape = (int(n), width, len(cols))
+    lens = resolve_fusion_window_lens(window_lens, window_len)
     decisions = pd.to_datetime(pd.Index(list(decision_times)), utc=True)
     dec_ns = decisions.asi8
     out: Dict[str, np.ndarray] = {}
@@ -319,6 +402,8 @@ def collect_training_windows(
     for res in FUSION_INPUT_RESOLUTIONS:
         if res not in featured_by_tf:
             raise KeyError(f"Missing featured frame for {res}")
+        width = int(lens[res])
+        shape = (int(n), width, len(cols))
         if mmap_root is not None:
             mat = _open_fusion_window_memmap(mmap_root, str(res), shape)
         else:

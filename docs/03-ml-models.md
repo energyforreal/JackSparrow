@@ -2,7 +2,7 @@
 
 ## Overview
 
-JackSparrow’s live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then four 3-class heads forecast **+10m / +30m / +1h / +2h** as BULL / NEUTRAL / BEAR. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration.
+JackSparrow’s live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then three 2-class heads forecast **+30m / +1h / +2h** as BULL / BEAR. NEUTRAL is ignored in training (not a class); live HOLD comes from LOW grade or `min_probability`. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration.
 
 Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` reloads the five per-TF ONNX bundles and climate/setup/timing synthesis. That path is not dual-running by default.
 
@@ -83,10 +83,11 @@ MODEL_DIR=./agent/model_storage
 
 Train/serve parity lives in [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/):
 
-- `contract.py` — per-TF resolutions, path labels only (MFE/MAE/vol/trend/OI/volume); no `future_return` head
+- `contract.py` — per-TF v9 plus fused v11 (`FEATURE_CONTRACT_VERSION_V11`); fusion heads are 2-class BEAR/BULL
+- `mtf_frames.py`, `mtf_features.py`, `mtf_labels.py` — independent TFs, native encodings, ignore_index NEUTRAL
 - `features.py`, `derivatives.py` — native TF feature matrix
 - `inference.py` — ONNX input assembly + metadata export
-- `labels.py` — training label helpers (Colab)
+- `labels.py` — legacy per-TF training label helpers (Colab)
 
 Each `TransformerModelNode` builds features on its native TF grid only.
 

@@ -7,33 +7,31 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-import numpy as np
-import pandas as pd
 import torch
-from torch.utils.data import DataLoader
 
 from feature_store.transformer_btcusd.contract import (
     FUSION_BUNDLE_DIR_NAME,
     FUSION_DIRECTION_CARDINALITY,
     FUSION_EMBARGO_BARS,
-    FUSION_INPUT_RESOLUTIONS,
-    FUSION_WINDOW_LEN,
     default_fusion_training_config,
 )
 from feature_store.transformer_btcusd.mtf_features import fusion_feature_cols
 from feature_store.transformer_btcusd.mtf_frames import fusion_frames_from_fetch
 from scripts.colab.mtf_fusion_model import (
-    MtfFusionDataset,
     fusion_model_from_config,
     inverse_frequency_class_weights,
     train_mtf_fusion,
 )
 from scripts.colab.mtf_fusion_research import (
     build_dataset_from_ohlcv,
+    development_prefix,
     export_fusion_bundle,
     freeze_horizon_gates,
     fusion_ready_to_promote,
     horizon_metrics,
+    loader_runtime_kwargs,
+    make_loader,
+    optuna_search,
     predict_logits,
     purged_dev_test_split,
     run_walk_forward,
@@ -53,6 +51,11 @@ def main() -> None:
         action="store_true",
         help="Run Gradient SHAP on the validation split after training.",
     )
+    parser.add_argument(
+        "--optuna-refresh",
+        action="store_true",
+        help="Ignore cached optuna_best.json and run a new search.",
+    )
     args = parser.parse_args()
 
     cfg = default_fusion_training_config()
@@ -62,6 +65,9 @@ def main() -> None:
         cfg["epochs"] = int(args.epochs)
     if args.shap:
         cfg["run_shap"] = True
+    if args.optuna_refresh:
+        cfg["optuna_refresh"] = True
+        cfg["run_optuna"] = True
 
     print("Fetching native 5m/30m/1h/2h OHLCV (10m built from 5m)...")
     df5 = fetch_history_bundle(
@@ -93,6 +99,7 @@ def main() -> None:
     memmap_dir.mkdir(parents=True, exist_ok=True)
     windows, labels, _times = build_dataset_from_ohlcv(
         frames,
+        window_lens=cfg.get("window_lens"),
         window_len=int(cfg["window_len"]),
         stride=int(cfg.get("stride") or 4),
         memmap_dir=memmap_dir,
@@ -106,36 +113,57 @@ def main() -> None:
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_features = len(fusion_feature_cols())
+    loader_kw = loader_runtime_kwargs(cfg, device)
+    train_loader = make_loader(
+        splits["train"]["windows"],
+        splits["train"]["labels"],
+        batch_size=int(cfg["batch_size"]),
+        shuffle=True,
+        **loader_kw,
+    )
+    val_loader = make_loader(
+        splits["val"]["windows"],
+        splits["val"]["labels"],
+        batch_size=int(cfg["batch_size"]),
+        shuffle=False,
+        **loader_kw,
+    )
+    class_w = torch.tensor(
+        inverse_frequency_class_weights(
+            splits["train"]["labels"], FUSION_DIRECTION_CARDINALITY
+        ),
+        dtype=torch.float32,
+    )
+    cache_root = Path(args.export_dir)
+    if cfg.get("run_optuna"):
+        cfg = optuna_search(
+            cfg,
+            n_features=n_features,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            device=device,
+            class_weights=class_w,
+            cache_dir=cache_root,
+        )
     wf: Dict[str, Any] = {"folds": [], "mean": {}, "std": {}}
     if not args.skip_walk_forward:
-        print("Walk-forward on development span (test excluded)...")
-        dev_windows = {
-            res: np.concatenate(
-                [splits["train"]["windows"][res], splits["val"]["windows"][res]],
-                axis=0,
-            )
-            for res in FUSION_INPUT_RESOLUTIONS
-        }
-        dev_labels = np.concatenate(
-            [splits["train"]["labels"], splits["val"]["labels"]], axis=0
+        print("Walk-forward on contiguous prefix through val (test excluded)...")
+        dev_windows, dev_labels = development_prefix(
+            windows,
+            labels,
+            train_frac=float(cfg["train_frac"]),
+            val_frac=float(cfg["val_frac"]),
         )
         wf = run_walk_forward(
             dev_windows, dev_labels, n_features=n_features, config=cfg, device=device
         )
         del dev_windows, dev_labels
 
-    train_ds = MtfFusionDataset(splits["train"]["windows"], splits["train"]["labels"])
-    val_ds = MtfFusionDataset(splits["val"]["windows"], splits["val"]["labels"])
-    train_loader = DataLoader(train_ds, batch_size=int(cfg["batch_size"]), shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=int(cfg["batch_size"]), shuffle=False)
-    class_w = torch.tensor(
-        inverse_frequency_class_weights(splits["train"]["labels"], FUSION_DIRECTION_CARDINALITY),
-        dtype=torch.float32,
-    )
     extra = {
         "label_smoothing": float(cfg.get("label_smoothing") or 0.0),
         "horizon_weights": list(cfg.get("horizon_loss_weights") or [1.0, 0.8, 0.4]),
         "lr_schedule": str(cfg.get("lr_schedule") or "cosine"),
+        "amp": bool(cfg.get("amp", True)),
     }
     model = fusion_model_from_config(n_features, cfg).to(device)
     print("Training on train split; early-stop on val (test still frozen)...")
@@ -154,10 +182,12 @@ def main() -> None:
     val_logits, val_y = predict_logits(model, val_loader, device)
     gates = freeze_horizon_gates(val_logits, val_y, wf, config=cfg)
 
-    test_loader = DataLoader(
-        MtfFusionDataset(splits["test"]["windows"], splits["test"]["labels"]),
+    test_loader = make_loader(
+        splits["test"]["windows"],
+        splits["test"]["labels"],
         batch_size=int(cfg["batch_size"]),
         shuffle=False,
+        **loader_kw,
     )
     test_logits, test_y = predict_logits(model, test_loader, device)
     test_metrics: Dict[str, Any] = {}
@@ -175,7 +205,8 @@ def main() -> None:
     print("promotion", promo)
     if not promo["ready"]:
         print(
-            "DO NOT PROMOTE: no head is MEDIUM on walk-forward mean and frozen test."
+            "DO NOT PROMOTE: no head is MEDIUM on walk-forward mean, "
+            "frozen test, and val gate."
         )
 
     weights = model.fusion_weights().detach().cpu().numpy().tolist()
@@ -192,6 +223,7 @@ def main() -> None:
         model,
         export_dir,
         n_features=n_features,
+        window_lens=cfg.get("window_lens"),
         window_len=int(cfg["window_len"]),
         config=cfg,
         gates=gates,

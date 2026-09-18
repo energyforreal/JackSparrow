@@ -128,12 +128,22 @@ CONFIG_CELL = """CONFIG = default_fusion_training_config()
 # Smoke overrides (comment out for a full research run):
 # CONFIG["epochs"] = 2
 # CONFIG["history_days"] = 120
+CONFIG["epochs"] = 12
+CONFIG["early_stop_patience"] = 3
 CONFIG["run_optuna"] = True
-CONFIG["optuna_trials"] = 8
-CONFIG["run_shap"] = True
+CONFIG["optuna_trials"] = 3
+CONFIG["optuna_trial_epochs"] = 4
+CONFIG["optuna_refresh"] = False
+CONFIG["run_shap"] = False
 CONFIG["shap_background"] = 32
 CONFIG["shap_explain_n"] = 64
+CONFIG["amp"] = True
+CONFIG["dataloader_workers"] = 2
+CONFIG["prefetch_factor"] = 4
+CONFIG["pin_memory"] = True
 CONFIG["run_walk_forward"] = True
+# Reuse cache/optuna_best.json unless optuna_refresh=True.
+# Weights-only retrain: CONFIG["run_walk_forward"] = False.
 
 _content = Path("/content")
 _root = _content if _content.is_dir() else Path(".")
@@ -146,6 +156,11 @@ print(json.dumps(CONFIG, indent=2, default=str))
 print("contract", FEATURE_CONTRACT_VERSION_V11)
 print("input TFs", list(FUSION_INPUT_RESOLUTIONS))
 print("horizons", list(FUSION_HORIZON_KEYS))
+print("fusion window spans (target", FUSION_TARGET_WINDOW_MINUTES, "min):")
+for res, width in fusion_window_lens().items():
+    minutes = RESOLUTION_MINUTES[res]
+    span = int(width) * int(minutes)
+    print(f"  {res:4}  bars={width:4}  span_min={span}  err={span - FUSION_TARGET_WINDOW_MINUTES}")
 """
 
 SEEDS_CELL = """set_research_seed(int(CONFIG.get("seed") or 42))
@@ -218,10 +233,12 @@ print(json.dumps(label_class_mix(y_preview), indent=2))
 print("dead zone: h30m/h1h 0.5 ATR, h2h 0.75 ATR; NEUTRAL is ignore_index.")
 """
 
-SPLIT_CELL = """window_len = int(CONFIG.get("window_len") or FUSION_WINDOW_LEN)
+SPLIT_CELL = """window_lens = dict(CONFIG.get("window_lens") or fusion_window_lens())
+window_len = int(CONFIG.get("window_len") or window_lens["5m"] or FUSION_WINDOW_LEN)
 stride = int(CONFIG.get("stride") or 4)
 embargo = int(CONFIG.get("embargo_bars") or FUSION_EMBARGO_BARS)
-print("window_len", window_len, "stride", stride, "embargo", embargo)
+print("window_lens", window_lens)
+print("window_len (5m warm-up)", window_len, "stride", stride, "embargo", embargo)
 print("Test is the final untouched tail after a purged embargo.")
 """
 
@@ -232,6 +249,7 @@ per_window = True
 
 SEQUENCES_CELL = """windows, labels, decision_times = build_dataset_from_ohlcv(
     frames,
+    window_lens=window_lens,
     window_len=window_len,
     stride=stride,
     memmap_dir=cache_dir / "fusion_windows",
@@ -274,14 +292,15 @@ TRAIN_CELL = """train_hist = train_mtf_fusion(
     train_loader,
     val_loader,
     device=device,
-    epochs=int(CONFIG.get("epochs") or 40),
+    epochs=int(CONFIG.get("epochs") or 12),
     lr=float(CONFIG.get("lr") or 1e-4),
     weight_decay=float(CONFIG.get("weight_decay") or 1e-3),
-    patience=int(CONFIG.get("early_stop_patience") or 5),
+    patience=int(CONFIG.get("early_stop_patience") or 3),
     class_weights=torch.tensor(class_w, dtype=torch.float32),
     label_smoothing=float(CONFIG.get("label_smoothing") or 0.0),
     horizon_weights=list(CONFIG.get("horizon_loss_weights") or [1.0, 0.8, 0.4]),
     lr_schedule=str(CONFIG.get("lr_schedule") or "cosine"),
+    amp=bool(CONFIG.get("amp", True)),
 )
 print(train_hist)
 if not train_hist.get("ok"):
@@ -304,23 +323,25 @@ TEST_CELL = """print("Test split is frozen until section 24. Do not score it dur
 print("test windows", {k: v.shape for k, v in splits["test"]["windows"].items()})
 """
 
-WALK_CELL = """tf_keys = tuple(splits["train"]["windows"].keys())
-n_dev = int(len(splits["train"]["labels"]) + len(splits["val"]["labels"]))
+WALK_CELL = """tf_keys = tuple(windows.keys())
 n_folds = int(CONFIG.get("walk_forward_folds") or 3)
 fold_embargo = int(CONFIG.get("walk_forward_embargo") or embargo)
 print("walk-forward TFs", tf_keys)
-print("dev samples (train+val)", n_dev, "folds", n_folds, "embargo", fold_embargo)
-print("test is excluded from walk-forward")
+print("test is excluded; folds use the contiguous prefix through val")
 if CONFIG.get("run_walk_forward"):
-    dev_windows = {
-        res: np.concatenate(
-            [splits["train"]["windows"][res], splits["val"]["windows"][res]],
-            axis=0,
-        )
-        for res in tf_keys
-    }
-    dev_labels = np.concatenate(
-        [splits["train"]["labels"], splits["val"]["labels"]], axis=0
+    dev_windows, dev_labels = development_prefix(
+        windows,
+        labels,
+        train_frac=float(CONFIG.get("train_frac") or 0.70),
+        val_frac=float(CONFIG.get("val_frac") or 0.15),
+    )
+    print(
+        "dev samples (contiguous through val)",
+        len(dev_labels),
+        "folds",
+        n_folds,
+        "embargo",
+        fold_embargo,
     )
     walk_forward = run_walk_forward(
         dev_windows,
@@ -332,6 +353,7 @@ if CONFIG.get("run_walk_forward"):
     print(json.dumps(walk_forward.get("mean") or {}, indent=2, default=str))
     del dev_windows, dev_labels
 else:
+    n_dev = int(len(splits["train"]["labels"]) + len(splits["val"]["labels"]))
     folds = walk_forward_slices(n_dev, folds=n_folds, embargo=fold_embargo)
     fold_spans = [(s.start, s.stop, v.start, v.stop) for s, v in folds]
     print("Walk-forward skipped (CONFIG run_walk_forward=False). Fold plan:", fold_spans)
@@ -370,25 +392,33 @@ for key, row in gates["horizons"].items():
 """
 
 OPTUNA_CELL = """device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+_loader_kw = _loader_runtime_kwargs(CONFIG, device)
+_eval_kw = dict(_loader_kw)
+_eval_kw["windows_in_ram"] = False
 train_loader = make_loader(
     splits["train"]["windows"],
     splits["train"]["labels"],
     batch_size=int(CONFIG.get("batch_size") or 64),
     shuffle=True,
+    **_loader_kw,
 )
 val_loader = make_loader(
     splits["val"]["windows"],
     splits["val"]["labels"],
     batch_size=int(CONFIG.get("batch_size") or 64),
     shuffle=False,
+    **_eval_kw,
 )
 test_loader = make_loader(
     splits["test"]["windows"],
     splits["test"]["labels"],
     batch_size=int(CONFIG.get("batch_size") or 64),
     shuffle=False,
+    **_eval_kw,
 )
 print("Loaders ready. Test is frozen until the final test section.")
+print("loader", json.dumps(_loader_kw, indent=2, default=str))
+print("AMP", bool(CONFIG.get("amp")) and device.type == "cuda", "device", device)
 CONFIG = optuna_search(
     CONFIG,
     n_features=n_features,
@@ -396,6 +426,7 @@ CONFIG = optuna_search(
     val_loader=val_loader,
     device=device,
     class_weights=torch.tensor(class_w, dtype=torch.float32),
+    cache_dir=cache_dir,
 )
 print(
     "post-optuna",
@@ -432,7 +463,10 @@ for j, key in enumerate(FUSION_HORIZON_KEYS):
 promo = fusion_ready_to_promote(walk_forward, final_test, gates)
 print(json.dumps(promo, indent=2, default=str))
 if not promo["ready"]:
-    print("DO NOT PROMOTE: no head is MEDIUM on walk-forward mean and frozen test.")
+    print(
+        "DO NOT PROMOTE: no head is MEDIUM on walk-forward mean, "
+        "frozen test, and val gate."
+    )
 """
 
 SAVE_CELL = """shap_report = {}
@@ -460,6 +494,8 @@ else:
         "feature_cols": list(feature_cols),
         "seed": CONFIG.get("seed"),
         "window_len": window_len,
+        "window_lens": window_lens,
+        "target_window_minutes": CONFIG.get("target_window_minutes"),
         "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
         "horizon_keys": list(FUSION_HORIZON_KEYS),
@@ -496,6 +532,7 @@ else:
         model,
         export_dir,
         n_features=n_features,
+        window_lens=window_lens,
         window_len=window_len,
         config=CONFIG,
         gates=gates,
@@ -526,9 +563,10 @@ NOTES_MARKDOWN = """## Notes
 - Walk-forward, Optuna, and temperature fitting never see the final test split.
 - Gate each horizon independently. Duration is the longest accepted same-side head.
 - SL/TP are ATR scaled to that duration (path heads were dropped).
-- Promote **only** if at least one head is MEDIUM on walk-forward **mean** and
-  frozen test (HIGH still needs ECE and fold std). Until then live stays on the
-  current gated stack. Paper PnL is a secondary diagnostic, not the training loss.
+- Promote **only** if at least one head is MEDIUM on walk-forward **mean**,
+  frozen test, and the exported val gate (HIGH still needs ECE and fold std).
+  Until then live stays on the current gated stack. Paper PnL is a secondary
+  diagnostic, not the training loss.
 - Section 26 zips the export folder and starts a Colab download on success.
 """
 

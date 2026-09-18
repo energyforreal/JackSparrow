@@ -14,13 +14,13 @@ alwaysApply: false
 - **Fused model**: `agent/model_storage/JackSparrow_Transformer_BTCUSD_mtf_fusion/`
 - Required artifacts: `metadata_transformer.json`, `btcusd_mtf_fusion.onnx`, `feature_config.json`
 - **`MODEL_DIR`**: Parent of that bundle directory (`agent/model_storage`)
-- **Feature contract**: `feature_store/transformer_btcusd/` v10 (`FEATURE_CONTRACT_VERSION_V10`)
+- **Feature contract**: `feature_store/transformer_btcusd/` v11 (`FEATURE_CONTRACT_VERSION_V11`)
 - **Decision path**: `TRANSFORMER_DECISION_PATH=mtf_fusion` (rollback: `transformer_agent_synthesis`)
 
 ## Environment Variables
 
 - **`TRANSFORMER_DECISION_PATH`**: `mtf_fusion` (default) or `transformer_agent_synthesis`
-- **`TRANSFORMER_MIN_CONFIDENCE`**: Per-horizon probability floor (default `0.55`)
+- **`TRANSFORMER_MIN_CONFIDENCE`**: Global floor (default `0.55`). Fusion heads also use bundle `min_probability` (training default `0.60`)
 - **`SL_TP_MODE`**: `atr` (fusion default); `path_pred` only for synthesis rollback
 
 ## Tests

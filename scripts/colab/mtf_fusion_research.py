@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gc
 import json
+import math
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -33,17 +34,22 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_MIN_PROBABILITY,
     FUSION_MODEL_FAMILY,
     FUSION_ONNX_FILENAME,
+    FUSION_TARGET_WINDOW_MINUTES,
     FUSION_WINDOW_LEN,
     FEATURE_CONTRACT_VERSION_V11,
     ONNX_OUTPUT_NAMES_V11,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
     default_fusion_training_config,
+    resolve_fusion_window_lens,
 )
 from feature_store.transformer_btcusd.mtf_features import (
     collect_training_windows,
     fusion_feature_cols,
+    fusion_feature_fingerprint,
     precompute_featured_frames,
+    save_featured_frames,
+    try_load_featured_frames,
 )
 from feature_store.transformer_btcusd.mtf_frames import bar_close_time
 from feature_store.transformer_btcusd.mtf_labels import (
@@ -123,6 +129,32 @@ def split_purged_windows(
             f"val={len(splits['val'][first_key])}, test={len(splits['test'][first_key])}"
         )
     return splits
+
+
+def development_prefix(
+    windows: Mapping[str, np.ndarray],
+    labels: np.ndarray,
+    *,
+    train_frac: float,
+    val_frac: float,
+) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+    """Contiguous samples from t=0 through val; test tail excluded.
+
+    Includes the train/val embargo rows so walk-forward stays on calendar time
+    instead of concatenating purged splits (which drops the gap).
+    """
+    if not windows:
+        raise ValueError("development_prefix requires windows")
+    n = int(len(labels))
+    lengths = {k: len(v) for k, v in windows.items()}
+    if any(length != n for length in lengths.values()):
+        raise ValueError(f"Array length mismatch: {lengths} vs labels={n}")
+    train_end = int(n * float(train_frac))
+    val_end = train_end + int(n * float(val_frac))
+    if val_end <= 0 or val_end > n:
+        raise ValueError(f"Invalid development end {val_end} for n={n}")
+    sl = slice(0, val_end)
+    return {str(k): v[sl] for k, v in windows.items()}, labels[sl]
 
 
 def leakage_audit(feature_cols: Sequence[str]) -> None:
@@ -489,7 +521,166 @@ def _fusion_train_extra(config: Mapping[str, Any]) -> Dict[str, Any]:
         "label_smoothing": float(config.get("label_smoothing") or 0.0),
         "horizon_weights": [float(x) for x in raw_w],
         "lr_schedule": str(config.get("lr_schedule") or "cosine"),
+        "amp": bool(config.get("amp", True)),
     }
+
+
+OPTUNA_BEST_FILENAME = "optuna_best.json"
+FUSION_WINDOW_MANIFEST = "manifest.json"
+FUSION_LABELS_FILENAME = "labels.npy"
+FUSION_TIMES_FILENAME = "decision_times.parquet"
+
+
+def window_cache_manifest(
+    *,
+    window_lens: Mapping[str, int],
+    stride: int,
+    n_samples: Optional[int] = None,
+    target_window_minutes: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Identity for cached TF windows + labels."""
+    cols = list(fusion_feature_cols())
+    lens = {res: int(window_lens[res]) for res in FUSION_INPUT_RESOLUTIONS}
+    payload: Dict[str, Any] = {
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
+        "window_lens": lens,
+        "window_len": int(lens["5m"]),
+        "target_window_minutes": int(
+            target_window_minutes
+            if target_window_minutes is not None
+            else FUSION_TARGET_WINDOW_MINUTES
+        ),
+        "stride": int(stride),
+        "n_features": len(cols),
+        "feature_fingerprint": fusion_feature_fingerprint(),
+    }
+    if n_samples is not None:
+        payload["n_samples"] = int(n_samples)
+    return payload
+
+
+def try_load_fusion_dataset_cache(
+    cache_dir: Path,
+    *,
+    stride: int,
+    window_len: Optional[int] = None,
+    window_lens: Optional[Mapping[str, int]] = None,
+    target_window_minutes: Optional[int] = None,
+) -> Optional[Tuple[Dict[str, np.ndarray], np.ndarray, pd.Series]]:
+    """Load memmapped windows + labels when manifest matches."""
+    root = Path(cache_dir)
+    man_path = root / FUSION_WINDOW_MANIFEST
+    labels_path = root / FUSION_LABELS_FILENAME
+    times_path = root / FUSION_TIMES_FILENAME
+    if not man_path.is_file() or not labels_path.is_file() or not times_path.is_file():
+        return None
+    try:
+        stored = json.loads(man_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    lens = resolve_fusion_window_lens(window_lens, window_len)
+    expected = window_cache_manifest(
+        window_lens=lens,
+        stride=stride,
+        target_window_minutes=target_window_minutes,
+    )
+    for key, value in expected.items():
+        if stored.get(key) != value:
+            return None
+    n_samples = int(stored.get("n_samples") or 0)
+    if n_samples <= 0:
+        return None
+    windows: Dict[str, np.ndarray] = {}
+    n_feat = int(expected["n_features"])
+    for res in FUSION_INPUT_RESOLUTIONS:
+        path = root / f"windows_{res}.npy"
+        if not path.is_file():
+            return None
+        arr = np.load(str(path), mmap_mode="r")
+        width = int(lens[res])
+        if tuple(arr.shape) != (n_samples, width, n_feat):
+            return None
+        windows[str(res)] = arr
+    labels = np.load(str(labels_path))
+    if len(labels) != n_samples:
+        return None
+    times_df = pd.read_parquet(times_path)
+    if "time" not in times_df.columns or len(times_df) != n_samples:
+        return None
+    decision_times = pd.to_datetime(times_df["time"], utc=True)
+    return windows, labels, decision_times
+
+
+def save_fusion_dataset_cache(
+    cache_dir: Path,
+    *,
+    labels: np.ndarray,
+    decision_times: pd.Series,
+    stride: int,
+    window_len: Optional[int] = None,
+    window_lens: Optional[Mapping[str, int]] = None,
+    target_window_minutes: Optional[int] = None,
+) -> None:
+    """Write labels, decision times, and window manifest (memmaps already on disk)."""
+    root = Path(cache_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    np.save(root / FUSION_LABELS_FILENAME, np.asarray(labels))
+    pd.DataFrame({"time": pd.to_datetime(decision_times, utc=True)}).to_parquet(
+        root / FUSION_TIMES_FILENAME, index=False
+    )
+    lens = resolve_fusion_window_lens(window_lens, window_len)
+    manifest = window_cache_manifest(
+        window_lens=lens,
+        stride=stride,
+        n_samples=len(labels),
+        target_window_minutes=target_window_minutes,
+    )
+    (root / FUSION_WINDOW_MANIFEST).write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
+
+
+def _optuna_cache_path(cache_dir: Optional[Path]) -> Optional[Path]:
+    if cache_dir is None:
+        return None
+    return Path(cache_dir) / OPTUNA_BEST_FILENAME
+
+
+def optuna_cache_identity() -> Dict[str, Any]:
+    """Contract fingerprint so stale Optuna HPs are not reused after a v11 change."""
+    return {
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
+        "feature_fingerprint": fusion_feature_fingerprint(),
+        "horizon_keys": list(FUSION_HORIZON_KEYS),
+        "n_classes": int(FUSION_DIRECTION_CARDINALITY),
+    }
+
+
+def _optuna_cache_matches(payload: Mapping[str, Any]) -> bool:
+    stored = payload.get("cache_identity")
+    if not isinstance(stored, dict):
+        return False
+    expected = optuna_cache_identity()
+    return all(stored.get(key) == value for key, value in expected.items())
+
+
+def _apply_optuna_payload(cfg: Dict[str, Any], payload: Mapping[str, Any]) -> Dict[str, Any]:
+    params = dict(payload.get("params") or payload)
+    cfg["lr"] = float(params["lr"])
+    cfg["weight_decay"] = float(params["weight_decay"])
+    cfg["dropout"] = float(params["dropout"])
+    identity = dict(payload.get("cache_identity") or optuna_cache_identity())
+    cfg["optuna_best"] = {
+        "params": {
+            "lr": cfg["lr"],
+            "weight_decay": cfg["weight_decay"],
+            "dropout": cfg["dropout"],
+        },
+        "best_val_loss": float(payload.get("best_val_loss") or payload.get("value") or 0.0),
+        "n_trials": int(payload.get("n_trials") or 0),
+        "cache_identity": identity,
+    }
+    return cfg
 
 
 def optuna_search(
@@ -502,6 +693,7 @@ def optuna_search(
     class_weights: Optional[torch.Tensor] = None,
     train_fn: Optional[Callable[..., Dict[str, Any]]] = None,
     model_factory: Optional[Callable[..., MtfFusionTransformer]] = None,
+    cache_dir: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Search dropout / weight_decay / lr on val CE. Never reads test."""
     cfg = dict(config)
@@ -511,6 +703,22 @@ def optuna_search(
             "Search space: lr, weight_decay, dropout."
         )
         return cfg
+    cache_root: Optional[Path] = Path(cache_dir) if cache_dir is not None else None
+    if cache_root is None and cfg.get("cache_dir"):
+        cache_root = Path(str(cfg["cache_dir"]))
+    best_path = _optuna_cache_path(cache_root)
+    if best_path is not None and best_path.is_file() and not cfg.get("optuna_refresh"):
+        try:
+            payload = json.loads(best_path.read_text(encoding="utf-8"))
+            if not _optuna_cache_matches(payload):
+                print(f"Optuna cache STALE {best_path}; running search.")
+            else:
+                cfg = _apply_optuna_payload(cfg, payload)
+                print(f"Optuna cache HIT {best_path}")
+                print("Optuna best", json.dumps(cfg["optuna_best"], indent=2, default=str))
+                return cfg
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            print(f"Optuna cache unreadable ({exc}); running search.")
     try:
         import optuna
     except ImportError:
@@ -520,46 +728,89 @@ def optuna_search(
     trainer = train_fn or train_mtf_fusion
     factory = model_factory or fusion_model_from_config
     extra = _fusion_train_extra(cfg)
-    n_trials = max(1, int(cfg.get("optuna_trials") or 8))
-    trial_epochs = max(1, int(cfg.get("optuna_trial_epochs") or 12))
-    patience = max(2, int(cfg.get("early_stop_patience") or 5))
+    n_trials = max(1, int(cfg.get("optuna_trials") or 3))
+    trial_epochs = max(1, int(cfg.get("optuna_trial_epochs") or 4))
+    patience = max(2, int(cfg.get("early_stop_patience") or 3))
+    failed_value = 1.0e9
 
     def objective(trial: Any) -> float:
-        trial_cfg = dict(cfg)
-        trial_cfg["lr"] = float(trial.suggest_float("lr", 3e-5, 3e-4, log=True))
-        trial_cfg["weight_decay"] = float(
-            trial.suggest_float("weight_decay", 1e-4, 3e-3, log=True)
-        )
-        trial_cfg["dropout"] = float(trial.suggest_float("dropout", 0.20, 0.40))
-        model = factory(n_features, trial_cfg).to(device)
-        hist = trainer(
-            model,
-            train_loader,
-            val_loader,
-            device=device,
-            epochs=trial_epochs,
-            lr=float(trial_cfg["lr"]),
-            weight_decay=float(trial_cfg["weight_decay"]),
-            patience=patience,
-            class_weights=class_weights,
-            **extra,
-        )
-        if not hist.get("ok"):
-            return float("inf")
-        return float(hist["best_val_loss"])
+        model: Optional[MtfFusionTransformer] = None
+        try:
+            trial_cfg = dict(cfg)
+            trial_cfg["lr"] = float(trial.suggest_float("lr", 3e-5, 3e-4, log=True))
+            trial_cfg["weight_decay"] = float(
+                trial.suggest_float("weight_decay", 1e-4, 3e-3, log=True)
+            )
+            trial_cfg["dropout"] = float(trial.suggest_float("dropout", 0.20, 0.40))
+            model = factory(n_features, trial_cfg).to(device)
+            hist = trainer(
+                model,
+                train_loader,
+                val_loader,
+                device=device,
+                epochs=trial_epochs,
+                lr=float(trial_cfg["lr"]),
+                weight_decay=float(trial_cfg["weight_decay"]),
+                patience=patience,
+                class_weights=class_weights,
+                **extra,
+            )
+            if not hist.get("ok"):
+                print(f"Optuna trial {trial.number}: non-finite train, skip")
+                return failed_value
+            value = float(hist["best_val_loss"])
+            if not math.isfinite(value):
+                return failed_value
+            return value
+        except Exception as exc:
+            print(
+                f"Optuna trial {getattr(trial, 'number', '?')} failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return failed_value
+        finally:
+            if model is not None:
+                del model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-    print(f"Optuna: {n_trials} trials on val CE (test unused).")
+    amp_on = bool(extra.get("amp")) and device.type == "cuda"
+    print(
+        f"Optuna: {n_trials} trials on val CE (test unused, "
+        f"AMP {'on' if amp_on else 'off'})."
+    )
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=n_trials)
-    best = dict(study.best_params)
+    study.optimize(objective, n_trials=n_trials, catch=())
+    finite = [
+        t
+        for t in study.trials
+        if t.value is not None
+        and math.isfinite(float(t.value))
+        and float(t.value) < failed_value / 2.0
+    ]
+    if not finite:
+        print(
+            "Optuna: no finite trial; keeping CONFIG lr / dropout / weight_decay."
+        )
+        return cfg
+    best_trial = min(finite, key=lambda t: float(t.value))
+    best = dict(best_trial.params)
     cfg["lr"] = float(best["lr"])
     cfg["weight_decay"] = float(best["weight_decay"])
     cfg["dropout"] = float(best["dropout"])
     cfg["optuna_best"] = {
         "params": best,
-        "best_val_loss": float(study.best_value),
+        "best_val_loss": float(best_trial.value),
         "n_trials": n_trials,
+        "cache_identity": optuna_cache_identity(),
     }
+    if best_path is not None:
+        best_path.parent.mkdir(parents=True, exist_ok=True)
+        best_path.write_text(
+            json.dumps(cfg["optuna_best"], indent=2, default=str), encoding="utf-8"
+        )
+        print(f"Wrote Optuna cache {best_path}")
     print("Optuna best", json.dumps(cfg["optuna_best"], indent=2, default=str))
     return cfg
 
@@ -583,20 +834,42 @@ def _decision_times(featured_5m: pd.DataFrame, window_len: int) -> pd.Series:
 def build_dataset_from_ohlcv(
     frames: Dict[str, pd.DataFrame],
     *,
-    window_len: int = FUSION_WINDOW_LEN,
+    window_len: Optional[int] = None,
+    window_lens: Optional[Mapping[str, int]] = None,
     stride: int = 4,
     memmap_dir: Optional[Path] = None,
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray, pd.Series]:
     """Native TF windows + 2-class train labels aligned on the 5m decision clock."""
+    lens = resolve_fusion_window_lens(window_lens, window_len)
+    warmup = int(lens["5m"])
+    cache_root = Path(memmap_dir) if memmap_dir is not None else None
+    if cache_root is not None:
+        cached = try_load_fusion_dataset_cache(
+            cache_root, window_lens=lens, stride=stride
+        )
+        if cached is not None:
+            print(f"cache HIT {cache_root}")
+            return cached
+        print(f"cache MISS {cache_root}")
+
     labeled = compute_fusion_horizon_labels(frames["5m"])
     labeled = trim_fusion_label_tail(labeled)
-    featured = precompute_featured_frames(frames)
+    featured: Optional[Dict[str, pd.DataFrame]] = None
+    if cache_root is not None:
+        featured = try_load_featured_frames(cache_root)
+        if featured is not None:
+            print(f"featured cache HIT {cache_root}")
+    if featured is None:
+        featured = precompute_featured_frames(frames)
+        if cache_root is not None:
+            save_featured_frames(cache_root, featured)
+            print(f"wrote featured cache {cache_root}")
     feat5_time = featured["5m"][["time"]].copy()
     feat5_time["time"] = pd.to_datetime(feat5_time["time"], utc=True)
     labeled["time"] = pd.to_datetime(labeled["time"], utc=True)
     dir_cols = [c for c in FUSION_DIR_COLS if c in labeled.columns]
     merged = feat5_time.merge(labeled[["time", *dir_cols]], on="time", how="inner")
-    merged = merged.iloc[int(window_len) :].reset_index(drop=True)
+    merged = merged.iloc[int(warmup) :].reset_index(drop=True)
     if stride > 1:
         merged = merged.iloc[:: int(stride)].reset_index(drop=True)
     y = fusion_label_matrix(merged)
@@ -607,11 +880,20 @@ def build_dataset_from_ohlcv(
     windows = collect_training_windows(
         featured,
         list(decision_close),
-        window_len=window_len,
+        window_lens=lens,
         zscore=True,
-        memmap_dir=memmap_dir,
+        memmap_dir=cache_root,
     )
     decision_times = merged["time"].copy()
+    if cache_root is not None:
+        save_fusion_dataset_cache(
+            cache_root,
+            labels=y,
+            decision_times=decision_times,
+            window_lens=lens,
+            stride=stride,
+        )
+        print(f"wrote window cache {cache_root}")
     del featured, labeled, merged, feat5_time
     gc.collect()
     return windows, y, decision_times
@@ -786,7 +1068,9 @@ def predict_logits(
     logit_chunks: List[np.ndarray] = []
     label_chunks: List[np.ndarray] = []
     for batch in loader:
-        batch_d = tuple(t.to(device) for t in batch)
+        batch_d = tuple(
+            t.to(device, non_blocking=device.type == "cuda") for t in batch
+        )
         outs = model(*batch_d[:-1])
         dir_logits = [o.cpu().numpy() for o in outs[:N_HORIZONS_SAFE]]
         stacked = np.stack(dir_logits, axis=1)
@@ -806,15 +1090,127 @@ def slice_windows(
     return {k: v[sl] for k, v in windows.items()}, labels[sl]
 
 
-def make_loader(
+_MAX_RAM_WINDOW_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _is_memmap_array(arr: Any) -> bool:
+    return isinstance(arr, np.memmap)
+
+
+def _windows_to_cpu_tensors(
+    windows: Mapping[str, Any],
+    *,
+    pin: bool,
+) -> Dict[str, torch.Tensor]:
+    """Host float32 tensors. Pin only when the DataLoader has no workers."""
+    out: Dict[str, torch.Tensor] = {}
+    for key, arr in windows.items():
+        if isinstance(arr, torch.Tensor):
+            tensor = arr.detach().to(dtype=torch.float32).contiguous().cpu()
+        else:
+            copied = np.ascontiguousarray(np.asarray(arr), dtype=np.float32)
+            tensor = torch.from_numpy(copied)
+        if pin and torch.cuda.is_available():
+            tensor = tensor.pin_memory()
+        out[str(key)] = tensor
+    return out
+
+
+def materialize_windows_if_fits(
     windows: Mapping[str, np.ndarray],
+    *,
+    enabled: bool = True,
+) -> Dict[str, Any]:
+    """Copy TF windows to C-contiguous writeable RAM. Keep memmaps on OOM.
+
+    Colab's OOM killer often SIGKILLs before Python can raise MemoryError, so
+    copies larger than 2 GiB are skipped.
+    """
+    if not enabled:
+        return {k: v for k, v in windows.items()}
+    nbytes = 0
+    for arr in windows.values():
+        nbytes += int(getattr(arr, "nbytes", 0) or 0)
+    if nbytes > _MAX_RAM_WINDOW_BYTES:
+        print(
+            f"windows_in_ram: skip copy ({nbytes / 1e9:.1f} GB > "
+            f"{_MAX_RAM_WINDOW_BYTES / 1e9:.0f} GB cap)"
+        )
+        return {k: v for k, v in windows.items()}
+    out: Dict[str, Any] = {}
+    try:
+        for key, arr in windows.items():
+            if isinstance(arr, torch.Tensor):
+                out[str(key)] = arr.detach().to(dtype=torch.float32).contiguous()
+                continue
+            copied = np.asarray(arr).astype(np.float32, copy=True, order="C")
+            out[str(key)] = copied
+    except MemoryError:
+        print("windows_in_ram: MemoryError, keeping original arrays")
+        return {k: v for k, v in windows.items()}
+    return out
+
+
+def make_loader(
+    windows: Mapping[str, Any],
     labels: np.ndarray,
     *,
     batch_size: int,
     shuffle: bool,
+    pin_memory: bool = False,
+    num_workers: int = 0,
+    windows_in_ram: bool = False,
+    prefetch_factor: int = 4,
 ) -> DataLoader:
-    ds = MtfFusionDataset(dict(windows), labels)
-    return DataLoader(ds, batch_size=int(batch_size), shuffle=shuffle)
+    mats = materialize_windows_if_fits(windows, enabled=windows_in_ram)
+    workers = max(0, int(num_workers))
+    pin = bool(pin_memory)
+    in_ram = mats and not any(_is_memmap_array(v) for v in mats.values())
+    if in_ram:
+        try:
+            mats = _windows_to_cpu_tensors(mats, pin=pin and workers == 0)
+        except (RuntimeError, MemoryError, ValueError) as exc:
+            print(f"windows_to_tensor skipped ({type(exc).__name__}: {exc})")
+    ds = MtfFusionDataset(mats, labels)
+    kwargs: Dict[str, Any] = {
+        "batch_size": int(batch_size),
+        "shuffle": shuffle,
+        "pin_memory": pin,
+    }
+    if workers > 0:
+        kwargs["num_workers"] = workers
+        kwargs["persistent_workers"] = True
+        kwargs["prefetch_factor"] = max(2, int(prefetch_factor))
+    return DataLoader(ds, **kwargs)
+
+
+def loader_runtime_kwargs(
+    config: Mapping[str, Any],
+    device: torch.device,
+) -> Dict[str, Any]:
+    """CUDA: pin batches, 2 workers, prefetch. CPU: single-process loader."""
+    cuda = device.type == "cuda"
+    pin = bool(config.get("pin_memory", True)) and cuda
+    if "dataloader_workers" in config:
+        workers = int(config.get("dataloader_workers") or 0)
+    else:
+        workers = 2 if cuda else 0
+    if not cuda:
+        workers = 0
+    return {
+        "pin_memory": pin,
+        "num_workers": max(0, workers),
+        "windows_in_ram": bool(config.get("windows_in_ram", True)),
+        "prefetch_factor": int(config.get("prefetch_factor") or 4),
+    }
+
+
+def _loader_runtime_kwargs(
+    config: Mapping[str, Any],
+    device: torch.device,
+) -> Dict[str, Any]:
+    """Alias kept for the generated Colab notebook."""
+    return loader_runtime_kwargs(config, device)
 
 
 def run_walk_forward(
@@ -839,13 +1235,26 @@ def run_walk_forward(
         tw, ty = slice_windows(windows, labels, train_sl)
         vw, vy = slice_windows(windows, labels, val_sl)
         model = fusion_model_from_config(n_features, config).to(device)
+        loader_kw = _loader_runtime_kwargs(config, device)
         train_loader = make_loader(
-            tw, ty, batch_size=int(config.get("batch_size") or 64), shuffle=True
+            tw,
+            ty,
+            batch_size=int(config.get("batch_size") or 64),
+            shuffle=True,
+            **loader_kw,
         )
         val_loader = make_loader(
-            vw, vy, batch_size=int(config.get("batch_size") or 64), shuffle=False
+            vw,
+            vy,
+            batch_size=int(config.get("batch_size") or 64),
+            shuffle=False,
+            **loader_kw,
         )
         extra = _fusion_train_extra(config)
+        fold_cw = torch.tensor(
+            inverse_frequency_class_weights(ty, FUSION_DIRECTION_CARDINALITY),
+            dtype=torch.float32,
+        )
         train_mtf_fusion(
             model,
             train_loader,
@@ -854,7 +1263,8 @@ def run_walk_forward(
             epochs=max(1, int(config.get("epochs") or 8) // 4),
             lr=float(config.get("lr") or 1e-4),
             weight_decay=float(config.get("weight_decay") or 1e-3),
-            patience=max(2, int(config.get("early_stop_patience") or 5) // 2),
+            patience=max(2, int(config.get("early_stop_patience") or 3) // 2),
+            class_weights=fold_cw,
             **extra,
         )
         logits, y = predict_logits(model, val_loader, device)
@@ -910,7 +1320,8 @@ def export_fusion_bundle(
     export_dir: Path,
     *,
     n_features: int,
-    window_len: int,
+    window_len: Optional[int] = None,
+    window_lens: Optional[Mapping[str, int]] = None,
     config: Mapping[str, Any],
     gates: Mapping[str, Any],
     fusion_weights: Sequence[float],
@@ -921,8 +1332,18 @@ def export_fusion_bundle(
     onnx_path = export_dir / FUSION_ONNX_FILENAME
     cfg_path = export_dir / TRANSFORMER_FEATURE_CONFIG_FILENAME
     meta_path = export_dir / TRANSFORMER_METADATA_FILENAME
+    cfg_lens = config.get("window_lens") if config is not None else None
+    target_minutes = int(
+        (config or {}).get("target_window_minutes") or FUSION_TARGET_WINDOW_MINUTES
+    )
+    lens = resolve_fusion_window_lens(
+        window_lens if window_lens is not None else cfg_lens,
+        window_len,
+        target_minutes=target_minutes,
+    )
     dummy = [
-        torch.randn(1, int(window_len), int(n_features)) for _ in FUSION_INPUT_RESOLUTIONS
+        torch.randn(1, int(lens[res]), int(n_features))
+        for res in FUSION_INPUT_RESOLUTIONS
     ]
     input_names = [f"features_{res}" for res in FUSION_INPUT_RESOLUTIONS]
     output_names = list(ONNX_OUTPUT_NAMES_V11)
@@ -970,7 +1391,9 @@ def export_fusion_bundle(
     feature_config = {
         "feature_contract_version": FEATURE_CONTRACT_VERSION_V11,
         "feature_cols": list(fusion_feature_cols()),
-        "window_len": int(window_len),
+        "window_len": int(max(lens.values())),
+        "window_lens": {res: int(lens[res]) for res in FUSION_INPUT_RESOLUTIONS},
+        "target_window_minutes": target_minutes,
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
         "horizon_keys": list(FUSION_HORIZON_KEYS),
         "direction_names": {str(k): v for k, v in FUSION_DIRECTION_NAMES.items()},
@@ -1029,41 +1452,47 @@ def fusion_ready_to_promote(
     test_metrics: Mapping[str, Any],
     gates: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    """True if at least one head is MEDIUM+ on walk-forward mean and frozen test.
+    """True if at least one head is MEDIUM+ on WF mean, frozen test, and val gate.
 
-    HIGH still requires ECE and fold std via ``grade_horizon``. Live must not
-    load a bundle when this returns ready=False.
+    The exported ``validation_confidence`` is what live will trade. Frozen test
+    is graded from test metrics, not copied from validation. Walk-forward mean
+    has no ECE, so WF HIGH is not used; MEDIUM is enough on that axis.
     """
     wf_mean = dict(walk_forward.get("mean") or {})
     wf_std = dict(walk_forward.get("std") or {})
     gate_map = dict(gates.get("horizons") or gates)
     ready_heads: List[str] = []
     detail: Dict[str, Any] = {}
+    accepted = {FUSION_GRADE_HIGH, FUSION_GRADE_MEDIUM}
     for key in FUSION_HORIZON_KEYS:
         test_m = dict(test_metrics.get(key) or {})
         test_acc = float(test_m.get("balanced_acc") or 0.0)
         test_ece = float(test_m.get("ece") or 1.0)
         wf_acc = float(wf_mean.get(key) or 0.0)
         fold_std = float(wf_std.get(key) or 0.0)
-        wf_grade = grade_horizon(
-            balanced_acc=wf_acc,
-            ece=test_ece,
-            fold_std=fold_std,
-        )
-        test_grade = str(
+        val_grade = str(
             (gate_map.get(key) or {}).get("validation_confidence") or ""
         )
-        if not test_grade:
-            test_grade = grade_horizon(balanced_acc=test_acc, ece=test_ece)
-        accepted = {FUSION_GRADE_HIGH, FUSION_GRADE_MEDIUM}
-        ok = wf_grade in accepted and test_grade in accepted
+        test_grade = grade_horizon(balanced_acc=test_acc, ece=test_ece)
+        wf_grade = grade_horizon(
+            balanced_acc=wf_acc,
+            ece=1.0,
+            fold_std=fold_std,
+        )
+        ok = (
+            wf_grade in accepted
+            and test_grade in accepted
+            and val_grade in accepted
+        )
         if ok:
             ready_heads.append(key)
         detail[key] = {
             "walk_forward_mean_acc": wf_acc,
             "walk_forward_grade": wf_grade,
             "test_acc": test_acc,
+            "test_ece": test_ece,
             "test_grade": test_grade,
+            "validation_grade": val_grade,
             "ok": ok,
         }
     ready = bool(ready_heads)
@@ -1072,9 +1501,12 @@ def fusion_ready_to_promote(
         "heads": ready_heads,
         "detail": detail,
         "reason": (
-            "at least one head MEDIUM+ on walk-forward mean and frozen test"
+            "at least one head MEDIUM+ on walk-forward mean, frozen test, and val gate"
             if ready
-            else "no head is MEDIUM on walk-forward mean and frozen test; do not promote"
+            else (
+                "no head is MEDIUM on walk-forward mean, frozen test, and val gate; "
+                "do not promote"
+            )
         ),
     }
 
@@ -1082,5 +1514,9 @@ def fusion_ready_to_promote(
 def default_config() -> Dict[str, Any]:
     cfg = default_fusion_training_config()
     cfg["window_len"] = FUSION_WINDOW_LEN
+    cfg["window_lens"] = resolve_fusion_window_lens(cfg.get("window_lens"))
+    cfg["target_window_minutes"] = int(
+        cfg.get("target_window_minutes") or FUSION_TARGET_WINDOW_MINUTES
+    )
     cfg["n_classes"] = FUSION_DIRECTION_CARDINALITY
     return cfg

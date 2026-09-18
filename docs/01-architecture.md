@@ -73,7 +73,7 @@ The Intelligence Layer contains the "brain" of the trading agent:
 
 **Signal Generation Engine (fused multi-TF Transformer — default)**
 - **`FusionModelNode`** (`agent/models/fusion_node.py`) — loads `btcusd_mtf_fusion.onnx`
-- Feature contract v10: [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/) (`mtf_frames.py`, `mtf_features.py`, `mtf_labels.py`)
+- Feature contract v11: [`feature_store/transformer_btcusd/`](../feature_store/transformer_btcusd/) (`mtf_frames.py`, `mtf_features.py`, `mtf_labels.py`)
 - Discovery via **`metadata_transformer.json`** in **`MODEL_DIR/JackSparrow_Transformer_BTCUSD_mtf_fusion/`**
 - Decision path: [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) via `evaluate_transformer_prediction` in [`agent/core/transformer_decision.py`](../agent/core/transformer_decision.py)
 - Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` reloads five per-TF bundles + climate/setup/timing
@@ -98,7 +98,7 @@ Trade *intent* on the event bus is issued as **`DECISION_READY`** after transfor
 
 1. **Market frames** — independent 5m/10m/30m/1h/2h OHLCV (10m built from two closed 5m bars; not resampled inside the encoder)
 2. **Feature build** — `FusionModelNode` runs candle/chart/structure engines on each native TF, as-of joined at the 5m close
-3. **ONNX inference** — one fused model (shared encoder + learned TF weights + four 3-class heads)
+3. **ONNX inference** — one fused model (shared encoder + learned TF weights + three 2-class heads)
 4. **Decision** — per-horizon gates (probability + frozen OOS grade); duration = longest accepted same-side horizon; ATR SL/TP
 5. **DECISION_READY** — trading handler uses **transformer safety gates** (`TRANSFORMER_ENTRY_GATES`); legacy feature-dict filters are off unless `LEGACY_FEATURE_ENTRY_GATES=true`
 6. **Risk & execution** — trading handler + risk manager before Delta testnet order placement

@@ -26,6 +26,7 @@ REQUIRED_SYMBOLS = (
     "export_fusion_bundle",
     "FEATURE_CONTRACT_VERSION_V11",
     "fusion_ready_to_promote",
+    "development_prefix",
     "walk_forward_slices",
     "freeze_horizon_gates",
     "FUSION_INPUT_RESOLUTIONS",
@@ -111,8 +112,10 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
         raise AssertionError("notebook should document last_swing_dir as causal")
     if "Walk-forward skipped (CONFIG run_walk_forward=False)" not in full_text:
         raise AssertionError("section 18 must skip walk-forward without concatenating windows")
+    if "development_prefix(" not in full_text:
+        raise AssertionError("section 18 must walk-forward on development_prefix")
     walk = re.search(
-        r"tf_keys = tuple\(splits\[\"train\"\]\[\"windows\"\]\.keys\(\)\)[\s\S]+?"
+        r"tf_keys = tuple\(windows\.keys\(\)\)[\s\S]+?"
         r"walk_forward = \{\"folds\": \[\], \"mean\": \{\}, \"std\": \{\}\}",
         full_text,
     )
@@ -120,9 +123,23 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
         raise AssertionError("section 18 walk-forward cell missing robust tf_keys path")
     if "FUSION_INPUT_RESOLUTIONS" in walk.group(0):
         raise AssertionError("section 18 must not depend on FUSION_INPUT_RESOLUTIONS")
+    if "np.concatenate(" in walk.group(0):
+        raise AssertionError("section 18 must not concatenate purged train/val windows")
 
     if 'CONFIG["run_optuna"] = True' not in full_text:
         raise AssertionError("research notebook must enable run_optuna")
+    if re.search(r'^CONFIG\["run_shap"\] = True\s*$', full_text, re.MULTILINE):
+        raise AssertionError("research notebook must leave SHAP off the training path")
+    if 'CONFIG["run_shap"] = False' not in full_text:
+        raise AssertionError("research notebook must set run_shap=False")
+    if 'CONFIG["amp"] = True' not in full_text:
+        raise AssertionError("research notebook must enable AMP for GPU training")
+    if 'CONFIG["dataloader_workers"] = 2' not in full_text:
+        raise AssertionError("research notebook must use DataLoader workers on GPU")
+    if "cache_dir=cache_dir" not in full_text:
+        raise AssertionError("optuna_search must persist winners under cache_dir")
+    if "optuna_refresh" not in full_text:
+        raise AssertionError("CONFIG must expose optuna_refresh for cache reuse")
     search_pos = full_text.find("CONFIG = optuna_search(")
     create_pos = full_text.find("optuna.create_study")
     optimize_pos = full_text.find("study.optimize")

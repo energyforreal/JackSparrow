@@ -58,7 +58,13 @@ class CandlestickPatternEngine:
     Detects candlestick patterns and produces ML-ready feature columns.
     All methods operate on a full OHLCV DataFrame and return a feature DataFrame
     aligned by index — safe for both training (batch) and live (last-row) use.
+
+    Hammer vs hanging man (and inverted hammer vs shooting star) share geometry;
+    they are disambiguated only by prior trend context, never by candle color alone.
     """
+
+    # Bars of prior closes (ending at t-1) used for trend context.
+    TREND_LOOKBACK = 5
 
     BULL_PATTERN_WEIGHTS = {
         "cdl_hammer": 0.8,
@@ -199,61 +205,90 @@ class CandlestickPatternEngine:
             index=df.index,
         )
 
-    def _hammer(self, df: pd.DataFrame, geo: list) -> pd.Series:
+    def _prior_trend(self, df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+        """Causal prior up/down trend from closes ending at the previous bar.
+
+        Uses prior close vs its trailing SMA over ``TREND_LOOKBACK`` bars.
+        Flat or insufficient history yields neither up nor down.
+        """
+        prior_close = df["close"].astype(float).shift(1)
+        sma = prior_close.rolling(
+            self.TREND_LOOKBACK, min_periods=self.TREND_LOOKBACK
+        ).mean()
+        prior_up = (prior_close > sma).fillna(False)
+        prior_down = (prior_close < sma).fillna(False)
+        return prior_up, prior_down
+
+    @staticmethod
+    def _atr_proxy(df: pd.DataFrame) -> pd.Series:
         atr = df["close"].diff().abs().rolling(14).mean()
-        result = []
-        for i, g in enumerate(geo):
-            atr_val = atr.iloc[i] if i < len(atr) else 0.0
-            if pd.isna(atr_val) or atr_val <= 0:
-                atr_val = df["close"].iloc[i] * 0.01
-            cond = (
-                g.lower_wick >= 2.0 * g.body
-                and g.upper_ratio < 0.20
-                and g.body_ratio > 0.05
-                and g.total_range > float(atr_val) * 0.5
-            )
-            result.append(1 if cond else 0)
+        fallback = df["close"].astype(float) * 0.01
+        return atr.where(atr.notna() & (atr > 0), fallback)
+
+    @staticmethod
+    def _is_hammer_shape(g: CandleGeometry, atr_val: float) -> bool:
+        """Long lower wick, short upper wick, meaningful body and range."""
+        return (
+            g.lower_wick >= 2.0 * g.body
+            and g.upper_ratio < 0.20
+            and g.body_ratio > 0.05
+            and g.total_range > float(atr_val) * 0.5
+        )
+
+    @staticmethod
+    def _is_inverted_hammer_shape(g: CandleGeometry) -> bool:
+        """Long upper wick, short lower wick, meaningful body."""
+        return (
+            g.upper_wick >= 2.0 * g.body
+            and g.lower_ratio < 0.20
+            and g.body_ratio > 0.05
+        )
+
+    def _hammer(self, df: pd.DataFrame, geo: list) -> pd.Series:
+        """Bullish hammer: hammer shape after a prior downtrend."""
+        atr = self._atr_proxy(df)
+        _, prior_down = self._prior_trend(df)
+        result = [
+            1
+            if self._is_hammer_shape(g, float(atr.iloc[i])) and bool(prior_down.iloc[i])
+            else 0
+            for i, g in enumerate(geo)
+        ]
+        return pd.Series(result, index=df.index)
+
+    def _hanging_man(self, df: pd.DataFrame, geo: list) -> pd.Series:
+        """Bearish hanging man: same shape as hammer after a prior uptrend."""
+        atr = self._atr_proxy(df)
+        prior_up, _ = self._prior_trend(df)
+        result = [
+            1
+            if self._is_hammer_shape(g, float(atr.iloc[i])) and bool(prior_up.iloc[i])
+            else 0
+            for i, g in enumerate(geo)
+        ]
         return pd.Series(result, index=df.index)
 
     def _inverted_hammer(self, df: pd.DataFrame, geo: list) -> pd.Series:
-        return pd.Series(
-            [
-                1
-                if g.upper_wick >= 2.0 * g.body
-                and g.lower_ratio < 0.20
-                and g.body_ratio > 0.05
-                else 0
-                for g in geo
-            ],
-            index=df.index,
-        )
-
-    def _hanging_man(self, df: pd.DataFrame, geo: list) -> pd.Series:
-        return pd.Series(
-            [
-                1
-                if g.lower_wick >= 2.0 * g.body
-                and g.upper_ratio < 0.20
-                and g.body_ratio > 0.05
-                else 0
-                for g in geo
-            ],
-            index=df.index,
-        )
+        """Bullish inverted hammer: inverted shape after a prior downtrend."""
+        _, prior_down = self._prior_trend(df)
+        result = [
+            1
+            if self._is_inverted_hammer_shape(g) and bool(prior_down.iloc[i])
+            else 0
+            for i, g in enumerate(geo)
+        ]
+        return pd.Series(result, index=df.index)
 
     def _shooting_star(self, df: pd.DataFrame, geo: list) -> pd.Series:
-        return pd.Series(
-            [
-                1
-                if g.upper_wick >= 2.0 * g.body
-                and g.lower_ratio < 0.20
-                and g.body_ratio > 0.05
-                and not g.is_bullish
-                else 0
-                for g in geo
-            ],
-            index=df.index,
-        )
+        """Bearish shooting star: same shape as inverted hammer after uptrend."""
+        prior_up, _ = self._prior_trend(df)
+        result = [
+            1
+            if self._is_inverted_hammer_shape(g) and bool(prior_up.iloc[i])
+            else 0
+            for i, g in enumerate(geo)
+        ]
+        return pd.Series(result, index=df.index)
 
     def _bull_marubozu(self, df: pd.DataFrame, geo: list) -> pd.Series:
         return pd.Series(

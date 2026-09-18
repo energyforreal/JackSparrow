@@ -7,8 +7,9 @@ NEUTRAL labels are ignore_index and never enter the loss.
 
 from __future__ import annotations
 
+import contextlib
 import math
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -18,8 +19,11 @@ from torch.utils.data import Dataset
 from feature_store.transformer_btcusd.contract import (
     FUSION_DIRECTION_CARDINALITY,
     FUSION_INPUT_RESOLUTIONS,
+    FUSION_TARGET_WINDOW_MINUTES,
     FUSION_WINDOW_LEN,
     N_FUSION_HORIZONS,
+    RESOLUTION_MINUTES,
+    resolve_fusion_window_lens,
 )
 from feature_store.transformer_btcusd.inference import zscore_window
 
@@ -43,30 +47,75 @@ def inverse_frequency_class_weights(
     return weights.astype(np.float32)
 
 
+WindowArray = Union[np.ndarray, torch.Tensor]
+
+
+def _ndarray_to_tensor(array: np.ndarray, dtype: torch.dtype) -> torch.Tensor:
+    """Zero-copy from_numpy when the torch/numpy bridge works; else copy."""
+    try:
+        if dtype == torch.float32 and array.dtype == np.float32:
+            return torch.from_numpy(array)
+        return torch.as_tensor(array, dtype=dtype)
+    except RuntimeError:
+        return torch.tensor(np.asarray(array), dtype=dtype)
+
+
+def _window_row_to_tensor(window: WindowArray) -> torch.Tensor:
+    """One host tensor for a (time, feat) row. Copies memmap slices once."""
+    if isinstance(window, torch.Tensor):
+        row = window.detach()
+        if row.dtype != torch.float32:
+            row = row.to(dtype=torch.float32)
+        return row if row.is_contiguous() else row.contiguous()
+    arr = np.asarray(window)
+    if arr.dtype != np.float32 or not arr.flags.c_contiguous or not arr.flags.writeable:
+        arr = np.array(arr, dtype=np.float32, copy=True, order="C")
+    return _ndarray_to_tensor(arr, torch.float32)
+
+
 class MtfFusionDataset(Dataset):
-    """Per-sample dict of TF windows plus (n_horizons,) 2-class labels."""
+    """Per-sample TF windows plus (n_horizons,) 2-class labels.
+
+    Accepts numpy memmaps or CPU float32 tensors. Tensor storage avoids a
+    numpy copy on each ``__getitem__`` when windows fit in RAM.
+    """
 
     def __init__(
         self,
-        windows: Dict[str, np.ndarray],
-        labels: np.ndarray,
+        windows: Mapping[str, WindowArray],
+        labels: Union[np.ndarray, torch.Tensor],
         *,
         per_window_zscore: bool = False,
     ) -> None:
         self.resolutions = tuple(FUSION_INPUT_RESOLUTIONS)
         n = None
-        self.windows: Dict[str, np.ndarray] = {}
+        self.windows: Dict[str, WindowArray] = {}
         for res in self.resolutions:
             arr = windows[res]
-            if not isinstance(arr, np.ndarray) or arr.dtype != np.float32:
-                arr = np.asarray(arr, dtype=np.float32)
-            self.windows[res] = arr
+            if isinstance(arr, torch.Tensor):
+                stored: WindowArray = arr.detach()
+                if stored.dtype != torch.float32:
+                    stored = stored.to(dtype=torch.float32)
+                if not stored.is_contiguous():
+                    stored = stored.contiguous()
+                n_i = int(stored.shape[0])
+            else:
+                stored = arr
+                if not isinstance(stored, np.ndarray) or stored.dtype != np.float32:
+                    stored = np.asarray(arr, dtype=np.float32)
+                n_i = int(len(stored))
+            self.windows[res] = stored
             if n is None:
-                n = len(arr)
-            elif len(arr) != n:
+                n = n_i
+            elif n_i != n:
                 raise ValueError(f"Window length mismatch for {res}")
-        self.labels = np.asarray(labels, dtype=np.int64)
-        if n is None or len(self.labels) != n:
+        if isinstance(labels, torch.Tensor):
+            self.labels: WindowArray = labels.detach().to(dtype=torch.long)
+            n_y = int(self.labels.shape[0])
+        else:
+            self.labels = np.asarray(labels, dtype=np.int64)
+            n_y = int(len(self.labels))
+        if n is None or n_y != n:
             raise ValueError("Labels length does not match windows")
         self.per_window_zscore = bool(per_window_zscore)
 
@@ -76,13 +125,15 @@ class MtfFusionDataset(Dataset):
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, ...]:
         tensors: List[torch.Tensor] = []
         for res in self.resolutions:
-            window = np.ascontiguousarray(self.windows[res][i], dtype=np.float32)
-            if not window.flags.writeable:
-                window = np.array(window, dtype=np.float32, copy=True)
-            if self.per_window_zscore:
-                window = zscore_window(window)
-            tensors.append(torch.from_numpy(window))
-        tensors.append(torch.as_tensor(self.labels[i], dtype=torch.long))
+            window = self.windows[res][i]
+            if self.per_window_zscore and not isinstance(window, torch.Tensor):
+                window = zscore_window(np.asarray(window, dtype=np.float32))
+            tensors.append(_window_row_to_tensor(window))
+        label_row = self.labels[i]
+        if isinstance(label_row, torch.Tensor):
+            tensors.append(label_row.to(dtype=torch.long))
+        else:
+            tensors.append(_ndarray_to_tensor(np.asarray(label_row), torch.long))
         return tuple(tensors)
 
 
@@ -116,6 +167,14 @@ class MtfFusionTransformer(nn.Module):
         self.n_classes = int(n_classes)
         self.tf_embed = nn.Embedding(self.n_tfs, d_model)
         self.input_proj = nn.Linear(n_features, d_model)
+        self.scale_proj = nn.Linear(1, d_model, bias=False)
+        scale_vals = [
+            math.log(float(RESOLUTION_MINUTES[res])) / math.log(120.0)
+            for res in FUSION_INPUT_RESOLUTIONS[: self.n_tfs]
+        ]
+        self.register_buffer(
+            "tf_bar_scale", torch.tensor(scale_vals, dtype=torch.float32)
+        )
         self.pos_enc = PositionalEncoding(d_model, max_len=max_len)
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -148,10 +207,24 @@ class MtfFusionTransformer(nn.Module):
             dtype=torch.long,
         )
         h = h + self.tf_embed(tf_ids)
+        scale = self.tf_bar_scale[int(tf_index)].to(dtype=h.dtype)
+        scale = scale.view(1, 1, 1).expand(x.size(0), x.size(1), 1)
+        h = h + self.scale_proj(scale)
         h = self.pos_enc(h)
         h = self.encoder(h)
         h = self.norm(h)
         return h[:, -1, :]
+
+    def encode_all_tfs(self, tf_windows: Sequence[torch.Tensor]) -> torch.Tensor:
+        """Encode every TF at its native length. Returns (batch, n_tf, d_model)."""
+        if len(tf_windows) != self.n_tfs:
+            raise ValueError(
+                f"Expected {self.n_tfs} TF windows, got {len(tf_windows)}"
+            )
+        encoded = [
+            self.encode_tf(window, i) for i, window in enumerate(tf_windows)
+        ]
+        return torch.stack(encoded, dim=1)
 
     def fusion_weights(self) -> torch.Tensor:
         return torch.softmax(self.fusion_logits, dim=0)
@@ -161,8 +234,7 @@ class MtfFusionTransformer(nn.Module):
             raise ValueError(
                 f"Expected {self.n_tfs} TF windows, got {len(tf_windows)}"
             )
-        zs = [self.encode_tf(tf_windows[i], i) for i in range(self.n_tfs)]
-        stacked = torch.stack(zs, dim=1)
+        stacked = self.encode_all_tfs(tf_windows)
         weights = self.fusion_weights().view(1, self.n_tfs, 1)
         combined = (stacked * weights).sum(dim=1)
         shared = self.shared(combined)
@@ -176,13 +248,20 @@ def fusion_model_from_config(
     config: Mapping[str, Any],
 ) -> MtfFusionTransformer:
     """Build the fused transformer from a training CONFIG mapping."""
+    target = int(config.get("target_window_minutes") or FUSION_TARGET_WINDOW_MINUTES)
+    lens = resolve_fusion_window_lens(
+        config.get("window_lens"),
+        config.get("window_len"),
+        target_minutes=target,
+    )
+    max_len = max(int(v) for v in lens.values())
     return MtfFusionTransformer(
         n_features=int(n_features),
         d_model=int(config.get("d_model") or 64),
         nhead=int(config.get("nhead") or 4),
         num_layers=int(config.get("num_layers") or 2),
         dropout=float(config.get("dropout") or 0.30),
-        max_len=int(config.get("window_len") or FUSION_WINDOW_LEN),
+        max_len=max_len,
     )
 
 
@@ -196,7 +275,7 @@ def compute_fusion_loss(
 ) -> torch.Tensor:
     """Weighted mean CE across 2-class horizon heads. Ignores labels < 0."""
     n_h = int(labels.size(1))
-    loss = labels.new_zeros(())
+    loss = torch.zeros((), device=labels.device, dtype=torch.float32)
     weight_sum = 0.0
     last_logits = outputs[0]
     smooth = float(label_smoothing)
@@ -239,6 +318,7 @@ def train_mtf_fusion(
     label_smoothing: float = 0.0,
     horizon_weights: Optional[Sequence[float]] = None,
     lr_schedule: str = "constant",
+    amp: bool = False,
 ) -> Dict[str, Any]:
     """AdamW + early stopping on validation CE. Never sees the test loader."""
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -256,6 +336,24 @@ def train_mtf_fusion(
     hw: Optional[Sequence[float]] = None
     if horizon_weights is not None:
         hw = [float(x) for x in horizon_weights]
+    use_amp = bool(amp) and device.type == "cuda"
+    non_blocking = device.type == "cuda"
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    scaler: Any = None
+    if use_amp:
+        try:
+            scaler = torch.amp.GradScaler("cuda")
+        except (TypeError, AttributeError):
+            scaler = torch.cuda.amp.GradScaler()
+
+    def _autocast() -> Any:
+        if not use_amp:
+            return contextlib.nullcontext()
+        try:
+            return torch.autocast(device_type="cuda")
+        except TypeError:
+            return torch.cuda.amp.autocast()
 
     def _batch_loss(batch: Sequence[torch.Tensor]) -> torch.Tensor:
         windows = batch[:-1]
@@ -269,41 +367,55 @@ def train_mtf_fusion(
             horizon_weights=hw,
         )
 
+    def _move(batch: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, ...]:
+        return tuple(t.to(device, non_blocking=non_blocking) for t in batch)
+
     for epoch in range(int(epochs)):
         model.train()
-        train_loss = 0.0
+        train_sum: Optional[torch.Tensor] = None
         n_train = 0
         for batch in train_loader:
-            batch_d = tuple(t.to(device) for t in batch)
+            batch_d = _move(batch)
             opt.zero_grad(set_to_none=True)
-            loss = _batch_loss(batch_d)
-            loss_val = float(loss.detach().item())
-            if not math.isfinite(loss_val):
-                aborted = True
-                break
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
-            train_loss += loss_val
+            with _autocast():
+                loss = _batch_loss(batch_d)
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                scaler.step(opt)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                opt.step()
+            detached = loss.detach().float()
+            train_sum = detached if train_sum is None else train_sum + detached
             n_train += 1
-        if aborted or n_train == 0:
+        if n_train == 0:
+            aborted = True
+            break
+        train_loss = float((train_sum / n_train).item())
+        if not math.isfinite(train_loss):
+            aborted = True
             break
         model.eval()
-        val_loss = 0.0
+        val_sum: Optional[torch.Tensor] = None
         n_val = 0
         with torch.no_grad():
             for batch in val_loader:
-                batch_d = tuple(t.to(device) for t in batch)
-                batch_val = float(_batch_loss(batch_d).item())
-                if not math.isfinite(batch_val):
-                    aborted = True
-                    break
-                val_loss += batch_val
+                batch_d = _move(batch)
+                with _autocast():
+                    batch_loss = _batch_loss(batch_d).float()
+                val_sum = batch_loss if val_sum is None else val_sum + batch_loss
                 n_val += 1
-        if aborted or n_val == 0:
+        if n_val == 0:
+            aborted = True
             break
-        train_loss /= max(n_train, 1)
-        val_loss /= max(n_val, 1)
+        val_loss = float((val_sum / n_val).item())
+        if not math.isfinite(val_loss):
+            aborted = True
+            break
         history.append((epoch + 1, train_loss, val_loss))
         print(f"epoch {epoch + 1:03d}  train={train_loss:.4f}  val={val_loss:.4f}")
         if scheduler is not None:

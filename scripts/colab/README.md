@@ -28,13 +28,14 @@ python scripts/validate_transformer_bundle.py agent/model_storage/JackSparrow_Tr
 
 Parity tests: `pytest tests/unit/test_transformer_btcusd_feature_parity.py`
 
-## Research Colab (v10 fused multi-TF)
+## Research Colab (v11 fused multi-TF)
 
 Primary research trainer: **`transformer_btcusd_next_candle_research.ipynb`**.
 It trains the live fused model: independent 5m/10m/30m/1h/2h OHLCV, shared encoder,
-softmax TF weights, and four 3-class heads (+10m/+30m/+1h/+2h). 10m is two closed
-5m bars built outside the encoder. Walk-forward, Optuna, and temperature fitting
-never see the final test split. Do not hand-edit the `.ipynb`.
+softmax TF weights, and three 2-class heads (+30m/+1h/+2h). NEUTRAL is ignore_index,
+not a class. 10m is two closed 5m bars built outside the encoder (input TF only).
+Walk-forward, Optuna, and temperature fitting never see the final test split.
+Do not hand-edit the `.ipynb`.
 
 Training-logic changes belong in the `.py` sources. Regenerate the notebook after
 every fusion training or contract change:

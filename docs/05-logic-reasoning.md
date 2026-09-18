@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes **JackSparrow's** decision-making process. Runtime default is **one fused multi-TF Transformer**. Independent 5m/10m/30m/1h/2h encodings are fused with learned weights; Layer 2 forecasts BULL/NEUTRAL/BEAR at +10m/+30m/+1h/+2h. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades. Duration is the longest accepted same-side horizon. 5m never trades alone.
+This document describes **JackSparrow's** decision-making process. Runtime default is **one fused multi-TF Transformer**. Independent 5m/10m/30m/1h/2h encodings are fused with learned weights; Layer 2 forecasts BULL/BEAR at +30m/+1h/+2h (NEUTRAL is not a class). [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades. Duration is the longest accepted same-side horizon. 5m never trades alone.
 
 Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` restores five per-TF models and climate/setup/timing.
 
@@ -14,8 +14,8 @@ Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` rest
 
 1. Encode each TF independently (candle + chart/structure engines on native OHLCV; as-of join at 5m close).
 2. Softmax fusion weights produce `Z_combined`.
-3. Four heads emit calibrated BULL/NEUTRAL/BEAR probabilities.
-4. Drop NEUTRAL, below-floor probability, or LOW validation grade.
+3. Three heads emit calibrated BULL/BEAR probabilities.
+4. Drop below-floor probability or LOW validation grade (HOLD is not a logit).
 5. Conflict (accepted LONG and SHORT) → HOLD. Else signal = that side; **duration = longest accepted horizon**.
 6. `execution_plan` — ATR SL/TP + `max_hold_minutes` + `size_fraction` from the duration head.
 

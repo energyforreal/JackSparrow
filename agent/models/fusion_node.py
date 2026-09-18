@@ -23,6 +23,7 @@ from feature_store.transformer_btcusd.contract import (
     ONNX_OUTPUT_NAMES_V11,
     TRANSFORMER_FEATURE_CONFIG_FILENAME,
     TRANSFORMER_METADATA_FILENAME,
+    resolve_fusion_window_lens,
 )
 from feature_store.transformer_btcusd.inference import (
     load_feature_config,
@@ -103,7 +104,14 @@ class FusionModelNode(MCPModelNode):
             bundle_metadata.get("model_name") or "jacksparrow_transformer_BTCUSD_mtf_fusion"
         )
         self._model_version = str(bundle_metadata.get("version") or "transformer_mtf_fusion_v11")
-        self._window_len = int(feature_config.get("window_len") or FUSION_WINDOW_LEN)
+        raw_lens = feature_config.get("window_lens")
+        if isinstance(raw_lens, dict) and raw_lens:
+            self._window_lens = resolve_fusion_window_lens(raw_lens)
+        else:
+            self._window_lens = resolve_fusion_window_lens(
+                window_len=int(feature_config.get("window_len") or FUSION_WINDOW_LEN)
+            )
+        self._window_len = int(self._window_lens["5m"])
         self._input_names: List[str] = list(
             feature_config.get("input_names")
             or [f"features_{res}" for res in FUSION_INPUT_RESOLUTIONS]
@@ -192,6 +200,7 @@ class FusionModelNode(MCPModelNode):
             "resolution": self.resolution,
             "model_family": FUSION_MODEL_FAMILY,
             "window_len": self._window_len,
+            "window_lens": dict(self._window_lens),
             "onnx_output_names": list(ONNX_OUTPUT_NAMES_V11),
             "horizon_gates": dict(self._feature_config.get("horizon_gates") or {}),
         }
@@ -229,7 +238,7 @@ class FusionModelNode(MCPModelNode):
         windows = encode_all_tf_windows(
             frames,
             decision_time,
-            window_len=self._window_len,
+            window_lens=self._window_lens,
             funding_df=funding,
             oi_df=oi,
             zscore=True,
@@ -264,6 +273,7 @@ class FusionModelNode(MCPModelNode):
             ),
             "decision_time": str(decision_time),
             "window_len": self._window_len,
+            "window_lens": dict(self._window_lens),
         }
         return MCPModelPrediction(
             model_name=self._model_name,

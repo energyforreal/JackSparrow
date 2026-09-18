@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 # Bump when FEATURE_COLS, label heads, or ONNX outputs change (requires retrain).
 FEATURE_CONTRACT_VERSION_V6 = "transformer_btcusd_per_tf_features_v6"
@@ -19,7 +19,7 @@ FUSION_INPUT_RESOLUTIONS: Tuple[str, ...] = ("5m", "10m", "30m", "1h", "2h")
 FUSION_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion"
 FUSION_MODEL_FAMILY = "jacksparrow_transformer_btcusd_mtf_fusion"
 FUSION_ONNX_FILENAME = "btcusd_mtf_fusion.onnx"
-FUSION_WINDOW_LEN: int = 64
+FUSION_TARGET_WINDOW_MINUTES: int = 10 * 60
 FUSION_EMBARGO_BARS: int = 24
 
 RESOLUTION_MINUTES: Dict[str, int] = {
@@ -544,6 +544,56 @@ def horizon_bars_for_wall_minutes(wall_minutes: int, resolution_minutes: int) ->
     return max(1, int(round(int(wall_minutes) / resolution_minutes)))
 
 
+def fusion_window_len(
+    resolution: str,
+    *,
+    target_minutes: int = FUSION_TARGET_WINDOW_MINUTES,
+) -> int:
+    """Bar count so one TF window covers ``target_minutes`` of wall-clock time."""
+    res = resolution.strip().lower()
+    if res not in RESOLUTION_MINUTES:
+        raise ValueError(f"Unsupported resolution: {resolution!r}")
+    return horizon_bars_for_wall_minutes(int(target_minutes), RESOLUTION_MINUTES[res])
+
+
+def fusion_window_lens(
+    resolutions: Tuple[str, ...] = FUSION_INPUT_RESOLUTIONS,
+    *,
+    target_minutes: int = FUSION_TARGET_WINDOW_MINUTES,
+) -> Dict[str, int]:
+    """Per-TF window lengths derived from the shared wall-clock target."""
+    return {
+        res: fusion_window_len(res, target_minutes=target_minutes) for res in resolutions
+    }
+
+
+def resolve_fusion_window_lens(
+    window_lens: Optional[Mapping[str, int]] = None,
+    window_len: Optional[int] = None,
+    *,
+    target_minutes: Optional[int] = None,
+) -> Dict[str, int]:
+    """Prefer an explicit per-TF map; else a uniform int; else the 10h target."""
+    if window_lens:
+        missing = [res for res in FUSION_INPUT_RESOLUTIONS if res not in window_lens]
+        if missing:
+            raise KeyError(f"window_lens missing resolutions: {missing}")
+        return {res: int(window_lens[res]) for res in FUSION_INPUT_RESOLUTIONS}
+    if window_len is not None:
+        width = int(window_len)
+        return {res: width for res in FUSION_INPUT_RESOLUTIONS}
+    minutes = (
+        int(target_minutes)
+        if target_minutes is not None
+        else FUSION_TARGET_WINDOW_MINUTES
+    )
+    return fusion_window_lens(target_minutes=minutes)
+
+
+# Longest TF window (5m) for PE max_len and 5m decision-clock warm-up.
+FUSION_WINDOW_LEN: int = fusion_window_len("5m")
+
+
 def label_horizon_bars_for_resolution(resolution_minutes: int) -> int:
     """Legacy helper: 8h wall-clock in bars for a TF grid."""
     return horizon_bars_for_wall_minutes(REFERENCE_LABEL_HORIZON_MINUTES, resolution_minutes)
@@ -762,19 +812,21 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "horizon_keys": list(FUSION_HORIZON_KEYS),
         "horizon_bars": list(FUSION_HORIZON_BARS_5M),
         "window_len": FUSION_WINDOW_LEN,
+        "window_lens": fusion_window_lens(),
+        "target_window_minutes": FUSION_TARGET_WINDOW_MINUTES,
         "stride": 4,
         "train_frac": 0.70,
         "val_frac": 0.15,
         "embargo_bars": FUSION_EMBARGO_BARS,
         "batch_size": 64,
-        "epochs": 40,
+        "epochs": 12,
         "lr": 1e-4,
         "weight_decay": 1e-3,
         "dropout": 0.30,
         "d_model": 64,
         "nhead": 4,
         "num_layers": 2,
-        "early_stop_patience": 5,
+        "early_stop_patience": 3,
         "label_smoothing": 0.05,
         "horizon_loss_weights": [1.0, 0.8, 0.4],
         "lr_schedule": "cosine",
@@ -783,8 +835,14 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "base_url": "https://api.india.delta.exchange",
         "atr_period": 14,
         "run_optuna": False,
-        "optuna_trials": 8,
-        "optuna_trial_epochs": 12,
+        "optuna_trials": 3,
+        "optuna_trial_epochs": 4,
+        "optuna_refresh": False,
+        "windows_in_ram": True,
+        "pin_memory": True,
+        "dataloader_workers": 2,
+        "prefetch_factor": 4,
+        "amp": True,
         "run_walk_forward": True,
         "walk_forward_folds": 3,
         "walk_forward_embargo": FUSION_EMBARGO_BARS,
