@@ -7,17 +7,26 @@ import pandas as pd
 import pytest
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_COL,
+    CHART_PATTERN_COL,
+    FEATURE_COLS,
     FUSION_INPUT_RESOLUTIONS,
     FUSION_TARGET_WINDOW_MINUTES,
     RESOLUTION_MINUTES,
+    V14_DROPPED_COLS,
+    fusion_feature_groups_v14,
     fusion_window_len,
     fusion_window_lens,
 )
 from feature_store.transformer_btcusd.mtf_features import (
     collect_training_windows,
+    collect_training_windows_v14,
     encode_tf_window,
+    encode_tf_window_v14,
     fusion_feature_cols,
+    fusion_feature_cols_v14,
     save_featured_frames,
+    scale_v14_feature_window,
     stack_tf_windows,
     try_load_featured_frames,
 )
@@ -61,6 +70,9 @@ def _toy_featured(resolution: str, n_bars: int) -> pd.DataFrame:
     ramp = np.linspace(0.0, 1.0, n_bars, dtype=np.float64)
     data = {name: ramp + (idx * 0.01) for idx, name in enumerate(cols)}
     data["time"] = times
+    data["atr"] = np.full(n_bars, 2.0, dtype=np.float64)
+    data[CANDLE_CLASS_COL] = np.arange(n_bars, dtype=np.int64) % 13
+    data[CHART_PATTERN_COL] = np.arange(n_bars, dtype=np.int64) % 9
     return pd.DataFrame(data)
 
 
@@ -139,11 +151,10 @@ def test_window_dataset_cache_roundtrip(tmp_path) -> None:
     featured = {res: _toy_featured(res, 48) for res in FUSION_INPUT_RESOLUTIONS}
     closes = bar_close_time(featured["5m"]["time"], 5)
     decisions = list(closes.iloc[20:28])
-    windows = collect_training_windows(
+    windows, candle_ids, chart_ids = collect_training_windows_v14(
         featured,
         decisions,
         window_len=8,
-        zscore=True,
         memmap_dir=tmp_path,
     )
     labels = np.zeros((len(decisions), 3), dtype=np.int64)
@@ -153,7 +164,7 @@ def test_window_dataset_cache_roundtrip(tmp_path) -> None:
     )
     loaded = try_load_fusion_dataset_cache(tmp_path, window_len=8, stride=4)
     assert loaded is not None
-    cached_w, cached_y, cached_t = loaded
+    cached_w, cached_y, cached_t, cached_cdl, cached_chp = loaded
     from scripts.colab.mtf_fusion_model import FusionTrainLabels
 
     assert isinstance(cached_y, FusionTrainLabels)
@@ -161,6 +172,8 @@ def test_window_dataset_cache_roundtrip(tmp_path) -> None:
     assert len(cached_t) == len(decisions)
     for res in FUSION_INPUT_RESOLUTIONS:
         np.testing.assert_allclose(cached_w[res], windows[res], rtol=1e-5, atol=1e-5)
+        np.testing.assert_array_equal(cached_cdl[res], candle_ids[res])
+        np.testing.assert_array_equal(cached_chp[res], chart_ids[res])
     miss = try_load_fusion_dataset_cache(tmp_path, window_len=8, stride=8)
     assert miss is None
 
@@ -248,3 +261,83 @@ def test_stack_tf_windows_rejects_unequal_lengths() -> None:
     }
     with pytest.raises(ValueError, match="equal window shapes"):
         stack_tf_windows(windows)
+
+
+def test_fusion_feature_groups_uses_v14_disjoint_map() -> None:
+    from scripts.colab.mtf_fusion_research import fusion_feature_groups
+
+    cols = list(fusion_feature_cols_v14())
+    groups = fusion_feature_groups(cols)
+    assert groups["price"] == ["ret_1"]
+    assert "rsi_14" in groups["momentum"]
+    assert "adx_14" in groups["trend"]
+    assert "vol_z" in groups["flow"]
+    assert "hour_sin" in groups["context"]
+    assert not any(name.startswith("cdl_") for names in groups.values() for name in names)
+
+
+def test_v14_groups_are_disjoint_and_drop_duplicates() -> None:
+    cols = fusion_feature_cols_v14()
+    groups = fusion_feature_groups_v14()
+    flat = [name for key in groups for name in groups[key]]
+    assert tuple(flat) == cols
+    assert len(cols) == len(set(cols))
+    assert set(cols) == set(FEATURE_COLS) - set(V14_DROPPED_COLS)
+    for dropped in V14_DROPPED_COLS:
+        assert dropped not in cols
+    joined = " ".join(cols)
+    assert "cdl_" not in joined
+    assert "chp_" not in joined
+    assert "sr_" not in joined
+    assert "tl_" not in joined
+    assert "bo_" not in joined
+    assert all(not name.startswith("htf_") for name in cols)
+    assigned = {name: key for key, members in groups.items() for name in members}
+    assert len(assigned) == len(cols)
+
+
+def test_v14_scaler_keeps_passthrough_and_affine_rsi() -> None:
+    cols = ["ret_1", "rsi_14", "vol_z", "hh_count"]
+    window = np.array(
+        [
+            [0.1, 70.0, 1.5, 12.0],
+            [0.2, 70.0, 1.5, 12.0],
+            [0.3, 70.0, 1.5, 12.0],
+            [0.4, 70.0, 1.5, 12.0],
+        ],
+        dtype=np.float32,
+    )
+    scaled = scale_v14_feature_window(
+        window, feature_cols=cols, resolution_minutes=5, zscore_returns=True
+    )
+    np.testing.assert_allclose(scaled[:, 1], (70.0 - 50.0) / 50.0)
+    np.testing.assert_allclose(scaled[:, 2], 1.5)
+    assert abs(float(scaled[:, 0].mean())) < 1e-5
+    lookback = 96.0
+    np.testing.assert_allclose(scaled[:, 3], 12.0 / lookback)
+
+
+def test_collect_v14_matches_encode_tf_window_v14() -> None:
+    featured = {res: _toy_featured(res, 48) for res in FUSION_INPUT_RESOLUTIONS}
+    closes = bar_close_time(featured["5m"]["time"], 5)
+    decisions = list(closes.iloc[20:24])
+    windows, candle_ids, chart_ids = collect_training_windows_v14(
+        featured, decisions, window_len=8
+    )
+    n_feat = len(fusion_feature_cols_v14())
+    for res, mat in windows.items():
+        assert mat.shape == (4, 8, n_feat)
+        for i, t in enumerate(decisions):
+            feat, cdl, chp = encode_tf_window_v14(
+                featured[res],
+                pd.Timestamp(t),
+                resolution=res,
+                window_len=8,
+                featured=featured[res],
+            )
+            np.testing.assert_allclose(mat[i], feat, rtol=1e-5, atol=1e-5)
+            np.testing.assert_array_equal(candle_ids[res][i], cdl)
+            np.testing.assert_array_equal(chart_ids[res][i], chp)
+            assert feat.dtype == np.float32
+            assert cdl.dtype == np.int64
+            assert chp.dtype == np.int64

@@ -23,6 +23,7 @@ from feature_store.transformer_btcusd.contract import (
     FUSION_RETIRED_DIR_COLS,
     HORIZON_DIR_ATR_WEAK,
     MAX_FUSION_HORIZON_BARS,
+    MAX_LABEL_V2_HORIZON_BARS,
 )
 
 
@@ -107,10 +108,17 @@ def compute_fusion_horizon_labels(df5m: pd.DataFrame) -> pd.DataFrame:
 
 
 def trim_fusion_label_tail(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop the last 24 five-minute bars that cannot form a +2h label."""
+    """Drop the last 24 five-minute bars that cannot form a +2h live label."""
     if len(df) <= int(MAX_FUSION_HORIZON_BARS):
         return df.iloc[0:0].copy()
     return df.iloc[: -int(MAX_FUSION_HORIZON_BARS)].reset_index(drop=True)
+
+
+def trim_label_v2_tail(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop the last 12 five-minute bars that cannot form a +1h Label V2 target."""
+    if len(df) <= int(MAX_LABEL_V2_HORIZON_BARS):
+        return df.iloc[0:0].copy()
+    return df.iloc[: -int(MAX_LABEL_V2_HORIZON_BARS)].reset_index(drop=True)
 
 
 def fusion_label_matrix(df: pd.DataFrame) -> np.ndarray:

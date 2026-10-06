@@ -9,7 +9,7 @@ export PATH="${HOME}/.local/bin:${PATH}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEFAULT_NOTEBOOK="${SCRIPT_DIR}/transformer_btcusd_next_candle_research.ipynb"
-BUNDLE_DIR_NAME="JackSparrow_Transformer_BTCUSD_mtf_fusion_v12"
+BUNDLE_DIR_NAME="JackSparrow_Transformer_BTCUSD_mtf_fusion_v15"
 REMOTE_EXPORT_DIR="/content/export/${BUNDLE_DIR_NAME}"
 REMOTE_ZIP="/content/export/${BUNDLE_DIR_NAME}.zip"
 

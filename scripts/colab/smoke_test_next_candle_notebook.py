@@ -27,7 +27,9 @@ REQUIRED_SYMBOLS = (
     "build_10m_ohlcv_from_5m",
     "fusion_frames_from_fetch",
     "export_fusion_bundle",
-    "FEATURE_CONTRACT_VERSION_V12",
+    "FEATURE_CONTRACT_VERSION_V13",
+    "FEATURE_CONTRACT_VERSION_V14",
+    "FEATURE_CONTRACT_VERSION_V15",
     "fusion_label_v2_matrices",
     "fusion_ready_to_promote",
     "development_prefix",
@@ -114,8 +116,8 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
         )
     if "Training uses fusion_label_v2_matrices; persist/TP-SL stay off the loss." not in full_text:
         raise AssertionError("section 08 must train on fusion_label_v2_matrices")
-    if "Do NOT copy this v12 bundle into agent/model_storage/" not in full_text:
-        raise AssertionError("section 26 must refuse copying v12 into live model_storage")
+    if "Do NOT copy this v15 bundle into agent/model_storage/" not in full_text:
+        raise AssertionError("section 26 must refuse copying v15 into live model_storage")
     if "last_swing_dir" not in full_text:
         raise AssertionError("notebook should document last_swing_dir as causal")
     if "Walk-forward skipped (CONFIG run_walk_forward=False)" not in full_text:
@@ -134,8 +136,16 @@ def validate_notebook(path: Path = NOTEBOOK) -> None:
     if "np.concatenate(" in walk.group(0):
         raise AssertionError("section 18 must not concatenate purged train/val windows")
 
-    if 'CONFIG["run_optuna"] = True' not in full_text:
-        raise AssertionError("research notebook must enable run_optuna")
+    if "later_direction_only" not in full_text:
+        raise AssertionError("research notebook must document later_direction_only")
+    if "dir class weights off (uniform CE)" not in full_text:
+        raise AssertionError("research notebook must skip class weights when off")
+    if "class_weights=class_w_t" not in full_text:
+        raise AssertionError("research notebook must pass optional class_w_t")
+    if 'CONFIG["run_optuna"] = False' not in full_text:
+        raise AssertionError("research notebook must leave run_optuna off")
+    if re.search(r'^CONFIG\["run_optuna"\] = True\s*$', full_text, re.MULTILINE):
+        raise AssertionError("research notebook must not enable run_optuna")
     if re.search(r'^CONFIG\["run_shap"\] = True\s*$', full_text, re.MULTILINE):
         raise AssertionError("research notebook must leave SHAP off the training path")
     if 'CONFIG["run_shap"] = False' not in full_text:

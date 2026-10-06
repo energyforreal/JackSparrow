@@ -12,14 +12,20 @@ FEATURE_CONTRACT_VERSION_V9 = "transformer_btcusd_per_tf_features_v9"
 FEATURE_CONTRACT_VERSION_V10 = "transformer_btcusd_mtf_fusion_v10"
 FEATURE_CONTRACT_VERSION_V11 = "transformer_btcusd_mtf_fusion_v11"
 FEATURE_CONTRACT_VERSION_V12 = "transformer_btcusd_mtf_fusion_v12"
+FEATURE_CONTRACT_VERSION_V13 = "transformer_btcusd_mtf_fusion_v13"
+FEATURE_CONTRACT_VERSION_V14 = "transformer_btcusd_mtf_fusion_v14"
+FEATURE_CONTRACT_VERSION_V15 = "transformer_btcusd_mtf_fusion_v15"
 # Live per-TF bundles remain v9. The fused live path uses V11 (2-class, no h10m head).
-# V12 is Label V2 research training only and must not load in FusionModelNode.
+# V12/V13/V14/V15 are Label V2 research training only and must not load in FusionModelNode.
 FEATURE_CONTRACT_VERSION = FEATURE_CONTRACT_VERSION_V9
 
 SUPPORTED_RESOLUTIONS: Tuple[str, ...] = ("5m", "15m", "30m", "1h", "2h")
 FUSION_INPUT_RESOLUTIONS: Tuple[str, ...] = ("5m", "10m", "30m", "1h", "2h")
 FUSION_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion"
 FUSION_V12_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion_v12"
+FUSION_V13_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion_v13"
+FUSION_V14_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion_v14"
+FUSION_V15_BUNDLE_DIR_NAME = "JackSparrow_Transformer_BTCUSD_mtf_fusion_v15"
 FUSION_MODEL_FAMILY = "jacksparrow_transformer_btcusd_mtf_fusion"
 FUSION_ONNX_FILENAME = "btcusd_mtf_fusion.onnx"
 FUSION_TARGET_WINDOW_MINUTES: int = 10 * 60
@@ -140,6 +146,127 @@ _V4_FEATURE_COLS: Tuple[str, ...] = (
 # Native all-TF continuous columns (v4 plus causal structure/geometry).
 FEATURE_COLS: Tuple[str, ...] = _V4_FEATURE_COLS + NATIVE_STRUCTURE_COLS
 
+# v14 research continuous vector: drop duplicate scale encodings and pattern flags.
+V14_DROPPED_COLS: Tuple[str, ...] = (
+    "ema50_dist_pct",
+    "dist_to_support_pct",
+    "dist_to_resistance_pct",
+    "funding_rate",
+)
+
+V14_FEATURE_GROUP_ORDER: Tuple[str, ...] = (
+    "price",
+    "volatility",
+    "trend",
+    "momentum",
+    "structure",
+    "candle",
+    "chart",
+    "flow",
+    "context",
+)
+
+V14_FEATURE_GROUPS: Dict[str, Tuple[str, ...]] = {
+    "price": ("ret_1",),
+    "volatility": ("rv_16", "rv_96", "atr_contraction"),
+    "trend": (
+        "adx_14",
+        "trend_efficiency",
+        "displacement_atr",
+        "pct_with_trend",
+        "price_vs_ema9_atr",
+        "price_vs_ema21_atr",
+        "price_vs_ema50_atr",
+        "price_vs_ema200_atr",
+        "ema9_vs_21_atr",
+        "ema21_vs_50_atr",
+        "ema50_vs_200_atr",
+        "ema21_slope_atr",
+        "ema50_slope_atr",
+    ),
+    "momentum": ("macd_hist", "rsi_14"),
+    "structure": (
+        "hh_count",
+        "hl_count",
+        "lh_count",
+        "ll_count",
+        "structure_bias",
+        "last_swing_dir",
+        "bars_since_swing",
+        "swing_amp_atr",
+        "unconfirmed_ext_atr",
+        "dist_to_support_atr",
+        "dist_to_resistance_atr",
+        "support_touch_count",
+        "resistance_touch_count",
+        "range_width_atr",
+        "range_width_pctile",
+    ),
+    "candle": (
+        "body_ratio",
+        "upper_wick_ratio",
+        "lower_wick_ratio",
+        "close_loc",
+        "range_atr",
+        "body_atr",
+        "gap_atr",
+        "inside_bar",
+        "outside_bar",
+        "engulf_score",
+    ),
+    "chart": (
+        "breakout_size_atr",
+        "breakout_vol_ratio",
+        "pre_breakout_comp",
+        "bars_since_breakout",
+        "retest_dist_atr",
+        "failed_break",
+        "peak_diff_atr",
+        "trough_diff_atr",
+        "peak_sep_bars",
+        "trough_sep_bars",
+        "dist_neck_atr",
+        "high_slope_atr",
+        "low_slope_atr",
+        "convergence",
+        "width_now_atr",
+        "pole_disp_atr",
+        "flag_width_atr",
+        "flag_slope_atr",
+    ),
+    "flow": (
+        "obv_z",
+        "vol_z",
+        "oi_z",
+        "funding_zscore",
+        "funding_mom",
+        "funding_rate_roc",
+        "oi_change_2",
+        "oi_delta_z",
+        "oi_price_divergence",
+        "oi_acceleration",
+        "funding_x_oi",
+    ),
+    "context": ("hour_sin", "hour_cos", "dow_sin", "dow_cos"),
+}
+
+V14_COUNT_COLS: Tuple[str, ...] = (
+    "hh_count",
+    "hl_count",
+    "lh_count",
+    "ll_count",
+    "bars_since_swing",
+    "support_touch_count",
+    "resistance_touch_count",
+    "bars_since_breakout",
+    "peak_sep_bars",
+    "trough_sep_bars",
+)
+
+V14_WINDOW_ZSCORE_COLS: Tuple[str, ...] = ("ret_1",)
+V14_STATE_GROUP_ORDER: Tuple[str, ...] = ("candle_state", "chart_state")
+V14_STRUCTURE_LOOKBACK_BARS: int = 96
+
 PATH_LABEL_COLS: Tuple[str, ...] = (
     "mfe",
     "mae",
@@ -190,6 +317,7 @@ REGIME_NAMES: Dict[int, str] = {
 CANDLE_CLASS_COL = "candle_class_id"
 CANDLE_CLASS_CARDINALITY = 13
 CANDLE_EMBED_DIM = 8
+CHART_EMBED_DIM = 8
 
 CANDLE_CLASS_NAMES: Dict[int, str] = {
     0: "FLAT_ZERO_RANGE",
@@ -445,11 +573,38 @@ FUSION_HORIZON_MINUTES: Dict[str, int] = {
     "h2h": 120,
 }
 
+# Label V2 research heads. Live fusion stays h30m/h1h/h2h. Encoder still sees 2h.
+LABEL_V2_HORIZON_SPECS: Tuple[Tuple[str, int], ...] = (
+    ("h10m", 2),
+    ("h15m", 3),
+    ("h30m", 6),
+    ("h1h", 12),
+)
+LABEL_V2_HORIZON_KEYS: Tuple[str, ...] = tuple(key for key, _ in LABEL_V2_HORIZON_SPECS)
+LABEL_V2_HORIZON_BARS_5M: Tuple[int, ...] = tuple(
+    bars for _, bars in LABEL_V2_HORIZON_SPECS
+)
+N_LABEL_V2_HORIZONS: int = len(LABEL_V2_HORIZON_SPECS)
+MAX_LABEL_V2_HORIZON_BARS: int = max(LABEL_V2_HORIZON_BARS_5M)
+LABEL_V2_DURATION_ATR_MULT: Dict[str, Tuple[float, float]] = {
+    "h10m": (0.5, 0.75),
+    "h15m": (0.75, 1.25),
+    "h30m": (1.0, 1.5),
+    "h1h": (1.5, 2.25),
+}
+LABEL_V2_HORIZON_MINUTES: Dict[str, int] = {
+    "h10m": 10,
+    "h15m": 15,
+    "h30m": 30,
+    "h1h": 60,
+}
+
 # Label V2 research targets. Live v11 stays 2-class with ignore_index NEUTRAL.
 LABEL_V2_DIRECTION_CARDINALITY = 3
 LABEL_V2_DIRECTION_NAMES: Dict[int, str] = {0: "BEAR", 1: "NEUTRAL", 2: "BULL"}
 LABEL_V2_THETA_GRID: Tuple[float, ...] = (0.25, 0.40, 0.50, 0.60, 0.75, 1.00)
 LABEL_V2_TP_SL_GRID: Tuple[Tuple[float, float], ...] = (
+    (0.5, 0.75),
     (0.75, 1.25),
     (1.0, 1.5),
     (1.5, 2.25),
@@ -467,32 +622,55 @@ LABEL_V2_TP_SL_NAMES: Dict[int, str] = {
 }
 LABEL_V2_PATH_FIELDS: Tuple[str, ...] = (
     "ret",
-    "mfe",
-    "mae",
+    "long_mfe",
+    "long_mae",
+    "short_mfe",
+    "short_mae",
     "persist",
-    "t_mfe",
-    "t_mae",
+    "t_long_mfe",
+    "t_short_mfe",
 )
 LABEL_V2_COLS: Tuple[str, ...] = tuple(
     f"{key}_{field}"
-    for key in FUSION_HORIZON_KEYS
+    for key in LABEL_V2_HORIZON_KEYS
     for field in LABEL_V2_PATH_FIELDS
 )
 LABEL_V2_MINORITY_RATE = 0.15
 LABEL_V2_DISAGREE_MIN = 0.02
 LABEL_V2_PERSIST_RANGE_MIN = 0.10
+# Frozen from the four-horizon mix report (259,188 labeled 5m bars).
 LABEL_V2_THETA_FROZEN: Dict[str, float] = {
+    "h10m": 0.50,
+    "h15m": 0.50,
     "h30m": 0.50,
     "h1h": 0.50,
-    "h2h": 0.60,
 }
-LABEL_V2_REG_FIELDS: Tuple[str, ...] = ("ret", "mfe", "mae")
+LABEL_V2_REG_FIELDS: Tuple[str, ...] = (
+    "ret",
+    "long_mfe",
+    "long_mae",
+    "short_mfe",
+    "short_mae",
+)
 LABEL_V2_PATH_LOSS_WEIGHTS: Dict[str, float] = {
     "dir": 1.0,
     "ret": 1.0,
-    "mfe": 0.5,
-    "mae": 0.5,
+    "long_mfe": 0.35,
+    "long_mae": 0.35,
+    "short_mfe": 0.35,
+    "short_mae": 0.35,
 }
+# later_direction_only research pass: train 3-class CE, keep path heads untrained.
+LABEL_V2_DIRECTION_ONLY_PATH_LOSS_WEIGHTS: Dict[str, float] = {
+    "dir": 1.0,
+    "ret": 0.0,
+    "long_mfe": 0.0,
+    "long_mae": 0.0,
+    "short_mfe": 0.0,
+    "short_mae": 0.0,
+}
+# Frozen v12 long-centric path outputs (ret/mfe/mae). Do not reuse for v13.
+LABEL_V2_V12_REG_FIELDS: Tuple[str, ...] = ("ret", "mfe", "mae")
 # 3-class chance is ~0.33; research grades only (not a live promote gate).
 LABEL_V2_HIGH_BALANCED_ACC = 0.45
 LABEL_V2_MEDIUM_BALANCED_ACC = 0.40
@@ -501,6 +679,24 @@ ONNX_OUTPUT_NAMES_V12: Tuple[str, ...] = (
     + tuple(
         f"{key}_{field}"
         for key in FUSION_HORIZON_KEYS
+        for field in LABEL_V2_V12_REG_FIELDS
+    )
+    + ("tf_fusion_logits",)
+)
+ONNX_OUTPUT_NAMES_V13: Tuple[str, ...] = (
+    tuple(f"{key}_dir_logits" for key in FUSION_HORIZON_KEYS)
+    + tuple(
+        f"{key}_{field}"
+        for key in FUSION_HORIZON_KEYS
+        for field in LABEL_V2_REG_FIELDS
+    )
+    + ("tf_fusion_logits",)
+)
+ONNX_OUTPUT_NAMES_V15: Tuple[str, ...] = (
+    tuple(f"{key}_dir_logits" for key in LABEL_V2_HORIZON_KEYS)
+    + tuple(
+        f"{key}_{field}"
+        for key in LABEL_V2_HORIZON_KEYS
         for field in LABEL_V2_REG_FIELDS
     )
     + ("tf_fusion_logits",)
@@ -750,6 +946,21 @@ def fusion_native_feature_cols() -> Tuple[str, ...]:
     return FEATURE_COLS
 
 
+def fusion_feature_cols_v14() -> Tuple[str, ...]:
+    """Disjoint v14 continuous columns (no pattern flags, no duplicate scales)."""
+    cols: Tuple[str, ...] = tuple(
+        name
+        for group in V14_FEATURE_GROUP_ORDER
+        for name in V14_FEATURE_GROUPS[group]
+    )
+    return cols
+
+
+def fusion_feature_groups_v14() -> Dict[str, Tuple[str, ...]]:
+    """Copy of the disjoint v14 group map."""
+    return {str(key): tuple(val) for key, val in V14_FEATURE_GROUPS.items()}
+
+
 def v7_feature_cols_for_resolution(resolution: str) -> Tuple[str, ...]:
     """Input columns: native features plus causal chart_pattern_id."""
     return feature_cols_for_resolution(resolution) + (CHART_PATTERN_COL,)
@@ -773,6 +984,10 @@ def onnx_output_names_for_contract(
     """ONNX head names for a bundle contract."""
     ver = str(contract_version or "").strip()
     res = resolution.strip().lower()
+    if ver == FEATURE_CONTRACT_VERSION_V15:
+        return ONNX_OUTPUT_NAMES_V15
+    if ver in (FEATURE_CONTRACT_VERSION_V13, FEATURE_CONTRACT_VERSION_V14):
+        return ONNX_OUTPUT_NAMES_V13
     if ver == FEATURE_CONTRACT_VERSION_V12:
         return ONNX_OUTPUT_NAMES_V12
     if ver == FEATURE_CONTRACT_VERSION_V11 or res == "mtf_fusion":
@@ -875,8 +1090,8 @@ def default_fusion_training_config() -> Dict[str, Any]:
     return {
         "symbol": "BTCUSD",
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
-        "horizon_keys": list(FUSION_HORIZON_KEYS),
-        "horizon_bars": list(FUSION_HORIZON_BARS_5M),
+        "horizon_keys": list(LABEL_V2_HORIZON_KEYS),
+        "horizon_bars": list(LABEL_V2_HORIZON_BARS_5M),
         "window_len": FUSION_WINDOW_LEN,
         "window_lens": fusion_window_lens(),
         "target_window_minutes": FUSION_TARGET_WINDOW_MINUTES,
@@ -884,18 +1099,18 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "train_frac": 0.70,
         "val_frac": 0.15,
         "embargo_bars": FUSION_EMBARGO_BARS,
-        "batch_size": 64,
-        "epochs": 12,
+        "batch_size": 128,
+        "epochs": 40,
         "lr": 1e-4,
         "weight_decay": 1e-3,
         "dropout": 0.30,
         "d_model": 64,
         "nhead": 4,
         "num_layers": 2,
-        "early_stop_patience": 3,
+        "early_stop_patience": 8,
         "label_smoothing": 0.05,
-        "horizon_loss_weights": [1.0, 0.8, 0.4],
-        "lr_schedule": "cosine",
+        "horizon_loss_weights": [1.0, 1.0, 1.0, 1.0],
+        "lr_schedule": "plateau",
         "seed": 42,
         "history_days": 900,
         "base_url": "https://api.india.delta.exchange",
@@ -918,11 +1133,15 @@ def default_fusion_training_config() -> Dict[str, Any]:
         "medium_balanced_acc": LABEL_V2_MEDIUM_BALANCED_ACC,
         "n_classes": LABEL_V2_DIRECTION_CARDINALITY,
         "label_scheme": "label_v2",
-        "path_loss_weights": dict(LABEL_V2_PATH_LOSS_WEIGHTS),
+        "experiment": "later_direction_only",
+        "use_class_weights": False,
+        "path_loss_weights": dict(LABEL_V2_DIRECTION_ONLY_PATH_LOSS_WEIGHTS),
         "label_v2_theta": dict(LABEL_V2_THETA_FROZEN),
         "run_shap": False,
         "shap_background": 32,
         "shap_explain_n": 64,
+        "use_state_embeddings": True,
+        "run_leave_one_group_out": False,
     }
 
 

@@ -1,4 +1,4 @@
-"""Build the v12 Label V2 multi-TF fusion research Colab (standalone, no GitHub clone).
+"""Build the v15 Label V2 multi-TF fusion research Colab (standalone, no GitHub clone).
 
 Run from repo root::
 
@@ -77,22 +77,35 @@ RESEARCH_SECTION_HEADINGS: tuple[str, ...] = (
     "## 26 JackSparrow export",
 )
 
-INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v12 Label V2)
+INTRO_MARKDOWN = """# BTCUSD fused multi-TF transformer research (v15 Label V2)
 
 One shared encoder, five **independent** OHLCV streams (5m / 10m / 30m / 1h / 2h),
-softmax TF fusion weights, three **3-class** direction heads (**+30m / +1h / +2h**)
-plus per-horizon **return / MFE / MAE** path heads. NEUTRAL is a trained class
-(frozen theta: h30m/h1h **0.50 ATR**, h2h **0.60 ATR**). Persistence and TP/SL
-path diagnostics stay off the loss. 5m is an input timeframe, not a forecast
-head. 10m is two closed 5m bars built **outside** the encoder.
+softmax TF fusion weights, four **3-class** direction heads (**+10m / +15m / +30m / +1h**)
+plus per-horizon **return / long-short MFE/MAE** path heads. NEUTRAL is a trained class
+(frozen theta **0.50 ATR** on all four heads). Persistence
+and TP/SL path diagnostics stay off the loss. 5m is an input timeframe, not a forecast
+head. 10m is two closed 5m bars built **outside** the encoder. **2h stays an encoder
+input**; it is not a research label head.
 
-This notebook trains a **research-only** v12 bundle
-(`JackSparrow_Transformer_BTCUSD_mtf_fusion_v12`). **Do not** copy it into
+This notebook trains a **research-only** v15 bundle
+(`JackSparrow_Transformer_BTCUSD_mtf_fusion_v15`). **Do not** copy it into
 `agent/model_storage/`. Live remains v11 2-class ONNX loaded by FusionModelNode.
-`fusion_ready_to_promote` is always `ready=false` (`research_v12_not_live`).
+v12/v13/v14/v15 research contracts must not load in FusionModelNode.
+`fusion_ready_to_promote` is always `ready=false` (`research_v15_not_live`).
 
-Optuna searches dropout / weight_decay / lr on val loss **before** the main
-train. Historical OHLCV comes from the Delta Exchange India public API.
+This pass is **later_direction_only**: path SmoothL1 weights are 0 and class
+weights are off (uniform CE). Path heads stay on the ONNX graph but are not
+trained. Judge balanced accuracy against last-bar D7 (~0.36–0.38), not 50%.
+
+v14 inputs drop duplicate scales and pattern flags, keep ATR-unit geometry,
+channel-scale (not full-window z-score), and embed `candle_class_id` plus
+`chart_pattern_id`. `FEATURE_CONTRACT_VERSION_V15` names the four-head ONNX
+layout this research trainer emits.
+
+Optuna stays **off** (`run_optuna=False`) so the main train uses the hand
+defaults (lr / dropout / weight_decay). Set it true to search those on val
+loss **before** the main train. Historical OHLCV comes from the Delta Exchange
+India public API.
 
 Edit repo `.py` files and regenerate:
 
@@ -127,9 +140,11 @@ CONFIG_CELL = """CONFIG = default_fusion_training_config()
 # Smoke overrides (comment out for a full research run):
 # CONFIG["epochs"] = 2
 # CONFIG["history_days"] = 120
-CONFIG["epochs"] = 12
-CONFIG["early_stop_patience"] = 3
-CONFIG["run_optuna"] = True
+CONFIG["epochs"] = 40
+CONFIG["early_stop_patience"] = 8
+CONFIG["batch_size"] = 128
+CONFIG["lr_schedule"] = "plateau"
+CONFIG["run_optuna"] = False
 CONFIG["optuna_trials"] = 3
 CONFIG["optuna_trial_epochs"] = 4
 CONFIG["optuna_refresh"] = False
@@ -146,16 +161,18 @@ CONFIG["run_walk_forward"] = True
 
 _content = Path("/content")
 _root = _content if _content.is_dir() else Path(".")
-export_dir = _root / "export" / FUSION_V12_BUNDLE_DIR_NAME
+export_dir = _root / "export" / FUSION_V15_BUNDLE_DIR_NAME
 export_dir.mkdir(parents=True, exist_ok=True)
 cache_dir = _root / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
 # Section 11 writes TF window memmaps under cache_dir/fusion_windows.
 print(json.dumps(CONFIG, indent=2, default=str))
-print("contract", FEATURE_CONTRACT_VERSION_V12)
+print("contract", FEATURE_CONTRACT_VERSION_V15)
+print("experiment", CONFIG.get("experiment"), "use_class_weights", CONFIG.get("use_class_weights"))
+print("path_loss_weights", CONFIG.get("path_loss_weights"))
 print("label scheme", CONFIG.get("label_scheme"), "theta", CONFIG.get("label_v2_theta"))
 print("input TFs", list(FUSION_INPUT_RESOLUTIONS))
-print("horizons", list(FUSION_HORIZON_KEYS))
+print("horizons", list(LABEL_V2_HORIZON_KEYS))
 print("fusion window spans (target", FUSION_TARGET_WINDOW_MINUTES, "min):")
 for res, width in fusion_window_lens().items():
     minutes = RESOLUTION_MINUTES[res]
@@ -209,7 +226,7 @@ print("as-of join uses closed bars only; sample lookahead check passed.")
 FEATURES_CELL = """preview = add_native_tf_features(
     frames["5m"].tail(400).reset_index(drop=True), resolution="5m"
 )
-feature_cols = list(fusion_feature_cols())
+feature_cols = list(fusion_feature_cols_v14())
 htf_cols = [c for c in preview.columns if str(c).startswith("htf_")]
 print(f"preview rows={len(preview)} n_features={len(feature_cols)}")
 print("htf_ resampled columns (must be empty):", htf_cols)
@@ -230,7 +247,7 @@ if overlap:
 """
 
 TARGETS_CELL = """labeled_5m = compute_fusion_path_targets(frames["5m"])
-labeled_5m = trim_fusion_label_tail(labeled_5m)
+labeled_5m = trim_label_v2_tail(labeled_5m)
 y_dir_preview, y_reg_preview = fusion_label_v2_matrices(labeled_5m)
 print("label rows", len(labeled_5m), "dir", y_dir_preview.shape, "path", y_reg_preview.shape)
 print("3-class mix BEAR/NEUTRAL/BULL (NEUTRAL is trained) per horizon:")
@@ -254,18 +271,24 @@ print("window_len (5m warm-up)", window_len, "stride", stride, "embargo", embarg
 print("Test is the final untouched tail after a purged embargo.")
 """
 
-SCALER_CELL = """print("Scaler: per-window z-score inside collect_training_windows (zscore=True).")
+SCALER_CELL = """print("Scaler: v14 channel scale inside collect_training_windows_v14.")
+print("ret_1 is per-window z-scored; ATR ratios and RSI/ADX keep level.")
 print("No global scaler is fit on val or test.")
-per_window = True
+per_window = False
 """
 
-SEQUENCES_CELL = """windows, labels, decision_times = build_dataset_from_ohlcv(
+SEQUENCES_CELL = """built = build_dataset_from_ohlcv(
     frames,
     window_lens=window_lens,
     window_len=window_len,
     stride=stride,
     memmap_dir=cache_dir / "fusion_windows",
 )
+windows = built.windows
+labels = built.labels
+decision_times = built.decision_times
+candle_ids = built.candle_ids
+chart_ids = built.chart_ids
 print("windows", {k: v.shape for k, v in windows.items()})
 print("labels dir", labels.direction.shape, "path", labels.path.shape, "decisions", len(decision_times))
 splits = purged_dev_test_split(
@@ -274,14 +297,22 @@ splits = purged_dev_test_split(
     train_frac=float(CONFIG.get("train_frac") or 0.70),
     val_frac=float(CONFIG.get("val_frac") or 0.15),
     embargo_bars=embargo,
+    candle_ids=candle_ids,
+    chart_ids=chart_ids,
 )
 print("split sizes", {k: len(v["labels"]) for k, v in splits.items()})
-n_features = len(fusion_feature_cols())
+n_features = len(fusion_feature_cols_v14())
 feature_finite_report(splits["train"]["windows"]["5m"], feature_cols)
-class_w = inverse_frequency_class_weights(
-    splits["train"]["labels"], LABEL_V2_DIRECTION_CARDINALITY
-)
-print("dir class weights", np.round(class_w, 3).tolist())
+if CONFIG.get("use_class_weights", True):
+    class_w = inverse_frequency_class_weights(
+        splits["train"]["labels"], LABEL_V2_DIRECTION_CARDINALITY
+    )
+    class_w_t = torch.tensor(class_w, dtype=torch.float32)
+    print("dir class weights", np.round(class_w, 3).tolist())
+else:
+    class_w = None
+    class_w_t = None
+    print("dir class weights off (uniform CE)")
 """
 
 MODEL_CELL = """device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -289,15 +320,17 @@ model = fusion_model_from_config(n_features, CONFIG).to(device)
 print(model)
 print("device", device)
 print("dropout", CONFIG.get("dropout"), "lr", CONFIG.get("lr"))
-print("heads", list(FUSION_HORIZON_KEYS), "classes BEAR/NEUTRAL/BULL plus ret/mfe/mae")
+print("heads", list(LABEL_V2_HORIZON_KEYS), "classes BEAR/NEUTRAL/BULL; path heads exported, not trained")
 """
 
-LOSS_CELL = """print("Loss is 3-class CE (NEUTRAL trained) plus SmoothL1 on finite ret/MFE/MAE.")
+LOSS_CELL = """print("Loss is 3-class CE (NEUTRAL trained). Path SmoothL1 is off when path weights are 0.")
 print("horizon_loss_weights", CONFIG.get("horizon_loss_weights"))
 print("path_loss_weights", CONFIG.get("path_loss_weights"))
+print("use_class_weights", CONFIG.get("use_class_weights"))
+print("experiment", CONFIG.get("experiment"))
 print("label_smoothing", CONFIG.get("label_smoothing"))
 print("No PnL loss. Invalid dirs (<0) and non-finite path values are masked.")
-print("class weights", np.round(class_w, 3).tolist())
+print("class weights", None if class_w is None else np.round(class_w, 3).tolist())
 """
 
 TRAIN_CELL = """train_hist = train_mtf_fusion(
@@ -305,16 +338,18 @@ TRAIN_CELL = """train_hist = train_mtf_fusion(
     train_loader,
     val_loader,
     device=device,
-    epochs=int(CONFIG.get("epochs") or 12),
+    epochs=int(CONFIG.get("epochs") or 40),
     lr=float(CONFIG.get("lr") or 1e-4),
     weight_decay=float(CONFIG.get("weight_decay") or 1e-3),
-    patience=int(CONFIG.get("early_stop_patience") or 3),
-    class_weights=torch.tensor(class_w, dtype=torch.float32),
+    patience=int(CONFIG.get("early_stop_patience") or 8),
+    class_weights=class_w_t,
     label_smoothing=float(CONFIG.get("label_smoothing") or 0.0),
-    horizon_weights=list(CONFIG.get("horizon_loss_weights") or [1.0, 0.8, 0.4]),
-    lr_schedule=str(CONFIG.get("lr_schedule") or "cosine"),
+    horizon_weights=list(CONFIG.get("horizon_loss_weights") or [1.0, 1.0, 1.0, 1.0]),
+    lr_schedule=str(CONFIG.get("lr_schedule") or "plateau"),
     amp=bool(CONFIG.get("amp", True)),
-    path_task_weights=dict(CONFIG.get("path_loss_weights") or LABEL_V2_PATH_LOSS_WEIGHTS),
+    path_task_weights=dict(
+        CONFIG.get("path_loss_weights") or LABEL_V2_DIRECTION_ONLY_PATH_LOSS_WEIGHTS
+    ),
 )
 print(train_hist)
 if not train_hist.get("ok"):
@@ -324,7 +359,7 @@ if not train_hist.get("ok"):
 VAL_CELL = """print("Validation (used for early stopping, temperature, and grades):")
 val_logits, val_y = predict_logits(model, val_loader, device)
 val_metrics = {}
-for j, key in enumerate(FUSION_HORIZON_KEYS):
+for j, key in enumerate(LABEL_V2_HORIZON_KEYS):
     val_metrics[key] = horizon_metrics(val_logits[:, j, :], val_y[:, j])
     m = val_metrics[key]
     print(
@@ -363,6 +398,8 @@ if CONFIG.get("run_walk_forward"):
         n_features=n_features,
         config=CONFIG,
         device=device,
+        candle_ids=slice_id_windows(candle_ids, slice(0, len(dev_labels))),
+        chart_ids=slice_id_windows(chart_ids, slice(0, len(dev_labels))),
     )
     print(json.dumps(walk_forward.get("mean") or {}, indent=2, default=str))
     del dev_windows, dev_labels
@@ -375,14 +412,14 @@ else:
 """
 
 CONFUSION_CELL = """print("Validation confusion (true x pred) per horizon, 0=BEAR 1=NEUTRAL 2=BULL:")
-for j, key in enumerate(FUSION_HORIZON_KEYS):
+for j, key in enumerate(LABEL_V2_HORIZON_KEYS):
     pred = val_logits[:, j, :].argmax(axis=-1)
     mat = confusion_counts(pred, val_y[:, j], LABEL_V2_DIRECTION_CARDINALITY)
     print(key)
     print(mat)
 """
 
-WEIGHTS_CELL = """fusion_w = model.fusion_weights().detach().cpu().numpy()
+WEIGHTS_CELL = """fusion_w = tensor_to_numpy(model.fusion_weights())
 tf_keys = tuple(splits["train"]["windows"].keys())
 print("softmax TF fusion weights:")
 for res, w in zip(tf_keys, fusion_w):
@@ -412,22 +449,28 @@ _eval_kw["windows_in_ram"] = False
 train_loader = make_loader(
     splits["train"]["windows"],
     splits["train"]["labels"],
-    batch_size=int(CONFIG.get("batch_size") or 64),
+    batch_size=int(CONFIG.get("batch_size") or 128),
     shuffle=True,
+    candle_ids=splits["train"].get("candle_ids"),
+    chart_ids=splits["train"].get("chart_ids"),
     **_loader_kw,
 )
 val_loader = make_loader(
     splits["val"]["windows"],
     splits["val"]["labels"],
-    batch_size=int(CONFIG.get("batch_size") or 64),
+    batch_size=int(CONFIG.get("batch_size") or 128),
     shuffle=False,
+    candle_ids=splits["val"].get("candle_ids"),
+    chart_ids=splits["val"].get("chart_ids"),
     **_eval_kw,
 )
 test_loader = make_loader(
     splits["test"]["windows"],
     splits["test"]["labels"],
-    batch_size=int(CONFIG.get("batch_size") or 64),
+    batch_size=int(CONFIG.get("batch_size") or 128),
     shuffle=False,
+    candle_ids=splits["test"].get("candle_ids"),
+    chart_ids=splits["test"].get("chart_ids"),
     **_eval_kw,
 )
 print("Loaders ready. Test is frozen until the final test section.")
@@ -439,7 +482,7 @@ CONFIG = optuna_search(
     train_loader=train_loader,
     val_loader=val_loader,
     device=device,
-    class_weights=torch.tensor(class_w, dtype=torch.float32),
+    class_weights=class_w_t,
     cache_dir=cache_dir,
 )
 print(
@@ -464,7 +507,7 @@ print("No second fit on train+val. Test split stays frozen.")
 FINAL_TEST_CELL = """print("Final untouched test (frozen weights + frozen gates):")
 test_logits, test_y = predict_logits(model, test_loader, device)
 final_test = {}
-for j, key in enumerate(FUSION_HORIZON_KEYS):
+for j, key in enumerate(LABEL_V2_HORIZON_KEYS):
     temp = float(gates["horizons"][key]["temperature"])
     final_test[key] = horizon_metrics(
         test_logits[:, j, :], test_y[:, j], temperature=temp
@@ -478,7 +521,7 @@ promo = fusion_ready_to_promote(walk_forward, final_test, gates)
 print(json.dumps(promo, indent=2, default=str))
 if not promo["ready"]:
     print(
-        "DO NOT PROMOTE: v12 Label V2 research export is not live-compatible "
+        "DO NOT PROMOTE: v15 Label V2 research export is not live-compatible "
         f"({promo.get('reason')}). Live stays on v11."
     )
 """
@@ -510,9 +553,9 @@ else:
         "window_len": window_len,
         "window_lens": window_lens,
         "target_window_minutes": CONFIG.get("target_window_minutes"),
-        "feature_contract_version": FEATURE_CONTRACT_VERSION_V12,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION_V15,
         "resolutions": list(FUSION_INPUT_RESOLUTIONS),
-        "horizon_keys": list(FUSION_HORIZON_KEYS),
+        "horizon_keys": list(LABEL_V2_HORIZON_KEYS),
         "tf_fusion_weights": [float(x) for x in fusion_w],
         "val_metrics": val_metrics,
         "horizon_gates": gates,
@@ -556,9 +599,9 @@ else:
     print("Exported", onnx_path)
     print("feature_config", cfg_path)
     print("metadata", meta_path)
-    print("Do NOT copy this v12 bundle into agent/model_storage/. Live remains v11.")
+    print("Do NOT copy this v15 bundle into agent/model_storage/. Live remains v11.")
     import shutil
-    zip_stem = export_dir.parent / FUSION_V12_BUNDLE_DIR_NAME
+    zip_stem = export_dir.parent / FUSION_V15_BUNDLE_DIR_NAME
     zip_path = Path(shutil.make_archive(str(zip_stem), "zip", root_dir=export_dir))
     print("Wrote zip", zip_path)
     try:
@@ -575,9 +618,10 @@ NOTES_MARKDOWN = """## Notes
 - 10m is assembled from two closed 5m bars **outside** the model.
 - Each TF runs candle/chart/structure engines on its **native** grid. No HTF resample.
 - Walk-forward, Optuna, and temperature fitting never see the final test split.
-- Training ``y`` is Label V2: 3-class direction (NEUTRAL trained) plus ret/MFE/MAE.
+- Training ``y`` is Label V2: 3-class direction (NEUTRAL trained) plus
+  ret / long-short MFE/MAE.
 - Persistence and TP/SL first-touch stay diagnostics, not loss heads.
-- Export is v12 research-only. ``fusion_ready_to_promote`` is always false.
+- Export is v15 research-only. ``fusion_ready_to_promote`` is always false.
   Do **not** copy the bundle into ``agent/model_storage/``. Live stays on v11.
 - Paper PnL is a secondary diagnostic, not the training loss.
 - Section 26 zips the export folder and starts a Colab download on success.

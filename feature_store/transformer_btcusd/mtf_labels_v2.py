@@ -1,4 +1,4 @@
-"""Label V2 path targets: ATR-normalized return, MFE, MAE, persistence.
+"""Label V2 path targets: ATR-normalized return and side-aware MFE/MAE.
 
 Research-only. Live v11 fusion remains 2-class close-to-close with ignore_index
 NEUTRAL. Path windows are t+1..t+k; High_t / Low_t never enter the target.
@@ -12,12 +12,12 @@ import numpy as np
 import pandas as pd
 
 from feature_store.transformer_btcusd.contract import (
-    FUSION_DURATION_ATR_MULT,
-    FUSION_HORIZON_BARS_5M,
-    FUSION_HORIZON_KEYS,
     LABEL_V2_COLS,
     LABEL_V2_DIRECTION_NAMES,
     LABEL_V2_DISAGREE_MIN,
+    LABEL_V2_DURATION_ATR_MULT,
+    LABEL_V2_HORIZON_BARS_5M,
+    LABEL_V2_HORIZON_KEYS,
     LABEL_V2_MINORITY_RATE,
     LABEL_V2_PATH_FIELDS,
     LABEL_V2_PERSIST_RANGE_MIN,
@@ -30,9 +30,9 @@ from feature_store.transformer_btcusd.contract import (
     LABEL_V2_TP_SL_NEITHER,
     LABEL_V2_TP_SL_SL_FIRST,
     LABEL_V2_TP_SL_TP_FIRST,
-    MAX_FUSION_HORIZON_BARS,
+    MAX_LABEL_V2_HORIZON_BARS,
 )
-from feature_store.transformer_btcusd.mtf_labels import trim_fusion_label_tail
+from feature_store.transformer_btcusd.mtf_labels import trim_label_v2_tail
 
 _EPS = 1e-9
 _QUANTILES: Tuple[float, ...] = (0.10, 0.25, 0.50, 0.75, 0.90)
@@ -241,25 +241,27 @@ def fusion_label_v2_matrices(
     *,
     thetas: Optional[Mapping[str, float]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Build (n, H) 3-class dirs and (n, H, 3) ret/mfe/mae path targets.
+    """Build (n, H) 3-class dirs and (n, H, 5) path targets.
 
+    Path last-dim order matches ``LABEL_V2_REG_FIELDS``:
+    ret, long_mfe, long_mae, short_mfe, short_mae.
     Direction uses frozen per-horizon theta. Non-finite return maps to -1.
     """
     theta_map = dict(LABEL_V2_THETA_FROZEN)
     if thetas is not None:
         theta_map.update({str(k): float(v) for k, v in thetas.items()})
     n = int(len(df))
-    n_h = len(FUSION_HORIZON_KEYS)
+    n_h = len(LABEL_V2_HORIZON_KEYS)
     y_dir = np.full((n, n_h), -1, dtype=np.int64)
     y_reg = np.full((n, n_h, len(LABEL_V2_REG_FIELDS)), np.nan, dtype=np.float32)
-    for j, key in enumerate(FUSION_HORIZON_KEYS):
+    for j, key in enumerate(LABEL_V2_HORIZON_KEYS):
         ret = df[f"{key}_ret"].to_numpy(dtype=np.float64)
-        mfe = df[f"{key}_mfe"].to_numpy(dtype=np.float64)
-        mae = df[f"{key}_mae"].to_numpy(dtype=np.float64)
-        y_reg[:, j, 0] = ret.astype(np.float32)
-        y_reg[:, j, 1] = mfe.astype(np.float32)
-        y_reg[:, j, 2] = mae.astype(np.float32)
         y_dir[:, j] = direction_from_return_array(ret, float(theta_map[str(key)]))
+        for k, field in enumerate(LABEL_V2_REG_FIELDS):
+            col = f"{key}_{field}"
+            if col not in df.columns:
+                continue
+            y_reg[:, j, k] = df[col].to_numpy(dtype=np.float32)
     return y_dir, y_reg
 
 
@@ -274,7 +276,7 @@ def label_v2_class_mix(y_dir: np.ndarray) -> Dict[str, Dict[str, float]]:
     """Per-horizon 3-class counts. Invalid dirs (<0) are unlabeled."""
     report: Dict[str, Dict[str, float]] = {}
     mat = np.asarray(y_dir, dtype=np.int64)
-    for j, key in enumerate(FUSION_HORIZON_KEYS):
+    for j, key in enumerate(LABEL_V2_HORIZON_KEYS):
         col = mat[:, j] if mat.ndim == 2 else mat
         n = int(len(col))
         unlabeled = int(np.sum(col < 0))
@@ -295,12 +297,15 @@ def compute_fusion_path_targets(df5m: pd.DataFrame) -> pd.DataFrame:
     For each fusion horizon k, at bar t:
 
     * ``ret`` = (Close[t+k] - Close[t]) / ATR[t]
-    * ``mfe`` = max(0, (max(High[t+1:t+k]) - Close[t]) / ATR[t])
-    * ``mae`` = min(0, (min(Low[t+1:t+k]) - Close[t]) / ATR[t])
+    * ``long_mfe`` = max(0, (max High[t+1:t+k] - Close[t]) / ATR[t])
+    * ``short_mfe`` = max(0, (Close[t] - min Low[t+1:t+k]) / ATR[t])
+    * ``long_mae`` = max(0, (Close[t] - min Low[t+1:t_long_mfe]) / ATR[t])
+    * ``short_mae`` = max(0, (max High[t+1:t_short_mfe] - Close[t]) / ATR[t])
     * ``persist`` = mean(sign(Close[t+j] - Close[t])) for j=1..k
-    * ``t_mfe`` / ``t_mae`` = 1-based bar index of the first extreme
+    * ``t_long_mfe`` / ``t_short_mfe`` = 1-based first max-high / min-low bar
 
-    The last ``MAX_FUSION_HORIZON_BARS`` rows are NaN (insufficient +2h future).
+    MAE windows are inclusive of the MFE bar (same-bar opposite wick counts).
+    The last ``MAX_LABEL_V2_HORIZON_BARS`` rows are NaN (insufficient +1h future).
     """
     out = _ensure_ohlcv_time(df5m)
     n = len(out)
@@ -308,44 +313,60 @@ def compute_fusion_path_targets(df5m: pd.DataFrame) -> pd.DataFrame:
     high = out["high"].to_numpy(dtype=np.float64)
     low = out["low"].to_numpy(dtype=np.float64)
     atr = _atr_series(out)
-    max_k = int(MAX_FUSION_HORIZON_BARS)
+    max_k = int(MAX_LABEL_V2_HORIZON_BARS)
     n_valid = max(n - max_k, 0)
     denom = np.maximum(atr[:n_valid], _EPS) if n_valid else np.zeros(0)
     entry = close[:n_valid] if n_valid else np.zeros(0)
 
     for field in LABEL_V2_PATH_FIELDS:
-        for key in FUSION_HORIZON_KEYS:
+        for key in LABEL_V2_HORIZON_KEYS:
             out[f"{key}_{field}"] = np.full(n, np.nan, dtype=np.float64)
 
     if n_valid == 0:
         return out
 
-    for key, k in zip(FUSION_HORIZON_KEYS, FUSION_HORIZON_BARS_5M):
+    for key, k in zip(LABEL_V2_HORIZON_KEYS, LABEL_V2_HORIZON_BARS_5M):
         kk = int(k)
         fwd_close = _forward_stack(close, n_valid, kk)
         fwd_high = _forward_stack(high, n_valid, kk)
         fwd_low = _forward_stack(low, n_valid, kk)
-        raw_up = (fwd_high.max(axis=1) - entry) / denom
-        raw_dn = (fwd_low.min(axis=1) - entry) / denom
+        t_long = fwd_high.argmax(axis=1)
+        t_short = fwd_low.argmin(axis=1)
+        bar_idx = np.arange(kk, dtype=np.int64)
+        long_mask = bar_idx[None, :] <= t_long[:, None]
+        short_mask = bar_idx[None, :] <= t_short[:, None]
+        min_low_until = np.where(long_mask, fwd_low, np.inf).min(axis=1)
+        max_high_until = np.where(short_mask, fwd_high, -np.inf).max(axis=1)
+        long_mfe = np.maximum((fwd_high.max(axis=1) - entry) / denom, 0.0)
+        short_mfe = np.maximum((entry - fwd_low.min(axis=1)) / denom, 0.0)
+        long_mae = np.maximum((entry - min_low_until) / denom, 0.0)
+        short_mae = np.maximum((max_high_until - entry) / denom, 0.0)
         ret = (fwd_close[:, -1] - entry) / denom
         delta = fwd_close - entry[:, None]
         persist = np.sign(delta).mean(axis=1)
-        t_mfe = fwd_high.argmax(axis=1).astype(np.float64) + 1.0
-        t_mae = fwd_low.argmin(axis=1).astype(np.float64) + 1.0
+        t_long_mfe = t_long.astype(np.float64) + 1.0
+        t_short_mfe = t_short.astype(np.float64) + 1.0
         atr_ok = np.isfinite(atr[:n_valid]) & (atr[:n_valid] > _EPS)
         nan_bad = ~atr_ok
-        ret[nan_bad] = np.nan
-        raw_up[nan_bad] = np.nan
-        raw_dn[nan_bad] = np.nan
-        persist[nan_bad] = np.nan
-        t_mfe[nan_bad] = np.nan
-        t_mae[nan_bad] = np.nan
+        for arr in (
+            ret,
+            long_mfe,
+            long_mae,
+            short_mfe,
+            short_mae,
+            persist,
+            t_long_mfe,
+            t_short_mfe,
+        ):
+            arr[nan_bad] = np.nan
         out.loc[: n_valid - 1, f"{key}_ret"] = ret
-        out.loc[: n_valid - 1, f"{key}_mfe"] = np.maximum(raw_up, 0.0)
-        out.loc[: n_valid - 1, f"{key}_mae"] = np.minimum(raw_dn, 0.0)
+        out.loc[: n_valid - 1, f"{key}_long_mfe"] = long_mfe
+        out.loc[: n_valid - 1, f"{key}_long_mae"] = long_mae
+        out.loc[: n_valid - 1, f"{key}_short_mfe"] = short_mfe
+        out.loc[: n_valid - 1, f"{key}_short_mae"] = short_mae
         out.loc[: n_valid - 1, f"{key}_persist"] = persist
-        out.loc[: n_valid - 1, f"{key}_t_mfe"] = t_mfe
-        out.loc[: n_valid - 1, f"{key}_t_mae"] = t_mae
+        out.loc[: n_valid - 1, f"{key}_t_long_mfe"] = t_long_mfe
+        out.loc[: n_valid - 1, f"{key}_t_short_mfe"] = t_short_mfe
     return out
 
 
@@ -419,8 +440,10 @@ def _expectancy_atr(
 def _class_block(
     mask: np.ndarray,
     ret: np.ndarray,
-    mfe: np.ndarray,
-    mae: np.ndarray,
+    long_mfe: np.ndarray,
+    short_mfe: np.ndarray,
+    long_mae: np.ndarray,
+    short_mae: np.ndarray,
     persist: np.ndarray,
     state_persist: np.ndarray,
     n_total: int,
@@ -430,13 +453,16 @@ def _class_block(
         "n": n,
         "rate": float(n) / float(max(n_total, 1)),
     }
+    empty_q = _quantile_map(np.array([]))
     if n == 0:
         block.update(
             {
                 "e_r": None,
-                "r_q": _quantile_map(np.array([])),
-                "mfe_q": _quantile_map(np.array([])),
-                "mae_q": _quantile_map(np.array([])),
+                "r_q": empty_q,
+                "mfe_q": empty_q,
+                "mae_q": empty_q,
+                "long_mae_q": empty_q,
+                "short_mae_q": empty_q,
                 "persist_mean": None,
                 "state_persist_mean": None,
             }
@@ -444,8 +470,10 @@ def _class_block(
         return block
     block["e_r"] = _py(np.mean(ret[mask]))
     block["r_q"] = _quantile_map(ret[mask])
-    block["mfe_q"] = _quantile_map(mfe[mask])
-    block["mae_q"] = _quantile_map(mae[mask])
+    block["mfe_q"] = _quantile_map(long_mfe[mask])
+    block["mae_q"] = _quantile_map(short_mfe[mask])
+    block["long_mae_q"] = _quantile_map(long_mae[mask])
+    block["short_mae_q"] = _quantile_map(short_mae[mask])
     block["persist_mean"] = _py(np.mean(persist[mask]))
     block["state_persist_mean"] = _py(np.mean(state_persist[mask]))
     return block
@@ -556,7 +584,7 @@ def summarize_label_v2(
     high_all = labeled["high"].to_numpy(dtype=np.float64)
     low_all = labeled["low"].to_numpy(dtype=np.float64)
     atr_all = _atr_series(labeled)
-    trimmed = trim_fusion_label_tail(labeled)
+    trimmed = trim_label_v2_tail(labeled)
     n = len(trimmed)
     close = close_all[:n]
     atr = atr_all[:n]
@@ -567,25 +595,33 @@ def summarize_label_v2(
 
     horizons: Dict[str, Any] = {}
     stacks: Dict[str, Tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-    for key, k in zip(FUSION_HORIZON_KEYS, FUSION_HORIZON_BARS_5M):
+    for key, k in zip(LABEL_V2_HORIZON_KEYS, LABEL_V2_HORIZON_BARS_5M):
         stacks[str(key)] = (
             _forward_stack(high_all, n, int(k)),
             _forward_stack(low_all, n, int(k)),
             _forward_stack(close_all, n, int(k)),
         )
 
-    for key, k in zip(FUSION_HORIZON_KEYS, FUSION_HORIZON_BARS_5M):
+    for key, k in zip(LABEL_V2_HORIZON_KEYS, LABEL_V2_HORIZON_BARS_5M):
         kk = int(k)
         ret = trimmed[f"{key}_ret"].to_numpy(dtype=np.float64)
-        mfe = trimmed[f"{key}_mfe"].to_numpy(dtype=np.float64)
-        mae = trimmed[f"{key}_mae"].to_numpy(dtype=np.float64)
+        long_mfe = trimmed[f"{key}_long_mfe"].to_numpy(dtype=np.float64)
+        short_mfe = trimmed[f"{key}_short_mfe"].to_numpy(dtype=np.float64)
+        long_mae = trimmed[f"{key}_long_mae"].to_numpy(dtype=np.float64)
+        short_mae = trimmed[f"{key}_short_mae"].to_numpy(dtype=np.float64)
         persist = trimmed[f"{key}_persist"].to_numpy(dtype=np.float64)
-        valid = np.isfinite(ret) & np.isfinite(mfe) & np.isfinite(mae)
+        valid = (
+            np.isfinite(ret)
+            & np.isfinite(long_mfe)
+            & np.isfinite(short_mfe)
+            & np.isfinite(long_mae)
+            & np.isfinite(short_mae)
+        )
         n_valid = int(np.sum(valid))
         fwd_high, fwd_low, fwd_close = stacks[str(key)]
         entry = close
         denom = np.maximum(atr, _EPS)
-        live_sl, live_tp = FUSION_DURATION_ATR_MULT[str(key)]
+        live_sl, live_tp = LABEL_V2_DURATION_ATR_MULT[str(key)]
         live_key = _pair_key(live_sl, live_tp)
         by_theta: Dict[str, Any] = {}
         stride = np.zeros(n, dtype=bool)
@@ -615,12 +651,28 @@ def summarize_label_v2(
             for cid, name in LABEL_V2_DIRECTION_NAMES.items():
                 mask = (dirs == int(cid)) & valid
                 classes[name] = _class_block(
-                    mask, ret, mfe, mae, persist, state_p, n_valid
+                    mask,
+                    ret,
+                    long_mfe,
+                    short_mfe,
+                    long_mae,
+                    short_mae,
+                    persist,
+                    state_p,
+                    n_valid,
                 )
                 mask_stride = mask & stride
                 n_stride = int(np.sum(valid & stride))
                 classes[name]["nonoverlap"] = _class_block(
-                    mask_stride, ret, mfe, mae, persist, state_p, n_stride
+                    mask_stride,
+                    ret,
+                    long_mfe,
+                    short_mfe,
+                    long_mae,
+                    short_mae,
+                    persist,
+                    state_p,
+                    n_stride,
                 )
             tp_sl_stats: Dict[str, Any] = {}
             for sl_m, tp_m in tp_sl_grid:
@@ -652,8 +704,10 @@ def summarize_label_v2(
                 "theta": float(theta),
                 "n_valid": n_valid,
                 "classes": classes,
-                "corr_r_mfe": _py(_spearman(ret[valid], mfe[valid])),
-                "corr_r_abs_mae": _py(_spearman(ret[valid], np.abs(mae[valid]))),
+                "corr_r_mfe": _py(_spearman(ret[valid], long_mfe[valid])),
+                "corr_r_abs_mae": _py(_spearman(ret[valid], short_mfe[valid])),
+                "corr_r_long_mae": _py(_spearman(ret[valid], long_mae[valid])),
+                "corr_r_short_mae": _py(_spearman(ret[valid], short_mae[valid])),
                 "disagreement_rate": float(disagree_n) / float(max(n_dir, 1)),
                 "disagreement_n": disagree_n,
                 "n_directional": n_dir,
@@ -669,36 +723,36 @@ def summarize_label_v2(
             }
 
         cross: Dict[str, Any] = {}
-        r30 = trimmed["h30m_ret"].to_numpy(dtype=np.float64)
+        r10 = trimmed["h10m_ret"].to_numpy(dtype=np.float64)
+        r15 = trimmed["h15m_ret"].to_numpy(dtype=np.float64)
         r1h = trimmed["h1h_ret"].to_numpy(dtype=np.float64)
-        r2h = trimmed["h2h_ret"].to_numpy(dtype=np.float64)
-        both = np.isfinite(r30) & np.isfinite(r1h) & np.isfinite(r2h)
+        both = np.isfinite(r10) & np.isfinite(r15) & np.isfinite(r1h)
         for theta in thetas:
-            d30 = direction_from_return_array(r30, float(theta))
+            d10 = direction_from_return_array(r10, float(theta))
+            d15 = direction_from_return_array(r15, float(theta))
             d1h = direction_from_return_array(r1h, float(theta))
-            d2h = direction_from_return_array(r2h, float(theta))
-            n30 = int(np.sum(both & (d30 == _BULL)))
+            n10 = int(np.sum(both & (d10 == _BULL)))
             cross[_theta_key(float(theta))] = {
-                "p_30m_bull_and_1h_bull": float(
-                    np.sum(both & (d30 == _BULL) & (d1h == _BULL))
+                "p_10m_bull_and_15m_bull": float(
+                    np.sum(both & (d10 == _BULL) & (d15 == _BULL))
                 )
-                / float(max(n30, 1)),
-                "p_30m_bull_and_2h_not_bull": float(
-                    np.sum(both & (d30 == _BULL) & (d2h != _BULL))
+                / float(max(n10, 1)),
+                "p_10m_bull_and_1h_not_bull": float(
+                    np.sum(both & (d10 == _BULL) & (d1h != _BULL))
                 )
-                / float(max(n30, 1)),
-                "n_30m_bull": n30,
+                / float(max(n10, 1)),
+                "n_10m_bull": n10,
             }
 
         gate = _gate_one_horizon(by_theta, live_key)
-        if str(key) == "h2h" and gate["status"] == "no-go":
-            gate["status"] = "regression-only"
         horizons[str(key)] = {
             "bars": kk,
             "live_sl_atr": float(live_sl),
             "live_tp_atr": float(live_tp),
-            "corr_r_mfe": _py(_spearman(ret[valid], mfe[valid])),
-            "corr_r_abs_mae": _py(_spearman(ret[valid], np.abs(mae[valid]))),
+            "corr_r_mfe": _py(_spearman(ret[valid], long_mfe[valid])),
+            "corr_r_abs_mae": _py(_spearman(ret[valid], short_mfe[valid])),
+            "corr_r_long_mae": _py(_spearman(ret[valid], long_mae[valid])),
+            "corr_r_short_mae": _py(_spearman(ret[valid], short_mae[valid])),
             "by_theta": by_theta,
             "cross_horizon": cross,
             "gate": gate,
@@ -709,14 +763,8 @@ def summarize_label_v2(
     for key, row in horizons.items():
         gate = row["gate"]
         chosen[key] = gate.get("chosen_theta")
-        if key != "h2h" and gate.get("status") != "go":
+        if gate.get("status") != "go":
             overall = "no-go"
-        if key == "h2h" and gate.get("status") == "no-go":
-            overall = "no-go"
-    if overall == "go" and horizons.get("h2h", {}).get("gate", {}).get("status") == (
-        "regression-only"
-    ):
-        overall = "go_with_2h_regression_only"
 
     return _py(
         {
@@ -737,7 +785,7 @@ def format_label_v2_table(report: Mapping[str, Any]) -> str:
         f"{'h':<6} {'th':>5} {'BEAR':>6} {'NEU':>6} {'BULL':>6} "
         f"{'E[R+/-]':>11} {'disagree':>8} {'gate':<16}",
     ]
-    for key in FUSION_HORIZON_KEYS:
+    for key in LABEL_V2_HORIZON_KEYS:
         hrow = (report.get("horizons") or {}).get(key) or {}
         by_theta = hrow.get("by_theta") or {}
         gate = hrow.get("gate") or {}

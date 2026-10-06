@@ -91,14 +91,15 @@ def _freeze_gate(report: Dict[str, Any]) -> Dict[str, Any]:
         "overall": report.get("overall"),
         "chosen_theta": chosen,
         "frozen": {
+            "h10m": chosen.get("h10m"),
+            "h15m": chosen.get("h15m"),
             "h30m": chosen.get("h30m"),
             "h1h": chosen.get("h1h"),
-            "h2h": chosen.get("h2h"),
         },
         "span": span,
         "notes": (
-            "Do not retrain the fused Transformer until overall is go "
-            "(h2h may be regression-only). Live v11 2-class labels stay in force."
+            "Do not retrain the fused Transformer until overall is go. "
+            "Live v11 2-class labels stay in force."
         ),
     }
 

@@ -1,0 +1,24 @@
+{
+  "feature_contract_version": "transformer_btcusd_mtf_fusion_v15",
+  "scaler": "v14_channel",
+  "label_scheme": "label_v2",
+  "label_v2_theta": {
+    "h10m": 0.5,
+    "h15m": 0.5,
+    "h30m": 0.5,
+    "h1h": 0.5
+  },
+  "window_lens": {
+    "5m": 120,
+    "10m": 60,
+    "30m": 20,
+    "1h": 10,
+    "2h": 5
+  },
+  "window_len": 120,
+  "target_window_minutes": 600,
+  "stride": 4,
+  "n_features": 77,
+  "feature_fingerprint": "e34bcf8530609f08",
+  "n_samples": 64751
+}

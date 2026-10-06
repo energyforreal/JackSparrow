@@ -1,8 +1,9 @@
-"""Shared-encoder multi-TF fusion Transformer (v12 research).
+"""Shared-encoder multi-TF fusion Transformer (v15 research).
 
 One parameter set applied independently to 5m/10m/30m/1h/2h windows, softmax
-fusion weights, three 3-class direction heads plus per-horizon ret/MFE/MAE.
-Live v11 remains 2-class ignore_index NEUTRAL in FusionModelNode.
+fusion weights, four 3-class direction heads (10m/15m/30m/1h) plus per-horizon
+ret and side-aware long/short MFE/MAE. Optional candle/chart embeddings. Live
+v11 remains 2-class ignore_index NEUTRAL in FusionModelNode.
 """
 
 from __future__ import annotations
@@ -17,10 +18,15 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 
 from feature_store.transformer_btcusd.contract import (
+    CANDLE_CLASS_CARDINALITY,
+    CANDLE_EMBED_DIM,
+    CHART_EMBED_DIM,
+    CHART_PATTERN_CARDINALITY,
     FUSION_INPUT_RESOLUTIONS,
     FUSION_TARGET_WINDOW_MINUTES,
     FUSION_WINDOW_LEN,
     LABEL_V2_DIRECTION_CARDINALITY,
+    LABEL_V2_HORIZON_KEYS,
     LABEL_V2_PATH_LOSS_WEIGHTS,
     LABEL_V2_REG_FIELDS,
     N_FUSION_HORIZONS,
@@ -31,7 +37,7 @@ from feature_store.transformer_btcusd.inference import zscore_window
 
 
 class FusionTrainLabels:
-    """Direction (n, H) int64 plus path (n, H, 3) float32 aligned on samples."""
+    """Direction (n, H) int64 plus path (n, H, F) float32 aligned on samples."""
 
     __slots__ = ("direction", "path")
 
@@ -73,6 +79,29 @@ def inverse_frequency_class_weights(
     return weights.astype(np.float32)
 
 
+def resolve_fusion_class_weights(
+    class_ids: Any,
+    n_classes: int,
+    config: Optional[Mapping[str, Any]] = None,
+) -> Optional[np.ndarray]:
+    """Inverse-frequency CE weights, or None when ``use_class_weights`` is False."""
+    if config is not None and not bool(config.get("use_class_weights", True)):
+        return None
+    return inverse_frequency_class_weights(class_ids, n_classes)
+
+
+def fusion_class_weight_tensor(
+    class_ids: Any,
+    n_classes: int,
+    config: Optional[Mapping[str, Any]] = None,
+) -> Optional[torch.Tensor]:
+    """Host float32 class-weight tensor, or None for uniform CE."""
+    weights = resolve_fusion_class_weights(class_ids, n_classes, config)
+    if weights is None:
+        return None
+    return torch.tensor(weights, dtype=torch.float32)
+
+
 WindowArray = Union[np.ndarray, torch.Tensor]
 
 
@@ -84,6 +113,27 @@ def _ndarray_to_tensor(array: np.ndarray, dtype: torch.dtype) -> torch.Tensor:
         return torch.as_tensor(array, dtype=dtype)
     except RuntimeError:
         return torch.tensor(np.asarray(array), dtype=dtype)
+
+
+def tensor_to_numpy(tensor: torch.Tensor) -> np.ndarray:
+    """Host ndarray. Copies via Python when the torch/numpy C API is broken."""
+    host = tensor.detach().cpu().contiguous()
+    try:
+        return host.numpy()
+    except RuntimeError:
+        np_dtype: Any = None
+        if host.dtype == torch.float32:
+            np_dtype = np.float32
+        elif host.dtype == torch.float64:
+            np_dtype = np.float64
+        elif host.dtype == torch.int64:
+            np_dtype = np.int64
+        elif host.dtype == torch.int32:
+            np_dtype = np.int32
+        arr = np.array(host.tolist())
+        if np_dtype is not None:
+            return arr.astype(np_dtype, copy=False)
+        return arr
 
 
 def _window_row_to_tensor(window: WindowArray) -> torch.Tensor:
@@ -99,11 +149,25 @@ def _window_row_to_tensor(window: WindowArray) -> torch.Tensor:
     return _ndarray_to_tensor(arr, torch.float32)
 
 
+def _id_row_to_tensor(window: WindowArray) -> torch.Tensor:
+    """One host int64 tensor for a (time,) id row."""
+    if isinstance(window, torch.Tensor):
+        row = window.detach()
+        if row.dtype != torch.long:
+            row = row.to(dtype=torch.long)
+        return row if row.is_contiguous() else row.contiguous()
+    arr = np.asarray(window)
+    if arr.dtype != np.int64 or not arr.flags.c_contiguous:
+        arr = np.array(arr, dtype=np.int64, copy=True, order="C")
+    return _ndarray_to_tensor(arr, torch.long)
+
+
 class MtfFusionDataset(Dataset):
     """Per-sample TF windows plus direction labels and optional path targets.
 
     Accepts numpy memmaps or CPU float32 tensors. Tensor storage avoids a
-    numpy copy on each ``__getitem__`` when windows fit in RAM.
+    numpy copy on each ``__getitem__`` when windows fit in RAM. Optional
+    candle/chart id windows are int64 and never z-scored.
     """
 
     def __init__(
@@ -113,6 +177,8 @@ class MtfFusionDataset(Dataset):
         *,
         path_labels: Optional[Union[np.ndarray, torch.Tensor]] = None,
         per_window_zscore: bool = False,
+        candle_ids: Optional[Mapping[str, WindowArray]] = None,
+        chart_ids: Optional[Mapping[str, WindowArray]] = None,
     ) -> None:
         self.resolutions = tuple(FUSION_INPUT_RESOLUTIONS)
         n = None
@@ -136,6 +202,18 @@ class MtfFusionDataset(Dataset):
                 n = n_i
             elif n_i != n:
                 raise ValueError(f"Window length mismatch for {res}")
+        self.candle_ids: Optional[Dict[str, WindowArray]] = None
+        self.chart_ids: Optional[Dict[str, WindowArray]] = None
+        if candle_ids is not None or chart_ids is not None:
+            if candle_ids is None or chart_ids is None:
+                raise ValueError("candle_ids and chart_ids must be provided together")
+            self.candle_ids = {}
+            self.chart_ids = {}
+            for res in self.resolutions:
+                cdl = _store_id_array(candle_ids[res], n=int(n or 0), name=f"candle {res}")
+                chp = _store_id_array(chart_ids[res], n=int(n or 0), name=f"chart {res}")
+                self.candle_ids[res] = cdl
+                self.chart_ids[res] = chp
         path_src: Optional[Union[np.ndarray, torch.Tensor]] = path_labels
         if isinstance(labels, FusionTrainLabels):
             dir_src: Union[np.ndarray, torch.Tensor] = labels.direction
@@ -172,6 +250,11 @@ class MtfFusionDataset(Dataset):
             if self.per_window_zscore and not isinstance(window, torch.Tensor):
                 window = zscore_window(np.asarray(window, dtype=np.float32))
             tensors.append(_window_row_to_tensor(window))
+        if self.candle_ids is not None and self.chart_ids is not None:
+            for res in self.resolutions:
+                tensors.append(_id_row_to_tensor(self.candle_ids[res][i]))
+            for res in self.resolutions:
+                tensors.append(_id_row_to_tensor(self.chart_ids[res][i]))
         label_row = self.labels[i]
         if isinstance(label_row, torch.Tensor):
             tensors.append(label_row.to(dtype=torch.long))
@@ -186,6 +269,24 @@ class MtfFusionDataset(Dataset):
                     _ndarray_to_tensor(np.asarray(path_row, dtype=np.float32), torch.float32)
                 )
         return tuple(tensors)
+
+
+def _store_id_array(arr: WindowArray, *, n: int, name: str) -> WindowArray:
+    if isinstance(arr, torch.Tensor):
+        stored = arr.detach()
+        if stored.dtype != torch.long:
+            stored = stored.to(dtype=torch.long)
+        if not stored.is_contiguous():
+            stored = stored.contiguous()
+        n_i = int(stored.shape[0])
+    else:
+        stored = arr
+        if not isinstance(stored, np.ndarray) or stored.dtype != np.int64:
+            stored = np.asarray(arr, dtype=np.int64)
+        n_i = int(len(stored))
+    if n_i != n:
+        raise ValueError(f"{name} length {n_i} != {n}")
+    return stored
 
 
 class PositionalEncoding(nn.Module):
@@ -211,14 +312,33 @@ class MtfFusionTransformer(nn.Module):
         n_tfs: int = 5,
         n_horizons: int = N_FUSION_HORIZONS,
         n_classes: int = LABEL_V2_DIRECTION_CARDINALITY,
+        use_state_embeddings: bool = False,
+        candle_embed_dim: int = CANDLE_EMBED_DIM,
+        chart_embed_dim: int = CHART_EMBED_DIM,
     ) -> None:
         super().__init__()
         self.n_tfs = int(n_tfs)
         self.n_horizons = int(n_horizons)
         self.n_classes = int(n_classes)
         self.n_path_fields = len(LABEL_V2_REG_FIELDS)
+        self.n_features = int(n_features)
+        self.use_state_embeddings = bool(use_state_embeddings)
+        self.zero_candle_embed = False
+        self.zero_chart_embed = False
         self.tf_embed = nn.Embedding(self.n_tfs, d_model)
-        self.input_proj = nn.Linear(n_features, d_model)
+        proj_in = int(n_features)
+        if self.use_state_embeddings:
+            self.candle_embed: Optional[nn.Embedding] = nn.Embedding(
+                CANDLE_CLASS_CARDINALITY, int(candle_embed_dim)
+            )
+            self.chart_embed: Optional[nn.Embedding] = nn.Embedding(
+                CHART_PATTERN_CARDINALITY, int(chart_embed_dim)
+            )
+            proj_in = int(n_features) + int(candle_embed_dim) + int(chart_embed_dim)
+        else:
+            self.candle_embed = None
+            self.chart_embed = None
+        self.input_proj = nn.Linear(proj_in, d_model)
         self.scale_proj = nn.Linear(1, d_model, bias=False)
         scale_vals = [
             math.log(float(RESOLUTION_MINUTES[res])) / math.log(120.0)
@@ -252,8 +372,26 @@ class MtfFusionTransformer(nn.Module):
             [nn.Linear(shared_dim, self.n_path_fields) for _ in range(self.n_horizons)]
         )
 
-    def encode_tf(self, x: torch.Tensor, tf_index: int) -> torch.Tensor:
+    def encode_tf(
+        self,
+        x: torch.Tensor,
+        tf_index: int,
+        candle_ids: Optional[torch.Tensor] = None,
+        chart_ids: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """Encode one TF window (batch, time, feat) → (batch, d_model)."""
+        if self.use_state_embeddings:
+            if self.candle_embed is None or self.chart_embed is None:
+                raise RuntimeError("state embeddings are enabled but missing")
+            if candle_ids is None or chart_ids is None:
+                raise ValueError("candle_ids and chart_ids are required")
+            cdl = self.candle_embed(candle_ids.long())
+            chp = self.chart_embed(chart_ids.long())
+            if self.zero_candle_embed:
+                cdl = torch.zeros_like(cdl)
+            if self.zero_chart_embed:
+                chp = torch.zeros_like(chp)
+            x = torch.cat([x, cdl, chp], dim=-1)
         h = self.input_proj(x)
         tf_ids = torch.full(
             (x.size(0), x.size(1)),
@@ -270,14 +408,25 @@ class MtfFusionTransformer(nn.Module):
         h = self.norm(h)
         return h[:, -1, :]
 
-    def encode_all_tfs(self, tf_windows: Sequence[torch.Tensor]) -> torch.Tensor:
+    def encode_all_tfs(
+        self,
+        tf_windows: Sequence[torch.Tensor],
+        candle_ids: Optional[Sequence[torch.Tensor]] = None,
+        chart_ids: Optional[Sequence[torch.Tensor]] = None,
+    ) -> torch.Tensor:
         """Encode every TF at its native length. Returns (batch, n_tf, d_model)."""
         if len(tf_windows) != self.n_tfs:
             raise ValueError(
                 f"Expected {self.n_tfs} TF windows, got {len(tf_windows)}"
             )
         encoded = [
-            self.encode_tf(window, i) for i, window in enumerate(tf_windows)
+            self.encode_tf(
+                window,
+                i,
+                candle_ids=None if candle_ids is None else candle_ids[i],
+                chart_ids=None if chart_ids is None else chart_ids[i],
+            )
+            for i, window in enumerate(tf_windows)
         ]
         return torch.stack(encoded, dim=1)
 
@@ -285,11 +434,18 @@ class MtfFusionTransformer(nn.Module):
         return torch.softmax(self.fusion_logits, dim=0)
 
     def forward(self, *tf_windows: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        if len(tf_windows) != self.n_tfs:
+        n = self.n_tfs
+        if len(tf_windows) == n:
+            stacked = self.encode_all_tfs(tf_windows)
+        elif len(tf_windows) == 3 * n:
+            xs = tf_windows[:n]
+            cdl = tf_windows[n : 2 * n]
+            chp = tf_windows[2 * n : 3 * n]
+            stacked = self.encode_all_tfs(xs, candle_ids=cdl, chart_ids=chp)
+        else:
             raise ValueError(
-                f"Expected {self.n_tfs} TF windows, got {len(tf_windows)}"
+                f"Expected {n} or {3 * n} TF tensors, got {len(tf_windows)}"
             )
-        stacked = self.encode_all_tfs(tf_windows)
         weights = self.fusion_weights().view(1, self.n_tfs, 1)
         combined = (stacked * weights).sum(dim=1)
         shared = self.shared(combined)
@@ -314,6 +470,7 @@ def fusion_model_from_config(
         target_minutes=target,
     )
     max_len = max(int(v) for v in lens.values())
+    n_horizons = len(config.get("horizon_keys") or LABEL_V2_HORIZON_KEYS)
     return MtfFusionTransformer(
         n_features=int(n_features),
         d_model=int(config.get("d_model") or 64),
@@ -321,7 +478,9 @@ def fusion_model_from_config(
         num_layers=int(config.get("num_layers") or 2),
         dropout=float(config.get("dropout") or 0.30),
         max_len=max_len,
+        n_horizons=n_horizons,
         n_classes=int(config.get("n_classes") or LABEL_V2_DIRECTION_CARDINALITY),
+        use_state_embeddings=bool(config.get("use_state_embeddings", False)),
     )
 
 
@@ -352,17 +511,14 @@ def compute_fusion_loss(
     horizon_weights: Optional[Sequence[float]] = None,
     path_task_weights: Optional[Mapping[str, float]] = None,
 ) -> torch.Tensor:
-    """3-class CE (trains NEUTRAL) plus SmoothL1 on finite ret/MFE/MAE."""
+    """3-class CE (trains NEUTRAL) plus SmoothL1 on finite path fields."""
     n_h = int(labels.size(1))
+    n_f = len(LABEL_V2_REG_FIELDS)
     weights = dict(LABEL_V2_PATH_LOSS_WEIGHTS)
     if path_task_weights is not None:
         weights.update({str(k): float(v) for k, v in path_task_weights.items()})
     dir_w = float(weights.get("dir") or 0.0)
-    field_ws = (
-        float(weights.get("ret") or 0.0),
-        float(weights.get("mfe") or 0.0),
-        float(weights.get("mae") or 0.0),
-    )
+    field_ws = tuple(float(weights.get(field) or 0.0) for field in LABEL_V2_REG_FIELDS)
     loss = torch.zeros((), device=labels.device, dtype=torch.float32)
     weight_sum = 0.0
     last_logits = outputs[0]
@@ -390,11 +546,7 @@ def compute_fusion_loss(
             parts += dir_w
         if path_labels is not None:
             pred = torch.cat(
-                [
-                    _as_col(outputs[n_h + j * 3]),
-                    _as_col(outputs[n_h + j * 3 + 1]),
-                    _as_col(outputs[n_h + j * 3 + 2]),
-                ],
+                [_as_col(outputs[n_h + j * n_f + k]) for k in range(n_f)],
                 dim=-1,
             )
             y_path = path_labels[:, j, :]
@@ -419,6 +571,34 @@ def compute_fusion_loss(
     return loss / float(weight_sum)
 
 
+def fusion_lr_scheduler(
+    opt: torch.optim.Optimizer,
+    lr_schedule: str,
+    epochs: int,
+) -> Optional[Any]:
+    """Build cosine, plateau, or no LR schedule. Plateau patience is 4 epochs."""
+    kind = str(lr_schedule).lower()
+    if kind == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt, T_max=max(int(epochs), 1)
+        )
+    if kind == "plateau":
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            opt, mode="min", factor=0.5, patience=4
+        )
+    return None
+
+
+def step_fusion_scheduler(scheduler: Optional[Any], val_loss: float) -> None:
+    """Step cosine (epoch) or plateau (val loss). No-op when schedule is off."""
+    if scheduler is None:
+        return
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        scheduler.step(val_loss)
+        return
+    scheduler.step()
+
+
 def train_mtf_fusion(
     model: MtfFusionTransformer,
     train_loader: torch.utils.data.DataLoader,
@@ -438,11 +618,7 @@ def train_mtf_fusion(
 ) -> Dict[str, Any]:
     """AdamW + early stopping on validation CE. Never sees the test loader."""
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = None
-    if str(lr_schedule).lower() == "cosine":
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            opt, T_max=max(int(epochs), 1)
-        )
+    scheduler = fusion_lr_scheduler(opt, lr_schedule, epochs)
     best_val = float("inf")
     best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
     stale = 0
@@ -534,9 +710,14 @@ def train_mtf_fusion(
             aborted = True
             break
         history.append((epoch + 1, train_loss, val_loss))
-        print(f"epoch {epoch + 1:03d}  train={train_loss:.4f}  val={val_loss:.4f}")
-        if scheduler is not None:
-            scheduler.step()
+        prev_lr = float(opt.param_groups[0]["lr"])
+        step_fusion_scheduler(scheduler, val_loss)
+        new_lr = float(opt.param_groups[0]["lr"])
+        lr_note = f"  lr={new_lr:.2e}" if new_lr < prev_lr else ""
+        print(
+            f"epoch {epoch + 1:03d}  train={train_loss:.4f}  "
+            f"val={val_loss:.4f}{lr_note}"
+        )
         if val_loss < best_val:
             best_val = val_loss
             stale = 0
@@ -553,4 +734,5 @@ def train_mtf_fusion(
         "best_val_loss": float(best_val) if math.isfinite(best_val) else float("inf"),
         "epochs_ran": float(history[-1][0]) if history else 0.0,
         "history": history,
+        "last_lr": float(opt.param_groups[0]["lr"]),
     }

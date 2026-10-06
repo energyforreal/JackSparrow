@@ -23,6 +23,9 @@ htmlcov/
 direct_output.txt
 *_report.json
 
+# Fusion training caches. GitHub rejects files over 100MB.
+export/**/*.npy
+
 # Node.js
 node_modules/
 npm-debug.log*

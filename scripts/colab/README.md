@@ -1,9 +1,9 @@
 # Colab notebook helpers (non-production)
 
-## Fused multi-TF trainer (research v12)
+## Fused multi-TF trainer (research v15)
 
 ```bash
-python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion_v12
+python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion_v15
 ```
 
 Sources: `scripts/colab/mtf_fusion_model.py`, `scripts/colab/mtf_fusion_research.py`.
@@ -28,13 +28,15 @@ python scripts/validate_transformer_bundle.py agent/model_storage/JackSparrow_Tr
 
 Parity tests: `pytest tests/unit/test_transformer_btcusd_feature_parity.py`
 
-## Research Colab (v12 Label V2)
+## Research Colab (v15 Label V2)
 
 Primary research trainer: **`transformer_btcusd_next_candle_research.ipynb`**.
 It trains a research-only fused model: independent 5m/10m/30m/1h/2h OHLCV,
-shared encoder, softmax TF weights, three 3-class heads (+30m/+1h/+2h), and
-per-horizon ret/MFE/MAE. NEUTRAL is a trained class (frozen theta 0.50/0.50/0.60).
-Do **not** copy the v12 export into `agent/model_storage/`. Live remains v11.
+shared encoder, softmax TF weights, four 3-class heads (+10m/+15m/+30m/+1h), and
+per-horizon ret / long-short MFE/MAE. 2h stays an encoder input, not a label.
+NEUTRAL is a trained class (frozen theta 0.50 on all four heads).
+Do **not** copy the v15 export into `agent/model_storage/`.
+Live remains v11.
 Do not hand-edit the `.ipynb`.
 
 Training-logic changes belong in the `.py` sources. Regenerate the notebook after
@@ -47,14 +49,14 @@ python scripts/colab/smoke_test_next_candle_notebook.py
 
 Sources: `scripts/colab/mtf_fusion_model.py`, `scripts/colab/mtf_fusion_research.py`,
 `feature_store/transformer_btcusd/mtf_*.py`. Local CLI equivalent:
-`python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion_v12`.
+`python scripts/colab/train_mtf_fusion.py --export-dir export/mtf_fusion_v15`.
 
 **Retrain after horizon/label changes:** set `refresh_data = True` in the Colab load
 cell so cached parquet is rebuilt (or delete `/content/cache/*.parquet`).
 
 ## Label V2 distribution report (no training)
 
-Path-target research (`ret` / `MFE` / `MAE` / persistence) for +30m/+1h/+2h.
+Path-target research (`ret` / long-short `MFE`/`MAE` / persistence) for +10m/+15m/+30m/+1h.
 Does **not** change live 2-class fusion labels or export a bundle.
 
 ```bash
@@ -64,6 +66,52 @@ python scripts/colab/report_label_v2.py --output export/label_v2/label_v2_report
 Optional: `--parquet path/to/btcusd_5m.parquet`, `--history-days 365`,
 `--thetas 0.50,0.75`. Spec: [`reference/label-v2-spec.md`](../../reference/label-v2-spec.md).
 The research trainer uses frozen theta from this report; live v11 is unchanged.
+
+## Fusion diagnostics (no Transformer retrain)
+
+Run this **before** another v15 training pass. It audits label indexing, class
+intervals, live-bracket expectancy minus cost, feature truncation, embargoed
+neighbors, naive baselines, last-bar logistic / histogram GBM, and the
+unweighted direction-predictability bake-off (confusion, AUC, log-loss vs
+prior, val knockout / add-one-in / vol+time, magnitude vs `rv_16`).
+It does **not** fit `MtfFusionTransformer`. `branch` is a diagnostics token,
+not the experiment verdict. Readings are pre-registered under
+`direction_predictability`.
+
+```bash
+python scripts/colab/report_fusion_diagnostics.py \
+  --parquet export/fusion_diagnostics/btcusd_5m_raw.parquet \
+  --output export/fusion_diagnostics/report.json \
+  --score-test --ablate-groups \
+  --transformer-report export/mtf_fusion_v15/direction_only_report.json \
+  --decision-times export/mtf_fusion_v15/fusion_windows/decision_times.parquet \
+  --checkpoint export/mtf_fusion_v15/best.pt
+```
+
+Optional: `--skip-models`, `--class-weight-sensitivity` (not the bake-off),
+`--forward-holdout` (records a skipped later holdout; does not tune),
+`--path-regression` (last-bar signed path-edge vs `rv_16`; writes readings
+under `path_regression`, no fused retrain). Write path results to a separate
+JSON so a direction report is not overwritten:
+
+```bash
+python scripts/colab/report_fusion_diagnostics.py \
+  --parquet export/fusion_diagnostics/btcusd_5m_raw.parquet \
+  --output export/fusion_diagnostics/path_regression_report.json \
+  --path-regression --truncation-samples 0
+```
+If `best.pt` eval fails (NumPy/Torch), last-bar decomp still writes and
+Transformer comparison falls back to JSON acc/F1/ECE with
+`transformer_confusion: false`.
+Regenerate the CPU Colab notebook after diagnostic-code changes:
+
+```bash
+python scripts/colab/build_fusion_diagnostics_notebook.py
+```
+
+Do not hand-edit `transformer_btcusd_fusion_diagnostics.ipynb`. Checkpoint
+confusion is CLI-only. Do not copy the export into `agent/model_storage/`.
+Live remains v11.
 
 ## Colab CLI via WSL (Windows)
 
