@@ -51,6 +51,7 @@ scripts/colab/*credentials*
 scripts/colab/colab_accounts.json
 scripts/colab/colab_accounts_state.json
 scripts/colab/.accounts/
+scripts/colab/_tf_sweep_tmp/
 
 # Accidental Cursor IDE screenshot placeholders
 assets/c__Users_*

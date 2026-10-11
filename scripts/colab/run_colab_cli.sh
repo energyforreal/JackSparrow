@@ -25,13 +25,14 @@ usage() {
   cat <<'EOF'
 Usage: run_colab_cli.sh [options]
 
-Provision a Colab runtime from WSL, execute the fused next-candle research
-notebook, download the export zip, and tear down the VM.
+Provision a Colab runtime from WSL, execute a research notebook, download the
+export zip, and tear down the VM.
 
 Options:
   --gpu GPU          Accelerator: T4 (default), L4, G4, H100, A100, or none
   --session NAME     Colab session name (default: mtf-fusion)
   --notebook PATH    Local .ipynb to execute (default: next-candle research)
+  --bundle-dir NAME  Remote export folder under /content/export/ (default: v15 fusion)
   --export-dir PATH  Local directory for downloaded artifacts (default: export/)
   --timeout SEC      colab exec timeout in seconds (default: 28800 = 8h)
   --keep             Leave the VM running after the job
@@ -55,6 +56,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --notebook)
       NOTEBOOK="${2:?}"
+      shift 2
+      ;;
+    --bundle-dir)
+      BUNDLE_DIR_NAME="${2:?}"
       shift 2
       ;;
     --export-dir)
@@ -95,6 +100,9 @@ if [[ ! -f "${NOTEBOOK}" ]]; then
   echo "Notebook not found: ${NOTEBOOK}" >&2
   exit 1
 fi
+
+REMOTE_EXPORT_DIR="/content/export/${BUNDLE_DIR_NAME}"
+REMOTE_ZIP="/content/export/${BUNDLE_DIR_NAME}.zip"
 
 mkdir -p "${LOCAL_EXPORT_DIR}"
 SESSION_STARTED=0
@@ -202,6 +210,9 @@ else
   fi
   SESSION_STARTED=1
 fi
+
+echo "Open in browser:"
+colab url -s "${SESSION}" || true
 
 echo "Executing $(basename "${NOTEBOOK}") on ${SESSION} (timeout=${TIMEOUT_SEC}s)..."
 colab exec -s "${SESSION}" -f "${NOTEBOOK}" --timeout "${TIMEOUT_SEC}"
