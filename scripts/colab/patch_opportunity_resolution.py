@@ -1,15 +1,20 @@
-"""Copy the opportunity notebook with CONFIG resolution rewritten for one TF."""
+"""Copy the opportunity notebook with CONFIG resolution/horizon rewritten."""
 
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
-def patch_notebook(src: Path, dest: Path, resolution: str) -> Path:
-    """Rewrite ``CONFIG["resolution"]`` in the CONFIG cell and write ``dest``."""
+def patch_notebook(
+    src: Path,
+    dest: Path,
+    resolution: str,
+    horizon_bars: Optional[int] = None,
+) -> Path:
+    """Rewrite ``CONFIG["resolution"]`` and optionally ``horizon_bars``."""
     nb: Dict[str, Any] = json.loads(src.read_text(encoding="utf-8"))
     patched = False
     for cell in nb.get("cells", []):
@@ -27,10 +32,12 @@ def patch_notebook(src: Path, dest: Path, resolution: str) -> Path:
         new_lines: List[str] = []
         for line in lines:
             stripped = line.lstrip()
+            indent = line[: len(line) - len(stripped)]
+            nl = "\n" if line.endswith("\n") else ""
             if stripped.startswith('"resolution":'):
-                indent = line[: len(line) - len(stripped)]
-                nl = "\n" if line.endswith("\n") else ""
                 new_lines.append(f'{indent}"resolution": "{resolution}",{nl}')
+            elif horizon_bars is not None and stripped.startswith('"horizon_bars":'):
+                new_lines.append(f'{indent}"horizon_bars": {int(horizon_bars)},{nl}')
             else:
                 new_lines.append(line)
         cell["source"] = new_lines
@@ -48,9 +55,13 @@ def main() -> None:
     parser.add_argument("src", type=Path)
     parser.add_argument("dest", type=Path)
     parser.add_argument("resolution")
+    parser.add_argument("horizon_bars", nargs="?", type=int, default=24)
     args = parser.parse_args()
-    patch_notebook(args.src, args.dest, args.resolution)
-    print(f"wrote {args.dest} resolution={args.resolution}")
+    patch_notebook(args.src, args.dest, args.resolution, args.horizon_bars)
+    print(
+        f"wrote {args.dest} resolution={args.resolution} "
+        f"horizon_bars={args.horizon_bars}"
+    )
 
 
 if __name__ == "__main__":

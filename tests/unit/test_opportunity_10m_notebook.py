@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -158,23 +159,63 @@ def test_config_derives_horizon_from_resolution() -> None:
     assert int(cfg["bar_minutes"]) == 10
     assert int(cfg["horizon_bars"]) == 24
     assert int(cfg["purge_bars"]) == 25
-    assert cfg["export_dir"] == "export/opportunity_10m"
-    expected = (("5m", 5, 48), ("15m", 15, 16), ("30m", 30, 8), ("1h", 60, 4))
-    for res, bar_min, horizon_bars in expected:
+    assert cfg["export_dir"] == "export/opportunity_10m_h24"
+    expected = (
+        ("5m", 5, 120),
+        ("15m", 15, 360),
+        ("30m", 30, 720),
+        ("1h", 60, 1440),
+        ("2h", 120, 2880),
+        ("4h", 240, 5760),
+        ("6h", 360, 8640),
+    )
+    for res, bar_min, horizon_min in expected:
         trial = dict(cfg)
         trial["resolution"] = res
-        trial["horizon_minutes"] = 240
+        trial["horizon_bars"] = 24
         ns["apply_resolution_config"](trial)
         assert trial["bar_minutes"] == bar_min
-        assert trial["horizon_bars"] == horizon_bars
-        assert trial["purge_bars"] == horizon_bars + 1
-        assert trial["export_dir"] == f"export/opportunity_{res}"
-    assert set(ns["RESOLUTION_MINUTES"]) >= {"5m", "10m", "15m", "30m", "1h"}
+        assert trial["horizon_bars"] == 24
+        assert trial["horizon_minutes"] == horizon_min
+        assert trial["purge_bars"] == 25
+        assert trial["export_dir"] == f"export/opportunity_{res}_h24"
+    assert set(ns["RESOLUTION_MINUTES"]) >= {
+        "5m",
+        "10m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+    }
+
+
+def test_config_derives_48_bar_horizon() -> None:
+    ns = _exec_config()
+    cfg = ns["CONFIG"]
+    expected = (
+        ("30m", 30, 1440),
+        ("1h", 60, 2880),
+        ("2h", 120, 5760),
+        ("4h", 240, 11520),
+        ("6h", 360, 17280),
+    )
+    for res, bar_min, horizon_min in expected:
+        trial = dict(cfg)
+        trial["resolution"] = res
+        trial["horizon_bars"] = 48
+        ns["apply_resolution_config"](trial)
+        assert trial["bar_minutes"] == bar_min
+        assert trial["horizon_bars"] == 48
+        assert trial["horizon_minutes"] == horizon_min
+        assert trial["purge_bars"] == 49
+        assert trial["export_dir"] == f"export/opportunity_{res}_h48"
 
 
 def test_fetch_map_covers_sweep_resolutions() -> None:
     fetch = _cell_named("FETCH")
-    for res in ("5m", "10m", "15m", "30m", "1h"):
+    for res in ("5m", "10m", "15m", "30m", "1h", "2h", "4h", "6h"):
         assert f'"{res}":' in fetch
     assert "raw_bars = fetch_candles" in fetch
     assert "CONFIG[\"resolution\"]" in fetch or "CONFIG['resolution']" in fetch
@@ -182,8 +223,11 @@ def test_fetch_map_covers_sweep_resolutions() -> None:
     bars_cell = _cell_named("BARS")
     assert "build_10m_ohlcv_from_5m" in bars_cell
     assert "bars_10m" not in bars_cell
+    assert "build_6h" not in bars_cell
     joined = "\n".join(_code_cells())
     assert "bars_10m" not in joined
+    assert "build_6h_from_1h" not in joined
+    assert "_source_resolution = \"5m\" if _resolution == \"10m\" else _resolution" in fetch
 
 
 def _reference_labels(
@@ -508,3 +552,36 @@ def test_gate_fails_when_exclusive_expectancy_missing() -> None:
     assert report["passed"] is False
     assert "exclusive_long_expectancy_not_positive" in report["reasons"]
     assert "exclusive_short_expectancy_not_positive" in report["reasons"]
+
+
+def _load_patcher():
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "colab"
+        / "patch_opportunity_resolution.py"
+    )
+    spec = importlib.util.spec_from_file_location("patch_opportunity_resolution", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_patcher_rewrites_resolution_and_horizon(tmp_path: Path) -> None:
+    dest = tmp_path / "patched.ipynb"
+    _load_patcher().patch_notebook(NOTEBOOK, dest, "6h", 48)
+    nb = json.loads(dest.read_text(encoding="utf-8"))
+    config = ""
+    for cell in nb["cells"]:
+        if cell.get("cell_type") != "code":
+            continue
+        source = cell.get("source", [])
+        text = source if isinstance(source, str) else "".join(source)
+        if "# CELL: CONFIG" in text.splitlines()[0:3]:
+            config = text
+            break
+    assert '"resolution": "6h"' in config
+    assert '"horizon_bars": 48' in config
+    assert '"resolution": "10m"' not in config
+    assert '"horizon_bars": 24' not in config

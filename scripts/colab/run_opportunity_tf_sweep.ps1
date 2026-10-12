@@ -1,9 +1,11 @@
-# Sequential Colab CPU sweep of the opportunity ensemble across timeframes.
+# Sequential Colab CPU sweep of the opportunity ensemble across TF x horizon.
 [CmdletBinding()]
 param(
     [string]$Distro = "Ubuntu-24.04",
-    [string[]]$Timeframes = @("10m", "5m", "15m", "30m", "1h"),
-    [int]$TimeoutSec = 28800
+    [string[]]$Timeframes = @("30m", "1h", "2h", "4h", "6h"),
+    [int[]]$Horizons = @(24, 48),
+    [int]$TimeoutSec = 28800,
+    [string]$SummaryName = "opportunity_tf_htf_h24_h48_summary.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,26 +30,42 @@ if (-not $python) {
 }
 
 foreach ($tf in $Timeframes) {
-    $relPatched = "scripts/colab/_tf_sweep_tmp/transformer_btcusd_opportunity_$tf.ipynb"
-    $patched = Join-Path $repoRoot $relPatched
-    Write-Host "=== opportunity $tf ==="
-    & python $patcher $srcNotebook $patched $tf
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to patch notebook for $tf"
+    foreach ($horizon in $Horizons) {
+        $cell = "opportunity_${tf}_h${horizon}"
+        $relPatched = "scripts/colab/_tf_sweep_tmp/transformer_btcusd_${cell}.ipynb"
+        $patched = Join-Path $repoRoot $relPatched
+        $zip = Join-Path $repoRoot "export\${cell}.zip"
+        $dest = Join-Path $repoRoot "export\${cell}"
+        if (Test-Path $zip) {
+            Write-Host "=== skip $cell (zip already exists) ==="
+            if (-not (Test-Path (Join-Path $dest "eval_report.json"))) {
+                New-Item -ItemType Directory -Force -Path $dest | Out-Null
+                Expand-Archive -Path $zip -DestinationPath $dest -Force
+                Write-Host "Unzipped $zip -> $dest"
+            }
+            continue
+        }
+        Write-Host "=== $cell ==="
+        & python $patcher $srcNotebook $patched $tf $horizon
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to patch notebook for $cell"
+        }
+        & powershell -File $cli --gpu none --session $cell --notebook $relPatched --bundle-dir $cell --stop-existing --timeout $TimeoutSec
+        if ($LASTEXITCODE -ne 0) {
+            throw "Colab run failed for $cell (exit $LASTEXITCODE)"
+        }
+        if (-not (Test-Path $zip)) {
+            throw "Missing export zip $zip"
+        }
+        New-Item -ItemType Directory -Force -Path $dest | Out-Null
+        Expand-Archive -Path $zip -DestinationPath $dest -Force
+        Write-Host "Unzipped $zip -> $dest"
     }
-    & powershell -File $cli --gpu none --session "opportunity-$tf" --notebook $relPatched --bundle-dir "opportunity_$tf" --stop-existing --timeout $TimeoutSec
-    if ($LASTEXITCODE -ne 0) {
-        throw "Colab run failed for $tf (exit $LASTEXITCODE)"
-    }
-    $zip = Join-Path $repoRoot "export\opportunity_$tf.zip"
-    $dest = Join-Path $repoRoot "export\opportunity_$tf"
-    if (-not (Test-Path $zip)) {
-        throw "Missing export zip $zip"
-    }
-    New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    Expand-Archive -Path $zip -DestinationPath $dest -Force
-    Write-Host "Unzipped $zip -> $dest"
 }
 
-& python $compare --export-dir (Join-Path $repoRoot "export") --tfs @Timeframes
+$horizonArgs = @()
+foreach ($horizon in $Horizons) {
+    $horizonArgs += "$horizon"
+}
+& python $compare --export-dir (Join-Path $repoRoot "export") --tfs @Timeframes --horizons @horizonArgs --output (Join-Path $repoRoot "export\$SummaryName")
 exit $LASTEXITCODE
