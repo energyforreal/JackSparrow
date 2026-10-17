@@ -1,8 +1,8 @@
-"""Build the 30m / 24-bar XGBoost feature-label sweep notebook.
+"""Build the 30m / 24-bar regime-aligned exclusive policy notebook.
 
 Copies the canonical 10m opportunity notebook, freezes resolution, horizon,
-and the model family, then appends the sweep cells. The 10m source is not
-modified.
+and the model family, then appends the regime exclusive sweep cells. The
+10m source is not modified.
 
 Run from repo root::
 
@@ -26,18 +26,44 @@ from patch_opportunity_resolution import patch_notebook  # noqa: E402
 SRC_NOTEBOOK = COLAB_DIR / "transformer_btcusd_opportunity_10m.ipynb"
 DEST_NOTEBOOK = COLAB_DIR / "transformer_btcusd_opportunity_30m_h24_fl_sweep.ipynb"
 SPECS_MODULE = COLAB_DIR / "opportunity_fl_sweep.py"
-SWEEP_EXPORT_DIR = "export/opportunity_30m_h24_fl_sweep"
+SWEEP_EXPORT_DIR = "export/opportunity_30m_h24_regime"
 SWEEP_ENSEMBLE = '["XGB"]'
-BASELINE_SKIP_CELLS: Sequence[str] = ("TRAIN", "EVAL", "PROMOTE", "EXPORT")
+BASELINE_SKIP_CELLS: Sequence[str] = ("GATE", "TRAIN", "EVAL", "PROMOTE", "EXPORT")
 
-FL_INTRO = """## 17 Feature-label sweep (frozen 30m XGBoost)
+COLAB_HOWTO = """# BTCUSD 30m regime-aligned exclusive policy (Colab)
 
-XGBoost, 30m bars, and a 24-bar (12 hour) horizon stay fixed. Each remaining
-label spec yields an opportunity head and a direction head; the combined
-policy is ranked on expanding walk-forward R-multiples. Stage A keeps specs
-with both sides above the minority floor (L5 is direction-only). Stage B
-screens F0–F7 plus leave-one-family-out. Column drop-one and permutation run
-on the top two specs. Baseline TRAIN/EVAL/EXPORT is skipped.
+Upload **this notebook only**. Do not clone the repo. Runtime: **CPU** (GPU unused).
+
+1. [colab.research.google.com](https://colab.research.google.com) → Upload →
+   `transformer_btcusd_opportunity_30m_h24_fl_sweep.ipynb`
+2. Runtime → Run all
+3. Wait for the last cell (`FL_RUN`). It tags a causal UP/DOWN/RANGE regime,
+   trains exclusive long/short labels on (2/2, 3/3, 4/2) ATR books, scores
+   non-overlapping R by side and regime, then fits an MLP on the walk-forward
+   winner. Download `export/opportunity_30m_h24_regime.zip`
+4. Ignore the 10m ensemble wording in the original intro below. Config is
+   already frozen to 30m / 24 bars / XGBoost. Baseline TRAIN/EVAL is skipped.
+   Direction and return heads are not fit. Live fusion is not written.
+
+From Windows with the Colab CLI already set up:
+
+```powershell
+powershell -File scripts/colab/run_colab_cli.ps1 --gpu none `
+  --session opportunity-30m-h24-regime --stop-existing --timeout 28800 `
+  --notebook scripts/colab/transformer_btcusd_opportunity_30m_h24_fl_sweep.ipynb `
+  --bundle-dir opportunity_30m_h24_regime
+```
+"""
+
+FL_INTRO = """## 17 Regime-aligned exclusive policy (frozen 30m XGBoost)
+
+Features stay frozen: 50 OHLCV columns, 30m bars, 24-bar horizon. Barriers
+(2/2, 3/3, 4/2) compete on walk-forward. Labels are exclusive TP-first, kept
+only when the causal regime matches the side (UP long, DOWN short, RANGE skip).
+Policy uses P(exclusive) plus an adverse-excursion veto; there is no vol floor.
+Validation is non-overlapping R, regime baselines, precision curves, and 1.5x
+cost stress. MLP (`50 → 64 → 32`) runs only on the walk-forward winner. Test
+is scored once only if that winner passes the gate. Live fusion is not written.
 """
 
 FL_RUN_SOURCE = '''# CELL: FL_RUN
@@ -46,15 +72,13 @@ import pandas as pd
 
 _sweep_dir = Path(str(CONFIG["export_dir"]))
 _sweep_dir.mkdir(parents=True, exist_ok=True)
-sweep_payload = run_feature_label_sweep(
-    featured,
+sweep_payload = run_regime_exclusive_sweep(
+    bars,
     config=CONFIG,
-    compute_opportunity_labels=compute_opportunity_labels,
-    summarize_label_gate=summarize_label_gate,
     splits=splits,
     wf_folds=wf_folds,
-    inner_calibration_split=inner_calibration_split,
     export_dir=_sweep_dir,
+    inner_calibration_split=inner_calibration_split,
 )
 
 pd.set_option("display.max_rows", None)
@@ -77,16 +101,18 @@ def _show_stage(name: str, rows: object) -> None:
     print(show.to_string(index=False))
 
 
-_show_stage("Stage A", sweep_payload.get("stage_a"))
-_show_stage("Stage B (walk-forward R)", sweep_payload.get("stage_b"))
-_show_stage("Shuffle null", sweep_payload.get("shuffle_rows"))
-_show_stage("Drop-one", sweep_payload.get("drop_one"))
-_show_stage("Permutation", sweep_payload.get("permutation"))
-_show_stage("Stage C (test once)", sweep_payload.get("stage_c"))
-print("diagnosis", sweep_payload["diagnosis"])
-print("kept labels", sweep_payload["stage_a_kept"])
-print("shuffle_best_r", sweep_payload.get("shuffle_best_r"))
-print("top pairs", sweep_payload.get("top_pairs"))
+print("n_features", sweep_payload.get("n_features"))
+print("policy_heads", sweep_payload.get("policy_heads"))
+print("barriers", sweep_payload.get("barriers"))
+print("winner_barrier", sweep_payload.get("winner_barrier"))
+_show_stage("Barrier compare", sweep_payload.get("barrier_rows"))
+_mlp = sweep_payload.get("mlp_policy") or {}
+_show_stage("MLP policy folds", _mlp.get("fold_rows"))
+_show_stage("Test once", sweep_payload.get("test_rows"))
+print("winner_gate", sweep_payload.get("winner_gate"))
+print("mlp_test_gate", sweep_payload.get("mlp_test_gate"))
+print("ready_to_promote", sweep_payload.get("ready_to_promote"))
+print("copied_to_live", sweep_payload.get("copied_to_live"))
 import shutil
 
 _zip_path = shutil.make_archive(str(_sweep_dir), "zip", root_dir=str(_sweep_dir))
@@ -223,9 +249,10 @@ def build_fl_sweep_notebook(
     src: Path = SRC_NOTEBOOK,
     dest: Path = DEST_NOTEBOOK,
 ) -> Path:
-    """Patch resolution/horizon, freeze XGB, skip baseline train, append sweep."""
+    """Patch resolution/horizon, freeze XGB, skip baseline, append exclusive sweep."""
     patch_notebook(src, dest, "30m", 24)
     nb: Dict[str, Any] = json.loads(dest.read_text(encoding="utf-8"))
+    nb["cells"].insert(0, _markdown_cell(COLAB_HOWTO, "cell-colab-howto"))
     _patch_config_cell(nb)
     _wrap_baseline_cells(nb)
     specs_body = SPECS_MODULE.read_text(encoding="utf-8")
