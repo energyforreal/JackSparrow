@@ -1,0 +1,11 @@
+# Chosen on the development prefix by the v2 rules.
+spec_version: forecast-30m-h24-v2
+theta: 0.75
+theta_reason: smallest_band_covering_cost
+tp_mult: null
+sl_mult: null
+barrier_reason: no_barrier_passed
+round_trip_cost: 0.002000
+development_rows: 36683
+entry: close
+ambiguous_policy: retain_path_code_and_drop_from_binary_heads

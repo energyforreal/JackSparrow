@@ -1,0 +1,264 @@
+{
+  "return": {
+    "task": "return",
+    "winner": "lgbm",
+    "phase3": {
+      "baseline": {
+        "algorithm": "baseline",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          0.012627991624053989,
+          0.010770006427591508,
+          0.010536492348404272
+        ],
+        "overlapping_scores": [
+          0.012627801077318533,
+          0.010770059131936132,
+          0.010536357486885911
+        ],
+        "mean_primary": 0.01131149680001659
+      },
+      "xgb": {
+        "algorithm": "xgb",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          0.012977405894981133,
+          0.011224431440717159,
+          0.010642538254710785
+        ],
+        "overlapping_scores": [
+          0.01297723740673105,
+          0.011224365623787206,
+          0.010642414919284362
+        ],
+        "mean_primary": 0.011614791863469693
+      },
+      "lgbm": {
+        "algorithm": "lgbm",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          0.012972859942042966,
+          0.01115652636063108,
+          0.010657243262781065
+        ],
+        "overlapping_scores": [
+          0.012972662629258839,
+          0.01115644420301706,
+          0.010657069621307254
+        ],
+        "mean_primary": 0.011595543188485038
+      }
+    },
+    "tuned": {
+      "algorithm": "lgbm",
+      "params": {
+        "n_estimators": 160,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "min_child_weight": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 1.0
+      },
+      "primary_scores": [
+        0.012972859942042966,
+        0.01115652636063108,
+        0.010657243262781065
+      ],
+      "overlapping_scores": [
+        0.012972662629258839,
+        0.01115644420301706,
+        0.010657069621307254
+      ],
+      "mean_primary": 0.011595543188485038,
+      "optuna_trials": 0,
+      "tune_skipped": "awaiting_economic_gate"
+    },
+    "gate4": {
+      "wins": 0,
+      "folds": 3,
+      "passed": false
+    },
+    "features": [
+      "return_1",
+      "return_6",
+      "return_12",
+      "return_24",
+      "ma_distance_20",
+      "ma_slope_20",
+      "rsi_14",
+      "atr_pct_14",
+      "vol_ratio_12_48",
+      "candle_body",
+      "upper_wick",
+      "lower_wick",
+      "close_location",
+      "volume_ratio_24",
+      "dist_high_24",
+      "dist_low_24",
+      "hour_sin",
+      "hour_cos",
+      "dow_sin",
+      "dow_cos"
+    ],
+    "ablation": {
+      "ran": false,
+      "dropped": []
+    }
+  },
+  "direction": {
+    "task": "direction",
+    "winner": "xgb",
+    "phase3": {
+      "baseline": {
+        "algorithm": "baseline",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          1.0700750120346871,
+          1.068421446720521,
+          1.0742042659830373
+        ],
+        "overlapping_scores": [
+          1.07007871968513,
+          1.0684214499729643,
+          1.0741987489949347
+        ],
+        "mean_primary": 1.070900241579415
+      },
+      "xgb": {
+        "algorithm": "xgb",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          1.0871561995610919,
+          1.068868616503597,
+          1.0471462574132004
+        ],
+        "overlapping_scores": [
+          1.087166292854189,
+          1.068870504783769,
+          1.047160236209288
+        ],
+        "mean_primary": 1.0677236911592967
+      },
+      "lgbm": {
+        "algorithm": "lgbm",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          1.0929844593221216,
+          1.073282196343693,
+          1.050851702254081
+        ],
+        "overlapping_scores": [
+          1.0929916683607184,
+          1.0732809865463009,
+          1.050869582517329
+        ],
+        "mean_primary": 1.0723727859732985
+      }
+    },
+    "tuned": {
+      "algorithm": "xgb",
+      "params": {
+        "n_estimators": 160,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "min_child_weight": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 1.0
+      },
+      "primary_scores": [
+        1.0871561995610919,
+        1.068868616503597,
+        1.0471462574132004
+      ],
+      "overlapping_scores": [
+        1.087166292854189,
+        1.068870504783769,
+        1.047160236209288
+      ],
+      "mean_primary": 1.0677236911592967,
+      "optuna_trials": 0,
+      "tune_skipped": "awaiting_economic_gate"
+    },
+    "gate4": {
+      "wins": 1,
+      "folds": 3,
+      "passed": false
+    },
+    "features": [
+      "return_1",
+      "return_6",
+      "return_12",
+      "return_24",
+      "ma_distance_20",
+      "ma_slope_20",
+      "rsi_14",
+      "atr_pct_14",
+      "vol_ratio_12_48",
+      "candle_body",
+      "upper_wick",
+      "lower_wick",
+      "close_location",
+      "volume_ratio_24",
+      "dist_high_24",
+      "dist_low_24",
+      "hour_sin",
+      "hour_cos",
+      "dow_sin",
+      "dow_cos"
+    ],
+    "ablation": {
+      "ran": false,
+      "dropped": []
+    }
+  }
+}

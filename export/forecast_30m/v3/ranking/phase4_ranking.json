@@ -1,0 +1,173 @@
+{
+  "algorithm": "xgb",
+  "params": {
+    "n_estimators": 160,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "min_child_weight": 20,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0
+  },
+  "features": [
+    "return_1",
+    "return_6",
+    "return_12",
+    "return_24",
+    "ma_distance_20",
+    "ma_slope_20",
+    "rsi_14",
+    "atr_pct_14",
+    "vol_ratio_12_48",
+    "candle_body",
+    "upper_wick",
+    "lower_wick",
+    "close_location",
+    "volume_ratio_24",
+    "dist_high_24",
+    "dist_low_24",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos"
+  ],
+  "oof_rows": 786,
+  "folds": [
+    {
+      "long_brier": 0.1879376544181859,
+      "long_brier_baseline": 0.18848367134920277,
+      "short_brier": 0.1858061748999054,
+      "short_brier_baseline": 0.17667389336733658,
+      "baseline_long_rate": 0.24615384615384617,
+      "baseline_short_rate": 0.2720306513409962,
+      "validation_rows": 262
+    },
+    {
+      "long_brier": 0.18335617997727838,
+      "long_brier_baseline": 0.17496109583183317,
+      "short_brier": 0.18222056704277784,
+      "short_brier_baseline": 0.1812402893140597,
+      "baseline_long_rate": 0.2471264367816092,
+      "baseline_short_rate": 0.248565965583174,
+      "validation_rows": 262
+    },
+    {
+      "long_brier": 0.14504724677540604,
+      "long_brier_baseline": 0.1450838088097835,
+      "short_brier": 0.1583129006018272,
+      "short_brier_baseline": 0.15539485774057246,
+      "baseline_long_rate": 0.24107142857142858,
+      "baseline_short_rate": 0.24489795918367346,
+      "validation_rows": 262
+    }
+  ],
+  "statistical": {
+    "long": {
+      "wins": 2,
+      "folds": 3,
+      "passed": true
+    },
+    "short": {
+      "wins": 0,
+      "folds": 3,
+      "passed": false
+    }
+  },
+  "economic": {
+    "passed": false,
+    "reasons": [
+      "expectancy_not_positive",
+      "profit_factor_not_above_one"
+    ],
+    "trades": 63,
+    "expectancy": -0.0007327235876794031,
+    "profit_factor": 0.8877183425906002,
+    "always_in_average": -0.002075524929103661,
+    "baseline_policy": {
+      "trades": 0.0,
+      "expectancy": 0.0,
+      "profit_factor": 0.0
+    },
+    "model_policy": {
+      "trades": 63.0,
+      "expectancy": -0.0007327235876794031,
+      "profit_factor": 0.8877183425906002,
+      "max_drawdown": -0.0960130576563587
+    }
+  },
+  "always_in": {
+    "long": -0.0020721961706696677,
+    "short": -0.0020788536875376543,
+    "average": -0.002075524929103661,
+    "rows": 786
+  },
+  "quintiles": {
+    "long": [
+      {
+        "bin": 0,
+        "rows": 158,
+        "mean_probability": 0.12784733842539636,
+        "mean_realized": -0.0031643264420308697
+      },
+      {
+        "bin": 1,
+        "rows": 157,
+        "mean_probability": 0.19286665510220133,
+        "mean_realized": -0.001692682356783909
+      },
+      {
+        "bin": 2,
+        "rows": 157,
+        "mean_probability": 0.22871946738024426,
+        "mean_realized": -0.001964946344539921
+      },
+      {
+        "bin": 3,
+        "rows": 166,
+        "mean_probability": 0.27332179239356375,
+        "mean_realized": -0.000577755692402692
+      },
+      {
+        "bin": 4,
+        "rows": 148,
+        "mean_probability": 0.37661294860614314,
+        "mean_realized": -0.0030988341976945512
+      }
+    ],
+    "short": [
+      {
+        "bin": 0,
+        "rows": 158,
+        "mean_probability": 0.12612658915923367,
+        "mean_realized": -0.0008248198340346728
+      },
+      {
+        "bin": 1,
+        "rows": 157,
+        "mean_probability": 0.18178508482920896,
+        "mean_realized": -0.0009260667061215847
+      },
+      {
+        "bin": 2,
+        "rows": 157,
+        "mean_probability": 0.23189271948519785,
+        "mean_realized": -0.0037426099313263694
+      },
+      {
+        "bin": 3,
+        "rows": 157,
+        "mean_probability": 0.281974320578727,
+        "mean_realized": -0.003772194038668654
+      },
+      {
+        "bin": 4,
+        "rows": 157,
+        "mean_probability": 0.3776428557125626,
+        "mean_realized": -0.0011365654043108968
+      }
+    ]
+  },
+  "orders_enabled": false,
+  "confirmation_scored": false,
+  "promoted_to_agent": false
+}

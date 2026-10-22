@@ -1,0 +1,8 @@
+{
+  "gate": {
+    "passed": false,
+    "reasons": [
+      "barrier_screen_failed"
+    ]
+  }
+}

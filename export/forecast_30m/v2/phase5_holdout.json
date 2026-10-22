@@ -1,0 +1,9 @@
+{
+  "scored": false,
+  "reason": "holdout_already_scored_once",
+  "gate4_passed": {
+    "return": false,
+    "direction": false
+  },
+  "holdout_rows_on_disk": 6454
+}

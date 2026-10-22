@@ -1,0 +1,55 @@
+{
+  "spec_version": "forecast-30m-h24-v4",
+  "label_version": "forecast-30m-h24-labels-v4",
+  "feature_version": "forecast-30m-h24-features-v4",
+  "feature_columns": [
+    "return_1",
+    "return_6",
+    "return_12",
+    "return_24",
+    "ma_distance_20",
+    "ma_slope_20",
+    "rsi_14",
+    "atr_pct_14",
+    "vol_ratio_12_48",
+    "candle_body",
+    "upper_wick",
+    "lower_wick",
+    "close_location",
+    "volume_ratio_24",
+    "dist_high_24",
+    "dist_low_24",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "doji",
+    "hammer",
+    "shooting_star",
+    "bullish_engulfing",
+    "bearish_engulfing",
+    "inside_bar",
+    "close_broke_high_24",
+    "close_broke_low_24",
+    "consecutive_closes"
+  ],
+  "source_sha256": "7b64fb0696d121d02d3ae209b1cfbaa85991ca0281135ae1d2a1bea16005145e",
+  "development_end_exclusive": "2026-05-15T14:00:00+00:00",
+  "snapshot_end": "2026-09-27T13:30:00+00:00",
+  "entry": "next_open",
+  "label_selection": {
+    "theta": 0.5,
+    "theta_reason": "smallest_theta_meeting_class_floor"
+  },
+  "decision_by_class": {
+    "BEARISH": "sell",
+    "NEUTRAL": "hold",
+    "BULLISH": "buy"
+  },
+  "gate4_passed": {
+    "direction": false
+  },
+  "orders_enabled": false,
+  "promoted_to_agent": false,
+  "targets_in_artifact": []
+}

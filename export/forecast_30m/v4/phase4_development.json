@@ -1,0 +1,119 @@
+{
+  "direction": {
+    "task": "direction",
+    "winner": "xgb",
+    "phase3": {
+      "baseline": {
+        "algorithm": "baseline",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          1.0107891790238221,
+          1.0092630273793837,
+          1.0224097754388946
+        ],
+        "overlapping_scores": [
+          1.0107962125438152,
+          1.009267811116872,
+          1.0223994078696017
+        ],
+        "mean_primary": 1.0141539939473667
+      },
+      "xgb": {
+        "algorithm": "xgb",
+        "params": {
+          "n_estimators": 160,
+          "max_depth": 4,
+          "learning_rate": 0.05,
+          "min_child_weight": 20,
+          "subsample": 0.8,
+          "colsample_bytree": 0.8,
+          "reg_lambda": 1.0
+        },
+        "primary_scores": [
+          1.0277879517515123,
+          1.0146601517615792,
+          1.0044373615914173
+        ],
+        "overlapping_scores": [
+          1.027798608095788,
+          1.0146633095556878,
+          1.0044515094926083
+        ],
+        "mean_primary": 1.0156284883681697
+      }
+    },
+    "tuned": {
+      "algorithm": "xgb",
+      "params": {
+        "n_estimators": 160,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "min_child_weight": 20,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 1.0
+      },
+      "primary_scores": [
+        1.0277879517515123,
+        1.0146601517615792,
+        1.0044373615914173
+      ],
+      "overlapping_scores": [
+        1.027798608095788,
+        1.0146633095556878,
+        1.0044515094926083
+      ],
+      "mean_primary": 1.0156284883681697,
+      "optuna_trials": 0,
+      "tune_skipped": "awaiting_economic_gate"
+    },
+    "gate4": {
+      "wins": 1,
+      "folds": 3,
+      "passed": false
+    },
+    "features": [
+      "return_1",
+      "return_6",
+      "return_12",
+      "return_24",
+      "ma_distance_20",
+      "ma_slope_20",
+      "rsi_14",
+      "atr_pct_14",
+      "vol_ratio_12_48",
+      "candle_body",
+      "upper_wick",
+      "lower_wick",
+      "close_location",
+      "volume_ratio_24",
+      "dist_high_24",
+      "dist_low_24",
+      "hour_sin",
+      "hour_cos",
+      "dow_sin",
+      "dow_cos",
+      "doji",
+      "hammer",
+      "shooting_star",
+      "bullish_engulfing",
+      "bearish_engulfing",
+      "inside_bar",
+      "close_broke_high_24",
+      "close_broke_low_24",
+      "consecutive_closes"
+    ],
+    "ablation": {
+      "ran": false,
+      "dropped": []
+    }
+  }
+}

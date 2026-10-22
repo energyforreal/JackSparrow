@@ -1,0 +1,12 @@
+# Chosen by the pre-registered v3 event rule. Not a grid search.
+spec_version: forecast-30m-h24-v3
+entry: next_open
+cusum_threshold: 0.02
+tp_pct: 0.02
+sl_pct: 0.01
+policy_threshold: 0.40
+breakeven_precision: 0.40
+round_trip_cost: 0.002000
+development_events: 1235
+barrier_passed: false
+barrier_reason: no_barrier_passed

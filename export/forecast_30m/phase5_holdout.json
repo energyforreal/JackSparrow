@@ -1,0 +1,63 @@
+{
+  "scored": true,
+  "holdout_baselines": {
+    "note": "Development majority class or base rate, phase-averaged on this same holdout. Not used to refit.",
+    "direction_majority_macro_f1": 0.20323674526996627,
+    "long_tp_base_rate_brier": 0.2204776784006691,
+    "short_tp_base_rate_brier": 0.22071771053824754
+  },
+  "targets": {
+    "direction": {
+      "primary": 0.2553140112918597,
+      "overlapping": 0.25604970107783676
+    },
+    "long_tp": {
+      "primary": 0.2059477075774918,
+      "overlapping": 0.20595202699128132
+    },
+    "short_tp": {
+      "primary": 0.21616510170637912,
+      "overlapping": 0.21616825981012744
+    }
+  },
+  "gate5": {
+    "passed": false,
+    "reasons": [
+      "too_few_trades",
+      "expectancy_not_positive",
+      "fragile_to_higher_cost",
+      "profit_factor_not_above_one"
+    ],
+    "costs": {
+      "1.0": {
+        "trades": 19.0,
+        "expectancy": -0.002279198857924901,
+        "profit_factor": 0.3559863643976281,
+        "max_drawdown": -0.08716441818622309,
+        "phases": 24.0
+      },
+      "1.5": {
+        "trades": 9.5,
+        "expectancy": -0.0074165670546877775,
+        "profit_factor": 0.15370077703751225,
+        "max_drawdown": -0.08579078548436869,
+        "phases": 24.0
+      },
+      "2.0": {
+        "trades": 2.0,
+        "expectancy": -0.0076674934865370884,
+        "profit_factor": 0.0,
+        "max_drawdown": -0.012042732373098936,
+        "phases": 24.0
+      }
+    },
+    "scored": true,
+    "thresholds": {
+      "long_threshold": 0.45,
+      "short_threshold": 0.45,
+      "median_expectancy": 0.0,
+      "median_trades": 24.5,
+      "reason": "max_median_calibration_expectancy"
+    }
+  }
+}

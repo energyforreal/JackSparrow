@@ -1,0 +1,9 @@
+{
+  "scored": false,
+  "labels_read": false,
+  "reason": "barrier_screen_failed",
+  "fail_reasons": [
+    "no_skill_expectancy_too_negative",
+    "tp_rate_far_below_breakeven"
+  ]
+}

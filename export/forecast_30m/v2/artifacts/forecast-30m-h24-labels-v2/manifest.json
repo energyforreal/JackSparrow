@@ -1,0 +1,46 @@
+{
+  "spec_version": "forecast-30m-h24-v2",
+  "label_version": "forecast-30m-h24-labels-v2",
+  "feature_version": "forecast-30m-h24-features-v1",
+  "feature_columns": [
+    "return_1",
+    "return_6",
+    "return_12",
+    "return_24",
+    "ma_distance_20",
+    "ma_slope_20",
+    "rsi_14",
+    "atr_pct_14",
+    "vol_ratio_12_48",
+    "candle_body",
+    "upper_wick",
+    "lower_wick",
+    "close_location",
+    "volume_ratio_24",
+    "dist_high_24",
+    "dist_low_24",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos"
+  ],
+  "source_sha256": "7b64fb0696d121d02d3ae209b1cfbaa85991ca0281135ae1d2a1bea16005145e",
+  "holdout_start": "2026-05-15T14:00:00+00:00",
+  "label_selection": {
+    "theta": 0.75,
+    "theta_reason": "smallest_band_covering_cost",
+    "tp_mult": null,
+    "sl_mult": null,
+    "barrier_reason": "no_barrier_passed",
+    "round_trip_cost": 0.002
+  },
+  "gate4_passed": {
+    "return": false,
+    "direction": false
+  },
+  "gate5_passed": false,
+  "holdout_scored": false,
+  "orders_enabled": false,
+  "promoted_to_agent": false,
+  "targets_in_artifact": []
+}

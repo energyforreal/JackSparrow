@@ -1,0 +1,6 @@
+# Chosen on development by the v4 class-floor rule. Cost is not used.
+spec_version: forecast-30m-h24-v4
+entry: next_open
+theta: 0.50
+theta_reason: smallest_theta_meeting_class_floor
+development_rows: 36683
