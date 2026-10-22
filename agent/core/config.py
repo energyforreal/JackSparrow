@@ -222,8 +222,11 @@ class Settings(BaseSettings):
         default="mtf_fusion",
         env="TRANSFORMER_DECISION_PATH",
         description=(
-            "Live decision path: 'mtf_fusion' (single fused model) or "
-            "'transformer_agent_synthesis' (emergency five-bundle rollback)."
+            "Live decision path: 'mtf_fusion' (fused Transformer rollback), "
+            "'forecast_30m' (30-minute forecast policy), or "
+            "'transformer_agent_synthesis' (emergency five-bundle rollback). "
+            "When unset, a promoted forecast bundle switches the path to "
+            "forecast_30m."
         ),
     )
     sl_tp_mode: str = Field(

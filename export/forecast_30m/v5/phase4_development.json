@@ -1,0 +1,126 @@
+{
+  "algorithm": "xgb",
+  "params": {
+    "n_estimators": 160,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "min_child_weight": 20,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0
+  },
+  "features": [
+    "return_1",
+    "return_6",
+    "return_12",
+    "return_24",
+    "ma_distance_20",
+    "ma_slope_20",
+    "rsi_14",
+    "atr_pct_14",
+    "vol_ratio_12_48",
+    "candle_body",
+    "upper_wick",
+    "lower_wick",
+    "close_location",
+    "volume_ratio_24",
+    "dist_high_24",
+    "dist_low_24",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "doji",
+    "hammer",
+    "shooting_star",
+    "bullish_engulfing",
+    "bearish_engulfing",
+    "inside_bar",
+    "close_broke_high_24",
+    "close_broke_low_24",
+    "consecutive_closes"
+  ],
+  "probability_floor": null,
+  "floor_choice": {
+    "selected": null,
+    "reason": "no_positive_calibration_expectancy",
+    "candidates": [
+      {
+        "probability_floor": 0.35,
+        "trades": 229,
+        "expectancy": -0.0038285630244437427,
+        "profit_factor": 0.5511963832794179
+      },
+      {
+        "probability_floor": 0.45,
+        "trades": 211,
+        "expectancy": -0.002237112312654719,
+        "profit_factor": 0.7136055997303953
+      },
+      {
+        "probability_floor": 0.55,
+        "trades": 57,
+        "expectancy": -0.0021050521546655044,
+        "profit_factor": 0.7981855786880162
+      },
+      {
+        "probability_floor": 0.65,
+        "trades": 9,
+        "expectancy": 0.014475263677976271,
+        "profit_factor": 3.146764815468
+      },
+      {
+        "probability_floor": 0.75,
+        "trades": 0,
+        "expectancy": 0.0,
+        "profit_factor": 0.0
+      }
+    ]
+  },
+  "fold_stats": [
+    {
+      "trades": 0,
+      "expectancy": 0.0,
+      "profit_factor": 0.0
+    },
+    {
+      "trades": 0,
+      "expectancy": 0.0,
+      "profit_factor": 0.0
+    },
+    {
+      "trades": 0,
+      "expectancy": 0.0,
+      "profit_factor": 0.0
+    }
+  ],
+  "fold_gate": {
+    "wins": 0,
+    "folds": 3,
+    "passed": false
+  },
+  "calibration_gate": {
+    "passed": false,
+    "reasons": [
+      "too_few_trades",
+      "expectancy_not_positive",
+      "profit_factor_not_above_one"
+    ],
+    "trades": 0,
+    "expectancy": null,
+    "profit_factor": null
+  },
+  "gate": {
+    "passed": false,
+    "reasons": [
+      "no_positive_calibration_expectancy",
+      "walk_forward_expectancy_failed"
+    ],
+    "trades": 0,
+    "expectancy": null,
+    "profit_factor": null
+  },
+  "orders_enabled": false,
+  "confirmation_scored": false,
+  "promoted_to_agent": false
+}

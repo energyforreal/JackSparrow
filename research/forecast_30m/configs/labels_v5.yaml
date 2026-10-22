@@ -1,0 +1,7 @@
+# Chosen on development by the v5 expectancy rule.
+spec_version: forecast-30m-h24-v5
+entry: next_open
+theta: 0.50
+theta_reason: smallest_theta_meeting_class_floor
+probability_floor: null
+development_rows: 36683

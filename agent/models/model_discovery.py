@@ -11,6 +11,12 @@ from typing import Any, List, Tuple
 import structlog
 
 from agent.core.config import settings
+from agent.core.forecast_policy import (
+    FORECAST_DECISION_PATH,
+    forecast_bundle_dir,
+    resolve_transformer_decision_path,
+)
+from agent.models.forecast_node import ForecastModelNode
 from agent.models.fusion_node import FusionModelNode
 from agent.models.mcp_model_registry import MCPModelRegistry
 from agent.models.transformer_node import TransformerModelNode
@@ -120,6 +126,15 @@ class ModelDiscovery:
             )
             return discovered_models
 
+        path = resolve_transformer_decision_path(self.model_dir)
+        if path == FORECAST_DECISION_PATH:
+            return await self._discover_forecast(
+                discovered_models,
+                failed_models,
+                failed_reasons,
+                discovery_attempted,
+            )
+
         bundle_dirs = _resolve_bundle_dirs(self.model_dir)
         if not bundle_dirs:
             msg = (
@@ -138,9 +153,6 @@ class ModelDiscovery:
             return discovered_models
 
         fusion_dirs, tf_dirs = _split_fusion_and_tf(bundle_dirs)
-        path = str(
-            getattr(settings, "transformer_decision_path", "mtf_fusion") or "mtf_fusion"
-        )
         if path == "mtf_fusion" and fusion_dirs:
             selected = fusion_dirs
         elif path == "transformer_agent_synthesis":
@@ -187,6 +199,42 @@ class ModelDiscovery:
                 failed_models.append(str(bundle_dir))
                 failed_reasons.append(msg)
 
+        self.registry.record_discovery_summary(
+            discovered_models,
+            failed_models,
+            failed_reasons,
+            discovery_attempted=discovery_attempted,
+        )
+        return discovered_models
+
+    async def _discover_forecast(
+        self,
+        discovered_models: List[str],
+        failed_models: List[str],
+        failed_reasons: List[str],
+        discovery_attempted: bool,
+    ) -> List[str]:
+        """Register the promoted 30-minute forecast bundle only."""
+        bundle_dir = forecast_bundle_dir(self.model_dir)
+        try:
+            node = ForecastModelNode.from_bundle_dir(bundle_dir)
+            await node.initialize()
+            if self.auto_register:
+                self.registry.register_model(node)
+                discovered_models.append(node.model_name)
+            else:
+                self.registry.add_pending_model(node)
+                discovered_models.append(f"pending:{node.model_name}")
+            logger.info(
+                "model_discovered_forecast",
+                model_name=node.model_name,
+                bundle=str(bundle_dir),
+            )
+        except Exception as exc:
+            msg = f"Failed to load forecast bundle {bundle_dir}: {exc}"
+            logger.error("model_discovery_forecast_failed", error=msg, exc_info=True)
+            failed_models.append(str(bundle_dir))
+            failed_reasons.append(msg)
         self.registry.record_discovery_summary(
             discovered_models,
             failed_models,

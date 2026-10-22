@@ -910,6 +910,7 @@ class TradingEventHandler:
             fusion_atr = (
                 plan_sl_source == "atr"
                 or decision_path == "mtf_fusion"
+                or decision_path == "forecast_30m"
                 or sl_tp_mode == "atr"
             )
             if fusion_atr and (execution_plan.get("atr_14") is not None or atr is not None):

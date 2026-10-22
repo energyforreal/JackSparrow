@@ -1,0 +1,9 @@
+{
+  "scored": false,
+  "labels_read": false,
+  "reason": "no_positive_calibration_expectancy",
+  "development_reasons": [
+    "no_positive_calibration_expectancy",
+    "walk_forward_expectancy_failed"
+  ]
+}

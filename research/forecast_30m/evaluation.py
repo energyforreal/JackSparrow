@@ -13,14 +13,16 @@ from sklearn.metrics import f1_score, log_loss
 
 from research.forecast_30m.contract import (
     AMBIGUOUS,
+    BEARISH,
+    BULLISH,
     COST_STRESS,
-    DIRECTION_NAMES,
     EXPIRY,
     GATE5_MAX_DRAWDOWN,
     GATE5_MIN_TRADES,
     HORIZON_BARS,
     MIN_PHASE_ROWS,
     MIN_TP_COST_RATIO,
+    NEUTRAL,
     ROUND_TRIP_COST,
     SL_FIRST,
     THRESHOLD_GRID,
@@ -861,6 +863,158 @@ def _profit_factor_clears(profit_factor: float | None) -> bool:
     if value == float("inf"):
         return True
     return bool(np.isfinite(value) and value > 1.0)
+
+
+def one_position_direction_policy(
+    frame: pd.DataFrame,
+    probability: np.ndarray,
+    *,
+    threshold: float,
+    cost: float = ROUND_TRIP_COST,
+    horizon_bars: int = HORIZON_BARS,
+    series_length: int | None = None,
+    series_origin: int = 0,
+) -> dict[str, Any]:
+    """Trade argmax direction when the class probability clears a floor.
+
+    Neutral and sub-floor rows stay flat. A new trade is skipped while a
+    ``horizon_bars`` position is open. Buy marks ``forward_return_24 - cost``.
+    Sell marks the opposite return minus cost.
+
+    Args:
+        frame: Rows with ``bar_index`` and ``forward_return_24``.
+        probability: Array of shape ``(n, 3)`` for BEARISH / NEUTRAL / BULLISH.
+        threshold: Minimum probability on the chosen class.
+        cost: Round-trip cost as a fraction of price.
+        horizon_bars: Bars a position occupies, including the fill bar.
+        series_length: Optional overlay length for confirmation scoring.
+        series_origin: ``bar_index`` of the first overlay slot.
+
+    Returns:
+        Trade count, expectancy, profit factor, drawdown, and per-trade returns.
+    """
+    order = np.argsort(frame["bar_index"].to_numpy(dtype=np.int64), kind="stable")
+    bar_index = frame["bar_index"].to_numpy(dtype=np.int64)
+    forward = frame["forward_return_24"].to_numpy(dtype=np.float64)
+    proba = np.asarray(probability, dtype=np.float64)
+    if proba.ndim != 2 or proba.shape[1] < 3:
+        raise ValueError("direction probability must have shape (n, 3)")
+    busy_until = -10**9
+    pnls: list[float] = []
+    overlay: np.ndarray | None = None
+    if series_length is not None:
+        overlay = np.zeros(int(series_length), dtype=np.float64)
+    for position in order.tolist():
+        signal_bar = int(bar_index[position])
+        if signal_bar < busy_until:
+            continue
+        row = proba[position]
+        class_id = int(np.argmax(row))
+        confidence = float(row[class_id])
+        if class_id == NEUTRAL or confidence < float(threshold):
+            continue
+        marked = float(forward[position])
+        if not np.isfinite(marked):
+            continue
+        if class_id == BULLISH:
+            pnl = marked - float(cost)
+        elif class_id == BEARISH:
+            pnl = -marked - float(cost)
+        else:
+            continue
+        pnls.append(float(pnl))
+        busy_until = signal_bar + int(horizon_bars)
+        if overlay is not None:
+            slot = signal_bar - int(series_origin)
+            if 0 <= slot < overlay.size:
+                overlay[slot] = float(pnl)
+    stats = _return_stats(np.asarray(pnls, dtype=np.float64), decisions=int(len(frame)))
+    stats["bar_returns"] = overlay
+    stats["trade_returns"] = np.asarray(pnls, dtype=np.float64)
+    return stats
+
+
+def choose_direction_floor(
+    frame: pd.DataFrame,
+    probability: np.ndarray,
+    *,
+    cost: float = ROUND_TRIP_COST,
+    grid: Sequence[float] = THRESHOLD_GRID,
+    min_trades: int = GATE5_MIN_TRADES,
+    horizon_bars: int = HORIZON_BARS,
+) -> dict[str, Any]:
+    """Pick one probability floor on a calibration block.
+
+    A candidate must show at least ``min_trades`` non-overlapping trades,
+    positive expectancy, and a profit factor above 1 after ``cost``.
+
+    Args:
+        frame: Calibration rows only.
+        probability: Class probabilities aligned to ``frame``.
+        cost: Round-trip cost.
+        grid: Floors to try, low to high.
+        min_trades: Minimum filled trades.
+        horizon_bars: Occupancy of one position.
+
+    Returns:
+        The selected floor, or ``selected: null`` when none pass.
+    """
+    best: dict[str, Any] | None = None
+    saw_enough_trades = False
+    candidates = []
+    for floor in grid:
+        stats = one_position_direction_policy(
+            frame,
+            probability,
+            threshold=float(floor),
+            cost=cost,
+            horizon_bars=horizon_bars,
+        )
+        row = {
+            "probability_floor": float(floor),
+            "trades": int(stats["trades"]),
+            "expectancy": stats["expectancy"],
+            "profit_factor": stats["profit_factor"],
+        }
+        candidates.append(row)
+        if int(stats["trades"]) < int(min_trades):
+            continue
+        saw_enough_trades = True
+        if stats["expectancy"] is None or float(stats["expectancy"]) <= 0.0:
+            continue
+        if not _profit_factor_clears(stats.get("profit_factor")):
+            continue
+        if best is None or float(stats["expectancy"]) > float(best["expectancy"]):
+            best = row
+    if best is None:
+        reason = (
+            "no_positive_calibration_expectancy"
+            if saw_enough_trades
+            else "no_threshold_with_enough_trades"
+        )
+        return {"selected": None, "reason": reason, "candidates": candidates}
+    return {
+        "selected": best,
+        "reason": "max_calibration_expectancy",
+        "candidates": candidates,
+    }
+
+
+def direction_expectancy_fold_gate(
+    fold_expectancies: Sequence[float | None],
+) -> dict[str, Any]:
+    """Require positive traded expectancy on at least two walk-forward folds."""
+    wins = 0
+    for value in fold_expectancies:
+        if value is None or not np.isfinite(value):
+            continue
+        if float(value) > 0.0:
+            wins += 1
+    return {
+        "wins": wins,
+        "folds": len(fold_expectancies),
+        "passed": wins >= 2,
+    }
 
 
 def _median_phase(phases: Sequence[Mapping[str, float]]) -> dict[str, float | None]:

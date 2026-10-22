@@ -157,7 +157,6 @@ is not scored.
 
 - Targets D, E, and F.
 - Funding and open interest as features.
-- Wiring forecasts into the agent. Orders stay disabled.
 
 ## v1 measured label choice
 
@@ -400,6 +399,56 @@ were worse than the prior on two folds and better on one (lift 0.018). Gate 4
 failed, 1 of 3. Optuna did not run. The artifact contains no model. Orders
 stay off. Confirmation was not scored.
 
+## v5 rules
+
+These rules were written after v4 showed that log-loss lift is the wrong
+promotion question for a live agent. v5 does not reuse the v4 Gate 4 log-loss
+rule. It does not train take-profit or stop-loss heads. Cost is not in the
+label. The spent holdout, 2026-05-15 14:00 through 2026-09-27 13:30, stays
+embargoed. Confirmation after 2026-09-27 is scored once, and only after the
+development expectancy gate passes, from the existing extended parquet.
+
+Every 30-minute bar is a candidate. The fill is the open of bar `t+1`. The
+12-hour return that defines the class is marked from that fill to the close of
+`t+24`. Direction is BEARISH / NEUTRAL / BULLISH versus `theta * ATR / fill`.
+Theta is the smallest grid value whose three class rates are each at least 15%.
+Features are the v4 causal set, including the frozen pattern block. Clock-only
+models are still rejected by keeping the full feature set. Optuna stays off.
+LightGBM is not compared.
+
+Training is one XGBoost direction head. Argmax maps BEARISH to sell, BULLISH to
+buy, and NEUTRAL to hold. On the development calibration block only, one
+probability floor is chosen from 0.35, 0.45, 0.55, 0.65, 0.75. A candidate
+passes only with at least 20 non-overlapping 24-bar trades, positive expectancy,
+and a profit factor above 1 after the 0.002 round-trip cost. Walk-forward
+inside development must show positive traded expectancy on at least two folds.
+A new signal is skipped while a 12-hour position is open.
+
+The original snapshot is the source for development, so bars after 2026-09-27
+never enter the fit. Outputs go to `export/forecast_30m/v5/`. The artifact
+always stores the fitted direction bundle. `orders_enabled` is true only when
+the development gate passes. A passing bundle is copied to
+`agent/model_storage/JackSparrow_Forecast_BTCUSD_30m/`. A failure does not copy
+files and does not read confirmation labels.
+
+The live agent path `TRANSFORMER_DECISION_PATH=forecast_30m` loads that bundle.
+When the environment variable is unset and a promoted bundle is on disk, that
+path is selected automatically. `mtf_fusion` remains the rollback.
+
+## v5 development result
+
+Theta **0.50** was the smallest class-floor value. Neutral was 15.1%.
+Development rows after warmup: 36,614. Entry was the next-bar open.
+
+No probability floor passed the calibration screen. Floors 0.35, 0.45, and 0.55
+each placed at least 20 non-overlapping trades and all lost money. The closest
+expectancy was −0.0021 at floor 0.55, profit factor 0.80. Floor 0.65 had
+expectancy 0.0145 and profit factor 3.15 on 9 trades, below the 20-trade floor.
+Floor 0.75 placed 0 trades. Walk-forward folds had no threshold to apply and
+placed 0 trades. Gate failed. The artifact contains the fitted direction
+bundle. `orders_enabled` is false. Confirmation labels were not read. Nothing
+was copied into `agent/model_storage/`. The live path stays `mtf_fusion`.
+
 ## Reproduce
 
 
@@ -409,7 +458,8 @@ python -m research.forecast_30m.pipeline
 python -m research.forecast_30m.pipeline_v3
 python -m research.forecast_30m.pipeline_v3_ranking
 python -m research.forecast_30m.pipeline_v4
-pytest tests/unit/test_forecast_30m_integrity.py tests/unit/test_forecast_30m_labels.py tests/unit/test_forecast_30m_evaluation.py tests/unit/test_forecast_30m_v3.py tests/unit/test_forecast_30m_v4.py -q
+python -m research.forecast_30m.pipeline_v5
+pytest tests/unit/test_forecast_30m_integrity.py tests/unit/test_forecast_30m_labels.py tests/unit/test_forecast_30m_evaluation.py tests/unit/test_forecast_30m_v3.py tests/unit/test_forecast_30m_v4.py tests/unit/test_forecast_30m_v5.py tests/unit/test_forecast_decision.py -q
 ```
 
 The audit exits with code 2 when the snapshot fails the provisional-source rule

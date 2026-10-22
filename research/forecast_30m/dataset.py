@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import numpy as np
 import pandas as pd
 
@@ -10,6 +12,11 @@ from research.forecast_30m.contract_v4 import (
     FEATURE_COLUMNS as FEATURE_COLUMNS_V4,
     FEATURE_VERSION as FEATURE_VERSION_V4,
     LABEL_VERSION as LABEL_VERSION_V4,
+)
+from research.forecast_30m.contract_v5 import (
+    FEATURE_COLUMNS as FEATURE_COLUMNS_V5,
+    FEATURE_VERSION as FEATURE_VERSION_V5,
+    LABEL_VERSION as LABEL_VERSION_V5,
 )
 from research.forecast_30m.contract_v3 import (
     CUSUM_THRESHOLD,
@@ -102,19 +109,26 @@ def build_direction_frames(
     *,
     theta: float,
     development_end: pd.Timestamp,
+    feature_columns: Sequence[str] | None = None,
+    feature_version: str = FEATURE_VERSION_V4,
+    label_version: str = LABEL_VERSION_V4,
 ) -> pd.DataFrame:
-    """Build development rows for the v4 direction head.
+    """Build development rows for the v4/v5 direction head.
 
     Args:
         frame: Original OHLCV snapshot. Confirmation bars must not be present.
         theta: Frozen class-floor theta.
         development_end: First embargo timestamp. Labels that touch it leave.
+        feature_columns: Causal columns. Defaults to the v4 set.
+        feature_version: Written onto the frame.
+        label_version: Written onto the frame.
 
     Returns:
-        Time-ordered development rows with v4 features and ``y_direction``.
+        Time-ordered development rows with direction labels and the 24-bar return.
     """
+    columns = list(feature_columns or FEATURE_COLUMNS_V4)
     labeled = attach_targets(
-        add_features(frame, feature_columns=FEATURE_COLUMNS_V4),
+        add_features(frame, feature_columns=columns),
         theta=theta,
         tp_mult=None,
         sl_mult=None,
@@ -134,14 +148,68 @@ def build_direction_frames(
         horizon_ok=labeled["horizon_ok"].to_numpy(dtype=bool),
     )
     keep = development & ready & direction_ok
-    columns = (
+    model_columns = (
         ["bar_index", "time"]
-        + list(FEATURE_COLUMNS_V4)
+        + columns
         + ["atr", "neutral_band", "y_direction", "forward_return_24"]
     )
-    out = labeled.loc[keep, columns].reset_index(drop=True)
-    out["feature_version"] = FEATURE_VERSION_V4
-    out["label_version"] = LABEL_VERSION_V4
+    out = labeled.loc[keep, model_columns].reset_index(drop=True)
+    out["feature_version"] = feature_version
+    out["label_version"] = label_version
+    return out
+
+
+def build_direction_confirmation_frames(
+    frame: pd.DataFrame,
+    *,
+    theta: float,
+    snapshot_end: pd.Timestamp,
+    feature_columns: Sequence[str] | None = None,
+    feature_version: str = FEATURE_VERSION_V5,
+    label_version: str = LABEL_VERSION_V5,
+) -> pd.DataFrame:
+    """Build confirmation rows whose signal sits after the frozen snapshot.
+
+    Args:
+        frame: Extended OHLCV series that may include bars after the snapshot.
+        theta: Frozen class-floor theta.
+        snapshot_end: Last original-snapshot timestamp. Signals must be later.
+        feature_columns: Causal columns. Defaults to the v5 set.
+        feature_version: Written onto the frame.
+        label_version: Written onto the frame.
+
+    Returns:
+        Time-ordered confirmation rows. Embargo rows are not included.
+    """
+    columns = list(feature_columns or FEATURE_COLUMNS_V5)
+    labeled = attach_targets(
+        add_features(frame, feature_columns=columns),
+        theta=theta,
+        tp_mult=None,
+        sl_mult=None,
+        entry="next_open",
+    )
+    labeled.insert(0, "bar_index", np.arange(len(labeled), dtype=np.int64))
+    epochs = to_epoch_seconds(labeled["time"])
+    snapshot_epoch = int(pd.Timestamp(snapshot_end).timestamp())
+    ready = labeled["label_row_ok"].to_numpy(dtype=bool) & labeled["feature_row_ok"].to_numpy(
+        dtype=bool
+    )
+    direction_ok = labeled["y_direction"].to_numpy(dtype=np.int64) >= 0
+    confirmation = confirmation_mask(
+        epochs,
+        confirmation_start=snapshot_epoch,
+        horizon_ok=labeled["horizon_ok"].to_numpy(dtype=bool),
+    )
+    keep = confirmation & ready & direction_ok
+    model_columns = (
+        ["bar_index", "time"]
+        + columns
+        + ["atr", "neutral_band", "y_direction", "forward_return_24"]
+    )
+    out = labeled.loc[keep, model_columns].reset_index(drop=True)
+    out["feature_version"] = feature_version
+    out["label_version"] = label_version
     return out
 
 

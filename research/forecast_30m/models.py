@@ -33,10 +33,13 @@ from research.forecast_30m.evaluation import (
     always_in_expectancy,
     barrier_expectancy,
     brier_score,
+    choose_direction_floor,
     development_policy_gate,
+    direction_expectancy_fold_gate,
     direction_log_loss,
     gate4_passed,
     mean_absolute_error,
+    one_position_direction_policy,
     one_position_policy,
     path_net_return,
     phase_average,
@@ -409,6 +412,123 @@ def predict_bundle(bundle: Mapping[str, Any], features: np.ndarray) -> np.ndarra
     if calibrator is None or task == "return":
         return raw
     return _apply_calibrator(calibrator, raw, task)
+
+
+def train_direction_policy_xgb(
+    frame: pd.DataFrame,
+    *,
+    holdout_start: pd.Timestamp,
+    embargo_end: pd.Timestamp,
+    feature_columns: Sequence[str],
+) -> dict[str, Any]:
+    """Fit the v5 direction policy. LightGBM and Optuna stay off.
+
+    The calibration block picks one probability floor. Walk-forward folds
+    must show positive traded expectancy on at least two of them. A frozen
+    bundle is always written so tests can load it.
+
+    Args:
+        frame: Development rows with ``y_direction`` and ``forward_return_24``.
+        holdout_start: First embargo timestamp.
+        embargo_end: Last embargo timestamp.
+        feature_columns: Causal columns, including the v4 pattern block.
+
+    Returns:
+        Fold stats, the chosen floor, the economic gate, and a frozen bundle.
+    """
+    assert_development_only(frame, holdout_start)
+    assert_outside_embargo(frame, holdout_start, embargo_end)
+    columns = list(feature_columns)
+    rows = _task_rows(frame, "direction")
+    blocks = development_blocks(rows["bar_index"].to_numpy(dtype=np.int64))
+    fit_rows = rows.iloc[blocks["fit"]]
+    calibration_rows = rows.iloc[blocks["calibration"]]
+    try:
+        fit_estimator = _fit_estimator(
+            "xgb", "direction", fit_rows, columns, TREE_DEFAULTS
+        )
+        calibration_proba = _predict_raw(
+            fit_estimator,
+            "direction",
+            calibration_rows.loc[:, columns].to_numpy(dtype=np.float64),
+        )
+        floor_choice = choose_direction_floor(calibration_rows, calibration_proba)
+    except (ValueError, RuntimeError) as exc:
+        floor_choice = {
+            "selected": None,
+            "reason": str(exc),
+            "candidates": [],
+        }
+    selected = floor_choice.get("selected")
+    threshold = None if selected is None else float(selected["probability_floor"])
+    fold_stats: list[dict[str, Any]] = []
+    expectancies: list[float | None] = []
+    for fold in blocks["walk_forward"]:
+        train = rows.iloc[fold["train"]]
+        validation = rows.iloc[fold["validation"]]
+        row: dict[str, Any] = {"trades": 0, "expectancy": None, "profit_factor": None}
+        try:
+            estimator = _fit_estimator("xgb", "direction", train, columns, TREE_DEFAULTS)
+            proba = _predict_raw(
+                estimator,
+                "direction",
+                validation.loc[:, columns].to_numpy(dtype=np.float64),
+            )
+            stats = one_position_direction_policy(
+                validation,
+                proba,
+                threshold=1.0 if threshold is None else threshold,
+                cost=ROUND_TRIP_COST,
+            )
+            row = {
+                "trades": int(stats["trades"]),
+                "expectancy": stats["expectancy"],
+                "profit_factor": stats["profit_factor"],
+            }
+        except (ValueError, RuntimeError) as exc:
+            row["error"] = str(exc)
+        fold_stats.append(row)
+        expectancies.append(row.get("expectancy"))
+    fold_gate = direction_expectancy_fold_gate(expectancies)
+    calibration_gate = development_policy_gate(
+        {
+            "trades": 0 if selected is None else selected["trades"],
+            "expectancy": None if selected is None else selected["expectancy"],
+            "profit_factor": None if selected is None else selected["profit_factor"],
+        }
+    )
+    reasons: list[str] = []
+    if selected is None:
+        reasons.append(str(floor_choice.get("reason") or "no_probability_floor"))
+    else:
+        reasons.extend(list(calibration_gate.get("reasons") or []))
+    if not fold_gate["passed"]:
+        reasons.append("walk_forward_expectancy_failed")
+    passed = selected is not None and bool(calibration_gate["passed"]) and bool(
+        fold_gate["passed"]
+    )
+    bundle = _fit_final(rows, "direction", "xgb", columns, TREE_DEFAULTS, blocks)
+    return {
+        "algorithm": "xgb",
+        "params": dict(TREE_DEFAULTS),
+        "features": columns,
+        "probability_floor": threshold,
+        "floor_choice": floor_choice,
+        "fold_stats": fold_stats,
+        "fold_gate": fold_gate,
+        "calibration_gate": calibration_gate,
+        "gate": {
+            "passed": passed,
+            "reasons": reasons,
+            "trades": 0 if selected is None else int(selected["trades"]),
+            "expectancy": None if selected is None else selected["expectancy"],
+            "profit_factor": None if selected is None else selected["profit_factor"],
+        },
+        "bundle": bundle,
+        "orders_enabled": bool(passed),
+        "confirmation_scored": False,
+        "promoted_to_agent": False,
+    }
 
 
 def train_direction_xgb(

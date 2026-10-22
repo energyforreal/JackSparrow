@@ -9,6 +9,14 @@ from typing import Any, Dict, List, Optional
 import structlog
 
 from agent.core.config import settings
+from agent.core.forecast_policy import (
+    FORECAST_DECISION_PATH,
+    apply_horizon_lock,
+    build_forecast_execution_plan,
+    map_forecast_signal,
+    remember_forecast_entry,
+    resolve_transformer_decision_path,
+)
 from agent.core.fusion_policy import (
     build_fusion_execution_plan,
     evaluate_horizon_forecast,
@@ -448,11 +456,19 @@ async def evaluate_transformer_prediction(
     t0: float,
     serialize_prediction: Any,
 ) -> Dict[str, Any]:
-    """Dispatch fused forecast (default) or emergency five-bundle synthesis."""
-    path = str(
-        getattr(settings, "transformer_decision_path", _FUSION_DECISION_PATH)
-        or _FUSION_DECISION_PATH
-    ).strip()
+    """Dispatch forecast, fused Transformer, or emergency five-bundle synthesis."""
+    path = resolve_transformer_decision_path(
+        getattr(settings, "model_dir", "./agent/model_storage")
+    )
+    if path == FORECAST_DECISION_PATH:
+        return await evaluate_forecast_prediction(
+            symbol=symbol,
+            context=context,
+            model_registry=model_registry,
+            delta_client=delta_client,
+            t0=t0,
+            serialize_prediction=serialize_prediction,
+        )
     if path != _DECISION_PATH:
         return await evaluate_fusion_prediction(
             symbol=symbol,
@@ -470,6 +486,247 @@ async def evaluate_transformer_prediction(
         t0=t0,
         serialize_prediction=serialize_prediction,
     )
+
+
+async def evaluate_forecast_prediction(
+    *,
+    symbol: str,
+    context: Dict[str, Any],
+    model_registry: MCPModelRegistry,
+    delta_client: Any,
+    t0: float,
+    serialize_prediction: Any,
+) -> Dict[str, Any]:
+    """30-minute forecast class map → 12-hour ATR entry, or HOLD."""
+    import time
+
+    import pandas as pd
+
+    from agent.core.contract_state import get_contract_state
+    from agent.core.portfolio_intelligence import (
+        apply_portfolio_guard_to_verdict,
+        evaluate_portfolio_guard,
+        fetch_portfolio_exposure_snapshot,
+    )
+
+    if not delta_client:
+        raise RuntimeError("delta_client not set; cannot fetch market frames")
+
+    df5, df15, df30, df1h, df2h, df_fund, df_oi, df_mark = await fetch_mtf_market_frames(
+        delta_client, symbol
+    )
+    if df30 is None or (isinstance(df30, pd.DataFrame) and df30.empty):
+        raise ValueError("Insufficient 30-minute OHLCV data for forecast prediction")
+
+    ticker_row: Dict[str, Any] = {}
+    if isinstance(df_oi, pd.DataFrame) and not df_oi.empty:
+        ticker_row = df_oi.iloc[-1].to_dict()
+    contract_state = await get_contract_state(symbol, ticker_row=ticker_row)
+
+    req_id = f"pred_forecast_{symbol}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    mctx: Dict[str, Any] = {
+        **(context or {}),
+        "v43_df5m": df5,
+        "v43_df15m": df15,
+        "v43_df30m": df30,
+        "v43_df1h": df1h,
+        "v43_df2h": df2h,
+        "v43_df_funding": df_fund,
+        "v43_df_oi": df_oi,
+        "v43_df_mark": df_mark,
+        "v43_contract_state": contract_state,
+        "symbol": symbol,
+    }
+    if not contract_state.is_operational:
+        mctx["market_health_hold"] = True
+        mctx["market_health_reason"] = (
+            f"contract_state={contract_state.state} "
+            f"trading_status={contract_state.trading_status}"
+        )
+
+    model_request = MCPModelRequest(
+        request_id=req_id,
+        features=[],
+        context=mctx,
+        require_explanation=False,
+    )
+    model_response = await model_registry.get_predictions(model_request)
+    pred = model_response.predictions[0] if model_response.predictions else None
+    pctx = pred.context if pred is not None and isinstance(pred.context, dict) else {}
+    if pred is not None and not bool(pctx.get("orders_enabled", False)):
+        raise RuntimeError("forecast bundle is not approved for live orders")
+    direction = pctx.get("direction")
+    probability = pctx.get("direction_probability")
+    floor = pctx.get("probability_floor")
+    signal, reason_codes = map_forecast_signal(direction, probability, floor)
+    confidence = float(probability or 0.0) if signal in _ENTRY_SIGNALS else 0.0
+    now = datetime.now(timezone.utc)
+    locked, lock_reasons = apply_horizon_lock(signal, symbol=symbol, now=now)
+    if lock_reasons:
+        signal = locked
+        confidence = 0.0
+        reason_codes = list(reason_codes) + lock_reasons
+    if mctx.get("market_health_hold"):
+        signal = "HOLD"
+        confidence = 0.0
+        reason_codes = list(reason_codes) + ["market_health_hold"]
+
+    size_floor = float(getattr(settings, "transformer_size_floor", 0.35) or 0.35)
+    max_position_size = float(getattr(settings, "max_position_size", 0.1) or 0.1)
+    size_fraction = 0.0
+    if signal in _ENTRY_SIGNALS:
+        size_fraction = float(
+            max(size_floor, min(max_position_size, max_position_size * confidence))
+        )
+    execution_plan = build_forecast_execution_plan(
+        signal=signal,
+        confidence=confidence,
+        size_fraction=size_fraction,
+        reason_codes=reason_codes,
+    )
+    atr = _simple_atr(df30 if isinstance(df30, pd.DataFrame) else df5)
+    if execution_plan:
+        execution_plan["atr_14"] = atr
+        position_size = _default_position_size(
+            confidence, float(execution_plan.get("size_fraction") or 0.0)
+        )
+    else:
+        position_size = 0.0
+
+    thesis = "flat"
+    if signal in {"BUY", "STRONG_BUY"}:
+        thesis = "long"
+    elif signal in {"SELL", "STRONG_SELL"}:
+        thesis = "short"
+    model_predictions_payload: List[Dict[str, Any]] = [
+        serialize_prediction(p) for p in model_response.predictions
+    ]
+    bar_idx = closed_5m_bar_index(df5)
+    market_context: Dict[str, Any] = {
+        **mctx,
+        "format": "jacksparrow_forecast_btcusd_30m",
+        "threshold": float(floor or 0.0),
+        "regime": thesis,
+        "transformer_signal": signal,
+        "transformer_reason_codes": reason_codes,
+        "closed_bar_index": bar_idx,
+        "model_predictions": model_predictions_payload,
+        "execution_plan": execution_plan,
+        "transformer_features": {"atr_14": atr},
+        "decision_path": FORECAST_DECISION_PATH,
+        "primary_tf": "30m",
+        "path_edge": 0.0,
+        "long_edge": 0.0,
+        "short_edge": 0.0,
+        "forecast_direction": direction,
+        "forecast_probability": probability,
+    }
+    policy_verdict = PolicyVerdict(
+        signal=signal,
+        confidence=confidence,
+        position_size=position_size,
+        reason_codes=reason_codes,
+        ml_evidence_id=None,
+        adopted_ml_candidate=signal in _ENTRY_SIGNALS,
+    )
+    portfolio_snap = await fetch_portfolio_exposure_snapshot(symbol, market_context)
+    market_context["portfolio_exposure"] = portfolio_snap.to_dict()
+    portfolio_guard = evaluate_portfolio_guard(
+        portfolio_snap,
+        symbol=symbol,
+        proposed_signal=policy_verdict.signal,
+        proposed_size_fraction=float(policy_verdict.position_size or 0.0),
+    )
+    policy_verdict = apply_portfolio_guard_to_verdict(
+        policy_verdict, portfolio_guard, symbol=symbol
+    )
+    market_context["portfolio_guard"] = portfolio_guard.to_dict()
+    signal = policy_verdict.signal
+    confidence = float(policy_verdict.confidence or 0.0)
+    position_size = float(policy_verdict.position_size or 0.0)
+    if signal in _ENTRY_SIGNALS:
+        remember_forecast_entry(symbol, now)
+
+    reasoning_chain = _build_reasoning_chain(
+        symbol=symbol,
+        signal=signal,
+        confidence=confidence,
+        path_edge=0.0,
+        threshold=float(floor or 0.0),
+        vol_regime="NORMAL",
+        regime=thesis,
+        model_predictions=model_predictions_payload,
+        market_context=market_context,
+        reason_codes=list(policy_verdict.reason_codes or reason_codes),
+        thesis=thesis,
+    )
+    reasoning_chain["conclusion"] = (
+        f"Forecast 30m: {signal} direction={direction or 'none'} "
+        f"p={confidence:.3f}"
+    )
+    reasoning_chain["steps"][0]["step_name"] = "forecast_30m"
+
+    ts = datetime.now(timezone.utc)
+    feat_list = [
+        MCPFeature(
+            name="atr_14",
+            version="1.0.0",
+            value=float(atr),
+            timestamp=ts,
+            quality=FeatureQuality.HIGH,
+            metadata={"forecast_30m": True},
+            computation_time_ms=0.0,
+        )
+    ]
+    feature_response = MCPFeatureResponse(
+        features=feat_list,
+        quality_score=0.9,
+        overall_quality=FeatureQuality.HIGH,
+        timestamp=ts,
+        request_id=req_id,
+    )
+    result: Dict[str, Any] = {
+        "symbol": symbol,
+        "timestamp": datetime.now(timezone.utc),
+        "features": {
+            "data": [
+                {"name": f.name, "value": f.value, "quality": f.quality.value}
+                for f in feature_response.features
+            ],
+            "quality_score": feature_response.quality_score,
+            "overall_quality": feature_response.overall_quality.value,
+            "count": len(feature_response.features),
+        },
+        "models": {
+            "predictions": model_predictions_payload,
+            "consensus_prediction": model_response.consensus_prediction,
+            "consensus_confidence": model_response.consensus_confidence,
+            "healthy_models": model_response.healthy_models,
+            "total_models": model_response.total_models,
+        },
+        "model_predictions": model_predictions_payload,
+        "market_context": market_context,
+        "reasoning": reasoning_chain,
+        "decision": {
+            "signal": signal,
+            "position_size": position_size,
+            "confidence": confidence,
+            "reasoning": reasoning_chain.get("conclusion"),
+            "policy_reason_codes": list(policy_verdict.reason_codes or []),
+        },
+        "policy_verdict": policy_verdict.model_dump(mode="json"),
+    }
+    result["inference_latency_ms"] = (time.perf_counter() - t0) * 1000.0
+    logger.info(
+        "forecast_decision_complete",
+        symbol=symbol,
+        signal=signal,
+        confidence=confidence,
+        direction=direction,
+        reason_codes=list(policy_verdict.reason_codes or []),
+        decision_path=FORECAST_DECISION_PATH,
+    )
+    return result
 
 
 async def _evaluate_synthesis_prediction(

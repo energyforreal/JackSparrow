@@ -168,3 +168,27 @@ async def test_discover_fails_without_onnx(
     discovered = await discovery.discover_models()
     assert discovered == []
     assert len(registry.models) == 0
+
+
+@pytest.mark.asyncio
+async def test_discover_forecast_bundle_when_path_is_forecast_30m(
+    temp_model_dir: Path, model_registry: MCPModelRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent.models.forecast_node import ForecastModelNode
+
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "forecast_30m")
+    mock_node = MagicMock(spec=ForecastModelNode)
+    mock_node.model_name = "jacksparrow_forecast_BTCUSD_30m"
+    mock_node.initialize = AsyncMock()
+
+    with patch("agent.models.model_discovery.settings") as mock_settings:
+        mock_settings.model_dir = str(temp_model_dir)
+        mock_settings.model_path = None
+        mock_settings.model_auto_register = True
+        with patch.object(ForecastModelNode, "from_bundle_dir", return_value=mock_node):
+            discovery = ModelDiscovery(model_registry)
+            discovered = await discovery.discover_models()
+
+    assert discovered == ["jacksparrow_forecast_BTCUSD_30m"]
+    mock_node.initialize.assert_awaited_once()
+    assert model_registry.get_model("jacksparrow_forecast_BTCUSD_30m") is mock_node

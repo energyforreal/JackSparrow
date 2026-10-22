@@ -13,11 +13,34 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from research.forecast_30m.contract import DIRECTION_NAMES
+from research.forecast_30m.contract import DIRECTION_NAMES, NEUTRAL
+from research.forecast_30m.contract_v5 import SIGNAL_BY_CLASS
 from research.forecast_30m.features import add_features
 from research.forecast_30m.models import predict_bundle
 
 ORDERS_ENABLED = False
+
+
+def map_direction_signal(
+    direction: str | None,
+    probability: float | None,
+    floor: float | None,
+) -> str:
+    """Map a direction class to a live BUY / SELL / HOLD wire signal.
+
+    Args:
+        direction: ``BEARISH``, ``NEUTRAL``, or ``BULLISH``.
+        probability: Probability of the chosen class.
+        floor: Minimum probability required to leave HOLD.
+
+    Returns:
+        ``BUY``, ``SELL``, or ``HOLD``.
+    """
+    if direction is None or direction == DIRECTION_NAMES[NEUTRAL]:
+        return "HOLD"
+    if probability is None or floor is None or float(probability) < float(floor):
+        return "HOLD"
+    return SIGNAL_BY_CLASS.get(direction, "HOLD")
 
 
 def load_artifact(path: Path) -> dict[str, Any]:
@@ -48,34 +71,51 @@ def predict_latest(artifact: dict[str, Any], frame: pd.DataFrame) -> dict[str, A
     Raises:
         ValueError: If the latest bar does not have a complete feature row.
     """
-    featured = add_features(frame)
+    manifest = artifact["manifest"]
+    feature_columns = manifest.get("feature_columns")
+    featured = add_features(
+        frame,
+        feature_columns=feature_columns,
+    )
     latest = featured.iloc[-1]
     if not bool(latest["feature_row_ok"]):
         raise ValueError("latest bar does not have a complete causal feature row")
-    manifest = artifact["manifest"]
     models = artifact["models"]
     direction = None
+    direction_probability = None
+    direction_proba = None
     forward = None
     long_probability = None
     short_probability = None
     if "direction" in models:
         proba = _one_row(models["direction"], featured)
-        direction = DIRECTION_NAMES[int(np.argmax(proba))]
+        direction_proba = [float(value) for value in np.asarray(proba).reshape(-1).tolist()]
+        class_id = int(np.argmax(proba))
+        direction = DIRECTION_NAMES[class_id]
+        direction_probability = float(np.asarray(proba).reshape(-1)[class_id])
     if "return" in models:
         forward = float(_one_row(models["return"], featured)[0])
     if "long_tp" in models:
         long_probability = float(_one_row(models["long_tp"], featured)[0])
     if "short_tp" in models:
         short_probability = float(_one_row(models["short_tp"], featured)[0])
+    floor = manifest.get("probability_floor")
+    signal = map_direction_signal(direction, direction_probability, floor)
+    orders_enabled = bool(manifest.get("orders_enabled", ORDERS_ENABLED))
     return {
         "direction": direction,
+        "direction_probability": direction_probability,
+        "direction_proba": direction_proba,
+        "signal": signal,
+        "probability_floor": None if floor is None else float(floor),
         "forward_return_24": forward,
         "long_tp_first_probability": long_probability,
         "short_tp_first_probability": short_probability,
-        "orders_enabled": ORDERS_ENABLED,
-        "promoted_to_agent": False,
+        "orders_enabled": orders_enabled,
+        "promoted_to_agent": bool(manifest.get("promoted_to_agent", False)),
         "gate4_passed": dict(manifest.get("gate4_passed") or {}),
         "gate5_passed": bool(manifest.get("gate5_passed", False)),
+        "development_gate_passed": bool(manifest.get("development_gate_passed", False)),
     }
 
 

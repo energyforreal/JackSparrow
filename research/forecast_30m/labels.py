@@ -527,6 +527,32 @@ def render_labels_v4_yaml(report: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_labels_v5_yaml(report: Mapping[str, Any]) -> str:
+    """Render the frozen v5 direction-policy choice.
+
+    Args:
+        report: Output of :func:`measure_direction_theta` plus the policy floor.
+
+    Returns:
+        YAML text.
+    """
+    theta = report["theta"]["selected"]
+    theta_text = "null" if theta is None else f"{float(theta['theta']):.2f}"
+    floor = report.get("probability_floor")
+    floor_text = "null" if floor is None else f"{float(floor):.2f}"
+    lines = [
+        "# Chosen on development by the v5 expectancy rule.",
+        f"spec_version: {report.get('spec_version', 'forecast-30m-h24-v5')}",
+        "entry: next_open",
+        f"theta: {theta_text}",
+        f"theta_reason: {report['theta']['reason']}",
+        f"probability_floor: {floor_text}",
+        f"development_rows: {int(report['development_rows'])}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def select_theta(candidates: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Apply the pre-registered theta rule.
 

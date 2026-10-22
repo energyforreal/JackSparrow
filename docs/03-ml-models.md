@@ -2,11 +2,11 @@
 
 ## Overview
 
-JackSparrow’s live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then three 2-class heads forecast **+30m / +1h / +2h** as BULL / BEAR. NEUTRAL is ignored in training (not a class); live HOLD comes from LOW grade or `min_probability`. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration. **Label V2** path targets (return / long-short MFE/MAE / persistence) train the
+JackSparrow’s default live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`) until a promoted 30-minute forecast bundle is on disk. Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then three 2-class heads forecast **+30m / +1h / +2h** as BULL / BEAR. NEUTRAL is ignored in training (not a class); live HOLD comes from LOW grade or `min_probability`. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration. **Label V2** path targets (return / long-short MFE/MAE / persistence) train the
 research v15 bundle only; see [`reference/label-v2-spec.md`](../reference/label-v2-spec.md).
 They are not consumed by the live fused v11 model.
 
-Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` reloads the five per-TF ONNX bundles and climate/setup/timing synthesis. That path is not dual-running by default.
+When `export/forecast_30m/v5` passes its development expectancy gate, the joblib bundle is copied to `agent/model_storage/JackSparrow_Forecast_BTCUSD_30m/` and the live path becomes **`forecast_30m`**: one XGBoost direction head on closed 30-minute bars, 12-hour occupancy, ATR brackets. See [`reference/forecast-30m-h24-spec.md`](../reference/forecast-30m-h24-spec.md). `TRANSFORMER_DECISION_PATH=mtf_fusion` remains the rollback. `transformer_agent_synthesis` reloads the five per-TF ONNX bundles. Those paths are not dual-running by default.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -15,6 +15,7 @@ Emergency rollback: `TRANSFORMER_DECISION_PATH=transformer_agent_synthesis` relo
 ## Table of Contents
 
 - [Runtime discovery (Transformer ONNX)](#runtime-discovery-transformer-onnx)
+- [Runtime discovery (30-minute forecast)](#runtime-discovery-30-minute-forecast)
 - [Bundle layout](#bundle-layout)
 - [Feature contract](#feature-contract)
 - [Environment variables](#environment-variables)
@@ -59,14 +60,27 @@ Required artifacts:
 
 ---
 
+## Runtime discovery (30-minute forecast)
+
+When `TRANSFORMER_DECISION_PATH=forecast_30m`, or when that env is unset and a promoted bundle exists, discovery registers **only** `ForecastModelNode` from:
+
+`JackSparrow_Forecast_BTCUSD_30m/`
+
+Required artifacts: `manifest.json` (`orders_enabled` must be true) and `models.joblib`. Unapproved research artifacts are refused.
+
+---
+
 ## Bundle layout
 
 ```
 agent/model_storage/
-└── JackSparrow_Transformer_BTCUSD_mtf_fusion/
-    ├── metadata_transformer.json
-    ├── btcusd_mtf_fusion.onnx
-    └── feature_config.json
+├── JackSparrow_Transformer_BTCUSD_mtf_fusion/
+│   ├── metadata_transformer.json
+│   ├── btcusd_mtf_fusion.onnx
+│   └── feature_config.json
+└── JackSparrow_Forecast_BTCUSD_30m/   # present only after a passing v5 gate
+    ├── manifest.json
+    └── models.joblib
 ```
 
 Older per-TF folders (`JackSparrow_Transformer_BTCUSD_{5m,15m,30m,1h,2h}/`) may remain unused.
@@ -101,7 +115,7 @@ Each `TransformerModelNode` builds features on its native TF grid only.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MODEL_DIR` | `./agent/model_storage` | Parent directory for model bundles |
-| `TRANSFORMER_DECISION_PATH` | `mtf_fusion` | Live path; `transformer_agent_synthesis` is emergency rollback |
+| `TRANSFORMER_DECISION_PATH` | `mtf_fusion` | Live path: `forecast_30m` when a promoted bundle exists and the env is unset; `mtf_fusion` is rollback; `transformer_agent_synthesis` is emergency five-bundle rollback |
 | `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Per-horizon probability floor |
 | `SL_TP_MODE` | `atr` | Duration-scaled ATR brackets (fusion default) |
 | `TRANSFORMER_CONFIDENCE_HOLD_FLOOR` | `0.40` | Soft confidence floor used in size bands |
@@ -151,6 +165,8 @@ pytest tests/unit/test_mtf_asof_alignment.py \
        tests/unit/test_mtf_fusion_decision.py \
        tests/unit/test_mtf_fusion_features.py \
        tests/unit/test_transformer_decision.py \
+       tests/unit/test_forecast_30m_v5.py \
+       tests/unit/test_forecast_decision.py \
        tests/integration/test_agent_synthesis_decision.py \
        tests/integration/test_mtf_transformer_decision.py -q
 ```
@@ -163,14 +179,24 @@ Runtime-critical modules:
 
 | Path | Role |
 |------|------|
-| `agent/models/model_discovery.py` | Prefers fused bundle; per-TF only on rollback |
+| `agent/models/model_discovery.py` | Forecast bundle on `forecast_30m`; fused bundle otherwise; per-TF only on rollback |
+| `agent/models/forecast_node.py` | `ForecastModelNode` (joblib v5 direction head) |
 | `agent/models/fusion_node.py` | `FusionModelNode` (ONNX via onnxruntime) |
 | `agent/models/transformer_node.py` | Per-TF node (emergency synthesis only) |
+| `agent/core/forecast_policy.py` | Class map, 12-hour lock, ATR brackets |
 | `agent/core/fusion_policy.py` | Per-horizon gates + duration |
 | `agent/core/transformer_decision.py` | Slim decision path → `PolicyVerdict` / `DECISION_READY` |
 | `agent/core/mcp_orchestrator.py` | Orchestrates features → model → decision |
 
-Decision flow:
+Decision flow (`forecast_30m`, when a promoted bundle is present):
+
+1. `CANDLE_CLOSED` (5m) → fetch independent frames; inference uses closed 30m
+2. `ForecastModelNode.predict()` runs the v5 XGBoost direction head
+3. Argmax BEARISH / BULLISH maps to SELL / BUY when probability clears the frozen floor; NEUTRAL is HOLD
+4. A new entry is skipped while a 12-hour forecast position is reserved; ATR SL/TP; `decision_path=forecast_30m`
+5. `DECISION_READY` → trading handler → risk → execution
+
+Decision flow (`mtf_fusion` rollback):
 
 1. `CANDLE_CLOSED` (5m) → fetch independent 5m/10m/30m/1h/2h frames
 2. `FusionModelNode.predict()` runs the fused ONNX graph
