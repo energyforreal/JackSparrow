@@ -26,6 +26,13 @@ from agent.events.schemas import (
 logger = structlog.get_logger()
 
 
+def _contributes_to_consensus(model: object | None) -> bool:
+    """Recognition context stays out of the order-weighted average."""
+    if model is None:
+        return True
+    return bool(getattr(model, "contributes_to_consensus", True))
+
+
 class MCPModelResponse(BaseModel):
     """MCP Model Protocol response."""
     request_id: str
@@ -43,6 +50,19 @@ class NoModelsRegisteredError(Exception):
 
 class NoHealthyModelPredictionsError(Exception):
     """Raised when no acceptable model predictions are available for consensus."""
+
+
+def reported_model_health(status: Dict[str, Any]) -> str:
+    """Read a model node's health from either payload key.
+
+    Fusion and transformer nodes report ``status``. The forecast node reports
+    ``health_status``. Missing either key must not be treated as unhealthy.
+    """
+    raw = status.get("status")
+    if raw is None or str(raw).strip() == "":
+        raw = status.get("health_status", "unknown")
+    text = str(raw or "unknown").strip()
+    return text or "unknown"
 
 
 class MCPModelRegistry:
@@ -362,7 +382,7 @@ class MCPModelRegistry:
         for model_name, model in self.models.items():
             try:
                 health_info = await model.get_health_status()
-                model_health_before[model_name] = health_info.get("status", "unknown")
+                model_health_before[model_name] = reported_model_health(health_info)
             except Exception as e:
                 model_health_before[model_name] = f"error: {str(e)}"
         
@@ -450,19 +470,23 @@ class MCPModelRegistry:
                 "No model predictions are available for consensus calculation."
             )
 
-        total_weight = sum(max(0.01, float(p.confidence)) for p in healthy_predictions)
+        scoring = [
+            pred
+            for pred in healthy_predictions
+            if _contributes_to_consensus(self.models.get(pred.model_name))
+        ]
+        if not scoring:
+            scoring = healthy_predictions
+
+        total_weight = sum(max(0.01, float(p.confidence)) for p in scoring)
         if total_weight <= 0:
-            consensus_prediction = sum(p.prediction for p in healthy_predictions) / len(
-                healthy_predictions
-            )
-            consensus_confidence = sum(p.confidence for p in healthy_predictions) / len(
-                healthy_predictions
-            )
+            consensus_prediction = sum(p.prediction for p in scoring) / len(scoring)
+            consensus_confidence = sum(p.confidence for p in scoring) / len(scoring)
         else:
             consensus_prediction = sum(
-                p.prediction * max(0.01, float(p.confidence)) for p in healthy_predictions
+                p.prediction * max(0.01, float(p.confidence)) for p in scoring
             ) / total_weight
-            consensus_confidence = total_weight / len(healthy_predictions)
+            consensus_confidence = total_weight / len(scoring)
         logger.info(
             "ic_consensus_calculated",
             request_id=request.request_id,
@@ -782,7 +806,7 @@ class MCPModelRegistry:
                 error_rate = errors / total_predictions if total_predictions > 0 else 0.0
                 
                 # Determine overall health status
-                model_health = status.get("status", "unknown")
+                model_health = reported_model_health(status)
                 
                 # Consider model unhealthy if:
                 # - Model reports unhealthy

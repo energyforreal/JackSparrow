@@ -20,6 +20,8 @@ LOCAL_EXPORT_DIR="${REPO_ROOT}/export"
 KEEP=0
 STOP_EXISTING=0
 TIMEOUT_SEC="28800"
+UPLOAD_LOCAL=""
+UPLOAD_REMOTE=""
 
 usage() {
   cat <<'EOF'
@@ -35,6 +37,9 @@ Options:
   --bundle-dir NAME  Remote export folder under /content/export/ (default: v15 fusion)
   --export-dir PATH  Local directory for downloaded artifacts (default: export/)
   --timeout SEC      colab exec timeout in seconds (default: 28800 = 8h)
+  --upload LOCAL REMOTE
+                     Upload a local file after the session is ready.
+                     A relative LOCAL path is resolved from the repo root.
   --keep             Leave the VM running after the job
   --stop-existing    Stop a leftover session with the same name first
   -h, --help         Show this help
@@ -69,6 +74,11 @@ while [[ $# -gt 0 ]]; do
     --timeout)
       TIMEOUT_SEC="${2:?}"
       shift 2
+      ;;
+    --upload)
+      UPLOAD_LOCAL="${2:?}"
+      UPLOAD_REMOTE="${3:?}"
+      shift 3
       ;;
     --keep)
       KEEP=1
@@ -214,11 +224,24 @@ fi
 echo "Open in browser:"
 colab url -s "${SESSION}" || true
 
+if [[ -n "${UPLOAD_LOCAL}" ]]; then
+  if [[ "${UPLOAD_LOCAL}" != /* ]]; then
+    UPLOAD_LOCAL="${REPO_ROOT}/${UPLOAD_LOCAL}"
+  fi
+  if [[ ! -f "${UPLOAD_LOCAL}" ]]; then
+    echo "Upload source not found: ${UPLOAD_LOCAL}" >&2
+    exit 1
+  fi
+  echo "Uploading ${UPLOAD_LOCAL} to ${UPLOAD_REMOTE}..."
+  colab upload -s "${SESSION}" "${UPLOAD_LOCAL}" "${UPLOAD_REMOTE}"
+fi
+
 echo "Executing $(basename "${NOTEBOOK}") on ${SESSION} (timeout=${TIMEOUT_SEC}s)..."
 colab exec -s "${SESSION}" -f "${NOTEBOOK}" --timeout "${TIMEOUT_SEC}"
 
 LOCAL_ZIP="${LOCAL_EXPORT_DIR}/${BUNDLE_DIR_NAME}.zip"
 LOCAL_LOG="${LOCAL_EXPORT_DIR}/${BUNDLE_DIR_NAME}_colab_log.ipynb"
+mkdir -p "$(dirname "${LOCAL_ZIP}")"
 
 echo "Downloading export zip to ${LOCAL_ZIP}..."
 # Jupyter Contents API is rooted at /content; absolute /content/... often 404s.

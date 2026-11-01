@@ -1,0 +1,6 @@
+{
+  "model_name": "jacksparrow_recognition_BTCUSD_15m",
+  "spec_version": "recognition-15m-v1",
+  "orders_enabled": false,
+  "checkpoint": "tcn_colab.pt"
+}

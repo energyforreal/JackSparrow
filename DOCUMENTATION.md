@@ -47,6 +47,7 @@ All maintained project documentation lives under **`docs/01-architecture.md` thr
 | Start / validate stack | [Build guide – Project commands](docs/11-build-guide.md#project-commands), [Deployment – Validation](docs/10-deployment.md#validation-and-monitoring-commands) |
 | Docker runtime ports & paths | [Deployment – Docker runtime topology](docs/10-deployment.md#docker-runtime-topology-reference) |
 | Transformer bundle & `MODEL_DIR` | [ML models – Runtime discovery](docs/03-ml-models.md#runtime-discovery-transformer-onnx) |
+| 15m recognition research | [ML models – 15-minute recognition](docs/03-ml-models.md#research-15-minute-recognition) |
 | Delta WebSocket (testnet) | [Deployment – Agent env](docs/10-deployment.md#agent-environment-variables), `.env.example` |
 | Entry lot sizing | [Logic & reasoning – Entry lot sizing](docs/05-logic-reasoning.md#entry-lot-sizing-portfolio-fraction) |
 | WebSocket message shape | [Backend – WebSocket](docs/06-backend.md#websocket-protocol), [Frontend – WebSocket](docs/07-frontend.md#websocket-integration) |

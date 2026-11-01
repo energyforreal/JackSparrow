@@ -122,6 +122,7 @@ services:
       DELTA_ENV: ${DELTA_ENV:-india_testnet}
       # In-container path; override with AGENT_MODEL_DIR in root .env if bundle folder name changes
       MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage}
+      TRANSFORMER_DECISION_PATH: ${TRANSFORMER_DECISION_PATH:-forecast_30m}
       REQUIRE_MODELS_ON_STARTUP: ${REQUIRE_MODELS_ON_STARTUP:-true}
       MODEL_PATH: ${MODEL_PATH:-}
       AGENT_START_MODE: ${AGENT_START_MODE:-MONITORING}

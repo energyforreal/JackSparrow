@@ -187,7 +187,9 @@ class ForecastModelNode(MCPModelNode):
 
     async def get_health_status(self) -> Dict[str, Any]:
         return {
+            "status": self._health,
             "health_status": self._health,
+            "model_loaded": self._initialized,
             "initialized": self._initialized,
             "call_count": self._call_count,
             "error_count": self._error_count,

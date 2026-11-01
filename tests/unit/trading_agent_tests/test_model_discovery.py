@@ -62,7 +62,7 @@ def _write_transformer_bundle(model_dir: Path, name: str = "test_transformer") -
 
 @pytest.mark.asyncio
 async def test_discover_prefers_fusion_bundle_over_per_tf(
-    temp_model_dir: Path, model_registry: MCPModelRegistry
+    temp_model_dir: Path, model_registry: MCPModelRegistry, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agent.models.fusion_node import FusionModelNode
     from feature_store.transformer_btcusd.contract import FUSION_BUNDLE_DIR_NAME
@@ -91,6 +91,7 @@ async def test_discover_prefers_fusion_bundle_over_per_tf(
     mock_fusion.model_type = "transformer_mtf_fusion"
     mock_fusion.resolution = "mtf_fusion"
     mock_fusion.initialize = AsyncMock()
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "mtf_fusion")
 
     with patch("agent.models.model_discovery.settings") as mock_settings:
         mock_settings.model_dir = str(temp_model_dir)
@@ -107,7 +108,7 @@ async def test_discover_prefers_fusion_bundle_over_per_tf(
 
 @pytest.mark.asyncio
 async def test_discover_transformer_registers_when_auto_register(
-    temp_model_dir: Path, model_registry: MCPModelRegistry
+    temp_model_dir: Path, model_registry: MCPModelRegistry, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bundle_dir = temp_model_dir / bundle_dir_name("15m")
     bundle_dir.mkdir(parents=True)
@@ -116,6 +117,7 @@ async def test_discover_transformer_registers_when_auto_register(
     mock_node.model_name = "test_transformer"
     mock_node.model_type = "transformer"
     mock_node.initialize = AsyncMock()
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "transformer_agent_synthesis")
 
     with patch("agent.models.model_discovery.settings") as mock_settings:
         mock_settings.model_dir = str(temp_model_dir)
@@ -135,8 +137,9 @@ async def test_discover_transformer_registers_when_auto_register(
 
 @pytest.mark.asyncio
 async def test_discover_empty_when_metadata_missing(
-    temp_model_dir: Path, model_registry: MCPModelRegistry
+    temp_model_dir: Path, model_registry: MCPModelRegistry, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "mtf_fusion")
     with patch("agent.models.model_discovery.settings") as mock_settings:
         mock_settings.model_dir = str(temp_model_dir)
         mock_settings.model_path = None
@@ -159,6 +162,7 @@ async def test_discover_fails_without_onnx(
 
     from agent.core import config as config_mod
 
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "mtf_fusion")
     monkeypatch.setattr(config_mod.settings, "model_dir", str(tmp_path))
     monkeypatch.setattr(config_mod.settings, "model_auto_register", True)
 

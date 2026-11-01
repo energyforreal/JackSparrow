@@ -11,11 +11,20 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [15-minute recognition inputs](#15-minute-recognition-inputs)
 - [Core Trading Agent Features](#core-trading-agent-features)
 - [Feature Categories](#feature-categories)
 - [Feature Roadmap](#feature-roadmap)
 - [Feature Dependencies](#feature-dependencies)
 - [Related Documentation](#related-documentation)
+
+---
+
+## 15-minute recognition inputs
+
+The research track in [`research/recognition_15m/`](../research/recognition_15m/) learns visible candle geometry and market state from 48 completed 15-minute bars. Its inputs are raw OHLCV, scaled inside the window, and ratios of body, wick, and range. Those ratios are computed from the current bar and earlier bars.
+
+[`feature_store/pattern_features/candlestick_patterns.py`](../feature_store/pattern_features/candlestick_patterns.py) and [`feature_store/pattern_features/chart_patterns.py`](../feature_store/pattern_features/chart_patterns.py) remain rule detectors for other feature rows. Their columns (`cdl_*`, `chp_*`, and the support, trendline, and breakout fields) are label proposers for this track and are excluded from its training tensor. A hammer name or a bullish score is not an input. The contract is [`reference/recognition-15m-spec.md`](../reference/recognition-15m-spec.md).
 
 ---
 

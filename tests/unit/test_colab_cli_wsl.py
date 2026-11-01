@@ -30,6 +30,7 @@ def test_run_colab_cli_sh_uses_bundle_name_and_cli_verbs() -> None:
     assert FUSION_V15_BUNDLE_DIR_NAME in text
     for token in (
         "colab exec",
+        "colab upload",
         "colab download",
         "export/${BUNDLE_DIR_NAME}.zip",
         "colab stop",

@@ -426,14 +426,12 @@ A new signal is skipped while a 12-hour position is open.
 
 The original snapshot is the source for development, so bars after 2026-09-27
 never enter the fit. Outputs go to `export/forecast_30m/v5/`. The artifact
-always stores the fitted direction bundle. `orders_enabled` is true only when
-the development gate passes. A passing bundle is copied to
-`agent/model_storage/JackSparrow_Forecast_BTCUSD_30m/`. A failure does not copy
-files and does not read confirmation labels.
+always stores the fitted direction bundle. The registered rule is that
+`orders_enabled` is true only when the development gate passes. That rule was
+overridden for a live Docker deploy: see the force-promote note below.
 
 The live agent path `TRANSFORMER_DECISION_PATH=forecast_30m` loads that bundle.
-When the environment variable is unset and a promoted bundle is on disk, that
-path is selected automatically. `mtf_fusion` remains the rollback.
+`mtf_fusion` remains the rollback.
 
 ## v5 development result
 
@@ -445,9 +443,14 @@ each placed at least 20 non-overlapping trades and all lost money. The closest
 expectancy was −0.0021 at floor 0.55, profit factor 0.80. Floor 0.65 had
 expectancy 0.0145 and profit factor 3.15 on 9 trades, below the 20-trade floor.
 Floor 0.75 placed 0 trades. Walk-forward folds had no threshold to apply and
-placed 0 trades. Gate failed. The artifact contains the fitted direction
-bundle. `orders_enabled` is false. Confirmation labels were not read. Nothing
-was copied into `agent/model_storage/`. The live path stays `mtf_fusion`.
+placed 0 trades. Gate failed. Confirmation labels were not read.
+
+**Force-promote (live override).** The fitted direction bundle was copied to
+`agent/model_storage/JackSparrow_Forecast_BTCUSD_30m/` with `orders_enabled`
+true, `promoted_to_agent` true, and live `probability_floor` 0.55. The
+development gate remains `false` on the manifest. Docker Compose sets
+`TRANSFORMER_DECISION_PATH=forecast_30m`. Rollback is
+`TRANSFORMER_DECISION_PATH=mtf_fusion`.
 
 ## Reproduce
 

@@ -36,12 +36,14 @@ services:
       - ./agent:/app/agent:rw
       - ./shared:/app/shared:ro
       - ./feature_store:/app/feature_store:rw
+      - ./research:/app/research:ro
       - ./agent/model_storage:/app/agent/model_storage:rw
       - ./logs/agent:/logs:rw
     environment:
       LOG_LEVEL: ${AGENT_LOG_LEVEL:-DEBUG}
       # Keep default in sync with docker-compose.yml so dev stacks load the same bundles unless AGENT_MODEL_DIR overrides.
       MODEL_DIR: ${AGENT_MODEL_DIR:-/app/agent/model_storage}
+      TRANSFORMER_DECISION_PATH: ${TRANSFORMER_DECISION_PATH:-forecast_30m}
       MAX_TRADES_PER_HOUR: 0
       TZ: Asia/Kolkata
 

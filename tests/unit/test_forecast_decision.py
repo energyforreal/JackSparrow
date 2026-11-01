@@ -109,11 +109,10 @@ def test_promoted_bundle_requires_orders_enabled(tmp_path: Path) -> None:
 def test_resolve_path_stays_fusion_without_a_promoted_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from agent.core import config as config_mod
+
     monkeypatch.delenv("TRANSFORMER_DECISION_PATH", raising=False)
-    assert resolve_transformer_decision_path(tmp_path) in {
-        "mtf_fusion",
-        FORECAST_DECISION_PATH,
-    }
+    monkeypatch.setattr(config_mod.settings, "transformer_decision_path", "mtf_fusion")
     assert resolve_transformer_decision_path(tmp_path) == "mtf_fusion"
 
 

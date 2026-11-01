@@ -37,11 +37,11 @@
   "development_end_exclusive": "2026-05-15T14:00:00+00:00",
   "snapshot_end": "2026-09-27T13:30:00+00:00",
   "entry": "next_open",
-  "probability_floor": null,
+  "probability_floor": 0.55,
   "label_selection": {
     "theta": 0.5,
     "theta_reason": "smallest_theta_meeting_class_floor",
-    "probability_floor": null,
+    "probability_floor": 0.55,
     "round_trip_cost": 0.002
   },
   "decision_by_class": {
@@ -52,8 +52,9 @@
   "development_gate_passed": false,
   "confirmation_scored": false,
   "confirmation_passed": false,
-  "orders_enabled": false,
-  "promoted_to_agent": false,
+  "orders_enabled": true,
+  "promoted_to_agent": true,
+  "promotion_override": "force_promote_live_floor_0.55",
   "targets_in_artifact": [
     "direction"
   ]

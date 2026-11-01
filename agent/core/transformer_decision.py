@@ -38,8 +38,34 @@ from agent.models.mcp_model_registry import (
     NoModelsRegisteredError,
 )
 from agent.models.transformer_context_builder import build_mtf_aggregation_context
+from research.recognition_15m.contract import RECOGNITION_DECISION_PATH
 
 logger = structlog.get_logger()
+
+
+def _context_of(prediction: Any) -> Dict[str, Any]:
+    """Return a prediction context mapping, or an empty mapping."""
+    context = getattr(prediction, "context", None)
+    if isinstance(context, dict):
+        return context
+    return {}
+
+
+def _forecast_prediction(predictions: List[Any]) -> Any:
+    """Return the forecast prediction that is allowed to emit an order."""
+    for prediction in predictions:
+        if _context_of(prediction).get("decision_path") == FORECAST_DECISION_PATH:
+            return prediction
+    return predictions[0] if predictions else None
+
+
+def _recognition_context(predictions: List[Any]) -> Optional[Dict[str, Any]]:
+    """Return the recognition payload attached to a forecast decision."""
+    for prediction in predictions:
+        context = _context_of(prediction)
+        if context.get("decision_path") == RECOGNITION_DECISION_PATH:
+            return context
+    return None
 
 _ENTRY_SIGNALS = frozenset({"BUY", "STRONG_BUY", "SELL", "STRONG_SELL"})
 _DECISION_PATH = "transformer_agent_synthesis"
@@ -551,7 +577,7 @@ async def evaluate_forecast_prediction(
         require_explanation=False,
     )
     model_response = await model_registry.get_predictions(model_request)
-    pred = model_response.predictions[0] if model_response.predictions else None
+    pred = _forecast_prediction(model_response.predictions)
     pctx = pred.context if pred is not None and isinstance(pred.context, dict) else {}
     if pred is not None and not bool(pctx.get("orders_enabled", False)):
         raise RuntimeError("forecast bundle is not approved for live orders")
@@ -620,6 +646,7 @@ async def evaluate_forecast_prediction(
         "short_edge": 0.0,
         "forecast_direction": direction,
         "forecast_probability": probability,
+        "recognition_15m": _recognition_context(model_response.predictions),
     }
     policy_verdict = PolicyVerdict(
         signal=signal,
@@ -664,6 +691,11 @@ async def evaluate_forecast_prediction(
         f"Forecast 30m: {signal} direction={direction or 'none'} "
         f"p={confidence:.3f}"
     )
+    recognized = market_context.get("recognition_15m")
+    if isinstance(recognized, dict) and recognized.get("market_state"):
+        reasoning_chain["conclusion"] += (
+            f" | 15m recognition {recognized.get('market_state')}"
+        )
     reasoning_chain["steps"][0]["step_name"] = "forecast_30m"
 
     ts = datetime.now(timezone.utc)

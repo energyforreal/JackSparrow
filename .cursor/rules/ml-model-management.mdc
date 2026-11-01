@@ -34,6 +34,10 @@ alwaysApply: false
 - Loads fused ONNX via `onnxruntime`
 - `predict()` emits per-horizon logits consumed by `agent/core/fusion_policy.py`
 
+## Recognition research track
+
+`research/recognition_15m/` trains geometric and market-state heads from completed 15-minute bars. Model discovery loads the Colab checkpoint beside the forecast bundle and attaches its market state and geometry to the forecast decision. It is not a `ForecastModelNode`, and the order still comes from `forecast_30m`. See `reference/recognition-15m-spec.md`.
+
 ## Tests
 
 - `pytest tests/unit/test_mtf_fusion_decision.py tests/unit/test_mtf_fusion_labels.py tests/unit/test_mtf_asof_alignment.py tests/unit/test_transformer_decision.py`

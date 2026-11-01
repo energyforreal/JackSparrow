@@ -2,11 +2,11 @@
 
 ## Overview
 
-JackSparrow’s default live path is **one fused multi-TF Transformer** (`JackSparrow_Transformer_BTCUSD_mtf_fusion`) until a promoted 30-minute forecast bundle is on disk. Independent OHLCV for 5m / 10m / 30m / 1h / 2h is encoded by a shared encoder, fused with learned softmax weights, then three 2-class heads forecast **+30m / +1h / +2h** as BULL / BEAR. NEUTRAL is ignored in training (not a class); live HOLD comes from LOW grade or `min_probability`. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades and does **not** pick the highest probability. Trade duration is the longest accepted same-side horizon. SL/TP is ATR-scaled to that duration. **Label V2** path targets (return / long-short MFE/MAE / persistence) train the
-research v15 bundle only; see [`reference/label-v2-spec.md`](../reference/label-v2-spec.md).
-They are not consumed by the live fused v11 model.
+JackSparrow’s live path is **`forecast_30m`**: the v5 XGBoost direction head in `JackSparrow_Forecast_BTCUSD_30m/`. That bundle was force-promoted after the development expectancy gate failed; `probability_floor` is 0.55. Closed 30-minute bars map BEARISH/BULLISH to SELL/BUY when probability clears the floor. One position is reserved for 12 hours. SL/TP is ATR-scaled. See [`reference/forecast-30m-h24-spec.md`](../reference/forecast-30m-h24-spec.md).
 
-When `export/forecast_30m/v5` passes its development expectancy gate, the joblib bundle is copied to `agent/model_storage/JackSparrow_Forecast_BTCUSD_30m/` and the live path becomes **`forecast_30m`**: one XGBoost direction head on closed 30-minute bars, 12-hour occupancy, ATR brackets. See [`reference/forecast-30m-h24-spec.md`](../reference/forecast-30m-h24-spec.md). `TRANSFORMER_DECISION_PATH=mtf_fusion` remains the rollback. `transformer_agent_synthesis` reloads the five per-TF ONNX bundles. Those paths are not dual-running by default.
+Rollback: `TRANSFORMER_DECISION_PATH=mtf_fusion` reloads the fused multi-TF Transformer (`JackSparrow_Transformer_BTCUSD_mtf_fusion`). Emergency `transformer_agent_synthesis` reloads the five per-TF ONNX bundles. Those paths are not dual-running.
+
+The fused v11 model encodes independent OHLCV for 5m / 10m / 30m / 1h / 2h, then three 2-class heads forecast **+30m / +1h / +2h** as BULL / BEAR. [`agent/core/fusion_policy.py`](../agent/core/fusion_policy.py) applies frozen walk-forward grades. **Label V2** path targets train the research v15 bundle only; see [`reference/label-v2-spec.md`](../reference/label-v2-spec.md). They are not consumed by live fusion or by the v5 forecast.
 
 **Repository**: [https://github.com/energyforreal/JackSparrow](https://github.com/energyforreal/JackSparrow)
 
@@ -24,6 +24,7 @@ When `export/forecast_30m/v5` passes its development expectancy gate, the joblib
 - [Docker](#docker)
 - [Troubleshooting](#troubleshooting)
 - [Archived inference families](#archived-inference-families)
+- [Research: 15-minute recognition](#research-15-minute-recognition)
 - [Related documentation](#related-documentation)
 
 ---
@@ -62,7 +63,7 @@ Required artifacts:
 
 ## Runtime discovery (30-minute forecast)
 
-When `TRANSFORMER_DECISION_PATH=forecast_30m`, or when that env is unset and a promoted bundle exists, discovery registers **only** `ForecastModelNode` from:
+When `TRANSFORMER_DECISION_PATH=forecast_30m` (Docker default), discovery registers **only** `ForecastModelNode` from:
 
 `JackSparrow_Forecast_BTCUSD_30m/`
 
@@ -115,7 +116,7 @@ Each `TransformerModelNode` builds features on its native TF grid only.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MODEL_DIR` | `./agent/model_storage` | Parent directory for model bundles |
-| `TRANSFORMER_DECISION_PATH` | `mtf_fusion` | Live path: `forecast_30m` when a promoted bundle exists and the env is unset; `mtf_fusion` is rollback; `transformer_agent_synthesis` is emergency five-bundle rollback |
+| `TRANSFORMER_DECISION_PATH` | `forecast_30m` | Live path (force-promoted v5). Rollback: `mtf_fusion`. Emergency: `transformer_agent_synthesis` |
 | `TRANSFORMER_MIN_CONFIDENCE` | `0.55` | Per-horizon probability floor |
 | `SL_TP_MODE` | `atr` | Duration-scaled ATR brackets (fusion default) |
 | `TRANSFORMER_CONFIDENCE_HOLD_FLOOR` | `0.40` | Soft confidence floor used in size bands |
@@ -215,8 +216,9 @@ See [Logic & reasoning](05-logic-reasoning.md) and [Architecture](01-architectur
 **Production compose** (`docker-compose.yml`):
 
 - Bind mount: `./agent/model_storage:/app/agent/model_storage`
-- Default `MODEL_DIR` → `JackSparrow_Transformer_BTCUSD` inside the container
-- Rebuild agent image only for **code** changes; model-only updates need container recreate:
+- Default `MODEL_DIR` → `/app/agent/model_storage`; live bundle is `JackSparrow_Forecast_BTCUSD_30m/`
+- `TRANSFORMER_DECISION_PATH=forecast_30m` (rollback: `mtf_fusion`)
+- Rebuild agent image for code or `research/` changes; model-only updates need container recreate:
 
 ```bash
 docker compose up -d --force-recreate agent
@@ -253,6 +255,18 @@ Do **not** point `MODEL_DIR` at archived bundle folders expecting them to load �
 
 ---
 
+## Research: 15-minute recognition
+
+`research/recognition_15m/` trains geometric families and market state from 48 completed 15-minute BTCUSD bars. Model discovery loads `agent/model_storage/JackSparrow_Recognition_BTCUSD_15m/tcn_colab.pt` and attaches that readout to the forecast decision. It is not a `ForecastModelNode`. The live order path remains `forecast_30m`.
+
+The track reads 48 completed 15-minute BTCUSD bars. Inputs are raw OHLCV scaled inside the window, or candle geometry derived from those bars. Candle-rule columns (`cdl_*`), chart-rule columns, forecast labels, and future returns are rejected before training. Textbook names such as hammer and hanging man are stored on a separate rule card and are not model classes. Head A learns geometric families. Head E learns the window's market state from swings confirmed inside the window. Chart patterns, formation status, breakouts, and zone geometry are specified and not trained.
+
+Chronological splits leave a purge of 48 bars between train, validation, and test. The contract is [`reference/recognition-15m-spec.md`](../reference/recognition-15m-spec.md). Train the short local fit with `python -m research.recognition_15m`. Metrics land in `export/recognition_15m/metrics.json`. The agent loads the Colab checkpoint from model storage and keeps the forecast bundle as the order source.
+
+The intense fit is the generated notebook `scripts/colab/recognition_15m_colab.ipynb`. Upload that notebook to Colab and run the cells from top to bottom. The training code is in the notebook, so the runtime does not clone this repository. It runs a purged Optuna search on the development span, a train-only Spearman audit, and TreeSHAP of the presence baseline, then refits one TCN and scores the sealed test once. The report in the Colab output folder records class-wise recognition metrics, Head A calibration, the correlation matrix, the SHAP ranking, the purge gaps, and the winning trial. The same folder holds PNG figures for the train and validation loss, validation against the sealed test, the Optuna trials, the correlation heatmaps, the SHAP ranking, and Head A reliability. The notebook draws those figures after the fit. It does not record a buy, a sell, expectancy, Sharpe, or a promotion flag. The agent copies that checkpoint into model storage and reads it as decision context.
+
+---
+
 ## Related documentation
 
 - [Architecture](01-architecture.md) — three-tier design and data flow
@@ -262,3 +276,4 @@ Do **not** point `MODEL_DIR` at archived bundle folders expecting them to load �
 - [Build guide](11-build-guide.md) — setup and tests
 - [`.cursor/rules/ml-model-management.mdc`](../.cursor/rules/ml-model-management.mdc) — Cursor rule for transformer standards
 - [Label V2 spec (research)](../reference/label-v2-spec.md) — path targets; live v11 2-class fusion is unchanged
+- [15-minute recognition spec (research)](../reference/recognition-15m-spec.md) — geometric labels only; live `forecast_30m` is unchanged

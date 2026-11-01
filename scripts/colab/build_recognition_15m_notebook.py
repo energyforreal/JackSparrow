@@ -1,0 +1,266 @@
+"""Generate a standalone Colab notebook for 15-minute recognition.
+
+The notebook contains the training code. Upload that file and the 5-minute
+parquet to Colab. It does not clone this repository.
+
+Run from the repo root::
+
+    python scripts/colab/build_recognition_15m_notebook.py
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.colab.build_standalone_notebook import (  # noqa: E402
+    _code_cell,
+    _markdown_cell,
+    _strip_cli_entrypoint,
+)
+
+OUTPUT = Path(__file__).resolve().parent / "recognition_15m_colab.ipynb"
+
+INLINE_MODULE_ORDER: tuple[tuple[str, str], ...] = (
+    ("## Contract", "research/recognition_15m/contract.py"),
+    ("## Completed 15-minute bars", "research/recognition_15m/bars.py"),
+    ("## Causal features", "research/recognition_15m/features.py"),
+    ("## Geometric labels", "research/recognition_15m/labels.py"),
+    ("## Purged splits", "research/recognition_15m/splits.py"),
+    ("## Leakage checks", "research/recognition_15m/integrity.py"),
+    ("## Windows", "research/recognition_15m/dataset.py"),
+    ("## Causal TCN", "research/recognition_15m/models.py"),
+    ("## Optuna search", "research/recognition_15m/search.py"),
+    ("## Correlation and TreeSHAP", "research/recognition_15m/explain.py"),
+    ("## Figures", "research/recognition_15m/plots.py"),
+    ("## Colab entry point", "research/recognition_15m/colab.py"),
+)
+
+_INTRO = """# 15-minute recognition training
+
+Upload **this notebook** to Google Colab and run the cells from top to bottom.
+The training code is in the notebook. A GitHub clone is not required.
+
+Place `btcusd_5m_raw.parquet` in the Colab session at
+`/content/btcusd_5m_raw.parquet` (Files panel, then Upload). If that file is
+missing, the data cell opens a file picker. It does not connect to Google Drive.
+
+Use a GPU runtime. The fit predicts geometric candle families and market state
+from 48 completed 15-minute bars. Each bar also carries causal support and
+resistance distance, proximity, touch counts, and range position. After the
+fit, the next cells draw the
+learning curve, validation against the sealed test, the Optuna trial scores,
+the label correlation heatmaps, and the SHAP ranking. Leave the checkpoint
+in the Colab output folder. It is a research artifact.
+"""
+
+_INSTALL = """import importlib.util
+import subprocess
+import sys
+
+def _pip(*packages: str) -> None:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *packages])
+
+if importlib.util.find_spec("torch") is None:
+    _pip("torch")
+_pip(
+    "optuna", "shap", "xgboost", "scipy", "pandas", "pyarrow",
+    "matplotlib", "structlog",
+)
+print("recognition dependencies ready")
+"""
+
+_DATA = """from pathlib import Path
+
+parquet = Path("/content/btcusd_5m_raw.parquet")
+if not parquet.is_file():
+    try:
+        from google.colab import files
+    except ImportError as exc:
+        raise FileNotFoundError(
+            "Place btcusd_5m_raw.parquet at /content/btcusd_5m_raw.parquet."
+        ) from exc
+    picked = files.upload()
+    name = "btcusd_5m_raw.parquet"
+    if name not in picked:
+        raise FileNotFoundError(
+            "Choose btcusd_5m_raw.parquet in the file picker."
+        )
+    parquet.write_bytes(picked[name])
+print(parquet)
+"""
+
+_TRAIN = """from pathlib import Path
+
+report = run_colab(
+    source=parquet,
+    output_dir=Path("/content/export/recognition_15m/colab"),
+)
+print(report["test"]["geometry_macro_f1"])
+print(report["test"]["geometry_calibration"]["expected_calibration_error"])
+print(report["zip_path"])
+"""
+
+_READ = """## How to read the figures
+
+The next cell draws the figures from the report already in memory. It does
+not train again.
+
+- **Learning curve.** Train loss and validation loss for the final TCN. The
+  dashed line is the epoch whose weights are saved. A train line that keeps
+  falling while validation turns up means later epochs fit the training
+  windows more tightly than the validation windows.
+- **Validation against the sealed test.** Macro-F1 for geometry, market
+  state, and the structure tag, then F1 for each geometric family. The test
+  bars are the one sealed score.
+- **Development search.** Each dot is one Optuna trial. The line is the best
+  completed trial so far. Pruned trials were stopped early on a validation fold.
+- **Correlation.** Spearman on training windows only. The left heatmap uses
+  the last bar of each window. The right heatmap uses the window mean. A black
+  box marks a pair whose absolute correlation is at least 0.5. A high value
+  on `body_to_range` versus `doji` is the candle rule showing through an
+  allowed channel.
+- **TreeSHAP.** Mean absolute contribution of each channel to the presence
+  baseline, summed across the 48 bars. Taller bars are the channels the trees
+  used. This ranking does not change the TCN.
+- **Reliability.** For Head A on the sealed test, each point is a probability
+  bin. A point on the dashed line means the predicted probability matches how
+  often the family was present. Larger points are bins with more rows.
+"""
+
+_SHOW = """show_recognition_plots(report)
+"""
+
+_DOWNLOAD = """try:
+    from google.colab import files
+    files.download(report["zip_path"])
+except Exception as exc:
+    print("browser download skipped:", exc)
+    print(report["zip_path"])
+"""
+
+
+def _is_internal_module(module: str | None) -> bool:
+    """True for packages that the notebook defines in earlier cells."""
+    if not module:
+        return False
+    root = module.split(".", maxsplit=1)[0]
+    return root in {"research", "feature_store", "scripts"}
+
+
+def _strip_internal_imports(source: str) -> str:
+    """Drop imports that the preceding notebook cells already define."""
+    lines = source.splitlines(keepends=True)
+    tree = ast.parse(source)
+    drop_lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and _is_internal_module(node.module):
+            end = node.end_lineno or node.lineno
+            drop_lines.update(range(node.lineno, end + 1))
+        elif isinstance(node, ast.Import):
+            internal = any(
+                _is_internal_module(alias.name) for alias in node.names
+            )
+            if internal:
+                end = node.end_lineno or node.lineno
+                drop_lines.update(range(node.lineno, end + 1))
+    kept = [line for index, line in enumerate(lines, start=1) if index not in drop_lines]
+    text = "".join(kept).strip()
+    return text + "\n"
+
+
+def _prepare_module(relative_path: str) -> str:
+    """Read one recognition module and make it safe to paste into a cell."""
+    path = REPO_ROOT / relative_path
+    source = path.read_text(encoding="utf-8")
+    prepared = _strip_cli_entrypoint(_strip_internal_imports(source))
+    if "from research." in prepared or "import research" in prepared:
+        raise RuntimeError(f"internal import remains in {relative_path}")
+    if "from feature_store." in prepared:
+        raise RuntimeError(f"feature-store import remains in {relative_path}")
+    ast.parse(prepared)
+    return prepared
+
+
+def _tuple_literal(name: str, values: tuple[str, ...]) -> str:
+    """One name per line so the denylist stays readable in the notebook."""
+    body = ",\n".join(f"    {item!r}" for item in values)
+    return f"{name} = (\n{body},\n)\n"
+
+
+def _denylist_source() -> str:
+    """Snapshot the refused column names from the live contracts."""
+    from feature_store.transformer_btcusd.contract import NATIVE_STRUCTURE_COLS
+    from research.forecast_30m.contract_v4 import PATTERN_COLUMNS
+
+    note = (
+        "# Refused column names, copied when this notebook is generated.\n"
+        "# The cell does not import the rest of the repository.\n"
+    )
+    return note + _tuple_literal(
+        "PATTERN_COLUMNS", tuple(PATTERN_COLUMNS)
+    ) + _tuple_literal(
+        "NATIVE_STRUCTURE_COLS", tuple(NATIVE_STRUCTURE_COLS)
+    )
+
+
+def build_notebook() -> dict[str, Any]:
+    """Assemble the standalone recognition notebook.
+
+    Returns:
+        An nbformat document.
+    """
+    cells: list[dict[str, Any]] = [
+        _markdown_cell(_INTRO),
+        _markdown_cell("## Setup"),
+        _code_cell(_INSTALL),
+        _markdown_cell("## Refused column names"),
+        _code_cell(_denylist_source()),
+    ]
+    for heading, relative_path in INLINE_MODULE_ORDER:
+        cells.append(_markdown_cell(heading))
+        cells.append(_code_cell(_prepare_module(relative_path)))
+    cells.extend(
+        [
+            _markdown_cell("## Load the 5-minute parquet"),
+            _code_cell(_DATA),
+            _markdown_cell("## Search, explain, and score the sealed test"),
+            _code_cell(_TRAIN),
+            _markdown_cell(_READ),
+            _code_cell(_SHOW),
+            _markdown_cell("## Download the research zip"),
+            _code_cell(_DOWNLOAD),
+        ]
+    )
+    return {
+        "nbformat": 4,
+        "nbformat_minor": 5,
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3",
+            },
+            "accelerator": "GPU",
+            "colab": {"provenance": []},
+        },
+        "cells": cells,
+    }
+
+
+def main() -> None:
+    """Write the notebook next to this script."""
+    document = build_notebook()
+    OUTPUT.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+    print(OUTPUT)
+
+
+if __name__ == "__main__":
+    main()

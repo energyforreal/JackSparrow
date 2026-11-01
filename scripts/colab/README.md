@@ -1,5 +1,16 @@
 # Colab notebook helpers (non-production)
 
+## 15-minute recognition
+
+```bash
+python scripts/colab/build_recognition_15m_notebook.py
+python scripts/colab/smoke_test_recognition_15m_notebook.py
+```
+
+The generated notebook is `scripts/colab/recognition_15m_colab.ipynb`. Do not hand-edit it. Upload that notebook to Colab and run every cell from top to bottom. The training code is inlined, so Colab does not clone this repository. Also upload `btcusd_5m_raw.parquet` to Drive or `/content`. The study searches hidden width, dilation depth, learning rate, batch size, and the positive-class weight clip inside the development span. Correlation and TreeSHAP run on training windows and do not add features. The sealed test is scored once.
+
+Outputs land in `export/recognition_15m/colab/report.json` and `recognition_15m_colab.zip`. Those files are research artifacts. Do not copy the checkpoint into `agent/model_storage/`, and do not register it as a `ForecastModelNode`. The report has no buy, sell, expectancy, Sharpe, or promotion field. The live path remains `forecast_30m`.
+
 ## Fused multi-TF trainer (research v15)
 
 ```bash

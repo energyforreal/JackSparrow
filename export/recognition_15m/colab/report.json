@@ -1,0 +1,2128 @@
+{
+  "spec_version": "recognition-15m-v1",
+  "rows_5m": 259200,
+  "rows_15m": 86399,
+  "heads_not_trained": [
+    "B",
+    "C",
+    "D",
+    "F",
+    "G",
+    "H"
+  ],
+  "perturbation_indices": [
+    95,
+    43246,
+    86397
+  ],
+  "purge_gap_bars": {
+    "train_val": 48,
+    "val_test": 48
+  },
+  "optuna": {
+    "best_value": 0.45219540143799986,
+    "best_params": {
+      "hidden": 128,
+      "dilation_depth": 2,
+      "dilations": [
+        1,
+        2
+      ],
+      "learning_rate": 0.0079584837492566,
+      "batch_size": 256,
+      "pos_weight_clip": 10.0
+    },
+    "n_trials": 30,
+    "folds": [
+      {
+        "train_windows": 18292,
+        "val_windows": 18339,
+        "purge_gap_bars": 48
+      },
+      {
+        "train_windows": 36631,
+        "val_windows": 18339,
+        "purge_gap_bars": 48
+      },
+      {
+        "train_windows": 54970,
+        "val_windows": 18341,
+        "purge_gap_bars": 48
+      }
+    ]
+  },
+  "correlation": {
+    "threshold": 0.5,
+    "pairs": [
+      {
+        "channel": "body_size_atr",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": -0.2030267392341458,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.05947255543220374,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.19755910902591736,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": -0.05454172652605246,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": -0.44191416823631147,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": -0.08563748435839816,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": 0.29801086362892387,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": 0.1875622821771999,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": 0.2777838308359906,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": 0.07990753016471722,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": -0.13550675953321567,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": 0.016419276963292054,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": 0.016051558548961835,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": 0.019049697348555644,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": 0.18081316626108498,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": 0.0007828868547443129,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": 0.14422348782875094,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": 0.04543800316057044,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": 0.08412559156897217,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": 0.17977578788177265,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": 0.015489735611780794,
+        "flagged": false
+      },
+      {
+        "channel": "body_size_atr",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.010265103968130254,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": -0.17736534574726395,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.11514267005584561,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": 0.30790263848367383,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": 0.22420280668707782,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": 0.21220369352875001,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": 0.06964748638668296,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": -0.28075046377043483,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": -0.12548569141809285,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": -0.07297710484938573,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": -0.027802656515818418,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": 0.05315307445707257,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": -0.0011504849081135152,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": -0.01230770948227516,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": 0.018694039255588806,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.10984525201863757,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": -0.01102480117856032,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": -0.08028948479969081,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.04351488742808069,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": -0.023288346567974877,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": -0.08533997821755936,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": -0.020987424041117534,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_atr",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.07796965467572177,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": 0.3157646084520709,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": 0.19170377708744912,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.1816578608427261,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": -0.09518080879294434,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": 0.21362075661450827,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": 0.04979440475667176,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": -0.2898060564749785,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": -0.12599567547883087,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": -0.06982573083777871,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": -0.03624626845945548,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": 0.052411555644531475,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": 0.004009972455173006,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": -0.024797597572910595,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": -0.050340888082797866,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.11205971003188096,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": 0.005735882593703791,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": -0.07137216489348028,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.09104324142487953,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": -0.02176309834577134,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": -0.067901034825037,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": -0.008714265131500781,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_atr",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": 0.09127174665753326,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": -0.009221953652867664,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.006445029957905432,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.02030091510170888,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": 0.01991774008543434,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": -0.052441079107426784,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": -0.005044169733818935,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": 0.10139181553895278,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": 0.0055423267778711505,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": 0.17794307003583623,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": 0.02622475012097076,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": -0.06541818626763626,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": 0.015002076732586677,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": -0.03269950057222057,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": -0.0026567526007847267,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": 0.015967175420242726,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": -0.002902933260042066,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": 0.05749801071232273,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.02894114058053855,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": 0.05024653518250946,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": 0.05791447956187175,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": 0.0008831060063177094,
+        "flagged": false
+      },
+      {
+        "channel": "range_atr",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.0003820415562314821,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": -0.2501627074039995,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.0932770834626631,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.23672326043005618,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": -0.10049380526114444,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": -0.45474161576238636,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": -0.13028950373155423,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": 0.3897862605701624,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": 0.24853792796827828,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": 0.24128521024486957,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": 0.09758349889178448,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": -0.1241716548355657,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": 0.017964553364638255,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": 0.03469441627888958,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": 0.04147280503277064,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": 0.2339018191144064,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": 0.012732408978728916,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": 0.16212711676942682,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": 0.11134923253270909,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": 0.08161298139280398,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": 0.20476855567859834,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": 0.020947417625931927,
+        "flagged": false
+      },
+      {
+        "channel": "body_to_range",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.0023458536269898283,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": -0.18914553686239796,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.12440749549956841,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": 0.3480490583067222,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": 0.25196110093244517,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": 0.24461840737024496,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": 0.08719306353085467,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": -0.29998023958490866,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": -0.1405974871495996,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": -0.14801834040480524,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": -0.05694261630982981,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": 0.07866798753030936,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": -0.0025333554442011296,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": -0.005702183049933019,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": 0.0006141000063616005,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.126228203000292,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": -0.013256821865828274,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": -0.10154379565914294,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.03921734348116564,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": -0.0495187082813086,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": -0.12031859506380473,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": -0.018865860853417942,
+        "flagged": false
+      },
+      {
+        "channel": "upper_wick_to_range",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.05028409497068263,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": 0.35958871402849146,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": 0.22800432020105416,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.1887596280740431,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": -0.13900265174099916,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": 0.25130817867632804,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": 0.07427714198281504,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": -0.30776495266898196,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": -0.1437119001188137,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": -0.1433223732482593,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": -0.07285513451627339,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": 0.07955206098894343,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": -0.023078797676644378,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": -0.020123780407106058,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": -0.0543181159436325,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.1316777855995806,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": -0.001510719687523416,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": -0.09803352117900867,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.09728021360391574,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": -0.04619227115152969,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": -0.11345510229044578,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": -0.00898173312238205,
+        "flagged": false
+      },
+      {
+        "channel": "lower_wick_to_range",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": 0.06320317947972456,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": 0.22283622349256352,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": 0.12436471875325211,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.21935631531177463,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": -0.14225372545601703,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": 0.0038602976412121623,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": -0.002568988351486665,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": -0.0013543513935930008,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": 0.012460254891906974,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": -0.0016436645889967836,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": 0.00439591636826494,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": -0.008363319955086186,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": -0.006134892553345681,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": -0.003038246723432897,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": -0.016235280046565985,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.007627606966138574,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": -0.000767956950494908,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": 0.0077245511913270355,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.01167807030894716,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": 0.006144902922308542,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": -0.019802585974497442,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": 0.008893067546148456,
+        "flagged": false
+      },
+      {
+        "channel": "close_location",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.11986106864530736,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": 0.005891281391496419,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.03204126032362532,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.013979077348422143,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": -0.006737901624770854,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": -0.002268476620779105,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": -0.016534969327569975,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": 0.0009651243674876657,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": 0.0009463068467550479,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": 0.0012042157142237188,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": 0.018888858349718193,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": -0.009216196201077867,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": 0.005070654733341772,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": 0.0053635441946114065,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": 0.023279765537071916,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.0032499573897270123,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": 0.0039598454537745145,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": 0.005577521443808432,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.0005830883522252545,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": 0.0032297203099200767,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": -0.027124350332607922,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": 0.0012312647535329365,
+        "flagged": false
+      },
+      {
+        "channel": "body_sign",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.15950794005702423,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": 0.0011882650304027842,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.038684384445107245,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": -0.005641054169069158,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": 0.04698685839443687,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": 0.000595527339915995,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": 0.0012151309023865243,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": 0.002067433269596008,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": 0.01983639033379195,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": 0.0005045452385790631,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": 0.026543956853958783,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": -0.007363278442847832,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": -0.0038229196295648743,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": 0.0033164153844727016,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": 0.03774066521314829,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.003060641307980696,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": -0.012751071358623875,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": 0.007084927534498184,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": 0.020101541113907426,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": 0.0008089535256781137,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": -0.00943067966405216,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": 0.0015013367529018752,
+        "flagged": false
+      },
+      {
+        "channel": "close_change_atr",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": -0.2369372580537648,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "long_lower_wick",
+        "reduction": "last_bar",
+        "spearman": 0.010920093129988562,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "long_lower_wick",
+        "reduction": "window_mean",
+        "spearman": -0.013492756637386194,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "long_upper_wick",
+        "reduction": "last_bar",
+        "spearman": 0.006932120213249113,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "long_upper_wick",
+        "reduction": "window_mean",
+        "spearman": 0.02501571326860999,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "doji",
+        "reduction": "last_bar",
+        "spearman": 0.004615585879094484,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "doji",
+        "reduction": "window_mean",
+        "spearman": 0.003608702670684673,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "marubozu",
+        "reduction": "last_bar",
+        "spearman": 0.02248064098572223,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "marubozu",
+        "reduction": "window_mean",
+        "spearman": -0.02641487029434576,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "engulfing",
+        "reduction": "last_bar",
+        "spearman": 0.05077904791158027,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "engulfing",
+        "reduction": "window_mean",
+        "spearman": 0.028857007610030995,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "harami",
+        "reduction": "last_bar",
+        "spearman": -0.01569308085063309,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "harami",
+        "reduction": "window_mean",
+        "spearman": 0.01661469215033768,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "piercing_dark_cloud",
+        "reduction": "last_bar",
+        "spearman": -0.05279202804897814,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "piercing_dark_cloud",
+        "reduction": "window_mean",
+        "spearman": -0.003243655223469513,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "tweezer",
+        "reduction": "last_bar",
+        "spearman": -0.07158726929731013,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "tweezer",
+        "reduction": "window_mean",
+        "spearman": -0.006237900624474176,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "star",
+        "reduction": "last_bar",
+        "spearman": -0.019295149520606663,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "star",
+        "reduction": "window_mean",
+        "spearman": -0.05258538872227949,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "soldiers_crows",
+        "reduction": "last_bar",
+        "spearman": 0.05722551804173167,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "soldiers_crows",
+        "reduction": "window_mean",
+        "spearman": 0.04035566946256372,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "market_state",
+        "reduction": "last_bar",
+        "spearman": -0.010704591827766383,
+        "flagged": false
+      },
+      {
+        "channel": "volume_ratio",
+        "label": "market_state",
+        "reduction": "window_mean",
+        "spearman": 0.021813273453809547,
+        "flagged": false
+      }
+    ],
+    "flagged": [],
+    "pair_count": 242
+  },
+  "shap": {
+    "sample_size": 2000,
+    "per_class": {
+      "long_lower_wick": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.10049875626640278,
+          "upper_wick_atr": 0.028471359991177447,
+          "lower_wick_atr": 0.043295295239950064,
+          "range_atr": 0.028780149801074007,
+          "body_to_range": 0.04808501981496374,
+          "upper_wick_to_range": 0.07872623232209298,
+          "lower_wick_to_range": 1.2366694986380025,
+          "close_location": 0.020653912275454787,
+          "body_sign": 0.0,
+          "close_change_atr": 0.00910829742559872,
+          "volume_ratio": 0.013710823591674852
+        }
+      },
+      "long_upper_wick": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.11194121388115309,
+          "upper_wick_atr": 0.028979773249666326,
+          "lower_wick_atr": 0.007080788378763828,
+          "range_atr": 0.014740408965975805,
+          "body_to_range": 0.04592834262773612,
+          "upper_wick_to_range": 1.1193214665204285,
+          "lower_wick_to_range": 0.051817776649761074,
+          "close_location": 0.011685151074936584,
+          "body_sign": 0.0,
+          "close_change_atr": 0.006298404348286567,
+          "volume_ratio": 0.006938664971989056
+        }
+      },
+      "doji": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.09168154810911802,
+          "upper_wick_atr": 0.012172960110357962,
+          "lower_wick_atr": 0.008707620168366702,
+          "range_atr": 0.13096730059963013,
+          "body_to_range": 1.8799687885078027,
+          "upper_wick_to_range": 0.007786421183976927,
+          "lower_wick_to_range": 0.004477303619962186,
+          "close_location": 0.00853009115002351,
+          "body_sign": 0.0,
+          "close_change_atr": 0.013850519965075364,
+          "volume_ratio": 0.011992323430255056
+        }
+      },
+      "marubozu": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.020326951575136264,
+          "upper_wick_atr": 0.0019194343858944193,
+          "lower_wick_atr": 0.0006461424927401823,
+          "range_atr": 0.017947529010176367,
+          "body_to_range": 1.2937969584309614,
+          "upper_wick_to_range": 0.07458941283305469,
+          "lower_wick_to_range": 0.029885699962527722,
+          "close_location": 0.00833743939402484,
+          "body_sign": 0.0,
+          "close_change_atr": 0.002306471108695405,
+          "volume_ratio": 0.00678616868356039
+        }
+      },
+      "engulfing": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.4877311734425894,
+          "upper_wick_atr": 0.16107499210027165,
+          "lower_wick_atr": 0.13081631939660293,
+          "range_atr": 0.06371537791439914,
+          "body_to_range": 0.5886154866792785,
+          "upper_wick_to_range": 0.19515975844464267,
+          "lower_wick_to_range": 0.26895621813458276,
+          "close_location": 0.1431755758791842,
+          "body_sign": 0.0,
+          "close_change_atr": 0.27767650518909787,
+          "volume_ratio": 0.13722472048108467
+        }
+      },
+      "harami": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.17582407015538773,
+          "upper_wick_atr": 0.33054132492188365,
+          "lower_wick_atr": 0.3686498169136467,
+          "range_atr": 1.0030683052870446,
+          "body_to_range": 0.17373286381457,
+          "upper_wick_to_range": 0.03222125007235445,
+          "lower_wick_to_range": 0.0,
+          "close_location": 0.15166574940760622,
+          "body_sign": 0.0,
+          "close_change_atr": 0.18751022784458474,
+          "volume_ratio": 1.0264659359160577
+        }
+      },
+      "piercing_dark_cloud": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.07701169226718049,
+          "upper_wick_atr": 0.21729113565092847,
+          "lower_wick_atr": 0.2935112875048652,
+          "range_atr": 0.15407541671063515,
+          "body_to_range": 0.23372018446859147,
+          "upper_wick_to_range": 0.12579495059952023,
+          "lower_wick_to_range": 0.22288062708186043,
+          "close_location": 0.19717451132746647,
+          "body_sign": 0.0,
+          "close_change_atr": 0.24670210639670406,
+          "volume_ratio": 0.16307721418086296
+        }
+      },
+      "tweezer": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.0,
+          "upper_wick_atr": 0.0,
+          "lower_wick_atr": 0.0,
+          "range_atr": 0.0,
+          "body_to_range": 0.0,
+          "upper_wick_to_range": 0.0,
+          "lower_wick_to_range": 0.0,
+          "close_location": 0.0,
+          "body_sign": 0.0,
+          "close_change_atr": 0.0,
+          "volume_ratio": 0.0
+        }
+      },
+      "star": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.06287845129759807,
+          "upper_wick_atr": 0.047319679215725045,
+          "lower_wick_atr": 0.10444942519634788,
+          "range_atr": 0.02723489634370344,
+          "body_to_range": 0.6815012587623425,
+          "upper_wick_to_range": 0.04115257617660973,
+          "lower_wick_to_range": 0.06337255208748684,
+          "close_location": 0.02647100996106019,
+          "body_sign": 0.0,
+          "close_change_atr": 0.013592655761865899,
+          "volume_ratio": 0.07963950879425101
+        }
+      },
+      "soldiers_crows": {
+        "skipped": false,
+        "channels": {
+          "body_size_atr": 0.1271973416871042,
+          "upper_wick_atr": 0.013970934409844631,
+          "lower_wick_atr": 0.0015212573813259951,
+          "range_atr": 0.004365764869915438,
+          "body_to_range": 1.0646428041570177,
+          "upper_wick_to_range": 0.10921576200048728,
+          "lower_wick_to_range": 0.03316734329596511,
+          "close_location": 0.032433567986634444,
+          "body_sign": 0.0,
+          "close_change_atr": 0.02021137622791866,
+          "volume_ratio": 0.04578527485534142
+        }
+      }
+    }
+  },
+  "final_stride_bars": 1,
+  "eval_stride_bars": 48,
+  "optimizer": "adamw",
+  "test": {
+    "geometry_macro_f1": 0.6614669767111867,
+    "geometry_per_class": {
+      "long_lower_wick": {
+        "precision": 0.5183917878528657,
+        "recall": 0.9774193548387097,
+        "f1": 0.6774734488541084,
+        "support": 620.0
+      },
+      "long_upper_wick": {
+        "precision": 0.5338142470694319,
+        "recall": 0.9579288025889967,
+        "f1": 0.6855819339895773,
+        "support": 618.0
+      },
+      "doji": {
+        "precision": 0.6648418491484185,
+        "recall": 0.9767649687220733,
+        "f1": 0.7911690191820486,
+        "support": 1119.0
+      },
+      "marubozu": {
+        "precision": 0.5531514581373471,
+        "recall": 0.9592169657422512,
+        "f1": 0.701670644391408,
+        "support": 613.0
+      },
+      "engulfing": {
+        "precision": 0.49400104329681793,
+        "recall": 0.9517587939698492,
+        "f1": 0.6504120879120879,
+        "support": 995.0
+      },
+      "harami": {
+        "precision": 0.5677593781683001,
+        "recall": 0.9655172413793104,
+        "f1": 0.7150457544158332,
+        "support": 1740.0
+      },
+      "piercing_dark_cloud": {
+        "precision": 0.36604886267902276,
+        "recall": 0.9486899563318777,
+        "f1": 0.5282674772036475,
+        "support": 916.0
+      },
+      "tweezer": {
+        "precision": 0.543778801843318,
+        "recall": 0.959349593495935,
+        "f1": 0.6941176470588235,
+        "support": 2091.0
+      },
+      "star": {
+        "precision": 0.4311023622047244,
+        "recall": 0.8725099601593626,
+        "f1": 0.5770750988142292,
+        "support": 251.0
+      },
+      "soldiers_crows": {
+        "precision": 0.4887640449438202,
+        "recall": 0.7565217391304347,
+        "f1": 0.5938566552901025,
+        "support": 115.0
+      }
+    },
+    "market_state": {
+      "macro_f1": 0.25622374690606536,
+      "per_class": {
+        "uptrend": {
+          "precision": 0.38961038961038963,
+          "recall": 0.379746835443038,
+          "f1": 0.38461538461538464,
+          "support": 79.0
+        },
+        "downtrend": {
+          "precision": 0.2878787878787879,
+          "recall": 0.296875,
+          "f1": 0.2923076923076923,
+          "support": 64.0
+        },
+        "range_bound": {
+          "precision": 0.3333333333333333,
+          "recall": 0.022727272727272728,
+          "f1": 0.04255319148936171,
+          "support": 44.0
+        },
+        "transition": {
+          "precision": 0.2540983606557377,
+          "recall": 0.38271604938271603,
+          "f1": 0.3054187192118227,
+          "support": 81.0
+        },
+        "indeterminate": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0.0
+        }
+      }
+    },
+    "structure_tag": {
+      "macro_f1": 0.34275949834807456,
+      "per_class": {
+        "hh_hl": {
+          "precision": 0.48717948717948717,
+          "recall": 0.6440677966101694,
+          "f1": 0.5547445255474452,
+          "support": 118.0
+        },
+        "lh_ll": {
+          "precision": 0.43157894736842106,
+          "recall": 0.3867924528301887,
+          "f1": 0.4079601990049751,
+          "support": 106.0
+        },
+        "mixed": {
+          "precision": 0.11764705882352941,
+          "recall": 0.045454545454545456,
+          "f1": 0.06557377049180328,
+          "support": 44.0
+        },
+        "none": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 0.0
+        }
+      }
+    },
+    "geometry_calibration": {
+      "expected_calibration_error": 0.062036691888720887,
+      "bins": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 102214.0,
+          "confidence": 0.00662188218938344,
+          "frequency": 0.00037176903359618056
+        },
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 3993.0,
+          "confidence": 0.14390221810411039,
+          "frequency": 0.010017530678687703
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.30000000000000004,
+          "count": 2377.0,
+          "confidence": 0.24741425682102175,
+          "frequency": 0.03281447202355911
+        },
+        {
+          "lower": 0.30000000000000004,
+          "upper": 0.4,
+          "count": 1862.0,
+          "confidence": 0.34868062333184846,
+          "frequency": 0.04296455424274973
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "count": 1584.0,
+          "confidence": 0.4484375821370067,
+          "frequency": 0.09785353535353536
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6000000000000001,
+          "count": 1621.0,
+          "confidence": 0.5493048932506742,
+          "frequency": 0.15052436767427513
+        },
+        {
+          "lower": 0.6000000000000001,
+          "upper": 0.7000000000000001,
+          "count": 1806.0,
+          "confidence": 0.6517103205487578,
+          "frequency": 0.22314507198228128
+        },
+        {
+          "lower": 0.7000000000000001,
+          "upper": 0.8,
+          "count": 2205.0,
+          "confidence": 0.7518235577747665,
+          "frequency": 0.35555555555555557
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 3433.0,
+          "confidence": 0.8552747595216454,
+          "frequency": 0.5117972618700845
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 7545.0,
+          "confidence": 0.9540007975024052,
+          "frequency": 0.7288270377733599
+        }
+      ]
+    }
+  },
+  "sealed_test_scored_once": true
+}

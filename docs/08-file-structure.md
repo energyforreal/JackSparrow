@@ -220,6 +220,22 @@ JackSparrow/
 │   ├── next.config.js                 # Next.js configuration
 │   └── tailwind.config.js             # Tailwind CSS configuration
 │
+├── research/
+│   └── recognition_15m/               # 15m recognition research (not a live model)
+│       ├── contract.py                # Allow-list, purge, and geometric class names
+│       ├── bars.py                    # Completed 5m → 15m resample
+│       ├── features.py                # Causal geometry channels
+│       ├── labels.py                  # Geometric labels, rule card, zigzag state
+│       ├── splits.py                  # Chronological split with a 48-bar purge
+│       ├── integrity.py               # Denylist and future-bar checks
+│       ├── dataset.py                 # Window tensors and train-only scaler
+│       ├── models.py                  # Causal TCN heads A and E, presence baseline
+│       ├── search.py                  # Purged Optuna search on the development span
+│       ├── explain.py                 # Train-only Spearman correlation and TreeSHAP
+│       ├── plots.py                   # Correlation, SHAP, and fit figures
+│       ├── colab.py                   # Intense fit, sealed test, and research report
+│       └── pipeline.py                # Offline trainer
+│
 ├── tests/                              # Test suite
 │   ├── unit/
 │   │   ├── backend/

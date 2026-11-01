@@ -19,6 +19,7 @@ from agent.core.forecast_policy import (
 from agent.models.forecast_node import ForecastModelNode
 from agent.models.fusion_node import FusionModelNode
 from agent.models.mcp_model_registry import MCPModelRegistry
+from agent.models.recognition_node import RecognitionModelNode
 from agent.models.transformer_node import TransformerModelNode
 from feature_store.transformer_btcusd.contract import (
     FUSION_BUNDLE_DIR_NAME,
@@ -214,7 +215,7 @@ class ModelDiscovery:
         failed_reasons: List[str],
         discovery_attempted: bool,
     ) -> List[str]:
-        """Register the promoted 30-minute forecast bundle only."""
+        """Register the forecast bundle, then the recognition checkpoint."""
         bundle_dir = forecast_bundle_dir(self.model_dir)
         try:
             node = ForecastModelNode.from_bundle_dir(bundle_dir)
@@ -235,6 +236,7 @@ class ModelDiscovery:
             logger.error("model_discovery_forecast_failed", error=msg, exc_info=True)
             failed_models.append(str(bundle_dir))
             failed_reasons.append(msg)
+        await self._register_recognition(discovered_models, failed_models, failed_reasons)
         self.registry.record_discovery_summary(
             discovered_models,
             failed_models,
@@ -242,3 +244,40 @@ class ModelDiscovery:
             discovery_attempted=discovery_attempted,
         )
         return discovered_models
+
+    async def _register_recognition(
+        self,
+        discovered_models: List[str],
+        failed_models: List[str],
+        failed_reasons: List[str],
+    ) -> None:
+        """Load the 15-minute recognition checkpoint when it is on disk."""
+        try:
+            node = RecognitionModelNode.from_model_dir(self.model_dir)
+        except FileNotFoundError:
+            return
+        except Exception as exc:
+            msg = f"Failed to load recognition checkpoint: {exc}"
+            logger.error("model_discovery_recognition_failed", error=msg, exc_info=True)
+            failed_models.append("recognition_15m")
+            failed_reasons.append(msg)
+            return
+        try:
+            await node.initialize()
+        except Exception as exc:
+            msg = f"Failed to initialize recognition checkpoint: {exc}"
+            logger.error("model_discovery_recognition_failed", error=msg, exc_info=True)
+            failed_models.append("recognition_15m")
+            failed_reasons.append(msg)
+            return
+        if self.auto_register:
+            self.registry.register_model(node)
+            discovered_models.append(node.model_name)
+        else:
+            self.registry.add_pending_model(node)
+            discovered_models.append(f"pending:{node.model_name}")
+        logger.info(
+            "model_discovered_recognition",
+            model_name=node.model_name,
+            checkpoint=str(node._checkpoint),
+        )

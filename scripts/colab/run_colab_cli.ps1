@@ -1,5 +1,5 @@
 # Thin Windows trampoline: run the Colab CLI helper inside Ubuntu WSL.
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Distro = "Ubuntu-24.04",
     [Parameter(ValueFromRemainingArguments = $true)]

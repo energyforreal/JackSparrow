@@ -1,0 +1,665 @@
+{
+  "spec_version": "recognition-15m-v1",
+  "rows_5m": 259200,
+  "rows_15m": 86399,
+  "rule_card_rows": 61195,
+  "heads_not_trained": [
+    "B",
+    "C",
+    "D",
+    "F",
+    "G",
+    "H"
+  ],
+  "channels": {
+    "raw": [
+      "open_atr",
+      "high_atr",
+      "low_atr",
+      "close_atr",
+      "volume_ratio"
+    ],
+    "engineered": [
+      "body_size_atr",
+      "upper_wick_atr",
+      "lower_wick_atr",
+      "range_atr",
+      "body_to_range",
+      "upper_wick_to_range",
+      "lower_wick_to_range",
+      "close_location",
+      "body_sign",
+      "close_change_atr",
+      "volume_ratio"
+    ]
+  },
+  "windows": {
+    "train": 60413,
+    "val": 12945,
+    "test": 12853
+  },
+  "purge_gap_bars": {
+    "train_val": 48,
+    "val_test": 48
+  },
+  "train_stride_bars": 4,
+  "eval_stride_bars": 48,
+  "tcn_engineered": {
+    "val_loss": 3.937178994609796,
+    "val_loss_by_epoch": [
+      4.078897006871857,
+      4.047339326848504,
+      4.018855123929415,
+      3.9918156528973747,
+      3.964742410834792,
+      3.937178994609796
+    ],
+    "val": {
+      "geometry_macro_f1": 0.09591090936763458,
+      "geometry_per_class": {
+        "long_lower_wick": {
+          "precision": 0.05023145596825747,
+          "recall": 0.9411461022199277,
+          "f1": 0.09537262287791991,
+          "support": 7748.0
+        },
+        "long_upper_wick": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 7509.0
+        },
+        "doji": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 13250.0
+        },
+        "marubozu": {
+          "precision": 0.04390968830545601,
+          "recall": 0.864391284473564,
+          "f1": 0.08357395403653506,
+          "support": 6563.0
+        },
+        "engulfing": {
+          "precision": 0.07714203242515114,
+          "recall": 0.8138905337957871,
+          "f1": 0.14092676817612548,
+          "support": 11821.0
+        },
+        "harami": {
+          "precision": 0.1372990933443231,
+          "recall": 1.0,
+          "f1": 0.24144764406798858,
+          "support": 21322.0
+        },
+        "piercing_dark_cloud": {
+          "precision": 0.06658804248768944,
+          "recall": 0.8481271946937183,
+          "f1": 0.12348133578544497,
+          "support": 10252.0
+        },
+        "tweezer": {
+          "precision": 0.16348381820659993,
+          "recall": 0.8515757504042915,
+          "f1": 0.27430676873233173,
+          "support": 25353.0
+        },
+        "star": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 3101.0
+        },
+        "soldiers_crows": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 924.0
+        }
+      },
+      "market_state": {
+        "macro_f1": 0.13528284218192857,
+        "per_class": {
+          "uptrend": {
+            "precision": 0.36363636363636365,
+            "recall": 0.004145077720207254,
+            "f1": 0.008196721311475409,
+            "support": 965.0
+          },
+          "downtrend": {
+            "precision": 0.30461073318216175,
+            "recall": 0.40584088620342396,
+            "f1": 0.348013816925734,
+            "support": 993.0
+          },
+          "range_bound": {
+            "precision": 0.10812236286919831,
+            "recall": 0.590778097982709,
+            "f1": 0.18279090503789566,
+            "support": 347.0
+          },
+          "transition": {
+            "precision": 0.14285714285714285,
+            "recall": 0.001072961373390558,
+            "f1": 0.002129925452609159,
+            "support": 932.0
+          },
+          "indeterminate": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      },
+      "structure_tag": {
+        "macro_f1": 0.22834524586955526,
+        "per_class": {
+          "hh_hl": {
+            "precision": 0.4331692540704279,
+            "recall": 0.8,
+            "f1": 0.562024072709408,
+            "support": 1430.0
+          },
+          "lh_ll": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1460.0
+          },
+          "mixed": {
+            "precision": 0.09731543624161074,
+            "recall": 0.16714697406340057,
+            "f1": 0.1230116648992577,
+            "support": 347.0
+          },
+          "none": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      }
+    },
+    "test": {
+      "geometry_macro_f1": 0.09764073739235202,
+      "geometry_per_class": {
+        "long_lower_wick": {
+          "precision": 0.04888186881702552,
+          "recall": 0.9483870967741935,
+          "f1": 0.09297177642501384,
+          "support": 620.0
+        },
+        "long_upper_wick": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 618.0
+        },
+        "doji": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 1119.0
+        },
+        "marubozu": {
+          "precision": 0.047785208878549965,
+          "recall": 0.8042414355628059,
+          "f1": 0.09021043000914913,
+          "support": 613.0
+        },
+        "engulfing": {
+          "precision": 0.07848076736750315,
+          "recall": 0.8140703517587939,
+          "f1": 0.14316012725344643,
+          "support": 995.0
+        },
+        "harami": {
+          "precision": 0.13506149774248793,
+          "recall": 0.9971264367816092,
+          "f1": 0.2378993555464144,
+          "support": 1740.0
+        },
+        "piercing_dark_cloud": {
+          "precision": 0.07252929777613731,
+          "recall": 0.8580786026200873,
+          "f1": 0.13375308431889732,
+          "support": 916.0
+        },
+        "tweezer": {
+          "precision": 0.16600681336893472,
+          "recall": 0.8622668579626973,
+          "f1": 0.2784126003705991,
+          "support": 2091.0
+        },
+        "star": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 251.0
+        },
+        "soldiers_crows": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 115.0
+        }
+      },
+      "market_state": {
+        "macro_f1": 0.16489361702127658,
+        "per_class": {
+          "uptrend": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 79.0
+          },
+          "downtrend": {
+            "precision": 0.3064516129032258,
+            "recall": 0.59375,
+            "f1": 0.4042553191489362,
+            "support": 64.0
+          },
+          "range_bound": {
+            "precision": 0.16666666666666666,
+            "recall": 0.5454545454545454,
+            "f1": 0.2553191489361702,
+            "support": 44.0
+          },
+          "transition": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 81.0
+          },
+          "indeterminate": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      },
+      "structure_tag": {
+        "macro_f1": 0.247175010061608,
+        "per_class": {
+          "hh_hl": {
+            "precision": 0.44651162790697674,
+            "recall": 0.8135593220338984,
+            "f1": 0.5765765765765766,
+            "support": 118.0
+          },
+          "lh_ll": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 106.0
+          },
+          "mixed": {
+            "precision": 0.1509433962264151,
+            "recall": 0.18181818181818182,
+            "f1": 0.16494845360824742,
+            "support": 44.0
+          },
+          "none": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      }
+    }
+  },
+  "tcn_raw": {
+    "val_loss": 3.729810734608308,
+    "val_loss_by_epoch": [
+      4.176876478516323,
+      4.101524320324888,
+      4.026410178855351,
+      3.93943433802843,
+      3.8370921260455453,
+      3.729810734608308
+    ],
+    "val": {
+      "geometry_macro_f1": 0.08415312111076445,
+      "geometry_per_class": {
+        "long_lower_wick": {
+          "precision": 0.0498661311914324,
+          "recall": 1.0,
+          "f1": 0.09499521836149188,
+          "support": 7748.0
+        },
+        "long_upper_wick": {
+          "precision": 0.04508502533087225,
+          "recall": 0.1528832068184845,
+          "f1": 0.06963484168385298,
+          "support": 7509.0
+        },
+        "doji": {
+          "precision": 0.08705330285164241,
+          "recall": 0.10920754716981132,
+          "f1": 0.0968800214247456,
+          "support": 13250.0
+        },
+        "marubozu": {
+          "precision": 0.043109524567426845,
+          "recall": 0.8666768246228859,
+          "f1": 0.08213362598010195,
+          "support": 6563.0
+        },
+        "engulfing": {
+          "precision": 0.08322157937085713,
+          "recall": 0.1837408002707047,
+          "f1": 0.11455696202531646,
+          "support": 11821.0
+        },
+        "harami": {
+          "precision": 0.1448097915977506,
+          "recall": 0.513272676109183,
+          "f1": 0.2258893464193938,
+          "support": 21322.0
+        },
+        "piercing_dark_cloud": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 10252.0
+        },
+        "tweezer": {
+          "precision": 0.1642713323613136,
+          "recall": 0.09332228927543092,
+          "f1": 0.11902605895965389,
+          "support": 25353.0
+        },
+        "star": {
+          "precision": 0.020420212549370903,
+          "recall": 0.3234440503063528,
+          "f1": 0.038415136253087956,
+          "support": 3101.0
+        },
+        "soldiers_crows": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 924.0
+        }
+      },
+      "market_state": {
+        "macro_f1": 0.31316521817009196,
+        "per_class": {
+          "uptrend": {
+            "precision": 0.5153743315508021,
+            "recall": 0.7989637305699482,
+            "f1": 0.6265745631856968,
+            "support": 965.0
+          },
+          "downtrend": {
+            "precision": 0.4902186421173763,
+            "recall": 0.8580060422960725,
+            "f1": 0.623947272061516,
+            "support": 993.0
+          },
+          "range_bound": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 347.0
+          },
+          "transition": {
+            "precision": 0.3333333333333333,
+            "recall": 0.001072961373390558,
+            "f1": 0.0021390374331550803,
+            "support": 932.0
+          },
+          "indeterminate": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      },
+      "structure_tag": {
+        "macro_f1": 0.5166138436229043,
+        "per_class": {
+          "hh_hl": {
+            "precision": 0.7215874924834637,
+            "recall": 0.8391608391608392,
+            "f1": 0.7759456838021339,
+            "support": 1430.0
+          },
+          "lh_ll": {
+            "precision": 0.7458703939008895,
+            "recall": 0.8041095890410959,
+            "f1": 0.7738958470665788,
+            "support": 1460.0
+          },
+          "mixed": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 347.0
+          },
+          "none": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      }
+    },
+    "test": {
+      "geometry_macro_f1": 0.08108903684037247,
+      "geometry_per_class": {
+        "long_lower_wick": {
+          "precision": 0.048196517412935326,
+          "recall": 1.0,
+          "f1": 0.09196084247997628,
+          "support": 620.0
+        },
+        "long_upper_wick": {
+          "precision": 0.043560606060606064,
+          "recall": 0.1488673139158576,
+          "f1": 0.0673992673992674,
+          "support": 618.0
+        },
+        "doji": {
+          "precision": 0.08487084870848709,
+          "recall": 0.10277033065236818,
+          "f1": 0.0929668552950687,
+          "support": 1119.0
+        },
+        "marubozu": {
+          "precision": 0.047687471935339024,
+          "recall": 0.866231647634584,
+          "f1": 0.09039836567926456,
+          "support": 613.0
+        },
+        "engulfing": {
+          "precision": 0.0807899461400359,
+          "recall": 0.18090452261306533,
+          "f1": 0.11169717654359294,
+          "support": 995.0
+        },
+        "harami": {
+          "precision": 0.13814180929095354,
+          "recall": 0.5195402298850574,
+          "f1": 0.2182520521487204,
+          "support": 1740.0
+        },
+        "piercing_dark_cloud": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 916.0
+        },
+        "tweezer": {
+          "precision": 0.1596292481977343,
+          "recall": 0.0741272118603539,
+          "f1": 0.10124101894186807,
+          "support": 2091.0
+        },
+        "star": {
+          "precision": 0.019672968829841594,
+          "recall": 0.30677290836653387,
+          "f1": 0.03697478991596639,
+          "support": 251.0
+        },
+        "soldiers_crows": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 115.0
+        }
+      },
+      "market_state": {
+        "macro_f1": 0.2723095869647594,
+        "per_class": {
+          "uptrend": {
+            "precision": 0.46511627906976744,
+            "recall": 0.759493670886076,
+            "f1": 0.576923076923077,
+            "support": 79.0
+          },
+          "downtrend": {
+            "precision": 0.37410071942446044,
+            "recall": 0.8125,
+            "f1": 0.5123152709359606,
+            "support": 64.0
+          },
+          "range_bound": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 44.0
+          },
+          "transition": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 81.0
+          },
+          "indeterminate": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      },
+      "structure_tag": {
+        "macro_f1": 0.4684383365068852,
+        "per_class": {
+          "hh_hl": {
+            "precision": 0.6618705035971223,
+            "recall": 0.7796610169491526,
+            "f1": 0.7159533073929962,
+            "support": 118.0
+          },
+          "lh_ll": {
+            "precision": 0.627906976744186,
+            "recall": 0.7641509433962265,
+            "f1": 0.6893617021276596,
+            "support": 106.0
+          },
+          "mixed": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 44.0
+          },
+          "none": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0.0
+          }
+        }
+      }
+    }
+  },
+  "xgboost_presence": {
+    "per_class": {
+      "long_lower_wick": {
+        "precision": 0.967391304347826,
+        "recall": 0.7478991596638656,
+        "f1": 0.8436018957345971,
+        "support": 238.0,
+        "skipped": false
+      },
+      "long_upper_wick": {
+        "precision": 0.9831460674157303,
+        "recall": 0.708502024291498,
+        "f1": 0.823529411764706,
+        "support": 247.0,
+        "skipped": false
+      },
+      "doji": {
+        "precision": 1.0,
+        "recall": 0.8943396226415095,
+        "f1": 0.9442231075697212,
+        "support": 265.0,
+        "skipped": false
+      },
+      "marubozu": {
+        "precision": 0.9937106918238994,
+        "recall": 0.6638655462184874,
+        "f1": 0.795969773299748,
+        "support": 238.0,
+        "skipped": false
+      },
+      "engulfing": {
+        "precision": 0.9695431472081218,
+        "recall": 0.7346153846153847,
+        "f1": 0.8358862144420132,
+        "support": 260.0,
+        "skipped": false
+      },
+      "harami": {
+        "precision": 0.9962264150943396,
+        "recall": 0.9887640449438202,
+        "f1": 0.9924812030075187,
+        "support": 267.0,
+        "skipped": false
+      },
+      "piercing_dark_cloud": {
+        "precision": 0.9818181818181818,
+        "recall": 0.8275862068965517,
+        "f1": 0.8981288981288982,
+        "support": 261.0,
+        "skipped": false
+      },
+      "tweezer": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 268.0,
+        "skipped": false
+      },
+      "star": {
+        "precision": 0.6796875,
+        "recall": 0.54375,
+        "f1": 0.6041666666666666,
+        "support": 160.0,
+        "skipped": false
+      },
+      "soldiers_crows": {
+        "precision": 0.4631578947368421,
+        "recall": 0.5176470588235295,
+        "f1": 0.48888888888888893,
+        "support": 85.0,
+        "skipped": false
+      }
+    },
+    "macro_f1": 0.8226876059502757
+  },
+  "ablation": {
+    "raw_geometry_macro_f1": 0.08108903684037247,
+    "engineered_geometry_macro_f1": 0.09764073739235202,
+    "xgboost_presence_macro_f1": 0.8226876059502757
+  }
+}

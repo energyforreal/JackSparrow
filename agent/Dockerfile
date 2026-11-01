@@ -28,7 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy and install Python dependencies (ML libraries need build tools)
 COPY agent/requirements.txt /tmp/requirements.txt
 RUN pip install --upgrade pip && \
-    pip install --user --no-warn-script-location -r /tmp/requirements.txt
+    pip install --user --no-warn-script-location -r /tmp/requirements.txt && \
+    pip install --user --no-warn-script-location \
+    torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
 
 # Stage 2: Runtime
 FROM python:3.11.9-slim AS runtime
@@ -68,6 +70,9 @@ COPY --chown=agent:agent shared /app/shared
 
 # Copy shared feature_store package used by agent (for unified feature engine)
 COPY --chown=agent:agent feature_store /app/feature_store
+
+# Forecast v5 inference imports research.forecast_30m
+COPY --chown=agent:agent research /app/research
 
 # Add build metadata labels
 LABEL org.opencontainers.image.created="${BUILD_DATE}" \

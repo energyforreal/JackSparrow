@@ -93,6 +93,23 @@ async def test_model_health_summary_counts(registry):
 
 
 @pytest.mark.asyncio
+async def test_model_health_accepts_health_status_key(registry):
+    """Forecast nodes report health_status; that must still count as healthy."""
+
+    class _LegacyHealthModel(_HealthFakeModel):
+        async def get_health_status(self) -> Dict[str, Any]:
+            return {"health_status": "healthy", "initialized": True}
+
+    registry.register_model(_LegacyHealthModel("forecast_model", "healthy"))
+
+    health = await registry.get_health_status()
+    assert health["healthy_models"] == 1
+    assert health["status"] == "up"
+    assert health["model_statuses"]["forecast_model"]["status"] == "healthy"
+    assert health["model_statuses"]["forecast_model"]["model_status"] == "healthy"
+
+
+@pytest.mark.asyncio
 async def test_model_health_handles_exceptions(registry):
     class _BrokenModel(_HealthFakeModel):
         async def get_health_status(self) -> Dict[str, Any]:
