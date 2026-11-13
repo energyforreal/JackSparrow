@@ -263,7 +263,13 @@ The track reads 48 completed 15-minute BTCUSD bars. Inputs are raw OHLCV scaled 
 
 Chronological splits leave a purge of 48 bars between train, validation, and test. The contract is [`reference/recognition-15m-spec.md`](../reference/recognition-15m-spec.md). Train the short local fit with `python -m research.recognition_15m`. Metrics land in `export/recognition_15m/metrics.json`. The agent loads the Colab checkpoint from model storage and keeps the forecast bundle as the order source.
 
-The intense fit is the generated notebook `scripts/colab/recognition_15m_colab.ipynb`. Upload that notebook to Colab and run the cells from top to bottom. The training code is in the notebook, so the runtime does not clone this repository. It runs a purged Optuna search on the development span, a train-only Spearman audit, and TreeSHAP of the presence baseline, then refits one TCN and scores the sealed test once. The report in the Colab output folder records class-wise recognition metrics, Head A calibration, the correlation matrix, the SHAP ranking, the purge gaps, and the winning trial. The same folder holds PNG figures for the train and validation loss, validation against the sealed test, the Optuna trials, the correlation heatmaps, the SHAP ranking, and Head A reliability. The notebook draws those figures after the fit. It does not record a buy, a sell, expectancy, Sharpe, or a promotion flag. The agent copies that checkpoint into model storage and reads it as decision context.
+The intense fit is the generated notebook `scripts/colab/recognition_15m_colab.ipynb`. Upload that notebook to Colab and run the cells from top to bottom. The training code is in the notebook, so the runtime does not clone this repository. The data cell fetches public BTCUSD 5-minute candles from Delta Exchange. The notebook runs a purged Optuna search on the development span, a train-only Spearman audit, and TreeSHAP of the presence baseline, then refits one TCN and scores the sealed test once. The report in the Colab output folder records class-wise recognition metrics, Head A calibration, the correlation matrix, the SHAP ranking, the purge gaps, and the winning trial. The same folder holds PNG figures for the train and validation loss, validation against the sealed test, the Optuna trials, the correlation heatmaps, the SHAP ranking, and Head A reliability. The notebook draws those figures after the fit. It does not record a buy, a sell, expectancy, Sharpe, or a promotion flag. The agent copies that checkpoint into model storage and reads it as decision context.
+
+---
+
+## Research: multi-timeframe chart candidates
+
+`research/cpr_mtf/` builds causal 15-minute, 1-hour, and 4-hour BTCUSD features, confirmed swings, and chart-candidate proposals from the same 5-minute source. Each timeframe keeps one 192-bar series. The shorter windows are suffixes of that series. The package does not train a model, does not load from model storage, and does not emit orders. Preview charts and any later training tensor call the same functions. The contract is [`reference/cpr-mtf-v1-spec.md`](../reference/cpr-mtf-v1-spec.md). Run `python -m research.cpr_mtf` when `export/fusion_diagnostics/btcusd_5m_raw.parquet` is present. A missing file exits without downloading data.
 
 ---
 
@@ -277,3 +283,4 @@ The intense fit is the generated notebook `scripts/colab/recognition_15m_colab.i
 - [`.cursor/rules/ml-model-management.mdc`](../.cursor/rules/ml-model-management.mdc) — Cursor rule for transformer standards
 - [Label V2 spec (research)](../reference/label-v2-spec.md) — path targets; live v11 2-class fusion is unchanged
 - [15-minute recognition spec (research)](../reference/recognition-15m-spec.md) — geometric labels only; live `forecast_30m` is unchanged
+- [CPR-MTF v1 spec (research)](../reference/cpr-mtf-v1-spec.md) — multi-timeframe chart candidates; no orders and no model install

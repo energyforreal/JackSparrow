@@ -91,7 +91,12 @@ def validate_notebook() -> None:
             continue
         if any(
             token in source
-            for token in ("drive.mount", "files.upload", "files.download")
+            for token in (
+                "drive.mount",
+                "files.upload",
+                "files.download",
+                "api.india.delta.exchange",
+            )
         ):
             continue
         if "report = run_colab(" in source:

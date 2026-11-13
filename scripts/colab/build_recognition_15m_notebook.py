@@ -1,7 +1,7 @@
 """Generate a standalone Colab notebook for 15-minute recognition.
 
-The notebook contains the training code. Upload that file and the 5-minute
-parquet to Colab. It does not clone this repository.
+The notebook contains the training code and fetches public BTCUSD 5-minute
+candles from Delta Exchange. It does not clone this repository.
 
 Run from the repo root::
 
@@ -48,9 +48,9 @@ _INTRO = """# 15-minute recognition training
 Upload **this notebook** to Google Colab and run the cells from top to bottom.
 The training code is in the notebook. A GitHub clone is not required.
 
-Place `btcusd_5m_raw.parquet` in the Colab session at
-`/content/btcusd_5m_raw.parquet` (Files panel, then Upload). If that file is
-missing, the data cell opens a file picker. It does not connect to Google Drive.
+The data cell loads BTCUSD 5-minute candles from the public Delta Exchange
+history API and writes `/content/btcusd_5m_raw.parquet`. It does not connect
+to Google Drive and it does not ask for a file upload.
 
 Use a GPU runtime. The fit predicts geometric candle families and market state
 from 48 completed 15-minute bars. Each bar also carries causal support and
@@ -77,24 +77,106 @@ _pip(
 print("recognition dependencies ready")
 """
 
-_DATA = """from pathlib import Path
+_DATA = """import json
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+import pandas as pd
+
+# Public history. No API key. One response holds about 4,000 candles.
+DELTA_CANDLES_URL = "https://api.india.delta.exchange/v2/history/candles"
+PAGE_BARS = 4_000
+BAR_SECONDS = 300
+TARGET_BARS = 100_000
+MIN_BARS = 15_000
+LOOKBACK_DAYS = 730
+PAUSE_SECONDS = 0.35
+
+
+def _candle_page(start: int, end: int) -> list[dict]:
+    \"\"\"Request one public BTCUSD 5-minute page.\"\"\"
+    query = urllib.parse.urlencode(
+        {
+            "symbol": "BTCUSD",
+            "resolution": "5m",
+            "start": int(start),
+            "end": int(end),
+        }
+    )
+    request = urllib.request.Request(
+        f"{DELTA_CANDLES_URL}?{query}",
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "JackSparrow-recognition/1.0",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if payload.get("success") is False:
+        raise RuntimeError("Delta candle history returned success=false")
+    result = payload.get("result", [])
+    if isinstance(result, dict):
+        result = result.get("candles", [])
+    if not isinstance(result, list):
+        raise RuntimeError("Delta candle history did not return a list")
+    return result
+
+
+def fetch_btcusd_5m(target: int = TARGET_BARS) -> pd.DataFrame:
+    \"\"\"Walk backward through public 5-minute candles and return OHLCV.\"\"\"
+    end = int(time.time())
+    earliest = end - LOOKBACK_DAYS * 24 * 60 * 60
+    rows: list[dict] = []
+    seen: set[int] = set()
+    while len(rows) < target and end > earliest:
+        start = max(earliest, end - PAGE_BARS * BAR_SECONDS)
+        page = _candle_page(start, end)
+        if not page:
+            break
+        oldest = end
+        added = 0
+        for row in page:
+            stamp = int(row["time"])
+            oldest = min(oldest, stamp)
+            if stamp in seen:
+                continue
+            seen.add(stamp)
+            rows.append(row)
+            added += 1
+        nxt = oldest - 1
+        if nxt >= end or added == 0:
+            break
+        end = nxt
+        print(f"delta 5m candles: {len(rows)}", flush=True)
+        if len(rows) >= target:
+            break
+        time.sleep(PAUSE_SECONDS)
+    if len(rows) < MIN_BARS:
+        raise RuntimeError(
+            f"Delta returned {len(rows)} five-minute candles; "
+            f"need at least {MIN_BARS}."
+        )
+    frame = pd.DataFrame(rows)
+    frame["time"] = pd.to_datetime(frame["time"].astype("int64"), unit="s", utc=True)
+    for column in ("open", "high", "low", "close", "volume"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.dropna(subset=["time", "open", "high", "low", "close", "volume"])
+    frame = frame.sort_values("time").drop_duplicates("time", keep="last")
+    frame = frame.tail(target).reset_index(drop=True)
+    return frame.loc[:, ["time", "open", "high", "low", "close", "volume"]]
+
 
 parquet = Path("/content/btcusd_5m_raw.parquet")
-if not parquet.is_file():
-    try:
-        from google.colab import files
-    except ImportError as exc:
-        raise FileNotFoundError(
-            "Place btcusd_5m_raw.parquet at /content/btcusd_5m_raw.parquet."
-        ) from exc
-    picked = files.upload()
-    name = "btcusd_5m_raw.parquet"
-    if name not in picked:
-        raise FileNotFoundError(
-            "Choose btcusd_5m_raw.parquet in the file picker."
-        )
-    parquet.write_bytes(picked[name])
-print(parquet)
+candles = fetch_btcusd_5m()
+candles.to_parquet(parquet, index=False)
+print(
+    parquet,
+    len(candles),
+    candles["time"].iloc[0],
+    candles["time"].iloc[-1],
+)
 """
 
 _TRAIN = """from pathlib import Path
@@ -229,7 +311,7 @@ def build_notebook() -> dict[str, Any]:
         cells.append(_code_cell(_prepare_module(relative_path)))
     cells.extend(
         [
-            _markdown_cell("## Load the 5-minute parquet"),
+            _markdown_cell("## Fetch the 5-minute candles"),
             _code_cell(_DATA),
             _markdown_cell("## Search, explain, and score the sealed test"),
             _code_cell(_TRAIN),
