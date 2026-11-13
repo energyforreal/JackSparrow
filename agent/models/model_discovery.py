@@ -20,6 +20,8 @@ from agent.models.forecast_node import ForecastModelNode
 from agent.models.fusion_node import FusionModelNode
 from agent.models.mcp_model_registry import MCPModelRegistry
 from agent.models.recognition_node import RecognitionModelNode
+from agent.models.setup_effectiveness_node import SetupEffectivenessNode
+from agent.models.sr_effectiveness_node import SREffectivenessNode
 from agent.models.transformer_node import TransformerModelNode
 from feature_store.transformer_btcusd.contract import (
     FUSION_BUNDLE_DIR_NAME,
@@ -145,6 +147,7 @@ class ModelDiscovery:
             logger.error("model_discovery_transformer_missing", message=msg)
             failed_models.append(str(self.model_dir))
             failed_reasons.append(msg)
+            await self._register_swinging(discovered_models, failed_models, failed_reasons)
             self.registry.record_discovery_summary(
                 discovered_models,
                 failed_models,
@@ -200,6 +203,7 @@ class ModelDiscovery:
                 failed_models.append(str(bundle_dir))
                 failed_reasons.append(msg)
 
+        await self._register_swinging(discovered_models, failed_models, failed_reasons)
         self.registry.record_discovery_summary(
             discovered_models,
             failed_models,
@@ -237,6 +241,7 @@ class ModelDiscovery:
             failed_models.append(str(bundle_dir))
             failed_reasons.append(msg)
         await self._register_recognition(discovered_models, failed_models, failed_reasons)
+        await self._register_swinging(discovered_models, failed_models, failed_reasons)
         self.registry.record_discovery_summary(
             discovered_models,
             failed_models,
@@ -281,3 +286,40 @@ class ModelDiscovery:
             model_name=node.model_name,
             checkpoint=str(node._checkpoint),
         )
+
+    async def _register_swinging(
+        self,
+        discovered_models: List[str],
+        failed_models: List[str],
+        failed_reasons: List[str],
+    ) -> None:
+        """Load research-only setup and S/R bundles when they are on disk."""
+        for label, loader in (
+            ("setup_effectiveness", SetupEffectivenessNode.from_model_dir),
+            ("sr_effectiveness", SREffectivenessNode.from_model_dir),
+        ):
+            try:
+                node = loader(self.model_dir)
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                message = f"Failed to load {label}: {exc}"
+                logger.error("model_discovery_swinging_failed", error=message, exc_info=True)
+                failed_models.append(label)
+                failed_reasons.append(message)
+                continue
+            try:
+                await node.initialize()
+            except Exception as exc:
+                message = f"Failed to initialize {label}: {exc}"
+                logger.error("model_discovery_swinging_failed", error=message, exc_info=True)
+                failed_models.append(label)
+                failed_reasons.append(message)
+                continue
+            if self.auto_register:
+                self.registry.register_model(node)
+                discovered_models.append(node.model_name)
+            else:
+                self.registry.add_pending_model(node)
+                discovered_models.append(f"pending:{node.model_name}")
+            logger.info("model_discovered_swinging", model_name=node.model_name, task=label)

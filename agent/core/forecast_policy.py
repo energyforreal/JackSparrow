@@ -40,9 +40,34 @@ def promoted_forecast_bundle(model_dir: Path | str) -> Path | None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not bool(manifest.get("orders_enabled")):
+    if not forecast_orders_approved(manifest):
         return None
     return bundle
+
+
+def forecast_orders_approved(manifest: dict) -> bool:
+    """Return true when a forecast manifest may place testnet orders.
+
+    A bundle whose development gate failed, or that carries
+    ``promotion_override``, is refused unless
+    ``FORECAST_ALLOW_PROMOTION_OVERRIDE`` is set. ``orders_enabled`` alone is
+    not enough in those cases.
+
+    Args:
+        manifest: Parsed ``manifest.json``.
+
+    Returns:
+        Whether the bundle is approved.
+    """
+    if not bool(manifest.get("orders_enabled")):
+        return False
+    override = manifest.get("promotion_override")
+    gate_failed = manifest.get("development_gate_passed") is False
+    if not override and not gate_failed:
+        return True
+    from agent.core.config import settings
+
+    return bool(getattr(settings, "forecast_allow_promotion_override", False))
 
 
 def resolve_transformer_decision_path(model_dir: Path | str) -> str:

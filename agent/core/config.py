@@ -229,6 +229,15 @@ class Settings(BaseSettings):
             "forecast_30m."
         ),
     )
+    forecast_allow_promotion_override: bool = Field(
+        default=False,
+        env="FORECAST_ALLOW_PROMOTION_OVERRIDE",
+        description=(
+            "When true, a forecast bundle may load even if its development "
+            "gate failed or its manifest sets promotion_override. Default "
+            "false, so an unvalidated bundle cannot enable orders."
+        ),
+    )
     sl_tp_mode: str = Field(
         default="atr",
         env="SL_TP_MODE",

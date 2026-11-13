@@ -98,8 +98,14 @@ class ForecastModelNode(MCPModelNode):
         import json
 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if not bool(manifest.get("orders_enabled")):
-            raise RuntimeError("forecast bundle is not approved for live orders")
+        from agent.core.forecast_policy import forecast_orders_approved
+
+        if not forecast_orders_approved(manifest):
+            if not bool(manifest.get("orders_enabled")):
+                raise RuntimeError("forecast bundle is not approved for live orders")
+            raise RuntimeError(
+                "forecast bundle failed its development gate or sets promotion_override"
+            )
         artifact = load_artifact(bundle_dir)
         return cls(bundle_dir, artifact)
 

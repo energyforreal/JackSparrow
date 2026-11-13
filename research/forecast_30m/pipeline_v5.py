@@ -292,14 +292,29 @@ def _write_artifact(
 
 
 def _maybe_promote(artifact: Path, passed: bool) -> bool:
-    """Copy a passing bundle into live model storage. Failures stay out."""
+    """Copy a passing bundle into live model storage.
+
+    A failed development gate or a ``promotion_override`` key stays out of
+    model storage. The override key is never written.
+
+    Args:
+        artifact: Research artifact directory.
+        passed: Whether the development gate passed.
+
+    Returns:
+        True when the bundle was copied.
+    """
     if not passed:
         return False
-    _AGENT_BUNDLE.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(artifact / "manifest.json", _AGENT_BUNDLE / "manifest.json")
-    shutil.copy2(artifact / "models.joblib", _AGENT_BUNDLE / "models.joblib")
     manifest = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("development_gate_passed") is False:
+        return False
+    if manifest.get("promotion_override"):
+        return False
+    manifest.pop("promotion_override", None)
     manifest["promoted_to_agent"] = True
+    _AGENT_BUNDLE.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(artifact / "models.joblib", _AGENT_BUNDLE / "models.joblib")
     _write_json(artifact / "manifest.json", manifest)
     _write_json(_AGENT_BUNDLE / "manifest.json", manifest)
     logger.info("forecast_30m_v5_promoted", destination=str(_AGENT_BUNDLE))

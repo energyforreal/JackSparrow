@@ -95,6 +95,51 @@ def test_forecast_node_refuses_orders_enabled_false(tmp_path: Path) -> None:
         ForecastModelNode.from_bundle_dir(tmp_path)
 
 
+def test_forecast_node_refuses_a_failed_gate_override(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "orders_enabled": True,
+                "development_gate_passed": False,
+                "promotion_override": "force_promote_live_floor_0.55",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "models.joblib").write_bytes(b"placeholder")
+    with pytest.raises(RuntimeError, match="promotion_override"):
+        ForecastModelNode.from_bundle_dir(tmp_path)
+
+
+def test_forecast_override_setting_reaches_artifact_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agent.core import config as config_mod
+
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "orders_enabled": True,
+                "development_gate_passed": False,
+                "promotion_override": "force_promote_live_floor_0.55",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "models.joblib").write_bytes(b"placeholder")
+    monkeypatch.setattr(
+        config_mod.settings,
+        "forecast_allow_promotion_override",
+        True,
+    )
+    monkeypatch.setattr(
+        "agent.models.forecast_node.load_artifact",
+        lambda _path: {"manifest": {}, "models": {"direction": object()}},
+    )
+    node = ForecastModelNode.from_bundle_dir(tmp_path)
+    assert node.model_type == "forecast_30m_xgb"
+
+
 def test_promoted_bundle_requires_orders_enabled(tmp_path: Path) -> None:
     bundle = tmp_path / "JackSparrow_Forecast_BTCUSD_30m"
     bundle.mkdir()

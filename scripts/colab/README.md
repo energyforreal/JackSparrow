@@ -1,5 +1,19 @@
 # Colab notebook helpers (non-production)
 
+## Swinging hybrid research
+
+```bash
+python scripts/colab/build_swinging_notebooks.py
+```
+
+The eight notebooks `01_delta_historical_data.ipynb` through `08_model_export.ipynb`
+are generated. Do not hand-edit them. On Colab they write the package to
+`/content/JackSparrow` and datasets to `/content/JackSparrow/data`. They download
+BTCUSD candles from the public Delta history API. Do not mount Google Drive.
+Training artifacts stay on the Colab disk until the export notebook builds a zip.
+Those zips are research-only and must not be copied into `agent/model_storage/`
+until a separate promotion review. The loader still refuses `orders_enabled: true`.
+
 ## 15-minute recognition
 
 ```bash
