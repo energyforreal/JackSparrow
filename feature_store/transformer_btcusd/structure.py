@@ -275,11 +275,27 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
     last_bo_idx = -1
     last_bo_level = float("nan")
     last_bo_side = 0
+    bos_up = np.zeros(n, dtype=np.float64)
+    bos_down = np.zeros(n, dtype=np.float64)
+    choch_up = np.zeros(n, dtype=np.float64)
+    choch_down = np.zeros(n, dtype=np.float64)
+    bars_since_bos = np.full(n, float(n), dtype=np.float64)
+    bars_since_choch = np.full(n, float(n), dtype=np.float64)
+    last_bos_side_arr = np.zeros(n, dtype=np.float64)
+    last_choch_side_arr = np.zeros(n, dtype=np.float64)
+    last_bos_idx = -1
+    last_choch_idx = -1
+    bos_side = 0.0
+    choch_side = 0.0
 
     for t in range(n):
         atr_t = _structure_safe_atr(atr, close, t)
         thresh = _ZZ_TAU * atr_t
         eps = _ZZ_EPS_ATR * atr_t
+        prior_swing_high = last_high_price
+        prior_swing_low = last_low_price
+        prior_bias = float(structure_bias[t - 1]) if t else 0.0
+        prior_close = float(close[t - 1]) if t else float(close[t])
 
         if direction == 1:
             if high[t] >= e_price:
@@ -332,6 +348,40 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
         lh_count[t] = float(n_lh)
         ll_count[t] = float(n_ll)
         structure_bias[t] = (n_hh + n_hl - n_lh - n_ll) / float(n_ev)
+        broke_high = (
+            np.isfinite(prior_swing_high)
+            and float(close[t]) > float(prior_swing_high)
+            and prior_close <= float(prior_swing_high)
+        )
+        broke_low = (
+            np.isfinite(prior_swing_low)
+            and float(close[t]) < float(prior_swing_low)
+            and prior_close >= float(prior_swing_low)
+        )
+        # BOS continues the prior swing bias. CHoCH breaks against it.
+        # A flat bias treats the first close through a swing as BOS.
+        if broke_high and not broke_low:
+            if prior_bias < 0.0:
+                choch_up[t] = 1.0
+                last_choch_idx = t
+                choch_side = 1.0
+            else:
+                bos_up[t] = 1.0
+                last_bos_idx = t
+                bos_side = 1.0
+        elif broke_low and not broke_high:
+            if prior_bias > 0.0:
+                choch_down[t] = 1.0
+                last_choch_idx = t
+                choch_side = -1.0
+            else:
+                bos_down[t] = 1.0
+                last_bos_idx = t
+                bos_side = -1.0
+        bars_since_bos[t] = float(t - last_bos_idx) if last_bos_idx >= 0 else float(n)
+        bars_since_choch[t] = float(t - last_choch_idx) if last_choch_idx >= 0 else float(n)
+        last_bos_side_arr[t] = bos_side
+        last_choch_side_arr[t] = choch_side
         last_swing_dir[t] = last_dir
         bars_since_swing[t] = float(t - last_swing_idx) if last_swing_idx >= 0 else float(t)
         if np.isfinite(last_high_price) and np.isfinite(last_low_price):
@@ -429,6 +479,14 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
     out["low_slope_atr"] = low_slope_atr
     out["convergence"] = convergence
     out["width_now_atr"] = width_now_atr
+    out["bos_up"] = bos_up
+    out["bos_down"] = bos_down
+    out["choch_up"] = choch_up
+    out["choch_down"] = choch_down
+    out["bars_since_bos"] = bars_since_bos
+    out["bars_since_choch"] = bars_since_choch
+    out["last_bos_side"] = last_bos_side_arr
+    out["last_choch_side"] = last_choch_side_arr
     out[CHART_PATTERN_COL] = _chart_pattern_ids(
         failed_break=failed_break,
         bars_since_breakout=bars_since_breakout,

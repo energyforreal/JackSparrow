@@ -1261,6 +1261,9 @@ class TradingEventHandler:
             )
             if not isinstance(market_context, dict):
                 market_context = {}
+            decision_path = (
+                market_context.get("decision_path") if isinstance(market_context, dict) else None
+            )
 
             hold_floor_late = float(
                 getattr(settings, "transformer_confidence_hold_floor", 0.0) or 0.0
@@ -1309,11 +1312,9 @@ class TradingEventHandler:
                 "agent_introspection_at_entry": payload.get("agent_introspection"),
                 "confidence": confidence,
                 "model_predictions": (payload.get("reasoning_chain") or {}).get("model_predictions"),
-                "ml_signal_validated": True,
-                "ml_signal_source": (
-                    (market_context.get("decision_path") if isinstance(market_context, dict) else None)
-                    or "transformer_agent_synthesis"
-                ),
+                "ml_signal_validated": decision_path != "algorithmic",
+                "algo_signal_validated": decision_path == "algorithmic",
+                "ml_signal_source": decision_path or "transformer_agent_synthesis",
                 "ml_evidence_id": (
                     (payload.get("ml_evidence_snapshot") or {}).get("evidence_id")
                     if isinstance(payload.get("ml_evidence_snapshot"), dict)

@@ -223,8 +223,9 @@ class Settings(BaseSettings):
         env="TRANSFORMER_DECISION_PATH",
         description=(
             "Live decision path: 'mtf_fusion' (fused Transformer rollback), "
-            "'forecast_30m' (30-minute forecast policy), or "
-            "'transformer_agent_synthesis' (emergency five-bundle rollback). "
+            "'forecast_30m' (30-minute forecast policy), "
+            "'transformer_agent_synthesis' (emergency five-bundle rollback), or "
+            "'algorithmic' (multi-timeframe score with no model). "
             "When unset, a promoted forecast bundle switches the path to "
             "forecast_30m."
         ),
@@ -499,7 +500,17 @@ class Settings(BaseSettings):
         env="REQUIRE_ML_SIGNAL_FOR_ORDERS",
         description=(
             "When True, entry orders on Delta require validated ML model predictions "
-            "(v43 gates passed and policy adopted ML evidence)."
+            "(v43 gates passed and policy adopted ML evidence). "
+            "Algorithmic verdicts use ALGORITHMIC_ORDERS_ENABLED instead."
+        ),
+    )
+    algorithmic_orders_enabled: bool = Field(
+        default=False,
+        env="ALGORITHMIC_ORDERS_ENABLED",
+        description=(
+            "When true, a verdict stamped algo_signal_validated may place Delta "
+            "orders. Default false until walk-forward net expectancy after costs "
+            "is positive. ML paths ignore this flag."
         ),
     )
     require_ml_consensus_alignment: bool = Field(

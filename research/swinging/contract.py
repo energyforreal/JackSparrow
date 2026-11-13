@@ -33,6 +33,22 @@ NEUTRAL_STRIDE = 8
 ACCEPT_SCORE = 0.55
 REJECT_SCORE = 0.35
 
+# Design values for the algo-only multi-timeframe score. They are not a
+# proven edge. Walk-forward tuning may replace them; it must not train a model.
+ALGO_DECISION_PATH = "algorithmic"
+ALGO_WEIGHTS = {
+    "trend_4h": 20.0,
+    "structure_1h": 20.0,
+    "pattern_15m": 15.0,
+    "zone_rejection": 15.0,
+    "confirm_5m": 15.0,
+    "volume": 10.0,
+    "momentum": 5.0,
+}
+ALGO_QUALIFIED_SCORE = 65.0
+ALGO_HIGH_QUALITY_SCORE = 80.0
+ALGO_BOS_LOOKBACK = 12
+
 SETUP_TYPES = (
     "long_breakout",
     "short_breakdown",

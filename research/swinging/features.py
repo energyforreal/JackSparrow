@@ -36,6 +36,7 @@ from research.swinging.contract import (
 from research.swinging.quality import normalize_ohlcv
 
 _ATR_PERIOD = 14
+_CHART_CAUSAL_BARS = 90
 
 
 def snapshot_columns() -> tuple[str, ...]:
@@ -170,6 +171,44 @@ def build_feature_frame(frame: pd.DataFrame, resolution: str) -> pd.DataFrame:
     featured.insert(0, "time", work["time"].to_numpy())
     featured.insert(1, "close", work["close"].to_numpy())
     return featured.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+
+
+def aligned_snapshot(
+    frame: pd.DataFrame,
+    featured: pd.DataFrame,
+    asof_index: int,
+    engine: ChartPatternEngine | None = None,
+) -> dict[str, float]:
+    """Read the causal feature row at ``asof_index`` from one batch frame.
+
+    Rolling, candle, structure, and swing columns are already causal on
+    ``featured``. Chart-pattern columns are recomputed on a trailing window
+    because ``ChartPatternEngine`` centers its extrema. The result matches
+    ``snapshot_features`` without rebuilding the whole prefix.
+
+    Args:
+        frame: OHLCV series aligned to ``featured``.
+        featured: Output of ``build_feature_frame`` on ``frame``.
+        asof_index: Signal bar.
+        engine: Optional chart engine reused across rows.
+
+    Returns:
+        Finite feature values in ``snapshot_columns`` order.
+
+    Raises:
+        ValueError: If the index is outside the frame.
+    """
+    if asof_index < 0 or asof_index >= len(frame) or asof_index >= len(featured):
+        raise ValueError(f"as-of index {asof_index} is outside the series")
+    row = featured.iloc[asof_index]
+    values = {name: _finite(row[name]) for name in snapshot_columns()}
+    start = max(0, asof_index - _CHART_CAUSAL_BARS + 1)
+    window = frame.iloc[start : asof_index + 1]
+    chart = (engine or ChartPatternEngine()).compute_all(window).iloc[-1]
+    for name in CHART_PATTERN_FEATURES:
+        if name in values:
+            values[name] = _finite(chart[name]) if name in chart.index else 0.0
+    return values
 
 
 def snapshot_features(frame: pd.DataFrame, asof_index: int, resolution: str) -> dict[str, float]:

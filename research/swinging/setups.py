@@ -26,7 +26,8 @@ from research.swinging.contract import (
     SYMBOL,
     WARMUP_BARS,
 )
-from research.swinging.features import snapshot_columns, snapshot_features
+from feature_store.pattern_features.chart_patterns import ChartPatternEngine
+from research.swinging.features import aligned_snapshot, build_feature_frame, snapshot_columns
 from research.swinging.quality import normalize_ohlcv
 
 
@@ -422,10 +423,11 @@ def generate_setups(
         neutral_stride=neutral_stride,
     )
     records: list[dict[str, Any]] = []
-    for index in chosen:
-        if index < 0 or index >= len(work):
-            continue
-        features = snapshot_features(work, index, resolution)
+    usable = [index for index in chosen if 0 <= index < len(work)]
+    featured = build_feature_frame(work, resolution) if usable else None
+    chart_engine = ChartPatternEngine()
+    for index in usable:
+        features = aligned_snapshot(work, featured, index, chart_engine)
         found = []
         found.extend(_level_setups(work, index, resolution, features))
         found.extend(_retests(work, index, resolution, features))

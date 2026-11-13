@@ -523,6 +523,23 @@ class MCPOrchestrator:
             serialize_prediction=self._serialize_model_prediction,
         )
 
+    async def _process_algorithmic_prediction(
+        self,
+        symbol: str,
+        context: Dict[str, Any],
+        _t0: float,
+    ) -> Dict[str, Any]:
+        """Score closed multi-timeframe bars without loading a model."""
+        from agent.core.algorithmic_decision import evaluate_algorithmic_prediction
+
+        context = _merge_prediction_context_with_agent_state(symbol, context)
+        return await evaluate_algorithmic_prediction(
+            symbol=symbol,
+            context=context,
+            delta_client=self.delta_client,
+            t0=_t0,
+        )
+
     async def process_prediction_request(
         self,
         symbol: str,
@@ -556,6 +573,14 @@ class MCPOrchestrator:
                        context_keys=list(context.keys()) if context else None)
 
             context = context or {}
+            from agent.core.forecast_policy import resolve_transformer_decision_path
+            from research.swinging.contract import ALGO_DECISION_PATH
+
+            decision_path = resolve_transformer_decision_path(
+                getattr(settings, "model_dir", "./agent/model_storage")
+            )
+            if decision_path == ALGO_DECISION_PATH:
+                return await self._process_algorithmic_prediction(symbol, context, _t0)
 
             if not self.model_registry or not self.model_registry.models:
                 logger.warning(

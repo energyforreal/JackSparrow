@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from research.swinging.contract import FORBIDDEN_FEATURE_COLUMNS
-from research.swinging.features import snapshot_columns, snapshot_features
+from research.swinging.features import aligned_snapshot, build_feature_frame, snapshot_columns, snapshot_features
 from research.swinging.regime import regime_target
 from tests.unit.swinging_fixtures import make_ohlcv
 
@@ -21,6 +21,13 @@ def test_snapshot_ignores_a_future_bar_and_hides_labels() -> None:
     assert FORBIDDEN_FEATURE_COLUMNS.isdisjoint(original)
     assert list(original) == list(snapshot_columns())
     assert all(pd.notna(value) for value in original.values())
+
+
+def test_aligned_snapshot_matches_the_prefix_snapshot() -> None:
+    frame = make_ohlcv(180, drift=0.2)
+    featured = build_feature_frame(frame, "5m")
+    for index in (40, 90, 160):
+        assert aligned_snapshot(frame, featured, index) == snapshot_features(frame, index, "5m")
 
 
 def test_regime_target_matches_structure_thresholds() -> None:
