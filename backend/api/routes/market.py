@@ -14,7 +14,8 @@ to the router initialization below.
 
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status, Query
-from backend.api.models.responses import MarketDataResponse
+from backend.api.models.responses import MarketChartResponse, MarketDataResponse
+from backend.services.chart_service import CHART_TIMEFRAMES, get_chart_data
 from backend.services.market_service import market_service
 
 # Intentionally public - no authentication required for market data
@@ -55,6 +56,48 @@ async def get_market_data(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get market data: {str(e)}"
         )
+
+
+@router.get("/market/chart", response_model=MarketChartResponse)
+async def get_market_chart(
+    symbol: str = Query("BTCUSD", description="Trading symbol"),
+    timeframe: str = Query("15m", description="Chart timeframe (5m, 15m, 1h, 4h)"),
+    limit: int = Query(300, ge=1, le=1000, description="Number of candles"),
+):
+    """Candles plus algorithmic trade levels for the Market Analysis chart.
+
+    Levels come from the cached last decision — the scorer is not re-run.
+    """
+    resolved = str(timeframe).strip().lower()
+    if resolved not in CHART_TIMEFRAMES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"timeframe must be one of {sorted(CHART_TIMEFRAMES)}",
+        )
+    try:
+        payload = await get_chart_data(
+            symbol=symbol,
+            timeframe=resolved,
+            limit=limit,
+        )
+        if not payload.get("candles"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Market data not found for symbol {symbol}",
+            )
+        return MarketChartResponse(**payload)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to build chart data: {exc}",
+        ) from exc
 
 
 @router.get("/market/ticker")

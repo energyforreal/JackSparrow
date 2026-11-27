@@ -1020,10 +1020,16 @@ class IntelligentAgent:
                 await self._send_response(
                     request_id, result.get("data", result), redis_client=redis_client
                 )
+            elif cmd == "get_market_data":
+                result = await self._handle_get_market_data(params)
+                await self._send_response(request_id, result, redis_client=redis_client)
+            elif cmd == "get_ticker":
+                result = await self._handle_get_ticker(params)
+                await self._send_response(request_id, result, redis_client=redis_client)
             else:
                 await self._send_response(
                     request_id,
-                    {"success": True, "message": f"Command '{cmd}' processed"},
+                    {"success": False, "error": f"Unknown command: {cmd}"},
                     redis_client=redis_client,
                 )
         except Exception as e:
@@ -1050,6 +1056,62 @@ class IntelligentAgent:
         )
         
         return {"success": True, "data": decision}
+
+    async def _handle_get_market_data(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return OHLCV candles for the Market Analysis chart and market APIs."""
+        symbol = str(params.get("symbol") or self.default_symbol)
+        interval = str(params.get("interval") or "15m")
+        try:
+            limit = int(params.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        limit = max(1, min(limit, 1000))
+        try:
+            market_data = await self.market_data_service.get_market_data(
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+            )
+            if not market_data or not market_data.get("candles"):
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"Market data not found for {symbol} {interval}",
+                }
+            return {"success": True, "data": market_data}
+        except Exception as exc:
+            logger.error(
+                "agent_get_market_data_failed",
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                error=str(exc),
+                exc_info=True,
+                service="agent",
+            )
+            return {"success": False, "data": None, "error": str(exc)}
+
+    async def _handle_get_ticker(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the latest ticker snapshot for a symbol."""
+        symbol = str(params.get("symbol") or self.default_symbol)
+        try:
+            ticker = await self.market_data_service.get_ticker(symbol)
+            if not ticker:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"Ticker not found for {symbol}",
+                }
+            return {"success": True, "data": ticker}
+        except Exception as exc:
+            logger.error(
+                "agent_get_ticker_failed",
+                symbol=symbol,
+                error=str(exc),
+                exc_info=True,
+                service="agent",
+            )
+            return {"success": False, "data": None, "error": str(exc)}
     
     async def _handle_execute_trade(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle trade execution request via execution engine."""

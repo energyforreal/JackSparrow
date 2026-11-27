@@ -245,6 +245,8 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
     unconfirmed_ext_atr = np.zeros(n, dtype=np.float64)
     dist_to_support_atr = np.zeros(n, dtype=np.float64)
     dist_to_resistance_atr = np.zeros(n, dtype=np.float64)
+    support_price = np.full(n, np.nan, dtype=np.float64)
+    resistance_price = np.full(n, np.nan, dtype=np.float64)
     support_touch = np.zeros(n, dtype=np.float64)
     resistance_touch = np.zeros(n, dtype=np.float64)
     bars_since_breakout = np.zeros(n, dtype=np.float64)
@@ -392,6 +394,8 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
         swing_highs = [p for _, p in highs if p >= close[t]]
         support = max(swing_lows) if swing_lows else float(donch_l[t])
         resistance = min(swing_highs) if swing_highs else float(donch_h[t])
+        support_price[t] = float(support)
+        resistance_price[t] = float(resistance)
         dist_to_support_atr[t] = _clip_atr((close[t] - support) / atr_t)
         dist_to_resistance_atr[t] = _clip_atr((resistance - close[t]) / atr_t)
         delta = _SR_DELTA_ATR * atr_t
@@ -465,6 +469,9 @@ def _zigzag_structure_loop(out: pd.DataFrame) -> pd.DataFrame:
     out["unconfirmed_ext_atr"] = unconfirmed_ext_atr
     out["dist_to_support_atr"] = dist_to_support_atr
     out["dist_to_resistance_atr"] = dist_to_resistance_atr
+    # Chart overlays only — not part of the transformer feature contract.
+    out["support_price"] = support_price
+    out["resistance_price"] = resistance_price
     out["support_touch_count"] = touch_sup.to_numpy(dtype=np.float64)
     out["resistance_touch_count"] = touch_res.to_numpy(dtype=np.float64)
     out["bars_since_breakout"] = bars_since_breakout

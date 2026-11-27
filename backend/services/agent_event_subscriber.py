@@ -224,12 +224,14 @@ def algorithmic_signal_fields(payload: Any, market_context: Any) -> Dict[str, An
     frames = frames if isinstance(frames, dict) else {}
     components = context.get("algo_components")
     components = components if isinstance(components, dict) else {}
+    signal = str(source.get("signal") or "HOLD")
+    directional = signal in {"BUY", "SELL", "STRONG_BUY", "STRONG_SELL"}
     return {
         "trading_decision": {
             "decision_id": context.get("decision_id"),
             "decision_path": path or "algorithmic",
             "symbol": source.get("symbol") or "",
-            "signal": source.get("signal") or "HOLD",
+            "signal": signal,
             "confidence": source.get("confidence"),
             "score": context.get("algo_score"),
             "candle_timestamp": context.get("candle_timestamp"),
@@ -239,6 +241,17 @@ def algorithmic_signal_fields(payload: Any, market_context: Any) -> Dict[str, An
                 "take_profit": plan.get("take_profit"),
                 "position_size": 0.0,
             },
+            "entry": plan.get("entry"),
+            "support_zones": context.get("support_zones")
+            if isinstance(context.get("support_zones"), list)
+            else [],
+            "resistance_zones": context.get("resistance_zones")
+            if isinstance(context.get("resistance_zones"), list)
+            else [],
+            "active_patterns": context.get("active_patterns")
+            if isinstance(context.get("active_patterns"), list)
+            else [],
+            "valid": directional and not reasons,
             "reasons": [],
             "invalidation": reasons,
             "execution_authorized": False,

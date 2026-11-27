@@ -203,6 +203,25 @@ export interface ModelReasoning {
 export type InferenceSource = 'model_service' | 'agent'
 export type InferenceMode = 'primary' | 'fallback' | 'degraded'
 
+/** Structure zone from the algorithmic scorer (1h / 4h). */
+export interface StructureZone {
+  timeframe: string
+  price: number
+  low: number
+  high: number
+}
+
+/** In-house candlestick or chart-pattern hit from the algo scorer. */
+export interface ChartPatternMarker {
+  time: number
+  name: string
+  label: string
+  direction: 'bullish' | 'bearish' | string
+  timeframe: string
+  kind: 'candlestick' | 'chart' | string
+  price?: number | null
+}
+
 /** Shared verdict for algorithmic and model paths. Size stays with risk. */
 export interface TradingDecisionContract {
   decision_id?: string
@@ -218,10 +237,56 @@ export interface TradingDecisionContract {
     take_profit?: number | null
     position_size?: number
   }
+  entry?: number | null
+  support_zones?: StructureZone[]
+  resistance_zones?: StructureZone[]
+  active_patterns?: ChartPatternMarker[]
+  risk_reward?: number | null
+  valid?: boolean
   reasons?: string[]
   invalidation?: string[]
   execution_authorized?: boolean
   score_breakdown?: Record<string, number>
+}
+
+export type ChartTimeframe = '5m' | '15m' | '1h' | '4h'
+
+export interface ChartCandle {
+  time: number
+  open: number
+  high: number
+  low: number
+  close: number
+}
+
+export interface ChartVolumeBar {
+  time: number
+  value: number
+}
+
+export interface ChartTradePlan {
+  signal: string
+  entry: number | null
+  stop_loss: number | null
+  take_profit: number | null
+  score: number | null
+  risk_reward: number | null
+  valid: boolean
+  candle_timestamp: string | null
+  decision_id?: string | null
+}
+
+export interface MarketChartResponse {
+  symbol: string
+  timeframe: ChartTimeframe | string
+  candles: ChartCandle[]
+  volume: ChartVolumeBar[]
+  current_price: number | null
+  support_zones: StructureZone[]
+  resistance_zones: StructureZone[]
+  active_patterns: ChartPatternMarker[]
+  trade_plan: ChartTradePlan
+  timestamp?: string
 }
 
 export interface Signal {

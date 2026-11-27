@@ -74,6 +74,89 @@ def _invalidation_list(value: object) -> list[str]:
     return [text]
 
 
+_DIRECTIONAL_SIGNALS = frozenset({"BUY", "SELL", "STRONG_BUY", "STRONG_SELL"})
+
+
+def _as_zone_list(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    zones: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            price = float(item.get("price"))
+            low = float(item.get("low"))
+            high = float(item.get("high"))
+        except (TypeError, ValueError):
+            continue
+        timeframe = str(item.get("timeframe") or "")
+        if not timeframe or price <= 0.0:
+            continue
+        zones.append(
+            {
+                "timeframe": timeframe,
+                "price": price,
+                "low": low,
+                "high": high,
+            }
+        )
+    return zones
+
+
+def _as_pattern_list(value: object) -> list[dict[str, Any]]:
+    """Normalize in-house candlestick / chart-pattern hits for the chart API."""
+    if not isinstance(value, list):
+        return []
+    patterns: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            time_s = int(item.get("time"))
+        except (TypeError, ValueError):
+            continue
+        name = str(item.get("name") or "").strip()
+        if time_s <= 0 or not name:
+            continue
+        direction = str(item.get("direction") or "").lower()
+        if direction not in {"bullish", "bearish"}:
+            continue
+        kind = str(item.get("kind") or "").lower()
+        if kind not in {"candlestick", "chart"}:
+            kind = "candlestick" if name.startswith("cdl_") else "chart"
+        price = None
+        raw_price = item.get("price")
+        if raw_price is not None:
+            try:
+                price_f = float(raw_price)
+                if price_f > 0.0:
+                    price = price_f
+            except (TypeError, ValueError):
+                price = None
+        patterns.append(
+            {
+                "time": time_s,
+                "name": name,
+                "label": str(item.get("label") or name),
+                "direction": direction,
+                "timeframe": str(item.get("timeframe") or ""),
+                "kind": kind,
+                "price": price,
+            }
+        )
+    return patterns
+
+
+def _risk_reward(entry: float | None, stop: float | None, take: float | None) -> float | None:
+    if entry is None or stop is None or take is None:
+        return None
+    risk = abs(entry - stop)
+    if risk <= 0.0:
+        return None
+    return abs(take - entry) / risk
+
+
 def build_algorithmic_decision(
     *,
     symbol: str,
@@ -91,24 +174,61 @@ def build_algorithmic_decision(
 
     Returns:
         Decision object. ``risk.position_size`` is zero and
-        ``execution_authorized`` is false.
+        ``execution_authorized`` is false. Chart overlays (zones, entry)
+        are included for the Market Analysis dashboard.
     """
+    signal = str(scored.get("signal") or "HOLD")
+    directional = signal in _DIRECTIONAL_SIGNALS
+    invalidation = _invalidation_list(scored.get("invalidation"))
+    entry = None
+    stop = None
+    take = None
+    if directional:
+        raw_entry = scored.get("entry_price", scored.get("close"))
+        try:
+            entry = float(raw_entry) if raw_entry is not None else None
+        except (TypeError, ValueError):
+            entry = None
+        if entry is not None and entry <= 0.0:
+            entry = None
+        try:
+            stop = float(scored["stop_price"]) if scored.get("stop_price") is not None else None
+        except (TypeError, ValueError, KeyError):
+            stop = None
+        try:
+            take = (
+                float(scored["take_profit_price"])
+                if scored.get("take_profit_price") is not None
+                else None
+            )
+        except (TypeError, ValueError, KeyError):
+            take = None
+        if stop is not None and stop <= 0.0:
+            stop = None
+        if take is not None and take <= 0.0:
+            take = None
     return {
         "decision_id": decision_id or str(uuid.uuid4()),
         "decision_path": "algorithmic",
         "symbol": symbol,
-        "signal": str(scored.get("signal") or "HOLD"),
+        "signal": signal,
         "confidence": float(scored.get("confidence") or 0.0),
         "score": float(scored.get("score") or 0.0),
         "candle_timestamp": _stamp(scored.get("decision_time")),
         "market_context": timeframe_context(scored),
         "risk": {
-            "stop_loss": scored.get("stop_price"),
-            "take_profit": scored.get("take_profit_price"),
+            "stop_loss": stop,
+            "take_profit": take,
             "position_size": 0.0,
         },
+        "entry": entry,
+        "support_zones": _as_zone_list(scored.get("support_zones")),
+        "resistance_zones": _as_zone_list(scored.get("resistance_zones")),
+        "active_patterns": _as_pattern_list(scored.get("active_patterns")),
+        "risk_reward": _risk_reward(entry, stop, take),
+        "valid": directional and not invalidation,
         "reasons": list(reasons),
-        "invalidation": _invalidation_list(scored.get("invalidation")),
+        "invalidation": invalidation,
         "execution_authorized": False,
         "score_breakdown": dict(scored.get("components") or {}),
     }
@@ -135,11 +255,29 @@ def ensure_trading_decision(result: Mapping[str, Any]) -> dict[str, Any]:
     reasoning = result.get("reasoning") if isinstance(result.get("reasoning"), dict) else {}
     plan = context.get("execution_plan") if isinstance(context.get("execution_plan"), dict) else {}
     reasons = verdict.get("reason_codes") or decision.get("policy_reason_codes") or []
+    signal = str(verdict.get("signal") or decision.get("signal") or "HOLD")
+    invalidation = _invalidation_list(context.get("invalidation"))
+    directional = signal in _DIRECTIONAL_SIGNALS
+    entry = plan.get("entry")
+    try:
+        entry_f = float(entry) if entry is not None else None
+    except (TypeError, ValueError):
+        entry_f = None
+    stop = plan.get("stop_loss")
+    take = plan.get("take_profit")
+    try:
+        stop_f = float(stop) if stop is not None else None
+    except (TypeError, ValueError):
+        stop_f = None
+    try:
+        take_f = float(take) if take is not None else None
+    except (TypeError, ValueError):
+        take_f = None
     return {
         "decision_id": str(reasoning.get("chain_id") or uuid.uuid4()),
         "decision_path": str(context.get("decision_path") or "model"),
         "symbol": str(result.get("symbol") or ""),
-        "signal": str(verdict.get("signal") or decision.get("signal") or "HOLD"),
+        "signal": signal,
         "confidence": float(verdict.get("confidence") or decision.get("confidence") or 0.0),
         "score": context.get("algo_score"),
         "candle_timestamp": context.get("candle_timestamp"),
@@ -147,14 +285,20 @@ def ensure_trading_decision(result: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(context.get("timeframes"), dict)
         else {"5m": {}, "15m": {}, "1h": {}, "4h": {}},
         "risk": {
-            "stop_loss": plan.get("stop_loss"),
-            "take_profit": plan.get("take_profit"),
+            "stop_loss": stop_f,
+            "take_profit": take_f,
             "position_size": float(
                 verdict.get("position_size") or decision.get("position_size") or 0.0
             ),
         },
+        "entry": entry_f,
+        "support_zones": _as_zone_list(context.get("support_zones")),
+        "resistance_zones": _as_zone_list(context.get("resistance_zones")),
+        "active_patterns": _as_pattern_list(context.get("active_patterns")),
+        "risk_reward": _risk_reward(entry_f, stop_f, take_f),
+        "valid": directional and not invalidation,
         "reasons": [str(item) for item in reasons],
-        "invalidation": _invalidation_list(context.get("invalidation")),
+        "invalidation": invalidation,
         "execution_authorized": False,
         "score_breakdown": context.get("algo_components")
         if isinstance(context.get("algo_components"), dict)

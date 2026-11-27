@@ -138,6 +138,12 @@ async def evaluate_algorithmic_prediction(
         f"algorithmic {scored['quality']} {scored['action']} "
         f"score={scored['score']:.1f} invalidation={scored.get('invalidation') or 'none'}"
     )
+    execution_plan = {
+        "atr_14": scored.get("atr"),
+        "stop_loss": trading_decision["risk"].get("stop_loss"),
+        "take_profit": trading_decision["risk"].get("take_profit"),
+        "entry": trading_decision.get("entry"),
+    }
     market_context = {
         "decision_path": ALGO_DECISION_PATH,
         "closed_bar_index": scored.get("bar_index"),
@@ -150,11 +156,10 @@ async def evaluate_algorithmic_prediction(
         "candle_timestamp": scored.get("decision_time"),
         "timeframes": trading_decision["market_context"],
         "decision_id": trading_decision["decision_id"],
-        "execution_plan": {
-            "atr_14": scored.get("atr"),
-            "stop_loss": scored.get("stop_price"),
-            "take_profit": scored.get("take_profit_price"),
-        },
+        "support_zones": trading_decision.get("support_zones") or [],
+        "resistance_zones": trading_decision.get("resistance_zones") or [],
+        "active_patterns": trading_decision.get("active_patterns") or [],
+        "execution_plan": execution_plan,
     }
     result = {
         "symbol": symbol,

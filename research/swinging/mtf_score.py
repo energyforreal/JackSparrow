@@ -13,7 +13,10 @@ import pandas as pd
 
 from feature_store.pattern_features.candlestick_patterns import CandlestickPatternEngine
 from feature_store.pattern_features.chart_patterns import ChartPatternEngine
-from feature_store.transformer_btcusd.structure import add_market_structure_features
+from feature_store.transformer_btcusd.structure import (
+    _SR_DELTA_ATR,
+    add_market_structure_features,
+)
 from feature_store.unified_feature_engine import UnifiedFeatureEngine
 from research.swinging.contract import (
     ALGO_BOS_LOOKBACK,
@@ -367,6 +370,210 @@ def _brackets(direction: str, close: float, atr: float) -> tuple[float, float]:
     return close - risk, close + reward
 
 
+def _row_atr(row: Mapping[str, Any]) -> float:
+    atr = _num(row.get("atr_14"))
+    if atr <= 0.0:
+        atr = _num(row.get("atr"))
+    return atr
+
+
+def structure_zone(
+    row: Mapping[str, Any],
+    *,
+    timeframe: str,
+    kind: str,
+) -> dict[str, float | str] | None:
+    """Build a chart zone from a scored structure bar.
+
+    Args:
+        row: Closed analysis bar with ``support_price`` / ``resistance_price``.
+        timeframe: Resolution label such as ``1h`` or ``4h``.
+        kind: ``support`` or ``resistance``.
+
+    Returns:
+        Zone with midpoint ``price`` and half-width ``0.5 * ATR``, or ``None``.
+    """
+    price_key = "support_price" if kind == "support" else "resistance_price"
+    price = _num(row.get(price_key))
+    atr = _row_atr(row)
+    if price <= 0.0 or atr <= 0.0:
+        return None
+    half = float(_SR_DELTA_ATR) * atr
+    return {
+        "timeframe": timeframe,
+        "low": price - half,
+        "high": price + half,
+        "price": price,
+    }
+
+
+def chart_structure_levels(
+    rows: Mapping[str, Mapping[str, Any]],
+) -> dict[str, list[dict[str, float | str]]]:
+    """Export 1h and 4h support/resistance zones for the chart overlay."""
+    support_zones: list[dict[str, float | str]] = []
+    resistance_zones: list[dict[str, float | str]] = []
+    for timeframe in ("1h", "4h"):
+        row = rows.get(timeframe)
+        if row is None:
+            continue
+        support = structure_zone(row, timeframe=timeframe, kind="support")
+        resistance = structure_zone(row, timeframe=timeframe, kind="resistance")
+        if support is not None:
+            support_zones.append(support)
+        if resistance is not None:
+            resistance_zones.append(resistance)
+    return {
+        "support_zones": support_zones,
+        "resistance_zones": resistance_zones,
+    }
+
+
+_PATTERN_LABELS = {
+    "cdl_bull_engulfing": "Bull Engulfing",
+    "cdl_hammer": "Hammer",
+    "cdl_inv_hammer": "Inv Hammer",
+    "cdl_morning_star": "Morning Star",
+    "cdl_bear_engulfing": "Bear Engulfing",
+    "cdl_shooting_star": "Shooting Star",
+    "cdl_hanging_man": "Hanging Man",
+    "cdl_evening_star": "Evening Star",
+    "chp_bull_flag": "Bull Flag",
+    "chp_asc_triangle": "Asc Triangle",
+    "chp_double_bottom": "Double Bottom",
+    "chp_ihs_detected": "Inv Head&Shoulders",
+    "tl_breakout_up": "Breakout Up",
+    "chp_bear_flag": "Bear Flag",
+    "chp_desc_triangle": "Desc Triangle",
+    "chp_double_top": "Double Top",
+    "chp_hs_detected": "Head&Shoulders",
+    "tl_breakout_down": "Breakout Down",
+}
+
+
+def _bar_open_unix(row: Mapping[str, Any]) -> int | None:
+    value = row.get("time", row.get("timestamp"))
+    if value is None:
+        return None
+    try:
+        stamp = pd.Timestamp(value)
+        if stamp.tzinfo is None:
+            stamp = stamp.tz_localize("UTC")
+        else:
+            stamp = stamp.tz_convert("UTC")
+        return int(stamp.timestamp())
+    except (TypeError, ValueError):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number > 1e12:
+            number /= 1000.0
+        return int(number)
+
+
+def _pattern_hits_on_row(
+    row: Mapping[str, Any],
+    *,
+    timeframe: str,
+    kind: str,
+    bullish_names: tuple[str, ...],
+    bearish_names: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    time_s = _bar_open_unix(row)
+    if time_s is None:
+        return []
+    price = _num(row.get("close"))
+    hits: list[dict[str, Any]] = []
+    for name in bullish_names:
+        if _num(row.get(name)) > 0.0:
+            hits.append(
+                {
+                    "time": time_s,
+                    "name": name,
+                    "label": _PATTERN_LABELS.get(name, name),
+                    "direction": "bullish",
+                    "timeframe": timeframe,
+                    "kind": kind,
+                    "price": price if price > 0.0 else None,
+                }
+            )
+    for name in bearish_names:
+        if _num(row.get(name)) > 0.0:
+            hits.append(
+                {
+                    "time": time_s,
+                    "name": name,
+                    "label": _PATTERN_LABELS.get(name, name),
+                    "direction": "bearish",
+                    "timeframe": timeframe,
+                    "kind": kind,
+                    "price": price if price > 0.0 else None,
+                }
+            )
+    return hits
+
+
+def collect_active_patterns(
+    analysis: Mapping[str, pd.DataFrame],
+    *,
+    decision_time: pd.Timestamp,
+    candle_lookback: int = 48,
+    chart_lookback: int = 32,
+) -> list[dict[str, Any]]:
+    """Collect in-house candlestick and chart-pattern hits for chart markers.
+
+    Does not change scores. Uses the same closed-bar cutoff as scoring.
+    """
+    patterns: list[dict[str, Any]] = []
+    five = analysis.get("5m")
+    if isinstance(five, pd.DataFrame) and not five.empty:
+        closed = []
+        for _, row in five.tail(max(candle_lookback * 2, candle_lookback)).iterrows():
+            open_unix = _bar_open_unix(row)
+            if open_unix is None:
+                continue
+            bar_close = pd.Timestamp(open_unix, unit="s", tz="UTC") + pd.Timedelta(
+                minutes=BAR_MINUTES["5m"]
+            )
+            if bar_close <= decision_time:
+                closed.append(row)
+        for row in closed[-candle_lookback:]:
+            patterns.extend(
+                _pattern_hits_on_row(
+                    row,
+                    timeframe="5m",
+                    kind="candlestick",
+                    bullish_names=_BULL_CANDLE,
+                    bearish_names=_BEAR_CANDLE,
+                )
+            )
+    fifteen = analysis.get("15m")
+    if isinstance(fifteen, pd.DataFrame) and not fifteen.empty:
+        closed = []
+        for _, row in fifteen.tail(max(chart_lookback * 2, chart_lookback)).iterrows():
+            open_unix = _bar_open_unix(row)
+            if open_unix is None:
+                continue
+            bar_close = pd.Timestamp(open_unix, unit="s", tz="UTC") + pd.Timedelta(
+                minutes=BAR_MINUTES["15m"]
+            )
+            if bar_close <= decision_time:
+                closed.append(row)
+        for row in closed[-chart_lookback:]:
+            patterns.extend(
+                _pattern_hits_on_row(
+                    row,
+                    timeframe="15m",
+                    kind="chart",
+                    bullish_names=_BULL_CHART,
+                    bearish_names=_BEAR_CHART,
+                )
+            )
+    patterns.sort(key=lambda item: (int(item["time"]), str(item["name"])))
+    return patterns
+
+
 def engine_a_direction(frame: pd.DataFrame, resolution: str, index: int) -> str | None:
     """Return the best accepted Engine A direction on one bar.
 
@@ -443,15 +650,14 @@ def score_snapshot(
     )
     five = rows["5m"]
     close = _num(five.get("close"))
-    atr = _num(five.get("atr_14"))
-    if atr <= 0.0:
-        atr = _num(five.get("atr"))
+    atr = _row_atr(five)
     if atr <= 0.0:
         atr = max(abs(close) * 0.01, 1e-9)
     bracket_side = decision["action"] if decision["action"] in ("long", "short") else "long"
     stop, take = _brackets(bracket_side, close, atr)
     confidence = max(0.0, min(1.0, decision["score"] / 100.0))
     chosen = long_points if decision["long_score"] >= decision["short_score"] else short_points
+    levels = chart_structure_levels(rows)
     return {
         **decision,
         "components": chosen,
@@ -461,8 +667,12 @@ def score_snapshot(
         "position_size": 0.0,
         "atr": atr,
         "close": close,
+        "entry_price": close,
         "stop_price": stop,
         "take_profit_price": take,
+        "support_zones": levels["support_zones"],
+        "resistance_zones": levels["resistance_zones"],
+        "active_patterns": [],
         "weights": resolved,
     }
 
@@ -484,8 +694,12 @@ def _hold_result(reason: str) -> dict[str, Any]:
         "position_size": 0.0,
         "atr": 0.0,
         "close": 0.0,
+        "entry_price": 0.0,
         "stop_price": 0.0,
         "take_profit_price": 0.0,
+        "support_zones": [],
+        "resistance_zones": [],
+        "active_patterns": [],
         "bar_index": None,
         "reason": reason,
     }
@@ -580,4 +794,9 @@ def score_frames(
     )
     scored["bar_index"] = int(rows["5m"].name)
     scored["decision_time"] = decision_time.isoformat()
+    # Chart sidecar only — not an input to decide_scores / weights.
+    scored["active_patterns"] = collect_active_patterns(
+        analysis,
+        decision_time=decision_time,
+    )
     return scored

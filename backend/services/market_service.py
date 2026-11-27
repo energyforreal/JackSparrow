@@ -37,6 +37,26 @@ class MarketService:
             "1d": 300
         }
         self.cache_ttl_orderbook = 1  # Orderbook: 1 second (very fresh)
+
+    @staticmethod
+    def _unwrap_market_data_response(
+        agent_response: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Normalize agent WS/Redis payloads to a candle market_data dict.
+
+        Outbound WebSocket responses are already unwrapped to ``data``.
+        Redis responses keep the ``{success, data}`` envelope.
+        """
+        if not isinstance(agent_response, dict):
+            return None
+        if isinstance(agent_response.get("candles"), list):
+            return agent_response
+        if agent_response.get("success") is False:
+            return None
+        nested = agent_response.get("data")
+        if isinstance(nested, dict) and isinstance(nested.get("candles"), list):
+            return nested
+        return None
     
     async def get_market_data(
         self,
@@ -44,15 +64,18 @@ class MarketService:
         interval: str = "1h",
         limit: int = 100
     ) -> Optional[Dict[str, Any]]:
-        """Get market data (OHLCV candles)."""
+        """Get OHLCV candles from the agent shared candle pipeline only.
+
+        Does not open a second Delta history fetch from the backend. The agent
+        serves memory cache / candle store / the same loader scoring uses.
+        """
         
         # Check cache first
         cache_key = f"market_data:{symbol}:{interval}:{limit}"
         cached = await get_cache(cache_key)
-        if cached:
+        if cached and cached.get("candles"):
             return cached
         
-        # Try to get from agent service first
         try:
             agent_response = await agent_service._send_command(
                 "get_market_data",
@@ -61,16 +84,26 @@ class MarketService:
                     "interval": interval,
                     "limit": limit
                 },
-                timeout=10
+                timeout=30
             )
             
-            if agent_response and agent_response.get("success"):
-                market_data = agent_response.get("data")
-                if market_data:
-                    # Cache with interval-based TTL
-                    ttl = self.cache_ttl_candles.get(interval, 15)  # Default 15s for unknown intervals
-                    await set_cache(cache_key, market_data, ttl=ttl)
-                    return market_data
+            market_data = self._unwrap_market_data_response(agent_response)
+            if market_data and market_data.get("candles"):
+                ttl = self.cache_ttl_candles.get(interval, 15)
+                await set_cache(cache_key, market_data, ttl=ttl)
+                return market_data
+            logger.warning(
+                "market_service_get_market_data_empty",
+                symbol=symbol,
+                interval=interval,
+                limit=limit,
+                response_keys=sorted(agent_response.keys())
+                if isinstance(agent_response, dict)
+                else None,
+                error=(agent_response or {}).get("error")
+                if isinstance(agent_response, dict)
+                else None,
+            )
         except Exception as e:
             logger.error(
                 "market_service_get_market_data_failed",
@@ -80,8 +113,7 @@ class MarketService:
                 error=str(e),
                 exc_info=True
             )
-        
-        # Fallback: return None (will be handled by route)
+
         return None
     
     async def get_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:

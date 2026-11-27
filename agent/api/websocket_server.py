@@ -338,6 +338,10 @@ class AgentWebSocketServer:
                 response = await self._agent._handle_control(parameters)
             elif command == "register_models":
                 response = await self._agent._handle_register_models(parameters)
+            elif command == "get_market_data":
+                response = await self._agent._handle_get_market_data(parameters)
+            elif command == "get_ticker":
+                response = await self._agent._handle_get_ticker(parameters)
             else:
                 response = {"success": False, "error": f"Unknown command: {command}"}
 

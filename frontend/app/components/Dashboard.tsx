@@ -22,7 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
-import { AlertCircle, RefreshCw, TrendingUp, Activity, BarChart3, Settings } from 'lucide-react'
+import { AlertCircle, RefreshCw, TrendingUp, Activity, BarChart3, CandlestickChart, Settings } from 'lucide-react'
 const ReasoningChainView = dynamic(
   () => import('./ReasoningChainView').then((m) => ({ default: m.ReasoningChainView })),
   {
@@ -34,6 +34,25 @@ const ReasoningChainView = dynamic(
         </CardHeader>
         <CardContent>
           <LoadingSkeleton className="h-40 w-full" />
+        </CardContent>
+      </Card>
+    ),
+  }
+)
+const MarketAnalysisDashboard = dynamic(
+  () =>
+    import('./market/MarketAnalysisDashboard').then((m) => ({
+      default: m.MarketAnalysisDashboard,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <Card>
+        <CardHeader>
+          <CardTitle>Market Analysis</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <LoadingSkeleton className="h-[480px] w-full" />
         </CardContent>
       </Card>
     ),
@@ -174,10 +193,14 @@ export function Dashboard() {
         )}
 
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Overview</span>
+            </TabsTrigger>
+            <TabsTrigger value="market" className="flex items-center gap-2">
+              <CandlestickChart className="h-4 w-4" />
+              <span className="hidden sm:inline">Market</span>
             </TabsTrigger>
             <TabsTrigger value="trading" className="flex items-center gap-2">
               <Activity className="h-4 w-4" />
@@ -274,6 +297,16 @@ export function Dashboard() {
                 exchangeEnvironment={health?.delta_environment ?? health?.trading_mode}
                 usdInrRate={portfolio?.usd_inr_rate}
                 contractValueBtc={portfolio?.contract_value_btc}
+              />
+            </ErrorBoundary>
+          </TabsContent>
+
+          {/* Market Analysis Tab */}
+          <TabsContent value="market" className="space-y-6">
+            <ErrorBoundary>
+              <MarketAnalysisDashboard
+                signal={signal}
+                marketTick={marketData?.BTCUSD || null}
               />
             </ErrorBoundary>
           </TabsContent>

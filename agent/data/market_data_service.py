@@ -1037,149 +1037,141 @@ class MarketDataService:
                     error=str(e),
                 )
 
+    _BAR_SECONDS = {
+        "1m": 60,
+        "3m": 180,
+        "5m": 300,
+        "15m": 900,
+        "30m": 1800,
+        "1h": 3600,
+        "2h": 7200,
+        "4h": 14400,
+        "1d": 86400,
+    }
+
     async def get_market_data(
         self,
         symbol: str,
         interval: str = "1h",
         limit: int = 100
     ) -> Optional[Dict[str, Any]]:
-        """Get market data (OHLCV candles)."""
+        """Return OHLCV candles from the shared trading/scoring candle pipeline.
+
+        Prefers the in-memory frame cache and on-disk candle store that scoring
+        already maintains. Only if those are empty does it load through the same
+        ``_fetch_ohlcv_df`` path used by algorithmic decisions (which then fills
+        the shared cache for concurrent reuse).
+        """
         symbol = normalize_symbol_for_delta_api(symbol)
+        resolution = str(interval or "1h").lower()
+        if resolution not in self._BAR_SECONDS:
+            resolution = "1h"
+        want = max(1, min(int(limit or 100), 1000))
 
-        # Check cache first
-        cache_key = f"market_data:{symbol}:{interval}:{limit}"
+        cache_key = f"market_data:{symbol}:{resolution}:{want}"
         cached = await get_cache(cache_key)
-        if cached:
+        if cached and cached.get("candles"):
             return cached
-        
+
         try:
-            # Map interval to Delta Exchange resolution (must be lowercase)
-            resolution_map = {
-                "1m": "1m",
-                "3m": "3m",
-                "5m": "5m",
-                "15m": "15m",
-                "30m": "30m",
-                "1h": "1h",
-                "2h": "2h",
-                "4h": "4h",
-                "1d": "1d",
-            }
-            resolution = resolution_map.get(interval, "1h")
-            
-            # Calculate start and end timestamps from limit and interval.
-            start_time, end_time = self.delta_client._calculate_candle_time_range(
-                resolution, limit
+            from agent.core.market_frames import (
+                _fetch_ohlcv_df,
+                get_cached_ohlcv_frame,
+                get_public_candle_client,
+                ohlcv_frame_to_candles,
             )
 
-            # Historical candles always use production-public API (same tape as
-            # model frames). Private/testnet delta_client is for trading only.
-            from agent.core.market_frames import get_public_candle_client
-
-            public_candles = get_public_candle_client()
-            response = await public_candles.get_candles(
-                symbol=symbol,
-                resolution=resolution,
-                start=start_time,
-                end=end_time,
+            source = "memory_cache"
+            formatted_candles = ohlcv_frame_to_candles(
+                get_cached_ohlcv_frame(symbol, resolution),
+                limit=want,
             )
-            
-            # Parse response - handle different response structures
-            # API might return {"result": {"candles": [...]}} or {"result": [...]} or just [...]
-            candles = []
-            if isinstance(response, dict):
-                result = response.get("result")
-                if isinstance(result, dict):
-                    candles = result.get("candles", [])
-                elif isinstance(result, list):
-                    candles = result
-            elif isinstance(response, list):
-                candles = response
-            
-            # Convert to standard format
-            formatted_candles = []
-            for candle in candles:
-                formatted_candles.append({
-                    "timestamp": candle.get("time"),
-                    "open": float(candle.get("open", 0)),
-                    "high": float(candle.get("high", 0)),
-                    "low": float(candle.get("low", 0)),
-                    "close": float(candle.get("close", 0)),
-                    "volume": float(candle.get("volume", 0))
-                })
-            
-            # Get latest ticker for current price
+
+            if len(formatted_candles) < min(want, 20):
+                store_df = self._candle_store.query(symbol, resolution)
+                if store_df is not None and not store_df.empty:
+                    store_candles = ohlcv_frame_to_candles(store_df, limit=want)
+                    if len(store_candles) > len(formatted_candles):
+                        formatted_candles = store_candles
+                        source = "candle_store"
+
+            if len(formatted_candles) < min(want, 20):
+                # Shared scorer path — populates _OHLCV_FRAME_CACHE for reuse.
+                frame = await _fetch_ohlcv_df(
+                    get_public_candle_client(),
+                    symbol,
+                    resolution,
+                    self._BAR_SECONDS[resolution],
+                    want,
+                )
+                formatted_candles = ohlcv_frame_to_candles(frame, limit=want)
+                source = "shared_ohlcv_loader"
+
+            if not formatted_candles:
+                logger.warning(
+                    "market_data_service_no_candles",
+                    symbol=symbol,
+                    interval=resolution,
+                    limit=want,
+                )
+                return None
+
             ticker = await self.get_ticker(symbol)
-            current_price = ticker.get("close") if ticker else None
-            
+            current_price = None
+            if isinstance(ticker, dict):
+                current_price = ticker.get("close", ticker.get("price"))
+            if current_price is None:
+                current_price = formatted_candles[-1]["close"]
+
             market_data = {
                 "symbol": symbol,
-                "interval": interval,
+                "interval": resolution,
                 "candles": formatted_candles,
                 "current_price": current_price,
-                "data_age_seconds": 0,  # Fresh data
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "data_age_seconds": 0,
+                "source": source,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-
-            if bool(getattr(settings, "strict_candle_validation_enabled", True)) and formatted_candles:
-                try:
-                    from agent.data.candle_validation import validate_delta_candle_rows
-
-                    want = int(getattr(settings, "strict_candle_validation_min_rows", 50) or 50)
-                    mr = min(len(formatted_candles), max(2, want))
-                    validate_delta_candle_rows(
-                        formatted_candles,
-                        resolution,
-                        min_rows=mr,
-                        allow_last_irregular=True,
-                    )
-                except ValueError as e:
-                    logger.warning(
-                        "market_data_candle_validation_failed",
-                        symbol=symbol,
-                        interval=interval,
-                        error=str(e),
-                    )
-                    return None
-
-            # Cache result
             await set_cache(cache_key, market_data, ttl=self.cache_ttl)
-            
+            logger.info(
+                "market_data_service_served_shared_candles",
+                symbol=symbol,
+                interval=resolution,
+                candle_count=len(formatted_candles),
+                source=source,
+            )
             return market_data
-            
-        except CircuitBreakerOpenError as e:
-            # Circuit breaker is OPEN - service unavailable, return None gracefully
+
+        except CircuitBreakerOpenError:
             logger.warning(
                 "market_data_service_circuit_breaker_open",
                 symbol=symbol,
-                interval=interval,
-                limit=limit,
-                message="Delta Exchange circuit breaker is OPEN - service unavailable"
+                interval=resolution,
+                limit=want,
+                message="Delta Exchange circuit breaker is OPEN - service unavailable",
             )
             return None
         except DeltaExchangeError as e:
-            # Delta Exchange API error - log and return None
             logger.warning(
                 "market_data_service_delta_exchange_error",
                 symbol=symbol,
-                interval=interval,
-                limit=limit,
+                interval=resolution,
+                limit=want,
                 error=str(e),
             )
             return None
         except Exception as e:
-            # Other unexpected errors
             logger.error(
                 "market_data_service_fetch_failed",
                 symbol=symbol,
-                interval=interval,
-                limit=limit,
+                interval=resolution,
+                limit=want,
                 error=str(e),
                 error_type=type(e).__name__,
-                exc_info=True
+                exc_info=True,
             )
             return None
-    
+
     async def get_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Get current ticker information."""
         symbol = normalize_symbol_for_delta_api(symbol)

@@ -89,6 +89,45 @@ def get_public_candle_client() -> PublicCandleClient:
     return PublicCandleClient()
 
 
+def get_cached_ohlcv_frame(symbol: str, resolution: str) -> Optional[pd.DataFrame]:
+    """Return the in-memory OHLCV frame shared with scoring, if present."""
+    sym_cache = _OHLCV_FRAME_CACHE.get(symbol) or {}
+    frame = sym_cache.get(resolution)
+    if frame is None or getattr(frame, "empty", True):
+        return None
+    return frame.copy()
+
+
+def ohlcv_frame_to_candles(frame: pd.DataFrame, *, limit: Optional[int] = None) -> List[dict[str, Any]]:
+    """Convert a cached OHLCV DataFrame into chart/API candle dicts."""
+    if frame is None or frame.empty:
+        return []
+    work = frame
+    if limit is not None and limit > 0 and len(work) > limit:
+        work = work.tail(int(limit))
+    candles: List[dict[str, Any]] = []
+    for raw in work.to_dict(orient="records"):
+        if not isinstance(raw, dict):
+            continue
+        ts = _candle_timestamp_epoch(raw.get("timestamp", raw.get("time")))
+        if ts is None:
+            continue
+        try:
+            candles.append(
+                {
+                    "timestamp": ts,
+                    "open": float(raw.get("open", 0) or 0),
+                    "high": float(raw.get("high", 0) or 0),
+                    "low": float(raw.get("low", 0) or 0),
+                    "close": float(raw.get("close", 0) or 0),
+                    "volume": float(raw.get("volume", 0) or 0),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return candles
+
+
 def _candle_timestamp_epoch(value: Any) -> Optional[int]:
     """Best-effort Unix seconds from a candle timestamp field."""
     if value is None:

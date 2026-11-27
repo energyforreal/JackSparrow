@@ -320,6 +320,61 @@ export const MarketDataResponseSchema = z
   })
   .describe('Market data response')
 
+export const StructureZoneSchema = z.object({
+  timeframe: z.string(),
+  price: z.number(),
+  low: z.number(),
+  high: z.number(),
+})
+
+export const ChartPatternMarkerSchema = z.object({
+  time: z.number(),
+  name: z.string(),
+  label: z.string(),
+  direction: z.string(),
+  timeframe: z.string().default(''),
+  kind: z.string().default('candlestick'),
+  price: z.number().nullable().optional().default(null),
+})
+
+export const ChartTradePlanSchema = z.object({
+  signal: z.string().default('HOLD'),
+  entry: z.number().nullable().optional().default(null),
+  stop_loss: z.number().nullable().optional().default(null),
+  take_profit: z.number().nullable().optional().default(null),
+  score: z.number().nullable().optional().default(null),
+  risk_reward: z.number().nullable().optional().default(null),
+  valid: z.boolean().default(false),
+  candle_timestamp: z.string().nullable().optional().default(null),
+  decision_id: z.string().nullable().optional().default(null),
+})
+
+export const MarketChartResponseSchema = z.object({
+  symbol: z.string(),
+  timeframe: z.string(),
+  candles: z.array(
+    z.object({
+      time: z.number(),
+      open: z.number(),
+      high: z.number(),
+      low: z.number(),
+      close: z.number(),
+    })
+  ),
+  volume: z.array(
+    z.object({
+      time: z.number(),
+      value: z.number(),
+    })
+  ),
+  current_price: z.number().nullable().optional().default(null),
+  support_zones: z.array(StructureZoneSchema).default([]),
+  resistance_zones: z.array(StructureZoneSchema).default([]),
+  active_patterns: z.array(ChartPatternMarkerSchema).default([]),
+  trade_plan: ChartTradePlanSchema,
+  timestamp: z.string().optional(),
+})
+
 // Agent status response
 export const AgentStatusResponseSchema = z.object({
   state: z.string().describe('Agent state'),

@@ -25,6 +25,7 @@ from agent.core.futures_utils import (
 from agent.core.sl_tp import compute_stop_take_prices
 from agent.core.product_specs import get_contract_specs
 from agent.core.decision_timestamp import decision_payload_age_seconds
+from agent.core.algorithmic_entry_policy import algorithmic_entry_reject
 from agent.core.signal_filter import EntrySignalFilter
 from agent.core.redis_config import get_cache
 
@@ -318,6 +319,30 @@ class TradingEventHandler:
             )
             # Legacy alias: minimal_entry historically skipped most feature gates.
             minimal_entry = transformer_gates and not legacy_feature_gates
+            if algorithmic_entry:
+                # Qualified by the scorer. ML confidence and feature gates do not apply.
+                transformer_gates = False
+                legacy_feature_gates = False
+                minimal_entry = False
+            trading_decision_payload = payload.get("trading_decision")
+            if not isinstance(trading_decision_payload, dict):
+                trading_decision_payload = {}
+            algo_score_raw = mc.get("algo_score") if isinstance(mc, dict) else None
+            if algo_score_raw is None:
+                algo_score_raw = trading_decision_payload.get("score")
+            algo_invalidation = mc.get("invalidation") if isinstance(mc, dict) else None
+            if not algo_invalidation:
+                algo_invalidation = trading_decision_payload.get("invalidation")
+            algo_validated_raw = (
+                mc.get("algo_signal_validated") if isinstance(mc, dict) else None
+            )
+            algo_validated_flag = (
+                bool(algo_validated_raw) if algo_validated_raw is not None else None
+            )
+            algo_decision_id = (
+                (mc.get("decision_id") if isinstance(mc, dict) else None)
+                or trading_decision_payload.get("decision_id")
+            )
             entry_proba_summary = self._summarize_model_entry_proba(model_predictions)
             diagnostics_base: Dict[str, Any] = {
                 "hour_bucket_utc": hour_bucket_utc,
@@ -350,6 +375,27 @@ class TradingEventHandler:
             diagnostics_base["decision_path"] = (
                 mc.get("decision_path") if isinstance(mc, dict) else None
             ) or "transformer_agent_synthesis"
+            diagnostics_base["algo_score"] = algo_score_raw
+            diagnostics_base["decision_id"] = algo_decision_id
+            diagnostics_base["algorithmic_entry_policy"] = algorithmic_entry
+
+            if algorithmic_entry:
+                policy_reason = algorithmic_entry_reject(
+                    decision_path=str(decision_path) if decision_path else None,
+                    signal=str(signal) if signal else None,
+                    algo_score=algo_score_raw,
+                    algo_signal_validated=algo_validated_flag,
+                    invalidation=algo_invalidation,
+                )
+                if policy_reason:
+                    self._log_entry_rejected(
+                        policy_reason,
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        **diagnostics_base,
+                    )
+                    return
 
             # HOLD: optional gated-ML reversal exit while positioned (PIPE-01)
             if signal == "HOLD" or not signal:
@@ -370,7 +416,12 @@ class TradingEventHandler:
                 )
                 return
 
-            if gates_on and transformer_gates and raw_ai_gate < hold_floor:
+            if (
+                not algorithmic_entry
+                and gates_on
+                and transformer_gates
+                and raw_ai_gate < hold_floor
+            ):
                 self._log_entry_rejected(
                     "low_ai_signal_confidence",
                     symbol=symbol,
@@ -381,7 +432,8 @@ class TradingEventHandler:
                 )
                 return
             if (
-                gates_on
+                not algorithmic_entry
+                and gates_on
                 and not transformer_gates
                 and bool(getattr(settings, "ai_signal_minimal_entry_gates", False))
                 and raw_ai_gate < ai_floor
@@ -513,7 +565,7 @@ class TradingEventHandler:
                         )
                         return
 
-            if gates_on and transformer_gates:
+            if not algorithmic_entry and gates_on and transformer_gates:
                 # Soft bands already applied in policy; only hard-reject below hold floor.
                 if float(raw_confidence or 0.0) < hold_floor:
                     self._log_entry_rejected(
@@ -528,14 +580,14 @@ class TradingEventHandler:
                         **diagnostics_base,
                     )
                     return
-            elif gates_on and minimal_entry:
+            elif not algorithmic_entry and gates_on and minimal_entry:
                 confidence = raw_ai_gate
-            elif gates_on and v43_exec_enabled:
+            elif not algorithmic_entry and gates_on and v43_exec_enabled:
                 confidence = max(
                     float(confidence or 0.0),
                     float(getattr(settings, "min_confidence_threshold", 0.52) or 0.52) * 0.85,
                 )
-            elif gates_on:
+            elif not algorithmic_entry and gates_on:
                 eff_min_conf = float(
                     getattr(settings, "transformer_min_confidence", None)
                     or getattr(settings, "min_confidence_threshold", 0.52)
@@ -932,6 +984,28 @@ class TradingEventHandler:
                     stop_loss_price = proposed_stop
                     take_profit_price = proposed_take
                     sl_tp_source = "algorithmic"
+                bracket_reason = algorithmic_entry_reject(
+                    decision_path=str(decision_path) if decision_path else None,
+                    signal=str(signal) if signal else None,
+                    algo_score=algo_score_raw,
+                    algo_signal_validated=algo_validated_flag,
+                    invalidation=algo_invalidation,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss_price,
+                    take_profit=take_profit_price,
+                    check_brackets=True,
+                )
+                if bracket_reason:
+                    self._log_entry_rejected(
+                        bracket_reason,
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        stop_loss=stop_loss_price,
+                        take_profit=take_profit_price,
+                        **diagnostics_base,
+                    )
+                    return
             plan_sl_source = str(execution_plan.get("sl_tp_source") or "")
 
             fusion_atr = (
@@ -1265,6 +1339,22 @@ class TradingEventHandler:
                     return
                 signal = filtered
 
+            if algorithmic_entry and getattr(settings, "entry_signal_filter_enabled", True):
+                # Hourly cap only. Empty features skip the breakout-score feature gate.
+                filtered, filt_reason = self._entry_signal_filter.apply(signal, {})
+                if filtered == "HOLD" and signal != "HOLD":
+                    self._log_entry_rejected(
+                        "entry_signal_filter",
+                        symbol=symbol,
+                        signal=signal,
+                        event_id=event.event_id,
+                        filter_reason=filt_reason,
+                        entry_signal_filter_reason=filt_reason,
+                        **diagnostics_base,
+                    )
+                    return
+                signal = filtered
+
             # Clear opposite-side debounce so reversal can trade
             opp_key = self._debounce_key(symbol, "SELL" if side == "BUY" else "BUY")
             self._last_risk_approved.pop(opp_key, None)
@@ -1298,7 +1388,7 @@ class TradingEventHandler:
             hold_floor_late = float(
                 getattr(settings, "transformer_confidence_hold_floor", 0.0) or 0.0
             )
-            if gates_on and transformer_gates:
+            if not algorithmic_entry and gates_on and transformer_gates:
                 if float(confidence or 0.0) < hold_floor_late:
                     self._log_entry_rejected(
                         "low_confidence_reject",
@@ -1310,7 +1400,7 @@ class TradingEventHandler:
                         **diagnostics_base,
                     )
                     return
-            elif gates_on:
+            elif not algorithmic_entry and gates_on:
                 eff_min_conf = float(
                     getattr(settings, "transformer_min_confidence", None)
                     or getattr(settings, "min_confidence_threshold", 0.52)
@@ -1395,7 +1485,9 @@ class TradingEventHandler:
             )
             await event_bus.publish(risk_approved)
             self._last_trade_wall_time = time.time()
-            if legacy_feature_gates and getattr(settings, "entry_signal_filter_enabled", True):
+            if getattr(settings, "entry_signal_filter_enabled", True) and (
+                legacy_feature_gates or algorithmic_entry
+            ):
                 self._entry_signal_filter.record_trade()
 
             # ai_signal_minimal_entry_gates already in diagnostics_base — do not pass twice (structlog TypeError).

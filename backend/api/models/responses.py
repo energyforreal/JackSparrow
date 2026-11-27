@@ -722,6 +722,75 @@ class MarketDataResponse(DecimalSerializerMixin, BaseModel):
     )
 
 
+class ChartCandle(BaseModel):
+    """One OHLCV bar for Lightweight Charts (time is Unix seconds)."""
+
+    time: float = Field(..., description="Bar open time as Unix seconds")
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class ChartVolumeBar(BaseModel):
+    """Volume histogram point."""
+
+    time: float
+    value: float
+
+
+class ChartZone(BaseModel):
+    """Support or resistance zone from the algorithmic structure bar."""
+
+    timeframe: str = Field(..., description="Source timeframe such as 1h or 4h")
+    price: float = Field(..., description="Zone midpoint")
+    low: float
+    high: float
+
+
+class ChartTradePlan(BaseModel):
+    """Trade overlays from the cached algorithmic decision."""
+
+    signal: str = Field(default="HOLD", description="BUY / SELL / HOLD / STRONG_*")
+    entry: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    score: Optional[float] = None
+    risk_reward: Optional[float] = None
+    valid: bool = False
+    candle_timestamp: Optional[str] = None
+    decision_id: Optional[str] = None
+
+
+class ChartPatternMarker(BaseModel):
+    """In-house candlestick or chart-pattern hit for chart markers."""
+
+    time: float = Field(..., description="Pattern bar open as Unix seconds")
+    name: str
+    label: str
+    direction: str = Field(..., description="bullish or bearish")
+    timeframe: str = Field(default="", description="Source timeframe such as 5m or 15m")
+    kind: str = Field(default="candlestick", description="candlestick or chart")
+    price: Optional[float] = None
+
+
+class MarketChartResponse(BaseModel):
+    """Market Analysis dashboard chart payload."""
+
+    symbol: str
+    timeframe: str
+    candles: List[ChartCandle] = Field(default_factory=list)
+    volume: List[ChartVolumeBar] = Field(default_factory=list)
+    current_price: Optional[float] = None
+    support_zones: List[ChartZone] = Field(default_factory=list)
+    resistance_zones: List[ChartZone] = Field(default_factory=list)
+    active_patterns: List[ChartPatternMarker] = Field(default_factory=list)
+    trade_plan: ChartTradePlan = Field(default_factory=ChartTradePlan)
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
 class AgentStatusResponse(BaseModel):
     """Agent status response."""
     
