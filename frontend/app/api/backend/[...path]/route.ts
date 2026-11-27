@@ -12,6 +12,17 @@ const HOP_BY_HOP = new Set([
   'transfer-encoding',
   'upgrade',
   'host',
+  // Node fetch auto-decompresses; never ask the backend to gzip or the
+  // browser will see plain JSON labelled as content-encoding: gzip.
+  'accept-encoding',
+])
+
+// Headers that describe the upstream wire encoding/length. Node's fetch has
+// already decoded the body, so forwarding these breaks clients (chart load).
+const RESPONSE_STRIP = new Set([
+  'transfer-encoding',
+  'content-encoding',
+  'content-length',
 ])
 
 function buildTargetUrl(req: NextRequest, pathSegments: string[]): string {
@@ -54,7 +65,7 @@ async function proxy(req: NextRequest, pathSegments: string[]): Promise<Response
 
   res.headers.forEach((value, key) => {
     const lower = key.toLowerCase()
-    if (lower === 'transfer-encoding') {
+    if (RESPONSE_STRIP.has(lower)) {
       return
     }
     out.headers.set(key, value)
