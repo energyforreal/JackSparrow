@@ -1049,6 +1049,8 @@ class MCPOrchestrator:
             model_predictions_for_reasoning = self._build_model_predictions_for_reasoning(
                 result.get("model_predictions") or []
             )
+            from research.swinging.decision_contract import ensure_trading_decision
+
             reasoning_chain_payload: Dict[str, Any] = {
                 "chain_id": reasoning.get("chain_id"),
                 "steps": reasoning.get("steps", []),
@@ -1069,6 +1071,7 @@ class MCPOrchestrator:
                 "policy_reason_codes": list(verdict.reason_codes or []),
                 "policy_verdict": verdict.model_dump(mode="json"),
                 "strategy_origin": False,
+                "trading_decision": ensure_trading_decision(result),
             }
             decision_payload.update(_decision_ws_metadata(result))
             _enrich_confidence_semantics(decision_payload)

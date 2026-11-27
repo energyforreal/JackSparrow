@@ -203,6 +203,27 @@ export interface ModelReasoning {
 export type InferenceSource = 'model_service' | 'agent'
 export type InferenceMode = 'primary' | 'fallback' | 'degraded'
 
+/** Shared verdict for algorithmic and model paths. Size stays with risk. */
+export interface TradingDecisionContract {
+  decision_id?: string
+  decision_path?: string
+  symbol?: string
+  signal?: string
+  confidence?: number
+  score?: number
+  candle_timestamp?: string | null
+  market_context?: Record<string, Record<string, number>>
+  risk?: {
+    stop_loss?: number | null
+    take_profit?: number | null
+    position_size?: number
+  }
+  reasons?: string[]
+  invalidation?: string[]
+  execution_authorized?: boolean
+  score_breakdown?: Record<string, number>
+}
+
 export interface Signal {
   signal: SignalType
   // Confidence is stored as percentage (0-100) for display,
@@ -254,6 +275,8 @@ export interface Signal {
   primary_tf?: string
   transformer_vol_regime?: string
   decision_path?: string
+  /** Shared verdict. Present on the algorithmic path and wrapped model paths. */
+  trading_decision?: TradingDecisionContract
   /** Path SL/TP + sizing plan from transformer_mtf. */
   execution_plan?: ExecutionPlan
   /** Per-horizon or per-TF stances (fusion uses h10m/h30m/h1h/h2h). */

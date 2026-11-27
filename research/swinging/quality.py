@@ -286,3 +286,111 @@ def quality_report(
     if five_minute is not None and resolution in ("15m", "1h", "4h"):
         report["resample_check"] = compare_native_to_resampled(frame, five_minute, resolution)
     return report
+
+
+def decision_data_issues(
+    frames: dict[str, pd.DataFrame] | Any,
+    *,
+    now: datetime | pd.Timestamp | None = None,
+    max_stale_bars: int = 2,
+) -> list[str]:
+    """Reject a decision when the four timeframes are missing, invalid, or stale.
+
+    Args:
+        frames: OHLCV keyed by resolution.
+        now: Clock used for the closed-candle and staleness checks. A last
+            row that is still forming is ignored when an earlier bar exists.
+            Historical replays pass ``None`` and only missing or invalid bars
+            are rejected.
+        max_stale_bars: How many bar lengths a closed candle may lag ``now``.
+
+    Returns:
+        Reason codes. An empty list means the frames may be scored.
+    """
+    issues: list[str] = []
+    decision_now = _as_utc(now) if now is not None else None
+    source = frames if isinstance(frames, dict) else {}
+    for name in RESOLUTIONS:
+        frame = source.get(name)
+        if frame is None or getattr(frame, "empty", True):
+            issues.append(f"missing_{name}")
+            continue
+        try:
+            work = normalize_ohlcv(frame)
+        except (TypeError, ValueError, KeyError):
+            issues.append(f"invalid_{name}")
+            continue
+        if work.empty:
+            issues.append(f"missing_{name}")
+            continue
+        if not _values_valid(work):
+            issues.append(f"invalid_{name}")
+            continue
+        if decision_now is None:
+            continue
+        closed_at, forming = _last_close(work, name, decision_now)
+        if name == "5m" and forming:
+            issues.append("five_minute_not_closed")
+            continue
+        if closed_at is None:
+            issues.append(f"missing_{name}")
+            continue
+        limit = pd.Timedelta(seconds=BAR_SECONDS[name] * max(1, int(max_stale_bars)))
+        if decision_now - closed_at > limit:
+            issues.append(f"stale_{name}")
+    return issues
+
+
+def _as_utc(value: datetime | pd.Timestamp) -> pd.Timestamp:
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is None:
+        return stamp.tz_localize("UTC")
+    return stamp.tz_convert("UTC")
+
+
+def _values_valid(frame: pd.DataFrame) -> bool:
+    numeric = frame.loc[:, ["open", "high", "low", "close", "volume"]].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    if not bool(numeric.notna().all().all()):
+        return False
+    if bool((numeric["volume"] < 0).to_numpy().any()):
+        return False
+    prices = numeric.loc[:, ["open", "high", "low", "close"]]
+    if bool((prices <= 0).to_numpy().any()):
+        return False
+    return bool(ohlc_mask(frame).all())
+
+
+def _last_close(
+    frame: pd.DataFrame,
+    resolution: str,
+    now: pd.Timestamp,
+) -> tuple[pd.Timestamp | None, bool]:
+    """Return the last fully closed bar.
+
+    The final row is ignored while it is still forming. ``forming`` is true
+    only when the frame has no earlier bar to use.
+
+    Args:
+        frame: Normalized OHLCV.
+        resolution: Bar size key.
+        now: Clock for the close check.
+
+    Returns:
+        Close time of the last completed bar, and whether none exists.
+    """
+    duration = pd.Timedelta(seconds=BAR_SECONDS[resolution])
+    opened = pd.Timestamp(frame["time"].iloc[-1])
+    if opened.tzinfo is None:
+        opened = opened.tz_localize("UTC")
+    closed = opened + duration
+    if now >= closed:
+        return closed, False
+    if len(frame) < 2:
+        return None, True
+    previous = pd.Timestamp(frame["time"].iloc[-2])
+    if previous.tzinfo is None:
+        previous = previous.tz_localize("UTC")
+    return previous + duration, False

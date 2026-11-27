@@ -9,11 +9,13 @@ import { cn } from '@/lib/utils'
 import { formatConfidence } from '@/utils/formatters'
 import { SignalEntryMetricsBlock } from './SignalEntryMetrics'
 import {
+  isAlgorithmicPath,
   isTransformerMtfPath,
   resolveConfidenceBand,
   resolveDecisionReasoning,
   resolveReasonCodes,
 } from '@/utils/signalConfidence'
+import { AlgorithmicVerdict } from './AlgorithmicVerdict'
 import { ConfidenceProgress } from './ConfidenceProgress'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
@@ -86,6 +88,7 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
   const band = resolveConfidenceBand(signal)
   const reasonCodes = resolveReasonCodes(signal)
   const transformerPath = isTransformerMtfPath(signal)
+  const algorithmic = isAlgorithmicPath(signal)
   const plan = signal.execution_plan
   const longEdge = formatEdge(signal.long_edge ?? plan?.long_edge)
   const shortEdge = formatEdge(signal.short_edge ?? plan?.short_edge)
@@ -109,6 +112,11 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Trading Signal</CardTitle>
           <div className="flex flex-wrap items-center gap-2">
+            {algorithmic && (
+              <Badge variant="outline" className="text-xs font-normal">
+                Algorithmic
+              </Badge>
+            )}
             {(signal.regime || signal.transformer_vol_regime) && (
               <Badge variant="outline" className="text-xs font-normal capitalize">
                 {signal.regime || signal.transformer_vol_regime} regime
@@ -163,7 +171,9 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         </div>
 
-        {(band.sizeScale != null || band.sizeFraction != null) && (
+        {algorithmic && <AlgorithmicVerdict signal={signal} />}
+
+        {!algorithmic && (band.sizeScale != null || band.sizeFraction != null) && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs">
             {band.sizeScale != null && (
               <div>
@@ -200,7 +210,7 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
-        {modelEdge && modelEdge.confidence > 0 && (
+        {!algorithmic && modelEdge && modelEdge.confidence > 0 && (
           <div className="rounded-md border border-dashed border-border/60 px-3 py-2">
             <div className="flex justify-between text-xs mb-1">
               <span className="text-muted-foreground">Model edge</span>
@@ -216,7 +226,7 @@ export function SignalIndicator({ signal, lastReflection, modelEdge }: SignalInd
           </div>
         )}
 
-        {hasEconomics && (
+        {!algorithmic && hasEconomics && (
           <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
             <p className="font-medium text-foreground">Path economics</p>
             <ul className="list-inside list-disc space-y-0.5 tabular-nums">

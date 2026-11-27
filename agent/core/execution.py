@@ -332,6 +332,45 @@ class ExecutionResult:
         }
 
 
+def algorithmic_order_block(trade: dict, *, orders_enabled: bool) -> str | None:
+    """Return why an algorithmic verdict must not become an order.
+
+    The scorer cannot authorize execution. This check requires the order flag,
+    a risk-approved entry, and a stop and target on the correct side of price.
+    Duplicate decision ids are rejected separately by the execution engine.
+
+    Args:
+        trade: Order the handler built after risk approval.
+        orders_enabled: ``ALGORITHMIC_ORDERS_ENABLED``.
+
+    Returns:
+        A rejection message, or ``None`` when the order may continue.
+    """
+    if not orders_enabled:
+        return (
+            "Algorithmic entries stay blocked until "
+            "ALGORITHMIC_ORDERS_ENABLED is true."
+        )
+    if not trade.get("risk_approved"):
+        return "Algorithmic orders require risk approval."
+    side = str(trade.get("side") or "")
+    if side not in ("buy", "sell"):
+        return "Algorithmic signal is not an entry."
+    try:
+        price = float(trade.get("price") or 0.0)
+        stop = float(trade.get("stop_loss"))
+        take = float(trade.get("take_profit"))
+    except (TypeError, ValueError):
+        return "Algorithmic orders require a stop and a target."
+    if price <= 0.0 or stop <= 0.0 or take <= 0.0:
+        return "Algorithmic stop or target is invalid."
+    if side == "buy" and not (stop < price < take):
+        return "Algorithmic long stop and target are on the wrong side of price."
+    if side == "sell" and not (take < price < stop):
+        return "Algorithmic short stop and target are on the wrong side of price."
+    return None
+
+
 class ExecutionEngine:
     """
     Trade execution engine with order management and slippage control.
@@ -677,6 +716,8 @@ class ExecutionEngine:
                 "take_profit": take_profit,
                 "execution_authority": AGENT_DECISION_AUTHORITY,
                 "decision_event_id": event.correlation_id or event.event_id,
+                "decision_id": payload.get("decision_id"),
+                "risk_approved": True,
             }
 
             pex = dict(trade.get("position_extras") or {})
@@ -986,19 +1027,26 @@ class ExecutionEngine:
             )
 
         if trade.get("algo_signal_validated"):
-            if not bool(getattr(settings, "algorithmic_orders_enabled", False)):
+            block = algorithmic_order_block(
+                trade,
+                orders_enabled=bool(getattr(settings, "algorithmic_orders_enabled", False)),
+            )
+            if block:
                 logger.warning(
-                    "trade_execution_rejected_algorithmic_orders_disabled",
+                    "algorithmic_execution_status",
                     symbol=symbol,
-                    execution_authority=execution_authority,
+                    decision_id=trade.get("decision_id"),
+                    execution_status="blocked",
+                    reason=block,
                 )
-                return ExecutionResult(
-                    False,
-                    error_message=(
-                        "Algorithmic entries stay blocked until "
-                        "ALGORITHMIC_ORDERS_ENABLED is true."
-                    ),
-                )
+                return ExecutionResult(False, error_message=block)
+            logger.info(
+                "algorithmic_execution_status",
+                symbol=symbol,
+                decision_id=trade.get("decision_id"),
+                execution_status="permitted",
+                execution_authorized=True,
+            )
         elif bool(getattr(settings, "require_ml_signal_for_orders", True)):
             if not trade.get("ml_signal_validated"):
                 logger.warning(

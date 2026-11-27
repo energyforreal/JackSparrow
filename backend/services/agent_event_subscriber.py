@@ -186,6 +186,67 @@ def _transformer_plan_ws_fields(market_context: Any) -> Dict[str, Any]:
     return out
 
 
+def algorithmic_signal_fields(payload: Any, market_context: Any) -> Dict[str, Any]:
+    """Attach the shared decision so the dashboard can render an algorithmic verdict.
+
+    A payload that already carries ``trading_decision`` is forwarded unchanged.
+    Older events are rebuilt from market-context fields, with position size left
+    at zero and execution left unauthorized.
+
+    Args:
+        payload: Decision-ready event payload.
+        market_context: Reasoning market context, which may hold the score.
+
+    Returns:
+        A signal fragment containing ``trading_decision``, or an empty dict.
+    """
+    source = payload if isinstance(payload, dict) else {}
+    existing = source.get("trading_decision")
+    if isinstance(existing, dict) and existing.get("decision_path"):
+        return {"trading_decision": existing}
+    context = market_context if isinstance(market_context, dict) else {}
+    path = context.get("decision_path")
+    has_algo = any(
+        context.get(key) is not None
+        for key in ("algo_score", "timeframes", "invalidation", "decision_id")
+    )
+    if path != "algorithmic" and not has_algo:
+        return {}
+    invalidation = context.get("invalidation")
+    if isinstance(invalidation, list):
+        reasons = [str(item) for item in invalidation if str(item)]
+    else:
+        text = str(invalidation or "")
+        reasons = [] if not text or text == "below_threshold" else [text]
+    plan = context.get("execution_plan")
+    plan = plan if isinstance(plan, dict) else {}
+    frames = context.get("timeframes")
+    frames = frames if isinstance(frames, dict) else {}
+    components = context.get("algo_components")
+    components = components if isinstance(components, dict) else {}
+    return {
+        "trading_decision": {
+            "decision_id": context.get("decision_id"),
+            "decision_path": path or "algorithmic",
+            "symbol": source.get("symbol") or "",
+            "signal": source.get("signal") or "HOLD",
+            "confidence": source.get("confidence"),
+            "score": context.get("algo_score"),
+            "candle_timestamp": context.get("candle_timestamp"),
+            "market_context": frames,
+            "risk": {
+                "stop_loss": plan.get("stop_loss"),
+                "take_profit": plan.get("take_profit"),
+                "position_size": 0.0,
+            },
+            "reasons": [],
+            "invalidation": reasons,
+            "execution_authorized": False,
+            "score_breakdown": components,
+        }
+    }
+
+
 def _market_context_excerpt(market_context: Any) -> Dict[str, Any]:
     """Compact market_context subset for REST /signal/latest hydration."""
     excerpt: Dict[str, Any] = {}
@@ -1727,6 +1788,7 @@ class AgentEventSubscriber:
             _jacksparrow_ws_fields_from_predictions(model_predictions, reasoning_chain)
         )
         signal_data.update(_transformer_plan_ws_fields(market_context))
+        signal_data.update(algorithmic_signal_fields(payload, market_context))
         for k in ("inference_latency_ms", "inference_source", "inference_mode", "model_version"):
             v = payload.get(k)
             if v is not None:

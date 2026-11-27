@@ -6,6 +6,7 @@ import inspect
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from feature_store.transformer_btcusd.structure import add_market_structure_features
 from research.swinging.algo_walkforward import tune_algo_weights, walk_forward_algo
@@ -134,6 +135,8 @@ def test_uptrend_scores_a_long_and_flat_market_holds() -> None:
     assert scored["signal"] in ("BUY", "STRONG_BUY"), scored
     assert scored["action"] == "long"
     assert scored["score"] >= ALGO_QUALIFIED_SCORE
+    assert scored["position_size"] == 0.0
+    assert scored["confidence"] == pytest.approx(scored["score"] / 100.0)
     assert scored["long_components"]["trend_4h"] > 0.0
     assert scored["stop_price"] < scored["close"] < scored["take_profit_price"]
 
@@ -146,6 +149,52 @@ def test_uptrend_scores_a_long_and_flat_market_holds() -> None:
     held = score_frames(flat, include_engine_a=False)
     assert held["signal"] == "HOLD", held
     assert held["score"] < ALGO_QUALIFIED_SCORE
+
+
+def test_data_gate_rejects_stale_unclosed_and_invalid_candles() -> None:
+    from research.swinging.quality import decision_data_issues
+
+    frames = _frames()
+    opened = pd.Timestamp(frames["5m"]["time"].iloc[-1])
+    if opened.tzinfo is None:
+        opened = opened.tz_localize("UTC")
+    closed = opened + pd.Timedelta(minutes=5)
+    assert decision_data_issues(frames, now=closed) == []
+    stale = decision_data_issues(frames, now=closed + pd.Timedelta(days=3))
+    assert any(item.startswith("stale_") for item in stale)
+    inside_bar = decision_data_issues(frames, now=opened + pd.Timedelta(minutes=1))
+    assert "five_minute_not_closed" not in inside_bar
+    assert not any(item.startswith("stale_") for item in inside_bar)
+    lone = {name: frame.copy() for name, frame in frames.items()}
+    lone["5m"] = frames["5m"].iloc[-1:].reset_index(drop=True)
+    unclosed = decision_data_issues(lone, now=opened + pd.Timedelta(minutes=1))
+    assert "five_minute_not_closed" in unclosed
+    broken = {name: frame.copy() for name, frame in frames.items()}
+    broken["1h"].loc[broken["1h"].index[-1], "high"] = 1.0
+    broken["1h"].loc[broken["1h"].index[-1], "low"] = 50.0
+    assert "invalid_1h" in decision_data_issues(broken)
+    held = score_frames(broken, include_engine_a=False)
+    assert held["signal"] == "HOLD"
+    assert held["position_size"] == 0.0
+
+
+def test_live_clock_scores_the_previous_closed_bar() -> None:
+    """A forming last 5m row must not zero the score or be traded."""
+    frames = _frames()
+    opened = pd.Timestamp(frames["5m"]["time"].iloc[-1])
+    if opened.tzinfo is None:
+        opened = opened.tz_localize("UTC")
+    previous_close = float(frames["5m"]["close"].iloc[-2])
+    scored = score_frames(
+        frames,
+        prepared=frames,
+        now=opened + pd.Timedelta(minutes=1),
+        include_engine_a=False,
+    )
+    assert scored.get("invalidation") != "five_minute_not_closed"
+    assert scored.get("data_issues") is None
+    assert scored["bar_index"] == len(frames["5m"]) - 2
+    assert scored["close"] == pytest.approx(previous_close)
 
 
 def test_walk_forward_reports_cost_adjusted_expectancy() -> None:

@@ -10,6 +10,8 @@ import { CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
 
 interface HealthMonitorProps {
   health?: HealthStatus
+  /** When true, unloaded models are unused by the decision path. */
+  algorithmicPath?: boolean
 }
 
 const getStatusIcon = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
@@ -55,7 +57,7 @@ const getStatusVariant = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
   }
 }
 
-export function HealthMonitor({ health }: HealthMonitorProps) {
+export function HealthMonitor({ health, algorithmicPath = false }: HealthMonitorProps) {
   if (!health) {
     return (
       <Card>
@@ -164,10 +166,19 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
               totalModels !== undefined &&
               service.name !== 'model_serving' &&
               service.name !== 'model_nodes'
+            const modelCountsAreZero =
+              (healthyModels === 0 || healthyModels === undefined) &&
+              (totalModels === 0 || totalModels === undefined)
+            const unusedModels =
+              algorithmicPath &&
+              (service.name === 'model_nodes' || service.name === 'model_serving') &&
+              (modelCountsAreZero || service.status === 'down')
+            const displayStatus = unusedModels ? 'unknown' : service.status
             const shouldShowDetails =
-              Boolean(note || hasUnitCounts || fillMetrics) &&
-              (service.status === 'unknown' ||
-                service.status === 'degraded' ||
+              Boolean(note || hasUnitCounts || fillMetrics || unusedModels) &&
+              (displayStatus === 'unknown' ||
+                displayStatus === 'degraded' ||
+                unusedModels ||
                 (service.name === 'execution_latency' && fillMetrics != null))
 
             return (
@@ -177,7 +188,7 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {getStatusIcon(service.status)}
+                    {getStatusIcon(displayStatus)}
                     <span className="text-sm font-medium">{service.name}</span>
                   </div>
                   <div className="flex items-center gap-3">
@@ -215,8 +226,8 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
                         </div>
                       </div>
                     )}
-                    <Badge variant={getStatusVariant(service.status as 'up' | 'degraded' | 'down' | 'unknown')}>
-                      {service.status.toUpperCase()}
+                    <Badge variant={getStatusVariant(displayStatus as 'up' | 'degraded' | 'down' | 'unknown')}>
+                      {unusedModels ? 'UNUSED' : service.status.toUpperCase()}
                     </Badge>
                   </div>
                 </div>
@@ -234,7 +245,11 @@ export function HealthMonitor({ health }: HealthMonitorProps) {
                         {fillMetrics.p95 != null && ` · p95 ${Math.round(fillMetrics.p95)}ms`}
                       </p>
                     )}
-                    {note && <p>{note}</p>}
+                    {unusedModels ? (
+                      <p>Unused by the algorithmic path</p>
+                    ) : (
+                      note && <p>{note}</p>
+                    )}
                   </div>
                 )}
               </div>

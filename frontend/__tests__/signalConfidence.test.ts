@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals'
 
 import {
+  algorithmicInvalidationText,
+  isAlgorithmicPath,
   isHoldNonActionableDisplay,
   isTransformerMtfPath,
   resolveConfidenceBand,
@@ -164,6 +166,38 @@ describe('resolveConfidenceBand', () => {
 
   it('returns hold for HOLD signal', () => {
     expect(resolveConfidenceBand({ signal: 'HOLD', confidence: 0.2 }).band).toBe('hold')
+  })
+
+  it('does not turn an algorithmic score into a size band', () => {
+    const band = resolveConfidenceBand({
+      signal: 'BUY',
+      confidence: 0.82,
+      is_actionable_entry: true,
+      decision_path: 'algorithmic',
+      execution_plan: { size_scale: 0.7, size_fraction: 0.42 },
+    })
+    expect(band.label).toBe('Score confidence')
+    expect(band.sizeScale).toBeUndefined()
+    expect(band.sizeFraction).toBeUndefined()
+  })
+
+  it('uses the invalidation code for an algorithmic hold', () => {
+    const band = resolveConfidenceBand({
+      signal: 'HOLD',
+      confidence: 0,
+      decision_path: 'algorithmic',
+      trading_decision: { invalidation: ['five_minute_not_closed'] },
+    })
+    expect(band.band).toBe('hold')
+    expect(band.label).toBe('five minute not closed')
+    expect(isAlgorithmicPath({ trading_decision: { decision_path: 'algorithmic' } })).toBe(
+      true
+    )
+    expect(
+      algorithmicInvalidationText({
+        trading_decision: { invalidation: ['stale_5m', 'invalid_1h'] },
+      })
+    ).toBe('stale 5m, invalid 1h')
   })
 })
 

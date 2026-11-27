@@ -306,6 +306,8 @@ class TradingEventHandler:
             )
             if not isinstance(execution_plan, dict):
                 execution_plan = {}
+            decision_path = mc.get("decision_path") if isinstance(mc, dict) else None
+            algorithmic_entry = decision_path == "algorithmic"
             gates_on = bool(getattr(settings, "entry_gates_enabled", False))
             transformer_gates = gates_on and (
                 bool(getattr(settings, "transformer_entry_gates", False))
@@ -671,7 +673,14 @@ class TradingEventHandler:
                     ),
                 ),
             )
-            if execution_plan.get("size_fraction") is not None:
+            if algorithmic_entry:
+                from research.swinging.decision_contract import capped_risk_fraction
+
+                entry_portfolio_frac = capped_risk_fraction(
+                    entry_portfolio_frac,
+                    float(getattr(settings, "max_position_size", 0.60) or 0.60),
+                )
+            elif execution_plan.get("size_fraction") is not None:
                 try:
                     plan_frac = float(execution_plan.get("size_fraction") or 0.0)
                     if plan_frac > 0:
@@ -734,13 +743,20 @@ class TradingEventHandler:
                     min_lots=min_lot_size,
                 )
             elif getattr(settings, "use_notional_lot_sizing", False):
-                alloc_frac = max(
-                    0.01,
-                    min(
-                        1.0,
-                        float(getattr(settings, "max_position_size", 0.1) or 0.1) * max(0.1, conf_f),
-                    ),
-                )
+                if algorithmic_entry:
+                    alloc_frac = capped_risk_fraction(
+                        float(getattr(settings, "max_position_size", 0.60) or 0.60),
+                        float(getattr(settings, "max_position_size", 0.60) or 0.60),
+                    )
+                else:
+                    alloc_frac = max(
+                        0.01,
+                        min(
+                            1.0,
+                            float(getattr(settings, "max_position_size", 0.1) or 0.1)
+                            * max(0.1, conf_f),
+                        ),
+                    )
                 margin_inr = available_cash_inr * alloc_frac
                 usd_margin = margin_inr / usdinr_rate if usdinr_rate > 0 else 0.0
                 entry_lots = price_to_lots(
@@ -905,13 +921,27 @@ class TradingEventHandler:
             decision_path = str(
                 (mc.get("decision_path") if isinstance(mc, dict) else "") or ""
             )
+            if algorithmic_entry:
+                try:
+                    proposed_stop = float(execution_plan.get("stop_loss"))
+                    proposed_take = float(execution_plan.get("take_profit"))
+                except (TypeError, ValueError):
+                    proposed_stop = 0.0
+                    proposed_take = 0.0
+                if proposed_stop > 0.0 and proposed_take > 0.0:
+                    stop_loss_price = proposed_stop
+                    take_profit_price = proposed_take
+                    sl_tp_source = "algorithmic"
             plan_sl_source = str(execution_plan.get("sl_tp_source") or "")
 
             fusion_atr = (
-                plan_sl_source == "atr"
-                or decision_path == "mtf_fusion"
-                or decision_path == "forecast_30m"
-                or sl_tp_mode == "atr"
+                not algorithmic_entry
+                and (
+                    plan_sl_source == "atr"
+                    or decision_path == "mtf_fusion"
+                    or decision_path == "forecast_30m"
+                    or sl_tp_mode == "atr"
+                )
             )
             if fusion_atr and (execution_plan.get("atr_14") is not None or atr is not None):
                 try:
@@ -1315,6 +1345,10 @@ class TradingEventHandler:
                 "ml_signal_validated": decision_path != "algorithmic",
                 "algo_signal_validated": decision_path == "algorithmic",
                 "ml_signal_source": decision_path or "transformer_agent_synthesis",
+                "decision_id": (payload.get("trading_decision") or {}).get("decision_id")
+                if isinstance(payload.get("trading_decision"), dict)
+                else None,
+                "risk_approved": True,
                 "ml_evidence_id": (
                     (payload.get("ml_evidence_snapshot") or {}).get("evidence_id")
                     if isinstance(payload.get("ml_evidence_snapshot"), dict)

@@ -91,6 +91,9 @@ export function Dashboard() {
   const positions = portfolio?.positions || []
   const portfolioBlockLoading = isPortfolioLoading && !portfolio
   const tradesBlockLoading = isTradesLoading && recentTrades.length === 0
+  const algorithmicPath =
+    signal?.decision_path === 'algorithmic' ||
+    signal?.trading_decision?.decision_path === 'algorithmic'
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -211,7 +214,10 @@ export function Dashboard() {
                 />
               </ErrorBoundary>
               <ErrorBoundary>
-                <HealthMonitor health={health || undefined} />
+                <HealthMonitor
+                  health={health || undefined}
+                  algorithmicPath={algorithmicPath}
+                />
               </ErrorBoundary>
             </div>
 
@@ -335,15 +341,20 @@ export function Dashboard() {
           {/* System Tab */}
           <TabsContent value="system" className="space-y-6">
             <ErrorBoundary>
-              <HealthMonitor health={health || undefined} />
+              <HealthMonitor
+                health={health || undefined}
+                algorithmicPath={algorithmicPath}
+              />
             </ErrorBoundary>
             <Card>
               <CardContent className="pt-6 space-y-2 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Transformer entry gates</p>
+                <p className="font-medium text-foreground">
+                  {algorithmicPath ? 'Algorithmic decision' : 'Transformer entry gates'}
+                </p>
                 <p>
-                  Safety-only gates (stale data, price, margin, open position, risk, kill switch).
-                  Soft confidence bands and path R:R adjust size — they do not hard-HOLD entries
-                  the way legacy ADX/EMA feature filters did.
+                  {algorithmicPath
+                    ? 'The score identifies the opportunity. Risk configuration sets the position size. A higher score does not enlarge the order, and the scorer cannot authorize execution.'
+                    : 'Safety-only gates (stale data, price, margin, open position, risk, kill switch). Soft confidence bands and path R:R adjust size — they do not hard-HOLD entries the way legacy ADX/EMA feature filters did.'}
                 </p>
                 {signal?.decision_path && (
                   <p className="text-xs">

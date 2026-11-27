@@ -228,6 +228,30 @@ type PlanCarrier = ConfidenceCarrier & {
   threshold?: number | null
   policy_reason_codes?: string[] | null
   thesis_signal?: string | null
+  trading_decision?: {
+    decision_path?: string | null
+    score?: number | null
+    invalidation?: string[] | null
+  } | null
+}
+
+export function isAlgorithmicPath(
+  signal: PlanCarrier | null | undefined
+): boolean {
+  if (!signal) return false
+  if (signal.decision_path === 'algorithmic') return true
+  return signal.trading_decision?.decision_path === 'algorithmic'
+}
+
+export function algorithmicInvalidationText(
+  signal: PlanCarrier | null | undefined
+): string | undefined {
+  const items = signal?.trading_decision?.invalidation
+  if (!items?.length) return undefined
+  return items
+    .filter((item) => item && item !== 'below_threshold')
+    .map((item) => item.replace(/_/g, ' '))
+    .join(', ') || undefined
 }
 
 const HOLD_FLOOR = 0.4
@@ -246,6 +270,15 @@ export function resolveConfidenceBand(
     return { band: 'hold', label: 'HOLD band' }
   }
   const sig = String(signal.signal || '').toUpperCase()
+  if (isAlgorithmicPath(signal)) {
+    if (sig === 'HOLD' || signal.is_actionable_entry === false) {
+      return {
+        band: 'hold',
+        label: algorithmicInvalidationText(signal) ?? 'No entry',
+      }
+    }
+    return { band: 'full', label: 'Score confidence' }
+  }
   const plan = signal.execution_plan
   const sizeScale =
     plan?.size_scale != null && Number.isFinite(Number(plan.size_scale))
@@ -342,14 +375,17 @@ export function resolveSignalEntryMetrics(
   const display = resolveDisplayConfidence(signal)
   let policyEntryPercent = resolvePolicyEntryPercent(signal, display)
   let reasoningPercent = display.percent
-  if (holdDim) {
+  const algorithmic = isAlgorithmicPath(signal as PlanCarrier)
+  if (holdDim && !algorithmic) {
     policyEntryPercent = 0
     reasoningPercent = 0
   }
-  const tradeScore = isTransformerMtfPath(signal as PlanCarrier)
-    ? undefined
-    : resolveTradeScore(signal)
+  const tradeScore =
+    algorithmic || isTransformerMtfPath(signal as PlanCarrier)
+      ? undefined
+      : resolveTradeScore(signal)
   const showSplitConfidence =
+    !algorithmic &&
     !holdDim &&
     display.source === 'reasoning' &&
     Math.abs(policyEntryPercent - display.percent) >= 1
@@ -357,7 +393,8 @@ export function resolveSignalEntryMetrics(
     reasoningPercent,
     policyEntryPercent,
     tradeScore,
-    signalStrengthPercent: holdDim ? undefined : display.signalStrengthPercent,
+    signalStrengthPercent:
+      holdDim || algorithmic ? undefined : display.signalStrengthPercent,
     isActionableEntry:
       signal.is_actionable_entry != null
         ? Boolean(signal.is_actionable_entry)

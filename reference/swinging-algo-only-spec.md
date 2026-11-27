@@ -29,13 +29,27 @@ Design weights, summing to 100:
 65–79 is a qualified setup. 80–100 is high quality. Below 65 is a hold.
 These cutoffs are design values. They are not a proven edge.
 
-Stops and targets use the existing 1.5 ATR stop and 2.5 ATR target. Position
-size still goes through the trading handler and `RiskManager`.
+Stops and targets use the existing 1.5 ATR stop and 2.5 ATR target. They travel
+on the shared decision as proposed brackets. Confidence is the score divided
+by 100. Position size stays zero on that object. The trading handler sizes the
+entry from `entry_portfolio_margin_fraction`, capped by `max_position_size`.
+A higher score does not increase the size.
+
+The shared object carries a decision id, candle timestamp, score breakdown,
+market context for 5m, 15m, 1h, and 4h, reasons, invalidation, and
+`execution_authorized: false`. Model predictions are wrapped in the same
+object without changing their signal, confidence, or size.
+
+A live score holds when a required timeframe is missing, a candle is invalid,
+the latest 5m bar is still open, or a closed bar is stale. Historical
+walk-forward checks missing and invalid bars only.
 
 ## Orders
 
-`ALGORITHMIC_ORDERS_ENABLED` defaults to false. A verdict stamped
-`algo_signal_validated` cannot place a Delta order until that flag is true.
+`ALGORITHMIC_ORDERS_ENABLED` defaults to false. The scorer cannot authorize an
+order. Execution accepts `algo_signal_validated` only when the flag is true,
+risk approval is present, the side is buy or sell, and the stop and target sit
+on the correct side of price. A repeated decision id is still rejected.
 The flag does not turn itself on after a backtest. ML orders still require
 `ml_signal_validated`.
 

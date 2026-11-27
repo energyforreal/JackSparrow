@@ -14,10 +14,13 @@ import {
 } from '@/utils/tradingDisplay'
 import { DataFreshnessIndicator } from './DataFreshnessIndicator'
 import {
+  algorithmicInvalidationText,
+  isAlgorithmicPath,
   resolveConfidenceBand,
   resolveDecisionReasoning,
   resolveReasonCodes,
 } from '@/utils/signalConfidence'
+import { AlgorithmicVerdict } from './AlgorithmicVerdict'
 
 interface TradingDecisionProps {
   signal?: Signal | null
@@ -50,10 +53,23 @@ const getDecisionAction = (signal: Signal): string => {
   const codes = resolveReasonCodes(signal, 3)
 
   if (sig === 'HOLD') {
+    if (isAlgorithmicPath(signal)) {
+      const invalidation = algorithmicInvalidationText(signal)
+      return invalidation ? `No entry — ${invalidation}` : 'No entry'
+    }
     if (codes.length > 0) {
       return `No entry — ${codes[0].replace(/_/g, ' ')}`
     }
     return 'No entry — waiting (hold floor / safety / alignment)'
+  }
+  if (isAlgorithmicPath(signal)) {
+    const side =
+      sig === 'STRONG_BUY' || sig === 'BUY'
+        ? 'Long'
+        : sig === 'STRONG_SELL' || sig === 'SELL'
+          ? 'Short'
+          : 'Position'
+    return `Enter ${side}`
   }
 
   const side =
@@ -140,6 +156,11 @@ export function TradingDecision({
                 >
                   {signal.signal.replace('_', ' ')}
                 </Badge>
+                {isAlgorithmicPath(signal) && (
+                  <Badge variant="outline" className="text-xs font-normal">
+                    Algorithmic
+                  </Badge>
+                )}
                 <div className="flex-1 space-y-1">
                   <div className="text-sm font-medium">{getDecisionAction(signal)}</div>
                   {band && (
@@ -148,8 +169,9 @@ export function TradingDecision({
                 </div>
               </div>
               <SignalEntryMetricsBlock signal={signal} compact />
+              <AlgorithmicVerdict signal={signal} />
 
-              {plan && (
+              {!isAlgorithmicPath(signal) && plan && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2 border-t text-xs">
                   {plan.size_fraction != null && (
                     <div>

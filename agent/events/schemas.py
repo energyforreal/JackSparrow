@@ -394,6 +394,13 @@ class DecisionReadyEvent(BaseEvent):
             default=None,
             description="DecisionReadyEvent.event_id for audit correlation.",
         )
+        trading_decision: Optional[Dict[str, Any]] = Field(
+            default=None,
+            description=(
+                "Shared verdict for algorithmic and model paths. "
+                "execution_authorized stays false until the execution engine permits the order."
+            ),
+        )
 
 
 # Risk Events

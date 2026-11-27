@@ -150,4 +150,29 @@ describe('mergeSignalPayload', () => {
     const merged = mergeSignalPayload(prev, { signal: 'HOLD', confidence: 0 })
     expect(merged.execution_plan).toBeUndefined()
   })
+
+  it('keeps an algorithmic verdict and clears it for another path', () => {
+    const prev: Signal = {
+      signal: 'BUY',
+      confidence: 0.82,
+      decision_path: 'algorithmic',
+      trading_decision: {
+        decision_path: 'algorithmic',
+        score: 82,
+        execution_authorized: false,
+        risk: { position_size: 0 },
+      },
+    }
+    const held = mergeSignalPayload(prev, { signal: 'HOLD', confidence: 0 })
+    expect(held.trading_decision?.score).toBe(82)
+    expect(held.trading_decision?.execution_authorized).toBe(false)
+
+    const replaced = mergeSignalPayload(prev, {
+      signal: 'BUY',
+      confidence: 0.5,
+      decision_path: 'mtf_fusion',
+    })
+    expect(replaced.trading_decision).toBeUndefined()
+    expect(replaced.decision_path).toBe('mtf_fusion')
+  })
 })

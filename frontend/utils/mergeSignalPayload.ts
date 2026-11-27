@@ -131,6 +131,18 @@ export function mergeSignalPayload(
     }
   }
 
+  if ('trading_decision' in data) {
+    if (data.trading_decision && typeof data.trading_decision === 'object') {
+      out.trading_decision = data.trading_decision
+    } else {
+      delete out.trading_decision
+    }
+  } else if (typeof data.decision_path === 'string' && data.decision_path !== 'algorithmic') {
+    delete out.trading_decision
+  } else if (prev?.trading_decision) {
+    out.trading_decision = prev.trading_decision
+  }
+
   if (data.timestamp !== undefined) {
     out.timestamp = data.timestamp as string
   } else {

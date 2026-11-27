@@ -49,9 +49,14 @@ def component_rows(
         One row per usable 5m bar. Columns are fractions, not points, so a
         later weight change does not rebuild features.
     """
+    from research.swinging.quality import decision_data_issues
+
     missing = [name for name in RESOLUTIONS if name not in frames]
     if missing:
         raise ValueError(f"missing resolutions: {', '.join(missing)}")
+    issues = [item for item in decision_data_issues(frames) if not item.startswith("missing_")]
+    if issues:
+        raise ValueError("algorithmic frames rejected: " + ", ".join(issues))
     prepared = {name: prepare_frame(frames[name]) for name in RESOLUTIONS}
     five = prepared["5m"]
     records: list[dict[str, Any]] = []

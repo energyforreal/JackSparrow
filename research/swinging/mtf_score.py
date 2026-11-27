@@ -25,7 +25,7 @@ from research.swinging.contract import (
     STOP_ATR_MULT,
     TAKE_PROFIT_ATR_MULT,
 )
-from research.swinging.quality import normalize_ohlcv
+from research.swinging.quality import decision_data_issues, normalize_ohlcv
 
 _BULL_CHART = (
     "chp_bull_flag",
@@ -451,7 +451,6 @@ def score_snapshot(
     bracket_side = decision["action"] if decision["action"] in ("long", "short") else "long"
     stop, take = _brackets(bracket_side, close, atr)
     confidence = max(0.0, min(1.0, decision["score"] / 100.0))
-    position_size = 0.0 if decision["action"] == "abstain" else min(0.1, confidence)
     chosen = long_points if decision["long_score"] >= decision["short_score"] else short_points
     return {
         **decision,
@@ -459,12 +458,36 @@ def score_snapshot(
         "long_components": long_points,
         "short_components": short_points,
         "confidence": confidence,
-        "position_size": position_size,
+        "position_size": 0.0,
         "atr": atr,
         "close": close,
         "stop_price": stop,
         "take_profit_price": take,
         "weights": resolved,
+    }
+
+
+def _hold_result(reason: str) -> dict[str, Any]:
+    """Return a no-trade score payload."""
+    return {
+        "action": "abstain",
+        "signal": "HOLD",
+        "quality": "none",
+        "score": 0.0,
+        "long_score": 0.0,
+        "short_score": 0.0,
+        "invalidation": reason,
+        "components": {},
+        "long_components": {},
+        "short_components": {},
+        "confidence": 0.0,
+        "position_size": 0.0,
+        "atr": 0.0,
+        "close": 0.0,
+        "stop_price": 0.0,
+        "take_profit_price": 0.0,
+        "bar_index": None,
+        "reason": reason,
     }
 
 
@@ -478,13 +501,16 @@ def score_frames(
     bos_lookback: int = ALGO_BOS_LOOKBACK,
     include_engine_a: bool = False,
     prepared: Mapping[str, pd.DataFrame] | None = None,
+    now: pd.Timestamp | None = None,
 ) -> dict[str, Any]:
     """Score the latest closed 5m bar using 15m, 1h, and 4h context.
 
     Args:
         frames: OHLCV keyed by resolution. Every swinging resolution is required
             unless ``prepared`` already contains those frames.
-        as_of: Decision timestamp. Defaults to the close of the last 5m bar.
+        as_of: Decision timestamp. When omitted, ``now`` is used so a forming
+            bar is not scored. Historical replays omit both and use the close
+            of the last 5m bar.
         weights: Optional weight overrides.
         qualified_score: Hold threshold.
         high_quality_score: Strong-signal threshold.
@@ -493,59 +519,49 @@ def score_frames(
             5m or 15m bar lifts that component to full credit.
         prepared: Optional precomputed analysis frames. Avoids rebuilding
             indicators when the caller scores many bars.
+        now: When set, missing, invalid, or stale closed candles hold. A
+            still-forming last row does not hold by itself. Historical replays
+            leave this unset.
 
     Returns:
         ``score_snapshot`` payload plus the 5m bar index. Missing higher-timeframe
         history returns a hold with reason ``missing_timeframe``.
     """
+    source = frames if frames else (prepared or {})
+    issues = decision_data_issues(source, now=now)
+    if issues:
+        hold = _hold_result(issues[0])
+        hold["data_issues"] = issues
+        return hold
     missing = [name for name in RESOLUTIONS if name not in frames and not (
         prepared is not None and name in prepared
     )]
     if missing:
-        return {
-            "action": "abstain",
-            "signal": "HOLD",
-            "quality": "none",
-            "score": 0.0,
-            "long_score": 0.0,
-            "short_score": 0.0,
-            "invalidation": "missing_timeframe",
-            "components": {},
-            "confidence": 0.0,
-            "position_size": 0.0,
-            "atr": 0.0,
-            "close": 0.0,
-            "stop_price": 0.0,
-            "take_profit_price": 0.0,
-            "bar_index": None,
-            "reason": "missing_timeframe",
-        }
+        return _hold_result("missing_timeframe")
     analysis = dict(prepared) if prepared is not None else {
         name: prepare_frame(frames[name]) for name in RESOLUTIONS
     }
     five = analysis["5m"]
     if five.empty:
-        hold = score_frames({})
-        hold["invalidation"] = "empty_frame"
-        hold["reason"] = "empty_frame"
-        return hold
-    if as_of is None:
+        return _hold_result("empty_frame")
+    if as_of is not None:
+        decision_time = pd.Timestamp(as_of)
+    elif now is not None:
+        decision_time = pd.Timestamp(now)
+    else:
         opened = pd.Timestamp(five["time"].iloc[-1])
         if opened.tzinfo is None:
             opened = opened.tz_localize("UTC")
         decision_time = opened + pd.Timedelta(minutes=BAR_MINUTES["5m"])
+    if decision_time.tzinfo is None:
+        decision_time = decision_time.tz_localize("UTC")
     else:
-        decision_time = pd.Timestamp(as_of)
-        if decision_time.tzinfo is None:
-            decision_time = decision_time.tz_localize("UTC")
+        decision_time = decision_time.tz_convert("UTC")
     rows: dict[str, pd.Series] = {}
     for name in RESOLUTIONS:
         row = _closed_row(analysis[name], name, decision_time)
         if row is None:
-            hold = score_frames({})
-            hold["invalidation"] = "missing_timeframe"
-            hold["reason"] = f"no_closed_{name}"
-            return hold
+            return _hold_result(f"no_closed_{name}")
         rows[name] = row
     engine_directions: dict[str, str] = {}
     if include_engine_a:

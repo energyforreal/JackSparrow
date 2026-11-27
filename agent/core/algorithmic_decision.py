@@ -7,7 +7,6 @@ Orders stay in the execution engine and remain blocked unless
 from __future__ import annotations
 
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping
 
@@ -16,6 +15,7 @@ import structlog
 
 from agent.events.schemas import PolicyVerdict
 from research.swinging.contract import ALGO_DECISION_PATH, RESOLUTIONS
+from research.swinging.decision_contract import build_algorithmic_decision
 from research.swinging.mtf_score import score_frames
 
 logger = structlog.get_logger()
@@ -76,6 +76,9 @@ async def evaluate_algorithmic_prediction(
 ) -> Dict[str, Any]:
     """Score 4h, 1h, 15m, and 5m structure and return a policy verdict.
 
+    The clock scores the last bar that has already closed. A still-forming
+    5-minute candle in the feed does not zero the score.
+
     Args:
         symbol: Trading symbol.
         context: Optional ``algo_frames`` override. Live calls fetch candles.
@@ -94,9 +97,12 @@ async def evaluate_algorithmic_prediction(
             frames = {name: supplied[name] for name in RESOLUTIONS}
         else:
             frames = await load_algorithmic_frames(symbol)
+        as_of = context.get("as_of") or datetime.now(timezone.utc)
         scored = score_frames(
             frames,
             include_engine_a=bool(context.get("include_engine_a", True)),
+            as_of=as_of,
+            now=as_of,
         )
     except Exception as exc:
         logger.error(
@@ -114,15 +120,20 @@ async def evaluate_algorithmic_prediction(
         }
     signal = str(scored["signal"])
     confidence = float(scored["confidence"])
-    position_size = float(scored["position_size"])
+    reasons = _reason_codes(scored)
+    trading_decision = build_algorithmic_decision(
+        symbol=symbol,
+        scored=scored,
+        reasons=reasons,
+    )
     verdict = PolicyVerdict(
         signal=signal,
         confidence=confidence,
-        position_size=position_size,
-        reason_codes=_reason_codes(scored),
+        position_size=0.0,
+        reason_codes=reasons,
         adopted_ml_candidate=False,
     )
-    chain_id = str(uuid.uuid4())
+    chain_id = trading_decision["decision_id"]
     conclusion = (
         f"algorithmic {scored['quality']} {scored['action']} "
         f"score={scored['score']:.1f} invalidation={scored.get('invalidation') or 'none'}"
@@ -136,6 +147,9 @@ async def evaluate_algorithmic_prediction(
         "algo_components": scored.get("components"),
         "invalidation": scored.get("invalidation"),
         "algo_signal_validated": scored.get("action") in ("long", "short"),
+        "candle_timestamp": scored.get("decision_time"),
+        "timeframes": trading_decision["market_context"],
+        "decision_id": trading_decision["decision_id"],
         "execution_plan": {
             "atr_14": scored.get("atr"),
             "stop_loss": scored.get("stop_price"),
@@ -156,6 +170,7 @@ async def evaluate_algorithmic_prediction(
                     "score": scored.get("score"),
                     "components": scored.get("components"),
                     "invalidation": scored.get("invalidation"),
+                    "decision_id": trading_decision["decision_id"],
                 }
             ],
             "conclusion": conclusion,
@@ -164,18 +179,20 @@ async def evaluate_algorithmic_prediction(
         },
         "decision": {
             "signal": signal,
-            "position_size": position_size,
+            "position_size": 0.0,
             "confidence": confidence,
             "reasoning": conclusion,
             "policy_reason_codes": list(verdict.reason_codes),
         },
         "policy_verdict": verdict.model_dump(mode="json"),
+        "trading_decision": trading_decision,
         "inference_latency_ms": (time.perf_counter() - t0) * 1000.0,
     }
     logger.info(
         "algorithmic_decision_complete",
         symbol=symbol,
         signal=signal,
+        decision_id=trading_decision["decision_id"],
         score=scored.get("score"),
         quality=scored.get("quality"),
         invalidation=scored.get("invalidation"),

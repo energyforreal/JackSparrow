@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple, Union
 from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import os
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 
 # Env-file split (single root location for all services):
 #   - .env.example (committed): non-secret defaults, thresholds, feature flags.
@@ -134,9 +134,10 @@ class Settings(BaseSettings):
         description="Redis queue for agent responses"
     )
     agent_websocket_url: str = Field(
-        # Docker: use service name "agent" and AGENT_WS_PORT (8003). Local dev: set AGENT_WS_URL.
+        # Docker compose sets AGENT_WS_URL=ws://agent:8003. Local .env.example uses localhost.
+        # validation_alias is required: pydantic-settings 2 ignores Field(env=...).
         default="ws://agent:8003",
-        env="AGENT_WS_URL",
+        validation_alias=AliasChoices("AGENT_WS_URL", "AGENT_WEBSOCKET_URL"),
         description="Agent WebSocket URL for backend client connections"
     )
     use_agent_websocket: bool = Field(

@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import type { Signal } from '@/types'
 import { formatConfidence } from '@/utils/formatters'
 import {
+  isAlgorithmicPath,
   isHoldNonActionableDisplay,
   isTransformerMtfPath,
   resolveDisplayConfidence,
@@ -28,10 +29,15 @@ export function SignalEntryMetricsBlock({
 
   const holdDim = isHoldNonActionableDisplay(signal)
   const transformerPath = isTransformerMtfPath(signal)
+  const algorithmic = isAlgorithmicPath(signal)
+  const score = signal.trading_decision?.score
 
-  const reasoningLabel =
-    display.source === 'reasoning' ? 'Reasoning confidence' : 'Signal confidence'
-  const policyLabel = 'Policy confidence'
+  const reasoningLabel = algorithmic
+    ? 'Score confidence'
+    : display.source === 'reasoning'
+      ? 'Reasoning confidence'
+      : 'Signal confidence'
+  const policyLabel = algorithmic ? 'Score confidence' : 'Policy confidence'
 
   if (compact) {
     return (
@@ -40,11 +46,15 @@ export function SignalEntryMetricsBlock({
           <span className="font-medium text-foreground">{reasoningLabel}:</span>{' '}
           {formatConfidence(metrics.reasoningPercent)}
         </p>
-        {metrics.showSplitConfidence && (
+        {algorithmic && score != null && Number.isFinite(Number(score)) && (
+          <p className="tabular-nums">
+            <span className="font-medium text-foreground">Score:</span> {Number(score).toFixed(1)}
+          </p>
+        )}
+        {metrics.showSplitConfidence && !algorithmic && (
           <p>
             <span className="font-medium text-foreground">{policyLabel}:</span>{' '}
             {formatConfidence(metrics.policyEntryPercent)}
-            <span className="ml-1 opacity-80">(decision / sizing)</span>
           </p>
         )}
         {!transformerPath && metrics.tradeScore != null && (
@@ -71,23 +81,28 @@ export function SignalEntryMetricsBlock({
   }
 
   return (
-    <div className={cn('space-y-3', holdDim && 'opacity-50')}>
-      {holdDim && (
+    <div className={cn('space-y-3', holdDim && !algorithmic && 'opacity-50')}>
+      {holdDim && !algorithmic && (
         <p className="text-[10px] text-muted-foreground">HOLD — confidence bars cleared (no entry).</p>
       )}
       <div>
         <div className="flex justify-between text-sm mb-1">
           <span className="text-muted-foreground">{reasoningLabel}</span>
           <span className="font-medium tabular-nums">
-            {formatConfidence(metrics.reasoningPercent)}
+            {algorithmic && score != null && Number.isFinite(Number(score))
+              ? `${Number(score).toFixed(1)} · ${formatConfidence(metrics.reasoningPercent)}`
+              : formatConfidence(metrics.reasoningPercent)}
           </span>
         </div>
         <ConfidenceProgress value={metrics.reasoningPercent} className="h-2" />
         <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
-          Calibrated across reasoning steps (may differ from policy confidence).
+          {algorithmic
+            ? 'Confidence is the score divided by 100. It does not set position size.'
+            : 'Calibrated across reasoning steps (may differ from policy confidence).'}
         </p>
       </div>
 
+      {!algorithmic && (
       <div
         className={cn(
           'rounded-md border px-3 py-2',
@@ -107,8 +122,8 @@ export function SignalEntryMetricsBlock({
           className="h-1.5 opacity-90"
         />
         <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-          Soft bands: &lt;40% HOLD · 40–55% reduced size · ≥55% full size. Soft R:R may
-          strip STRONG or cut size without forcing HOLD.
+          Soft bands: &lt;40% HOLD · 40–55% reduced size · ≥55% full size. Soft R:R
+          may strip STRONG or cut size without forcing HOLD.
         </p>
         {!transformerPath && metrics.tradeScore != null && (
           <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-border/50 text-xs">
@@ -128,6 +143,7 @@ export function SignalEntryMetricsBlock({
           </div>
         )}
       </div>
+      )}
 
       {metrics.signalStrengthPercent != null && (
         <p className="text-[10px] text-muted-foreground tabular-nums">
