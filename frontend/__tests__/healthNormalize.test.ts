@@ -62,4 +62,35 @@ describe('normalizeHealthPayload', () => {
     const merged = mergeHealthPreserveFields(prev, next)
     expect(merged.degradation_reasons).toEqual(['Agent service is down'])
   })
+
+  it('keeps models_scored from the latest payload', () => {
+    const prev = normalizeHealthPayload({
+      status: 'degraded',
+      health_score: 0.7,
+      models_scored: true,
+      services: {},
+    })!
+    const next = normalizeHealthPayload({
+      status: 'healthy',
+      health_score: 1,
+      models_scored: false,
+      services: { database: { status: 'up' } },
+    })!
+    expect(mergeHealthPreserveFields(prev, next).models_scored).toBe(false)
+  })
+
+  it('keeps a reported model node status instead of rewriting it', () => {
+    const result = normalizeHealthPayload({
+      status: 'healthy',
+      health_score: 1,
+      models_scored: false,
+      services: {
+        model_nodes: {
+          status: 'down',
+          details: { healthy_models: 0, total_models: 0 },
+        },
+      },
+    })
+    expect(result?.services.model_nodes?.status).toBe('down')
+  })
 })

@@ -58,6 +58,9 @@ export function normalizeHealthPayload(raw: unknown): HealthStatus | null {
   if (typeof h.trading_ready === 'boolean') {
     merged.trading_ready = h.trading_ready
   }
+  if (typeof h.models_scored === 'boolean') {
+    merged.models_scored = h.models_scored
+  }
   if (typeof h.trading_mode === 'string' && h.trading_mode.trim()) {
     merged.trading_mode = h.trading_mode.trim().toLowerCase()
   }
@@ -125,6 +128,10 @@ export function mergeHealthPreserveFields(
       next.delta_environment !== undefined ? next.delta_environment : previous.delta_environment,
     ml_models: next.ml_models !== undefined ? next.ml_models : previous.ml_models,
     agent_state: next.agent_state !== undefined ? next.agent_state : previous.agent_state,
+    models_scored:
+      typeof next.models_scored === 'boolean'
+        ? next.models_scored
+        : previous.models_scored,
     // Empty array is a real clear (recovery). Only preserve when the field is omitted.
     degradation_reasons: Array.isArray(next.degradation_reasons)
       ? next.degradation_reasons

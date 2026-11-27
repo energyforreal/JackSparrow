@@ -10,8 +10,6 @@ import { CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
 
 interface HealthMonitorProps {
   health?: HealthStatus
-  /** When true, unloaded models are unused by the decision path. */
-  algorithmicPath?: boolean
 }
 
 const getStatusIcon = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
@@ -57,7 +55,7 @@ const getStatusVariant = (status: 'up' | 'degraded' | 'down' | 'unknown') => {
   }
 }
 
-export function HealthMonitor({ health, algorithmicPath = false }: HealthMonitorProps) {
+export function HealthMonitor({ health }: HealthMonitorProps) {
   if (!health) {
     return (
       <Card>
@@ -87,6 +85,9 @@ export function HealthMonitor({ health, algorithmicPath = false }: HealthMonitor
           details: (s as { details?: unknown }).details
         }
       })
+    : []
+  const degradationReasons = Array.isArray(health.degradation_reasons)
+    ? health.degradation_reasons
     : []
 
   // Health score is now standardized to 0-100 range in WebSocket messages
@@ -166,19 +167,11 @@ export function HealthMonitor({ health, algorithmicPath = false }: HealthMonitor
               totalModels !== undefined &&
               service.name !== 'model_serving' &&
               service.name !== 'model_nodes'
-            const modelCountsAreZero =
-              (healthyModels === 0 || healthyModels === undefined) &&
-              (totalModels === 0 || totalModels === undefined)
-            const unusedModels =
-              algorithmicPath &&
-              (service.name === 'model_nodes' || service.name === 'model_serving') &&
-              (modelCountsAreZero || service.status === 'down')
-            const displayStatus = unusedModels ? 'unknown' : service.status
+            const displayStatus = service.status
             const shouldShowDetails =
-              Boolean(note || hasUnitCounts || fillMetrics || unusedModels) &&
+              Boolean(note || hasUnitCounts || fillMetrics) &&
               (displayStatus === 'unknown' ||
                 displayStatus === 'degraded' ||
-                unusedModels ||
                 (service.name === 'execution_latency' && fillMetrics != null))
 
             return (
@@ -227,7 +220,7 @@ export function HealthMonitor({ health, algorithmicPath = false }: HealthMonitor
                       </div>
                     )}
                     <Badge variant={getStatusVariant(displayStatus as 'up' | 'degraded' | 'down' | 'unknown')}>
-                      {unusedModels ? 'UNUSED' : service.status.toUpperCase()}
+                      {service.status.toUpperCase()}
                     </Badge>
                   </div>
                 </div>
@@ -245,11 +238,7 @@ export function HealthMonitor({ health, algorithmicPath = false }: HealthMonitor
                         {fillMetrics.p95 != null && ` · p95 ${Math.round(fillMetrics.p95)}ms`}
                       </p>
                     )}
-                    {unusedModels ? (
-                      <p>Unused by the algorithmic path</p>
-                    ) : (
-                      note && <p>{note}</p>
-                    )}
+                    {note && <p>{note}</p>}
                   </div>
                 )}
               </div>
@@ -259,15 +248,13 @@ export function HealthMonitor({ health, algorithmicPath = false }: HealthMonitor
 
 
 
-        {health.degradation_reasons &&
-          Array.isArray(health.degradation_reasons) &&
-          health.degradation_reasons.length > 0 && (
+        {degradationReasons.length > 0 && (
             <div className="mt-4 p-3 bg-warning/10 border border-warning/20 rounded-md">
               <p className="text-sm font-medium text-warning mb-1">
                 Degradation Reasons:
               </p>
               <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
-                {health.degradation_reasons.map((reason, index) => (
+                {degradationReasons.map((reason, index) => (
                   <li key={index}>{reason}</li>
                 ))}
               </ul>

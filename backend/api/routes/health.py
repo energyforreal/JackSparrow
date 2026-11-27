@@ -37,6 +37,34 @@ _health_rate_limit: Dict[str, list] = defaultdict(list)
 _health_rate_limit_requests = 100
 _health_rate_limit_window = 60  # 60 seconds
 
+# Weighted components of health_score. They sum to 1.0 when models are included.
+MODEL_NODES_WEIGHT = 0.25
+NON_MODEL_WEIGHT = 0.75
+
+
+def decision_path_uses_models(path: Optional[str]) -> bool:
+    """Return whether the live path depends on model serving and model nodes.
+
+    The algorithmic path scores candles directly and does not call models.
+    """
+    return str(path or "").strip().lower() != "algorithmic"
+
+
+def finalize_health_score(component_total: float, *, include_models: bool) -> float:
+    """Scale weighted component scores onto 0..1.
+
+    Model nodes are ``MODEL_NODES_WEIGHT`` of the full score. When they are
+    not on the decision path, that weight is removed and the remaining
+    ``NON_MODEL_WEIGHT`` is scaled back to 1.0 so a healthy stack still
+    reads as 100%.
+    """
+    total = float(component_total)
+    if include_models:
+        scaled = total
+    else:
+        scaled = total / NON_MODEL_WEIGHT if NON_MODEL_WEIGHT else 0.0
+    return round(min(1.0, max(0.0, scaled)), 3)
+
 
 async def check_market_data_freshness() -> HealthServiceStatus:
     """Check agent-published market tick freshness from Redis."""
@@ -246,25 +274,17 @@ async def check_model_nodes_health(
             total_count = model_nodes_status.get("total_models", 0)
             status_from_agent = model_nodes_status.get("status", "unknown")
             
-            # If no models are loaded, return "unknown" (not "down") since this is acceptable in paper trading mode
+            # Nothing loaded is not a healthy registry. Keep the agent's status
+            # (down when discovery failed, unknown when no files were found).
             if total_count == 0:
-                # But if agent is UP, we can infer model nodes are UP (just no models loaded)
-                if agent_available:
-                    return HealthServiceStatus(
-                        status="up",
-                        details={
-                            **model_nodes_status,
-                            "status": "up",
-                            "note": "No models loaded - agent functioning in paper trading mode"
-                        }
-                    )
-                return HealthServiceStatus(
-                    status="unknown",
-                    details={
-                        **model_nodes_status,
-                        "note": "No models loaded - agent can function in paper trading mode without ML models"
-                    }
-                )
+                reported = str(status_from_agent or "unknown").lower()
+                if reported not in {"down", "degraded", "unknown"}:
+                    discovery = model_nodes_status.get("discovery") or {}
+                    failed = int(discovery.get("failed_models") or 0)
+                    reported = "down" if failed > 0 else "unknown"
+                details = dict(model_nodes_status)
+                details["status"] = reported
+                return HealthServiceStatus(status=reported, details=details)
             
             # Use status from agent if available and not unknown, otherwise determine from healthy count
             # Normalize "down" to "degraded" when agent is up and models are loaded (0 healthy can mean "no predictions yet")
@@ -309,29 +329,20 @@ async def check_model_nodes_health(
                         status=inferred_status,
                         details=updated_details
                     )
-                else:
-                    # No total count but agent available - infer UP
-                    if agent_available:
-                        return HealthServiceStatus(
-                            status="up",
-                            details={**model_nodes_status, "status": "up", "note": "Inferred UP - agent available"}
-                        )
-                    return HealthServiceStatus(
-                        status="up" if healthy_count > 0 else "unknown",
-                        details=model_nodes_status
-                    )
-        else:
-            # No model nodes status but agent available - infer UP
-            if agent_available:
                 return HealthServiceStatus(
-                    status="up",
-                    details={"note": "Inferred UP - agent available and responding"}
+                    status="unknown",
+                    details={
+                        **model_nodes_status,
+                        "status": "unknown",
+                        "note": model_nodes_status.get("note")
+                        or "Model node counts were not reported",
+                    },
                 )
-            return HealthServiceStatus(
-                status="unknown",
-                error="Model nodes status not available",
-                details={"note": "Agent available but model nodes status unknown"}
-            )
+        return HealthServiceStatus(
+            status="unknown",
+            error="Model nodes status not available",
+            details={"note": "Agent did not report model node status"},
+        )
     except Exception as e:
         # Agent service unavailable - report model nodes as unknown, not down
         error_msg = str(e)
@@ -628,33 +639,42 @@ async def check_overall_health(db: AsyncSession) -> dict:
             degradation_reasons.append("Feature server is down")
         health_scores.append(0.0)
     
-    # Check model serving (direct HTTP predict endpoint; failure does not reduce score — agent fallback)
+    # Model serving never changes the score (agent fallback). Model nodes are
+    # 0.25 of the score only when the live path actually calls models.
+    uses_models = decision_path_uses_models(
+        getattr(settings, "transformer_decision_path", None)
+    )
     model_serving_health = await check_model_serving_health()
-
-    # Check model nodes (via agent)
     model_health = await check_model_nodes_health(raw_agent_status)
-    model_weight = 0.25
-    if model_health.status == "up":
-        if model_health.details:
-            healthy_count = model_health.details.get("healthy_models", 0)
-            total_count = model_health.details.get("total_models", 0)
-            if total_count > 0 and healthy_count < total_count:
-                degradation_reasons.append(f"Only {healthy_count}/{total_count} models are healthy")
-            health_scores.append(model_weight * (healthy_count / max(total_count, 1)))
-        else:
-            health_scores.append(model_weight)
-    elif model_health.status == "unknown" and agent_health.status == "up":
-        health_scores.append(model_weight * 0.5)
-    else:
-        if model_health.status != "unknown":
-            is_testnet_mode = str(getattr(settings, "trading_mode", "testnet")).lower() == "testnet"
-            if is_testnet_mode:
-                degradation_reasons.append(
-                    "Model nodes are degraded; testnet trading may use agent fallback paths."
-                )
+    if uses_models:
+        if model_health.status == "up":
+            if model_health.details:
+                healthy_count = model_health.details.get("healthy_models", 0)
+                total_count = model_health.details.get("total_models", 0)
+                if total_count > 0 and healthy_count < total_count:
+                    degradation_reasons.append(
+                        f"Only {healthy_count}/{total_count} models are healthy"
+                    )
+                if total_count > 0:
+                    health_scores.append(MODEL_NODES_WEIGHT * (healthy_count / total_count))
+                else:
+                    health_scores.append(0.0)
             else:
-                degradation_reasons.append("No model nodes are healthy")
-        health_scores.append(0.0)
+                health_scores.append(MODEL_NODES_WEIGHT)
+        elif model_health.status == "unknown" and agent_health.status == "up":
+            health_scores.append(MODEL_NODES_WEIGHT * 0.5)
+        else:
+            if model_health.status != "unknown":
+                is_testnet_mode = (
+                    str(getattr(settings, "trading_mode", "testnet")).lower() == "testnet"
+                )
+                if is_testnet_mode:
+                    degradation_reasons.append(
+                        "Model nodes are degraded; testnet trading may use agent fallback paths."
+                    )
+                else:
+                    degradation_reasons.append("No model nodes are healthy")
+            health_scores.append(0.0)
     
     # Check Delta Exchange
     delta_health = await check_delta_exchange_health(raw_agent_status)
@@ -683,7 +703,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
             degradation_reasons.append("Reasoning engine is down")
         health_scores.append(0.0)
     
-    health_score = sum(health_scores)
+    health_score = finalize_health_score(sum(health_scores), include_models=uses_models)
     if market_data_health.status == "degraded":
         degradation_reasons.append("Market data feed is stale or missing")
 
@@ -699,16 +719,18 @@ async def check_overall_health(db: AsyncSession) -> dict:
     def _to_dict(obj):
         return obj.model_dump() if hasattr(obj, "model_dump") else obj
 
-    # Trading readiness: require healthy models for testnet order flow.
-    model_status = getattr(model_health, "status", "unknown")
+    # Trading readiness. Models are required only when the decision path uses them.
     details = getattr(model_health, "details", None) or {}
-    healthy_models = details.get("healthy_models", 0)
-    total_models = details.get("total_models", 0)
+    if uses_models:
+        model_status = getattr(model_health, "status", "unknown")
+        healthy_models = details.get("healthy_models", 0)
+        models_ok = model_status == "up" and (healthy_models or 0) > 0
+    else:
+        models_ok = True
     delta_status = getattr(delta_health, "status", "unknown")
     trading_ready = (
         agent_health.status in {"up", "unknown"}
-        and model_status == "up"
-        and (total_models == 0 or (healthy_models is not None and healthy_models > 0))
+        and models_ok
         and delta_status == "up"
     )
     if str(getattr(settings, "trading_mode", "testnet")).lower() == "testnet" and delta_status != "up":
@@ -733,9 +755,23 @@ async def check_overall_health(db: AsyncSession) -> dict:
         if not isinstance(agent_data, dict):
             agent_data = {}
 
+    services: Dict[str, Any] = {
+        "database": _to_dict(db_health),
+        "redis": _to_dict(redis_status),
+        "agent": _to_dict(agent_health),
+        "feature_server": _to_dict(feature_health),
+    }
+    services["model_serving"] = _to_dict(model_serving_health)
+    services["model_nodes"] = _to_dict(model_health)
+    services["delta_exchange"] = _to_dict(delta_health)
+    services["reasoning_engine"] = _to_dict(reasoning_health)
+    services["market_data"] = _to_dict(market_data_health)
+    services["execution_latency"] = _to_dict(latency_health)
+
     result = {
         "status": status_str,
-        "health_score": round(health_score, 3),
+        "health_score": health_score,
+        "models_scored": uses_models,
         "ml_models": ml_models_summary,
         "trading_mode": str(getattr(settings, "trading_mode", "testnet")).lower(),
         "delta_environment": str(getattr(settings, "delta_environment", "testnet")).lower(),
@@ -743,18 +779,7 @@ async def check_overall_health(db: AsyncSession) -> dict:
         "current_regime": agent_data.get("current_regime"),
         "active_thesis_strategy": agent_data.get("active_thesis_strategy"),
         "thesis_fires_this_bar": agent_data.get("thesis_fires_this_bar"),
-        "services": {
-            "database": _to_dict(db_health),
-            "redis": _to_dict(redis_status),
-            "agent": _to_dict(agent_health),
-            "feature_server": _to_dict(feature_health),
-            "model_serving": _to_dict(model_serving_health),
-            "model_nodes": _to_dict(model_health),
-            "delta_exchange": _to_dict(delta_health),
-            "reasoning_engine": _to_dict(reasoning_health),
-            "market_data": _to_dict(market_data_health),
-            "execution_latency": _to_dict(latency_health),
-        },
+        "services": services,
         "agent_state": agent_state,
         "degradation_reasons": degradation_reasons,
         "trading_ready": trading_ready,

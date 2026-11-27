@@ -110,6 +110,19 @@ class MCPFeatureServer:
             symbol = payload.get("symbol")
             feature_names = payload.get("feature_names", [])
 
+            from agent.core.forecast_policy import algorithmic_decision_active
+
+            if algorithmic_decision_active():
+                logger.info(
+                    "feature_warmup_rejected",
+                    symbol=symbol,
+                    feature_count=len(feature_names),
+                    message=(
+                        "Algorithmic decision path does not use MCP feature warm-up"
+                    ),
+                )
+                return
+
             # Transformer models compute features internally; skip canonical engine.
             try:
                 from agent.core.mcp_orchestrator import mcp_orchestrator

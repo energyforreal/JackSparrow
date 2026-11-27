@@ -54,6 +54,7 @@ export const HealthResponseSchema = z
       .describe('Reasons for degraded status')
       .default([]),
     trading_ready: z.boolean().optional(),
+    models_scored: z.boolean().optional(),
     trading_mode: z.string().optional(),
     delta_environment: z.string().optional(),
     ml_models: z.record(z.string(), z.unknown()).optional(),

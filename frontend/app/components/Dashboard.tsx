@@ -214,10 +214,7 @@ export function Dashboard() {
                 />
               </ErrorBoundary>
               <ErrorBoundary>
-                <HealthMonitor
-                  health={health || undefined}
-                  algorithmicPath={algorithmicPath}
-                />
+                <HealthMonitor health={health || undefined} />
               </ErrorBoundary>
             </div>
 
@@ -341,10 +338,7 @@ export function Dashboard() {
           {/* System Tab */}
           <TabsContent value="system" className="space-y-6">
             <ErrorBoundary>
-              <HealthMonitor
-                health={health || undefined}
-                algorithmicPath={algorithmicPath}
-              />
+              <HealthMonitor health={health || undefined} />
             </ErrorBoundary>
             <Card>
               <CardContent className="pt-6 space-y-2 text-sm text-muted-foreground">

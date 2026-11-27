@@ -213,12 +213,26 @@ class ModelService:
             resp.raise_for_status()
             data = resp.json()
             models = data.get("models") or []
+            names = [m.get("name") for m in models if isinstance(m, dict)]
+            loaded = len(names)
+            # A reachable list endpoint with nothing loaded is not a healthy registry.
+            if loaded == 0:
+                return {
+                    "status": "down",
+                    "latency_ms": round(latency_ms, 2),
+                    "details": {
+                        "model_count": 0,
+                        "models": [],
+                        "mode": "direct_model_endpoint",
+                        "note": "Model endpoint is reachable but no models are loaded.",
+                    },
+                }
             return {
                 "status": "up",
                 "latency_ms": round(latency_ms, 2),
                 "details": {
-                    "model_count": len(models),
-                    "models": [m.get("name") for m in models if isinstance(m, dict)],
+                    "model_count": loaded,
+                    "models": names,
                     "mode": "direct_model_endpoint",
                 },
             }

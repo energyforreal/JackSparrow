@@ -184,6 +184,14 @@ class Settings(BaseSettings):
         env="MODEL_HEALTH_TTL",
         description="Redis TTL for model-serving health heartbeat"
     )
+    transformer_decision_path: str = Field(
+        default="mtf_fusion",
+        env="TRANSFORMER_DECISION_PATH",
+        description=(
+            "Live decision path. 'algorithmic' does not use model serving or "
+            "model nodes, so those checks are left out of the health score."
+        ),
+    )
     
     # Vector Database (Optional)
     qdrant_url: Optional[str] = Field(

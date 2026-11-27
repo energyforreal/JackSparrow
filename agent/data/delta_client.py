@@ -1522,11 +1522,39 @@ class DeltaExchangeWebSocketClient:
             },
         }
 
+    async def _stop_io_tasks(self) -> None:
+        """Stop the heartbeat and message reader before opening another socket.
+
+        A second ``recv`` on the same connection raises RuntimeError and the
+        reader then spins, so ticks stop while the logs fill up.
+        """
+        current = asyncio.current_task()
+        pending = []
+        for task in (self._heartbeat_task, self._message_task):
+            if task is None or task.done() or task is current:
+                continue
+            task.cancel()
+            pending.append(task)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        if self._heartbeat_task is not current:
+            self._heartbeat_task = None
+        if self._message_task is not current:
+            self._message_task = None
+
     async def connect(self) -> None:
         """Establish WebSocket connection and send Delta key-auth message."""
         self._manual_disconnect = False
         self._ws_authenticated = False
         try:
+            await self._stop_io_tasks()
+            if self.websocket is not None:
+                try:
+                    await self.websocket.close()
+                except Exception:
+                    pass
+                self.websocket = None
+
             if not self._credentials_valid:
                 logger.warning(
                     "delta_websocket_credentials_placeholder_detected",
@@ -1831,25 +1859,24 @@ class DeltaExchangeWebSocketClient:
             logger.error("delta_websocket_heartbeat_error", error=str(e), exc_info=True)
 
     async def _message_loop(self) -> None:
-        """Main message processing loop."""
+        """Read one socket until it closes or is replaced.
+
+        The socket is pinned for the life of this task. Reconnect replaces
+        ``self.websocket`` only after this reader has been cancelled, so two
+        coroutines never call ``recv`` on the same connection.
+        """
+        ws = self.websocket
         try:
-            while self.connected and self.websocket:
+            while self.connected and ws is not None and ws is self.websocket:
                 try:
-                    # Receive message with timeout
-                    message_raw = await asyncio.wait_for(
-                        self.websocket.recv(),
-                        timeout=60.0
-                    )
-
-                    # Parse JSON message
+                    # Ping timeout already detects a dead socket. Wrapping recv
+                    # in wait_for cancels the waiter and the next recv then
+                    # raises "already waiting for the next message".
+                    message_raw = await ws.recv()
                     message = json.loads(message_raw)
-
-                    # Process message
                     await self._process_message(message)
-
-                except asyncio.TimeoutError:
-                    # Timeout is normal, continue listening
-                    continue
+                except asyncio.CancelledError:
+                    raise
                 except (ConnectionClosedError, WebSocketException) as e:
                     logger.warning("delta_websocket_connection_lost", error=str(e))
                     self.connected = False
@@ -1858,11 +1885,38 @@ class DeltaExchangeWebSocketClient:
                         asyncio.create_task(self._reconnect())
                     break
                 except json.JSONDecodeError as e:
-                    logger.warning("delta_websocket_invalid_json", error=str(e), raw_message=message_raw[:200])
+                    raw = message_raw if isinstance(message_raw, str) else ""
+                    logger.warning(
+                        "delta_websocket_invalid_json",
+                        error=str(e),
+                        raw_message=raw[:200],
+                    )
                     continue
+                except RuntimeError as e:
+                    if "already waiting" not in str(e):
+                        logger.error(
+                            "delta_websocket_message_error",
+                            error=str(e),
+                            exc_info=True,
+                        )
+                    else:
+                        logger.warning("delta_websocket_recv_conflict", error=str(e))
+                    self.connected = False
+                    if not self._manual_disconnect:
+                        self._invoke_connection_lost("recv_conflict")
+                        asyncio.create_task(self._reconnect())
+                    break
                 except Exception as e:
-                    logger.error("delta_websocket_message_error", error=str(e), exc_info=True)
-                    continue
+                    logger.error(
+                        "delta_websocket_message_error",
+                        error=str(e),
+                        exc_info=True,
+                    )
+                    self.connected = False
+                    if not self._manual_disconnect:
+                        self._invoke_connection_lost("message_error")
+                        asyncio.create_task(self._reconnect())
+                    break
 
         except asyncio.CancelledError:
             logger.debug("delta_websocket_message_loop_cancelled")

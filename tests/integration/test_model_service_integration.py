@@ -89,6 +89,23 @@ class TestModelServiceClient:
             assert health.get("status") == "up"
             assert health.get("details", {}).get("model_count") == 1
 
+    @pytest.mark.asyncio
+    async def test_get_health_is_down_when_no_models_are_loaded(self):
+        """A reachable model list with nothing loaded is not healthy."""
+        service = ModelService(base_url="http://test:8002")
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {"models": [], "count": 0}
+            mock_resp.raise_for_status = MagicMock()
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aexit__.return_value = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            health = await service.get_health()
+            assert health.get("status") == "down"
+            assert health.get("details", {}).get("model_count") == 0
+
 
 class TestFloatToSignal:
     """Discrete signal mapping from continuous prediction."""

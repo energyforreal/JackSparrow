@@ -1,8 +1,8 @@
 {
   "agent_id": "jack_sparrow_v1",
   "version": "1.0.0",
-  "startup_time": "2026-11-27T04:53:55.907791+00:00",
-  "last_update": "2026-11-27T04:54:54.070580+00:00",
+  "startup_time": "2026-11-27T08:35:20.803329+00:00",
+  "last_update": "2026-11-27T08:39:20.144912+00:00",
   "is_active": false,
   "trading_enabled": false,
   "emergency_stop": false,

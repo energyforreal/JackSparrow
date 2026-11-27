@@ -73,8 +73,9 @@ class MarketDataEventHandler:
     ) -> str:
         """Emit the correct event to start the decision pipeline for the active registry.
 
-        Transformer-only registries skip MCP feature server and publish
-        ModelPredictionRequestEvent directly. Other registries use FeatureRequestEvent.
+        The algorithmic path publishes ModelPredictionRequestEvent directly and
+        rejects MCP feature warm-up. Transformer-only registries do the same.
+        Other registries use FeatureRequestEvent.
         """
         registry = MarketDataEventHandler._get_model_registry()
         ts = timestamp or datetime.now(timezone.utc)
@@ -82,7 +83,13 @@ class MarketDataEventHandler:
         if extra_context:
             ctx.update(extra_context)
 
-        if registry and registry.uses_transformer_internal_features():
+        from agent.core.forecast_policy import algorithmic_decision_active
+
+        algorithmic = algorithmic_decision_active()
+        transformer_direct = bool(
+            registry and registry.uses_transformer_internal_features()
+        )
+        if algorithmic or transformer_direct:
             model_request = ModelPredictionRequestEvent(
                 source=source,
                 correlation_id=correlation_id,
@@ -97,12 +104,24 @@ class MarketDataEventHandler:
                 },
             )
             await event_bus.publish(model_request)
-            logger.debug(
-                "decision_pipeline_transformer_direct",
-                symbol=symbol,
-                trigger=trigger,
-                model_request_id=model_request.event_id,
-            )
+            if algorithmic:
+                logger.info(
+                    "decision_pipeline_feature_warmup_rejected",
+                    symbol=symbol,
+                    trigger=trigger,
+                    model_request_id=model_request.event_id,
+                    message=(
+                        "Feature warm-up rejected; algorithmic scorer "
+                        "fetches its own frames"
+                    ),
+                )
+            else:
+                logger.debug(
+                    "decision_pipeline_transformer_direct",
+                    symbol=symbol,
+                    trigger=trigger,
+                    model_request_id=model_request.event_id,
+                )
             return model_request.event_id
 
         runtime_feature_names = MarketDataEventHandler._get_runtime_feature_names()

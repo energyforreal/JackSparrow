@@ -361,6 +361,8 @@ export interface HealthStatus {
   agent_state?: string
   /** When false, automated trading per health rules may be unavailable. */
   trading_ready?: boolean
+  /** False when model serving and model nodes are left out of the score. */
+  models_scored?: boolean
   /** Backend trading_mode setting (testnet). */
   trading_mode?: string
   /** Delta cluster label from backend health. */

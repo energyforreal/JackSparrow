@@ -96,7 +96,17 @@ class HealthResponse(BaseModel):
     )
     trading_ready: Optional[bool] = Field(
         default=None,
-        description="True if testnet trading can execute (agent + models healthy)"
+        description=(
+            "True when the live path can trade. Model health is required only "
+            "when the decision path uses models."
+        ),
+    )
+    models_scored: Optional[bool] = Field(
+        default=None,
+        description=(
+            "False when model serving and model nodes are omitted from the "
+            "health score (algorithmic path)."
+        ),
     )
     trading_mode: Optional[str] = Field(
         default=None,

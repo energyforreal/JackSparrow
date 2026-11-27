@@ -497,12 +497,29 @@ class MarketDataService:
                         await self._check_and_emit_candle(symbol, interval)
                         last_candle_check_time_by_symbol[symbol] = time.time()
 
-                # Reset error count on successful iteration
+                # Reset error count on successful iteration. Reconnect attempts
+                # only reset once the socket is actually up; clearing them while
+                # it is down keeps the backoff from ever taking effect.
                 consecutive_errors = 0
-                websocket_reconnect_attempts = 0
+                if self._websocket_connected:
+                    websocket_reconnect_attempts = 0
 
-                # Use appropriate polling interval
-                await asyncio.sleep(min(poll_interval, candle_poll_interval_seconds))
+                # A live socket can sleep longer. A quiet or dropped socket must
+                # wake before the 30s health window so REST can refresh the tick.
+                feed_live = self._trusted_ws_ticker_feed() and all(
+                    not self._ticker_stale(symbol) for symbol in self.streaming_symbols
+                )
+                stale_window = float(
+                    getattr(settings, "market_data_stale_rest_poll_seconds", 30.0) or 30.0
+                )
+                if feed_live:
+                    interval_s = min(
+                        float(settings.websocket_fallback_poll_interval),
+                        max(5.0, stale_window / 2.0),
+                    )
+                else:
+                    interval_s = float(settings.fast_poll_interval)
+                await asyncio.sleep(min(interval_s, float(candle_poll_interval_seconds)))
 
             except asyncio.CancelledError:
                 break

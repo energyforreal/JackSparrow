@@ -93,6 +93,21 @@ def resolve_transformer_decision_path(model_dir: Path | str) -> str:
     return configured or _FUSION_DECISION_PATH
 
 
+def algorithmic_decision_active() -> bool:
+    """Return True when live decisions score candles and skip feature warm-up.
+
+    The algorithmic path fetches its own 4h, 1h, 15m, and 5m frames. MCP
+    feature warm-up downloads a different timeframe set and is unused.
+    """
+    from agent.core.config import settings
+    from research.swinging.contract import ALGO_DECISION_PATH
+
+    path = resolve_transformer_decision_path(
+        getattr(settings, "model_dir", "./agent/model_storage")
+    )
+    return path == ALGO_DECISION_PATH
+
+
 def map_forecast_signal(
     direction: str | None,
     probability: float | None,

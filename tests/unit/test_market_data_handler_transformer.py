@@ -93,7 +93,10 @@ async def test_emit_decision_pipeline_transformer_direct() -> None:
 
 
 @pytest.mark.asyncio
-async def test_emit_decision_pipeline_feature_request_for_legacy() -> None:
+async def test_emit_decision_pipeline_feature_request_for_legacy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "mtf_fusion")
     orchestrator = SimpleNamespace(model_registry=_legacy_registry())
     with patch(
         "agent.events.handlers.market_data_handler.MarketDataEventHandler._get_model_registry",
@@ -112,6 +115,58 @@ async def test_emit_decision_pipeline_feature_request_for_legacy() -> None:
             published = mock_publish.await_args.args[0]
             assert isinstance(published, FeatureRequestEvent)
             assert "rsi_14" in published.payload["feature_names"]
+
+
+@pytest.mark.asyncio
+async def test_emit_decision_pipeline_rejects_feature_warmup_when_algorithmic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Algorithmic mode must score directly and must not request feature warm-up."""
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "algorithmic")
+    orchestrator = SimpleNamespace(model_registry=_legacy_registry())
+    with patch(
+        "agent.events.handlers.market_data_handler.MarketDataEventHandler._get_model_registry",
+        return_value=orchestrator.model_registry,
+    ):
+        with patch(
+            "agent.events.handlers.market_data_handler.event_bus.publish",
+            new_callable=AsyncMock,
+        ) as mock_publish:
+            await MarketDataEventHandler.emit_decision_pipeline_trigger(
+                symbol="BTCUSD",
+                current_price=61543.5,
+                trigger="candle_closed",
+            )
+            mock_publish.assert_awaited_once()
+            published = mock_publish.await_args.args[0]
+            assert isinstance(published, ModelPredictionRequestEvent)
+            assert published.payload["features"] == {}
+            assert published.payload["context"]["trigger"] == "candle_closed"
+
+
+@pytest.mark.asyncio
+async def test_feature_server_rejects_warmup_when_algorithmic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A leftover feature request must not download warm-up candles."""
+    monkeypatch.setenv("TRANSFORMER_DECISION_PATH", "algorithmic")
+    with patch("agent.data.feature_server.FeatureEngineering"):
+        with patch("agent.data.feature_server.MarketDataService") as market_data_cls:
+            from agent.data.feature_server import MCPFeatureServer
+
+            server = MCPFeatureServer()
+            warm = AsyncMock()
+            market_data_cls.return_value.warm_multi_timeframe_caches = warm
+            server.market_data_service.warm_multi_timeframe_caches = warm
+            event = MagicMock()
+            event.event_id = "feature-1"
+            event.payload = {
+                "symbol": "BTCUSD",
+                "feature_names": ["rsi_14"],
+                "context": {"trigger": "candle_closed"},
+            }
+            await server._handle_feature_request_event(event)
+            warm.assert_not_awaited()
 
 
 @pytest.mark.asyncio
